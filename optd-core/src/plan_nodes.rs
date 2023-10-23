@@ -1,10 +1,12 @@
 //! Typed interface of plan nodes.
 
+mod filter;
 mod join;
 mod scan;
 
 use crate::rel_node::{RelNode, RelNodeRef, RelNodeTyp, Value};
 
+pub use filter::LogicalFilter;
 pub use join::{JoinType, LogicalJoin};
 pub use scan::LogicalScan;
 
@@ -145,6 +147,7 @@ pub fn explain(rel_node: OptRelNodeRef) {
         OptRelNodeTyp::Constant => ConstantExpr::from_rel_node(rel_node).unwrap().explain(),
         OptRelNodeTyp::Join => LogicalJoin::from_rel_node(rel_node).unwrap().explain(),
         OptRelNodeTyp::Scan => LogicalScan::from_rel_node(rel_node).unwrap().explain(),
+        OptRelNodeTyp::Filter => LogicalFilter::from_rel_node(rel_node).unwrap().explain(),
         _ => unimplemented!(),
     }
 }

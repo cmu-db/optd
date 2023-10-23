@@ -1,6 +1,6 @@
 use crate::{
     plan_nodes::{LogicalJoin, OptRelNode, OptRelNodeRef, OptRelNodeTyp},
-    rel_node::{RelNode, Value},
+    rel_node::Value,
 };
 
 use super::Rule;
