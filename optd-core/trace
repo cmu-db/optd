@@ -1,0 +1,53 @@
+[2m2023-10-30T21:41:22.048601Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_begin" [3mtask[0m[2m=[0m"optimize_group" [3mgroup_id[0m[2m=[0m13
+[2m2023-10-30T21:41:22.048707Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_finish" [3mtask[0m[2m=[0m"optimize_group" [3mgroup_id[0m[2m=[0m13 [3mexprs_cnt[0m[2m=[0m1
+[2m2023-10-30T21:41:22.048727Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_begin" [3mtask[0m[2m=[0m"optimize_expr" [3mexpr_id[0m[2m=[0m12 [3mexpr[0m[2m=[0m(Join(Inner) !1 !11 !5)
+[2m2023-10-30T21:41:22.048745Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_end" [3mtask[0m[2m=[0m"optimize_expr" [3mexpr_id[0m[2m=[0m12
+[2m2023-10-30T21:41:22.048758Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_begin" [3mtask[0m[2m=[0m"explore_group" [3mgroup_id[0m[2m=[0m5
+[2m2023-10-30T21:41:22.048773Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_finish" [3mtask[0m[2m=[0m"explore_group" [3mresult[0m[2m=[0m"expand group" [3mexprs_cnt[0m[2m=[0m1
+[2m2023-10-30T21:41:22.048788Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_begin" [3mtask[0m[2m=[0m"explore_group" [3mgroup_id[0m[2m=[0m11
+[2m2023-10-30T21:41:22.048802Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_finish" [3mtask[0m[2m=[0m"explore_group" [3mresult[0m[2m=[0m"expand group" [3mexprs_cnt[0m[2m=[0m1
+[2m2023-10-30T21:41:22.048816Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_begin" [3mtask[0m[2m=[0m"optimize_expr" [3mexpr_id[0m[2m=[0m10 [3mexpr[0m[2m=[0m(Join(Inner) !7 !9 !5)
+[2m2023-10-30T21:41:22.048829Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_end" [3mtask[0m[2m=[0m"optimize_expr" [3mexpr_id[0m[2m=[0m10
+[2m2023-10-30T21:41:22.048840Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_begin" [3mtask[0m[2m=[0m"explore_group" [3mgroup_id[0m[2m=[0m1
+[2m2023-10-30T21:41:22.048853Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_finish" [3mtask[0m[2m=[0m"explore_group" [3mresult[0m[2m=[0m"expand group" [3mexprs_cnt[0m[2m=[0m1
+[2m2023-10-30T21:41:22.048866Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_begin" [3mtask[0m[2m=[0m"optimize_expr" [3mexpr_id[0m[2m=[0m0 [3mexpr[0m[2m=[0m(Scan "t3")
+[2m2023-10-30T21:41:22.048878Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_end" [3mtask[0m[2m=[0m"optimize_expr" [3mexpr_id[0m[2m=[0m0
+[2m2023-10-30T21:41:22.048942Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"apply_rule" [3mexpr_id[0m[2m=[0m12 [3mrule_id[0m[2m=[0m0 [3mnew_expr_id[0m[2m=[0m14
+[2m2023-10-30T21:41:22.048962Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_end" [3mtask[0m[2m=[0m"apply_rule" [3mexpr_id[0m[2m=[0m12 [3mrule_id[0m[2m=[0m0
+[2m2023-10-30T21:41:22.048975Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_begin" [3mtask[0m[2m=[0m"optimize_inputs" [3mexpr_id[0m[2m=[0m14
+[2m2023-10-30T21:41:22.048986Z[0m [35mTRACE[0m [3mevent[0m[2m=[0m"task_finish" [3mtask[0m[2m=[0m"optimize_inputs" [3mexpr_id[0m[2m=[0m14
+group_id=1
+  expr_id=0 | (Scan "t3")
+    (Scan "t3")
+group_id=7
+  expr_id=6 | (Filter !3 !5)
+    (Filter (Scan "t1") (Constant true))
+group_id=5
+  expr_id=4 | (Constant true)
+    (Constant true)
+group_id=9
+  expr_id=8 | (Scan "t2")
+    (Scan "t2")
+group_id=3
+  expr_id=2 | (Scan "t1")
+    (Scan "t1")
+group_id=11
+  expr_id=10 | (Join(Inner) !7 !9 !5)
+    (Join(Inner) (Filter (Scan "t1") (Constant true)) (Scan "t2") (Constant true))
+group_id=13
+  expr_id=14 | (PhysicalNestedLoopJoin(Inner) !1 !11 !5)
+    (PhysicalNestedLoopJoin(Inner) (Scan "t3") (Join(Inner) (Filter (Scan "t1") (Constant true)) (Scan "t2") (Constant true)) (Constant true))
+  expr_id=12 | (Join(Inner) !1 !11 !5)
+    (Join(Inner) (Scan "t3") (Join(Inner) (Filter (Scan "t1") (Constant true)) (Scan "t2") (Constant true)) (Constant true))
+PhysicalNestedLoopJoin { typ: Inner, cond: true }
+├── LogicalScan { table: t3 }
+└── LogicalJoin { typ: Inner, cond: true }
+    ├── LogicalFilter { cond: true }
+    │   └── LogicalScan { table: t1 }
+    └── LogicalScan { table: t2 }
+LogicalJoin { typ: Inner, cond: true }
+├── LogicalScan { table: t3 }
+└── LogicalJoin { typ: Inner, cond: true }
+    ├── LogicalFilter { cond: true }
+    │   └── LogicalScan { table: t1 }
+    └── LogicalScan { table: t2 }

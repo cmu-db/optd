@@ -23,19 +23,27 @@ impl ExploreGroupTask {
 
 impl<T: RelNodeTyp> Task<T> for ExploreGroupTask {
     fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
-        trace!(name: "task_begin", task = "explore_group", group_id = %self.group_id);
+        trace!(event = "task_begin", task = "explore_group", group_id = %self.group_id);
         let mut tasks = vec![];
         if optimizer.is_group_explored(self.group_id) {
             trace!(target: "task_finish", task = "explore_group", result = "already explored, skipping", group_id = %self.group_id);
             return Ok(vec![]);
         }
-        let exprs = optimizer.get_group_exprs(self.group_id);
+        let exprs = optimizer.get_all_exprs_in_group(self.group_id);
         let exprs_cnt = exprs.len();
         for expr in exprs {
-            tasks.push(Box::new(OptimizeExpressionTask::new(expr, true)) as Box<dyn Task<T>>);
+            let typ = optimizer.get_expr_memoed(expr).typ;
+            if typ.is_logical() {
+                tasks.push(Box::new(OptimizeExpressionTask::new(expr, true)) as Box<dyn Task<T>>);
+            }
         }
         optimizer.mark_group_explored(self.group_id);
-        trace!(name: "task_finish", task = "explore_group", result = "expand group", exprs_cnt = exprs_cnt);
+        trace!(
+            event = "task_finish",
+            task = "explore_group",
+            result = "expand group",
+            exprs_cnt = exprs_cnt
+        );
         Ok(tasks)
     }
 }

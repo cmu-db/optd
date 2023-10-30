@@ -11,7 +11,9 @@ use ordered_float::OrderedFloat;
 
 pub type RelNodeRef<T> = Arc<RelNode<T>>;
 
-pub trait RelNodeTyp: PartialEq + Eq + Hash + Clone + Copy + 'static + Display + Debug {}
+pub trait RelNodeTyp: PartialEq + Eq + Hash + Clone + Copy + 'static + Display + Debug {
+    fn is_logical(&self) -> bool;
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Value {
@@ -41,6 +43,13 @@ impl Value {
             _ => panic!("Value is not an i64"),
         }
     }
+
+    pub fn as_str(&self) -> Arc<str> {
+        match self {
+            Value::String(i) => i.clone(),
+            _ => panic!("Value is not a string"),
+        }
+    }
 }
 
 /// A RelNode is consisted of a plan node type and some children.
@@ -54,9 +63,8 @@ pub struct RelNode<T: RelNodeTyp> {
 impl<T: RelNodeTyp> std::fmt::Display for RelNode<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "({}", self.typ)?;
-        match self.data {
-            Some(ref data) => write!(f, " {}", data)?,
-            None => {}
+        if let Some(ref data) = self.data {
+            write!(f, " {}", data)?;
         }
         for child in &self.children {
             write!(f, " {}", child)?;
