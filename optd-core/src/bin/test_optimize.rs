@@ -3,7 +3,8 @@ use std::sync::Arc;
 use optd_core::{
     cascades::CascadesOptimizer,
     plan_nodes::{
-        ConstantExpr, JoinType, LogicalFilter, LogicalJoin, LogicalScan, OptRelNode, PlanNode,
+        BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, JoinType, LogicalFilter, LogicalJoin,
+        LogicalScan, OptRelNode, PlanNode,
     },
     rel_node::Value,
     rules::{FilterJoinRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule},
@@ -18,14 +19,18 @@ pub fn main() {
         .init();
 
     let mut optimizer = CascadesOptimizer::new_with_rules(vec![
-        Arc::new(JoinCommuteRule {}),
-        Arc::new(JoinAssocRule {}),
-        Arc::new(FilterJoinRule {}),
+        // Arc::new(JoinCommuteRule {}),
+        // Arc::new(JoinAssocRule {}),
+        // Arc::new(FilterJoinRule {}),
         Arc::new(PhysicalConversionRule {}),
     ]);
 
     let scan1 = LogicalScan::new("t1".into());
-    let filter_cond = ConstantExpr::new(Value::Bool(true));
+    let filter_cond = BinOpExpr::new(
+        ColumnRefExpr::new(1).0,
+        ConstantExpr::new(Value::Int(2)).0,
+        BinOpType::Eq,
+    );
     let filter1 = LogicalFilter::new(scan1.0, filter_cond.0);
     let scan2 = LogicalScan::new("t2".into());
     let join_cond = ConstantExpr::new(Value::Bool(true));
