@@ -7,7 +7,10 @@ use std::{
 use anyhow::{bail, Result};
 use itertools::Itertools;
 
-use crate::rel_node::{RelNode, RelNodeRef, RelNodeTyp, Value};
+use crate::{
+    cost::Cost,
+    rel_node::{RelNode, RelNodeRef, RelNodeTyp, Value},
+};
 
 use super::optimizer::{ExprId, GroupId};
 
@@ -38,7 +41,7 @@ impl<T: RelNodeTyp> std::fmt::Display for RelMemoNode<T> {
 pub struct Winner {
     pub impossible: bool,
     pub expr_id: ExprId,
-    pub cost: f64,
+    pub cost: Cost,
 }
 
 #[derive(Default, Debug, Clone)]

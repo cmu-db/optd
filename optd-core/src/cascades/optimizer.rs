@@ -31,7 +31,7 @@ pub struct CascadesOptimizer<T: RelNodeTyp> {
     explored_group: HashSet<GroupId>,
     fired_rules: HashMap<ExprId, HashSet<RuleId>>,
     rules: Arc<[Arc<dyn Rule<T>>]>,
-    cost: Box<dyn CostModel<T>>,
+    cost: Arc<dyn CostModel<T>>,
     pub ctx: OptimizerContext,
 }
 
@@ -63,13 +63,13 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             explored_group: HashSet::new(),
             fired_rules: HashMap::new(),
             rules: rules.into(),
-            cost,
+            cost: cost.into(),
             ctx: OptimizerContext::default(),
         }
     }
 
-    pub fn cost(&self) -> &dyn CostModel<T> {
-        self.cost.as_ref()
+    pub fn cost(&self) -> Arc<dyn CostModel<T>> {
+        self.cost.clone()
     }
 
     pub(super) fn rules(&self) -> Arc<[Arc<dyn Rule<T>>]> {
@@ -85,7 +85,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
                     format!(
                         "winner={} cost={} {}",
                         winner.expr_id,
-                        winner.cost,
+                        self.cost.explain(&winner.cost),
                         self.memo.get_expr_memoed(winner.expr_id)
                     )
                 }

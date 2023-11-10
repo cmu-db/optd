@@ -57,10 +57,15 @@ pub fn main() {
     let fnal = LogicalJoin::new(scan3.0, join_filter.0, join_cond.0, JoinType::Inner);
     let node = optimizer.optimize(fnal.0.into_rel_node());
     optimizer.dump();
+    let node = node.unwrap();
+    println!(
+        "cost={}",
+        optimizer
+            .cost()
+            .explain(&optimizer.cost().compute_plan_node_cost(&node))
+    );
     println!(
         "{}",
-        PlanNode::from_rel_node(node.unwrap())
-            .unwrap()
-            .explain_to_string()
+        PlanNode::from_rel_node(node).unwrap().explain_to_string()
     );
 }

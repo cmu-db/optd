@@ -8,6 +8,7 @@ use crate::{
         tasks::OptimizeGroupTask,
         CascadesOptimizer, GroupId,
     },
+    cost::Cost,
     rel_node::RelNodeTyp,
 };
 
@@ -16,7 +17,7 @@ use super::Task;
 #[derive(Debug, Clone)]
 struct ContinueTask {
     next_group_idx: usize,
-    input_cost: Vec<f64>,
+    input_cost: Vec<Cost>,
     return_from_optimize_group: bool,
 }
 
@@ -48,7 +49,8 @@ impl OptimizeInputsTask {
         &self,
         children: &[GroupId],
         optimizer: &mut CascadesOptimizer<T>,
-    ) -> Vec<f64> {
+    ) -> Vec<Cost> {
+        let zero_cost = optimizer.cost().zero();
         let mut input_cost = Vec::new();
         input_cost.reserve(children.len());
         for &child in children.iter() {
@@ -56,16 +58,16 @@ impl OptimizeInputsTask {
             if let Some(ref winner) = group.winner {
                 if !winner.impossible {
                     // the full winner case
-                    input_cost.push(winner.cost);
+                    input_cost.push(winner.cost.clone());
                     continue;
                 }
             }
-            input_cost.push(0.0);
+            input_cost.push(zero_cost.clone());
         }
         input_cost
     }
 
-    fn should_terminate(&self, input_cost: &[f64], upper_bound: Option<f64>) -> bool {
+    fn should_terminate(&self, cost_so_far: f64, upper_bound: Option<f64>) -> bool {
         if !self.pruning {
             return false;
         }
@@ -73,7 +75,6 @@ impl OptimizeInputsTask {
             return false;
         }
         let upper_bound = upper_bound.unwrap();
-        let cost_so_far = input_cost.iter().sum::<f64>();
         if cost_so_far >= upper_bound {
             trace!(
                 event = "optimize_inputs_pruning",
@@ -88,15 +89,15 @@ impl OptimizeInputsTask {
 
     fn update_winner<T: RelNodeTyp>(
         &self,
-        input_cost: &[f64],
+        cost_so_far: &Cost,
         optimizer: &mut CascadesOptimizer<T>,
     ) {
-        let cost_so_far = input_cost.iter().sum::<f64>();
+        let cost = optimizer.cost();
         let group_id = optimizer.get_group_id(self.expr_id);
         let group_info = optimizer.get_group_info(group_id);
         let mut update_cost = false;
         if let Some(ref winner) = group_info.winner {
-            if winner.impossible || winner.cost > cost_so_far {
+            if winner.impossible || &winner.cost > cost_so_far {
                 update_cost = true;
             }
         } else {
@@ -109,7 +110,7 @@ impl OptimizeInputsTask {
                     winner: Some(Winner {
                         impossible: false,
                         expr_id: self.expr_id,
-                        cost: cost_so_far,
+                        cost: cost_so_far.clone(),
                     }),
                 },
             );
@@ -120,7 +121,9 @@ impl OptimizeInputsTask {
 impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
     fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
         trace!(event = "task_begin", task = "optimize_inputs", expr_id = %self.expr_id, continue_from = ?self.continue_from);
-        let children = &optimizer.get_expr_memoed(self.expr_id).children;
+        let expr = optimizer.get_expr_memoed(self.expr_id);
+        let children = &expr.children;
+        let cost = optimizer.cost();
 
         if let Some(ContinueTask {
             next_group_idx,
@@ -128,7 +131,10 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
             return_from_optimize_group,
         }) = self.continue_from.clone()
         {
-            if self.should_terminate(&input_cost, optimizer.ctx.upper_bound) {
+            if self.should_terminate(
+                cost.compute_cost(&expr.typ, &expr.data, &input_cost).0[0],
+                optimizer.ctx.upper_bound,
+            ) {
                 trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id);
                 return Ok(vec![]);
             }
@@ -140,9 +146,12 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                 let mut has_full_winner = false;
                 if let Some(ref winner) = group_info.winner {
                     if !winner.impossible {
-                        input_cost[group_idx] = winner.cost;
+                        input_cost[group_idx] = winner.cost.clone();
                         has_full_winner = true;
-                        if self.should_terminate(&input_cost, optimizer.ctx.upper_bound) {
+                        if self.should_terminate(
+                            cost.compute_cost(&expr.typ, &expr.data, &input_cost).0[0],
+                            optimizer.ctx.upper_bound,
+                        ) {
                             trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id);
                             return Ok(vec![]);
                         }
@@ -201,7 +210,10 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                     self.pruning,
                 )) as Box<dyn Task<T>>]);
             } else {
-                self.update_winner(&input_cost, optimizer);
+                self.update_winner(
+                    &cost.compute_cost(&expr.typ, &expr.data, &input_cost),
+                    optimizer,
+                );
                 trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id);
                 return Ok(vec![]);
             }
