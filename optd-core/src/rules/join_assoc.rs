@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
-use crate::plan_nodes::{JoinType, OptRelNodeTyp};
+use crate::{
+    plan_nodes::{JoinType, OptRelNodeTyp},
+    rel_node::RelNode,
+};
 
 use super::{
     ir::{OneOrMany, RuleMatcher},
-    RelRuleNode, Rule,
+    Rule,
 };
 
 /// Implements A join (B join C) = (A join B) join C
@@ -80,9 +83,9 @@ impl Rule<OptRelNodeTyp> for JoinAssocLeftRule {
 
     fn apply(
         &self,
-        mut input: HashMap<usize, OneOrMany<RelRuleNode<OptRelNodeTyp>>>,
-    ) -> Vec<RelRuleNode<OptRelNodeTyp>> {
-        let RelRuleNode::Node {
+        mut input: HashMap<usize, OneOrMany<RelNode<OptRelNodeTyp>>>,
+    ) -> Vec<RelNode<OptRelNodeTyp>> {
+        let RelNode {
             typ: top_typ,
             data: top_data,
             ..
@@ -90,7 +93,7 @@ impl Rule<OptRelNodeTyp> for JoinAssocLeftRule {
         else {
             unreachable!()
         };
-        let RelRuleNode::Node {
+        let RelNode {
             typ: down_typ,
             data: down_data,
             ..
@@ -103,20 +106,21 @@ impl Rule<OptRelNodeTyp> for JoinAssocLeftRule {
         let child_c = input.remove(&CHILD_C).unwrap().as_one();
         let cond_ab = input.remove(&COND_AB).unwrap().as_one();
         let cond_bc = input.remove(&COND_BC).unwrap().as_one();
-        let node = RelRuleNode::Node {
+        let node = RelNode {
             typ: top_typ,
             children: vec![
-                RelRuleNode::Node {
+                RelNode {
                     typ: down_typ,
-                    children: vec![child_a, child_b, cond_ab],
+                    children: vec![child_a.into(), child_b.into(), cond_ab.into()],
                     data: down_data,
-                },
-                child_c,
-                cond_bc,
+                }
+                .into(),
+                child_c.into(),
+                cond_bc.into(),
             ],
             data: top_data,
         };
-        vec![node]
+        vec![node.into()]
     }
 
     fn name(&self) -> &'static str {
@@ -131,9 +135,9 @@ impl Rule<OptRelNodeTyp> for JoinAssocRightRule {
 
     fn apply(
         &self,
-        mut input: HashMap<usize, OneOrMany<RelRuleNode<OptRelNodeTyp>>>,
-    ) -> Vec<RelRuleNode<OptRelNodeTyp>> {
-        let RelRuleNode::Node {
+        mut input: HashMap<usize, OneOrMany<RelNode<OptRelNodeTyp>>>,
+    ) -> Vec<RelNode<OptRelNodeTyp>> {
+        let RelNode {
             typ: top_typ,
             data: top_data,
             ..
@@ -141,7 +145,7 @@ impl Rule<OptRelNodeTyp> for JoinAssocRightRule {
         else {
             unreachable!()
         };
-        let RelRuleNode::Node {
+        let RelNode {
             typ: down_typ,
             data: down_data,
             ..
@@ -154,20 +158,21 @@ impl Rule<OptRelNodeTyp> for JoinAssocRightRule {
         let child_c = input.remove(&CHILD_C).unwrap().as_one();
         let cond_ab = input.remove(&COND_AB).unwrap().as_one();
         let cond_bc = input.remove(&COND_BC).unwrap().as_one();
-        let node = RelRuleNode::Node {
+        let node = RelNode {
             typ: top_typ,
             children: vec![
-                child_a,
-                RelRuleNode::Node {
+                child_a.into(),
+                RelNode {
                     typ: down_typ,
-                    children: vec![child_b, child_c, cond_bc],
+                    children: vec![child_b.into(), child_c.into(), cond_bc.into()],
                     data: down_data,
-                },
-                cond_ab,
+                }
+                .into(),
+                cond_ab.into(),
             ],
             data: top_data,
         };
-        vec![node]
+        vec![node.into()]
     }
 
     fn name(&self) -> &'static str {

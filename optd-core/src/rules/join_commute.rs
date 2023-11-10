@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
-use crate::plan_nodes::{JoinType, OptRelNodeTyp};
+use crate::{
+    plan_nodes::{JoinType, OptRelNodeTyp},
+    rel_node::RelNode,
+};
 
 use super::{
     ir::{OneOrMany, RuleMatcher},
-    RelRuleNode, Rule,
+    Rule,
 };
 
 /// Implements A join B = B join A
@@ -45,20 +48,20 @@ impl Rule<OptRelNodeTyp> for JoinCommuteRule {
 
     fn apply(
         &self,
-        mut input: HashMap<usize, OneOrMany<RelRuleNode<OptRelNodeTyp>>>,
-    ) -> Vec<RelRuleNode<OptRelNodeTyp>> {
-        let RelRuleNode::Node { typ, data, .. } = input.remove(&JOIN_NODE).unwrap().as_one() else {
+        mut input: HashMap<usize, OneOrMany<RelNode<OptRelNodeTyp>>>,
+    ) -> Vec<RelNode<OptRelNodeTyp>> {
+        let RelNode { typ, data, .. } = input.remove(&JOIN_NODE).unwrap().as_one() else {
             unreachable!()
         };
         let left_child = input.remove(&LEFT_CHILD).unwrap().as_one();
-        let right_child: RelRuleNode<OptRelNodeTyp> = input.remove(&RIGHT_CHILD).unwrap().as_one();
+        let right_child = input.remove(&RIGHT_CHILD).unwrap().as_one();
         let cond = input.remove(&COND).unwrap().as_one();
-        let node = RelRuleNode::Node {
+        let node = RelNode {
             typ,
-            children: vec![right_child, left_child, cond],
+            children: vec![right_child.into(), left_child.into(), cond.into()],
             data,
         };
-        vec![node]
+        vec![node.into()]
     }
 
     fn name(&self) -> &'static str {

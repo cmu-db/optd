@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
-use crate::plan_nodes::{JoinType, OptRelNodeTyp};
+use crate::{
+    plan_nodes::{JoinType, OptRelNodeTyp},
+    rel_node::RelNode,
+};
 
 use super::{
     ir::{OneOrMany, RuleMatcher},
-    RelRuleNode, Rule,
+    Rule,
 };
 
 pub struct FilterJoinPullUpRule {
@@ -50,23 +53,23 @@ impl Rule<OptRelNodeTyp> for FilterJoinPullUpRule {
 
     fn apply(
         &self,
-        mut input: HashMap<usize, OneOrMany<RelRuleNode<OptRelNodeTyp>>>,
-    ) -> Vec<RelRuleNode<OptRelNodeTyp>> {
+        mut input: HashMap<usize, OneOrMany<RelNode<OptRelNodeTyp>>>,
+    ) -> Vec<RelNode<OptRelNodeTyp>> {
         let left_child = input.remove(&LEFT_CHILD).unwrap().as_one();
-        let right_child: RelRuleNode<OptRelNodeTyp> = input.remove(&RIGHT_CHILD).unwrap().as_one();
+        let right_child = input.remove(&RIGHT_CHILD).unwrap().as_one();
         let join_cond = input.remove(&JOIN_COND).unwrap().as_one();
         let filter_cond = input.remove(&FILTER_COND).unwrap().as_one();
-        let join_node = RelRuleNode::Node {
+        let join_node = RelNode {
             typ: OptRelNodeTyp::Join(JoinType::Inner),
-            children: vec![left_child, right_child, join_cond],
+            children: vec![left_child.into(), right_child.into(), join_cond.into()],
             data: None,
         };
-        let filter_node = RelRuleNode::Node {
+        let filter_node = RelNode {
             typ: OptRelNodeTyp::Filter,
-            children: vec![join_node, filter_cond],
+            children: vec![join_node.into(), filter_cond.into()],
             data: None,
         };
-        vec![filter_node]
+        vec![filter_node.into()]
     }
 
     fn name(&self) -> &'static str {

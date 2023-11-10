@@ -9,12 +9,18 @@ use std::{
 
 use ordered_float::OrderedFloat;
 
+use crate::cascades::GroupId;
+
 pub type RelNodeRef<T> = Arc<RelNode<T>>;
 
 pub trait RelNodeTyp:
     PartialEq + Eq + Hash + Clone + Copy + 'static + Display + Debug + Send + Sync
 {
     fn is_logical(&self) -> bool;
+
+    fn group_typ(group_id: GroupId) -> Self;
+
+    fn extract_group(&self) -> Option<GroupId>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -81,5 +87,13 @@ impl<T: RelNodeTyp> RelNode<T> {
             panic!("child index {} out of range: {}", idx, self);
         }
         self.children[idx].clone()
+    }
+
+    pub fn new_leaf(typ: T) -> Self {
+        Self {
+            typ,
+            data: None,
+            children: Vec::new(),
+        }
     }
 }

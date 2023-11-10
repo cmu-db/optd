@@ -11,8 +11,8 @@ use crate::{
         tasks::{OptimizeExpressionTask, OptimizeInputsTask},
         GroupId,
     },
-    rel_node::RelNodeTyp,
-    rules::{OneOrMany, RelRuleNode, RuleMatcher},
+    rel_node::{RelNode, RelNodeRef, RelNodeTyp},
+    rules::{OneOrMany, RuleMatcher},
 };
 
 use super::Task;
@@ -39,7 +39,7 @@ fn match_node<T: RelNodeTyp>(
     pick_to: Option<usize>,
     node: RelMemoNodeRef<T>,
     optimizer: &CascadesOptimizer<T>,
-) -> Vec<HashMap<usize, OneOrMany<RelRuleNode<T>>>> {
+) -> Vec<HashMap<usize, OneOrMany<RelNode<T>>>> {
     if let RuleMatcher::PickMany { .. } | RuleMatcher::IgnoreMany = children.last().unwrap() {
     } else {
         assert_eq!(
@@ -63,7 +63,7 @@ fn match_node<T: RelNodeTyp>(
                 for pick in &mut picks {
                     let res = pick.insert(
                         *pick_to,
-                        OneOrMany::One(RelRuleNode::Group(node.children[idx])),
+                        OneOrMany::One(RelNode::new_leaf(T::group_typ(node.children[idx]))),
                     );
                     assert!(res.is_none(), "dup pick");
                 }
@@ -75,7 +75,7 @@ fn match_node<T: RelNodeTyp>(
                         OneOrMany::Many(
                             node.children[idx..]
                                 .iter()
-                                .map(|x| RelRuleNode::Group(*x))
+                                .map(|x| RelNode::new_leaf(T::group_typ(*x)))
                                 .collect_vec()
                                 .into(),
                         ),
@@ -100,14 +100,14 @@ fn match_node<T: RelNodeTyp>(
     }
     if let Some(pick_to) = pick_to {
         for pick in &mut picks {
-            let res: Option<OneOrMany<RelRuleNode<T>>> = pick.insert(
+            let res: Option<OneOrMany<RelNode<T>>> = pick.insert(
                 pick_to,
-                OneOrMany::One(RelRuleNode::Node {
+                OneOrMany::One(RelNode {
                     typ: *typ,
                     children: node
                         .children
                         .iter()
-                        .map(|x| RelRuleNode::Group(*x))
+                        .map(|x| RelNode::new_leaf(T::group_typ(*x)).into())
                         .collect_vec(),
                     data: node.data.clone(),
                 }),
@@ -122,7 +122,7 @@ fn match_and_pick_group<T: RelNodeTyp>(
     matcher: &RuleMatcher<T>,
     group_id: GroupId,
     optimizer: &CascadesOptimizer<T>,
-) -> Vec<HashMap<usize, OneOrMany<RelRuleNode<T>>>> {
+) -> Vec<HashMap<usize, OneOrMany<RelNode<T>>>> {
     let mut matches = vec![];
     for expr_id in optimizer.get_all_exprs_in_group(group_id) {
         let node = optimizer.get_expr_memoed(expr_id);
@@ -135,7 +135,7 @@ fn match_and_pick<T: RelNodeTyp>(
     matcher: &RuleMatcher<T>,
     node: RelMemoNodeRef<T>,
     optimizer: &CascadesOptimizer<T>,
-) -> Vec<HashMap<usize, OneOrMany<RelRuleNode<T>>>> {
+) -> Vec<HashMap<usize, OneOrMany<RelNode<T>>>> {
     match matcher {
         RuleMatcher::MatchAndPickNode {
             typ,
@@ -170,11 +170,12 @@ impl<T: RelNodeTyp> Task<T> for ApplyRuleTask {
         for expr in binding_exprs {
             let applied = rule.apply(expr);
             for expr in applied {
-                let RelRuleNode::Node { typ, .. } = expr else {
-                    unreachable!()
-                };
+                let RelNode { typ, .. } = expr;
+                if typ.extract_group().is_some() {
+                    unreachable!();
+                }
                 let expr_typ = typ;
-                let (_, expr_id) = optimizer.add_rule_group_expr(expr, Some(group_id));
+                let (_, expr_id) = optimizer.add_group_expr(expr.into(), Some(group_id));
                 trace!(event = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, new_expr_id = %expr_id);
                 if expr_typ.is_logical() {
                     tasks.push(

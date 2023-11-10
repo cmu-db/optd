@@ -8,7 +8,10 @@ mod scan;
 
 use std::sync::Arc;
 
-use crate::rel_node::{RelNode, RelNodeRef, RelNodeTyp};
+use crate::{
+    cascades::GroupId,
+    rel_node::{RelNode, RelNodeRef, RelNodeTyp},
+};
 
 pub use apply::{ApplyType, LogicalApply};
 pub use expr::{BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, FuncExpr, UnOpExpr, UnOpType};
@@ -19,6 +22,7 @@ pub use scan::{LogicalScan, PhysicalScan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OptRelNodeTyp {
+    Placeholder(GroupId),
     // Plan nodes
     // Developers: update `is_plan_node` function after adding new elements
     Projection,
@@ -81,6 +85,18 @@ impl RelNodeTyp for OptRelNodeTyp {
             true
         } else {
             false
+        }
+    }
+
+    fn group_typ(group_id: GroupId) -> Self {
+        Self::Placeholder(group_id)
+    }
+
+    fn extract_group(&self) -> Option<GroupId> {
+        if let Self::Placeholder(group_id) = self {
+            Some(*group_id)
+        } else {
+            None
         }
     }
 }

@@ -4,12 +4,12 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 
 use crate::{
     cost::CostModel,
     rel_node::{RelNodeRef, RelNodeTyp},
-    rules::{RelRuleNode, Rule},
+    rules::Rule,
 };
 
 use super::{
@@ -126,14 +126,6 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         group_id: Option<GroupId>,
     ) -> (GroupId, ExprId) {
         self.memo.add_new_group_expr(expr, group_id)
-    }
-
-    pub(super) fn add_rule_group_expr(
-        &mut self,
-        expr: RelRuleNode<T>,
-        group_id: Option<GroupId>,
-    ) -> (GroupId, ExprId) {
-        self.memo.add_new_rule_group_expr(expr, group_id)
     }
 
     pub(super) fn get_group_info(&self, group_id: GroupId) -> GroupInfo {

@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use crate::plan_nodes::OptRelNodeTyp;
+use crate::{plan_nodes::OptRelNodeTyp, rel_node::RelNode};
 
 use super::{
     ir::{OneOrMany, RuleMatcher},
-    RelRuleNode, Rule,
+    Rule,
 };
 
 pub struct PhysicalConversionRule {
@@ -30,9 +30,9 @@ impl Rule<OptRelNodeTyp> for PhysicalConversionRule {
 
     fn apply(
         &self,
-        mut input: HashMap<usize, OneOrMany<RelRuleNode<OptRelNodeTyp>>>,
-    ) -> Vec<RelRuleNode<OptRelNodeTyp>> {
-        let RelRuleNode::Node {
+        mut input: HashMap<usize, OneOrMany<RelNode<OptRelNodeTyp>>>,
+    ) -> Vec<RelNode<OptRelNodeTyp>> {
+        let RelNode {
             typ,
             data,
             children,
@@ -43,36 +43,36 @@ impl Rule<OptRelNodeTyp> for PhysicalConversionRule {
 
         match typ {
             OptRelNodeTyp::Apply(x) => {
-                let node = RelRuleNode::Node {
+                let node = RelNode {
                     typ: OptRelNodeTyp::PhysicalNestedLoopJoin(x.to_join_type()),
                     children,
                     data,
                 };
-                vec![node]
+                vec![node.into()]
             }
             OptRelNodeTyp::Join(x) => {
-                let node = RelRuleNode::Node {
+                let node = RelNode {
                     typ: OptRelNodeTyp::PhysicalNestedLoopJoin(x),
                     children,
                     data,
                 };
-                vec![node]
+                vec![node.into()]
             }
             OptRelNodeTyp::Scan => {
-                let node = RelRuleNode::Node {
+                let node = RelNode {
                     typ: OptRelNodeTyp::PhysicalScan,
                     children,
                     data,
                 };
-                vec![node]
+                vec![node.into()]
             }
             OptRelNodeTyp::Filter => {
-                let node = RelRuleNode::Node {
+                let node = RelNode {
                     typ: OptRelNodeTyp::PhysicalFilter,
                     children,
                     data,
                 };
-                vec![node]
+                vec![node.into()]
             }
             _ => vec![],
         }

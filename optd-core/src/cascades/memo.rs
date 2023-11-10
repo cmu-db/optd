@@ -7,10 +7,7 @@ use std::{
 use anyhow::{bail, Result};
 use itertools::Itertools;
 
-use crate::{
-    rel_node::{RelNode, RelNodeRef, RelNodeTyp, Value},
-    rules::RelRuleNode,
-};
+use crate::rel_node::{RelNode, RelNodeRef, RelNodeTyp, Value};
 
 use super::optimizer::{ExprId, GroupId};
 
@@ -125,19 +122,10 @@ impl<T: RelNodeTyp> Memo<T> {
         rel_node: RelNodeRef<T>,
         add_to_group_id: Option<GroupId>,
     ) -> (GroupId, ExprId) {
+        if rel_node.typ.extract_group().is_some() {
+            unreachable!();
+        }
         let (group_id, expr_id) = self.add_new_group_expr_inner(
-            rel_node,
-            add_to_group_id.map(|x| self.get_reduced_group_id(x)),
-        );
-        (group_id.as_group_id(), expr_id)
-    }
-
-    pub fn add_new_rule_group_expr(
-        &mut self,
-        rel_node: RelRuleNode<T>,
-        add_to_group_id: Option<GroupId>,
-    ) -> (GroupId, ExprId) {
-        let (group_id, expr_id) = self.add_new_rule_group_expr_inner(
             rel_node,
             add_to_group_id.map(|x| self.get_reduced_group_id(x)),
         );
@@ -157,61 +145,18 @@ impl<T: RelNodeTyp> Memo<T> {
         let children_group_ids = rel_node
             .children
             .iter()
-            .map(|child| self.add_new_group_expr(child.clone(), None).0)
+            .map(|child| {
+                if let Some(group) = child.typ.extract_group() {
+                    group
+                } else {
+                    self.add_new_group_expr(child.clone(), None).0
+                }
+            })
             .collect::<Vec<_>>();
         let memo_node = RelMemoNode {
             typ: rel_node.typ,
             children: children_group_ids,
             data: rel_node.data.clone(),
-        };
-        if let Some(&expr_id) = self.expr_node_to_expr_id.get(&memo_node) {
-            let group_id = self.get_group_id_of_expr_id(expr_id);
-            let group_id = self.get_reduced_group_id(group_id);
-            if let Some(add_to_group_id) = add_to_group_id {
-                self.merge_group(add_to_group_id, group_id);
-            }
-            return (group_id, expr_id);
-        }
-        let expr_id = self.next_expr_id();
-        let group_id = if let Some(group_id) = add_to_group_id {
-            group_id
-        } else {
-            self.next_group_id()
-        };
-        self.expr_id_to_expr_node
-            .insert(expr_id, memo_node.clone().into());
-        self.expr_id_to_group_id
-            .insert(expr_id, group_id.as_group_id());
-        self.expr_node_to_expr_id.insert(memo_node, expr_id);
-        self.add_expr_to_group(expr_id, group_id);
-        (group_id, expr_id)
-    }
-
-    // TODO(chi): dedup with the above function
-    fn add_new_rule_group_expr_inner(
-        &mut self,
-        rel_node: RelRuleNode<T>,
-        add_to_group_id: Option<ReducedGroupId>,
-    ) -> (ReducedGroupId, ExprId) {
-        let RelRuleNode::Node {
-            typ,
-            children,
-            data,
-        } = rel_node
-        else {
-            unimplemented!()
-        };
-        let children_group_ids = children
-            .iter()
-            .map(|child| match child {
-                RelRuleNode::Group(group_id) => *group_id,
-                _ => self.add_new_rule_group_expr(child.clone(), None).0,
-            })
-            .collect::<Vec<_>>();
-        let memo_node = RelMemoNode {
-            typ,
-            children: children_group_ids,
-            data,
         };
         if let Some(&expr_id) = self.expr_node_to_expr_id.get(&memo_node) {
             let group_id = self.get_group_id_of_expr_id(expr_id);

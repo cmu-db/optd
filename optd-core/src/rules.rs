@@ -6,10 +6,7 @@ mod physical;
 
 use std::collections::HashMap;
 
-use crate::{
-    cascades::GroupId,
-    rel_node::{RelNodeTyp, Value},
-};
+use crate::rel_node::{RelNode, RelNodeTyp};
 
 pub use filter_join::FilterJoinPullUpRule;
 pub use ir::{OneOrMany, RuleMatcher};
@@ -19,20 +16,9 @@ pub use physical::PhysicalConversionRule;
 
 pub trait Rule<T: RelNodeTyp> {
     fn matcher(&self) -> &RuleMatcher<T>;
-    fn apply(&self, input: HashMap<usize, OneOrMany<RelRuleNode<T>>>) -> Vec<RelRuleNode<T>>;
+    fn apply(&self, input: HashMap<usize, OneOrMany<RelNode<T>>>) -> Vec<RelNode<T>>;
     fn name(&self) -> &'static str;
     fn is_impl_rule(&self) -> bool {
         false
     }
-}
-
-/// The rel node type when implementing a rule.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum RelRuleNode<T: RelNodeTyp> {
-    Node {
-        typ: T,
-        children: Vec<Self>,
-        data: Option<Value>,
-    },
-    Group(GroupId),
 }
