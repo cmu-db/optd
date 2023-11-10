@@ -17,10 +17,11 @@
 
 use clap::Parser;
 use datafusion::error::{DataFusionError, Result};
-use datafusion::execution::context::SessionConfig;
+use datafusion::execution::context::{SessionConfig, SessionState};
 use datafusion::execution::memory_pool::{FairSpillPool, GreedyMemoryPool};
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
 use datafusion::prelude::SessionContext;
+use datafusion_optd_bridge::OptdQueryPlanner;
 use datafusion_optd_cli::catalog::DynamicFileCatalog;
 use datafusion_optd_cli::{
     exec,
@@ -177,7 +178,16 @@ pub async fn main() -> Result<()> {
 
     let runtime_env = create_runtime_env(rn_config.clone())?;
 
-    let mut ctx = SessionContext::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
+    let mut ctx = {
+        let mut state =
+            SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
+        // clean up optimizer rules so that we can plug in our own optimizer
+        state = state.with_optimizer_rules(vec![]);
+        state = state.with_physical_optimizer_rules(vec![]);
+        // use optd-bridge query planner
+        state = state.with_query_planner(Arc::new(OptdQueryPlanner::new()));
+        SessionContext::new_with_state(state)
+    };
     ctx.refresh_catalogs().await?;
     // install dynamic catalog provider that knows how to open files
     ctx.register_catalog_list(Arc::new(DynamicFileCatalog::new(
