@@ -3,7 +3,7 @@ use std::fmt::Display;
 
 use pretty_xmlish::Pretty;
 
-use crate::rel_node::RelNode;
+use optd_core::rel_node::RelNode;
 
 use super::{Expr, JoinType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 

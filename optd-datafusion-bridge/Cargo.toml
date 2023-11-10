@@ -1,5 +1,5 @@
 [package]
-name = "datafusion-optd-bridge"
+name = "optd-datafusion-bridge"
 version = "0.1.0"
 edition = "2021"
 

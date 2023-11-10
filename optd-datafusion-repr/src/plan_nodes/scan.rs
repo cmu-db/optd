@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use pretty_xmlish::Pretty;
 
-use crate::rel_node::{RelNode, Value};
+use optd_core::rel_node::{RelNode, Value};
 
 use super::{replace_typ, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 

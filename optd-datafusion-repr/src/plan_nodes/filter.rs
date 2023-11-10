@@ -1,6 +1,6 @@
 use pretty_xmlish::Pretty;
 
-use crate::rel_node::RelNode;
+use optd_core::rel_node::RelNode;
 
 use super::{replace_typ, Expr, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 

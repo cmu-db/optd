@@ -8,7 +8,7 @@ mod scan;
 
 use std::sync::Arc;
 
-use crate::{
+use optd_core::{
     cascades::GroupId,
     rel_node::{RelNode, RelNodeRef, RelNodeTyp},
 };

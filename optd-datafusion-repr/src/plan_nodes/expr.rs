@@ -3,7 +3,7 @@ use std::fmt::Display;
 use itertools::Itertools;
 use pretty_xmlish::Pretty;
 
-use crate::rel_node::{RelNode, Value};
+use optd_core::rel_node::{RelNode, Value};
 
 use super::{Expr, OptRelNode, OptRelNodeRef, OptRelNodeTyp};
 

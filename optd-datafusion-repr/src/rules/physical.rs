@@ -1,11 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{plan_nodes::OptRelNodeTyp, rel_node::RelNode};
+use optd_core::rel_node::RelNode;
+use optd_core::rules::{OneOrMany, Rule, RuleMatcher};
 
-use super::{
-    ir::{OneOrMany, RuleMatcher},
-    Rule,
-};
+use crate::plan_nodes::{JoinType, OptRelNodeTyp};
 
 pub struct PhysicalConversionRule {
     matcher: RuleMatcher<OptRelNodeTyp>,

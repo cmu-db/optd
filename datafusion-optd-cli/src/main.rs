@@ -21,7 +21,6 @@ use datafusion::execution::context::{SessionConfig, SessionState};
 use datafusion::execution::memory_pool::{FairSpillPool, GreedyMemoryPool};
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
 use datafusion::prelude::SessionContext;
-use datafusion_optd_bridge::OptdQueryPlanner;
 use datafusion_optd_cli::catalog::DynamicFileCatalog;
 use datafusion_optd_cli::{
     exec,
@@ -30,6 +29,7 @@ use datafusion_optd_cli::{
     DATAFUSION_CLI_VERSION,
 };
 use mimalloc::MiMalloc;
+use optd_datafusion_bridge::OptdQueryPlanner;
 use std::collections::HashMap;
 use std::env;
 use std::path::Path;

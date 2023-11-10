@@ -11,7 +11,7 @@ use crate::{
         tasks::{OptimizeExpressionTask, OptimizeInputsTask},
         GroupId,
     },
-    rel_node::{RelNode, RelNodeRef, RelNodeTyp},
+    rel_node::{RelNode, RelNodeTyp},
     rules::{OneOrMany, RuleMatcher},
 };
 

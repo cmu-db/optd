@@ -1,3 +1,8 @@
 [workspace]
-members = ["datafusion-optd-cli", "optd-core", "datafusion-optd-bridge"]
+members = [
+    "datafusion-optd-cli",
+    "optd-core",
+    "optd-datafusion-bridge",
+    "optd-datafusion-repr",
+]
 resolver = "2"

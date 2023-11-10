@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
-use optd_core::{
-    cascades::CascadesOptimizer,
+use optd_core::{cascades::CascadesOptimizer, rel_node::Value};
+use optd_datafusion_repr::{
     cost::OptCostModel,
     plan_nodes::{
         BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, JoinType, LogicalFilter, LogicalJoin,
         LogicalScan, OptRelNode, OptRelNodeTyp, PlanNode,
     },
-    rel_node::Value,
     rules::{
         FilterJoinPullUpRule, JoinAssocLeftRule, JoinAssocRightRule, JoinCommuteRule,
         PhysicalConversionRule,
