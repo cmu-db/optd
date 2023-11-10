@@ -182,8 +182,8 @@ pub async fn main() -> Result<()> {
         let mut state =
             SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
         // clean up optimizer rules so that we can plug in our own optimizer
-        state = state.with_optimizer_rules(vec![]);
-        state = state.with_physical_optimizer_rules(vec![]);
+        // state = state.with_optimizer_rules(vec![]);
+        // state = state.with_physical_optimizer_rules(vec![]);
         // use optd-bridge query planner
         state = state.with_query_planner(Arc::new(OptdQueryPlanner::new()));
         SessionContext::new_with_state(state)

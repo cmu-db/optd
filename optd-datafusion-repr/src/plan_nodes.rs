@@ -4,6 +4,7 @@ mod apply;
 mod expr;
 mod filter;
 mod join;
+pub(super) mod macros;
 mod scan;
 
 use std::sync::Arc;
@@ -98,13 +99,17 @@ pub type OptRelNodeRef = RelNodeRef<OptRelNodeTyp>;
 
 pub trait OptRelNode: 'static + Clone {
     fn into_rel_node(self) -> OptRelNodeRef;
+
     fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self>
     where
         Self: Sized;
+
     fn dispatch_explain(&self) -> Pretty<'static>;
+
     fn explain(&self) -> Pretty<'static> {
         explain(self.clone().into_rel_node())
     }
+
     fn explain_to_string(&self) -> String {
         let mut config = PrettyConfig {
             need_boundaries: false,

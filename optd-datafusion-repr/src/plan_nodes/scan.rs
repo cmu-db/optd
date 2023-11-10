@@ -47,7 +47,7 @@ impl LogicalScan {
 }
 
 #[derive(Clone, Debug)]
-pub struct PhysicalScan(pub LogicalScan);
+pub struct PhysicalScan(pub PlanNode);
 
 impl OptRelNode for PhysicalScan {
     fn into_rel_node(self) -> OptRelNodeRef {
@@ -58,7 +58,7 @@ impl OptRelNode for PhysicalScan {
         if rel_node.typ != OptRelNodeTyp::PhysicalScan {
             return None;
         }
-        LogicalScan::from_rel_node(replace_typ(rel_node, OptRelNodeTyp::Scan)).map(Self)
+        PlanNode::from_rel_node(rel_node).map(Self)
     }
 
     fn dispatch_explain(&self) -> Pretty<'static> {
@@ -70,11 +70,11 @@ impl OptRelNode for PhysicalScan {
 }
 
 impl PhysicalScan {
-    pub fn new(node: LogicalScan) -> PhysicalScan {
+    pub fn new(node: PlanNode) -> PhysicalScan {
         Self(node)
     }
 
     pub fn table(&self) -> Arc<str> {
-        self.0.table()
+        self.clone().into_rel_node().data.as_ref().unwrap().as_str()
     }
 }
