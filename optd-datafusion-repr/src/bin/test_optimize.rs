@@ -7,25 +7,21 @@ use optd_datafusion_repr::{
         BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, JoinType, LogicalFilter, LogicalJoin,
         LogicalScan, OptRelNode, OptRelNodeTyp, PlanNode,
     },
-    rules::{
-        FilterJoinPullUpRule, JoinAssocLeftRule, JoinAssocRightRule, JoinCommuteRule,
-        PhysicalConversionRule,
-    },
+    rules::{FilterJoinPullUpRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule},
 };
 
 use tracing::Level;
 
 pub fn main() {
     tracing_subscriber::fmt()
-        .with_max_level(Level::TRACE)
+        .with_max_level(Level::DEBUG)
         .with_target(false)
         .init();
 
     let mut optimizer = CascadesOptimizer::new_with_rules(
         vec![
             Arc::new(JoinCommuteRule::new()),
-            Arc::new(JoinAssocLeftRule::new()),
-            Arc::new(JoinAssocRightRule::new()),
+            Arc::new(JoinAssocRule::new()),
             Arc::new(FilterJoinPullUpRule::new()),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Scan)),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Join(
@@ -55,8 +51,8 @@ pub fn main() {
     let join_filter = LogicalJoin::new(filter1.0, scan2.0, join_cond.clone().0, JoinType::Inner);
     let fnal = LogicalJoin::new(scan3.0, join_filter.0, join_cond.0, JoinType::Inner);
     let node = optimizer.optimize(fnal.0.into_rel_node());
-    optimizer.dump();
-    let node = node.unwrap();
+    // optimizer.dump();
+    let node: Arc<optd_core::rel_node::RelNode<OptRelNodeTyp>> = node.unwrap();
     println!(
         "cost={}",
         optimizer

@@ -110,6 +110,7 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                     0.0,
                 )
             }
+            _ if node.is_expression() => Self::cost(0.0, 0.0, 0.0),
             _ => Self::cost(1.0, 0.0, 0.0),
         }
     }
