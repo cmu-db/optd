@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use optd_core::rel_node::RelNode;
-use optd_core::rules::{OneOrMany, Rule, RuleMatcher};
+use optd_core::rules::{Rule, RuleMatcher};
 
 use crate::plan_nodes::{JoinType, OptRelNodeTyp};
 
@@ -49,23 +49,23 @@ impl Rule<OptRelNodeTyp> for JoinAssocRule {
 
     fn apply(
         &self,
-        mut input: HashMap<usize, OneOrMany<RelNode<OptRelNodeTyp>>>,
+        mut input: HashMap<usize, RelNode<OptRelNodeTyp>>,
     ) -> Vec<RelNode<OptRelNodeTyp>> {
         let RelNode {
             typ: top_typ,
             data: top_data,
             ..
-        } = input.remove(&JOIN_NODE_TOP).unwrap().as_one();
+        } = input.remove(&JOIN_NODE_TOP).unwrap();
         let RelNode {
             typ: down_typ,
             data: down_data,
             ..
-        } = input.remove(&JOIN_NODE_DOWN).unwrap().as_one();
-        let child_a = input.remove(&CHILD_A).unwrap().as_one();
-        let child_b = input.remove(&CHILD_B).unwrap().as_one();
-        let child_c = input.remove(&CHILD_C).unwrap().as_one();
-        let cond_ab = input.remove(&COND_AB).unwrap().as_one();
-        let cond_bc = input.remove(&COND_BC).unwrap().as_one();
+        } = input.remove(&JOIN_NODE_DOWN).unwrap();
+        let child_a = input.remove(&CHILD_A).unwrap();
+        let child_b = input.remove(&CHILD_B).unwrap();
+        let child_c = input.remove(&CHILD_C).unwrap();
+        let cond_ab = input.remove(&COND_AB).unwrap();
+        let cond_bc = input.remove(&COND_BC).unwrap();
         let node = RelNode {
             typ: top_typ,
             children: vec![

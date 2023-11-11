@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use optd_core::rel_node::RelNode;
-use optd_core::rules::{OneOrMany, Rule, RuleMatcher};
+use optd_core::rules::{Rule, RuleMatcher};
 
 use crate::plan_nodes::{JoinType, OptRelNodeTyp};
 
@@ -43,12 +43,12 @@ impl Rule<OptRelNodeTyp> for JoinCommuteRule {
 
     fn apply(
         &self,
-        mut input: HashMap<usize, OneOrMany<RelNode<OptRelNodeTyp>>>,
+        mut input: HashMap<usize, RelNode<OptRelNodeTyp>>,
     ) -> Vec<RelNode<OptRelNodeTyp>> {
-        let RelNode { typ, data, .. } = input.remove(&JOIN_NODE).unwrap().as_one();
-        let left_child = input.remove(&LEFT_CHILD).unwrap().as_one();
-        let right_child = input.remove(&RIGHT_CHILD).unwrap().as_one();
-        let cond = input.remove(&COND).unwrap().as_one();
+        let RelNode { typ, data, .. } = input.remove(&JOIN_NODE).unwrap();
+        let left_child = input.remove(&LEFT_CHILD).unwrap();
+        let right_child = input.remove(&RIGHT_CHILD).unwrap();
+        let cond = input.remove(&COND).unwrap();
         let node = RelNode {
             typ,
             children: vec![right_child.into(), left_child.into(), cond.into()],

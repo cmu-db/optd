@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
 use itertools::Itertools;
@@ -12,7 +12,7 @@ use crate::{
         GroupId,
     },
     rel_node::{RelNode, RelNodeTyp},
-    rules::{OneOrMany, RuleMatcher},
+    rules::RuleMatcher,
 };
 
 use super::Task;
@@ -39,7 +39,7 @@ fn match_node<T: RelNodeTyp>(
     pick_to: Option<usize>,
     node: RelMemoNodeRef<T>,
     optimizer: &CascadesOptimizer<T>,
-) -> Vec<HashMap<usize, OneOrMany<RelNode<T>>>> {
+) -> Vec<HashMap<usize, RelNode<T>>> {
     if let RuleMatcher::PickMany { .. } | RuleMatcher::IgnoreMany = children.last().unwrap() {
     } else {
         assert_eq!(
@@ -61,10 +61,7 @@ fn match_node<T: RelNodeTyp>(
             }
             RuleMatcher::PickOne { pick_to } => {
                 for pick in &mut picks {
-                    let res = pick.insert(
-                        *pick_to,
-                        OneOrMany::One(RelNode::new_leaf(T::group_typ(node.children[idx]))),
-                    );
+                    let res = pick.insert(*pick_to, RelNode::new_group(node.children[idx]));
                     assert!(res.is_none(), "dup pick");
                 }
             }
@@ -72,12 +69,11 @@ fn match_node<T: RelNodeTyp>(
                 for pick in &mut picks {
                     let res = pick.insert(
                         *pick_to,
-                        OneOrMany::Many(
+                        RelNode::new_list(
                             node.children[idx..]
                                 .iter()
-                                .map(|x| RelNode::new_leaf(T::group_typ(*x)))
-                                .collect_vec()
-                                .into(),
+                                .map(|x| Arc::new(RelNode::new_group(*x)))
+                                .collect_vec(),
                         ),
                     );
                     assert!(res.is_none(), "dup pick");
@@ -100,17 +96,17 @@ fn match_node<T: RelNodeTyp>(
     }
     if let Some(pick_to) = pick_to {
         for pick in &mut picks {
-            let res: Option<OneOrMany<RelNode<T>>> = pick.insert(
+            let res: Option<RelNode<T>> = pick.insert(
                 pick_to,
-                OneOrMany::One(RelNode {
+                RelNode {
                     typ: *typ,
                     children: node
                         .children
                         .iter()
-                        .map(|x| RelNode::new_leaf(T::group_typ(*x)).into())
+                        .map(|x| RelNode::new_group(*x).into())
                         .collect_vec(),
                     data: node.data.clone(),
-                }),
+                },
             );
             assert!(res.is_none(), "dup pick");
         }
@@ -122,7 +118,7 @@ fn match_and_pick_group<T: RelNodeTyp>(
     matcher: &RuleMatcher<T>,
     group_id: GroupId,
     optimizer: &CascadesOptimizer<T>,
-) -> Vec<HashMap<usize, OneOrMany<RelNode<T>>>> {
+) -> Vec<HashMap<usize, RelNode<T>>> {
     let mut matches = vec![];
     for expr_id in optimizer.get_all_exprs_in_group(group_id) {
         let node = optimizer.get_expr_memoed(expr_id);
@@ -135,7 +131,7 @@ fn match_and_pick<T: RelNodeTyp>(
     matcher: &RuleMatcher<T>,
     node: RelMemoNodeRef<T>,
     optimizer: &CascadesOptimizer<T>,
-) -> Vec<HashMap<usize, OneOrMany<RelNode<T>>>> {
+) -> Vec<HashMap<usize, RelNode<T>>> {
     match matcher {
         RuleMatcher::MatchAndPickNode {
             typ,

@@ -21,6 +21,8 @@ pub trait RelNodeTyp:
     fn group_typ(group_id: GroupId) -> Self;
 
     fn extract_group(&self) -> Option<GroupId>;
+
+    fn list_typ() -> Self;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -94,6 +96,18 @@ impl<T: RelNodeTyp> RelNode<T> {
             typ,
             data: None,
             children: Vec::new(),
+        }
+    }
+
+    pub fn new_group(group_id: GroupId) -> Self {
+        Self::new_leaf(T::group_typ(group_id))
+    }
+
+    pub fn new_list(items: Vec<RelNodeRef<T>>) -> Self {
+        Self {
+            typ: T::list_typ(),
+            data: None,
+            children: items,
         }
     }
 }

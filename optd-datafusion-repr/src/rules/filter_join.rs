@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use optd_core::rel_node::RelNode;
-use optd_core::rules::{OneOrMany, Rule, RuleMatcher};
+use optd_core::rules::{Rule, RuleMatcher};
 
 use crate::plan_nodes::{JoinType, OptRelNodeTyp};
 
@@ -48,12 +48,12 @@ impl Rule<OptRelNodeTyp> for FilterJoinPullUpRule {
 
     fn apply(
         &self,
-        mut input: HashMap<usize, OneOrMany<RelNode<OptRelNodeTyp>>>,
+        mut input: HashMap<usize, RelNode<OptRelNodeTyp>>,
     ) -> Vec<RelNode<OptRelNodeTyp>> {
-        let left_child = input.remove(&LEFT_CHILD).unwrap().as_one();
-        let right_child = input.remove(&RIGHT_CHILD).unwrap().as_one();
-        let join_cond = input.remove(&JOIN_COND).unwrap().as_one();
-        let filter_cond = input.remove(&FILTER_COND).unwrap().as_one();
+        let left_child = input.remove(&LEFT_CHILD).unwrap();
+        let right_child = input.remove(&RIGHT_CHILD).unwrap();
+        let join_cond = input.remove(&JOIN_COND).unwrap();
+        let filter_cond = input.remove(&FILTER_COND).unwrap();
         let join_node = RelNode {
             typ: OptRelNodeTyp::Join(JoinType::Inner),
             children: vec![left_child.into(), right_child.into(), join_cond.into()],

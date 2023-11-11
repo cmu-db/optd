@@ -24,6 +24,7 @@ pub use scan::{LogicalScan, PhysicalScan};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OptRelNodeTyp {
     Placeholder(GroupId),
+    List,
     // Plan nodes
     // Developers: update `is_plan_node` function after adding new elements
     Projection,
@@ -84,6 +85,10 @@ impl RelNodeTyp for OptRelNodeTyp {
 
     fn group_typ(group_id: GroupId) -> Self {
         Self::Placeholder(group_id)
+    }
+
+    fn list_typ() -> Self {
+        Self::List
     }
 
     fn extract_group(&self) -> Option<GroupId> {

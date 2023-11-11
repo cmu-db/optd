@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use optd_core::rel_node::RelNode;
-use optd_core::rules::{OneOrMany, Rule, RuleMatcher};
+use optd_core::rules::{Rule, RuleMatcher};
 
 use crate::plan_nodes::OptRelNodeTyp;
 
@@ -28,13 +28,13 @@ impl Rule<OptRelNodeTyp> for PhysicalConversionRule {
 
     fn apply(
         &self,
-        mut input: HashMap<usize, OneOrMany<RelNode<OptRelNodeTyp>>>,
+        mut input: HashMap<usize, RelNode<OptRelNodeTyp>>,
     ) -> Vec<RelNode<OptRelNodeTyp>> {
         let RelNode {
             typ,
             data,
             children,
-        } = input.remove(&0).unwrap().as_one();
+        } = input.remove(&0).unwrap();
 
         match typ {
             OptRelNodeTyp::Apply(x) => {

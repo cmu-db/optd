@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::rel_node::RelNodeTyp;
 
 pub enum RuleMatcher<T: RelNodeTyp> {
@@ -19,25 +17,4 @@ pub enum RuleMatcher<T: RelNodeTyp> {
     IgnoreOne,
     /// Ignore many
     IgnoreMany,
-}
-
-#[derive(Debug, Clone)]
-pub enum OneOrMany<T> {
-    One(T),
-    Many(Arc<Vec<T>>),
-}
-
-impl<T> OneOrMany<T> {
-    pub fn as_one(self) -> T {
-        match self {
-            Self::One(x) => x,
-            _ => panic!(),
-        }
-    }
-    pub fn as_many(self) -> Arc<Vec<T>> {
-        match self {
-            Self::Many(x) => x,
-            _ => panic!(),
-        }
-    }
 }
