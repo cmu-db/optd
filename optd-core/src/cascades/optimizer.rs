@@ -43,7 +43,7 @@ pub struct ExprId(pub usize);
 
 impl Display for GroupId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "!{}", self.0)
     }
 }
 
@@ -96,7 +96,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             for expr_id in self.memo.get_all_exprs_in_group(group_id) {
                 let memo_node = self.memo.get_expr_memoed(expr_id);
                 println!("  expr_id={} | {}", expr_id, memo_node);
-                let bindings = self.memo.get_all_expr_bindings(expr_id, false);
+                let bindings = self.memo.get_all_expr_bindings(expr_id, false, Some(1));
                 for binding in bindings {
                     println!("    {}", binding);
                 }
@@ -144,12 +144,20 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.memo.get_expr_memoed(expr_id)
     }
 
-    pub(super) fn get_all_expr_bindings(&self, expr_id: ExprId) -> Vec<RelNodeRef<T>> {
-        self.memo.get_all_expr_bindings(expr_id, false)
+    pub(super) fn get_all_expr_bindings(
+        &self,
+        expr_id: ExprId,
+        level: Option<usize>,
+    ) -> Vec<RelNodeRef<T>> {
+        self.memo.get_all_expr_bindings(expr_id, false, level)
     }
 
-    pub(super) fn get_all_expr_physical_bindings(&self, expr_id: ExprId) -> Vec<RelNodeRef<T>> {
-        self.memo.get_all_expr_bindings(expr_id, true)
+    pub(super) fn get_all_expr_physical_bindings(
+        &self,
+        expr_id: ExprId,
+        level: Option<usize>,
+    ) -> Vec<RelNodeRef<T>> {
+        self.memo.get_all_expr_bindings(expr_id, true, level)
     }
 
     pub(super) fn is_group_explored(&self, group_id: GroupId) -> bool {

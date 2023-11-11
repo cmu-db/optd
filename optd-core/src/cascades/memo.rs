@@ -76,6 +76,7 @@ pub struct Memo<T: RelNodeTyp> {
     expr_node_to_expr_id: HashMap<RelMemoNode<T>, ExprId>,
     groups: HashMap<ReducedGroupId, Group>,
     group_expr_counter: usize,
+    merged_groups: HashMap<GroupId, GroupId>,
 }
 
 impl<T: RelNodeTyp> Memo<T> {
@@ -86,6 +87,7 @@ impl<T: RelNodeTyp> Memo<T> {
             expr_node_to_expr_id: HashMap::new(),
             groups: HashMap::new(),
             group_expr_counter: 0,
+            merged_groups: HashMap::new(),
         }
     }
 
@@ -107,14 +109,19 @@ impl<T: RelNodeTyp> Memo<T> {
         if group_a == group_b {
             return group_a;
         }
-        unimplemented!("need to merge groups {} and {}", group_a, group_b);
+        self.merged_groups
+            .insert(group_a.as_group_id(), group_b.as_group_id());
+        group_b
     }
 
     fn get_group_id_of_expr_id(&self, expr_id: ExprId) -> GroupId {
         self.expr_id_to_group_id[&expr_id]
     }
 
-    fn get_reduced_group_id(&self, group_id: GroupId) -> ReducedGroupId {
+    fn get_reduced_group_id(&self, mut group_id: GroupId) -> ReducedGroupId {
+        while let Some(next_group_id) = self.merged_groups.get(&group_id) {
+            group_id = *next_group_id;
+        }
         ReducedGroupId(group_id.0)
     }
 
@@ -208,6 +215,7 @@ impl<T: RelNodeTyp> Memo<T> {
         &self,
         group_id: GroupId,
         physical_only: bool,
+        level: Option<usize>,
     ) -> Vec<RelNodeRef<T>> {
         let group_id = self.get_reduced_group_id(group_id);
         let group = self.groups.get(&group_id).expect("group not found");
@@ -215,7 +223,7 @@ impl<T: RelNodeTyp> Memo<T> {
             .group_exprs
             .iter()
             .filter(|x| !physical_only || !self.get_expr_memoed(**x).typ.is_logical())
-            .map(|&expr_id| self.get_all_expr_bindings(expr_id, physical_only))
+            .map(|&expr_id| self.get_all_expr_bindings(expr_id, physical_only, level))
             .concat()
     }
 
@@ -225,12 +233,28 @@ impl<T: RelNodeTyp> Memo<T> {
         &self,
         expr_id: ExprId,
         physical_only: bool,
+        level: Option<usize>,
     ) -> Vec<RelNodeRef<T>> {
         let expr = self.get_expr_memoed(expr_id);
+        if let Some(level) = level {
+            if level == 0 {
+                let node = Arc::new(RelNode {
+                    typ: expr.typ,
+                    children: expr
+                        .children
+                        .iter()
+                        .map(|x| Arc::new(RelNode::new_group(*x)))
+                        .collect_vec(),
+                    data: expr.data.clone(),
+                });
+                return vec![node];
+            }
+        }
         let mut children = vec![];
         let mut cumulative = 1;
         for child in &expr.children {
-            let group_exprs = self.get_all_group_bindings(*child, physical_only);
+            let group_exprs =
+                self.get_all_group_bindings(*child, physical_only, level.map(|x| x - 1));
             cumulative *= group_exprs.len();
             children.push(group_exprs);
         }
@@ -257,15 +281,20 @@ impl<T: RelNodeTyp> Memo<T> {
     pub fn get_all_exprs_in_group(&self, group_id: GroupId) -> Vec<ExprId> {
         let group_id = self.get_reduced_group_id(group_id);
         let group = self.groups.get(&group_id).expect("group not found");
-        group.group_exprs.iter().copied().collect()
+        let mut exprs = group.group_exprs.iter().copied().collect_vec();
+        exprs.sort();
+        exprs
     }
 
     pub fn get_all_group_ids(&self) -> Vec<GroupId> {
-        self.groups
+        let mut ids = self
+            .groups
             .keys()
             .copied()
             .map(|x| x.as_group_id())
-            .collect()
+            .collect_vec();
+        ids.sort();
+        ids
     }
 
     pub fn get_group_info(&self, group_id: GroupId) -> GroupInfo {
