@@ -4,5 +4,6 @@ members = [
     "optd-core",
     "optd-datafusion-bridge",
     "optd-datafusion-repr",
+    "optd-sqlplannertest",
 ]
 resolver = "2"

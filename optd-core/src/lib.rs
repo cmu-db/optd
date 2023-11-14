@@ -2,5 +2,6 @@
 
 pub mod cascades;
 pub mod cost;
+pub mod heuristics;
 pub mod rel_node;
 pub mod rules;

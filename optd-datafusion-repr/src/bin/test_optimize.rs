@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use optd_core::{cascades::CascadesOptimizer, rel_node::Value};
+use optd_core::{cascades::CascadesOptimizer, heuristics::HeuristicsOptimizer, rel_node::Value};
 use optd_datafusion_repr::{
     cost::OptCostModel,
     plan_nodes::{
@@ -50,7 +50,7 @@ pub fn main() {
     let scan3 = LogicalScan::new("t3".into());
     let join_filter = LogicalJoin::new(filter1.0, scan2.0, join_cond.clone().0, JoinType::Inner);
     let fnal = LogicalJoin::new(scan3.0, join_filter.0, join_cond.0, JoinType::Inner);
-    let node = optimizer.optimize(fnal.0.into_rel_node());
+    let node = optimizer.optimize(fnal.0.clone().into_rel_node());
     optimizer.dump();
     let node: Arc<optd_core::rel_node::RelNode<OptRelNodeTyp>> = node.unwrap();
     println!(
@@ -59,6 +59,25 @@ pub fn main() {
             .cost()
             .explain(&optimizer.cost().compute_plan_node_cost(&node))
     );
+    println!(
+        "{}",
+        PlanNode::from_rel_node(node).unwrap().explain_to_string()
+    );
+
+    let mut optimizer = HeuristicsOptimizer::new_with_rules(
+        vec![
+            Arc::new(JoinCommuteRule::new()),
+            Arc::new(JoinAssocRule::new()),
+            Arc::new(FilterJoinPullUpRule::new()),
+            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Scan)),
+            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Join(
+                JoinType::Inner,
+            ))),
+            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Filter)),
+        ],
+        optd_core::heuristics::ApplyOrder::BottomUp,
+    );
+    let node = optimizer.optimize(fnal.0.into_rel_node()).unwrap();
     println!(
         "{}",
         PlanNode::from_rel_node(node).unwrap().explain_to_string()

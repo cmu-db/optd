@@ -98,14 +98,14 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
             OptRelNodeTyp::PhysicalFilter => {
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
                 let selectivity = 0.001;
-                Self::cost(row_cnt * selectivity, row_cnt, 0.0)
+                Self::cost((row_cnt * selectivity).max(1.0), row_cnt, 0.0)
             }
             OptRelNodeTyp::PhysicalNestedLoopJoin(_) => {
                 let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
                 let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
                 let selectivity = 0.01;
                 Self::cost(
-                    row_cnt_1 * row_cnt_2 * selectivity,
+                    (row_cnt_1 * row_cnt_2 * selectivity).max(1.0),
                     row_cnt_1 * row_cnt_2,
                     0.0,
                 )
