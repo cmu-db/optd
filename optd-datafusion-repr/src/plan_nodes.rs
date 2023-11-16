@@ -5,6 +5,7 @@ mod expr;
 mod filter;
 mod join;
 pub(super) mod macros;
+mod projection;
 mod scan;
 
 use std::sync::Arc;
@@ -15,10 +16,13 @@ use optd_core::{
 };
 
 pub use apply::{ApplyType, LogicalApply};
-pub use expr::{BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, FuncExpr, UnOpExpr, UnOpType};
+pub use expr::{
+    BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ExprList, FuncExpr, UnOpExpr, UnOpType,
+};
 pub use filter::{LogicalFilter, PhysicalFilter};
 pub use join::{JoinType, LogicalJoin, PhysicalNestedLoopJoin};
 use pretty_xmlish::{Pretty, PrettyConfig};
+pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -125,10 +129,24 @@ pub trait OptRelNode: 'static + Clone {
         config.unicode(&mut out, &self.explain());
         out
     }
+
+    fn into_plan_node(self) -> PlanNode {
+        PlanNode::from_rel_node(self.into_rel_node()).unwrap()
+    }
+
+    fn into_expr(self) -> Expr {
+        Expr::from_rel_node(self.into_rel_node()).unwrap()
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct PlanNode(OptRelNodeRef);
+
+impl PlanNode {
+    pub fn typ(&self) -> OptRelNodeTyp {
+        self.0.typ
+    }
+}
 
 impl OptRelNode for PlanNode {
     fn into_rel_node(self) -> OptRelNodeRef {

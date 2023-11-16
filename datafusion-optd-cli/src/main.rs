@@ -30,6 +30,7 @@ use datafusion_optd_cli::{
 };
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::OptdQueryPlanner;
+use optd_datafusion_repr::DatafusionOptimizer;
 use std::collections::HashMap;
 use std::env;
 use std::path::Path;
@@ -137,8 +138,12 @@ struct Args {
 
 #[tokio::main]
 pub async fn main() -> Result<()> {
-    env_logger::init();
     let args = Args::parse();
+
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_target(false)
+        .init();
 
     if !args.quiet {
         println!("DataFusion CLI v{}", DATAFUSION_CLI_VERSION);
@@ -185,7 +190,8 @@ pub async fn main() -> Result<()> {
         // state = state.with_optimizer_rules(vec![]);
         // state = state.with_physical_optimizer_rules(vec![]);
         // use optd-bridge query planner
-        state = state.with_query_planner(Arc::new(OptdQueryPlanner::new()));
+        let optimizer = DatafusionOptimizer::new_physical();
+        state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));
         SessionContext::new_with_state(state)
     };
     ctx.refresh_catalogs().await?;

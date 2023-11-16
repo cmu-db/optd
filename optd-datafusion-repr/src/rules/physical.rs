@@ -1,9 +1,10 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use optd_core::rel_node::RelNode;
 use optd_core::rules::{Rule, RuleMatcher};
 
-use crate::plan_nodes::OptRelNodeTyp;
+use crate::plan_nodes::{JoinType, OptRelNodeTyp};
 
 pub struct PhysicalConversionRule {
     matcher: RuleMatcher<OptRelNodeTyp>,
@@ -18,6 +19,19 @@ impl PhysicalConversionRule {
                 children: vec![RuleMatcher::IgnoreMany],
             },
         }
+    }
+}
+
+impl PhysicalConversionRule {
+    pub fn all_conversions() -> Vec<Arc<dyn Rule<OptRelNodeTyp>>> {
+        vec![
+            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Scan)),
+            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Projection)),
+            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Join(
+                JoinType::Inner,
+            ))),
+            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Filter)),
+        ]
     }
 }
 
@@ -64,6 +78,14 @@ impl Rule<OptRelNodeTyp> for PhysicalConversionRule {
             OptRelNodeTyp::Filter => {
                 let node = RelNode {
                     typ: OptRelNodeTyp::PhysicalFilter,
+                    children,
+                    data,
+                };
+                vec![node]
+            }
+            OptRelNodeTyp::Projection => {
+                let node = RelNode {
+                    typ: OptRelNodeTyp::PhysicalProjection,
                     children,
                     data,
                 };

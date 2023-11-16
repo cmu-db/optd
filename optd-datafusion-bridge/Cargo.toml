@@ -8,3 +8,6 @@ edition = "2021"
 [dependencies]
 datafusion = "32.0.0"
 async-trait = "0.1"
+optd-datafusion-repr = { path = "../optd-datafusion-repr" }
+anyhow = "1"
+async-recursion = "1"
