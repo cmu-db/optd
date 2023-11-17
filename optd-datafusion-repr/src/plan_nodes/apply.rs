@@ -20,8 +20,8 @@ impl ApplyType {
         match self {
             Self::Cross => JoinType::Cross,
             Self::LeftOuter => JoinType::LeftOuter,
-            Self::Semi => JoinType::Semi,
-            Self::AntiSemi => JoinType::AntiSemi,
+            Self::Semi => JoinType::LeftSemi,
+            Self::AntiSemi => JoinType::LeftAnti,
         }
     }
 }

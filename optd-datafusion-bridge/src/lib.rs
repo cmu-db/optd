@@ -40,30 +40,23 @@ impl OptdQueryPlanner {
         &self,
         logical_plan: &LogicalPlan,
         session_state: &SessionState,
-    ) -> Result<Arc<dyn ExecutionPlan>> {
+    ) -> anyhow::Result<Arc<dyn ExecutionPlan>> {
         println!(
             "optd-datafusion-bridge: [datafusion_logical_plan] {:?}",
             logical_plan
         );
         let mut ctx = OptdPlanContext::new(session_state);
-        let optd_rel = ctx
-            .into_optd(logical_plan)
-            .map_err(|x| DataFusionError::External(x.into()))?;
+        let optd_rel = ctx.into_optd(logical_plan)?;
         println!("optd-datafusion-bridge: [optd_logical_plan] {}", optd_rel);
         let mut optimizer = self.optimizer.lock().unwrap().take().unwrap();
-        let optimized_rel = optimizer
-            .optimize(optd_rel)
-            .map_err(|x| DataFusionError::External(x.into()));
+        let optimized_rel = optimizer.optimize(optd_rel);
         optimizer.dump();
         let optimized_rel = optimized_rel?;
         println!(
             "optd-datafusion-bridge: [optd_optimized_plan] {}",
             optimized_rel
         );
-        let physical_plan = ctx
-            .from_optd(optimized_rel)
-            .await
-            .map_err(|x| DataFusionError::External(x.into()))?;
+        let physical_plan = ctx.from_optd(optimized_rel).await?;
         println!(
             "optd-datafusion-bridge: [physical_plan] {:?}",
             physical_plan
@@ -92,7 +85,7 @@ impl QueryPlanner for OptdQueryPlanner {
         {
             Ok(x) => Ok(x),
             Err(e) => {
-                println!("optd-datafusion-bridge: [error] {:#?}", e);
+                println!("[ERROR] optd-datafusion-bridge: {:#}", e);
                 let planner = DefaultPhysicalPlanner::default();
                 planner
                     .create_physical_plan(logical_plan, session_state)

@@ -1,5 +1,6 @@
 //! Typed interface of plan nodes.
 
+mod agg;
 mod apply;
 mod expr;
 mod filter;
@@ -7,6 +8,7 @@ mod join;
 pub(super) mod macros;
 mod projection;
 mod scan;
+mod sort;
 
 use std::sync::Arc;
 
@@ -15,6 +17,7 @@ use optd_core::{
     rel_node::{RelNode, RelNodeRef, RelNodeTyp},
 };
 
+pub use agg::{LogicalAgg, PhysicalAgg};
 pub use apply::{ApplyType, LogicalApply};
 pub use expr::{
     BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ExprList, FuncExpr, UnOpExpr, UnOpType,
@@ -24,6 +27,9 @@ pub use join::{JoinType, LogicalJoin, PhysicalNestedLoopJoin};
 use pretty_xmlish::{Pretty, PrettyConfig};
 pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
+pub use sort::{LogicalSort, PhysicalSort};
+
+use self::expr::SortOrderType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OptRelNodeTyp {
@@ -35,11 +41,15 @@ pub enum OptRelNodeTyp {
     Filter,
     Scan,
     Join(JoinType),
+    Sort,
+    Agg,
     Apply(ApplyType),
     // Physical plan nodes
     PhysicalProjection,
     PhysicalFilter,
     PhysicalScan,
+    PhysicalSort,
+    PhysicalAgg,
     PhysicalNestedLoopJoin(JoinType),
     // Expressions
     Constant,
@@ -47,6 +57,7 @@ pub enum OptRelNodeTyp {
     UnOp(UnOpType),
     BinOp(BinOpType),
     Func(usize),
+    SortOrder(SortOrderType),
 }
 
 impl OptRelNodeTyp {
@@ -58,17 +69,24 @@ impl OptRelNodeTyp {
                 | Self::Scan
                 | Self::Join(_)
                 | Self::Apply(_)
+                | Self::Sort
                 | Self::PhysicalProjection
                 | Self::PhysicalFilter
                 | Self::PhysicalNestedLoopJoin(_)
                 | Self::PhysicalScan
+                | Self::PhysicalSort
         )
     }
 
     pub fn is_expression(&self) -> bool {
         matches!(
             self,
-            Self::Constant | Self::ColumnRef | Self::UnOp(_) | Self::BinOp(_) | Self::Func(_)
+            Self::Constant
+                | Self::ColumnRef
+                | Self::UnOp(_)
+                | Self::BinOp(_)
+                | Self::Func(_)
+                | Self::SortOrder(_)
         )
     }
 }
@@ -182,6 +200,10 @@ pub struct Expr(OptRelNodeRef);
 impl Expr {
     pub fn typ(&self) -> OptRelNodeTyp {
         self.0.typ
+    }
+
+    pub fn child(&self, idx: usize) -> OptRelNodeRef {
+        self.0.child(idx)
     }
 }
 
