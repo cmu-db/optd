@@ -20,7 +20,8 @@ use optd_core::{
 pub use agg::{LogicalAgg, PhysicalAgg};
 pub use apply::{ApplyType, LogicalApply};
 pub use expr::{
-    BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ExprList, FuncExpr, UnOpExpr, UnOpType,
+    BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, ExprList, FuncExpr, FuncType,
+    LogOpExpr, LogOpType, SortOrderExpr, SortOrderType, UnOpExpr, UnOpType,
 };
 pub use filter::{LogicalFilter, PhysicalFilter};
 pub use join::{JoinType, LogicalJoin, PhysicalNestedLoopJoin};
@@ -29,9 +30,7 @@ pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
 pub use sort::{LogicalSort, PhysicalSort};
 
-use self::expr::SortOrderType;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OptRelNodeTyp {
     Placeholder(GroupId),
     List,
@@ -52,11 +51,12 @@ pub enum OptRelNodeTyp {
     PhysicalAgg,
     PhysicalNestedLoopJoin(JoinType),
     // Expressions
-    Constant,
+    Constant(ConstantType),
     ColumnRef,
     UnOp(UnOpType),
     BinOp(BinOpType),
-    Func(usize),
+    LogOp(LogOpType),
+    Func(FuncType),
     SortOrder(SortOrderType),
 }
 
@@ -70,23 +70,26 @@ impl OptRelNodeTyp {
                 | Self::Join(_)
                 | Self::Apply(_)
                 | Self::Sort
+                | Self::Agg
                 | Self::PhysicalProjection
                 | Self::PhysicalFilter
                 | Self::PhysicalNestedLoopJoin(_)
                 | Self::PhysicalScan
                 | Self::PhysicalSort
+                | Self::PhysicalAgg
         )
     }
 
     pub fn is_expression(&self) -> bool {
         matches!(
             self,
-            Self::Constant
+            Self::Constant(_)
                 | Self::ColumnRef
                 | Self::UnOp(_)
                 | Self::BinOp(_)
                 | Self::Func(_)
                 | Self::SortOrder(_)
+                | Self::LogOp(_)
         )
     }
 }
@@ -149,11 +152,21 @@ pub trait OptRelNode: 'static + Clone {
     }
 
     fn into_plan_node(self) -> PlanNode {
-        PlanNode::from_rel_node(self.into_rel_node()).unwrap()
+        let rel_node = self.into_rel_node();
+        let typ = rel_node.typ.clone();
+        let Some(p) = PlanNode::from_rel_node(rel_node) else {
+            panic!("expect plan node, found {}", typ)
+        };
+        p
     }
 
     fn into_expr(self) -> Expr {
-        Expr::from_rel_node(self.into_rel_node()).unwrap()
+        let node = self.into_rel_node();
+        let typ = node.typ.clone();
+        let Some(e) = Expr::from_rel_node(node) else {
+            panic!("expect expr, found {}", typ)
+        };
+        e
     }
 }
 
@@ -162,7 +175,7 @@ pub struct PlanNode(OptRelNodeRef);
 
 impl PlanNode {
     pub fn typ(&self) -> OptRelNodeTyp {
-        self.0.typ
+        self.0.typ.clone()
     }
 }
 
@@ -199,7 +212,7 @@ pub struct Expr(OptRelNodeRef);
 
 impl Expr {
     pub fn typ(&self) -> OptRelNodeTyp {
-        self.0.typ
+        self.0.typ.clone()
     }
 
     pub fn child(&self, idx: usize) -> OptRelNodeRef {
@@ -238,7 +251,7 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
         OptRelNodeTyp::ColumnRef => ColumnRefExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
-        OptRelNodeTyp::Constant => ConstantExpr::from_rel_node(rel_node)
+        OptRelNodeTyp::Constant(_) => ConstantExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
         OptRelNodeTyp::UnOp(_) => UnOpExpr::from_rel_node(rel_node)

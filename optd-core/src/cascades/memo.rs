@@ -164,7 +164,7 @@ impl<T: RelNodeTyp> Memo<T> {
             })
             .collect::<Vec<_>>();
         let memo_node = RelMemoNode {
-            typ: rel_node.typ,
+            typ: rel_node.typ.clone(),
             children: children_group_ids,
             data: rel_node.data.clone(),
         };
@@ -239,7 +239,7 @@ impl<T: RelNodeTyp> Memo<T> {
         if let Some(level) = level {
             if level == 0 {
                 let node = Arc::new(RelNode {
-                    typ: expr.typ,
+                    typ: expr.typ.clone(),
                     children: expr
                         .children
                         .iter()
@@ -269,7 +269,7 @@ impl<T: RelNodeTyp> Memo<T> {
             }
             selected_nodes.reverse();
             let node = Arc::new(RelNode {
-                typ: expr.typ,
+                typ: expr.typ.clone(),
                 children: selected_nodes,
                 data: expr.data.clone(),
             });
@@ -323,7 +323,7 @@ impl<T: RelNodeTyp> Memo<T> {
                     children.push(self.get_best_group_binding(*child)?);
                 }
                 let node = Arc::new(RelNode {
-                    typ: expr.typ,
+                    typ: expr.typ.clone(),
                     children,
                     data: expr.data.clone(),
                 });

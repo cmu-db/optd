@@ -60,14 +60,34 @@ impl OptRelNode for ExprList {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum ConstantType {
+    Bool,
+    Utf8String,
+    Int,
+    Date,
+    Decimal,
+}
+
 #[derive(Clone, Debug)]
 pub struct ConstantExpr(pub Expr);
 
 impl ConstantExpr {
     pub fn new(value: Value) -> Self {
+        let typ = match &value {
+            Value::Bool(_) => ConstantType::Bool,
+            Value::String(_) => ConstantType::Utf8String,
+            Value::Int(_) => ConstantType::Int,
+            Value::Float(_) => ConstantType::Decimal,
+            _ => unimplemented!(),
+        };
+        Self::new_with_type(value, typ)
+    }
+
+    pub fn new_with_type(value: Value, typ: ConstantType) -> Self {
         ConstantExpr(Expr(
             RelNode {
-                typ: OptRelNodeTyp::Constant,
+                typ: OptRelNodeTyp::Constant(typ),
                 children: vec![],
                 data: Some(value),
             }
@@ -76,11 +96,26 @@ impl ConstantExpr {
     }
 
     pub fn bool(value: bool) -> Self {
-        Self::new(Value::Bool(value))
+        Self::new_with_type(Value::Bool(value), ConstantType::Bool)
+    }
+
+    pub fn string(value: impl AsRef<str>) -> Self {
+        Self::new_with_type(
+            Value::String(value.as_ref().into()),
+            ConstantType::Utf8String,
+        )
     }
 
     pub fn int(value: i64) -> Self {
-        Self::new(Value::Int(value))
+        Self::new_with_type(Value::Int(value), ConstantType::Int)
+    }
+
+    pub fn date(value: i64) -> Self {
+        Self::new_with_type(Value::Int(value), ConstantType::Date)
+    }
+
+    pub fn decimal(value: f64) -> Self {
+        Self::new_with_type(Value::Float(value.into()), ConstantType::Decimal)
     }
 
     /// Gets the constant value.
@@ -95,10 +130,10 @@ impl OptRelNode for ConstantExpr {
     }
 
     fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if rel_node.typ != OptRelNodeTyp::Constant {
-            return None;
+        if let OptRelNodeTyp::Constant(_) = rel_node.typ {
+            return Expr::from_rel_node(rel_node).map(Self);
         }
-        Expr::from_rel_node(rel_node).map(Self)
+        None
     }
 
     fn dispatch_explain(&self) -> Pretty<'static> {
@@ -122,9 +157,29 @@ impl ColumnRefExpr {
         ))
     }
 
+    pub fn with_child(&self, child_idx: usize) -> ColumnRefExpr {
+        ColumnRefExpr(Expr(
+            RelNode {
+                typ: OptRelNodeTyp::ColumnRef,
+                children: vec![],
+                data: Some(Value::Int((self.index() + (child_idx << 32)) as i64)),
+            }
+            .into(),
+        ))
+    }
+
+    fn get_data_usize(&self) -> usize {
+        self.0 .0.data.as_ref().unwrap().as_i64() as usize
+    }
+
     /// Gets the column index.
     pub fn index(&self) -> usize {
-        self.0 .0.data.as_ref().unwrap().as_i64() as usize
+        self.get_data_usize() & ((1 << 32) - 1)
+    }
+
+    /// Gets the child id.
+    pub fn child_id(&self) -> usize {
+        self.get_data_usize() >> 32
     }
 }
 
@@ -283,15 +338,38 @@ impl OptRelNode for BinOpExpr {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum FuncType {
+    Scalar(datafusion_expr::BuiltinScalarFunction),
+    Agg(datafusion_expr::AggregateFunction),
+    Case,
+}
+
+impl std::fmt::Display for FuncType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl FuncType {
+    pub fn new_scalar(func_id: datafusion_expr::BuiltinScalarFunction) -> Self {
+        FuncType::Scalar(func_id)
+    }
+
+    pub fn new_agg(func_id: datafusion_expr::AggregateFunction) -> Self {
+        FuncType::Agg(func_id)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FuncExpr(Expr);
 
 impl FuncExpr {
-    pub fn new(func_id: usize, argv: Vec<Expr>) -> Self {
+    pub fn new(func_id: FuncType, argv: ExprList) -> Self {
         FuncExpr(Expr(
             RelNode {
                 typ: OptRelNodeTyp::Func(func_id),
-                children: argv.into_iter().map(Expr::into_rel_node).collect(),
+                children: vec![argv.into_rel_node()],
                 data: None,
             }
             .into(),
@@ -300,23 +378,18 @@ impl FuncExpr {
 
     /// Gets the i-th argument of the function.
     pub fn arg_at(&self, i: usize) -> Expr {
-        Expr::from_rel_node(self.clone().into_rel_node().children[i].clone()).unwrap()
+        self.children().child(i)
     }
 
     /// Get all children.
-    pub fn children(&self) -> Vec<Expr> {
-        self.clone()
-            .into_rel_node()
-            .children
-            .iter()
-            .map(|x| Expr::from_rel_node(x.clone()).unwrap())
-            .collect_vec()
+    pub fn children(&self) -> ExprList {
+        ExprList::from_rel_node(self.0.child(0)).unwrap()
     }
 
     /// Gets the function id.
-    pub fn id(&self) -> usize {
-        if let OptRelNodeTyp::Func(func_id) = self.clone().into_rel_node().typ {
-            func_id
+    pub fn id(&self) -> FuncType {
+        if let OptRelNodeTyp::Func(func_id) = &self.clone().into_rel_node().typ {
+            func_id.clone()
         } else {
             panic!("not a function")
         }
@@ -339,10 +412,7 @@ impl OptRelNode for FuncExpr {
         Pretty::simple_record(
             self.id().to_string(),
             vec![],
-            self.children()
-                .iter()
-                .map(|child| child.explain())
-                .collect(),
+            vec![self.children().explain()],
         )
     }
 }
@@ -404,6 +474,71 @@ impl OptRelNode for SortOrderExpr {
             "SortOrder",
             vec![("order", self.order().to_string().into())],
             vec![self.child().explain()],
+        )
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum LogOpType {
+    And,
+    Or,
+}
+
+impl Display for LogOpType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LogOpExpr(pub Expr);
+
+impl LogOpExpr {
+    pub fn new(op_type: LogOpType, expr_list: ExprList) -> Self {
+        LogOpExpr(Expr(
+            RelNode {
+                typ: OptRelNodeTyp::LogOp(op_type),
+                children: vec![expr_list.into_rel_node()],
+                data: None,
+            }
+            .into(),
+        ))
+    }
+
+    pub fn children(&self) -> ExprList {
+        ExprList::from_rel_node(self.0.child(0)).unwrap()
+    }
+
+    pub fn child(&self, idx: usize) -> Expr {
+        self.children().child(idx)
+    }
+
+    pub fn op_type(&self) -> LogOpType {
+        if let OptRelNodeTyp::LogOp(op_type) = self.clone().into_rel_node().typ {
+            op_type
+        } else {
+            panic!("not a log op")
+        }
+    }
+}
+
+impl OptRelNode for LogOpExpr {
+    fn into_rel_node(self) -> OptRelNodeRef {
+        self.0.into_rel_node()
+    }
+
+    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
+        if !matches!(rel_node.typ, OptRelNodeTyp::BinOp(_)) {
+            return None;
+        }
+        Expr::from_rel_node(rel_node).map(Self)
+    }
+
+    fn dispatch_explain(&self) -> Pretty<'static> {
+        Pretty::simple_record(
+            self.op_type().to_string(),
+            vec![],
+            vec![self.children().explain()],
         )
     }
 }

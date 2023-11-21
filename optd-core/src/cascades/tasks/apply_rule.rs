@@ -99,7 +99,7 @@ fn match_node<T: RelNodeTyp>(
             let res: Option<RelNode<T>> = pick.insert(
                 pick_to,
                 RelNode {
-                    typ: *typ,
+                    typ: typ.clone(),
                     children: node
                         .children
                         .iter()
@@ -166,11 +166,11 @@ impl<T: RelNodeTyp> Task<T> for ApplyRuleTask {
         for expr in binding_exprs {
             let applied = rule.apply(expr);
             for expr in applied {
-                let RelNode { typ, .. } = expr;
+                let RelNode { typ, .. } = &expr;
                 if typ.extract_group().is_some() {
                     unreachable!();
                 }
-                let expr_typ = typ;
+                let expr_typ = typ.clone();
                 let (_, expr_id) = optimizer.add_group_expr(expr.into(), Some(group_id));
                 trace!(event = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, new_expr_id = %expr_id);
                 if expr_typ.is_logical() {

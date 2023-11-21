@@ -1,9 +1,13 @@
 use anyhow::{bail, Result};
-use datafusion::logical_expr::{self, logical_plan, LogicalPlan};
+use datafusion::{
+    common::DFSchema,
+    logical_expr::{self, logical_plan, LogicalPlan},
+    scalar::ScalarValue,
+};
 use optd_datafusion_repr::plan_nodes::{
-    BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, JoinType, LogicalAgg,
-    LogicalFilter, LogicalJoin, LogicalProjection, LogicalScan, LogicalSort, OptRelNode,
-    OptRelNodeRef, PlanNode,
+    BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, FuncExpr, FuncType,
+    JoinType, LogOpExpr, LogOpType, LogicalAgg, LogicalFilter, LogicalJoin, LogicalProjection,
+    LogicalScan, LogicalSort, OptRelNode, OptRelNodeRef, PlanNode, SortOrderExpr, SortOrderType,
 };
 
 use crate::OptdPlanContext;
@@ -30,14 +34,68 @@ impl OptdPlanContext<'_> {
         Ok(scan.into_plan_node())
     }
 
-    fn into_optd_expr(&mut self, expr: &logical_expr::Expr) -> Result<Expr> {
+    fn into_optd_expr(&mut self, expr: &logical_expr::Expr, context: &DFSchema) -> Result<Expr> {
         use logical_expr::Expr;
         match expr {
             Expr::BinaryExpr(node) => {
-                let left = self.into_optd_expr(node.left.as_ref())?;
-                let right = self.into_optd_expr(node.right.as_ref())?;
+                let left = self.into_optd_expr(node.left.as_ref(), context)?;
+                let right = self.into_optd_expr(node.right.as_ref(), context)?;
                 let op = BinOpType::Add;
                 Ok(BinOpExpr::new(left, right, op).into_expr())
+            }
+            Expr::Column(col) => {
+                let idx = context.index_of_column(col)?;
+                Ok(ColumnRefExpr::new(idx).into_expr())
+            }
+            Expr::Literal(x) => match x {
+                ScalarValue::Utf8(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::string(x).into_expr())
+                }
+                ScalarValue::Date32(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::date(*x as i64).into_expr())
+                }
+                ScalarValue::Decimal128(x, _, _) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::decimal(*x as f64).into_expr())
+                }
+                _ => bail!("{:?}", x),
+            },
+            Expr::Alias(x) => self.into_optd_expr(x.expr.as_ref(), context),
+            Expr::ScalarFunction(x) => {
+                let args = self.into_optd_expr_list(&x.args, context)?;
+                Ok(FuncExpr::new(FuncType::new_scalar(x.fun), args).into_expr())
+            }
+            Expr::AggregateFunction(x) => {
+                let args = self.into_optd_expr_list(&x.args, context)?;
+                Ok(FuncExpr::new(FuncType::new_agg(x.fun.clone()), args).into_expr())
+            }
+            Expr::Case(x) => {
+                let when_then_expr = &x.when_then_expr;
+                assert_eq!(when_then_expr.len(), 1);
+                let (when_expr, then_expr) = &when_then_expr[0];
+                let when_expr = self.into_optd_expr(&when_expr, context)?;
+                let then_expr = self.into_optd_expr(&then_expr, context)?;
+                let else_expr = self.into_optd_expr(x.else_expr.as_ref().unwrap(), context)?;
+                assert!(x.expr.is_none());
+                Ok(FuncExpr::new(
+                    FuncType::Case,
+                    ExprList::new(vec![when_expr, then_expr, else_expr]),
+                )
+                .into_expr())
+            }
+            Expr::Sort(x) => {
+                let expr = self.into_optd_expr(x.expr.as_ref(), context)?;
+                Ok(SortOrderExpr::new(
+                    if x.asc {
+                        SortOrderType::Asc
+                    } else {
+                        SortOrderType::Desc
+                    },
+                    expr,
+                )
+                .into_expr())
             }
             _ => bail!("{:?}", expr),
         }
@@ -48,34 +106,38 @@ impl OptdPlanContext<'_> {
         node: &logical_plan::Projection,
     ) -> Result<LogicalProjection> {
         let input = self.into_optd_plan_node(node.input.as_ref())?;
-        let expr_list = self.into_optd_expr_list(&node.expr)?;
+        let expr_list = self.into_optd_expr_list(&node.expr, node.input.schema())?;
         Ok(LogicalProjection::new(input, expr_list))
     }
 
     fn into_optd_filter(&mut self, node: &logical_plan::Filter) -> Result<LogicalFilter> {
         let input = self.into_optd_plan_node(node.input.as_ref())?;
-        let expr = self.into_optd_expr(&node.predicate)?;
+        let expr = self.into_optd_expr(&node.predicate, node.input.schema())?;
         Ok(LogicalFilter::new(input, expr))
     }
 
-    fn into_optd_expr_list(&mut self, exprs: &[logical_expr::Expr]) -> Result<ExprList> {
+    fn into_optd_expr_list(
+        &mut self,
+        exprs: &[logical_expr::Expr],
+        context: &DFSchema,
+    ) -> Result<ExprList> {
         let exprs = exprs
             .iter()
-            .map(|expr| self.into_optd_expr(expr))
+            .map(|expr| self.into_optd_expr(expr, context))
             .collect::<Result<Vec<_>>>()?;
         Ok(ExprList::new(exprs))
     }
 
     fn into_optd_sort(&mut self, node: &logical_plan::Sort) -> Result<LogicalSort> {
         let input = self.into_optd_plan_node(node.input.as_ref())?;
-        let expr_list = self.into_optd_expr_list(&node.expr)?;
+        let expr_list = self.into_optd_expr_list(&node.expr, node.input.schema())?;
         Ok(LogicalSort::new(input, expr_list))
     }
 
     fn into_optd_agg(&mut self, node: &logical_plan::Aggregate) -> Result<LogicalAgg> {
         let input = self.into_optd_plan_node(node.input.as_ref())?;
-        let agg_exprs = self.into_optd_expr_list(&node.aggr_expr)?;
-        let group_exprs = self.into_optd_expr_list(&node.group_expr)?;
+        let agg_exprs = self.into_optd_expr_list(&node.aggr_expr, node.input.schema())?;
+        let group_exprs = self.into_optd_expr_list(&node.group_expr, node.input.schema())?;
         Ok(LogicalAgg::new(input, agg_exprs, group_exprs))
     }
 
@@ -93,12 +155,21 @@ impl OptdPlanContext<'_> {
             DFJoinType::LeftSemi => JoinType::LeftSemi,
             DFJoinType::RightSemi => JoinType::RightSemi,
         };
-        // TODO: on condition
+        let mut log_ops = vec![];
+        log_ops.reserve(node.on.len());
+        for (left, right) in &node.on {
+            let left = self.into_optd_expr(left, node.left.schema())?;
+            let right = self.into_optd_expr(right, node.right.schema())?;
+            let op = BinOpType::Eq;
+            let expr = BinOpExpr::new(left, right, op).into_expr();
+            log_ops.push(expr);
+        }
+        let expr_list = ExprList::new(log_ops);
 
         Ok(LogicalJoin::new(
             left,
             right,
-            ConstantExpr::bool(true).into_expr(),
+            LogOpExpr::new(LogOpType::And, expr_list).into_expr(),
             join_type,
         ))
     }

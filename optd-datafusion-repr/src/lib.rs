@@ -1,12 +1,9 @@
 #![allow(clippy::new_without_default)]
 
-use std::sync::Arc;
-
 use anyhow::Result;
 use cost::OptCostModel;
-use itertools::Itertools;
-use optd_core::{cascades::CascadesOptimizer, rules::Rule};
-use plan_nodes::{JoinType, OptRelNodeRef, OptRelNodeTyp};
+use optd_core::cascades::CascadesOptimizer;
+use plan_nodes::{OptRelNodeRef, OptRelNodeTyp};
 use rules::PhysicalConversionRule;
 
 pub mod cost;

@@ -92,7 +92,11 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
         match node {
             OptRelNodeTyp::PhysicalScan => {
                 let table_name = data.as_ref().unwrap().as_str();
-                let row_cnt = self.table_stat.get(table_name.as_ref()).copied().unwrap() as f64;
+                let row_cnt = self
+                    .table_stat
+                    .get(table_name.as_ref())
+                    .copied()
+                    .unwrap_or(1) as f64;
                 Self::cost(row_cnt, 0.0, row_cnt)
             }
             OptRelNodeTyp::PhysicalFilter => {

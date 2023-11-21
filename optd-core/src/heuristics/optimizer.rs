@@ -67,7 +67,7 @@ fn match_node<T: RelNodeTyp>(
         let res: Option<RelNode<T>> = pick.insert(
             pick_to,
             RelNode {
-                typ: *typ,
+                typ: typ.clone(),
                 children: node.children.clone(),
                 data: node.data.clone(),
             },

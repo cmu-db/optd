@@ -47,7 +47,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeExpressionTask {
             if self.exploring && rule.is_impl_rule() {
                 continue;
             }
-            if top_matches(rule.matcher(), expr.typ, expr.data.clone()) {
+            if top_matches(rule.matcher(), expr.typ.clone(), expr.data.clone()) {
                 tasks.push(
                     Box::new(ApplyRuleTask::new(rule_id, self.expr_id, self.exploring))
                         as Box<dyn Task<T>>,

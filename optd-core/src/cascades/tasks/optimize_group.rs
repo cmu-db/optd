@@ -34,13 +34,13 @@ impl<T: RelNodeTyp> Task<T> for OptimizeGroupTask {
         let mut tasks = vec![];
         let exprs_cnt = exprs.len();
         for &expr in &exprs {
-            let typ = optimizer.get_expr_memoed(expr).typ;
+            let typ = optimizer.get_expr_memoed(expr).typ.clone();
             if typ.is_logical() {
                 tasks.push(Box::new(OptimizeExpressionTask::new(expr, false)) as Box<dyn Task<T>>);
             }
         }
         for &expr in &exprs {
-            let typ = optimizer.get_expr_memoed(expr).typ;
+            let typ = optimizer.get_expr_memoed(expr).typ.clone();
             if !typ.is_logical() {
                 tasks.push(Box::new(OptimizeInputsTask::new(expr, true)) as Box<dyn Task<T>>);
             }

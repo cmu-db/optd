@@ -5,7 +5,7 @@ mod into_optd;
 
 use async_trait::async_trait;
 use datafusion::{
-    error::{DataFusionError, Result},
+    error::Result,
     execution::context::{QueryPlanner, SessionState},
     logical_expr::{LogicalPlan, TableSource},
     physical_plan::ExecutionPlan,

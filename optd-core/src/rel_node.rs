@@ -14,7 +14,7 @@ use crate::cascades::GroupId;
 pub type RelNodeRef<T> = Arc<RelNode<T>>;
 
 pub trait RelNodeTyp:
-    PartialEq + Eq + Hash + Clone + Copy + 'static + Display + Debug + Send + Sync
+    PartialEq + Eq + Hash + Clone + 'static + Display + Debug + Send + Sync
 {
     fn is_logical(&self) -> bool;
 
