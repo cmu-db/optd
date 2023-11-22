@@ -83,7 +83,7 @@ CREATE TABLE LINEITEM (
     L_COMMENT       VARCHAR(44) NOT NULL
 );
 
-select
+explain select
     o_year,
     sum(case
         when nation = 'IRAQ' then volume
