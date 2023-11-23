@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+arrow-schema = "*"
 datafusion = "32.0.0"
 async-trait = "0.1"
 optd-datafusion-repr = { path = "../optd-datafusion-repr" }

@@ -3,6 +3,7 @@
 use anyhow::Result;
 use cost::OptCostModel;
 use optd_core::cascades::CascadesOptimizer;
+pub use optd_core::rel_node::Value;
 use plan_nodes::{OptRelNodeRef, OptRelNodeTyp};
 use rules::PhysicalConversionRule;
 

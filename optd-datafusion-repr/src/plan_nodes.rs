@@ -30,6 +30,8 @@ pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
 pub use sort::{LogicalSort, PhysicalSort};
 
+use self::join::PhysicalHashJoin;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OptRelNodeTyp {
     Placeholder(GroupId),
@@ -106,7 +108,13 @@ impl RelNodeTyp for OptRelNodeTyp {
     fn is_logical(&self) -> bool {
         matches!(
             self,
-            Self::Projection | Self::Filter | Self::Scan | Self::Join(_) | Self::Apply(_)
+            Self::Projection
+                | Self::Filter
+                | Self::Scan
+                | Self::Join(_)
+                | Self::Apply(_)
+                | Self::Sort
+                | Self::Agg
         )
     }
 
@@ -310,7 +318,9 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
         OptRelNodeTyp::PhysicalSort => PhysicalSort::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
-        OptRelNodeTyp::PhysicalHashJoin(_) => unimplemented!(),
+        OptRelNodeTyp::PhysicalHashJoin(_) => PhysicalHashJoin::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
         OptRelNodeTyp::SortOrder(_) => SortOrderExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),

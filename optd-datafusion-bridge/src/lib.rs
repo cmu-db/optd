@@ -8,7 +8,7 @@ use datafusion::{
     error::Result,
     execution::context::{QueryPlanner, SessionState},
     logical_expr::{LogicalPlan, TableSource},
-    physical_plan::ExecutionPlan,
+    physical_plan::{displayable, ExecutionPlan},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
 use optd_datafusion_repr::DatafusionOptimizer;
@@ -57,10 +57,13 @@ impl OptdQueryPlanner {
             optimized_rel
         );
         let physical_plan = ctx.from_optd(optimized_rel).await?;
-        println!(
-            "optd-datafusion-bridge: [physical_plan] {:?}",
-            physical_plan
+        let d = displayable(&*physical_plan).to_stringified(
+            false,
+            datafusion::logical_expr::PlanType::OptimizedPhysicalPlan {
+                optimizer_name: "optd-datafusion".to_string(),
+            },
         );
+        println!("optd-datafusion-bridge: [physical_plan] {}", d.plan);
         self.optimizer.lock().unwrap().replace(optimizer);
         Ok(physical_plan)
     }

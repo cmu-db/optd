@@ -31,6 +31,8 @@ impl PhysicalConversionRule {
                 JoinType::Inner,
             ))),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Filter)),
+            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Sort)),
+            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Agg)),
         ]
     }
 }
@@ -86,6 +88,22 @@ impl Rule<OptRelNodeTyp> for PhysicalConversionRule {
             OptRelNodeTyp::Projection => {
                 let node = RelNode {
                     typ: OptRelNodeTyp::PhysicalProjection,
+                    children,
+                    data,
+                };
+                vec![node]
+            }
+            OptRelNodeTyp::Sort => {
+                let node = RelNode {
+                    typ: OptRelNodeTyp::PhysicalSort,
+                    children,
+                    data,
+                };
+                vec![node]
+            }
+            OptRelNodeTyp::Agg => {
+                let node = RelNode {
+                    typ: OptRelNodeTyp::PhysicalAgg,
                     children,
                     data,
                 };

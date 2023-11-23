@@ -387,7 +387,7 @@ impl FuncExpr {
     }
 
     /// Gets the function id.
-    pub fn id(&self) -> FuncType {
+    pub fn func(&self) -> FuncType {
         if let OptRelNodeTyp::Func(func_id) = &self.clone().into_rel_node().typ {
             func_id.clone()
         } else {
@@ -410,7 +410,7 @@ impl OptRelNode for FuncExpr {
 
     fn dispatch_explain(&self) -> Pretty<'static> {
         Pretty::simple_record(
-            self.id().to_string(),
+            self.func().to_string(),
             vec![],
             vec![self.children().explain()],
         )
@@ -528,7 +528,7 @@ impl OptRelNode for LogOpExpr {
     }
 
     fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !matches!(rel_node.typ, OptRelNodeTyp::BinOp(_)) {
+        if !matches!(rel_node.typ, OptRelNodeTyp::LogOp(_)) {
             return None;
         }
         Expr::from_rel_node(rel_node).map(Self)

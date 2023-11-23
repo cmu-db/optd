@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use datafusion::{
     common::DFSchema,
-    logical_expr::{self, logical_plan, LogicalPlan},
+    logical_expr::{self, logical_plan, LogicalPlan, Operator},
     scalar::ScalarValue,
 };
 use optd_datafusion_repr::plan_nodes::{
@@ -40,7 +40,18 @@ impl OptdPlanContext<'_> {
             Expr::BinaryExpr(node) => {
                 let left = self.into_optd_expr(node.left.as_ref(), context)?;
                 let right = self.into_optd_expr(node.right.as_ref(), context)?;
-                let op = BinOpType::Add;
+                let op = match node.op {
+                    Operator::Eq => BinOpType::Eq,
+                    Operator::NotEq => BinOpType::Neq,
+                    Operator::LtEq => BinOpType::Leq,
+                    Operator::GtEq => BinOpType::Geq,
+                    Operator::And => BinOpType::And,
+                    Operator::Plus => BinOpType::Add,
+                    Operator::Minus => BinOpType::Sub,
+                    Operator::Multiply => BinOpType::Mul,
+                    Operator::Divide => BinOpType::Div,
+                    op => unimplemented!("{}", op),
+                };
                 Ok(BinOpExpr::new(left, right, op).into_expr())
             }
             Expr::Column(col) => {

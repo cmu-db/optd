@@ -54,6 +54,20 @@ impl Value {
         }
     }
 
+    pub fn as_f64(&self) -> f64 {
+        match self {
+            Value::Float(i) => **i,
+            _ => panic!("Value is not an f64"),
+        }
+    }
+
+    pub fn as_bool(&self) -> bool {
+        match self {
+            Value::Bool(i) => *i,
+            _ => panic!("Value is not a bool"),
+        }
+    }
+
     pub fn as_str(&self) -> Arc<str> {
         match self {
             Value::String(i) => i.clone(),
