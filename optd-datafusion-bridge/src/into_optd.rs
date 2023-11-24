@@ -205,14 +205,18 @@ impl OptdPlanContext<'_> {
             let expr = BinOpExpr::new(left, right, op).into_expr();
             log_ops.push(expr);
         }
-        let expr_list = ExprList::new(log_ops);
 
-        Ok(LogicalJoin::new(
-            left,
-            right,
-            LogOpExpr::new(LogOpType::And, expr_list).into_expr(),
-            join_type,
-        ))
+        if log_ops.len() == 1 {
+            Ok(LogicalJoin::new(left, right, log_ops.remove(0), join_type))
+        } else {
+            let expr_list = ExprList::new(log_ops);
+            Ok(LogicalJoin::new(
+                left,
+                right,
+                LogOpExpr::new(LogOpType::And, expr_list).into_expr(),
+                join_type,
+            ))
+        }
     }
 
     fn into_optd_plan_node(&mut self, node: &LogicalPlan) -> Result<PlanNode> {

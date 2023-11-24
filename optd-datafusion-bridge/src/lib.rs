@@ -14,7 +14,9 @@ use datafusion::{
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
 use optd_datafusion_repr::{
-    plan_nodes::ConstantType, properties::schema::Catalog, DatafusionOptimizer,
+    plan_nodes::{ConstantType, OptRelNode, PlanNode},
+    properties::schema::Catalog,
+    DatafusionOptimizer,
 };
 use std::{
     collections::HashMap,
@@ -88,8 +90,10 @@ impl OptdQueryPlanner {
         optimizer.dump();
         let optimized_rel = optimized_rel?;
         println!(
-            "optd-datafusion-bridge: [optd_optimized_plan] {}",
-            optimized_rel
+            "optd-datafusion-bridge: [optd_optimized_plan]\n{}",
+            PlanNode::from_rel_node(optimized_rel.clone())
+                .unwrap()
+                .explain_to_string()
         );
         let physical_plan = ctx.from_optd(optimized_rel).await?;
         let d = displayable(&*physical_plan).to_stringified(

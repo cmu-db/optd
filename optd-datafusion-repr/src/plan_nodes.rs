@@ -14,7 +14,6 @@ use std::sync::Arc;
 
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId},
-    optimizer::Optimizer,
     rel_node::{RelNode, RelNodeRef, RelNodeTyp},
 };
 
@@ -25,15 +24,13 @@ pub use expr::{
     LogOpExpr, LogOpType, SortOrderExpr, SortOrderType, UnOpExpr, UnOpType,
 };
 pub use filter::{LogicalFilter, PhysicalFilter};
-pub use join::{JoinType, LogicalJoin, PhysicalNestedLoopJoin};
+pub use join::{JoinType, LogicalJoin, PhysicalHashJoin, PhysicalNestedLoopJoin};
 use pretty_xmlish::{Pretty, PrettyConfig};
 pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
 pub use sort::{LogicalSort, PhysicalSort};
 
 use crate::properties::schema::{Schema, SchemaPropertyBuilder};
-
-use self::join::PhysicalHashJoin;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OptRelNodeTyp {
@@ -194,6 +191,10 @@ impl PlanNode {
     pub fn schema(&self, optimizer: CascadesOptimizer<OptRelNodeTyp>) -> Schema {
         let group_id = optimizer.resolve_group_id(self.0.clone());
         optimizer.get_property_by_group::<SchemaPropertyBuilder>(group_id, 0)
+    }
+
+    pub fn from_group(rel_node: OptRelNodeRef) -> Self {
+        return Self(rel_node);
     }
 }
 

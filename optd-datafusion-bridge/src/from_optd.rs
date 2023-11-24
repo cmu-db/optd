@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use arrow_schema::Schema;
 use async_recursion::async_recursion;
 use datafusion::{
@@ -9,9 +9,12 @@ use datafusion::{
     logical_expr::Operator,
     physical_expr,
     physical_plan::{
-        self, aggregates::AggregateMode, expressions::create_aggregate_expr,
-        joins::utils::JoinFilter, projection::ProjectionExec, AggregateExpr, ExecutionPlan,
-        PhysicalExpr,
+        self,
+        aggregates::AggregateMode,
+        expressions::create_aggregate_expr,
+        joins::{utils::JoinFilter, PartitionMode},
+        projection::ProjectionExec,
+        AggregateExpr, ExecutionPlan, PhysicalExpr,
     },
     scalar::ScalarValue,
 };
@@ -19,8 +22,8 @@ use optd_datafusion_repr::{
     plan_nodes::{
         BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, FuncExpr, FuncType,
         JoinType, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalAgg,
-        PhysicalFilter, PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan, PhysicalSort,
-        PlanNode, SortOrderExpr, SortOrderType,
+        PhysicalFilter, PhysicalHashJoin, PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan,
+        PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
     },
     Value,
 };
@@ -324,6 +327,52 @@ impl OptdPlanContext<'_> {
         ) as Arc<dyn ExecutionPlan + 'static>)
     }
 
+    #[async_recursion]
+    async fn from_optd_hash_join(
+        &mut self,
+        node: PhysicalHashJoin,
+    ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
+        let left_exec = self.from_optd_plan_node(node.left()).await?;
+        let right_exec = self.from_optd_plan_node(node.right()).await?;
+        let join_type = match node.join_type() {
+            JoinType::Inner => datafusion::logical_expr::JoinType::Inner,
+            _ => unimplemented!(),
+        };
+        let left_exprs = node.left_keys().to_vec();
+        let right_exprs = node.right_keys().to_vec();
+        assert_eq!(left_exprs.len(), right_exprs.len());
+        let mut on = Vec::with_capacity(left_exprs.len());
+        for (left_expr, right_expr) in left_exprs.into_iter().zip(right_exprs.into_iter()) {
+            let Some(left_expr) = ColumnRefExpr::from_rel_node(left_expr.into_rel_node()) else {
+                bail!("left expr is not column ref")
+            };
+            let Some(right_expr) = ColumnRefExpr::from_rel_node(right_expr.into_rel_node()) else {
+                bail!("right expr is not column ref")
+            };
+            on.push((
+                physical_expr::expressions::Column::new(
+                    left_exec.schema().field(left_expr.index()).name(),
+                    left_expr.index(),
+                ),
+                physical_expr::expressions::Column::new(
+                    right_exec.schema().field(right_expr.index()).name(),
+                    right_expr.index(),
+                ),
+            ));
+        }
+        Ok(
+            Arc::new(datafusion::physical_plan::joins::HashJoinExec::try_new(
+                left_exec,
+                right_exec,
+                on,
+                None,
+                &join_type,
+                PartitionMode::CollectLeft,
+                false,
+            )?) as Arc<dyn ExecutionPlan + 'static>,
+        )
+    }
+
     async fn from_optd_plan_node(&mut self, node: PlanNode) -> Result<Arc<dyn ExecutionPlan>> {
         match node.typ() {
             OptRelNodeTyp::PhysicalScan => {
@@ -353,6 +402,12 @@ impl OptdPlanContext<'_> {
             OptRelNodeTyp::PhysicalNestedLoopJoin(_) => {
                 self.from_optd_nested_loop_join(
                     PhysicalNestedLoopJoin::from_rel_node(node.into_rel_node()).unwrap(),
+                )
+                .await
+            }
+            OptRelNodeTyp::PhysicalHashJoin(_) => {
+                self.from_optd_hash_join(
+                    PhysicalHashJoin::from_rel_node(node.into_rel_node()).unwrap(),
                 )
                 .await
             }
