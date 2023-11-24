@@ -69,7 +69,7 @@ impl OptdPlanContext<'_> {
                     let x = x.as_ref().unwrap();
                     Ok(ConstantExpr::date(*x as i64).into_expr())
                 }
-                ScalarValue::Decimal128(x, _, _) => {
+                ScalarValue::Decimal128(x, p, s) => {
                     let x = x.as_ref().unwrap();
                     Ok(ConstantExpr::decimal(*x as f64).into_expr())
                 }
