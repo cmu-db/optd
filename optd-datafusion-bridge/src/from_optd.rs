@@ -105,7 +105,8 @@ impl OptdPlanContext<'_> {
                     ConstantType::Bool => ScalarValue::Boolean(Some(value.as_bool())),
                     ConstantType::Int => ScalarValue::Int64(Some(value.as_i64())),
                     ConstantType::Decimal => {
-                        ScalarValue::Decimal128(Some(value.as_f64() as i128), 0, 0)
+                        ScalarValue::Decimal128(Some(value.as_f64() as i128), 15, 2)
+                        // TODO(chi): no hard code decimal
                     }
                     ConstantType::Date => ScalarValue::Date32(Some(value.as_i64() as i32)),
                     ConstantType::Utf8String => ScalarValue::Utf8(Some(value.as_str().to_string())),

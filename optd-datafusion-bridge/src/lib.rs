@@ -58,6 +58,8 @@ impl Catalog for DatafusionCatalog {
             let dt = match field.data_type() {
                 DataType::Date32 => ConstantType::Date,
                 DataType::Int32 => ConstantType::Int,
+                DataType::Int64 => ConstantType::Int,
+                DataType::Float64 => ConstantType::Decimal,
                 DataType::Utf8 => ConstantType::Utf8String,
                 DataType::Decimal128(_, _) => ConstantType::Decimal,
                 dt => unimplemented!("{:?}", dt),

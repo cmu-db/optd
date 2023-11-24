@@ -83,6 +83,23 @@ CREATE TABLE LINEITEM (
     L_COMMENT       VARCHAR(44) NOT NULL
 );
 
+CREATE EXTERNAL TABLE customer_tbl STORED AS CSV DELIMITER '|' LOCATION 'tpch/customer.tbl';
+insert into customer select column_1, column_2, column_3, column_4, column_5, column_6, column_7, column_8 from customer_tbl;
+CREATE EXTERNAL TABLE lineitem_tbl STORED AS CSV DELIMITER '|' LOCATION 'tpch/lineitem.tbl';
+insert into lineitem select column_1, column_2, column_3, column_4, column_5, column_6, column_7, column_8, column_9, column_10, column_11, column_12, column_13, column_14, column_15, column_16 from lineitem_tbl;
+CREATE EXTERNAL TABLE nation_tbl STORED AS CSV DELIMITER '|' LOCATION 'tpch/nation.tbl';
+insert into nation select column_1, column_2, column_3, column_4 from nation_tbl;
+CREATE EXTERNAL TABLE orders_tbl STORED AS CSV DELIMITER '|' LOCATION 'tpch/orders.tbl';
+insert into orders select column_1, column_2, column_3, column_4, column_5, column_6, column_7, column_8, column_9 from orders_tbl;
+CREATE EXTERNAL TABLE part_tbl STORED AS CSV DELIMITER '|' LOCATION 'tpch/part.tbl';
+insert into part select column_1, column_2, column_3, column_4, column_5, column_6, column_7, column_8, column_9 from part_tbl;
+CREATE EXTERNAL TABLE partsupp_tbl STORED AS CSV DELIMITER '|' LOCATION 'tpch/partsupp.tbl';
+insert into partsupp select column_1, column_2, column_3, column_4, column_5 from partsupp_tbl;
+CREATE EXTERNAL TABLE region_tbl STORED AS CSV DELIMITER '|' LOCATION 'tpch/region.tbl';
+insert into region select column_1, column_2, column_3 from region_tbl;
+CREATE EXTERNAL TABLE supplier_tbl STORED AS CSV DELIMITER '|' LOCATION 'tpch/supplier.tbl';
+insert into supplier select column_1, column_2, column_3, column_4, column_5, column_6, column_7 from supplier_tbl;
+
 select
     o_year,
     sum(case
@@ -121,3 +138,41 @@ group by
 order by
     o_year;
 
+select
+    o_year,
+    sum(case
+        when nation = 'IRAQ' then volume
+        else 0
+    end) / sum(volume) as mkt_share
+from
+    (
+        select
+            extract(year from o_orderdate) as o_year,
+            l_extendedprice * (1 - l_discount) as volume,
+            n2.n_name as nation
+        from
+            part,
+            supplier,
+            lineitem,
+            orders,
+            customer,
+            nation n1,
+            nation n2,
+            region
+        where
+            p_partkey = l_partkey
+            and s_suppkey = l_suppkey
+            and l_orderkey = o_orderkey
+            and o_custkey = c_custkey
+            and c_nationkey = n1.n_nationkey
+            and n1.n_regionkey = r_regionkey
+            and r_name = 'AMERICA'
+            and s_nationkey = n2.n_nationkey
+            and o_orderdate between date '1995-01-01' and date '1996-12-31'
+            and p_type = 'ECONOMY ANODIZED STEEL'
+    ) as all_nations
+group by
+    o_year
+order by
+    o_year
+limit 10;

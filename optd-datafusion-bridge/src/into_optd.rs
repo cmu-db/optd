@@ -228,7 +228,10 @@ impl OptdPlanContext<'_> {
             LogicalPlan::SubqueryAlias(node) => self.into_optd_plan_node(node.input.as_ref())?,
             LogicalPlan::Join(node) => self.into_optd_join(node)?.into_plan_node(),
             LogicalPlan::Filter(node) => self.into_optd_filter(node)?.into_plan_node(),
-            _ => bail!("{:?}", node),
+            _ => bail!(
+                "unsupported plan node: {}",
+                format!("{:?}", node).split('\n').next().unwrap()
+            ),
         };
         Ok(node)
     }
