@@ -10,6 +10,12 @@ use crate::plan_nodes::{ConstantType, OptRelNodeTyp};
 #[derive(Clone, Debug)]
 pub struct Schema(pub Vec<ConstantType>);
 
+impl Schema {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 pub trait Catalog: Send + Sync + 'static {
     fn get(&self, name: &str) -> Schema;
 }

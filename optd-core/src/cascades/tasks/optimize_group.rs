@@ -23,6 +23,10 @@ impl OptimizeGroupTask {
 }
 
 impl<T: RelNodeTyp> Task<T> for OptimizeGroupTask {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
         trace!(event = "task_begin", task = "optimize_group", group_id = %self.group_id);
         let group_info = optimizer.get_group_info(self.group_id);

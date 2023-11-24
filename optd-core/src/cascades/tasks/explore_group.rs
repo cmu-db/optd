@@ -22,6 +22,10 @@ impl ExploreGroupTask {
 }
 
 impl<T: RelNodeTyp> Task<T> for ExploreGroupTask {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
         trace!(event = "task_begin", task = "explore_group", group_id = %self.group_id);
         let mut tasks = vec![];

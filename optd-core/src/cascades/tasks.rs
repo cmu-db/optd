@@ -18,4 +18,5 @@ pub use optimize_inputs::OptimizeInputsTask;
 
 pub trait Task<T: RelNodeTyp>: 'static + Send + Sync {
     fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>>;
+    fn as_any(&self) -> &dyn std::any::Any;
 }

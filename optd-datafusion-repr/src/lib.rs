@@ -11,7 +11,7 @@ pub use optd_core::rel_node::Value;
 use optd_core::{cascades::CascadesOptimizer, optimizer::Optimizer};
 use plan_nodes::{OptRelNodeRef, OptRelNodeTyp};
 use properties::schema::{Catalog, Schema, SchemaPropertyBuilder};
-use rules::{HashJoinRule, PhysicalConversionRule};
+use rules::{HashJoinRule, JoinCommuteRule, PhysicalConversionRule};
 
 pub mod cost;
 pub mod plan_nodes;
@@ -26,6 +26,7 @@ impl DatafusionOptimizer {
     pub fn new_physical(catalog: Box<dyn Catalog>) -> Self {
         let mut rules = PhysicalConversionRule::all_conversions();
         rules.push(Arc::new(HashJoinRule::new()));
+        rules.push(Arc::new(JoinCommuteRule::new()));
         Self {
             optimizer: CascadesOptimizer::new(
                 rules,

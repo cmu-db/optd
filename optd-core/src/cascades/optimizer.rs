@@ -29,7 +29,7 @@ pub struct OptimizerContext {
 
 pub struct CascadesOptimizer<T: RelNodeTyp> {
     memo: Memo<T>,
-    tasks: VecDeque<Box<dyn Task<T>>>,
+    pub(super) tasks: VecDeque<Box<dyn Task<T>>>,
     explored_group: HashSet<GroupId>,
     fired_rules: HashMap<ExprId, HashSet<RuleId>>,
     rules: Arc<[Arc<dyn Rule<T, Self>>]>,

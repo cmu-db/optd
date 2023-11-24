@@ -119,7 +119,23 @@ impl OptimizeInputsTask {
 }
 
 impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
+        if optimizer.tasks.iter().any(|t| {
+            if let Some(task) = t.as_any().downcast_ref::<Self>() {
+                // skip optimize_inputs to avoid dead-loop: consider join commute being fired twice that produces
+                // two projections, therefore having groups like projection1 -> projection2 -> join = projection1.
+                task.expr_id == self.expr_id
+            } else {
+                false
+            }
+        }) {
+            trace!(event = "task_skip", task = "optimize_inputs", expr_id = %self.expr_id);
+            return Ok(vec![]);
+        }
         trace!(event = "task_begin", task = "optimize_inputs", expr_id = %self.expr_id, continue_from = ?self.continue_from);
         let expr = optimizer.get_expr_memoed(self.expr_id);
         let children = &expr.children;
