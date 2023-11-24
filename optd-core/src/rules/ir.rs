@@ -10,7 +10,7 @@ pub enum RuleMatcher<T: RelNodeTyp> {
     /// Match a node of type `typ`.
     MatchNode { typ: T, children: Vec<Self> },
     /// Match anything,
-    PickOne { pick_to: usize },
+    PickOne { pick_to: usize, expand: bool },
     /// Match all things in the group
     PickMany { pick_to: usize },
     /// Ignore one

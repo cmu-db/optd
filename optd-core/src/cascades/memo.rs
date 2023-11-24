@@ -164,7 +164,7 @@ impl<T: RelNodeTyp> Memo<T> {
             data: rel_node.data.clone(),
         };
         let Some(&expr_id) = self.expr_node_to_expr_id.get(&memo_node) else {
-            unreachable!()
+            unreachable!("not found {}", memo_node)
         };
         let group_id = self.get_group_id_of_expr_id(expr_id);
         return (group_id, expr_id);

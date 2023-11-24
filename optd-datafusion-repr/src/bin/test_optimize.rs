@@ -1,13 +1,16 @@
 use std::sync::Arc;
 
-use optd_core::{cascades::CascadesOptimizer, heuristics::HeuristicsOptimizer, rel_node::Value};
+use optd_core::{
+    cascades::CascadesOptimizer, heuristics::HeuristicsOptimizer, optimizer::Optimizer,
+    rel_node::Value,
+};
 use optd_datafusion_repr::{
     cost::OptCostModel,
     plan_nodes::{
         BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, JoinType, LogicalFilter, LogicalJoin,
         LogicalScan, OptRelNode, OptRelNodeTyp, PlanNode,
     },
-    rules::{FilterJoinPullUpRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule},
+    rules::{HashJoinRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule},
 };
 
 use tracing::Level;
@@ -15,6 +18,7 @@ use tracing::Level;
 pub fn main() {
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
+        .with_ansi(false)
         .with_target(false)
         .init();
 
@@ -22,12 +26,12 @@ pub fn main() {
         vec![
             Arc::new(JoinCommuteRule::new()),
             Arc::new(JoinAssocRule::new()),
-            Arc::new(FilterJoinPullUpRule::new()),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Scan)),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Join(
                 JoinType::Inner,
             ))),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Filter)),
+            Arc::new(HashJoinRule::new()),
         ],
         Box::new(OptCostModel::new(
             [("t1", 1000), ("t2", 100), ("t3", 10000)]
@@ -69,12 +73,12 @@ pub fn main() {
         vec![
             Arc::new(JoinCommuteRule::new()),
             Arc::new(JoinAssocRule::new()),
-            Arc::new(FilterJoinPullUpRule::new()),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Scan)),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Join(
                 JoinType::Inner,
             ))),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Filter)),
+            Arc::new(HashJoinRule::new()),
         ],
         optd_core::heuristics::ApplyOrder::BottomUp,
     );

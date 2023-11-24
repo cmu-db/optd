@@ -59,9 +59,20 @@ fn match_node<T: RelNodeTyp>(
             RuleMatcher::IgnoreMany => {
                 should_end = true;
             }
-            RuleMatcher::PickOne { pick_to } => {
+            RuleMatcher::PickOne { pick_to, expand } => {
+                let group_id = node.children[idx];
+                let node = if *expand {
+                    let mut exprs = optimizer.get_all_exprs_in_group(group_id);
+                    assert_eq!(exprs.len(), 1, "can only expand expression");
+                    let expr = exprs.remove(0);
+                    let mut bindings = optimizer.get_all_expr_bindings(expr, None);
+                    assert_eq!(bindings.len(), 1, "can only expand expression");
+                    bindings.remove(0).as_ref().clone()
+                } else {
+                    RelNode::new_group(group_id)
+                };
                 for pick in &mut picks {
-                    let res = pick.insert(*pick_to, RelNode::new_group(node.children[idx]));
+                    let res = pick.insert(*pick_to, node.clone());
                     assert!(res.is_none(), "dup pick");
                 }
             }
@@ -164,7 +175,7 @@ impl<T: RelNodeTyp> Task<T> for ApplyRuleTask {
         let mut tasks = vec![];
         let binding_exprs = match_and_pick_group(rule.matcher(), group_id, optimizer);
         for expr in binding_exprs {
-            let applied = rule.apply(expr);
+            let applied = rule.apply(optimizer, expr);
             for expr in applied {
                 let RelNode { typ, .. } = &expr;
                 if typ.extract_group().is_some() {

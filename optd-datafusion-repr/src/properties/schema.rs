@@ -38,12 +38,14 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
                 let name = data.unwrap().as_str().to_string();
                 self.catalog.get(&name)
             }
+            OptRelNodeTyp::Projection => children[1].clone(),
             OptRelNodeTyp::Filter => children[0].clone(),
             OptRelNodeTyp::Join(_) => {
                 let mut schema = children[0].clone();
                 schema.0.extend(children[1].clone().0);
                 schema
             }
+            OptRelNodeTyp::List => Schema(vec![ConstantType::Any; children.len()]),
             _ => Schema(vec![]),
         }
     }

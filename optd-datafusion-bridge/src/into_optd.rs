@@ -4,10 +4,12 @@ use datafusion::{
     logical_expr::{self, logical_plan, LogicalPlan, Operator},
     scalar::ScalarValue,
 };
+use optd_core::rel_node::RelNode;
 use optd_datafusion_repr::plan_nodes::{
     BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, FuncExpr, FuncType,
     JoinType, LogOpExpr, LogOpType, LogicalAgg, LogicalFilter, LogicalJoin, LogicalProjection,
-    LogicalScan, LogicalSort, OptRelNode, OptRelNodeRef, PlanNode, SortOrderExpr, SortOrderType,
+    LogicalScan, LogicalSort, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode, SortOrderExpr,
+    SortOrderType,
 };
 
 use crate::OptdPlanContext;
@@ -152,6 +154,33 @@ impl OptdPlanContext<'_> {
         Ok(LogicalAgg::new(input, agg_exprs, group_exprs))
     }
 
+    fn add_column_offset(&mut self, offset: usize, expr: Expr) -> Expr {
+        if expr.typ() == OptRelNodeTyp::ColumnRef {
+            let expr = ColumnRefExpr::from_rel_node(expr.into_rel_node()).unwrap();
+            return ColumnRefExpr::new(expr.index() + offset).into_expr();
+        }
+        let rel_node = expr.into_rel_node();
+        let children = rel_node
+            .children
+            .iter()
+            .map(|child| {
+                let child = child.clone();
+                let child = Expr::from_rel_node(child).unwrap();
+                let child = self.add_column_offset(offset, child);
+                child.into_rel_node()
+            })
+            .collect();
+        Expr::from_rel_node(
+            RelNode {
+                typ: rel_node.typ.clone(),
+                children,
+                data: rel_node.data.clone(),
+            }
+            .into(),
+        )
+        .unwrap()
+    }
+
     fn into_optd_join(&mut self, node: &logical_plan::Join) -> Result<LogicalJoin> {
         use logical_plan::JoinType as DFJoinType;
         let left = self.into_optd_plan_node(node.left.as_ref())?;
@@ -171,6 +200,7 @@ impl OptdPlanContext<'_> {
         for (left, right) in &node.on {
             let left = self.into_optd_expr(left, node.left.schema())?;
             let right = self.into_optd_expr(right, node.right.schema())?;
+            let right = self.add_column_offset(node.left.schema().fields().len(), right);
             let op = BinOpType::Eq;
             let expr = BinOpExpr::new(left, right, op).into_expr();
             log_ops.push(expr);

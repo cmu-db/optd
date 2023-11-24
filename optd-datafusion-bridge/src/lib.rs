@@ -6,7 +6,7 @@ mod into_optd;
 use arrow_schema::DataType;
 use async_trait::async_trait;
 use datafusion::{
-    catalog::{schema, CatalogList},
+    catalog::CatalogList,
     error::Result,
     execution::context::{QueryPlanner, SessionState},
     logical_expr::{LogicalPlan, TableSource},

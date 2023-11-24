@@ -5,15 +5,13 @@ use arrow_schema::Schema;
 use async_recursion::async_recursion;
 use datafusion::{
     arrow::datatypes::SchemaRef,
-    common::DFSchema,
     datasource::source_as_provider,
-    logical_expr::{expr::ScalarFunction, Operator},
-    parquet::basic::SortOrder,
+    logical_expr::Operator,
     physical_expr,
     physical_plan::{
         self, aggregates::AggregateMode, expressions::create_aggregate_expr,
-        functions::create_physical_fun, joins::utils::JoinFilter, projection::ProjectionExec,
-        sorts::sort::SortExec, AggregateExpr, ExecutionPlan, PhysicalExpr,
+        joins::utils::JoinFilter, projection::ProjectionExec, AggregateExpr, ExecutionPlan,
+        PhysicalExpr,
     },
     scalar::ScalarValue,
 };
@@ -108,6 +106,7 @@ impl OptdPlanContext<'_> {
                     }
                     ConstantType::Date => ScalarValue::Date32(Some(value.as_i64() as i32)),
                     ConstantType::Utf8String => ScalarValue::Utf8(Some(value.as_str().to_string())),
+                    ConstantType::Any => unimplemented!(),
                 };
                 Ok(Arc::new(
                     datafusion::physical_plan::expressions::Literal::new(value),

@@ -67,6 +67,7 @@ pub enum ConstantType {
     Int,
     Date,
     Decimal,
+    Any,
 }
 
 #[derive(Clone, Debug)]
@@ -157,29 +158,13 @@ impl ColumnRefExpr {
         ))
     }
 
-    pub fn with_child(&self, child_idx: usize) -> ColumnRefExpr {
-        ColumnRefExpr(Expr(
-            RelNode {
-                typ: OptRelNodeTyp::ColumnRef,
-                children: vec![],
-                data: Some(Value::Int((self.index() + (child_idx << 32)) as i64)),
-            }
-            .into(),
-        ))
-    }
-
     fn get_data_usize(&self) -> usize {
         self.0 .0.data.as_ref().unwrap().as_i64() as usize
     }
 
     /// Gets the column index.
     pub fn index(&self) -> usize {
-        self.get_data_usize() & ((1 << 32) - 1)
-    }
-
-    /// Gets the child id.
-    pub fn child_id(&self) -> usize {
-        self.get_data_usize() >> 32
+        self.get_data_usize()
     }
 }
 

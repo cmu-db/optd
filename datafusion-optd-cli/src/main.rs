@@ -35,7 +35,6 @@ use std::collections::HashMap;
 use std::env;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::Mutex;
 use std::sync::{Arc, OnceLock};
 
 #[global_allocator]

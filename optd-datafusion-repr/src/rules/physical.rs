@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use optd_core::optimizer::Optimizer;
 use optd_core::rel_node::RelNode;
 use optd_core::rules::{Rule, RuleMatcher};
 
@@ -23,7 +24,7 @@ impl PhysicalConversionRule {
 }
 
 impl PhysicalConversionRule {
-    pub fn all_conversions() -> Vec<Arc<dyn Rule<OptRelNodeTyp>>> {
+    pub fn all_conversions<O: Optimizer<OptRelNodeTyp>>() -> Vec<Arc<dyn Rule<OptRelNodeTyp, O>>> {
         vec![
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Scan)),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Projection)),
@@ -37,13 +38,14 @@ impl PhysicalConversionRule {
     }
 }
 
-impl Rule<OptRelNodeTyp> for PhysicalConversionRule {
+impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionRule {
     fn matcher(&self) -> &RuleMatcher<OptRelNodeTyp> {
         &self.matcher
     }
 
     fn apply(
         &self,
+        _optimizer: &O,
         mut input: HashMap<usize, RelNode<OptRelNodeTyp>>,
     ) -> Vec<RelNode<OptRelNodeTyp>> {
         let RelNode {

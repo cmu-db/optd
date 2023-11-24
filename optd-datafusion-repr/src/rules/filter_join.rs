@@ -25,16 +25,22 @@ impl FilterJoinPullUpRule {
                         children: vec![
                             RuleMatcher::PickOne {
                                 pick_to: LEFT_CHILD,
+                                expand: false,
                             },
                             RuleMatcher::PickOne {
                                 pick_to: FILTER_COND,
+                                expand: true,
                             },
                         ],
                     },
                     RuleMatcher::PickOne {
                         pick_to: RIGHT_CHILD,
+                        expand: false,
                     },
-                    RuleMatcher::PickOne { pick_to: JOIN_COND },
+                    RuleMatcher::PickOne {
+                        pick_to: JOIN_COND,
+                        expand: true,
+                    },
                 ],
             },
         }
@@ -68,6 +74,6 @@ impl Rule<OptRelNodeTyp> for FilterJoinPullUpRule {
     }
 
     fn name(&self) -> &'static str {
-        "join_commute"
+        "filter_join"
     }
 }

@@ -7,11 +7,11 @@ use std::{
 
 use anyhow::Result;
 use cost::OptCostModel;
-use optd_core::cascades::CascadesOptimizer;
 pub use optd_core::rel_node::Value;
+use optd_core::{cascades::CascadesOptimizer, optimizer::Optimizer};
 use plan_nodes::{OptRelNodeRef, OptRelNodeTyp};
 use properties::schema::{Catalog, Schema, SchemaPropertyBuilder};
-use rules::PhysicalConversionRule;
+use rules::{HashJoinRule, PhysicalConversionRule};
 
 pub mod cost;
 pub mod plan_nodes;
@@ -24,9 +24,11 @@ pub struct DatafusionOptimizer {
 
 impl DatafusionOptimizer {
     pub fn new_physical(catalog: Box<dyn Catalog>) -> Self {
+        let mut rules = PhysicalConversionRule::all_conversions();
+        rules.push(Arc::new(HashJoinRule::new()));
         Self {
             optimizer: CascadesOptimizer::new(
-                PhysicalConversionRule::all_conversions(),
+                rules,
                 Box::new(OptCostModel::new(
                     [("t1", 1000), ("t2", 100), ("t3", 10000)]
                         .into_iter()

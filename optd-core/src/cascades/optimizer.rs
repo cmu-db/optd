@@ -8,6 +8,7 @@ use anyhow::Result;
 
 use crate::{
     cost::CostModel,
+    optimizer::Optimizer,
     property::{PropertyBuilder, PropertyBuilderAny},
     rel_node::{RelNodeRef, RelNodeTyp},
     rules::Rule,
@@ -31,7 +32,7 @@ pub struct CascadesOptimizer<T: RelNodeTyp> {
     tasks: VecDeque<Box<dyn Task<T>>>,
     explored_group: HashSet<GroupId>,
     fired_rules: HashMap<ExprId, HashSet<RuleId>>,
-    rules: Arc<[Arc<dyn Rule<T>>]>,
+    rules: Arc<[Arc<dyn Rule<T, Self>>]>,
     cost: Arc<dyn CostModel<T>>,
     property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
     pub ctx: OptimizerContext,
@@ -57,7 +58,7 @@ impl Display for ExprId {
 
 impl<T: RelNodeTyp> CascadesOptimizer<T> {
     pub fn new(
-        rules: Vec<Arc<dyn Rule<T>>>,
+        rules: Vec<Arc<dyn Rule<T, Self>>>,
         cost: Box<dyn CostModel<T>>,
         property_builders: Vec<Box<dyn PropertyBuilderAny<T>>>,
     ) -> Self {
@@ -80,7 +81,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.cost.clone()
     }
 
-    pub(super) fn rules(&self) -> Arc<[Arc<dyn Rule<T>>]> {
+    pub(super) fn rules(&self) -> Arc<[Arc<dyn Rule<T, Self>>]> {
         self.rules.clone()
     }
 
@@ -120,7 +121,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         }
     }
 
-    pub fn optimize(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
+    fn optimize_inner(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
         let (group_id, _) = self.add_group_expr(root_rel, None);
         self.tasks
             .push_back(Box::new(OptimizeGroupTask::new(group_id)));
@@ -133,6 +134,9 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
     }
 
     pub fn resolve_group_id(&self, root_rel: RelNodeRef<T>) -> GroupId {
+        if let Some(group_id) = T::extract_group(&root_rel.typ) {
+            return group_id;
+        }
         let (group_id, _) = self.get_expr_info(root_rel);
         group_id
     }
@@ -161,7 +165,11 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.memo.update_group_info(group_id, group_info)
     }
 
-    pub fn get_property<P: PropertyBuilder<T>>(&self, group_id: GroupId, idx: usize) -> P::Prop {
+    pub fn get_property_by_group<P: PropertyBuilder<T>>(
+        &self,
+        group_id: GroupId,
+        idx: usize,
+    ) -> P::Prop {
         self.memo.get_group(group_id).properties[idx]
             .downcast_ref::<P::Prop>()
             .unwrap()
@@ -212,5 +220,15 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             .entry(group_expr_id)
             .or_default()
             .insert(rule_id);
+    }
+}
+
+impl<T: RelNodeTyp> Optimizer<T> for CascadesOptimizer<T> {
+    fn optimize(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
+        self.optimize_inner(root_rel)
+    }
+
+    fn get_property<P: PropertyBuilder<T>>(&self, root_rel: RelNodeRef<T>, idx: usize) -> P::Prop {
+        self.get_property_by_group::<P>(self.resolve_group_id(root_rel), idx)
     }
 }

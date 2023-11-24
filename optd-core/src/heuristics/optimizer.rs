@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 
 use crate::{
+    optimizer::Optimizer,
     rel_node::{RelNode, RelNodeRef, RelNodeTyp},
     rules::{Rule, RuleMatcher},
 };
@@ -13,7 +14,7 @@ pub enum ApplyOrder {
 }
 
 pub struct HeuristicsOptimizer<T: RelNodeTyp> {
-    rules: Arc<[Arc<dyn Rule<T>>]>,
+    rules: Arc<[Arc<dyn Rule<T, Self>>]>,
     apply_order: ApplyOrder,
 }
 
@@ -42,7 +43,8 @@ fn match_node<T: RelNodeTyp>(
             RuleMatcher::IgnoreMany => {
                 should_end = true;
             }
-            RuleMatcher::PickOne { pick_to } => {
+            RuleMatcher::PickOne { pick_to, expand: _ } => {
+                // Heuristics always keep the full plan without group placeholders, therefore we can ignore expand property.
                 let res = pick.insert(*pick_to, node.child(idx).as_ref().clone());
                 assert!(res.is_none(), "dup pick");
             }
@@ -103,7 +105,7 @@ fn match_and_pick<T: RelNodeTyp>(
 }
 
 impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
-    pub fn new_with_rules(rules: Vec<Arc<dyn Rule<T>>>, apply_order: ApplyOrder) -> Self {
+    pub fn new_with_rules(rules: Vec<Arc<dyn Rule<T, Self>>>, apply_order: ApplyOrder) -> Self {
         Self {
             rules: rules.into(),
             apply_order,
@@ -122,7 +124,7 @@ impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
         for rule in self.rules.as_ref() {
             let matcher = rule.matcher();
             if let Some(picks) = match_and_pick(matcher, root_rel.clone()) {
-                let mut results = rule.apply(picks);
+                let mut results = rule.apply(&self, picks);
                 assert_eq!(results.len(), 1);
                 root_rel = results.remove(0).into();
             }
@@ -130,7 +132,7 @@ impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
         Ok(root_rel)
     }
 
-    pub fn optimize(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
+    fn optimize_inner(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
         match self.apply_order {
             ApplyOrder::BottomUp => {
                 let optimized_children = self.optimize_inputs(&root_rel.children)?;
@@ -155,5 +157,21 @@ impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
                 .into())
             }
         }
+    }
+}
+
+impl<T: RelNodeTyp> Optimizer<T> for HeuristicsOptimizer<T> {
+    fn optimize(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
+        self.optimize_inner(root_rel)
+    }
+
+    fn get_property<P: crate::property::PropertyBuilder<T>>(
+        &self,
+        root_rel: RelNodeRef<T>,
+        idx: usize,
+    ) -> P::Prop {
+        let _ = root_rel;
+        let _ = idx;
+        unimplemented!()
     }
 }
