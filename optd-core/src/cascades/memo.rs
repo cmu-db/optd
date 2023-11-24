@@ -1,14 +1,16 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     fmt::Display,
     sync::Arc,
 };
 
 use anyhow::{bail, Result};
 use itertools::Itertools;
+use std::any::Any;
 
 use crate::{
     cost::Cost,
+    property::PropertyBuilderAny,
     rel_node::{RelNode, RelNodeRef, RelNodeTyp, Value},
 };
 
@@ -49,10 +51,10 @@ pub struct GroupInfo {
     pub winner: Option<Winner>,
 }
 
-#[derive(Default)]
-struct Group {
-    group_exprs: HashSet<ExprId>,
-    info: GroupInfo,
+pub(crate) struct Group {
+    pub(crate) group_exprs: HashSet<ExprId>,
+    pub(crate) info: GroupInfo,
+    pub(crate) properties: Arc<[Box<dyn Any + Send + Sync + 'static>]>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
@@ -77,10 +79,11 @@ pub struct Memo<T: RelNodeTyp> {
     groups: HashMap<ReducedGroupId, Group>,
     group_expr_counter: usize,
     merged_groups: HashMap<GroupId, GroupId>,
+    property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
 }
 
 impl<T: RelNodeTyp> Memo<T> {
-    pub fn new() -> Self {
+    pub fn new(property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>) -> Self {
         Self {
             expr_id_to_group_id: HashMap::new(),
             expr_id_to_expr_node: HashMap::new(),
@@ -88,6 +91,7 @@ impl<T: RelNodeTyp> Memo<T> {
             groups: HashMap::new(),
             group_expr_counter: 0,
             merged_groups: HashMap::new(),
+            property_builders,
         }
     }
 
@@ -142,9 +146,79 @@ impl<T: RelNodeTyp> Memo<T> {
         (group_id.as_group_id(), expr_id)
     }
 
-    fn add_expr_to_group(&mut self, expr_id: ExprId, group_id: ReducedGroupId) {
-        let group = self.groups.entry(group_id).or_default();
+    pub fn get_expr_info(&self, rel_node: RelNodeRef<T>) -> (GroupId, ExprId) {
+        let children_group_ids = rel_node
+            .children
+            .iter()
+            .map(|child| {
+                if let Some(group) = child.typ.extract_group() {
+                    group
+                } else {
+                    self.get_expr_info(child.clone()).0
+                }
+            })
+            .collect::<Vec<_>>();
+        let memo_node = RelMemoNode {
+            typ: rel_node.typ.clone(),
+            children: children_group_ids,
+            data: rel_node.data.clone(),
+        };
+        let Some(&expr_id) = self.expr_node_to_expr_id.get(&memo_node) else {
+            unreachable!()
+        };
+        let group_id = self.get_group_id_of_expr_id(expr_id);
+        return (group_id, expr_id);
+    }
+
+    fn infer_properties(
+        &self,
+        memo_node: RelMemoNode<T>,
+    ) -> Vec<Box<dyn Any + 'static + Send + Sync>> {
+        let child_properties = memo_node
+            .children
+            .iter()
+            .map(|child| {
+                let group_id = self.get_reduced_group_id(*child);
+                self.groups[&group_id].properties.clone()
+            })
+            .collect_vec();
+        let mut props = Vec::with_capacity(self.property_builders.len());
+        for (id, builder) in self.property_builders.iter().enumerate() {
+            let child_properties = child_properties
+                .iter()
+                .map(|x| x[id].as_ref() as &dyn std::any::Any)
+                .collect::<Vec<_>>();
+            let prop = builder.derive_any(
+                memo_node.typ.clone(),
+                memo_node.data.clone(),
+                child_properties.as_slice(),
+            );
+            props.push(prop);
+        }
+        props
+    }
+
+    fn add_expr_to_group(
+        &mut self,
+        expr_id: ExprId,
+        group_id: ReducedGroupId,
+        memo_node: RelMemoNode<T>,
+    ) {
+        match self.groups.entry(group_id) {
+            Entry::Occupied(mut entry) => {
+                let group = entry.get_mut();
+                group.group_exprs.insert(expr_id);
+                return;
+            }
+            _ => {}
+        }
+        let mut group = Group {
+            group_exprs: HashSet::new(),
+            info: GroupInfo::default(),
+            properties: self.infer_properties(memo_node).into(),
+        };
         group.group_exprs.insert(expr_id);
+        self.groups.insert(group_id, group);
     }
 
     fn add_new_group_expr_inner(
@@ -186,8 +260,8 @@ impl<T: RelNodeTyp> Memo<T> {
             .insert(expr_id, memo_node.clone().into());
         self.expr_id_to_group_id
             .insert(expr_id, group_id.as_group_id());
-        self.expr_node_to_expr_id.insert(memo_node, expr_id);
-        self.add_expr_to_group(expr_id, group_id);
+        self.expr_node_to_expr_id.insert(memo_node.clone(), expr_id);
+        self.add_expr_to_group(expr_id, group_id, memo_node);
         (group_id, expr_id)
     }
 
@@ -304,6 +378,13 @@ impl<T: RelNodeTyp> Memo<T> {
             .unwrap()
             .info
             .clone()
+    }
+
+    pub(crate) fn get_group(&self, group_id: GroupId) -> &Group {
+        self.groups
+            .get(&self.get_reduced_group_id(group_id))
+            .as_ref()
+            .unwrap()
     }
 
     pub fn update_group_info(&mut self, group_id: GroupId, group_info: GroupInfo) {

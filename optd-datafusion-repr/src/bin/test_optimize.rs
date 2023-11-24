@@ -18,7 +18,7 @@ pub fn main() {
         .with_target(false)
         .init();
 
-    let mut optimizer = CascadesOptimizer::new_with_rules(
+    let mut optimizer = CascadesOptimizer::new(
         vec![
             Arc::new(JoinCommuteRule::new()),
             Arc::new(JoinAssocRule::new()),
@@ -35,6 +35,7 @@ pub fn main() {
                 .map(|(x, y)| (x.to_string(), y))
                 .collect(),
         )),
+        vec![],
     );
 
     // The plan: (filter (scan t1) #1=2) join (scan t2) join (scan t3)

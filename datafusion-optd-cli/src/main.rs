@@ -29,12 +29,13 @@ use datafusion_optd_cli::{
     DATAFUSION_CLI_VERSION,
 };
 use mimalloc::MiMalloc;
-use optd_datafusion_bridge::OptdQueryPlanner;
+use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::DatafusionOptimizer;
 use std::collections::HashMap;
 use std::env;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Mutex;
 use std::sync::{Arc, OnceLock};
 
 #[global_allocator]
@@ -190,7 +191,9 @@ pub async fn main() -> Result<()> {
         // state = state.with_optimizer_rules(vec![]);
         // state = state.with_physical_optimizer_rules(vec![]);
         // use optd-bridge query planner
-        let optimizer = DatafusionOptimizer::new_physical();
+        let optimizer = DatafusionOptimizer::new_physical(Box::new(DatafusionCatalog::new(
+            state.catalog_list(),
+        )));
         state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));
         SessionContext::new_with_state(state)
     };

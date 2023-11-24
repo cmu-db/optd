@@ -8,6 +8,7 @@ use anyhow::Result;
 
 use crate::{
     cost::CostModel,
+    property::{PropertyBuilder, PropertyBuilderAny},
     rel_node::{RelNodeRef, RelNodeTyp},
     rules::Rule,
 };
@@ -32,6 +33,7 @@ pub struct CascadesOptimizer<T: RelNodeTyp> {
     fired_rules: HashMap<ExprId, HashSet<RuleId>>,
     rules: Arc<[Arc<dyn Rule<T>>]>,
     cost: Arc<dyn CostModel<T>>,
+    property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
     pub ctx: OptimizerContext,
 }
 
@@ -54,9 +56,14 @@ impl Display for ExprId {
 }
 
 impl<T: RelNodeTyp> CascadesOptimizer<T> {
-    pub fn new_with_rules(rules: Vec<Arc<dyn Rule<T>>>, cost: Box<dyn CostModel<T>>) -> Self {
+    pub fn new(
+        rules: Vec<Arc<dyn Rule<T>>>,
+        cost: Box<dyn CostModel<T>>,
+        property_builders: Vec<Box<dyn PropertyBuilderAny<T>>>,
+    ) -> Self {
         let tasks = VecDeque::new();
-        let memo = Memo::new();
+        let property_builders: Arc<[_]> = property_builders.into();
+        let memo = Memo::new(property_builders.clone());
         Self {
             memo,
             tasks,
@@ -65,6 +72,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             rules: rules.into(),
             cost: cost.into(),
             ctx: OptimizerContext::default(),
+            property_builders,
         }
     }
 
@@ -93,6 +101,14 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
                 "winner=None".to_string()
             };
             println!("group_id={} {}", group_id, winner);
+            let group = self.memo.get_group(group_id);
+            for (id, property) in self.property_builders.iter().enumerate() {
+                println!(
+                    "  {}={}",
+                    property.property_name(),
+                    property.display(group.properties[id].as_ref())
+                )
+            }
             for expr_id in self.memo.get_all_exprs_in_group(group_id) {
                 let memo_node = self.memo.get_expr_memoed(expr_id);
                 println!("  expr_id={} | {}", expr_id, memo_node);
@@ -116,8 +132,17 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.memo.get_best_group_binding(group_id)
     }
 
+    pub fn resolve_group_id(&self, root_rel: RelNodeRef<T>) -> GroupId {
+        let (group_id, _) = self.get_expr_info(root_rel);
+        group_id
+    }
+
     pub(super) fn get_all_exprs_in_group(&self, group_id: GroupId) -> Vec<ExprId> {
         self.memo.get_all_exprs_in_group(group_id)
+    }
+
+    pub(super) fn get_expr_info(&self, expr: RelNodeRef<T>) -> (GroupId, ExprId) {
+        self.memo.get_expr_info(expr)
     }
 
     pub(super) fn add_group_expr(
@@ -134,6 +159,13 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
 
     pub(super) fn update_group_info(&mut self, group_id: GroupId, group_info: GroupInfo) {
         self.memo.update_group_info(group_id, group_info)
+    }
+
+    pub fn get_property<P: PropertyBuilder<T>>(&self, group_id: GroupId, idx: usize) -> P::Prop {
+        self.memo.get_group(group_id).properties[idx]
+            .downcast_ref::<P::Prop>()
+            .unwrap()
+            .clone()
     }
 
     pub(super) fn get_group_id(&self, expr_id: ExprId) -> GroupId {

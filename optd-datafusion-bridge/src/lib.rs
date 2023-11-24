@@ -3,15 +3,19 @@
 mod from_optd;
 mod into_optd;
 
+use arrow_schema::DataType;
 use async_trait::async_trait;
 use datafusion::{
+    catalog::{schema, CatalogList},
     error::Result,
     execution::context::{QueryPlanner, SessionState},
     logical_expr::{LogicalPlan, TableSource},
     physical_plan::{displayable, ExecutionPlan},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
-use optd_datafusion_repr::DatafusionOptimizer;
+use optd_datafusion_repr::{
+    plan_nodes::ConstantType, properties::schema::Catalog, DatafusionOptimizer,
+};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -28,6 +32,37 @@ impl<'a> OptdPlanContext<'a> {
             tables: HashMap::new(),
             session_state,
         }
+    }
+}
+
+pub struct DatafusionCatalog {
+    catalog: Arc<dyn CatalogList>,
+}
+
+impl DatafusionCatalog {
+    pub fn new(catalog: Arc<dyn CatalogList>) -> Self {
+        Self { catalog }
+    }
+}
+
+impl Catalog for DatafusionCatalog {
+    fn get(&self, name: &str) -> optd_datafusion_repr::properties::schema::Schema {
+        let catalog = self.catalog.catalog("datafusion").unwrap();
+        let schema = catalog.schema("public").unwrap();
+        let table = futures_lite::future::block_on(schema.table(name.as_ref())).unwrap();
+        let fields = table.schema();
+        let mut optd_schema = vec![];
+        for field in fields.fields() {
+            let dt = match field.data_type() {
+                DataType::Date32 => ConstantType::Date,
+                DataType::Int32 => ConstantType::Int,
+                DataType::Utf8 => ConstantType::Utf8String,
+                DataType::Decimal128(_, _) => ConstantType::Decimal,
+                dt => unimplemented!("{:?}", dt),
+            };
+            optd_schema.push(dt);
+        }
+        optd_datafusion_repr::properties::schema::Schema(optd_schema)
     }
 }
 

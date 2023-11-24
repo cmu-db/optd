@@ -13,7 +13,7 @@ mod sort;
 use std::sync::Arc;
 
 use optd_core::{
-    cascades::GroupId,
+    cascades::{CascadesOptimizer, GroupId},
     rel_node::{RelNode, RelNodeRef, RelNodeTyp},
 };
 
@@ -29,6 +29,8 @@ use pretty_xmlish::{Pretty, PrettyConfig};
 pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
 pub use sort::{LogicalSort, PhysicalSort};
+
+use crate::properties::schema::{Schema, SchemaPropertyBuilder};
 
 use self::join::PhysicalHashJoin;
 
@@ -186,6 +188,11 @@ pub struct PlanNode(OptRelNodeRef);
 impl PlanNode {
     pub fn typ(&self) -> OptRelNodeTyp {
         self.0.typ.clone()
+    }
+
+    pub fn schema(&self, optimizer: CascadesOptimizer<OptRelNodeTyp>) -> Schema {
+        let group_id = optimizer.resolve_group_id(self.0.clone());
+        optimizer.get_property::<SchemaPropertyBuilder>(group_id, 0)
     }
 }
 
