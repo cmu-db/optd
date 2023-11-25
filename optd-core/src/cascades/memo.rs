@@ -289,6 +289,7 @@ impl<T: RelNodeTyp> Memo<T> {
         &self,
         group_id: GroupId,
         physical_only: bool,
+        exclude_placeholder: bool,
         level: Option<usize>,
     ) -> Vec<RelNodeRef<T>> {
         let group_id = self.get_reduced_group_id(group_id);
@@ -297,7 +298,9 @@ impl<T: RelNodeTyp> Memo<T> {
             .group_exprs
             .iter()
             .filter(|x| !physical_only || !self.get_expr_memoed(**x).typ.is_logical())
-            .map(|&expr_id| self.get_all_expr_bindings(expr_id, physical_only, level))
+            .map(|&expr_id| {
+                self.get_all_expr_bindings(expr_id, physical_only, exclude_placeholder, level)
+            })
             .concat()
     }
 
@@ -307,28 +310,37 @@ impl<T: RelNodeTyp> Memo<T> {
         &self,
         expr_id: ExprId,
         physical_only: bool,
+        exclude_placeholder: bool,
         level: Option<usize>,
     ) -> Vec<RelNodeRef<T>> {
         let expr = self.get_expr_memoed(expr_id);
         if let Some(level) = level {
             if level == 0 {
-                let node = Arc::new(RelNode {
-                    typ: expr.typ.clone(),
-                    children: expr
-                        .children
-                        .iter()
-                        .map(|x| Arc::new(RelNode::new_group(*x)))
-                        .collect_vec(),
-                    data: expr.data.clone(),
-                });
-                return vec![node];
+                if exclude_placeholder {
+                    return vec![];
+                } else {
+                    let node = Arc::new(RelNode {
+                        typ: expr.typ.clone(),
+                        children: expr
+                            .children
+                            .iter()
+                            .map(|x| Arc::new(RelNode::new_group(*x)))
+                            .collect_vec(),
+                        data: expr.data.clone(),
+                    });
+                    return vec![node];
+                }
             }
         }
         let mut children = vec![];
         let mut cumulative = 1;
         for child in &expr.children {
-            let group_exprs =
-                self.get_all_group_bindings(*child, physical_only, level.map(|x| x - 1));
+            let group_exprs = self.get_all_group_bindings(
+                *child,
+                physical_only,
+                exclude_placeholder,
+                level.map(|x| x - 1),
+            );
             cumulative *= group_exprs.len();
             children.push(group_exprs);
         }

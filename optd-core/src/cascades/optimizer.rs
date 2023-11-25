@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    memo::{GroupInfo, RelMemoNodeRef},
+    memo::{Group, GroupInfo, RelMemoNodeRef},
     tasks::OptimizeGroupTask,
     Memo, Task,
 };
@@ -113,7 +113,9 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             for expr_id in self.memo.get_all_exprs_in_group(group_id) {
                 let memo_node = self.memo.get_expr_memoed(expr_id);
                 println!("  expr_id={} | {}", expr_id, memo_node);
-                let bindings = self.memo.get_all_expr_bindings(expr_id, false, Some(1));
+                let bindings = self
+                    .memo
+                    .get_all_expr_bindings(expr_id, false, true, Some(1));
                 for binding in bindings {
                     println!("    {}", binding);
                 }
@@ -189,15 +191,13 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         expr_id: ExprId,
         level: Option<usize>,
     ) -> Vec<RelNodeRef<T>> {
-        self.memo.get_all_expr_bindings(expr_id, false, level)
+        self.memo
+            .get_all_expr_bindings(expr_id, false, false, level)
     }
 
-    pub(super) fn get_all_expr_physical_bindings(
-        &self,
-        expr_id: ExprId,
-        level: Option<usize>,
-    ) -> Vec<RelNodeRef<T>> {
-        self.memo.get_all_expr_bindings(expr_id, true, level)
+    pub fn get_all_group_physical_bindings(&self, group_id: GroupId) -> Vec<RelNodeRef<T>> {
+        self.memo
+            .get_all_group_bindings(group_id, true, true, Some(10))
     }
 
     pub(super) fn is_group_explored(&self, group_id: GroupId) -> bool {

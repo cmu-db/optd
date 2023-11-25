@@ -14,7 +14,10 @@ use datafusion::{
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
 use optd_datafusion_repr::{
-    plan_nodes::{ConstantType, OptRelNode, PlanNode},
+    plan_nodes::{
+        ConstantType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalHashJoin,
+        PhysicalNestedLoopJoin, PlanNode,
+    },
     properties::schema::Catalog,
     DatafusionOptimizer,
 };
@@ -74,6 +77,64 @@ pub struct OptdQueryPlanner {
     optimizer: Arc<Mutex<Option<Box<DatafusionOptimizer>>>>,
 }
 
+#[derive(Debug)]
+enum JoinOrder {
+    Table(String),
+    HashJoin(Box<Self>, Box<Self>),
+    NestedLoopJoin(Box<Self>, Box<Self>),
+}
+
+fn get_join_order(rel_node: OptRelNodeRef) -> Option<JoinOrder> {
+    match rel_node.typ {
+        OptRelNodeTyp::PhysicalHashJoin(_) => {
+            let join = PhysicalHashJoin::from_rel_node(rel_node.clone()).unwrap();
+            let left = get_join_order(join.left().into_rel_node())?;
+            let right = get_join_order(join.right().into_rel_node())?;
+            Some(JoinOrder::HashJoin(Box::new(left), Box::new(right)))
+        }
+        OptRelNodeTyp::PhysicalNestedLoopJoin(_) => {
+            let join = PhysicalNestedLoopJoin::from_rel_node(rel_node.clone()).unwrap();
+            let left = get_join_order(join.left().into_rel_node())?;
+            let right = get_join_order(join.right().into_rel_node())?;
+            Some(JoinOrder::NestedLoopJoin(Box::new(left), Box::new(right)))
+        }
+        OptRelNodeTyp::PhysicalScan => {
+            let scan =
+                optd_datafusion_repr::plan_nodes::PhysicalScan::from_rel_node(rel_node).unwrap();
+            Some(JoinOrder::Table(scan.table().to_string()))
+        }
+        _ => {
+            for child in &rel_node.children {
+                if let Some(res) = get_join_order(child.clone()) {
+                    return Some(res);
+                }
+            }
+            None
+        }
+    }
+}
+
+impl std::fmt::Display for JoinOrder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JoinOrder::Table(name) => write!(f, "{}", name),
+            JoinOrder::HashJoin(left, right) => {
+                write!(f, "(HashJoin {} {})", left, right)
+            }
+            JoinOrder::NestedLoopJoin(left, right) => {
+                write!(f, "(NLJ {} {})", left, right)
+            }
+        }
+    }
+}
+
+fn print_join_order(rel_node: OptRelNodeRef) {
+    println!(
+        "join order: {}",
+        get_join_order(rel_node).unwrap_or_else(|| JoinOrder::Table("".to_string()))
+    );
+}
+
 impl OptdQueryPlanner {
     async fn create_physical_plan_inner(
         &self,
@@ -91,6 +152,15 @@ impl OptdQueryPlanner {
         let optimized_rel = optimizer.optimize(optd_rel);
         optimizer.dump();
         let optimized_rel = optimized_rel?;
+        let group_id = optimizer
+            .optd_optimizer()
+            .resolve_group_id(optimized_rel.clone());
+        let bindings = optimizer
+            .optd_optimizer()
+            .get_all_group_physical_bindings(group_id);
+        for binding in bindings {
+            print_join_order(binding);
+        }
         println!(
             "optd-datafusion-bridge: [optd_optimized_plan]\n{}",
             PlanNode::from_rel_node(optimized_rel.clone())
