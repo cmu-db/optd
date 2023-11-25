@@ -1,0 +1,12 @@
+- id: sql1
+  sql: |
+    CREATE TABLE t1(v1 int);
+- id: sql2
+  sql: |
+    CREATE TABLE t2(v2 int);
+- sql: |
+    SELECT * FROM t1, t2 WHERE t1.v1 = t2.v2;
+  desc: Test whether join works correctly.
+  before: ["*sql1", "*sql2", "CREATE TABLE t3(v3 int);"]
+  tasks:
+    - explain

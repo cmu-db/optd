@@ -6,3 +6,37 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = { version = "1", features = ["backtrace"] }
+sqlplannertest = { git = "https://github.com/risinglightdb/sqlplannertest-rs" }
+async-trait = "0.1"
+datafusion-optd-cli = { path = "../datafusion-optd-cli" }
+rand = "0.8"
+datafusion = { version = "32.0.0", features = [
+    "avro",
+    "crypto_expressions",
+    "encoding_expressions",
+    "regex_expressions",
+    "unicode_expressions",
+    "compression",
+] }
+dirs = "4.0.0"
+env_logger = "0.9"
+mimalloc = { version = "0.1", default-features = false }
+regex = "1.8"
+tokio = { version = "1.24", features = [
+    "macros",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "parking_lot",
+] }
+url = "2.2"
+optd-datafusion-bridge = { path = "../optd-datafusion-bridge" }
+optd-datafusion-repr = { path = "../optd-datafusion-repr" }
+tracing-subscriber = "0.3"
+tracing = "0.1"
+
+
+[[test]]
+name = "planner_test"
+harness = false
