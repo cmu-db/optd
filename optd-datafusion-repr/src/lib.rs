@@ -29,7 +29,7 @@ impl DatafusionOptimizer {
 
     pub fn new_physical(catalog: Box<dyn Catalog>) -> Self {
         let mut rules = PhysicalConversionRule::all_conversions();
-        rules.push(Arc::new(HashJoinRule::new()));
+        // rules.push(Arc::new(HashJoinRule::new()));
         rules.push(Arc::new(JoinCommuteRule::new()));
         rules.push(Arc::new(JoinAssocRule::new()));
         Self {

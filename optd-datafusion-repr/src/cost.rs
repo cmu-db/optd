@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::plan_nodes::OptRelNodeTyp;
+use crate::plan_nodes::{OptRelNode, OptRelNodeTyp};
 use itertools::Itertools;
 use optd_core::{
     cost::{Cost, CostModel},
@@ -101,21 +101,61 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
             }
             OptRelNodeTyp::PhysicalFilter => {
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
+                let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
                 let selectivity = 0.001;
-                Self::cost((row_cnt * selectivity).max(1.0), row_cnt, 0.0)
+                Self::cost(
+                    (row_cnt * selectivity).max(1.0),
+                    row_cnt * compute_cost,
+                    0.0,
+                )
             }
             OptRelNodeTyp::PhysicalNestedLoopJoin(_) => {
+                let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
+                let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
+                let (_, compute_cost, _) = Self::cost_tuple(&children[2]);
+                let selectivity = 0.01;
+                Self::cost(
+                    (row_cnt_1 * row_cnt_2 * selectivity).max(1.0),
+                    row_cnt_1 * row_cnt_2 * compute_cost,
+                    0.0,
+                )
+            }
+            OptRelNodeTyp::PhysicalProjection => {
+                let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
+                let (_, compute_cost, _) = Self::cost_tuple(&children[0]);
+                Self::cost(row_cnt, compute_cost * row_cnt, 0.0)
+            }
+            OptRelNodeTyp::PhysicalHashJoin(_) => {
                 let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
                 let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
                 let selectivity = 0.01;
                 Self::cost(
                     (row_cnt_1 * row_cnt_2 * selectivity).max(1.0),
-                    row_cnt_1 * row_cnt_2,
+                    row_cnt_1 + row_cnt_2,
                     0.0,
                 )
             }
-            _ if node.is_expression() => Self::cost(0.0, 0.0, 0.0),
-            _ => Self::cost(1.0, 0.0, 0.0),
+            OptRelNodeTyp::List => {
+                let compute_cost = children
+                    .iter()
+                    .map(|child| {
+                        let (_, compute_cost, _) = Self::cost_tuple(child);
+                        compute_cost
+                    })
+                    .sum::<f64>();
+                Self::cost(1.0, compute_cost + 1.0, 0.0)
+            }
+            _ if node.is_expression() => {
+                let compute_cost = children
+                    .iter()
+                    .map(|child| {
+                        let (_, compute_cost, _) = Self::cost_tuple(child);
+                        compute_cost
+                    })
+                    .sum::<f64>();
+                Self::cost(1.0, compute_cost + 1.0, 0.0)
+            }
+            x => unimplemented!("cannot compute cost for {}", x),
         }
     }
 

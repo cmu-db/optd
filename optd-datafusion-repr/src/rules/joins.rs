@@ -131,9 +131,6 @@ fn apply_join_assoc(
     let a_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(a.clone()), 0);
     let b_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(b.clone()), 0);
     let c_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(c.clone()), 0);
-    println!(
-        "rule fired for a={a}, b={b}, c={c}, cond1={cond1}, cond2={cond2}, a_schema={a_schema:?}, b_schema={b_schema:?}, c_schema={c_schema:?}",
-    );
     let cond2 = Expr::from_rel_node(cond2.into()).unwrap();
     let Some(cond2) = rewrite_column_refs(cond2, a_schema.len()) else {
         return vec![];

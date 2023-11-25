@@ -4,7 +4,7 @@ use anyhow::{bail, Result};
 use arrow_schema::Schema;
 use async_recursion::async_recursion;
 use datafusion::{
-    arrow::datatypes::SchemaRef,
+    arrow::{compute::kernels::filter, datatypes::SchemaRef},
     datasource::source_as_provider,
     logical_expr::Operator,
     physical_expr,
@@ -12,7 +12,10 @@ use datafusion::{
         self,
         aggregates::AggregateMode,
         expressions::create_aggregate_expr,
-        joins::{utils::JoinFilter, PartitionMode},
+        joins::{
+            utils::{ColumnIndex, JoinFilter},
+            PartitionMode,
+        },
         projection::ProjectionExec,
         AggregateExpr, ExecutionPlan, PhysicalExpr,
     },
@@ -318,11 +321,26 @@ impl OptdPlanContext<'_> {
             JoinType::Inner => datafusion::logical_expr::JoinType::Inner,
             _ => unimplemented!(),
         };
+
+        let mut column_idxs = vec![];
+        for i in 0..left_exec.schema().fields().len() {
+            column_idxs.push(ColumnIndex {
+                index: i,
+                side: physical_plan::joins::utils::JoinSide::Left,
+            });
+        }
+        for i in 0..right_exec.schema().fields().len() {
+            column_idxs.push(ColumnIndex {
+                index: i,
+                side: physical_plan::joins::utils::JoinSide::Right,
+            });
+        }
+
         Ok(Arc::new(
             datafusion::physical_plan::joins::NestedLoopJoinExec::try_new(
                 left_exec,
                 right_exec,
-                Some(JoinFilter::new(physical_expr, vec![], filter_schema)),
+                Some(JoinFilter::new(physical_expr, column_idxs, filter_schema)),
                 &join_type,
             )?,
         ) as Arc<dyn ExecutionPlan + 'static>)

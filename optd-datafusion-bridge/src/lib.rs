@@ -22,7 +22,7 @@ use optd_datafusion_repr::{
     DatafusionOptimizer,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -77,7 +77,7 @@ pub struct OptdQueryPlanner {
     optimizer: Arc<Mutex<Option<Box<DatafusionOptimizer>>>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 enum JoinOrder {
     Table(String),
     HashJoin(Box<Self>, Box<Self>),
@@ -96,7 +96,8 @@ fn get_join_order(rel_node: OptRelNodeRef) -> Option<JoinOrder> {
             let join = PhysicalNestedLoopJoin::from_rel_node(rel_node.clone()).unwrap();
             let left = get_join_order(join.left().into_rel_node())?;
             let right = get_join_order(join.right().into_rel_node())?;
-            Some(JoinOrder::NestedLoopJoin(Box::new(left), Box::new(right)))
+            // Some(JoinOrder::NestedLoopJoin(Box::new(left), Box::new(right)))
+            None
         }
         OptRelNodeTyp::PhysicalScan => {
             let scan =
@@ -128,13 +129,6 @@ impl std::fmt::Display for JoinOrder {
     }
 }
 
-fn print_join_order(rel_node: OptRelNodeRef) {
-    println!(
-        "join order: {}",
-        get_join_order(rel_node).unwrap_or_else(|| JoinOrder::Table("".to_string()))
-    );
-}
-
 impl OptdQueryPlanner {
     async fn create_physical_plan_inner(
         &self,
@@ -158,8 +152,14 @@ impl OptdQueryPlanner {
         let bindings = optimizer
             .optd_optimizer()
             .get_all_group_physical_bindings(group_id);
+        let mut join_orders = HashSet::new();
         for binding in bindings {
-            print_join_order(binding);
+            join_orders.insert(get_join_order(binding));
+        }
+        for order in join_orders {
+            if order.is_some() {
+                println!("optd-datafusion-bridge: [join_order] {}", order.unwrap());
+            }
         }
         println!(
             "optd-datafusion-bridge: [optd_optimized_plan]\n{}",
