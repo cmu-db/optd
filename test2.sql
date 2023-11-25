@@ -6,3 +6,5 @@ insert into t2 values (0), (1), (2);
 insert into t3 values (0), (1), (2);
 
 select * from t2, t1, t3 where t1v1 = t2v1 and t1v2 = t3v2;
+select * from t2, t1, t3 where t1v1 = t2v1 and t1v2 = t3v2;
+select * from t2, t1, t3 where t1v1 = t2v1 and t1v2 = t3v2;

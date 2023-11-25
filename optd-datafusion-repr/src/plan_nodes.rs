@@ -30,7 +30,10 @@ pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
 pub use sort::{LogicalSort, PhysicalSort};
 
-use crate::properties::schema::{Schema, SchemaPropertyBuilder};
+use crate::{
+    adaptive::PhysicalCollector,
+    properties::schema::{Schema, SchemaPropertyBuilder},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OptRelNodeTyp {
@@ -53,6 +56,7 @@ pub enum OptRelNodeTyp {
     PhysicalAgg,
     PhysicalHashJoin(JoinType),
     PhysicalNestedLoopJoin(JoinType),
+    PhysicalCollector(GroupId), // only produced after optimization is done
     // Expressions
     Constant(ConstantType),
     ColumnRef,
@@ -81,6 +85,7 @@ impl OptRelNodeTyp {
                 | Self::PhysicalSort
                 | Self::PhysicalAgg
                 | Self::PhysicalHashJoin(_)
+                | Self::PhysicalCollector(_)
         )
     }
 
@@ -181,7 +186,7 @@ pub trait OptRelNode: 'static + Clone {
 }
 
 #[derive(Clone, Debug)]
-pub struct PlanNode(OptRelNodeRef);
+pub struct PlanNode(pub(crate) OptRelNodeRef);
 
 impl PlanNode {
     pub fn typ(&self) -> OptRelNodeTyp {
@@ -334,6 +339,9 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
             .unwrap()
             .dispatch_explain(),
         OptRelNodeTyp::LogOp(_) => LogOpExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::PhysicalCollector(group_id) => PhysicalCollector::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
     }

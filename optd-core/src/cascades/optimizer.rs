@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    memo::{Group, GroupInfo, RelMemoNodeRef},
+    memo::{GroupInfo, RelMemoNodeRef},
     tasks::OptimizeGroupTask,
     Memo, Task,
 };
@@ -36,6 +36,14 @@ pub struct CascadesOptimizer<T: RelNodeTyp> {
     cost: Arc<dyn CostModel<T>>,
     property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
     pub ctx: OptimizerContext,
+}
+
+/// `RelNode` only contains the representation of the plan nodes. Sometimes, we need more context, i.e., group id and
+/// expr id, during the optimization phase. All these information are collected in this struct.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
+pub struct RelNodeContext {
+    pub group_id: GroupId,
+    pub expr_id: ExprId,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
@@ -123,8 +131,11 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         }
     }
 
-    fn optimize_inner(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
-        let (group_id, _) = self.add_group_expr(root_rel, None);
+    fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
+        self.memo.clear_winner();
+        self.fired_rules.clear();
+        self.explored_group.clear();
+
         self.tasks
             .push_back(Box::new(OptimizeGroupTask::new(group_id)));
         // get the task from the stack
@@ -132,7 +143,27 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             let new_tasks = task.execute(self)?;
             self.tasks.extend(new_tasks);
         }
-        self.memo.get_best_group_binding(group_id)
+        Ok(())
+    }
+
+    fn optimize_inner(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
+        let (group_id, _) = self.add_group_expr(root_rel, None);
+        self.fire_optimize_tasks(group_id)?;
+        self.memo.get_best_group_binding(group_id, &mut |x, _| x)
+    }
+
+    pub fn optimize_with_on_produce_callback(
+        &mut self,
+        root_rel: RelNodeRef<T>,
+        mut on_produce: impl FnMut(RelNodeRef<T>, GroupId) -> RelNodeRef<T>,
+    ) -> Result<(GroupId, RelNodeRef<T>)> {
+        let (group_id, _) = self.add_group_expr(root_rel, None);
+        self.fire_optimize_tasks(group_id)?;
+        Ok((
+            group_id,
+            self.memo
+                .get_best_group_binding(group_id, &mut on_produce)?,
+        ))
     }
 
     pub fn resolve_group_id(&self, root_rel: RelNodeRef<T>) -> GroupId {

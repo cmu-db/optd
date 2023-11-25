@@ -6,7 +6,7 @@ use crate::{
         memo::{GroupInfo, Winner},
         optimizer::ExprId,
         tasks::OptimizeGroupTask,
-        CascadesOptimizer, GroupId,
+        CascadesOptimizer, GroupId, RelNodeContext,
     },
     cost::Cost,
     rel_node::RelNodeTyp,
@@ -138,6 +138,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
         }
         trace!(event = "task_begin", task = "optimize_inputs", expr_id = %self.expr_id, continue_from = ?self.continue_from);
         let expr = optimizer.get_expr_memoed(self.expr_id);
+        let group_id = optimizer.get_group_id(self.expr_id);
         let children = &expr.children;
         let cost = optimizer.cost();
 
@@ -147,8 +148,13 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
             return_from_optimize_group,
         }) = self.continue_from.clone()
         {
+            let context = RelNodeContext {
+                expr_id: self.expr_id,
+                group_id,
+            };
             if self.should_terminate(
-                cost.compute_cost(&expr.typ, &expr.data, &input_cost).0[0],
+                cost.compute_cost(&expr.typ, &expr.data, &input_cost, Some(context.clone()))
+                    .0[0],
                 optimizer.ctx.upper_bound,
             ) {
                 trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id);
@@ -164,7 +170,13 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                         input_cost[group_idx] = winner.cost.clone();
                         has_full_winner = true;
                         if self.should_terminate(
-                            cost.compute_cost(&expr.typ, &expr.data, &input_cost).0[0],
+                            cost.compute_cost(
+                                &expr.typ,
+                                &expr.data,
+                                &input_cost,
+                                Some(context.clone()),
+                            )
+                            .0[0],
                             optimizer.ctx.upper_bound,
                         ) {
                             trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id);
@@ -226,7 +238,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                 )) as Box<dyn Task<T>>])
             } else {
                 self.update_winner(
-                    &cost.compute_cost(&expr.typ, &expr.data, &input_cost),
+                    &cost.compute_cost(&expr.typ, &expr.data, &input_cost, Some(context.clone())),
                     optimizer,
                 );
                 trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id);

@@ -143,6 +143,7 @@ pub async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_target(false)
+        .with_ansi(false)
         .init();
 
     if !args.quiet {

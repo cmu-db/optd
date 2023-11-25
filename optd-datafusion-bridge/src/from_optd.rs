@@ -28,10 +28,10 @@ use optd_datafusion_repr::{
         PhysicalFilter, PhysicalHashJoin, PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan,
         PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
     },
-    Value,
+    PhysicalCollector, Value,
 };
 
-use crate::OptdPlanContext;
+use crate::{physical_collector::CollectorExec, OptdPlanContext};
 
 impl OptdPlanContext<'_> {
     #[async_recursion]
@@ -392,6 +392,7 @@ impl OptdPlanContext<'_> {
         )
     }
 
+    #[async_recursion]
     async fn from_optd_plan_node(&mut self, node: PlanNode) -> Result<Arc<dyn ExecutionPlan>> {
         match node.typ() {
             OptRelNodeTyp::PhysicalScan => {
@@ -429,6 +430,15 @@ impl OptdPlanContext<'_> {
                     PhysicalHashJoin::from_rel_node(node.into_rel_node()).unwrap(),
                 )
                 .await
+            }
+            OptRelNodeTyp::PhysicalCollector(_) => {
+                let node = PhysicalCollector::from_rel_node(node.into_rel_node()).unwrap();
+                let child = self.from_optd_plan_node(node.child()).await?;
+                Ok(Arc::new(CollectorExec::new(
+                    child,
+                    node.group_id(),
+                    self.optimizer.as_ref().unwrap().runtime_statistics.clone(),
+                )) as Arc<dyn ExecutionPlan>)
             }
             typ => unimplemented!("{}", typ),
         }

@@ -2,6 +2,7 @@
 
 mod from_optd;
 mod into_optd;
+mod physical_collector;
 
 use arrow_schema::DataType;
 use async_trait::async_trait;
@@ -29,6 +30,7 @@ use std::{
 struct OptdPlanContext<'a> {
     tables: HashMap<String, Arc<dyn TableSource>>,
     session_state: &'a SessionState,
+    pub optimizer: Option<&'a DatafusionOptimizer>,
 }
 
 impl<'a> OptdPlanContext<'a> {
@@ -36,6 +38,7 @@ impl<'a> OptdPlanContext<'a> {
         Self {
             tables: HashMap::new(),
             session_state,
+            optimizer: None,
         }
     }
 }
@@ -141,14 +144,11 @@ impl OptdQueryPlanner {
         );
         let mut ctx = OptdPlanContext::new(session_state);
         let optd_rel = ctx.into_optd(logical_plan)?;
-        println!("optd-datafusion-bridge: [optd_logical_plan] {}", optd_rel);
         let mut optimizer = self.optimizer.lock().unwrap().take().unwrap();
+        println!("optd-datafusion-bridge: [optd_logical_plan] {}", optd_rel);
         let optimized_rel = optimizer.optimize(optd_rel);
         optimizer.dump();
-        let optimized_rel = optimized_rel?;
-        let group_id = optimizer
-            .optd_optimizer()
-            .resolve_group_id(optimized_rel.clone());
+        let (group_id, optimized_rel) = optimized_rel?;
         let bindings = optimizer
             .optd_optimizer()
             .get_all_group_physical_bindings(group_id);
@@ -167,6 +167,7 @@ impl OptdQueryPlanner {
                 .unwrap()
                 .explain_to_string()
         );
+        ctx.optimizer = Some(&optimizer);
         let physical_plan = ctx.from_optd(optimized_rel).await?;
         let d = displayable(&*physical_plan).to_stringified(
             false,
