@@ -92,7 +92,6 @@ impl OptimizeInputsTask {
         cost_so_far: &Cost,
         optimizer: &mut CascadesOptimizer<T>,
     ) {
-        let _cost = optimizer.cost();
         let group_id = optimizer.get_group_id(self.expr_id);
         let group_info = optimizer.get_group_info(group_id);
         let mut update_cost = false;
@@ -153,8 +152,11 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                 group_id,
             };
             if self.should_terminate(
-                cost.compute_cost(&expr.typ, &expr.data, &input_cost, Some(context.clone()))
-                    .0[0],
+                cost.sum(
+                    &cost.compute_cost(&expr.typ, &expr.data, &input_cost, Some(context.clone())),
+                    &input_cost,
+                )
+                .0[0],
                 optimizer.ctx.upper_bound,
             ) {
                 trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id);
@@ -170,11 +172,14 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                         input_cost[group_idx] = winner.cost.clone();
                         has_full_winner = true;
                         if self.should_terminate(
-                            cost.compute_cost(
-                                &expr.typ,
-                                &expr.data,
+                            cost.sum(
+                                &cost.compute_cost(
+                                    &expr.typ,
+                                    &expr.data,
+                                    &input_cost,
+                                    Some(context.clone()),
+                                ),
                                 &input_cost,
-                                Some(context.clone()),
                             )
                             .0[0],
                             optimizer.ctx.upper_bound,
@@ -238,7 +243,15 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                 )) as Box<dyn Task<T>>])
             } else {
                 self.update_winner(
-                    &cost.compute_cost(&expr.typ, &expr.data, &input_cost, Some(context.clone())),
+                    &cost.sum(
+                        &cost.compute_cost(
+                            &expr.typ,
+                            &expr.data,
+                            &input_cost,
+                            Some(context.clone()),
+                        ),
+                        &input_cost,
+                    ),
                     optimizer,
                 );
                 trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id);

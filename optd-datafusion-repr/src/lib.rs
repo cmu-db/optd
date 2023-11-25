@@ -45,6 +45,7 @@ impl DatafusionOptimizer {
     }
 
     pub fn optimize(&mut self, root_rel: OptRelNodeRef) -> Result<(GroupId, OptRelNodeRef)> {
+        self.runtime_statistics.lock().unwrap().iter_cnt += 1;
         self.optimizer
             .optimize_with_on_produce_callback(root_rel, |rel_node, group_id| {
                 if rel_node.typ.is_plan_node() {
@@ -58,7 +59,7 @@ impl DatafusionOptimizer {
             })
     }
 
-    pub fn dump(&self) {
-        self.optimizer.dump()
+    pub fn dump(&self, group_id: Option<GroupId>) {
+        self.optimizer.dump(group_id)
     }
 }

@@ -21,5 +21,13 @@ pub trait CostModel<T: RelNodeTyp>: 'static + Send + Sync {
 
     fn accumulate(&self, total_cost: &mut Cost, cost: &Cost);
 
+    fn sum(&self, self_cost: &Cost, inputs: &[Cost]) -> Cost {
+        let mut total_cost = self_cost.clone();
+        for input in inputs {
+            self.accumulate(&mut total_cost, input);
+        }
+        total_cost
+    }
+
     fn zero(&self) -> Cost;
 }

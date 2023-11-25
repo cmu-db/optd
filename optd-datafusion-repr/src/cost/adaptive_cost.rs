@@ -10,12 +10,20 @@ use optd_core::{
     rel_node::{RelNode, Value},
 };
 
-pub type RuntimeAdaptionStorage = Arc<Mutex<HashMap<GroupId, usize>>>;
+pub type RuntimeAdaptionStorage = Arc<Mutex<RuntimeAdaptionStorageInner>>;
+
+#[derive(Default, Debug)]
+pub struct RuntimeAdaptionStorageInner {
+    pub history: HashMap<GroupId, (usize, usize)>,
+    pub iter_cnt: usize,
+}
 
 pub struct AdaptiveCostModel {
     runtime_row_cnt: RuntimeAdaptionStorage,
     base_model: OptCostModel,
 }
+
+const DECAY: usize = 5;
 
 impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
     fn explain(&self, cost: &Cost) -> String {
@@ -39,9 +47,13 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
     ) -> Cost {
         if let OptRelNodeTyp::PhysicalScan = node {
             let guard = self.runtime_row_cnt.lock().unwrap();
-            if let Some(runtime_row_cnt) = guard.get(&context.unwrap().group_id) {
-                let runtime_row_cnt = *runtime_row_cnt as f64;
-                return OptCostModel::cost(runtime_row_cnt, 0.0, runtime_row_cnt);
+            if let Some((runtime_row_cnt, iter)) = guard.history.get(&context.unwrap().group_id) {
+                if *iter + DECAY >= guard.iter_cnt {
+                    let runtime_row_cnt = (*runtime_row_cnt).max(1) as f64;
+                    return OptCostModel::cost(runtime_row_cnt, 0.0, runtime_row_cnt);
+                } else {
+                    return OptCostModel::cost(1.0, 0.0, 1.0);
+                }
             } else {
                 return OptCostModel::cost(1.0, 0.0, 1.0);
             }
@@ -50,9 +62,11 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
             OptCostModel::cost_tuple(&self.base_model.compute_cost(node, data, children, None));
         if let Some(context) = context {
             let guard = self.runtime_row_cnt.lock().unwrap();
-            if let Some(runtime_row_cnt) = guard.get(&context.group_id) {
-                let runtime_row_cnt = *runtime_row_cnt as f64;
-                row_cnt = runtime_row_cnt;
+            if let Some((runtime_row_cnt, iter)) = guard.history.get(&context.group_id) {
+                if *iter + DECAY >= guard.iter_cnt {
+                    let runtime_row_cnt = (*runtime_row_cnt).max(1) as f64;
+                    row_cnt = runtime_row_cnt;
+                }
             }
         }
         OptCostModel::cost(row_cnt, compute_cost, io_cost)
@@ -66,7 +80,7 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
 impl AdaptiveCostModel {
     pub fn new() -> Self {
         Self {
-            runtime_row_cnt: Arc::new(Mutex::new(HashMap::new())),
+            runtime_row_cnt: Arc::new(Mutex::new(RuntimeAdaptionStorageInner::default())),
             base_model: OptCostModel::new(HashMap::new()),
         }
     }

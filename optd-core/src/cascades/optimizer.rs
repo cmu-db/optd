@@ -93,7 +93,30 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.rules.clone()
     }
 
-    pub fn dump(&self) {
+    pub fn dump(&self, group_id: Option<GroupId>) {
+        if let Some(group_id) = group_id {
+            fn dump_inner<T: RelNodeTyp>(this: &CascadesOptimizer<T>, group_id: GroupId) {
+                if let Some(ref winner) = this.memo.get_group_info(group_id).winner {
+                    let expr = this.memo.get_expr_memoed(winner.expr_id);
+                    assert!(!winner.impossible);
+                    if winner.cost.0[1] == 1.0 {
+                        return;
+                    }
+                    println!(
+                        "group_id={} winner={} cost={} {}",
+                        group_id,
+                        winner.expr_id,
+                        this.cost.explain(&winner.cost),
+                        expr
+                    );
+                    for child in &expr.children {
+                        dump_inner(this, *child);
+                    }
+                }
+            }
+            dump_inner(self, group_id);
+            return;
+        }
         for group_id in self.memo.get_all_group_ids() {
             let winner = if let Some(ref winner) = self.memo.get_group_info(group_id).winner {
                 if winner.impossible {

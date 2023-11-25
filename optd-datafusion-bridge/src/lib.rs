@@ -26,7 +26,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
-
+use tracing::debug;
 struct OptdPlanContext<'a> {
     tables: HashMap<String, Arc<dyn TableSource>>,
     session_state: &'a SessionState,
@@ -99,8 +99,7 @@ fn get_join_order(rel_node: OptRelNodeRef) -> Option<JoinOrder> {
             let join = PhysicalNestedLoopJoin::from_rel_node(rel_node.clone()).unwrap();
             let left = get_join_order(join.left().into_rel_node())?;
             let right = get_join_order(join.right().into_rel_node())?;
-            // Some(JoinOrder::NestedLoopJoin(Box::new(left), Box::new(right)))
-            None
+            Some(JoinOrder::NestedLoopJoin(Box::new(left), Box::new(right)))
         }
         OptRelNodeTyp::PhysicalScan => {
             let scan =
@@ -138,17 +137,17 @@ impl OptdQueryPlanner {
         logical_plan: &LogicalPlan,
         session_state: &SessionState,
     ) -> anyhow::Result<Arc<dyn ExecutionPlan>> {
-        println!(
+        debug!(
             "optd-datafusion-bridge: [datafusion_logical_plan] {:?}",
             logical_plan
         );
         let mut ctx = OptdPlanContext::new(session_state);
         let optd_rel = ctx.into_optd(logical_plan)?;
         let mut optimizer = self.optimizer.lock().unwrap().take().unwrap();
-        println!("optd-datafusion-bridge: [optd_logical_plan] {}", optd_rel);
-        let optimized_rel = optimizer.optimize(optd_rel);
-        optimizer.dump();
-        let (group_id, optimized_rel) = optimized_rel?;
+        debug!("optd-datafusion-bridge: [optd_logical_plan] {}", optd_rel);
+        let (group_id, optimized_rel) = optimizer.optimize(optd_rel)?;
+        /* optimizer.dump();
+
         let bindings = optimizer
             .optd_optimizer()
             .get_all_group_physical_bindings(group_id);
@@ -158,15 +157,29 @@ impl OptdQueryPlanner {
         }
         for order in join_orders {
             if order.is_some() {
-                println!("optd-datafusion-bridge: [join_order] {}", order.unwrap());
+                debug!("optd-datafusion-bridge: [join_order] {}", order.unwrap());
             }
         }
-        println!(
+         */
+        debug!(
             "optd-datafusion-bridge: [optd_optimized_plan]\n{}",
             PlanNode::from_rel_node(optimized_rel.clone())
                 .unwrap()
                 .explain_to_string()
         );
+        println!(
+            "--- JOIN ORDER ---\n{}",
+            get_join_order(optimized_rel.clone()).unwrap()
+        );
+        println!("--- COST ---");
+        optimizer.dump(Some(group_id));
+        println!(
+            "--- PLAN ---\n{}",
+            PlanNode::from_rel_node(optimized_rel.clone())
+                .unwrap()
+                .explain_to_string()
+        );
+
         ctx.optimizer = Some(&optimizer);
         let physical_plan = ctx.from_optd(optimized_rel).await?;
         let d = displayable(&*physical_plan).to_stringified(
@@ -175,7 +188,7 @@ impl OptdQueryPlanner {
                 optimizer_name: "optd-datafusion".to_string(),
             },
         );
-        println!("optd-datafusion-bridge: [physical_plan] {}", d.plan);
+        debug!("optd-datafusion-bridge: [physical_plan] {}", d.plan);
         self.optimizer.lock().unwrap().replace(optimizer);
         Ok(physical_plan)
     }
@@ -200,7 +213,7 @@ impl QueryPlanner for OptdQueryPlanner {
         {
             Ok(x) => Ok(x),
             Err(e) => {
-                println!("[ERROR] optd-datafusion-bridge: {:#}", e);
+                debug!("[ERROR] optd-datafusion-bridge: {:#}", e);
                 let planner = DefaultPhysicalPlanner::default();
                 planner
                     .create_physical_plan(logical_plan, session_state)

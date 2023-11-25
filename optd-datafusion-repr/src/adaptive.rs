@@ -24,11 +24,12 @@ impl OptRelNode for PhysicalCollector {
     }
 
     fn dispatch_explain(&self) -> Pretty<'static> {
-        Pretty::simple_record(
-            "PhysicalCollector",
-            vec![("group_id", self.group_id().to_string().into())],
-            vec![self.child().explain()],
-        )
+        // Pretty::simple_record(
+        //     "PhysicalCollector",
+        //     vec![("group_id", self.group_id().to_string().into())],
+        //     vec![self.child().explain()],
+        // )
+        self.child().explain()
     }
 }
 

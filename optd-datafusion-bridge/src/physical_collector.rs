@@ -137,7 +137,10 @@ impl Stream for CollectorReader {
                 self.done = true;
                 {
                     let mut guard = self.collect_into.lock().unwrap();
-                    guard.insert(self.group_id, self.row_cnt);
+                    let iter_cnt = guard.iter_cnt;
+                    guard
+                        .history
+                        .insert(self.group_id, (self.row_cnt, iter_cnt));
                 }
                 Poll::Ready(None)
             }

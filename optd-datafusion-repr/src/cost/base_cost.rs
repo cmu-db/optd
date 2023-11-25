@@ -50,7 +50,7 @@ impl OptCostModel {
 
     pub fn weighted_cost(row_cnt: f64, compute_cost: f64, io_cost: f64) -> f64 {
         let _ = row_cnt;
-        compute_cost + io_cost * 10.0
+        compute_cost + io_cost
     }
 
     pub fn cost(row_cnt: f64, compute_cost: f64, io_cost: f64) -> Cost {
@@ -123,22 +123,21 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                 let selectivity = 0.01;
                 Self::cost(
                     (row_cnt_1 * row_cnt_2 * selectivity).max(1.0),
-                    row_cnt_1 * row_cnt_2 * compute_cost,
+                    row_cnt_1 * row_cnt_2 * compute_cost + row_cnt_1,
                     0.0,
                 )
             }
             OptRelNodeTyp::PhysicalProjection => {
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
-                let (_, compute_cost, _) = Self::cost_tuple(&children[0]);
+                let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
                 Self::cost(row_cnt, compute_cost * row_cnt, 0.0)
             }
             OptRelNodeTyp::PhysicalHashJoin(_) => {
                 let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
                 let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
-                let selectivity = 0.01;
                 Self::cost(
-                    (row_cnt_1 * row_cnt_2 * selectivity).max(1.0),
-                    row_cnt_1 + row_cnt_2,
+                    row_cnt_1.min(row_cnt_2).max(1.0),
+                    row_cnt_1 * 2.0 + row_cnt_2,
                     0.0,
                 )
             }
