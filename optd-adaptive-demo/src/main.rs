@@ -108,6 +108,6 @@ async fn main() -> Result<()> {
             vec!["select (select count(*) from t1) as t1cnt, (select count(*) from t2) as t2cnt, (select count(*) from t3) as t3cnt;".to_string()],
         )
         .await;
-        tokio::time::sleep(Duration::from_millis(800)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
