@@ -31,6 +31,9 @@ impl PhysicalConversionRule {
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Join(
                 JoinType::Inner,
             ))),
+            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Join(
+                JoinType::LeftOuter,
+            ))),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Filter)),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Sort)),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Agg)),

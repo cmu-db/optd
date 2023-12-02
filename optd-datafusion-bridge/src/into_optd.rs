@@ -61,6 +61,10 @@ impl OptdPlanContext<'_> {
                 Ok(ColumnRefExpr::new(idx).into_expr())
             }
             Expr::Literal(x) => match x {
+                ScalarValue::UInt8(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::int(*x as i64).into_expr())
+                }
                 ScalarValue::Utf8(x) => {
                     let x = x.as_ref().unwrap();
                     Ok(ConstantExpr::string(x).into_expr())
@@ -206,7 +210,14 @@ impl OptdPlanContext<'_> {
             log_ops.push(expr);
         }
 
-        if log_ops.len() == 1 {
+        if log_ops.is_empty() {
+            Ok(LogicalJoin::new(
+                left,
+                right,
+                ConstantExpr::bool(true).into_expr(),
+                join_type,
+            ))
+        } else if log_ops.len() == 1 {
             Ok(LogicalJoin::new(left, right, log_ops.remove(0), join_type))
         } else {
             let expr_list = ExprList::new(log_ops);

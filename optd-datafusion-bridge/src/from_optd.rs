@@ -320,6 +320,7 @@ impl OptdPlanContext<'_> {
         let physical_expr = self.from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
         let join_type = match node.join_type() {
             JoinType::Inner => datafusion::logical_expr::JoinType::Inner,
+            JoinType::LeftOuter => datafusion::logical_expr::JoinType::Left,
             _ => unimplemented!(),
         };
 

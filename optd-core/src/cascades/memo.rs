@@ -401,11 +401,13 @@ impl<T: RelNodeTyp> Memo<T> {
 
     pub fn update_group_info(&mut self, group_id: GroupId, group_info: GroupInfo) {
         if let Some(ref winner) = group_info.winner {
-            assert!(
-                winner.cost.0[0] != 0.0,
-                "{}",
-                self.get_expr_memoed(winner.expr_id)
-            );
+            if !winner.impossible {
+                assert!(
+                    winner.cost.0[0] != 0.0,
+                    "{}",
+                    self.get_expr_memoed(winner.expr_id)
+                );
+            }
         }
         let grp = self.groups.get_mut(&self.get_reduced_group_id(group_id));
         grp.unwrap().info = group_info;
