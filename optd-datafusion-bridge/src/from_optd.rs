@@ -11,6 +11,7 @@ use datafusion::{
     physical_plan::{
         self,
         aggregates::AggregateMode,
+        explain::ExplainExec,
         expressions::create_aggregate_expr,
         joins::{
             utils::{ColumnIndex, JoinFilter},

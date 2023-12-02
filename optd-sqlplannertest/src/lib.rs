@@ -1,24 +1,15 @@
-use datafusion::arrow::csv::WriterBuilder;
-use datafusion::common::format;
-use datafusion::error::DataFusionError;
+use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
 use datafusion::execution::context::{SessionConfig, SessionState};
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
-use datafusion::logical_expr::LogicalPlan;
 use datafusion::prelude::SessionContext;
 use datafusion::sql::parser::DFParser;
-use datafusion::sql::sqlparser::dialect::{dialect_from_str, GenericDialect};
+use datafusion::sql::sqlparser::dialect::GenericDialect;
 use datafusion_optd_cli::helper::unescape_input;
-use datafusion_optd_cli::{
-    exec::exec_from_commands,
-    print_format::PrintFormat,
-    print_options::{MaxRows, PrintOptions},
-};
+use itertools::Itertools;
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::DatafusionOptimizer;
-use rand::Rng;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -51,30 +42,35 @@ impl DatafusionDb {
         Ok(Self { ctx })
     }
 
-    async fn execute(&self, sql: &str) -> Result<String> {
+    async fn execute(&self, sql: &str) -> Result<Vec<Vec<String>>> {
         let sql = unescape_input(sql)?;
         let dialect = Box::new(GenericDialect);
         let statements = DFParser::parse_sql_with_dialect(&sql, dialect.as_ref())?;
-        let mut result = String::new();
+        let mut result = Vec::new();
         for statement in statements {
             let plan = self.ctx.state().statement_to_plan(statement).await?;
 
             let df = self.ctx.execute_logical_plan(plan).await?;
             let batches = df.collect().await?;
 
-            let mut bytes = vec![];
-            {
-                let builder = WriterBuilder::new()
-                    .has_headers(true)
-                    .with_delimiter(' ' as u8);
-                let mut writer = builder.build(&mut bytes);
-                for batch in batches {
-                    writer.write(&batch)?;
+            let options = FormatOptions::default();
+
+            for batch in batches {
+                let converters = batch
+                    .columns()
+                    .iter()
+                    .map(|a| ArrayFormatter::try_new(a.as_ref(), &options))
+                    .collect::<Result<Vec<_>, _>>()?;
+                for row_idx in 0..batch.num_rows() {
+                    let mut row = Vec::with_capacity(batch.num_columns());
+                    for (_, converter) in converters.iter().enumerate() {
+                        let mut buffer = String::with_capacity(8);
+                        converter.value(row_idx).write(&mut buffer)?;
+                        row.push(buffer);
+                    }
+                    result.push(row);
                 }
             }
-            let formatted =
-                String::from_utf8(bytes).map_err(|e| DataFusionError::External(Box::new(e)))?;
-            result += &formatted;
         }
         Ok(result)
     }
@@ -93,15 +89,38 @@ impl sqlplannertest::PlannerTestRunner for DatafusionDb {
         let mut result = String::new();
         let r = &mut result;
         for task in &test_case.tasks {
-            if task == "explain" {
-                writeln!(
-                    r,
-                    "{}",
-                    self.execute(&format!("explain {}", test_case.sql))
-                        .await
-                        .context("execution error")?
-                )?;
+            if task == "execute" {
+                let result = self.execute(&test_case.sql).await?;
+                writeln!(r, "{}", result.into_iter().map(|x| x.join(" ")).join("\n"))?;
                 writeln!(r)?;
+            } else if task.starts_with("explain:") {
+                let result = self.execute(&format!("explain {}", test_case.sql)).await?;
+                for subtask in task["explain:".len()..].split(",") {
+                    let subtask = subtask.trim();
+                    if subtask == "join_orders" {
+                        writeln!(
+                            r,
+                            "{}",
+                            result
+                                .iter()
+                                .find(|x| x[0] == "physical_plan after optd-all-join-orders")
+                                .map(|x| &x[1])
+                                .unwrap()
+                        )?;
+                        writeln!(r)?;
+                    } else if subtask == "logical_join_orders" {
+                        writeln!(
+                            r,
+                            "{}",
+                            result
+                                .iter()
+                                .find(|x| x[0] == "physical_plan after optd-all-logical-join-orders")
+                                .map(|x| &x[1])
+                                .unwrap()
+                        )?;
+                        writeln!(r)?;
+                    }
+                }
             }
         }
         Ok(result)
