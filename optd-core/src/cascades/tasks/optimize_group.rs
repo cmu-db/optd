@@ -52,4 +52,8 @@ impl<T: RelNodeTyp> Task<T> for OptimizeGroupTask {
         trace!(event = "task_finish", task = "optimize_group", group_id = %self.group_id, exprs_cnt = exprs_cnt);
         Ok(tasks)
     }
+
+    fn describe(&self) -> String {
+        format!("optimize_group {}", self.group_id)
+    }
 }

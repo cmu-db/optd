@@ -270,4 +270,8 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
             )) as Box<dyn Task<T>>])
         }
     }
+
+    fn describe(&self) -> String {
+        format!("optimize_inputs {}", self.expr_id)
+    }
 }

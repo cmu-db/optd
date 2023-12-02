@@ -25,6 +25,7 @@ use crate::{
     },
     print_options::{MaxRows, PrintOptions},
 };
+use arrow::util::display::{ArrayFormatter, FormatOptions};
 use datafusion::sql::{parser::DFParser, sqlparser::dialect::dialect_from_str};
 use datafusion::{
     datasource::listing::ListingTableUrl,
@@ -53,6 +54,18 @@ pub async fn exec_from_commands(
             Err(err) => println!("{err}"),
         }
     }
+}
+
+/// run and execute SQL statements and commands, against a context with the given print options
+pub async fn exec_from_commands_collect(
+    ctx: &mut SessionContext,
+    commands: Vec<String>,
+) -> Result<Vec<Vec<String>>> {
+    let mut result = Vec::new();
+    for sql in commands {
+        result.extend(exec_and_collect(ctx, sql).await?);
+    }
+    Ok(result)
 }
 
 /// run and execute SQL statements and commands from a file, against a context with the given print options
@@ -236,6 +249,57 @@ async fn exec_and_print(
     }
 
     Ok(())
+}
+
+async fn exec_and_collect(ctx: &mut SessionContext, sql: String) -> Result<Vec<Vec<String>>> {
+    let sql = unescape_input(&sql)?;
+    let task_ctx = ctx.task_ctx();
+    let dialect = &task_ctx.session_config().options().sql_parser.dialect;
+    let dialect = dialect_from_str(dialect).ok_or_else(|| {
+        DataFusionError::Plan(format!(
+            "Unsupported SQL dialect: {dialect}. Available dialects: \
+                 Generic, MySQL, PostgreSQL, Hive, SQLite, Snowflake, Redshift, \
+                 MsSQL, ClickHouse, BigQuery, Ansi."
+        ))
+    })?;
+    let statements = DFParser::parse_sql_with_dialect(&sql, dialect.as_ref())?;
+
+    let mut result = Vec::new();
+
+    for statement in statements {
+        let plan = ctx.state().statement_to_plan(statement).await?;
+
+        let df = match &plan {
+            LogicalPlan::Ddl(DdlStatement::CreateExternalTable(cmd)) => {
+                create_external_table(ctx, cmd).await?;
+                ctx.execute_logical_plan(plan).await?
+            }
+            _ => ctx.execute_logical_plan(plan).await?,
+        };
+
+        let batches = df.collect().await?;
+
+        let options = FormatOptions::default();
+
+        for batch in batches {
+            let converters = batch
+                .columns()
+                .iter()
+                .map(|a| ArrayFormatter::try_new(a.as_ref(), &options))
+                .collect::<Result<Vec<_>, _>>()?;
+            for row_idx in 0..batch.num_rows() {
+                let mut row = Vec::with_capacity(batch.num_columns());
+                for (_, converter) in converters.iter().enumerate() {
+                    let mut buffer = String::with_capacity(8);
+                    converter.value(row_idx).write(&mut buffer)?;
+                    row.push(buffer);
+                }
+                result.push(row);
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 async fn create_external_table(ctx: &SessionContext, cmd: &CreateExternalTable) -> Result<()> {

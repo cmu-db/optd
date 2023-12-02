@@ -204,4 +204,11 @@ impl<T: RelNodeTyp> Task<T> for ApplyRuleTask {
         trace!(event = "task_end", task = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id);
         Ok(tasks)
     }
+
+    fn describe(&self) -> String {
+        format!(
+            "apply_rule {{ rule_id: {}, expr_id: {}, exploring: {} }}",
+            self.rule_id, self.expr_id, self.exploring
+        )
+    }
 }

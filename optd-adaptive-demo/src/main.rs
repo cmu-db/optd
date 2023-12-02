@@ -2,6 +2,7 @@ use datafusion::error::Result;
 use datafusion::execution::context::{SessionConfig, SessionState};
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
 use datafusion::prelude::SessionContext;
+use datafusion_optd_cli::exec::exec_from_commands_collect;
 use datafusion_optd_cli::{
     exec::exec_from_commands,
     print_format::PrintFormat,
@@ -102,15 +103,22 @@ async fn main() -> Result<()> {
         }
         iter += 1;
         println!("--- ITERATION {} ---", iter);
+        let result = exec_from_commands_collect(
+            &mut ctx,
+            vec!["explain select * from t2, t1, t3 where t1v1 = t2v1 and t1v2 = t3v2;".to_string()],
+        )
+        .await?;
+        println!(
+            "{}",
+            result
+                .iter()
+                .find(|x| x[0] == "physical_plan after optd-join-order")
+                .map(|x| &x[1])
+                .unwrap()
+        );
         exec_from_commands(
             &mut ctx,
             &print_options,
-            vec!["explain select * from t2, t1, t3 where t1v1 = t2v1 and t1v2 = t3v2;".to_string()],
-        )
-        .await;
-        exec_from_commands(
-            &mut ctx,
-            &slient_print_options,
             vec!["select * from t2, t1, t3 where t1v1 = t2v1 and t1v2 = t3v2;".to_string()],
         )
         .await;

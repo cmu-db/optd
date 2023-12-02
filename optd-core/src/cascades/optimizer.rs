@@ -25,6 +25,7 @@ pub type RuleId = usize;
 #[derive(Default, Clone, Debug)]
 pub struct OptimizerContext {
     pub upper_bound: Option<f64>,
+    pub budget_used: bool,
 }
 
 pub struct CascadesOptimizer<T: RelNodeTyp> {
@@ -156,15 +157,19 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
 
     fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
         self.memo.clear_winner();
-        self.fired_rules.clear();
-        self.explored_group.clear();
-
         self.tasks
             .push_back(Box::new(OptimizeGroupTask::new(group_id)));
         // get the task from the stack
+        self.ctx.budget_used = false;
+        let mut num_tasks = 0;
         while let Some(task) = self.tasks.pop_back() {
             let new_tasks = task.execute(self)?;
             self.tasks.extend(new_tasks);
+            num_tasks += 1;
+            if num_tasks == (1 << 16) {
+                println!("budget used, not applying logical rules any more");
+                self.ctx.budget_used = true;
+            }
         }
         Ok(())
     }

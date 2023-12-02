@@ -51,6 +51,9 @@ impl<T: RelNodeTyp> Task<T> for OptimizeExpressionTask {
             if self.exploring && rule.is_impl_rule() {
                 continue;
             }
+            if optimizer.ctx.budget_used && !rule.is_impl_rule() {
+                break;
+            }
             if top_matches(rule.matcher(), expr.typ.clone(), expr.data.clone()) {
                 tasks.push(
                     Box::new(ApplyRuleTask::new(rule_id, self.expr_id, self.exploring))
@@ -63,5 +66,9 @@ impl<T: RelNodeTyp> Task<T> for OptimizeExpressionTask {
         }
         trace!(event = "task_end", task = "optimize_expr", expr_id = %self.expr_id);
         Ok(tasks)
+    }
+
+    fn describe(&self) -> String {
+        format!("optimize_expr {}", self.expr_id)
     }
 }

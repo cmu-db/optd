@@ -50,4 +50,8 @@ impl<T: RelNodeTyp> Task<T> for ExploreGroupTask {
         );
         Ok(tasks)
     }
+
+    fn describe(&self) -> String {
+        format!("explore_group {}", self.group_id)
+    }
 }
