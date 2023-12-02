@@ -173,6 +173,12 @@ impl<T: RelNodeTyp> Task<T> for ApplyRuleTask {
         if optimizer.is_rule_fired(self.expr_id, self.rule_id) {
             return Ok(vec![]);
         }
+
+        if optimizer.is_rule_disabled(self.rule_id) {
+            optimizer.mark_rule_fired(self.expr_id, self.rule_id);
+            return Ok(vec![]);
+        }
+
         let rule = optimizer.rules()[self.rule_id].clone();
         trace!(event = "task_begin", task = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, rule = %rule.name());
         let group_id = optimizer.get_group_id(self.expr_id);

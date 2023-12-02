@@ -80,7 +80,7 @@ impl Catalog for DatafusionCatalog {
 }
 
 pub struct OptdQueryPlanner {
-    optimizer: Arc<Mutex<Option<Box<DatafusionOptimizer>>>>,
+    pub optimizer: Arc<Mutex<Option<Box<DatafusionOptimizer>>>>,
 }
 
 #[derive(Debug, Eq, PartialEq, Hash)]
@@ -168,6 +168,24 @@ impl std::fmt::Display for JoinOrder {
 }
 
 impl OptdQueryPlanner {
+    pub fn enable_adaptive(&self) {
+        self.optimizer
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .enable_adaptive(true);
+    }
+
+    pub fn disable_adaptive(&self) {
+        self.optimizer
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .enable_adaptive(false);
+    }
+
     async fn create_physical_plan_inner(
         &self,
         logical_plan: &LogicalPlan,
@@ -248,6 +266,12 @@ impl OptdQueryPlanner {
                 logical_join_orders.iter().map(|x| x.to_string()).join("\n"),
             ));
         }
+        // println!(
+        //     "{} cost={}",
+        //     get_join_order(optimized_rel.clone()).unwrap(),
+        //     optimizer.optd_optimizer().get_cost_of(group_id)
+        // );
+        // optimizer.dump(Some(group_id));
         ctx.optimizer = Some(&optimizer);
         let physical_plan = ctx.from_optd(optimized_rel).await?;
         if let Some(explains) = &mut explains {

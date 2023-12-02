@@ -27,8 +27,16 @@ pub struct DatafusionOptimizer {
 }
 
 impl DatafusionOptimizer {
+    pub fn enable_adaptive(&mut self, enable: bool) {
+        self.enable_adaptive = enable;
+    }
+
     pub fn optd_optimizer(&self) -> &CascadesOptimizer<OptRelNodeTyp> {
         &self.optimizer
+    }
+
+    pub fn optd_optimizer_mut(&mut self) -> &mut CascadesOptimizer<OptRelNodeTyp> {
+        &mut self.optimizer
     }
 
     pub fn new_physical(catalog: Box<dyn Catalog>) -> Self {
@@ -37,7 +45,7 @@ impl DatafusionOptimizer {
         rules.push(Arc::new(JoinCommuteRule::new()));
         rules.push(Arc::new(JoinAssocRule::new()));
         rules.push(Arc::new(ProjectionPullUpJoin::new()));
-        let cost_model = AdaptiveCostModel::new();
+        let cost_model = AdaptiveCostModel::new(50);
         Self {
             runtime_statistics: cost_model.get_runtime_map(),
             optimizer: CascadesOptimizer::new(
@@ -49,8 +57,31 @@ impl DatafusionOptimizer {
         }
     }
 
+    pub fn new_alternative_physical_for_demo(catalog: Box<dyn Catalog>) -> Self {
+        let mut rules = PhysicalConversionRule::all_conversions();
+        rules.push(Arc::new(HashJoinRule::new()));
+        rules.insert(0, Arc::new(JoinCommuteRule::new()));
+        rules.insert(1, Arc::new(JoinAssocRule::new()));
+        rules.insert(2, Arc::new(ProjectionPullUpJoin::new()));
+        let cost_model = AdaptiveCostModel::new(1000);
+        let runtime_statistics = cost_model.get_runtime_map();
+        let optimizer = CascadesOptimizer::new(
+            rules,
+            Box::new(cost_model),
+            vec![Box::new(SchemaPropertyBuilder::new(catalog))],
+        );
+        Self {
+            runtime_statistics,
+            optimizer,
+            enable_adaptive: true,
+        }
+    }
+
     pub fn optimize(&mut self, root_rel: OptRelNodeRef) -> Result<(GroupId, OptRelNodeRef)> {
-        self.runtime_statistics.lock().unwrap().iter_cnt += 1;
+        if self.enable_adaptive {
+            self.runtime_statistics.lock().unwrap().iter_cnt += 1;
+        }
+
         self.optimizer
             .optimize_with_on_produce_callback(root_rel, |rel_node, group_id| {
                 if rel_node.typ.is_plan_node() && self.enable_adaptive {

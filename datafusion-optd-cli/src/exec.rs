@@ -25,8 +25,14 @@ use crate::{
     },
     print_options::{MaxRows, PrintOptions},
 };
-use arrow::util::display::{ArrayFormatter, FormatOptions};
-use datafusion::sql::{parser::DFParser, sqlparser::dialect::dialect_from_str};
+use arrow::{
+    record_batch::RecordBatch,
+    util::display::{ArrayFormatter, FormatOptions},
+};
+use datafusion::{
+    dataframe::DataFrame,
+    sql::{parser::DFParser, sqlparser::dialect::dialect_from_str},
+};
 use datafusion::{
     datasource::listing::ListingTableUrl,
     error::{DataFusionError, Result},
@@ -36,10 +42,10 @@ use datafusion::{logical_expr::LogicalPlan, prelude::SessionContext};
 use object_store::ObjectStore;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
-use std::io::prelude::*;
 use std::io::BufReader;
 use std::time::Instant;
 use std::{fs::File, sync::Arc};
+use std::{io::prelude::*, time::Duration};
 use url::Url;
 
 /// run and execute SQL statements and commands, against a context with the given print options
@@ -233,7 +239,18 @@ async fn exec_and_print(
             _ => ctx.execute_logical_plan(plan).await?,
         };
 
-        let results = df.collect().await?;
+        pub async fn collect(df: DataFrame) -> Result<(Vec<RecordBatch>, Duration, Duration)> {
+            let task_ctx = Arc::new(df.task_ctx());
+            let now = Instant::now();
+            let plan = df.create_physical_plan().await?;
+            let plan_time = now.elapsed();
+            let now = Instant::now();
+            let result = datafusion::physical_plan::collect(plan, task_ctx).await?;
+            let execution_time = now.elapsed();
+            Ok((result, plan_time, execution_time))
+        }
+
+        let (results, plan_time, execution_time) = collect(df).await?;
 
         let print_options = if should_ignore_maxrows {
             PrintOptions {
@@ -245,6 +262,11 @@ async fn exec_and_print(
         };
         if !print_options.quiet {
             print_options.print_batches(&results, now)?;
+            println!(
+                "Execution took {:.3} secs, Planning took {:.3} secs",
+                execution_time.as_secs_f64(),
+                plan_time.as_secs_f64()
+            );
         }
     }
 

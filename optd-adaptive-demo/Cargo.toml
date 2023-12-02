@@ -33,3 +33,4 @@ optd-datafusion-bridge = { path = "../optd-datafusion-bridge" }
 optd-datafusion-repr = { path = "../optd-datafusion-repr" }
 tracing-subscriber = "0.3"
 tracing = "0.1"
+console = "0.15"

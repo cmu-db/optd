@@ -160,8 +160,9 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                         compute_cost
                     })
                     .sum::<f64>();
-                Self::cost(1.0, compute_cost + 1.0, 0.0)
+                Self::cost(1.0, compute_cost + 0.01, 0.0)
             }
+            OptRelNodeTyp::ColumnRef => Self::cost(1.0, 0.01, 0.0),
             _ if node.is_expression() => {
                 let compute_cost = children
                     .iter()

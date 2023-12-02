@@ -29,15 +29,22 @@ pub struct OptimizerContext {
     pub rules_applied: usize,
 }
 
+#[derive(Default, Clone, Debug)]
+pub struct OptimizerProperties {
+    pub no_partial_explore: bool,
+}
+
 pub struct CascadesOptimizer<T: RelNodeTyp> {
     memo: Memo<T>,
     pub(super) tasks: VecDeque<Box<dyn Task<T>>>,
     explored_group: HashSet<GroupId>,
     fired_rules: HashMap<ExprId, HashSet<RuleId>>,
     rules: Arc<[Arc<dyn Rule<T, Self>>]>,
+    disabled_rules: HashSet<usize>,
     cost: Arc<dyn CostModel<T>>,
     property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
     pub ctx: OptimizerContext,
+    pub prop: OptimizerProperties,
 }
 
 /// `RelNode` only contains the representation of the plan nodes. Sometimes, we need more context, i.e., group id and
@@ -84,6 +91,8 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             cost: cost.into(),
             ctx: OptimizerContext::default(),
             property_builders,
+            prop: OptimizerProperties::default(),
+            disabled_rules: HashSet::new(),
         }
     }
 
@@ -93,6 +102,18 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
 
     pub(super) fn rules(&self) -> Arc<[Arc<dyn Rule<T, Self>>]> {
         self.rules.clone()
+    }
+
+    pub fn disable_rule(&mut self, rule_id: usize) {
+        self.disabled_rules.insert(rule_id);
+    }
+
+    pub fn enable_rule(&mut self, rule_id: usize) {
+        self.disabled_rules.remove(&rule_id);
+    }
+
+    pub fn is_rule_disabled(&self, rule_id: usize) -> bool {
+        self.disabled_rules.contains(&rule_id)
     }
 
     pub fn dump(&self, group_id: Option<GroupId>) {
@@ -157,7 +178,14 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
     }
 
     fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
-        self.memo.clear_winner();
+        if self.prop.no_partial_explore {
+            self.fired_rules.clear();
+            self.explored_group.clear();
+            self.memo.clear_winner();
+        } else {
+            self.memo.clear_winner();
+        }
+
         self.tasks
             .push_back(Box::new(OptimizeGroupTask::new(group_id)));
         // get the task from the stack
@@ -170,7 +198,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             iter += 1;
             if !self.ctx.budget_used {
                 let plan_space = self.memo.compute_plan_space();
-                if plan_space - plan_space_begin > (1 << 10) || iter >= (1 << 16) {
+                if plan_space - plan_space_begin > (1 << 10) || iter >= (1 << 20) {
                     println!(
                         "budget used, not applying logical rules any more. current plan space: {}",
                         plan_space
@@ -287,6 +315,15 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             .entry(group_expr_id)
             .or_default()
             .insert(rule_id);
+    }
+
+    pub fn get_cost_of(&self, group_id: GroupId) -> f64 {
+        self.memo
+            .get_group_info(group_id)
+            .winner
+            .as_ref()
+            .map(|x| x.cost.0[0])
+            .unwrap_or(0.0)
     }
 }
 
