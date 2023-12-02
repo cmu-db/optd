@@ -213,8 +213,6 @@ async fn exec_and_print(
             LogicalPlan::Explain(_) | LogicalPlan::DescribeTable(_) | LogicalPlan::Analyze(_)
         );
 
-        debug!("original plan:\n{:?}", plan);
-
         let df = match &plan {
             LogicalPlan::Ddl(DdlStatement::CreateExternalTable(cmd)) => {
                 create_external_table(ctx, cmd).await?;

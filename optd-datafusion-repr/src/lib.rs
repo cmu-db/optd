@@ -7,7 +7,9 @@ use cost::{AdaptiveCostModel, RuntimeAdaptionStorage};
 use optd_core::cascades::{CascadesOptimizer, GroupId};
 use plan_nodes::{OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 use properties::schema::{Catalog, SchemaPropertyBuilder};
-use rules::{HashJoinRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule};
+use rules::{
+    HashJoinRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule, ProjectionPullUpJoin,
+};
 
 pub use adaptive::PhysicalCollector;
 pub use optd_core::rel_node::Value;
@@ -33,6 +35,7 @@ impl DatafusionOptimizer {
         rules.push(Arc::new(HashJoinRule::new()));
         rules.push(Arc::new(JoinCommuteRule::new()));
         rules.push(Arc::new(JoinAssocRule::new()));
+        rules.push(Arc::new(ProjectionPullUpJoin::new()));
         let cost_model = AdaptiveCostModel::new();
         Self {
             runtime_statistics: cost_model.get_runtime_map(),
