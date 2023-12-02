@@ -35,15 +35,21 @@ async fn main() -> Result<()> {
     };
     ctx.refresh_catalogs().await?;
 
-    let print_options = PrintOptions {
+    let slient_print_options = PrintOptions {
         format: PrintFormat::Table,
         quiet: true,
         maxrows: MaxRows::Limited(5),
     };
 
+    let print_options = PrintOptions {
+        format: PrintFormat::Table,
+        quiet: false,
+        maxrows: MaxRows::Limited(5),
+    };
+
     exec_from_commands(
         &mut ctx,
-        &print_options,
+        &slient_print_options,
         vec![
             "create table t1(t1v1 int, t1v2 int);".to_string(),
             "create table t2(t2v1 int);".to_string(),
@@ -79,11 +85,11 @@ async fn main() -> Result<()> {
         statement
     }
     let statement = do_insert(0, 0, 50, 1);
-    exec_from_commands(&mut ctx, &print_options, vec![statement]).await;
+    exec_from_commands(&mut ctx, &slient_print_options, vec![statement]).await;
     let statement = do_insert(1, 0, 50, 1);
-    exec_from_commands(&mut ctx, &print_options, vec![statement]).await;
+    exec_from_commands(&mut ctx, &slient_print_options, vec![statement]).await;
     let statement = do_insert(2, 0, 50, 1);
-    exec_from_commands(&mut ctx, &print_options, vec![statement]).await;
+    exec_from_commands(&mut ctx, &slient_print_options, vec![statement]).await;
     loop {
         for table in 0..3 {
             let progress = rand::thread_rng().gen_range(5..10);
@@ -92,19 +98,25 @@ async fn main() -> Result<()> {
             let end = begin + progress;
             data_progress[table] = end;
             let statement = do_insert(table, begin, end, repeat);
-            exec_from_commands(&mut ctx, &print_options, vec![statement]).await;
+            exec_from_commands(&mut ctx, &slient_print_options, vec![statement]).await;
         }
         iter += 1;
         println!("--- ITERATION {} ---", iter);
         exec_from_commands(
             &mut ctx,
             &print_options,
+            vec!["explain select * from t2, t1, t3 where t1v1 = t2v1 and t1v2 = t3v2;".to_string()],
+        )
+        .await;
+        exec_from_commands(
+            &mut ctx,
+            &slient_print_options,
             vec!["select * from t2, t1, t3 where t1v1 = t2v1 and t1v2 = t3v2;".to_string()],
         )
         .await;
         exec_from_commands(
             &mut ctx,
-            &print_options,
+            &slient_print_options,
             vec!["select (select count(*) from t1) as t1cnt, (select count(*) from t2) as t2cnt, (select count(*) from t3) as t3cnt;".to_string()],
         )
         .await;

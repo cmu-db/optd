@@ -39,7 +39,6 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::time::Instant;
 use std::{fs::File, sync::Arc};
-use tracing::debug;
 use url::Url;
 
 /// run and execute SQL statements and commands, against a context with the given print options
@@ -231,7 +230,9 @@ async fn exec_and_print(
         } else {
             print_options.clone()
         };
-        // print_options.print_batches(&results, now)?;
+        if !print_options.quiet {
+            print_options.print_batches(&results, now)?;
+        }
     }
 
     Ok(())
