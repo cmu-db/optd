@@ -23,6 +23,7 @@ pub mod rules;
 pub struct DatafusionOptimizer {
     optimizer: CascadesOptimizer<OptRelNodeTyp>,
     pub runtime_statistics: RuntimeAdaptionStorage,
+    enable_adaptive: bool,
 }
 
 impl DatafusionOptimizer {
@@ -44,6 +45,7 @@ impl DatafusionOptimizer {
                 Box::new(cost_model),
                 vec![Box::new(SchemaPropertyBuilder::new(catalog))],
             ),
+            enable_adaptive: true,
         }
     }
 
@@ -51,7 +53,7 @@ impl DatafusionOptimizer {
         self.runtime_statistics.lock().unwrap().iter_cnt += 1;
         self.optimizer
             .optimize_with_on_produce_callback(root_rel, |rel_node, group_id| {
-                if rel_node.typ.is_plan_node() {
+                if rel_node.typ.is_plan_node() && self.enable_adaptive {
                     return PhysicalCollector::new(
                         PlanNode::from_rel_node(rel_node).unwrap(),
                         group_id,

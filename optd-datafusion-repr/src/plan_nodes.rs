@@ -159,6 +159,7 @@ pub trait OptRelNode: 'static + Clone {
         let mut config = PrettyConfig {
             need_boundaries: false,
             reduced_spaces: false,
+            width: 300,
             ..Default::default()
         };
         let mut out = String::new();

@@ -271,15 +271,22 @@ fn apply_projection_pull_up_join(
         return vec![];
     };
 
-    fn rewrite_condition(cond: Expr, mapping: &ProjectionMapping, left_schema_size: usize) -> Expr {
+    fn rewrite_condition(
+        cond: Expr,
+        mapping: &ProjectionMapping,
+        left_schema_size: usize,
+        projection_schema_size: usize,
+    ) -> Expr {
         if cond.typ() == OptRelNodeTyp::ColumnRef {
             let col = ColumnRefExpr::from_rel_node(cond.into_rel_node()).unwrap();
             let idx = col.index();
-            if idx < left_schema_size {
+            if idx < projection_schema_size {
                 let col = mapping.projection_col_refers_to(col.index());
                 return ColumnRefExpr::new(col).into_expr();
             } else {
-                return col.into_expr();
+                let col = col.index();
+                return ColumnRefExpr::new(col - projection_schema_size + left_schema_size)
+                    .into_expr();
             }
         }
         let expr = cond.into_rel_node();
@@ -290,6 +297,7 @@ fn apply_projection_pull_up_join(
                     Expr::from_rel_node(child.clone()).unwrap(),
                     mapping,
                     left_schema_size,
+                    projection_schema_size,
                 )
                 .into_rel_node(),
             );
@@ -312,11 +320,12 @@ fn apply_projection_pull_up_join(
     // TODO(chi): support capture projection node.
     let projection =
         LogicalProjection::new(PlanNode::from_group(left.clone()), list.clone()).into_rel_node();
+    let left_schema = optimizer.get_property::<SchemaPropertyBuilder>(left.clone(), 0);
     let projection_schema = optimizer.get_property::<SchemaPropertyBuilder>(projection.clone(), 0);
     let right_schema = optimizer.get_property::<SchemaPropertyBuilder>(right.clone(), 0);
     let mut new_projection_exprs = list.to_vec();
     for i in 0..right_schema.len() {
-        let col = ColumnRefExpr::new(i + projection_schema.len()).into_expr();
+        let col: Expr = ColumnRefExpr::new(i + left_schema.len()).into_expr();
         new_projection_exprs.push(col);
     }
     let node = LogicalProjection::new(
@@ -326,6 +335,7 @@ fn apply_projection_pull_up_join(
             rewrite_condition(
                 Expr::from_rel_node(Arc::new(cond)).unwrap(),
                 &mapping,
+                left_schema.len(),
                 projection_schema.len(),
             ),
             JoinType::Inner,

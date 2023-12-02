@@ -119,7 +119,7 @@ async fn main() -> Result<()> {
         exec_from_commands(
             &mut ctx,
             &print_options,
-            vec!["select * from t2, t1, t3 where t1v1 = t2v1 and t1v2 = t3v2;".to_string()],
+            vec!["select * from t1, t2, t3 where t1v1 = t2v1 and t1v2 = t3v2;".to_string()],
         )
         .await;
         exec_from_commands(

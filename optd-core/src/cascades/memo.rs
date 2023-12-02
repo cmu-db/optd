@@ -444,4 +444,9 @@ impl<T: RelNodeTyp> Memo<T> {
             group.info.winner = None;
         }
     }
+
+    /// Return number of expressions in the memo table.
+    pub fn compute_plan_space(&self) -> usize {
+        self.expr_id_to_expr_node.len()
+    }
 }

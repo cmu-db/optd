@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use arrow_schema::Schema;
 use async_recursion::async_recursion;
 use datafusion::{
@@ -396,45 +396,41 @@ impl OptdPlanContext<'_> {
 
     #[async_recursion]
     async fn from_optd_plan_node(&mut self, node: PlanNode) -> Result<Arc<dyn ExecutionPlan>> {
-        match node.typ() {
+        let rel_node = node.into_rel_node();
+        let rel_node_dbg = rel_node.clone();
+        let result = match &rel_node.typ {
             OptRelNodeTyp::PhysicalScan => {
-                self.from_optd_table_scan(
-                    PhysicalScan::from_rel_node(node.into_rel_node()).unwrap(),
-                )
-                .await
+                self.from_optd_table_scan(PhysicalScan::from_rel_node(rel_node).unwrap())
+                    .await
             }
             OptRelNodeTyp::PhysicalProjection => {
-                self.from_optd_projection(
-                    PhysicalProjection::from_rel_node(node.into_rel_node()).unwrap(),
-                )
-                .await
+                self.from_optd_projection(PhysicalProjection::from_rel_node(rel_node).unwrap())
+                    .await
             }
             OptRelNodeTyp::PhysicalFilter => {
-                self.from_optd_filter(PhysicalFilter::from_rel_node(node.into_rel_node()).unwrap())
+                self.from_optd_filter(PhysicalFilter::from_rel_node(rel_node).unwrap())
                     .await
             }
             OptRelNodeTyp::PhysicalSort => {
-                self.from_optd_sort(PhysicalSort::from_rel_node(node.into_rel_node()).unwrap())
+                self.from_optd_sort(PhysicalSort::from_rel_node(rel_node).unwrap())
                     .await
             }
             OptRelNodeTyp::PhysicalAgg => {
-                self.from_optd_agg(PhysicalAgg::from_rel_node(node.into_rel_node()).unwrap())
+                self.from_optd_agg(PhysicalAgg::from_rel_node(rel_node).unwrap())
                     .await
             }
             OptRelNodeTyp::PhysicalNestedLoopJoin(_) => {
                 self.from_optd_nested_loop_join(
-                    PhysicalNestedLoopJoin::from_rel_node(node.into_rel_node()).unwrap(),
+                    PhysicalNestedLoopJoin::from_rel_node(rel_node).unwrap(),
                 )
                 .await
             }
             OptRelNodeTyp::PhysicalHashJoin(_) => {
-                self.from_optd_hash_join(
-                    PhysicalHashJoin::from_rel_node(node.into_rel_node()).unwrap(),
-                )
-                .await
+                self.from_optd_hash_join(PhysicalHashJoin::from_rel_node(rel_node).unwrap())
+                    .await
             }
             OptRelNodeTyp::PhysicalCollector(_) => {
-                let node = PhysicalCollector::from_rel_node(node.into_rel_node()).unwrap();
+                let node = PhysicalCollector::from_rel_node(rel_node).unwrap();
                 let child = self.from_optd_plan_node(node.child()).await?;
                 Ok(Arc::new(CollectorExec::new(
                     child,
@@ -443,7 +439,8 @@ impl OptdPlanContext<'_> {
                 )) as Arc<dyn ExecutionPlan>)
             }
             typ => unimplemented!("{}", typ),
-        }
+        };
+        result.with_context(|| format!("when processing {}", rel_node_dbg))
     }
 
     pub async fn from_optd(&mut self, root_rel: OptRelNodeRef) -> Result<Arc<dyn ExecutionPlan>> {

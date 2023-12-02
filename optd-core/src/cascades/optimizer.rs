@@ -26,6 +26,7 @@ pub type RuleId = usize;
 pub struct OptimizerContext {
     pub upper_bound: Option<f64>,
     pub budget_used: bool,
+    pub rules_applied: usize,
 }
 
 pub struct CascadesOptimizer<T: RelNodeTyp> {
@@ -161,14 +162,21 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             .push_back(Box::new(OptimizeGroupTask::new(group_id)));
         // get the task from the stack
         self.ctx.budget_used = false;
-        let mut num_tasks = 0;
+        let plan_space_begin = self.memo.compute_plan_space();
+        let mut iter = 0;
         while let Some(task) = self.tasks.pop_back() {
             let new_tasks = task.execute(self)?;
             self.tasks.extend(new_tasks);
-            num_tasks += 1;
-            if num_tasks == (1 << 16) {
-                println!("budget used, not applying logical rules any more");
-                self.ctx.budget_used = true;
+            iter += 1;
+            if !self.ctx.budget_used {
+                let plan_space = self.memo.compute_plan_space();
+                if plan_space - plan_space_begin > (1 << 10) || iter >= (1 << 16) {
+                    println!(
+                        "budget used, not applying logical rules any more. current plan space: {}",
+                        plan_space
+                    );
+                    self.ctx.budget_used = true;
+                }
             }
         }
         Ok(())
