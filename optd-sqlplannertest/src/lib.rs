@@ -24,7 +24,8 @@ pub struct DatafusionDb {
 
 impl DatafusionDb {
     pub async fn new() -> Result<Self> {
-        let session_config = SessionConfig::from_env()?.with_information_schema(true);
+        let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
+        session_config.options_mut().optimizer.max_passes = 0;
 
         let rn_config = RuntimeConfig::new();
         let runtime_env = RuntimeEnv::new(rn_config.clone())?;
@@ -35,6 +36,10 @@ impl DatafusionDb {
             let optimizer = DatafusionOptimizer::new_physical(Box::new(DatafusionCatalog::new(
                 state.catalog_list(),
             )));
+            // clean up optimizer rules so that we can plug in our own optimizer
+            state = state.with_optimizer_rules(vec![]);
+            state = state.with_physical_optimizer_rules(vec![]);
+            // use optd-bridge query planner
             state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));
             SessionContext::new_with_state(state)
         };
