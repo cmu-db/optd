@@ -3,17 +3,13 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::{bail, Context, Result};
 use async_recursion::async_recursion;
 use datafusion::{
-    arrow::{
-        compute::kernels::filter,
-        datatypes::{Schema, SchemaRef},
-    },
+    arrow::datatypes::{Schema, SchemaRef},
     datasource::source_as_provider,
     logical_expr::Operator,
     physical_expr,
     physical_plan::{
         self,
         aggregates::AggregateMode,
-        explain::ExplainExec,
         expressions::create_aggregate_expr,
         joins::{
             utils::{ColumnIndex, JoinFilter},
@@ -31,7 +27,7 @@ use optd_datafusion_repr::{
         PhysicalFilter, PhysicalHashJoin, PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan,
         PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
     },
-    PhysicalCollector, Value,
+    PhysicalCollector,
 };
 
 use crate::{physical_collector::CollectorExec, OptdPlanContext};
@@ -321,7 +317,7 @@ impl OptdPlanContext<'_> {
 
         let physical_expr = self.from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
         let join_type = match node.join_type() {
-            JoinType::Inner => datafusion::logical_expr::JoinType::Inner,
+            JoinType::Inner | JoinType::Cross  => datafusion::logical_expr::JoinType::Inner,
             JoinType::LeftOuter => datafusion::logical_expr::JoinType::Left,
             _ => unimplemented!(),
         };

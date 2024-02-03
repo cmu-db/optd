@@ -113,8 +113,8 @@ impl OptdPlanContext<'_> {
                     expr,
                 )
                 .into_expr())
-            }
-            _ => bail!("{:?}", expr),
+            } 
+            _ => bail!("Unsupported expression: {:?}", expr),
         }
     }
 
@@ -230,6 +230,12 @@ impl OptdPlanContext<'_> {
         }
     }
 
+    fn into_optd_cross_join(&mut self, node: &logical_plan::CrossJoin) -> Result<LogicalJoin> {
+        let left = self.into_optd_plan_node(node.left.as_ref())?;
+        let right = self.into_optd_plan_node(node.right.as_ref())?;
+        Ok(LogicalJoin::new(left, right, ConstantExpr::bool(true).into_expr(), JoinType::Inner))
+    }
+
     fn into_optd_plan_node(&mut self, node: &LogicalPlan) -> Result<PlanNode> {
         let node = match node {
             LogicalPlan::TableScan(node) => self.into_optd_table_scan(node)?.into_plan_node(),
@@ -239,6 +245,7 @@ impl OptdPlanContext<'_> {
             LogicalPlan::SubqueryAlias(node) => self.into_optd_plan_node(node.input.as_ref())?,
             LogicalPlan::Join(node) => self.into_optd_join(node)?.into_plan_node(),
             LogicalPlan::Filter(node) => self.into_optd_filter(node)?.into_plan_node(),
+            LogicalPlan::CrossJoin(node) => self.into_optd_cross_join(node)?.into_plan_node(),
             _ => bail!(
                 "unsupported plan node: {}",
                 format!("{:?}", node).split('\n').next().unwrap()
