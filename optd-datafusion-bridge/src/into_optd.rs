@@ -233,7 +233,7 @@ impl OptdPlanContext<'_> {
     fn into_optd_cross_join(&mut self, node: &logical_plan::CrossJoin) -> Result<LogicalJoin> {
         let left = self.into_optd_plan_node(node.left.as_ref())?;
         let right = self.into_optd_plan_node(node.right.as_ref())?;
-        Ok(LogicalJoin::new(left, right, ConstantExpr::bool(true).into_expr(), JoinType::Inner))
+        Ok(LogicalJoin::new(left, right, ConstantExpr::bool(true).into_expr(), JoinType::Cross))
     }
 
     fn into_optd_plan_node(&mut self, node: &LogicalPlan) -> Result<PlanNode> {

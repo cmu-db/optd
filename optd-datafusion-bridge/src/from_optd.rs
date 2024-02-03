@@ -12,8 +12,7 @@ use datafusion::{
         aggregates::AggregateMode,
         expressions::create_aggregate_expr,
         joins::{
-            utils::{ColumnIndex, JoinFilter},
-            PartitionMode,
+            utils::{ColumnIndex, JoinFilter}, CrossJoinExec, PartitionMode
         },
         projection::ProjectionExec,
         AggregateExpr, ExecutionPlan, PhysicalExpr,
@@ -316,8 +315,13 @@ impl OptdPlanContext<'_> {
         };
 
         let physical_expr = self.from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
+
+        if let JoinType::Cross = node.join_type() {
+            return Ok(Arc::new(CrossJoinExec::new(left_exec, right_exec)) as Arc<dyn ExecutionPlan + 'static>);
+        }
+
         let join_type = match node.join_type() {
-            JoinType::Inner | JoinType::Cross  => datafusion::logical_expr::JoinType::Inner,
+            JoinType::Inner => datafusion::logical_expr::JoinType::Inner,
             JoinType::LeftOuter => datafusion::logical_expr::JoinType::Left,
             _ => unimplemented!(),
         };
