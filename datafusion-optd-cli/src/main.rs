@@ -134,6 +134,8 @@ struct Args {
         default_value = "40"
     )]
     maxrows: MaxRows,
+    #[clap(long, help = "Turn on datafusion logical optimizer before optd")]
+    enable_logical: bool,
 }
 
 #[tokio::main]
@@ -156,7 +158,11 @@ pub async fn main() -> Result<()> {
     };
 
     let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
-    session_config.options_mut().optimizer.max_passes = 0;
+    
+    if !args.enable_logical {
+        session_config.options_mut().optimizer.max_passes = 0;
+    }
+    
 
     if let Some(batch_size) = args.batch_size {
         session_config = session_config.with_batch_size(batch_size);
@@ -188,9 +194,11 @@ pub async fn main() -> Result<()> {
     let mut ctx = {
         let mut state =
             SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
-        // clean up optimizer rules so that we can plug in our own optimizer
-        state = state.with_optimizer_rules(vec![]);
-        state = state.with_physical_optimizer_rules(vec![]);
+        if !args.enable_logical {
+            // clean up optimizer rules so that we can plug in our own optimizer
+            state = state.with_optimizer_rules(vec![]);
+            state = state.with_physical_optimizer_rules(vec![]);
+        }
         // use optd-bridge query planner
         let optimizer = DatafusionOptimizer::new_physical(Box::new(DatafusionCatalog::new(
             state.catalog_list(),
