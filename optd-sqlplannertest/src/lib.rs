@@ -102,7 +102,38 @@ impl sqlplannertest::PlannerTestRunner for DatafusionDb {
                 let result = self.execute(&format!("explain {}", test_case.sql)).await?;
                 for subtask in task["explain:".len()..].split(",") {
                     let subtask = subtask.trim();
-                    if subtask == "join_orders" {
+                    if subtask == "logical_datafusion" {
+                        writeln!(
+                            r,
+                            "{}",
+                            result
+                                .iter()
+                                .find(|x| x[0] == "logical_plan after datafusion")
+                                .map(|x| &x[1])
+                                .unwrap()
+                        )?;
+                    } else if subtask == "logical_optd" {
+                        // println!("logical!!!");
+                        writeln!(
+                            r,
+                            "{}",
+                            result
+                                .iter()
+                                .find(|x| x[0] == "logical_plan after optd")
+                                .map(|x| &x[1])
+                                .unwrap()
+                        )?;
+                    } else if subtask == "physical_optd" {
+                        writeln!(
+                            r,
+                            "{}",
+                            result
+                                .iter()
+                                .find(|x| x[0] == "physical_plan after optd")
+                                .map(|x| &x[1])
+                                .unwrap()
+                        )?;
+                    } else if subtask == "join_orders" {
                         writeln!(
                             r,
                             "{}",
@@ -124,6 +155,16 @@ impl sqlplannertest::PlannerTestRunner for DatafusionDb {
                                 .unwrap()
                         )?;
                         writeln!(r)?;
+                    } else if subtask == "physical_datafusion" {
+                        writeln!(
+                            r,
+                            "{}",
+                            result
+                                .iter()
+                                .find(|x| x[0] == "physical_plan")
+                                .map(|x| &x[1])
+                                .unwrap()
+                        )?;
                     }
                 }
             }
