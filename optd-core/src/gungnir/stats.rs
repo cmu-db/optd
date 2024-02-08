@@ -74,7 +74,7 @@ pub fn t_digest() {
     let mut t_digest = TDigest::new(4.0);
 
     // Add some sample data
-    for i in 0..1000 {
+    /*for i in 0..1000 {
         t_digest.add(i as f64);
         // Perform compression only after every 10 data points
         if i % 100 == 0 {
@@ -89,5 +89,5 @@ pub fn t_digest() {
     println!("Quantile at 0.5: {}", t_digest.quantile(0.5));
     println!("Quantile at 0.75: {}", t_digest.quantile(0.75));
     println!("Quantile at 0.99: {}", t_digest.quantile(0.99));
-    println!("Quantile at 0.999: {}", t_digest.quantile(0.999));
+    println!("Quantile at 0.999: {}", t_digest.quantile(0.999));*/
 }
