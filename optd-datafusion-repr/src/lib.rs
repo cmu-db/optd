@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use cost::{AdaptiveCostModel, RuntimeAdaptionStorage};
-use optd_core::cascades::{CascadesOptimizer, GroupId, OptimizerProperties};
+use optd_core::{
+    cascades::{CascadesOptimizer, GroupId, OptimizerProperties},
+    cost::CostModel,
+};
 use plan_nodes::{OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 use properties::schema::{Catalog, SchemaPropertyBuilder};
 use rules::{
@@ -22,7 +25,7 @@ pub mod rules;
 
 pub struct DatafusionOptimizer {
     optimizer: CascadesOptimizer<OptRelNodeTyp>,
-    pub runtime_statistics: RuntimeAdaptionStorage,
+    pub runtime_stats: RuntimeAdaptionStorage,
     enable_adaptive: bool,
 }
 
@@ -41,17 +44,26 @@ impl DatafusionOptimizer {
 
     /// Create an optimizer with default settings: adaptive + partial explore.
     pub fn new_physical(catalog: Box<dyn Catalog>) -> Self {
+        let runtime_stats = RuntimeAdaptionStorage::default();
+        let cost_model = Box::new(AdaptiveCostModel::new(50, runtime_stats.clone()));
+        Self::new_physical_with_cost_model(catalog, cost_model, runtime_stats)
+    }
+
+    pub fn new_physical_with_cost_model(
+        catalog: Box<dyn Catalog>,
+        cost_model: Box<dyn CostModel<OptRelNodeTyp>>,
+        runtime_stats: RuntimeAdaptionStorage,
+    ) -> Self {
         let mut rules = PhysicalConversionRule::all_conversions();
         rules.push(Arc::new(HashJoinRule::new()));
         rules.push(Arc::new(JoinCommuteRule::new()));
         rules.push(Arc::new(JoinAssocRule::new()));
         rules.push(Arc::new(ProjectionPullUpJoin::new()));
-        let cost_model = AdaptiveCostModel::new(50);
         Self {
-            runtime_statistics: cost_model.get_runtime_map(),
+            runtime_stats,
             optimizer: CascadesOptimizer::new_with_prop(
                 rules,
-                Box::new(cost_model),
+                cost_model,
                 vec![Box::new(SchemaPropertyBuilder::new(catalog))],
                 OptimizerProperties {
                     partial_explore_iter: Some(1 << 20),
@@ -69,15 +81,15 @@ impl DatafusionOptimizer {
         rules.insert(0, Arc::new(JoinCommuteRule::new()));
         rules.insert(1, Arc::new(JoinAssocRule::new()));
         rules.insert(2, Arc::new(ProjectionPullUpJoin::new()));
-        let cost_model = AdaptiveCostModel::new(1000); // very large decay
-        let runtime_statistics = cost_model.get_runtime_map();
+        let runtime_stats = RuntimeAdaptionStorage::default();
+        let cost_model = AdaptiveCostModel::new(1000, runtime_stats.clone()); // very large decay
         let optimizer = CascadesOptimizer::new(
             rules,
             Box::new(cost_model),
             vec![Box::new(SchemaPropertyBuilder::new(catalog))],
         );
         Self {
-            runtime_statistics,
+            runtime_stats,
             optimizer,
             enable_adaptive: true,
         }
@@ -85,7 +97,7 @@ impl DatafusionOptimizer {
 
     pub fn optimize(&mut self, root_rel: OptRelNodeRef) -> Result<(GroupId, OptRelNodeRef)> {
         if self.enable_adaptive {
-            self.runtime_statistics.lock().unwrap().iter_cnt += 1;
+            self.runtime_stats.lock().unwrap().iter_cnt += 1;
             self.optimizer.step_clear_winner();
         } else {
             self.optimizer.step_clear();

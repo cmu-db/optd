@@ -77,9 +77,9 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
 }
 
 impl AdaptiveCostModel {
-    pub fn new(decay: usize) -> Self {
+    pub fn new(decay: usize, runtime_map: RuntimeAdaptionStorage) -> Self {
         Self {
-            runtime_row_cnt: Arc::new(Mutex::new(RuntimeAdaptionStorageInner::default())),
+            runtime_row_cnt: runtime_map,
             base_model: OptCostModel::new(HashMap::new()),
             decay,
         }

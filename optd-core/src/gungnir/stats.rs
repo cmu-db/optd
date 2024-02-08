@@ -8,16 +8,25 @@
 // "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 // KIND, either express or implied.
 
-use arrow::array::{Array, Int32Array};
 use arrow_schema::DataType;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use std::collections::HashMap;
 use std::fs::File;
 
 use super::tdigest::TDigest;
 
+struct Stats {
+    pub table_stats: HashMap<String, TableStats>,
+}
+
+struct TableStats {
+    row_cnt: usize,
+    column_stats: HashMap<usize, ColumnStats>,
+}
+
 /// Represents the statistics of a one-dimensional column for a table in memory.
 /// NOTE: Subject to change if we use T-Digest.
-struct StatsData<T: PartialOrd> {
+pub struct ColumnStatsData<T: PartialOrd> {
     name: String,                // Table name || Attribute name.
     n_distinct: u32,             // Number of unique values in the column.
     most_common_vals: Vec<T>,    // i.e. MCV.
@@ -26,19 +35,21 @@ struct StatsData<T: PartialOrd> {
 }
 
 /// Enumeration of currently supported data types in Gungnir™.
-pub enum Stats {
-    Int(StatsData<i32>),
-    Float(StatsData<f64>),
-    String(StatsData<String>),
+pub enum ColumnStats {
+    Int(ColumnStatsData<i32>),
+    Float(ColumnStatsData<f64>),
+    String(ColumnStatsData<String>),
 }
 
 /// Returns the statistics over all columns of the Parquet file.
-pub fn compute_stats(path: &str) -> Result<Vec<Stats>, Box<dyn std::error::Error>> {
+pub fn compute_stats(
+    path: &str,
+) -> Result<HashMap<usize, ColumnStats>, Box<dyn std::error::Error>> {
     // Obtain a batch iterator over the Parquet file.
     let mut reader = ParquetRecordBatchReaderBuilder::try_new(File::open(path)?)?.build()?;
 
     // Initialize an empty statistics array.
-    let mut stats = Vec::new();
+    let stats = HashMap::new();
 
     // Iterate over all record batches.
     while let Some(batch_result) = reader.next() {
