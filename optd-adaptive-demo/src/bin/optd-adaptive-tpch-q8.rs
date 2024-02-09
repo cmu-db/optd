@@ -28,7 +28,7 @@ async fn main() -> Result<()> {
     let mut ctx = {
         let mut state =
             SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
-        let optimizer = DatafusionOptimizer::new_physical(Box::new(DatafusionCatalog::new(
+        let optimizer = DatafusionOptimizer::new_physical(Arc::new(DatafusionCatalog::new(
             state.catalog_list(),
         )));
         // clean up optimizer rules so that we can plug in our own optimizer

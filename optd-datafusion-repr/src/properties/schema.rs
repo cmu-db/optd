@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use optd_core::property::PropertyBuilder;
 
 use crate::plan_nodes::{ConstantType, OptRelNodeTyp};
@@ -28,11 +30,11 @@ pub trait Catalog: Send + Sync + 'static {
 }
 
 pub struct SchemaPropertyBuilder {
-    catalog: Box<dyn Catalog>,
+    catalog: Arc<dyn Catalog>,
 }
 
 impl SchemaPropertyBuilder {
-    pub fn new(catalog: Box<dyn Catalog>) -> Self {
+    pub fn new(catalog: Arc<dyn Catalog>) -> Self {
         Self { catalog }
     }
 }
