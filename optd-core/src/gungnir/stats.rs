@@ -15,6 +15,7 @@ use std::fs::File;
 
 use super::tdigest::TDigest;
 
+#[derive(Default)]
 pub struct Stats {
     pub table_stats: HashMap<String, TableStats>,
 }
