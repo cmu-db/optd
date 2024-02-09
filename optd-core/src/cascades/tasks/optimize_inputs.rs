@@ -150,6 +150,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
             let context = RelNodeContext {
                 expr_id: self.expr_id,
                 group_id,
+                children_group_ids: children.to_vec(),
             };
             if self.should_terminate(
                 cost.sum(
