@@ -7,6 +7,7 @@ use cost::{AdaptiveCostModel, RuntimeAdaptionStorage};
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId, OptimizerProperties},
     cost::CostModel,
+    gungnir::stats::Stats,
 };
 use plan_nodes::{OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 use properties::schema::{Catalog, SchemaPropertyBuilder};
@@ -42,10 +43,11 @@ impl DatafusionOptimizer {
         &mut self.optimizer
     }
 
-    /// Create an optimizer with default settings: adaptive + partial explore.
+    /// Create an optimizer with default settings: adaptive + partial explore + no statistics.
     pub fn new_physical(catalog: Box<dyn Catalog>) -> Self {
         let runtime_stats = RuntimeAdaptionStorage::default();
-        let cost_model = Box::new(AdaptiveCostModel::new(50, runtime_stats.clone()));
+        let stats = Stats::default();
+        let cost_model = Box::new(AdaptiveCostModel::new(50, runtime_stats.clone(), stats));
         Self::new_physical_with_cost_model(catalog, cost_model, runtime_stats)
     }
 
@@ -82,7 +84,8 @@ impl DatafusionOptimizer {
         rules.insert(1, Arc::new(JoinAssocRule::new()));
         rules.insert(2, Arc::new(ProjectionPullUpJoin::new()));
         let runtime_stats = RuntimeAdaptionStorage::default();
-        let cost_model = AdaptiveCostModel::new(1000, runtime_stats.clone()); // very large decay
+        let stats = Stats::default();
+        let cost_model = AdaptiveCostModel::new(1000, runtime_stats.clone(), stats); // very large decay
         let optimizer = CascadesOptimizer::new(
             rules,
             Box::new(cost_model),

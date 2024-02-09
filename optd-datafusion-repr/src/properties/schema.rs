@@ -1,8 +1,3 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-
 use optd_core::property::PropertyBuilder;
 
 use crate::plan_nodes::{ConstantType, OptRelNodeTyp};
