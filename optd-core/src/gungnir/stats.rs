@@ -15,11 +15,11 @@ use std::fs::File;
 
 use super::tdigest::TDigest;
 
-struct Stats {
+pub struct Stats {
     pub table_stats: HashMap<String, TableStats>,
 }
 
-struct TableStats {
+pub struct TableStats {
     row_cnt: usize,
     column_stats: HashMap<usize, ColumnStats>,
 }

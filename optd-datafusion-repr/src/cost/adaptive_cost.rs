@@ -7,6 +7,7 @@ use crate::{cost::OptCostModel, plan_nodes::OptRelNodeTyp};
 use optd_core::{
     cascades::{GroupId, RelNodeContext},
     cost::{Cost, CostModel},
+    gungnir::stats::Stats,
     rel_node::{RelNode, Value},
 };
 
@@ -22,6 +23,7 @@ pub struct AdaptiveCostModel {
     runtime_row_cnt: RuntimeAdaptionStorage,
     base_model: OptCostModel,
     decay: usize,
+    stats: Stats,
 }
 
 impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
@@ -77,11 +79,12 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
 }
 
 impl AdaptiveCostModel {
-    pub fn new(decay: usize, runtime_map: RuntimeAdaptionStorage) -> Self {
+    pub fn new(decay: usize, runtime_map: RuntimeAdaptionStorage, stats: Stats) -> Self {
         Self {
             runtime_row_cnt: runtime_map,
             base_model: OptCostModel::new(HashMap::new()),
             decay,
+            stats,
         }
     }
 
