@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use crate::plan_nodes::OptRelNodeTyp;
 use itertools::Itertools;
 use optd_core::{
-    cascades::RelNodeContext,
+    cascades::{CascadesOptimizer, RelNodeContext},
     cost::{Cost, CostModel},
+    optimizer,
     rel_node::{RelNode, RelNodeTyp, Value},
 };
 
@@ -18,7 +19,7 @@ fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
         .iter()
         .map(|child| compute_plan_node_cost(model, child, total_cost))
         .collect_vec();
-    let cost = model.compute_cost(&node.typ, &node.data, &children, None);
+    let cost = model.compute_cost(&node.typ, &node.data, &children, None, None);
     model.accumulate(total_cost, &cost);
     cost
 }
@@ -95,6 +96,7 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
         data: &Option<Value>,
         children: &[Cost],
         _context: Option<RelNodeContext>,
+        _optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Cost {
         match node {
             OptRelNodeTyp::PhysicalScan => {

@@ -5,7 +5,7 @@ use std::{
 
 use crate::{cost::OptCostModel, plan_nodes::OptRelNodeTyp};
 use optd_core::{
-    cascades::{GroupId, RelNodeContext},
+    cascades::{CascadesOptimizer, GroupId, RelNodeContext},
     cost::{Cost, CostModel},
     gungnir::stats::Stats,
     rel_node::{RelNode, Value},
@@ -45,6 +45,7 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
         data: &Option<Value>,
         children: &[Cost],
         context: Option<RelNodeContext>,
+        optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Cost {
         if let OptRelNodeTyp::PhysicalScan = node {
             let guard = self.runtime_row_cnt.lock().unwrap();
@@ -59,8 +60,11 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
                 return OptCostModel::cost(1.0, 0.0, 1.0);
             }
         }
-        let (mut row_cnt, compute_cost, io_cost) =
-            OptCostModel::cost_tuple(&self.base_model.compute_cost(node, data, children, None));
+        let (mut row_cnt, compute_cost, io_cost) = OptCostModel::cost_tuple(
+            &self
+                .base_model
+                .compute_cost(node, data, children, None, optimizer),
+        );
         if let Some(context) = context {
             let guard = self.runtime_row_cnt.lock().unwrap();
             if let Some((runtime_row_cnt, iter)) = guard.history.get(&context.group_id) {

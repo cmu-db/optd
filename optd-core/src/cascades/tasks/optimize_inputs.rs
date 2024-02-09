@@ -154,7 +154,13 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
             };
             if self.should_terminate(
                 cost.sum(
-                    &cost.compute_cost(&expr.typ, &expr.data, &input_cost, Some(context.clone())),
+                    &cost.compute_cost(
+                        &expr.typ,
+                        &expr.data,
+                        &input_cost,
+                        Some(context.clone()),
+                        Some(optimizer),
+                    ),
                     &input_cost,
                 )
                 .0[0],
@@ -179,6 +185,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                                     &expr.data,
                                     &input_cost,
                                     Some(context.clone()),
+                                    Some(optimizer),
                                 ),
                                 &input_cost,
                             )
@@ -250,6 +257,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                             &expr.data,
                             &input_cost,
                             Some(context.clone()),
+                            Some(optimizer),
                         ),
                         &input_cost,
                     ),

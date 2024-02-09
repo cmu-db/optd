@@ -1,5 +1,5 @@
 use crate::{
-    cascades::RelNodeContext,
+    cascades::{CascadesOptimizer, RelNodeContext},
     rel_node::{RelNode, RelNodeTyp, Value},
 };
 
@@ -13,6 +13,7 @@ pub trait CostModel<T: RelNodeTyp>: 'static + Send + Sync {
         data: &Option<Value>,
         children: &[Cost],
         context: Option<RelNodeContext>,
+        optimizer: Option<&CascadesOptimizer<T>>,
     ) -> Cost;
 
     fn compute_plan_node_cost(&self, node: &RelNode<T>) -> Cost;
