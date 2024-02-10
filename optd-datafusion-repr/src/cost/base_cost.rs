@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::plan_nodes::OptRelNodeTyp;
 use itertools::Itertools;
 use optd_core::{
-    cascades::RelNodeContext,
+    cascades::{CascadesOptimizer, RelNodeContext},
     cost::{Cost, CostModel},
     rel_node::{RelNode, RelNodeTyp, Value},
 };
@@ -18,7 +18,7 @@ fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
         .iter()
         .map(|child| compute_plan_node_cost(model, child, total_cost))
         .collect_vec();
-    let cost = model.compute_cost(&node.typ, &node.data, &children, None);
+    let cost = model.compute_cost(&node.typ, &node.data, &children, None, None);
     model.accumulate(total_cost, &cost);
     cost
 }
@@ -95,8 +95,8 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
         data: &Option<Value>,
         children: &[Cost],
         _context: Option<RelNodeContext>,
+        optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Cost {
-        println!("compute_cost() called");
         match node {
             OptRelNodeTyp::PhysicalScan => {
                 let table_name = data.as_ref().unwrap().as_str();
@@ -108,6 +108,7 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                 Self::cost(row_cnt, 0.0, row_cnt)
             }
             OptRelNodeTyp::PhysicalFilter => {
+                println!("compute_cost(): entering PhysicalFilter branch");
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
                 let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
                 let selectivity = 0.001;
