@@ -158,7 +158,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                         &expr.data,
                         &input_cost,
                         Some(context.clone()),
-                        Some(optimizer)
+                        Some(optimizer),
                     ),
                     &input_cost,
                 )

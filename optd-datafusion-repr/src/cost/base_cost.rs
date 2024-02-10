@@ -108,7 +108,13 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                 Self::cost(row_cnt, 0.0, row_cnt)
             }
             OptRelNodeTyp::PhysicalFilter => {
-                println!("compute_cost(): entering PhysicalFilter branch");
+                println!("OptCostModel.compute_cost(): entering PhysicalFilter branch");
+                if let Some(optimizer) = optimizer {
+                    println!("OptCostModel.compute_cost(): calling optimizer.dump()...");
+                    optimizer.dump(None);
+                } else {
+                    println!("OptCostModel.compute_cost(): optimizer was None");
+                }
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
                 let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
                 let selectivity = 0.001;
