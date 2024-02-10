@@ -14,6 +14,7 @@ cargo test -p optd-sqlplannertest
 cargo nextest run -p optd-sqlplannertest
 ```
 
+The `explain` and `execute` task will be run with datafusion's logical optimizer disabled. To keep using datafusion's logical optimizer, you could use the `execute_with_logical` and `explain_with_logical` tasks instead.
 
 Currently we have the following options for the explain task:
 
