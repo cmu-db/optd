@@ -96,6 +96,7 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
         children: &[Cost],
         _context: Option<RelNodeContext>,
     ) -> Cost {
+        println!("compute_cost() called");
         match node {
             OptRelNodeTyp::PhysicalScan => {
                 let table_name = data.as_ref().unwrap().as_str();
