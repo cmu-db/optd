@@ -8,7 +8,8 @@ use optd_core::cascades::{CascadesOptimizer, GroupId, OptimizerProperties};
 use plan_nodes::{OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 use properties::schema::{Catalog, SchemaPropertyBuilder};
 use rules::{
-    HashJoinRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule, ProjectionPullUpJoin,
+    EliminateFilterRule, HashJoinRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule,
+    ProjectionPullUpJoin,
 };
 
 pub use adaptive::PhysicalCollector;
@@ -69,6 +70,8 @@ impl DatafusionOptimizer {
         rules.insert(0, Arc::new(JoinCommuteRule::new()));
         rules.insert(1, Arc::new(JoinAssocRule::new()));
         rules.insert(2, Arc::new(ProjectionPullUpJoin::new()));
+        rules.insert(3, Arc::new(EliminateFilterRule::new()));
+
         let cost_model = AdaptiveCostModel::new(1000); // very large decay
         let runtime_statistics = cost_model.get_runtime_map();
         let optimizer = CascadesOptimizer::new(
