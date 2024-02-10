@@ -61,7 +61,7 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
         }
         println!("AdaptiveCostModel.compute_cost(): about to call OptCostModel.compute_cost()");
         let (mut row_cnt, compute_cost, io_cost) =
-            OptCostModel::cost_tuple(&self.base_model.compute_cost(node, data, children, None, optimizer));
+            OptCostModel::cost_tuple(&self.base_model.compute_cost(node, data, children, context, optimizer));
         if let Some(context) = context {
             let guard = self.runtime_row_cnt.lock().unwrap();
             if let Some((runtime_row_cnt, iter)) = guard.history.get(&context.group_id) {
