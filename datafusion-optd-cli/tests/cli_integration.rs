@@ -17,9 +17,7 @@
 
 use std::process::Command;
 
-use assert_cmd::prelude::{CommandCargoExt, OutputAssertExt};
-use predicates::prelude::predicate;
-use rstest::rstest;
+use assert_cmd::prelude::CommandCargoExt;
 
 #[cfg(test)]
 #[ctor::ctor]
