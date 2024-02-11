@@ -13,27 +13,24 @@ define_rule!(
     (Filter, child, [cond])
 );
 
-/// Replace filter nodes with a false predicate
-/// with an EmptyRelation (since it will yield no tuples)
+/// Transformations:
+///     - Filter node w/ false pred -> EmptyRelation
+///     - Filter node w/ true pred  -> Eliminate from the tree
 fn apply_eliminate_filter(
     _optimizer: &impl Optimizer<OptRelNodeTyp>,
     EliminateFilterRulePicks { child, cond }: EliminateFilterRulePicks,
 ) -> Vec<RelNode<OptRelNodeTyp>> {
-    // If the conditional is a constant boolean
-    if let OptRelNodeTyp::Constant(const_type) = cond.typ {
-        if const_type == ConstantType::Bool {
-            if let Some(data) = cond.data {
-                if data.as_bool() {
-                    // If the condition is true, eliminate the filter node, as it
-                    // will yield everything from below it.
-                    // TODO(bowad)
-                    return vec![child];
-                } else {
-                    // If the condition is false, replace this node with the empty relation,
-                    // since it will never yield tuples.
-                    let node = LogicalEmptyRelation::new(false);
-                    return vec![node.into_rel_node().as_ref().clone()];
-                }
+    if let OptRelNodeTyp::Constant(ConstantType::Bool) = cond.typ {
+        if let Some(data) = cond.data {
+            if data.as_bool() {
+                // If the condition is true, eliminate the filter node, as it
+                // will yield everything from below it.
+                return vec![child];
+            } else {
+                // If the condition is false, replace this node with the empty relation,
+                // since it will never yield tuples.
+                let node = LogicalEmptyRelation::new(false);
+                return vec![node.into_rel_node().as_ref().clone()];
             }
         }
     }
