@@ -54,7 +54,8 @@ fn init() {
 #[test]
 fn cli_test_tpch() {
     let mut cmd = Command::cargo_bin("datafusion-optd-cli").unwrap();
-    cmd.args(["--enable-logical", "--file", "../tpch/test.sql"]);
+    cmd.current_dir(".."); // all paths in `test.sql` assume we're in the base dir of the repo
+    cmd.args(["--enable-logical", "--file", "tpch/test.sql"]);
     let status = cmd.status().unwrap();
     assert!(status.success(), "should not have crashed when running tpch");
 }
