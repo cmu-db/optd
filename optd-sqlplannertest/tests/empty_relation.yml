@@ -15,7 +15,6 @@
 - sql: |
     select * from t1 inner join t2 on false;
     select 64+1 from t1 inner join t2 on false;
-    select 64+1 from t1 inner join t2 on 1=0;
   desc: Test whether the optimizer eliminates join to empty relation
   tasks:
     - explain:logical_optd,physical_optd

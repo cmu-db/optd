@@ -46,7 +46,7 @@ pub fn main() {
     let scan1 = LogicalScan::new("t1".into());
     let filter_cond = BinOpExpr::new(
         ColumnRefExpr::new(1).0,
-        ConstantExpr::new(Value::Int(2)).0,
+        ConstantExpr::new(Value::Int64(2)).0,
         BinOpType::Eq,
     );
     let filter1 = LogicalFilter::new(scan1.0, filter_cond.0);

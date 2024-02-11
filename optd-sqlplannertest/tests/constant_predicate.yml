@@ -1,0 +1,20 @@
+- sql: |
+    create table t1(t1v1 int, t1v2 int);
+    insert into t1 values (0, 0), (1, 1), (2, 2);
+  tasks:
+    - execute_with_logical
+- sql: |
+    select * from t1 where t1v1 = 0;
+  desc: Test whether the optimizer handles integer equality predicates correctly.
+  tasks:
+    - execute_with_logical
+- sql: |
+    select * from t1 where t1v1 = 0 and t1v2 = 1;
+  desc: Test whether the optimizer handles multiple integer equality predicates correctly.
+  tasks:
+    - execute_with_logical
+- sql: |
+    select * from t1 where t1v1 = 0 and t1v2 != 1;
+  desc: Test whether the optimizer handles multiple integer inequality predicates correctly.
+  tasks:
+    - execute_with_logical

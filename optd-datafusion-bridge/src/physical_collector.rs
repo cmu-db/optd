@@ -30,7 +30,7 @@ impl std::fmt::Debug for CollectorExec {
 }
 
 impl DisplayAs for CollectorExec {
-    fn fmt_as(&self, t: DisplayFormatType, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt_as(&self, _t: DisplayFormatType, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "CollectorExec group_id={}", self.group_id)
     }
 }

@@ -6,5 +6,7 @@ mod physical;
 
 // pub use filter_join::FilterJoinPullUpRule;
 pub use eliminate_filter::EliminateFilterRule;
-pub use joins::{HashJoinRule, JoinAssocRule, JoinCommuteRule, ProjectionPullUpJoin};
+pub use joins::{
+    EliminateJoinRule, HashJoinRule, JoinAssocRule, JoinCommuteRule, ProjectionPullUpJoin,
+};
 pub use physical::PhysicalConversionRule;

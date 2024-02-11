@@ -1,12 +1,6 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-
 use optd_core::property::PropertyBuilder;
 
 use crate::plan_nodes::{ConstantType, OptRelNodeTyp};
-use datafusion::arrow::datatypes::{DataType, Field, Schema as DatafusionSchema};
 
 #[derive(Clone, Debug)]
 pub struct Schema(pub Vec<ConstantType>);
@@ -16,28 +10,9 @@ impl Schema {
     pub fn len(&self) -> usize {
         self.0.len()
     }
-}
 
-impl Into<DatafusionSchema> for Schema {
-    // TODO: current DataType and ConstantType are not 1 to 1 mapping
-    // optd schema stores constantType from data type in catalog.get
-    // for decimal128, the precision is lost
-    fn into(self) -> DatafusionSchema {
-        let match_type = |typ: &ConstantType| match typ {
-            ConstantType::Any => unimplemented!(),
-            ConstantType::Bool => DataType::Boolean,
-            ConstantType::Int => DataType::Int64,
-            ConstantType::Date => DataType::Date32,
-            ConstantType::Decimal => DataType::Float64,
-            ConstantType::Utf8String => DataType::Utf8,
-        };
-        let fields: Vec<_> = self
-            .0
-            .iter()
-            .enumerate()
-            .map(|(i, typ)| Field::new(&format!("c{}", i), match_type(typ), false))
-            .collect();
-        DatafusionSchema::new(fields)
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 

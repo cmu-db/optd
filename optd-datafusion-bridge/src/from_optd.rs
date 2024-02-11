@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::{bail, Context, Result};
 use async_recursion::async_recursion;
 use datafusion::{
-    arrow::datatypes::{Schema, SchemaRef},
+    arrow::datatypes::{DataType, Field, Schema, SchemaRef},
     datasource::source_as_provider,
     logical_expr::Operator,
     physical_expr,
@@ -33,9 +33,37 @@ use optd_datafusion_repr::{
 
 use crate::{physical_collector::CollectorExec, OptdPlanContext};
 
+// TODO: current DataType and ConstantType are not 1 to 1 mapping
+// optd schema stores constantType from data type in catalog.get
+// for decimal128, the precision is lost
+fn from_optd_schema(optd_schema: &OptdSchema) -> Schema {
+    let match_type = |typ: &ConstantType| match typ {
+        ConstantType::Any => unimplemented!(),
+        ConstantType::Bool => DataType::Boolean,
+        ConstantType::UInt8 => DataType::UInt8,
+        ConstantType::UInt16 => DataType::UInt16,
+        ConstantType::UInt32 => DataType::UInt32,
+        ConstantType::UInt64 => DataType::UInt64,
+        ConstantType::Int8 => DataType::Int8,
+        ConstantType::Int16 => DataType::Int16,
+        ConstantType::Int32 => DataType::Int32,
+        ConstantType::Int64 => DataType::Int64,
+        ConstantType::Date => DataType::Date32,
+        ConstantType::Decimal => DataType::Float64,
+        ConstantType::Utf8String => DataType::Utf8,
+    };
+    let fields: Vec<_> = optd_schema
+        .0
+        .iter()
+        .enumerate()
+        .map(|(i, typ)| Field::new(format!("c{}", i), match_type(typ), false))
+        .collect();
+    Schema::new(fields)
+}
+
 impl OptdPlanContext<'_> {
     #[async_recursion]
-    async fn from_optd_table_scan(
+    async fn conv_from_optd_table_scan(
         &mut self,
         node: PhysicalScan,
     ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
@@ -45,12 +73,12 @@ impl OptdPlanContext<'_> {
         Ok(plan)
     }
 
-    fn from_optd_sort_order_expr(
+    fn conv_from_optd_sort_order_expr(
         &mut self,
         sort_expr: SortOrderExpr,
         context: &SchemaRef,
     ) -> Result<physical_expr::PhysicalSortExpr> {
-        let expr = self.from_optd_expr(sort_expr.child(), context)?;
+        let expr = Self::conv_from_optd_expr(sort_expr.child(), context)?;
         Ok(physical_expr::PhysicalSortExpr {
             expr,
             options: match sort_expr.order() {
@@ -66,7 +94,7 @@ impl OptdPlanContext<'_> {
         })
     }
 
-    fn from_optd_agg_expr(
+    fn conv_from_optd_agg_expr(
         &mut self,
         expr: Expr,
         context: &SchemaRef,
@@ -80,19 +108,19 @@ impl OptdPlanContext<'_> {
             .children()
             .to_vec()
             .into_iter()
-            .map(|expr| self.from_optd_expr(expr, context))
+            .map(|expr| Self::conv_from_optd_expr(expr, context))
             .collect::<Result<Vec<_>>>()?;
         Ok(create_aggregate_expr(
             &func,
             false,
             &args,
             &[],
-            &context,
+            context,
             "<agg_func>",
         )?)
     }
 
-    fn from_optd_expr(&mut self, expr: Expr, context: &SchemaRef) -> Result<Arc<dyn PhysicalExpr>> {
+    fn conv_from_optd_expr(expr: Expr, context: &SchemaRef) -> Result<Arc<dyn PhysicalExpr>> {
         match expr.typ() {
             OptRelNodeTyp::ColumnRef => {
                 let expr = ColumnRefExpr::from_rel_node(expr.into_rel_node()).unwrap();
@@ -106,7 +134,14 @@ impl OptdPlanContext<'_> {
                 let value = expr.value();
                 let value = match typ {
                     ConstantType::Bool => ScalarValue::Boolean(Some(value.as_bool())),
-                    ConstantType::Int => ScalarValue::Int64(Some(value.as_i64())),
+                    ConstantType::UInt8 => ScalarValue::UInt8(Some(value.as_u8())),
+                    ConstantType::UInt16 => ScalarValue::UInt16(Some(value.as_u16())),
+                    ConstantType::UInt32 => ScalarValue::UInt32(Some(value.as_u32())),
+                    ConstantType::UInt64 => ScalarValue::UInt64(Some(value.as_u64())),
+                    ConstantType::Int8 => ScalarValue::Int8(Some(value.as_i8())),
+                    ConstantType::Int16 => ScalarValue::Int16(Some(value.as_i16())),
+                    ConstantType::Int32 => ScalarValue::Int32(Some(value.as_i32())),
+                    ConstantType::Int64 => ScalarValue::Int64(Some(value.as_i64())),
                     ConstantType::Decimal => {
                         ScalarValue::Decimal128(Some(value.as_f64() as i128), 20, 0)
                         // TODO(chi): no hard code decimal
@@ -126,7 +161,7 @@ impl OptdPlanContext<'_> {
                     .children()
                     .to_vec()
                     .into_iter()
-                    .map(|expr| self.from_optd_expr(expr, context))
+                    .map(|expr| Self::conv_from_optd_expr(expr, context))
                     .collect::<Result<Vec<_>>>()?;
                 match func {
                     FuncType::Scalar(func) => {
@@ -154,13 +189,13 @@ impl OptdPlanContext<'_> {
             OptRelNodeTyp::LogOp(typ) => {
                 let expr = LogOpExpr::from_rel_node(expr.into_rel_node()).unwrap();
                 let mut children = expr.children().to_vec().into_iter();
-                let first_expr = self.from_optd_expr(children.next().unwrap(), context)?;
+                let first_expr = Self::conv_from_optd_expr(children.next().unwrap(), context)?;
                 let op = match typ {
                     LogOpType::And => datafusion::logical_expr::Operator::And,
                     LogOpType::Or => datafusion::logical_expr::Operator::Or,
                 };
                 children.try_fold(first_expr, |acc, expr| {
-                    let expr = self.from_optd_expr(expr, context)?;
+                    let expr = Self::conv_from_optd_expr(expr, context)?;
                     Ok(
                         Arc::new(datafusion::physical_plan::expressions::BinaryExpr::new(
                             acc, op, expr,
@@ -170,8 +205,8 @@ impl OptdPlanContext<'_> {
             }
             OptRelNodeTyp::BinOp(op) => {
                 let expr = BinOpExpr::from_rel_node(expr.into_rel_node()).unwrap();
-                let left = self.from_optd_expr(expr.left_child(), context)?;
-                let right = self.from_optd_expr(expr.right_child(), context)?;
+                let left = Self::conv_from_optd_expr(expr.left_child(), context)?;
+                let right = Self::conv_from_optd_expr(expr.right_child(), context)?;
                 let op = match op {
                     BinOpType::Eq => Operator::Eq,
                     BinOpType::Neq => Operator::NotEq,
@@ -195,11 +230,11 @@ impl OptdPlanContext<'_> {
     }
 
     #[async_recursion]
-    async fn from_optd_projection(
+    async fn conv_from_optd_projection(
         &mut self,
         node: PhysicalProjection,
     ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
-        let input_exec = self.from_optd_plan_node(node.child()).await?;
+        let input_exec = self.conv_from_optd_plan_node(node.child()).await?;
         let physical_exprs = node
             .exprs()
             .to_vec()
@@ -207,7 +242,7 @@ impl OptdPlanContext<'_> {
             .enumerate()
             .map(|(idx, expr)| {
                 Ok((
-                    self.from_optd_expr(expr, &input_exec.schema())?,
+                    Self::conv_from_optd_expr(expr, &input_exec.schema())?,
                     format!("col{}", idx),
                 ))
             })
@@ -220,12 +255,12 @@ impl OptdPlanContext<'_> {
     }
 
     #[async_recursion]
-    async fn from_optd_filter(
+    async fn conv_from_optd_filter(
         &mut self,
         node: PhysicalFilter,
     ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
-        let input_exec = self.from_optd_plan_node(node.child()).await?;
-        let physical_expr = self.from_optd_expr(node.cond(), &input_exec.schema())?;
+        let input_exec = self.conv_from_optd_plan_node(node.child()).await?;
+        let physical_expr = Self::conv_from_optd_expr(node.cond(), &input_exec.schema())?;
         Ok(
             Arc::new(datafusion::physical_plan::filter::FilterExec::try_new(
                 physical_expr,
@@ -235,17 +270,17 @@ impl OptdPlanContext<'_> {
     }
 
     #[async_recursion]
-    async fn from_optd_sort(
+    async fn conv_from_optd_sort(
         &mut self,
         node: PhysicalSort,
     ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
-        let input_exec = self.from_optd_plan_node(node.child()).await?;
+        let input_exec = self.conv_from_optd_plan_node(node.child()).await?;
         let physical_exprs = node
             .exprs()
             .to_vec()
             .into_iter()
             .map(|expr| {
-                self.from_optd_sort_order_expr(
+                self.conv_from_optd_sort_order_expr(
                     SortOrderExpr::from_rel_node(expr.into_rel_node()).unwrap(),
                     &input_exec.schema(),
                 )
@@ -260,16 +295,16 @@ impl OptdPlanContext<'_> {
     }
 
     #[async_recursion]
-    async fn from_optd_agg(
+    async fn conv_from_optd_agg(
         &mut self,
         node: PhysicalAgg,
     ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
-        let input_exec = self.from_optd_plan_node(node.child()).await?;
+        let input_exec = self.conv_from_optd_plan_node(node.child()).await?;
         let agg_exprs = node
             .aggrs()
             .to_vec()
             .into_iter()
-            .map(|expr| self.from_optd_agg_expr(expr, &input_exec.schema()))
+            .map(|expr| self.conv_from_optd_agg_expr(expr, &input_exec.schema()))
             .collect::<Result<Vec<_>>>()?;
         let group_exprs = node
             .groups()
@@ -277,7 +312,7 @@ impl OptdPlanContext<'_> {
             .into_iter()
             .map(|expr| {
                 Ok((
-                    self.from_optd_expr(expr, &input_exec.schema())?,
+                    Self::conv_from_optd_expr(expr, &input_exec.schema())?,
                     "<agg_expr>".to_string(),
                 ))
             })
@@ -299,12 +334,12 @@ impl OptdPlanContext<'_> {
     }
 
     #[async_recursion]
-    async fn from_optd_nested_loop_join(
+    async fn conv_from_optd_nested_loop_join(
         &mut self,
         node: PhysicalNestedLoopJoin,
     ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
-        let left_exec = self.from_optd_plan_node(node.left()).await?;
-        let right_exec = self.from_optd_plan_node(node.right()).await?;
+        let left_exec = self.conv_from_optd_plan_node(node.left()).await?;
+        let right_exec = self.conv_from_optd_plan_node(node.right()).await?;
         let filter_schema = {
             let fields = left_exec
                 .schema()
@@ -316,7 +351,7 @@ impl OptdPlanContext<'_> {
             Schema::new_with_metadata(fields, HashMap::new())
         };
 
-        let physical_expr = self.from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
+        let physical_expr = Self::conv_from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
 
         if let JoinType::Cross = node.join_type() {
             return Ok(Arc::new(CrossJoinExec::new(left_exec, right_exec))
@@ -354,12 +389,12 @@ impl OptdPlanContext<'_> {
     }
 
     #[async_recursion]
-    async fn from_optd_hash_join(
+    async fn conv_from_optd_hash_join(
         &mut self,
         node: PhysicalHashJoin,
     ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
-        let left_exec = self.from_optd_plan_node(node.left()).await?;
-        let right_exec = self.from_optd_plan_node(node.right()).await?;
+        let left_exec = self.conv_from_optd_plan_node(node.left()).await?;
+        let right_exec = self.conv_from_optd_plan_node(node.right()).await?;
         let join_type = match node.join_type() {
             JoinType::Inner => datafusion::logical_expr::JoinType::Inner,
             _ => unimplemented!(),
@@ -400,7 +435,7 @@ impl OptdPlanContext<'_> {
     }
 
     #[async_recursion]
-    async fn from_optd_plan_node(&mut self, node: PlanNode) -> Result<Arc<dyn ExecutionPlan>> {
+    async fn conv_from_optd_plan_node(&mut self, node: PlanNode) -> Result<Arc<dyn ExecutionPlan>> {
         let mut schema = OptdSchema(vec![]);
         if node.typ() == OptRelNodeTyp::PhysicalEmptyRelation {
             schema = node.schema(self.optimizer.unwrap().optd_optimizer());
@@ -409,38 +444,38 @@ impl OptdPlanContext<'_> {
         let rel_node_dbg = rel_node.clone();
         let result = match &rel_node.typ {
             OptRelNodeTyp::PhysicalScan => {
-                self.from_optd_table_scan(PhysicalScan::from_rel_node(rel_node).unwrap())
+                self.conv_from_optd_table_scan(PhysicalScan::from_rel_node(rel_node).unwrap())
                     .await
             }
             OptRelNodeTyp::PhysicalProjection => {
-                self.from_optd_projection(PhysicalProjection::from_rel_node(rel_node).unwrap())
+                self.conv_from_optd_projection(PhysicalProjection::from_rel_node(rel_node).unwrap())
                     .await
             }
             OptRelNodeTyp::PhysicalFilter => {
-                self.from_optd_filter(PhysicalFilter::from_rel_node(rel_node).unwrap())
+                self.conv_from_optd_filter(PhysicalFilter::from_rel_node(rel_node).unwrap())
                     .await
             }
             OptRelNodeTyp::PhysicalSort => {
-                self.from_optd_sort(PhysicalSort::from_rel_node(rel_node).unwrap())
+                self.conv_from_optd_sort(PhysicalSort::from_rel_node(rel_node).unwrap())
                     .await
             }
             OptRelNodeTyp::PhysicalAgg => {
-                self.from_optd_agg(PhysicalAgg::from_rel_node(rel_node).unwrap())
+                self.conv_from_optd_agg(PhysicalAgg::from_rel_node(rel_node).unwrap())
                     .await
             }
             OptRelNodeTyp::PhysicalNestedLoopJoin(_) => {
-                self.from_optd_nested_loop_join(
+                self.conv_from_optd_nested_loop_join(
                     PhysicalNestedLoopJoin::from_rel_node(rel_node).unwrap(),
                 )
                 .await
             }
             OptRelNodeTyp::PhysicalHashJoin(_) => {
-                self.from_optd_hash_join(PhysicalHashJoin::from_rel_node(rel_node).unwrap())
+                self.conv_from_optd_hash_join(PhysicalHashJoin::from_rel_node(rel_node).unwrap())
                     .await
             }
             OptRelNodeTyp::PhysicalCollector(_) => {
                 let node = PhysicalCollector::from_rel_node(rel_node).unwrap();
-                let child = self.from_optd_plan_node(node.child()).await?;
+                let child = self.conv_from_optd_plan_node(node.child()).await?;
                 Ok(Arc::new(CollectorExec::new(
                     child,
                     node.group_id(),
@@ -449,7 +484,7 @@ impl OptdPlanContext<'_> {
             }
             OptRelNodeTyp::PhysicalEmptyRelation => {
                 let physical_node = PhysicalEmptyRelation::from_rel_node(rel_node).unwrap();
-                let datafusion_schema: Schema = schema.into();
+                let datafusion_schema: Schema = from_optd_schema(&schema);
                 Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
                     physical_node.produce_one_row(),
                     Arc::new(datafusion_schema),
@@ -460,9 +495,8 @@ impl OptdPlanContext<'_> {
         result.with_context(|| format!("when processing {}", rel_node_dbg))
     }
 
-    pub async fn from_optd(&mut self, root_rel: OptRelNodeRef) -> Result<Arc<dyn ExecutionPlan>> {
-        println!("{}", root_rel);
-        self.from_optd_plan_node(PlanNode::from_rel_node(root_rel).unwrap())
+    pub async fn conv_from_optd(&mut self, root_rel: OptRelNodeRef) -> Result<Arc<dyn ExecutionPlan>> {
+        self.conv_from_optd_plan_node(PlanNode::from_rel_node(root_rel).unwrap())
             .await
     }
 }

@@ -51,8 +51,7 @@ impl OptimizeInputsTask {
         optimizer: &mut CascadesOptimizer<T>,
     ) -> Vec<Cost> {
         let zero_cost = optimizer.cost().zero();
-        let mut input_cost = Vec::new();
-        input_cost.reserve(children.len());
+        let mut input_cost = Vec::with_capacity(children.len());
         for &child in children.iter() {
             let group = optimizer.get_group_info(child);
             if let Some(ref winner) = group.winner {
@@ -153,7 +152,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
             };
             if self.should_terminate(
                 cost.sum(
-                    &cost.compute_cost(&expr.typ, &expr.data, &input_cost, Some(context.clone())),
+                    &cost.compute_cost(&expr.typ, &expr.data, &input_cost, Some(context)),
                     &input_cost,
                 )
                 .0[0],
@@ -177,7 +176,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                                     &expr.typ,
                                     &expr.data,
                                     &input_cost,
-                                    Some(context.clone()),
+                                    Some(context),
                                 ),
                                 &input_cost,
                             )
@@ -248,7 +247,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                             &expr.typ,
                             &expr.data,
                             &input_cost,
-                            Some(context.clone()),
+                            Some(context),
                         ),
                         &input_cost,
                     ),

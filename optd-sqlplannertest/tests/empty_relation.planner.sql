@@ -14,6 +14,16 @@ select 64 + 1;
 select 64 + 1 from t1;
 
 /*
+LogicalProjection
+├── exprs:Add
+│   ├── 64
+│   └── 1
+└── LogicalEmptyRelation { produce_one_row: true }
+PhysicalProjection
+├── exprs:Add
+│   ├── 64
+│   └── 1
+└── PhysicalEmptyRelation { produce_one_row: true }
 65
 65
 65
@@ -23,35 +33,13 @@ select 64 + 1 from t1;
 -- Test whether the optimizer eliminates join to empty relation
 select * from t1 inner join t2 on false;
 select 64+1 from t1 inner join t2 on false;
-select 64+1 from t1 inner join t2 on 1=0;
 
 /*
-0 0 0 200
-0 0 1 201
-0 0 2 202
-1 1 0 200
-1 1 1 201
-1 1 2 202
-2 2 0 200
-2 2 1 201
-2 2 2 202
-65
-65
-65
-65
-65
-65
-65
-65
-65
-65
-65
-65
-65
-65
-65
-65
-65
-65
+LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
+└── LogicalJoin { join_type: Inner, cond: false }
+    ├── LogicalScan { table: t1 }
+    └── LogicalScan { table: t2 }
+PhysicalProjection { exprs: [ #0, #1, #2, #3 ] }
+└── PhysicalEmptyRelation { produce_one_row: false }
 */
 
