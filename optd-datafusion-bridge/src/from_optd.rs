@@ -49,7 +49,7 @@ fn from_optd_schema(optd_schema: &OptdSchema) -> Schema {
         .0
         .iter()
         .enumerate()
-        .map(|(i, typ)| Field::new(&format!("c{}", i), match_type(typ), false))
+        .map(|(i, typ)| Field::new(format!("c{}", i), match_type(typ), false))
         .collect();
     Schema::new(fields)
 }
@@ -108,7 +108,7 @@ impl OptdPlanContext<'_> {
             false,
             &args,
             &[],
-            &context,
+            context,
             "<agg_func>",
         )?)
     }

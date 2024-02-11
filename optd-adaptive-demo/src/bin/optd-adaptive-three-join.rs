@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
     )
     .await;
 
-    let mut data_progress = vec![5; 3];
+    let mut data_progress = [5; 3];
     let mut iter = 0;
 
     fn do_insert(table: usize, begin: usize, end: usize, repeat: usize) -> String {

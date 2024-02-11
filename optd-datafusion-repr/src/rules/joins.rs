@@ -342,7 +342,8 @@ fn apply_projection_pull_up_join(
                 .into_rel_node(),
             );
         }
-        let expr = Expr::from_rel_node(
+        
+        Expr::from_rel_node(
             RelNode {
                 typ: expr.typ.clone(),
                 children,
@@ -350,8 +351,7 @@ fn apply_projection_pull_up_join(
             }
             .into(),
         )
-        .unwrap();
-        expr
+        .unwrap()
     }
 
     let left = Arc::new(left.clone());

@@ -72,7 +72,7 @@ impl OptdPlanContext<'_> {
                 }
                 ScalarValue::Int64(x) => {
                     let x = x.as_ref().unwrap();
-                    Ok(ConstantExpr::int(*x as i64).into_expr())
+                    Ok(ConstantExpr::int(*x).into_expr())
                 }
                 ScalarValue::Date32(x) => {
                     let x = x.as_ref().unwrap();
@@ -97,8 +97,8 @@ impl OptdPlanContext<'_> {
                 let when_then_expr = &x.when_then_expr;
                 assert_eq!(when_then_expr.len(), 1);
                 let (when_expr, then_expr) = &when_then_expr[0];
-                let when_expr = self.into_optd_expr(&when_expr, context)?;
-                let then_expr = self.into_optd_expr(&then_expr, context)?;
+                let when_expr = self.into_optd_expr(when_expr, context)?;
+                let then_expr = self.into_optd_expr(then_expr, context)?;
                 let else_expr = self.into_optd_expr(x.else_expr.as_ref().unwrap(), context)?;
                 assert!(x.expr.is_none());
                 Ok(FuncExpr::new(
@@ -226,20 +226,20 @@ impl OptdPlanContext<'_> {
 
             match node.filter {
                 Some(DFExpr::Literal(ScalarValue::Boolean(Some(val)))) => {
-                    return Ok(LogicalJoin::new(
+                    Ok(LogicalJoin::new(
                         left,
                         right,
                         ConstantExpr::bool(val).into_expr(),
                         join_type,
-                    ));
+                    ))
                 }
                 None => {
-                    return Ok(LogicalJoin::new(
+                    Ok(LogicalJoin::new(
                         left,
                         right,
                         ConstantExpr::bool(true).into_expr(),
                         join_type,
-                    ));
+                    ))
                 }
                 _ => bail!("unsupported join filter: {:?}", node.filter),
             }

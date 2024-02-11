@@ -207,7 +207,7 @@ impl PlanNode {
     }
 
     pub fn from_group(rel_node: OptRelNodeRef) -> Self {
-        return Self(rel_node);
+        Self(rel_node)
     }
 }
 

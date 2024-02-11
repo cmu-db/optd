@@ -167,7 +167,7 @@ impl<T: RelNodeTyp> Memo<T> {
             unreachable!("not found {}", memo_node)
         };
         let group_id = self.get_group_id_of_expr_id(expr_id);
-        return (group_id, expr_id);
+        (group_id, expr_id)
     }
 
     fn infer_properties(
