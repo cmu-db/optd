@@ -11,3 +11,4 @@ CREATE EXTERNAL TABLE nation_tbl STORED AS CSV DELIMITER '|' LOCATION 'tpch/nati
 insert into nation select column_1, column_2, column_3, column_4 from nation_tbl;
 
 SELECT * FROM nation WHERE nation.n_name = 'UNITED STATES';
+SELECT * FROM nation WHERE nation.n_name = 'UNITED STATES';
