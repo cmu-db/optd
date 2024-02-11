@@ -4,12 +4,13 @@ use datafusion::{
     logical_expr::{self, logical_plan, LogicalPlan, Operator},
     scalar::ScalarValue,
 };
+use datafusion_expr::Expr as DFExpr;
 use optd_core::rel_node::RelNode;
 use optd_datafusion_repr::plan_nodes::{
     BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, FuncExpr, FuncType,
-    JoinType, LogOpExpr, LogOpType, LogicalAgg, LogicalFilter, LogicalJoin, LogicalProjection,
-    LogicalScan, LogicalSort, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode, SortOrderExpr,
-    SortOrderType,
+    JoinType, LogOpExpr, LogOpType, LogicalAgg, LogicalEmptyRelation, LogicalFilter, LogicalJoin,
+    LogicalProjection, LogicalScan, LogicalSort, OptRelNode, OptRelNodeRef, OptRelNodeTyp,
+    PlanNode, SortOrderExpr, SortOrderType,
 };
 
 use crate::OptdPlanContext;
@@ -68,6 +69,10 @@ impl OptdPlanContext<'_> {
                 ScalarValue::Utf8(x) => {
                     let x = x.as_ref().unwrap();
                     Ok(ConstantExpr::string(x).into_expr())
+                }
+                ScalarValue::Int64(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::int(*x as i64).into_expr())
                 }
                 ScalarValue::Date32(x) => {
                     let x = x.as_ref().unwrap();
@@ -211,12 +216,33 @@ impl OptdPlanContext<'_> {
         }
 
         if log_ops.is_empty() {
-            Ok(LogicalJoin::new(
-                left,
-                right,
-                ConstantExpr::bool(true).into_expr(),
-                join_type,
-            ))
+            // optd currently only supports
+            // 1. normal equal condition join
+            //    select * from a join b on a.id = b.id
+            // 2. join on false/true
+            //    select * from a join b on false/true
+            // 3. join on other literals or other filters are not supported
+            //  instead of converting them to a join on true, we bail out
+
+            match node.filter {
+                Some(DFExpr::Literal(ScalarValue::Boolean(Some(val)))) => {
+                    return Ok(LogicalJoin::new(
+                        left,
+                        right,
+                        ConstantExpr::bool(val).into_expr(),
+                        join_type,
+                    ));
+                }
+                None => {
+                    return Ok(LogicalJoin::new(
+                        left,
+                        right,
+                        ConstantExpr::bool(true).into_expr(),
+                        join_type,
+                    ));
+                }
+                _ => bail!("unsupported join filter: {:?}", node.filter),
+            }
         } else if log_ops.len() == 1 {
             Ok(LogicalJoin::new(left, right, log_ops.remove(0), join_type))
         } else {
@@ -233,7 +259,19 @@ impl OptdPlanContext<'_> {
     fn into_optd_cross_join(&mut self, node: &logical_plan::CrossJoin) -> Result<LogicalJoin> {
         let left = self.into_optd_plan_node(node.left.as_ref())?;
         let right = self.into_optd_plan_node(node.right.as_ref())?;
-        Ok(LogicalJoin::new(left, right, ConstantExpr::bool(true).into_expr(), JoinType::Cross))
+        Ok(LogicalJoin::new(
+            left,
+            right,
+            ConstantExpr::bool(true).into_expr(),
+            JoinType::Cross,
+        ))
+    }
+
+    fn into_optd_empty_relation(
+        &mut self,
+        node: &logical_plan::EmptyRelation,
+    ) -> Result<LogicalEmptyRelation> {
+        Ok(LogicalEmptyRelation::new(node.produce_one_row))
     }
 
     fn into_optd_plan_node(&mut self, node: &LogicalPlan) -> Result<PlanNode> {
@@ -246,6 +284,9 @@ impl OptdPlanContext<'_> {
             LogicalPlan::Join(node) => self.into_optd_join(node)?.into_plan_node(),
             LogicalPlan::Filter(node) => self.into_optd_filter(node)?.into_plan_node(),
             LogicalPlan::CrossJoin(node) => self.into_optd_cross_join(node)?.into_plan_node(),
+            LogicalPlan::EmptyRelation(node) => {
+                self.into_optd_empty_relation(node)?.into_plan_node()
+            }
             _ => bail!(
                 "unsupported plan node: {}",
                 format!("{:?}", node).split('\n').next().unwrap()

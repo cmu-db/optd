@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 arrow-schema = "*"
 datafusion = "32.0.0"
+datafusion-expr = "32.0.0"
 async-trait = "0.1"
 optd-core = { path = "../optd-core" }
 optd-datafusion-repr = { path = "../optd-datafusion-repr" }

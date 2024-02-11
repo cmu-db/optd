@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::{bail, Context, Result};
 use async_recursion::async_recursion;
 use datafusion::{
-    arrow::datatypes::{Schema, SchemaRef},
+    arrow::datatypes::{DataType, Field, Schema, SchemaRef},
     datasource::source_as_provider,
     logical_expr::Operator,
     physical_expr,
@@ -12,7 +12,8 @@ use datafusion::{
         aggregates::AggregateMode,
         expressions::create_aggregate_expr,
         joins::{
-            utils::{ColumnIndex, JoinFilter}, CrossJoinExec, PartitionMode
+            utils::{ColumnIndex, JoinFilter},
+            CrossJoinExec, PartitionMode,
         },
         projection::ProjectionExec,
         AggregateExpr, ExecutionPlan, PhysicalExpr,
@@ -23,13 +24,35 @@ use optd_datafusion_repr::{
     plan_nodes::{
         BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, FuncExpr, FuncType,
         JoinType, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalAgg,
-        PhysicalFilter, PhysicalHashJoin, PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan,
-        PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
+        PhysicalEmptyRelation, PhysicalFilter, PhysicalHashJoin, PhysicalNestedLoopJoin,
+        PhysicalProjection, PhysicalScan, PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
     },
+    properties::schema::Schema as OptdSchema,
     PhysicalCollector,
 };
 
 use crate::{physical_collector::CollectorExec, OptdPlanContext};
+
+// TODO: current DataType and ConstantType are not 1 to 1 mapping
+// optd schema stores constantType from data type in catalog.get
+// for decimal128, the precision is lost
+fn from_optd_schema(optd_schema: &OptdSchema) -> Schema {
+    let match_type = |typ: &ConstantType| match typ {
+        ConstantType::Any => unimplemented!(),
+        ConstantType::Bool => DataType::Boolean,
+        ConstantType::Int => DataType::Int64,
+        ConstantType::Date => DataType::Date32,
+        ConstantType::Decimal => DataType::Float64,
+        ConstantType::Utf8String => DataType::Utf8,
+    };
+    let fields: Vec<_> = optd_schema
+        .0
+        .iter()
+        .enumerate()
+        .map(|(i, typ)| Field::new(&format!("c{}", i), match_type(typ), false))
+        .collect();
+    Schema::new(fields)
+}
 
 impl OptdPlanContext<'_> {
     #[async_recursion]
@@ -317,7 +340,8 @@ impl OptdPlanContext<'_> {
         let physical_expr = self.from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
 
         if let JoinType::Cross = node.join_type() {
-            return Ok(Arc::new(CrossJoinExec::new(left_exec, right_exec)) as Arc<dyn ExecutionPlan + 'static>);
+            return Ok(Arc::new(CrossJoinExec::new(left_exec, right_exec))
+                as Arc<dyn ExecutionPlan + 'static>);
         }
 
         let join_type = match node.join_type() {
@@ -398,6 +422,10 @@ impl OptdPlanContext<'_> {
 
     #[async_recursion]
     async fn from_optd_plan_node(&mut self, node: PlanNode) -> Result<Arc<dyn ExecutionPlan>> {
+        let mut schema = OptdSchema(vec![]);
+        if node.typ() == OptRelNodeTyp::PhysicalEmptyRelation {
+            schema = node.schema(self.optimizer.unwrap().optd_optimizer());
+        }
         let rel_node = node.into_rel_node();
         let rel_node_dbg = rel_node.clone();
         let result = match &rel_node.typ {
@@ -438,6 +466,14 @@ impl OptdPlanContext<'_> {
                     child,
                     node.group_id(),
                     self.optimizer.as_ref().unwrap().runtime_statistics.clone(),
+                )) as Arc<dyn ExecutionPlan>)
+            }
+            OptRelNodeTyp::PhysicalEmptyRelation => {
+                let physical_node = PhysicalEmptyRelation::from_rel_node(rel_node).unwrap();
+                let datafusion_schema: Schema = from_optd_schema(&schema);
+                Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
+                    physical_node.produce_one_row(),
+                    Arc::new(datafusion_schema),
                 )) as Arc<dyn ExecutionPlan>)
             }
             typ => unimplemented!("{}", typ),

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::vec;
 
 use itertools::Itertools;
 use optd_core::optimizer::Optimizer;
@@ -8,8 +9,9 @@ use optd_core::rules::{Rule, RuleMatcher};
 
 use super::macros::{define_impl_rule, define_rule};
 use crate::plan_nodes::{
-    BinOpExpr, BinOpType, ColumnRefExpr, Expr, ExprList, JoinType, LogicalJoin, LogicalProjection,
-    OptRelNode, OptRelNodeTyp, PhysicalHashJoin, PlanNode,
+    BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, ExprList, JoinType,
+    LogicalEmptyRelation, LogicalJoin, LogicalProjection, OptRelNode, OptRelNodeTyp,
+    PhysicalHashJoin, PlanNode,
 };
 use crate::properties::schema::SchemaPropertyBuilder;
 
@@ -76,6 +78,44 @@ fn apply_join_commute(
     let node =
         LogicalProjection::new(node.into_plan_node(), ExprList::new(proj_expr)).into_rel_node();
     vec![node.as_ref().clone()]
+}
+
+define_rule!(
+    EliminateJoinRule,
+    apply_eliminate_join,
+    (Join(JoinType::Inner), left, right, [cond])
+);
+
+/// Eliminate logical join with constant predicates
+/// True predicates becomes CrossJoin (not yet implemented)
+/// False predicates become EmptyRelation (not yet implemented)
+#[allow(unused_variables)]
+fn apply_eliminate_join(
+    optimizer: &impl Optimizer<OptRelNodeTyp>,
+    EliminateJoinRulePicks { left, right, cond }: EliminateJoinRulePicks,
+) -> Vec<RelNode<OptRelNodeTyp>> {
+    if let OptRelNodeTyp::Constant(const_type) = cond.typ {
+        if const_type == ConstantType::Bool {
+            if let Some(data) = cond.data {
+                if data.as_bool() {
+                    // change it to cross join if filter is always true
+                    let node = LogicalJoin::new(
+                        PlanNode::from_group(left.into()),
+                        PlanNode::from_group(right.into()),
+                        ConstantExpr::bool(true).into_expr(),
+                        JoinType::Cross,
+                    );
+                    return vec![node.into_rel_node().as_ref().clone()];
+                } else {
+                    // No need to handle schema here, as all exprs in the same group
+                    // will have same logical properties
+                    let node = LogicalEmptyRelation::new(false);
+                    return vec![node.into_rel_node().as_ref().clone()];
+                }
+            }
+        }
+    }
+    vec![]
 }
 
 // (A join B) join C -> A join (B join C)

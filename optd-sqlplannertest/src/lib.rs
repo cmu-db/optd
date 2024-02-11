@@ -20,12 +20,26 @@ use async_trait::async_trait;
 #[derive(Default)]
 pub struct DatafusionDb {
     ctx: SessionContext,
+    /// Context enabling datafusion's logical optimizer.
+    with_logical_ctx: SessionContext,
 }
 
 impl DatafusionDb {
     pub async fn new() -> Result<Self> {
+        let ctx = DatafusionDb::new_session_ctx(false).await?;
+        let with_logical_ctx = DatafusionDb::new_session_ctx(true).await?;
+        Ok(Self {
+            ctx,
+            with_logical_ctx,
+        })
+    }
+
+    /// Creates a new session context. If the `with_logical` flag is set, datafusion's logical optimizer will be used.
+    async fn new_session_ctx(with_logical: bool) -> Result<SessionContext> {
         let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
-        session_config.options_mut().optimizer.max_passes = 0;
+        if !with_logical {
+            session_config.options_mut().optimizer.max_passes = 0;
+        }
 
         let rn_config = RuntimeConfig::new();
         let runtime_env = RuntimeEnv::new(rn_config.clone())?;
@@ -36,26 +50,37 @@ impl DatafusionDb {
             let optimizer = DatafusionOptimizer::new_physical(Box::new(DatafusionCatalog::new(
                 state.catalog_list(),
             )));
-            // clean up optimizer rules so that we can plug in our own optimizer
-            state = state.with_optimizer_rules(vec![]);
-            state = state.with_physical_optimizer_rules(vec![]);
+            if !with_logical {
+                // clean up optimizer rules so that we can plug in our own optimizer
+                state = state.with_optimizer_rules(vec![]);
+                state = state.with_physical_optimizer_rules(vec![]);
+            }
             // use optd-bridge query planner
             state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));
             SessionContext::new_with_state(state)
         };
         ctx.refresh_catalogs().await?;
-        Ok(Self { ctx })
+        Ok(ctx)
     }
 
-    async fn execute(&self, sql: &str) -> Result<Vec<Vec<String>>> {
+    async fn execute(&self, sql: &str, with_logical: bool) -> Result<Vec<Vec<String>>> {
         let sql = unescape_input(sql)?;
         let dialect = Box::new(GenericDialect);
         let statements = DFParser::parse_sql_with_dialect(&sql, dialect.as_ref())?;
         let mut result = Vec::new();
         for statement in statements {
-            let plan = self.ctx.state().statement_to_plan(statement).await?;
+            let df = if with_logical {
+                let plan = self
+                    .with_logical_ctx
+                    .state()
+                    .statement_to_plan(statement)
+                    .await?;
+                self.with_logical_ctx.execute_logical_plan(plan).await?
+            } else {
+                let plan = self.ctx.state().statement_to_plan(statement).await?;
+                self.ctx.execute_logical_plan(plan).await?
+            };
 
-            let df = self.ctx.execute_logical_plan(plan).await?;
             let batches = df.collect().await?;
 
             let options = FormatOptions::default();
@@ -79,53 +104,125 @@ impl DatafusionDb {
         }
         Ok(result)
     }
+
+    /// Executes the `execute` task.
+    async fn task_execute(&mut self, r: &mut String, sql: &str, with_logical: bool) -> Result<()> {
+        use std::fmt::Write;
+        let result = self.execute(&sql, with_logical).await?;
+        writeln!(r, "{}", result.into_iter().map(|x| x.join(" ")).join("\n"))?;
+        writeln!(r)?;
+        Ok(())
+    }
+
+    /// Executes the `explain` task.
+    async fn task_explain(
+        &mut self,
+        r: &mut String,
+        sql: &str,
+        task: &str,
+        with_logical: bool,
+    ) -> Result<()> {
+        use std::fmt::Write;
+
+        let result = self
+            .execute(&format!("explain {}", &sql), with_logical)
+            .await?;
+        let subtask_start_pos = if with_logical {
+            "explain_with_logical:".len()
+        } else {
+            "explain:".len()
+        };
+        for subtask in task[subtask_start_pos..].split(",") {
+            let subtask = subtask.trim();
+            if subtask == "logical_datafusion" {
+                writeln!(
+                    r,
+                    "{}",
+                    result
+                        .iter()
+                        .find(|x| x[0] == "logical_plan after datafusion")
+                        .map(|x| &x[1])
+                        .unwrap()
+                )?;
+            } else if subtask == "logical_optd" {
+                writeln!(
+                    r,
+                    "{}",
+                    result
+                        .iter()
+                        .find(|x| x[0] == "logical_plan after optd")
+                        .map(|x| &x[1])
+                        .unwrap()
+                )?;
+            } else if subtask == "physical_optd" {
+                writeln!(
+                    r,
+                    "{}",
+                    result
+                        .iter()
+                        .find(|x| x[0] == "physical_plan after optd")
+                        .map(|x| &x[1])
+                        .unwrap()
+                )?;
+            } else if subtask == "join_orders" {
+                writeln!(
+                    r,
+                    "{}",
+                    result
+                        .iter()
+                        .find(|x| x[0] == "physical_plan after optd-all-join-orders")
+                        .map(|x| &x[1])
+                        .unwrap()
+                )?;
+                writeln!(r)?;
+            } else if subtask == "logical_join_orders" {
+                writeln!(
+                    r,
+                    "{}",
+                    result
+                        .iter()
+                        .find(|x| x[0] == "physical_plan after optd-all-logical-join-orders")
+                        .map(|x| &x[1])
+                        .unwrap()
+                )?;
+                writeln!(r)?;
+            } else if subtask == "physical_datafusion" {
+                writeln!(
+                    r,
+                    "{}",
+                    result
+                        .iter()
+                        .find(|x| x[0] == "physical_plan")
+                        .map(|x| &x[1])
+                        .unwrap()
+                )?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl sqlplannertest::PlannerTestRunner for DatafusionDb {
     async fn run(&mut self, test_case: &sqlplannertest::ParsedTestCase) -> Result<String> {
         for before in &test_case.before_sql {
-            self.execute(before)
+            self.execute(before, true)
                 .await
                 .context("before execution error")?;
         }
 
-        use std::fmt::Write;
         let mut result = String::new();
         let r = &mut result;
         for task in &test_case.tasks {
             if task == "execute" {
-                let result = self.execute(&test_case.sql).await?;
-                writeln!(r, "{}", result.into_iter().map(|x| x.join(" ")).join("\n"))?;
-                writeln!(r)?;
+                self.task_execute(r, &test_case.sql, false).await?;
+            } else if task == "execute_with_logical" {
+                self.task_execute(r, &test_case.sql, true).await?;
             } else if task.starts_with("explain:") {
-                let result = self.execute(&format!("explain {}", test_case.sql)).await?;
-                for subtask in task["explain:".len()..].split(",") {
-                    let subtask = subtask.trim();
-                    if subtask == "join_orders" {
-                        writeln!(
-                            r,
-                            "{}",
-                            result
-                                .iter()
-                                .find(|x| x[0] == "physical_plan after optd-all-join-orders")
-                                .map(|x| &x[1])
-                                .unwrap()
-                        )?;
-                        writeln!(r)?;
-                    } else if subtask == "logical_join_orders" {
-                        writeln!(
-                            r,
-                            "{}",
-                            result
-                                .iter()
-                                .find(|x| x[0] == "physical_plan after optd-all-logical-join-orders")
-                                .map(|x| &x[1])
-                                .unwrap()
-                        )?;
-                        writeln!(r)?;
-                    }
-                }
+                self.task_explain(r, &test_case.sql, task, false).await?;
+            } else if task.starts_with("explain_with_logical:") {
+                self.task_explain(r, &test_case.sql, task, true).await?;
             }
         }
         Ok(result)

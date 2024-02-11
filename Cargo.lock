@@ -2490,6 +2490,7 @@ dependencies = [
  "async-recursion",
  "async-trait",
  "datafusion",
+ "datafusion-expr",
  "futures-lite",
  "futures-util",
  "itertools",
