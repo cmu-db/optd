@@ -97,8 +97,8 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
         context: Option<RelNodeContext>,
         optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Cost {
-        let bindings = optimizer.unwrap().get_all_group_bindings(context.unwrap().group_id, false);
-        println!("bindings={:?}", bindings);
+        // let bindings = optimizer.unwrap().get_all_group_bindings(context.unwrap().group_id, false);
+        // println!("bindings={:?}", bindings);
         match node {
             OptRelNodeTyp::PhysicalScan => {
                 let table_name = data.as_ref().unwrap().as_str();
