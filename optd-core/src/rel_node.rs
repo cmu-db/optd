@@ -27,7 +27,14 @@ pub trait RelNodeTyp:
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Value {
-    Int(i64),
+    UInt8(u8),
+    UInt16(u16),
+    UInt32(u32),
+    UInt64(u64),
+    Int8(i8),
+    Int16(i16),
+    Int32(i32),
+    Int64(i64),
     Float(OrderedFloat<f64>),
     String(Arc<str>),
     Bool(bool),
@@ -37,7 +44,14 @@ pub enum Value {
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Int(x) => write!(f, "{x}"),
+            Self::UInt8(x) => write!(f, "{x}"),
+            Self::UInt16(x) => write!(f, "{x}"),
+            Self::UInt32(x) => write!(f, "{x}"),
+            Self::UInt64(x) => write!(f, "{x}"),
+            Self::Int8(x) => write!(f, "{x}"),
+            Self::Int16(x) => write!(f, "{x}"),
+            Self::Int32(x) => write!(f, "{x}"),
+            Self::Int64(x) => write!(f, "{x}"),
             Self::Float(x) => write!(f, "{x}"),
             Self::String(x) => write!(f, "\"{x}\""),
             Self::Bool(x) => write!(f, "{x}"),
@@ -47,9 +61,58 @@ impl std::fmt::Display for Value {
 }
 
 impl Value {
+    pub fn as_u8(&self) -> u8 {
+        match self {
+            Value::UInt8(i) => *i,
+            _ => panic!("Value is not an u8"),
+        }
+    }
+
+    pub fn as_u16(&self) -> u16 {
+        match self {
+            Value::UInt16(i) => *i,
+            _ => panic!("Value is not an u16"),
+        }
+    }
+
+    pub fn as_u32(&self) -> u32 {
+        match self {
+            Value::UInt32(i) => *i,
+            _ => panic!("Value is not an u32"),
+        }
+    }
+
+    pub fn as_u64(&self) -> u64 {
+        match self {
+            Value::UInt64(i) => *i,
+            _ => panic!("Value is not an u64"),
+        }
+    }
+
+    pub fn as_i8(&self) -> i8 {
+        match self {
+            Value::Int8(i) => *i,
+            _ => panic!("Value is not an i8"),
+        }
+    }
+
+    pub fn as_i16(&self) -> i16 {
+        match self {
+            Value::Int16(i) => *i,
+            _ => panic!("Value is not an i16"),
+        }
+    }
+
+    pub fn as_i32(&self) -> i32 {
+        match self {
+            Value::Int32(i) => *i,
+            _ => panic!("Value is not an i32"),
+        }
+    }
+
     pub fn as_i64(&self) -> i64 {
         match self {
-            Value::Int(i) => *i,
+            Value::Int64(i) => *i,
             _ => panic!("Value is not an i64"),
         }
     }

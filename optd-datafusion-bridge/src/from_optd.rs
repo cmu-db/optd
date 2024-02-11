@@ -40,7 +40,14 @@ fn from_optd_schema(optd_schema: &OptdSchema) -> Schema {
     let match_type = |typ: &ConstantType| match typ {
         ConstantType::Any => unimplemented!(),
         ConstantType::Bool => DataType::Boolean,
-        ConstantType::Int => DataType::Int64,
+        ConstantType::UInt8 => DataType::UInt8,
+        ConstantType::UInt16 => DataType::UInt16,
+        ConstantType::UInt32 => DataType::UInt32,
+        ConstantType::UInt64 => DataType::UInt64,
+        ConstantType::Int8 => DataType::Int8,
+        ConstantType::Int16 => DataType::Int16,
+        ConstantType::Int32 => DataType::Int32,
+        ConstantType::Int64 => DataType::Int64,
         ConstantType::Date => DataType::Date32,
         ConstantType::Decimal => DataType::Float64,
         ConstantType::Utf8String => DataType::Utf8,
@@ -127,7 +134,14 @@ impl OptdPlanContext<'_> {
                 let value = expr.value();
                 let value = match typ {
                     ConstantType::Bool => ScalarValue::Boolean(Some(value.as_bool())),
-                    ConstantType::Int => ScalarValue::Int64(Some(value.as_i64())),
+                    ConstantType::UInt8 => ScalarValue::UInt8(Some(value.as_u8())),
+                    ConstantType::UInt16 => ScalarValue::UInt16(Some(value.as_u16())),
+                    ConstantType::UInt32 => ScalarValue::UInt32(Some(value.as_u32())),
+                    ConstantType::UInt64 => ScalarValue::UInt64(Some(value.as_u64())),
+                    ConstantType::Int8 => ScalarValue::Int8(Some(value.as_i8())),
+                    ConstantType::Int16 => ScalarValue::Int16(Some(value.as_i16())),
+                    ConstantType::Int32 => ScalarValue::Int32(Some(value.as_i32())),
+                    ConstantType::Int64 => ScalarValue::Int64(Some(value.as_i64())),
                     ConstantType::Decimal => {
                         ScalarValue::Decimal128(Some(value.as_f64() as i128), 20, 0)
                         // TODO(chi): no hard code decimal

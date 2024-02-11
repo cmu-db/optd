@@ -64,15 +64,39 @@ impl OptdPlanContext<'_> {
             Expr::Literal(x) => match x {
                 ScalarValue::UInt8(x) => {
                     let x = x.as_ref().unwrap();
-                    Ok(ConstantExpr::int(*x as i64).into_expr())
+                    Ok(ConstantExpr::uint8(*x).into_expr())
+                }
+                ScalarValue::UInt16(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::uint16(*x).into_expr())
+                }
+                ScalarValue::UInt32(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::uint32(*x).into_expr())
+                }
+                ScalarValue::UInt64(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::uint64(*x).into_expr())
+                }
+                ScalarValue::Int8(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::int8(*x).into_expr())
+                }
+                ScalarValue::Int16(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::int16(*x).into_expr())
+                }
+                ScalarValue::Int32(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::int32(*x).into_expr())
+                }
+                ScalarValue::Int64(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::int64(*x as i64).into_expr())
                 }
                 ScalarValue::Utf8(x) => {
                     let x = x.as_ref().unwrap();
                     Ok(ConstantExpr::string(x).into_expr())
-                }
-                ScalarValue::Int64(x) => {
-                    let x = x.as_ref().unwrap();
-                    Ok(ConstantExpr::int(*x as i64).into_expr())
                 }
                 ScalarValue::Date32(x) => {
                     let x = x.as_ref().unwrap();
@@ -118,7 +142,7 @@ impl OptdPlanContext<'_> {
                     expr,
                 )
                 .into_expr())
-            } 
+            }
             _ => bail!("Unsupported expression: {:?}", expr),
         }
     }
