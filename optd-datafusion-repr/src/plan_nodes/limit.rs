@@ -19,7 +19,7 @@ impl OptRelNode for LogicalLimit {
     }
 
     fn dispatch_explain(&self) -> Pretty<'static> {
-        Pretty::childless_record(
+        Pretty::simple_record(
             "LogicalLimit",
             vec![
                 ("skip", self.skip().to_string().into()),
@@ -33,6 +33,7 @@ impl OptRelNode for LogicalLimit {
                     .into(),
                 ),
             ],
+            vec![self.child().explain()],
         )
     }
 }
@@ -107,7 +108,7 @@ impl OptRelNode for PhysicalLimit {
     }
 
     fn dispatch_explain(&self) -> Pretty<'static> {
-        Pretty::childless_record(
+        Pretty::simple_record(
             "PhysicalLimit",
             vec![
                 ("skip", self.skip().to_string().into()),
@@ -121,6 +122,7 @@ impl OptRelNode for PhysicalLimit {
                     .into(),
                 ),
             ],
+            vec![self.child().explain()],
         )
     }
 }
