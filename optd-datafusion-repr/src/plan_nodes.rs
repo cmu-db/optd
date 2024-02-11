@@ -28,6 +28,7 @@ pub use expr::{
 };
 pub use filter::{LogicalFilter, PhysicalFilter};
 pub use join::{JoinType, LogicalJoin, PhysicalHashJoin, PhysicalNestedLoopJoin};
+pub use limit::{LogicalLimit, PhysicalLimit};
 use pretty_xmlish::{Pretty, PrettyConfig};
 pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
@@ -37,8 +38,6 @@ use crate::{
     adaptive::PhysicalCollector,
     properties::schema::{Schema, SchemaPropertyBuilder},
 };
-
-use self::limit::{LogicalLimit, PhysicalLimit};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OptRelNodeTyp {

@@ -24,8 +24,9 @@ use optd_datafusion_repr::{
     plan_nodes::{
         BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, FuncExpr, FuncType,
         JoinType, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalAgg,
-        PhysicalEmptyRelation, PhysicalFilter, PhysicalHashJoin, PhysicalNestedLoopJoin,
-        PhysicalProjection, PhysicalScan, PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
+        PhysicalEmptyRelation, PhysicalFilter, PhysicalHashJoin, PhysicalLimit,
+        PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan, PhysicalSort, PlanNode,
+        SortOrderExpr, SortOrderType,
     },
     properties::schema::Schema as OptdSchema,
     PhysicalCollector,
@@ -256,6 +257,26 @@ impl OptdPlanContext<'_> {
     }
 
     #[async_recursion]
+    async fn from_optd_limit(
+        &mut self,
+        node: PhysicalLimit,
+    ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
+        let child = self.from_optd_plan_node(node.child()).await?;
+        let casted_fetch = if let Some(x) = node.fetch() {
+            Some(x.try_into().unwrap())
+        } else {
+            None
+        };
+        Ok(
+            Arc::new(datafusion::physical_plan::limit::GlobalLimitExec::new(
+                child,
+                node.skip().try_into().unwrap(),
+                casted_fetch,
+            )) as Arc<dyn ExecutionPlan>,
+        )
+    }
+
+    #[async_recursion]
     async fn from_optd_sort(
         &mut self,
         node: PhysicalSort,
@@ -475,6 +496,10 @@ impl OptdPlanContext<'_> {
                     physical_node.produce_one_row(),
                     Arc::new(datafusion_schema),
                 )) as Arc<dyn ExecutionPlan>)
+            }
+            OptRelNodeTyp::PhysicalLimit => {
+                self.from_optd_limit(PhysicalLimit::from_rel_node(rel_node).unwrap())
+                    .await
             }
             typ => unimplemented!("{}", typ),
         };
