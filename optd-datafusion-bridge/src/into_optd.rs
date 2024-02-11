@@ -205,6 +205,7 @@ impl OptdPlanContext<'_> {
             DFJoinType::RightSemi => JoinType::RightSemi,
         };
         let mut log_ops = Vec::with_capacity(node.on.len());
+        let a = 5;
         for (left, right) in &node.on {
             let left = self.conv_into_optd_expr(left, node.left.schema())?;
             let right = self.conv_into_optd_expr(right, node.right.schema())?;
