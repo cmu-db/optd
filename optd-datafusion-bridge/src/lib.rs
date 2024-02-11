@@ -91,16 +91,16 @@ enum JoinOrder {
 }
 
 impl JoinOrder {
-    pub fn into_logical_join_order(&self) -> LogicalJoinOrder {
+    pub fn conv_into_logical_join_order(&self) -> LogicalJoinOrder {
         match self {
             JoinOrder::Table(name) => LogicalJoinOrder::Table(name.clone()),
             JoinOrder::HashJoin(left, right) => LogicalJoinOrder::Join(
-                Box::new(left.into_logical_join_order()),
-                Box::new(right.into_logical_join_order()),
+                Box::new(left.conv_into_logical_join_order()),
+                Box::new(right.conv_into_logical_join_order()),
             ),
             JoinOrder::NestedLoopJoin(left, right) => LogicalJoinOrder::Join(
-                Box::new(left.into_logical_join_order()),
-                Box::new(right.into_logical_join_order()),
+                Box::new(left.conv_into_logical_join_order()),
+                Box::new(right.conv_into_logical_join_order()),
             ),
         }
     }
@@ -209,7 +209,7 @@ impl OptdQueryPlanner {
                 optimizer_name: "datafusion".to_string(),
             }));
         }
-        let optd_rel = ctx.into_optd(logical_plan)?;
+        let optd_rel = ctx.conv_into_optd(logical_plan)?;
         if let Some(explains) = &mut explains {
             explains.push(StringifiedPlan::new(
                 PlanType::OptimizedLogicalPlan {
@@ -249,7 +249,7 @@ impl OptdQueryPlanner {
             let mut logical_join_orders = BTreeSet::new();
             for binding in bindings {
                 if let Some(join_order) = get_join_order(binding) {
-                    logical_join_orders.insert(join_order.into_logical_join_order());
+                    logical_join_orders.insert(join_order.conv_into_logical_join_order());
                     join_orders.insert(join_order);
                 }
             }
@@ -273,7 +273,7 @@ impl OptdQueryPlanner {
         // );
         // optimizer.dump(Some(group_id));
         ctx.optimizer = Some(&optimizer);
-        let physical_plan = ctx.from_optd(optimized_rel).await?;
+        let physical_plan = ctx.conv_from_optd(optimized_rel).await?;
         if let Some(explains) = &mut explains {
             explains.push(
                 displayable(&*physical_plan)
