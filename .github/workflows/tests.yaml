@@ -8,4 +8,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test
+      
