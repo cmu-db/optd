@@ -260,7 +260,7 @@ define_rule!(
 
 struct ProjectionMapping {
     forward: Vec<usize>,
-    backward: Vec<Option<usize>>,
+    _backward: Vec<Option<usize>>,
 }
 
 impl ProjectionMapping {
@@ -274,7 +274,7 @@ impl ProjectionMapping {
         }
         Some(Self {
             forward: mapping,
-            backward,
+            _backward: backward,
         })
     }
 
@@ -282,8 +282,8 @@ impl ProjectionMapping {
         self.forward[col]
     }
 
-    pub fn original_col_maps_to(&self, col: usize) -> Option<usize> {
-        self.backward[col]
+    pub fn _original_col_maps_to(&self, col: usize) -> Option<usize> {
+        self._backward[col]
     }
 }
 

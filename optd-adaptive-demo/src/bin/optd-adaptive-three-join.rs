@@ -62,12 +62,6 @@ async fn main() -> Result<()> {
         maxrows: MaxRows::Limited(5),
     };
 
-    let print_options = PrintOptions {
-        format: PrintFormat::Table,
-        quiet: false,
-        maxrows: MaxRows::Limited(5),
-    };
-
     exec_from_commands(
         &mut ctx,
         &slient_print_options,
