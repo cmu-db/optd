@@ -10,5 +10,4 @@ CREATE TABLE NATION  (
 CREATE EXTERNAL TABLE nation_tbl STORED AS CSV DELIMITER '|' LOCATION 'tpch/nation.tbl';
 insert into nation select column_1, column_2, column_3, column_4 from nation_tbl;
 
-SELECT * FROM nation WHERE nation.n_name = 'UNITED STATES';
-SELECT * FROM nation WHERE nation.n_name = 'UNITED STATES';
+SELECT * FROM nation WHERE nation.n_name = (SELECT nation.n_name FROM nation WHERE nation.n_name = 'United States');

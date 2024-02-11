@@ -59,6 +59,7 @@ impl OptdPlanContext<'_> {
             }
             Expr::Column(col) => {
                 let idx = context.index_of_column(col)?;
+                println!("col={}, col.relation={:?}", col, col.relation);
                 Ok(ColumnRefExpr::new(idx).into_expr())
             }
             Expr::Literal(x) => match x {
