@@ -16,7 +16,7 @@ define_rule!(
 /// Replace filter nodes with a false predicate
 /// with an EmptyRelation (since it will yield no tuples)
 fn apply_eliminate_filter(
-    optimizer: &impl Optimizer<OptRelNodeTyp>,
+    _optimizer: &impl Optimizer<OptRelNodeTyp>,
     EliminateFilterRulePicks { child, cond }: EliminateFilterRulePicks,
 ) -> Vec<RelNode<OptRelNodeTyp>> {
     // If the conditional is a constant boolean
