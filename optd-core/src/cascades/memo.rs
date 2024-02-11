@@ -222,10 +222,8 @@ impl<T: RelNodeTyp> Memo<T> {
         props
     }
 
-    pub fn clear_exprs_in_group(&self, group_id: ReducedGroupId) {
-        let group = self.groups.get(&group_id).expect("group not found");
-        let mut exprs = group.group_exprs.iter().copied().collect_vec();
-        exprs.clear();
+    fn clear_exprs_in_group(&mut self, group_id: ReducedGroupId) {
+        self.groups.remove(&group_id);
     }
 
     fn add_expr_to_group(
