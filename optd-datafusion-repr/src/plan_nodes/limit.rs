@@ -1,14 +1,14 @@
 use optd_core::rel_node::{RelNode, Value};
 use pretty_xmlish::Pretty;
 
-use super::{macros::define_plan_node, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
+use super::{replace_typ, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 
 #[derive(Clone, Debug)]
 pub struct LogicalLimit(pub PlanNode);
 
 impl OptRelNode for LogicalLimit {
     fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+        replace_typ(self.0.into_rel_node(), OptRelNodeTyp::Limit)
     }
 
     fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
@@ -96,11 +96,11 @@ pub struct PhysicalLimit(pub PlanNode);
 
 impl OptRelNode for PhysicalLimit {
     fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+        replace_typ(self.0.into_rel_node(), OptRelNodeTyp::PhysicalLimit)
     }
 
     fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if rel_node.typ != OptRelNodeTyp::Limit {
+        if rel_node.typ != OptRelNodeTyp::PhysicalLimit {
             return None;
         }
         PlanNode::from_rel_node(rel_node).map(Self)
