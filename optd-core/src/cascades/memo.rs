@@ -127,6 +127,9 @@ impl<T: RelNodeTyp> Memo<T> {
             self.add_expr_to_group(expr_id, group_b, expr_node.as_ref().clone());
         }
 
+        // Remove all expressions from group a (so we don't accidentally access it)
+        self.clear_exprs_in_group(group_a);
+
         group_b
     }
 
@@ -217,6 +220,12 @@ impl<T: RelNodeTyp> Memo<T> {
             props.push(prop);
         }
         props
+    }
+
+    pub fn clear_exprs_in_group(&self, group_id: ReducedGroupId) {
+        let group = self.groups.get(&group_id).expect("group not found");
+        let mut exprs = group.group_exprs.iter().copied().collect_vec();
+        exprs.clear();
     }
 
     fn add_expr_to_group(
