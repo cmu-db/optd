@@ -292,6 +292,10 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.memo.update_group_info(group_id, group_info)
     }
 
+    pub(super) fn merge_group(&mut self, group_a: GroupId, group_b: GroupId) {
+        self.memo.merge_group(group_a, group_b);
+    }
+
     pub fn get_property_by_group<P: PropertyBuilder<T>>(
         &self,
         group_id: GroupId,
