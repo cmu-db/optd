@@ -32,6 +32,8 @@ pub enum Value {
     String(Arc<str>),
     Bool(bool),
     Serialized(Arc<[u8]>),
+    Pair(Arc<Value>, Arc<Value>),
+    Option(Option<Arc<Value>>),
 }
 
 impl std::fmt::Display for Value {
@@ -42,6 +44,9 @@ impl std::fmt::Display for Value {
             Self::String(x) => write!(f, "\"{x}\""),
             Self::Bool(x) => write!(f, "{x}"),
             Self::Serialized(x) => write!(f, "<len:{}>", x.len()),
+            Self::Pair(l, r) => write!(f, "({l}, {r})"),
+            Self::Option(Some(x)) => write!(f, "{}", x),
+            Self::Option(None) => write!(f, "None"),
         }
     }
 }
@@ -72,6 +77,20 @@ impl Value {
         match self {
             Value::String(i) => i.clone(),
             _ => panic!("Value is not a string"),
+        }
+    }
+
+    pub fn as_pair(&self) -> (Arc<Value>, Arc<Value>) {
+        match self {
+            Value::Pair(l, r) => (l.clone(), r.clone()),
+            _ => panic!("Value is not a pair"),
+        }
+    }
+
+    pub fn as_option(&self) -> Option<Arc<Value>> {
+        match self {
+            Value::Option(i) => i.clone(),
+            _ => panic!("Value is not an option"),
         }
     }
 }

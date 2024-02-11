@@ -6,6 +6,7 @@ mod empty_relation;
 mod expr;
 mod filter;
 mod join;
+mod limit;
 pub(super) mod macros;
 mod projection;
 mod scan;
@@ -37,6 +38,8 @@ use crate::{
     properties::schema::{Schema, SchemaPropertyBuilder},
 };
 
+use self::limit::{LogicalLimit, PhysicalLimit};
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OptRelNodeTyp {
     Placeholder(GroupId),
@@ -51,6 +54,7 @@ pub enum OptRelNodeTyp {
     Agg,
     Apply(ApplyType),
     EmptyRelation,
+    Limit,
     // Physical plan nodes
     PhysicalProjection,
     PhysicalFilter,
@@ -60,6 +64,7 @@ pub enum OptRelNodeTyp {
     PhysicalHashJoin(JoinType),
     PhysicalNestedLoopJoin(JoinType),
     PhysicalEmptyRelation,
+    PhysicalLimit,
     PhysicalCollector(GroupId), // only produced after optimization is done
     // Expressions
     Constant(ConstantType),
@@ -83,6 +88,7 @@ impl OptRelNodeTyp {
                 | Self::Sort
                 | Self::Agg
                 | Self::EmptyRelation
+                | Self::Limit
                 | Self::PhysicalProjection
                 | Self::PhysicalFilter
                 | Self::PhysicalNestedLoopJoin(_)
@@ -91,6 +97,7 @@ impl OptRelNodeTyp {
                 | Self::PhysicalAgg
                 | Self::PhysicalHashJoin(_)
                 | Self::PhysicalCollector(_)
+                | Self::PhysicalLimit
                 | Self::PhysicalEmptyRelation
         )
     }
@@ -127,6 +134,7 @@ impl RelNodeTyp for OptRelNodeTyp {
                 | Self::Sort
                 | Self::Agg
                 | Self::EmptyRelation
+                | Self::Limit
         )
     }
 
@@ -310,6 +318,9 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
         OptRelNodeTyp::EmptyRelation => LogicalEmptyRelation::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
+        OptRelNodeTyp::Limit => LogicalLimit::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
         OptRelNodeTyp::PhysicalFilter => PhysicalFilter::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
@@ -352,10 +363,13 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
         OptRelNodeTyp::LogOp(_) => LogOpExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
-        OptRelNodeTyp::PhysicalCollector(group_id) => PhysicalCollector::from_rel_node(rel_node)
+        OptRelNodeTyp::PhysicalCollector(_) => PhysicalCollector::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
         OptRelNodeTyp::PhysicalEmptyRelation => PhysicalEmptyRelation::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::PhysicalLimit => PhysicalLimit::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
     }
