@@ -71,7 +71,7 @@ impl OptdPlanContext<'_> {
         sort_expr: SortOrderExpr,
         context: &SchemaRef,
     ) -> Result<physical_expr::PhysicalSortExpr> {
-        let expr = self.conv_from_optd_expr(sort_expr.child(), context)?;
+        let expr = Self::conv_from_optd_expr(sort_expr.child(), context)?;
         Ok(physical_expr::PhysicalSortExpr {
             expr,
             options: match sort_expr.order() {
@@ -101,7 +101,7 @@ impl OptdPlanContext<'_> {
             .children()
             .to_vec()
             .into_iter()
-            .map(|expr| self.conv_from_optd_expr(expr, context))
+            .map(|expr| Self::conv_from_optd_expr(expr, context))
             .collect::<Result<Vec<_>>>()?;
         Ok(create_aggregate_expr(
             &func,
@@ -113,7 +113,7 @@ impl OptdPlanContext<'_> {
         )?)
     }
 
-    fn conv_from_optd_expr(&mut self, expr: Expr, context: &SchemaRef) -> Result<Arc<dyn PhysicalExpr>> {
+    fn conv_from_optd_expr(expr: Expr, context: &SchemaRef) -> Result<Arc<dyn PhysicalExpr>> {
         match expr.typ() {
             OptRelNodeTyp::ColumnRef => {
                 let expr = ColumnRefExpr::from_rel_node(expr.into_rel_node()).unwrap();
@@ -147,7 +147,7 @@ impl OptdPlanContext<'_> {
                     .children()
                     .to_vec()
                     .into_iter()
-                    .map(|expr| self.conv_from_optd_expr(expr, context))
+                    .map(|expr| Self::conv_from_optd_expr(expr, context))
                     .collect::<Result<Vec<_>>>()?;
                 match func {
                     FuncType::Scalar(func) => {
@@ -175,13 +175,13 @@ impl OptdPlanContext<'_> {
             OptRelNodeTyp::LogOp(typ) => {
                 let expr = LogOpExpr::from_rel_node(expr.into_rel_node()).unwrap();
                 let mut children = expr.children().to_vec().into_iter();
-                let first_expr = self.conv_from_optd_expr(children.next().unwrap(), context)?;
+                let first_expr = Self::conv_from_optd_expr(children.next().unwrap(), context)?;
                 let op = match typ {
                     LogOpType::And => datafusion::logical_expr::Operator::And,
                     LogOpType::Or => datafusion::logical_expr::Operator::Or,
                 };
                 children.try_fold(first_expr, |acc, expr| {
-                    let expr = self.conv_from_optd_expr(expr, context)?;
+                    let expr = Self::conv_from_optd_expr(expr, context)?;
                     Ok(
                         Arc::new(datafusion::physical_plan::expressions::BinaryExpr::new(
                             acc, op, expr,
@@ -191,8 +191,8 @@ impl OptdPlanContext<'_> {
             }
             OptRelNodeTyp::BinOp(op) => {
                 let expr = BinOpExpr::from_rel_node(expr.into_rel_node()).unwrap();
-                let left = self.conv_from_optd_expr(expr.left_child(), context)?;
-                let right = self.conv_from_optd_expr(expr.right_child(), context)?;
+                let left = Self::conv_from_optd_expr(expr.left_child(), context)?;
+                let right = Self::conv_from_optd_expr(expr.right_child(), context)?;
                 let op = match op {
                     BinOpType::Eq => Operator::Eq,
                     BinOpType::Neq => Operator::NotEq,
@@ -228,7 +228,7 @@ impl OptdPlanContext<'_> {
             .enumerate()
             .map(|(idx, expr)| {
                 Ok((
-                    self.conv_from_optd_expr(expr, &input_exec.schema())?,
+                    Self::conv_from_optd_expr(expr, &input_exec.schema())?,
                     format!("col{}", idx),
                 ))
             })
@@ -246,7 +246,7 @@ impl OptdPlanContext<'_> {
         node: PhysicalFilter,
     ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
         let input_exec = self.conv_from_optd_plan_node(node.child()).await?;
-        let physical_expr = self.conv_from_optd_expr(node.cond(), &input_exec.schema())?;
+        let physical_expr = Self::conv_from_optd_expr(node.cond(), &input_exec.schema())?;
         Ok(
             Arc::new(datafusion::physical_plan::filter::FilterExec::try_new(
                 physical_expr,
@@ -298,7 +298,7 @@ impl OptdPlanContext<'_> {
             .into_iter()
             .map(|expr| {
                 Ok((
-                    self.conv_from_optd_expr(expr, &input_exec.schema())?,
+                    Self::conv_from_optd_expr(expr, &input_exec.schema())?,
                     "<agg_expr>".to_string(),
                 ))
             })
@@ -337,7 +337,7 @@ impl OptdPlanContext<'_> {
             Schema::new_with_metadata(fields, HashMap::new())
         };
 
-        let physical_expr = self.conv_from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
+        let physical_expr = Self::conv_from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
 
         if let JoinType::Cross = node.join_type() {
             return Ok(Arc::new(CrossJoinExec::new(left_exec, right_exec))

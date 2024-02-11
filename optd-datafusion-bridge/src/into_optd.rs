@@ -163,7 +163,7 @@ impl OptdPlanContext<'_> {
         Ok(LogicalAgg::new(input, agg_exprs, group_exprs))
     }
 
-    fn add_column_offset(&mut self, offset: usize, expr: Expr) -> Expr {
+    fn add_column_offset(offset: usize, expr: Expr) -> Expr {
         if expr.typ() == OptRelNodeTyp::ColumnRef {
             let expr = ColumnRefExpr::from_rel_node(expr.into_rel_node()).unwrap();
             return ColumnRefExpr::new(expr.index() + offset).into_expr();
@@ -175,7 +175,7 @@ impl OptdPlanContext<'_> {
             .map(|child| {
                 let child = child.clone();
                 let child = Expr::from_rel_node(child).unwrap();
-                let child = self.add_column_offset(offset, child);
+                let child = Self::add_column_offset(offset, child);
                 child.into_rel_node()
             })
             .collect();
@@ -208,7 +208,7 @@ impl OptdPlanContext<'_> {
         for (left, right) in &node.on {
             let left = self.conv_into_optd_expr(left, node.left.schema())?;
             let right = self.conv_into_optd_expr(right, node.right.schema())?;
-            let right = self.add_column_offset(node.left.schema().fields().len(), right);
+            let right = Self::add_column_offset(node.left.schema().fields().len(), right);
             let op = BinOpType::Eq;
             let expr = BinOpExpr::new(left, right, op).into_expr();
             log_ops.push(expr);
