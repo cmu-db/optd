@@ -58,7 +58,6 @@ impl OptdPlanContext<'_> {
                 Ok(BinOpExpr::new(left, right, op).into_expr())
             }
             Expr::Column(col) => {
-                println!("col: {}", col);
                 let idx = context.index_of_column(col)?;
                 Ok(ColumnRefExpr::new(idx).into_expr())
             }

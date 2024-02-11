@@ -15,6 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use std::process::Command;
+
+use assert_cmd::prelude::{CommandCargoExt, OutputAssertExt};
+use predicates::prelude::predicate;
 use rstest::rstest;
 
 #[cfg(test)]
@@ -24,27 +28,35 @@ fn init() {
     let _ = env_logger::try_init();
 }
 
-#[rstest]
-#[case::exec_from_commands(
-    ["--command", "select 1", "--format", "json", "-q"],
-    "[{\"Int64(1)\":1}]\n"
-)]
-#[case::exec_multiple_statements(
-    ["--command", "select 1; select 2;", "--format", "json", "-q"],
-    "[{\"Int64(1)\":1}]\n[{\"Int64(2)\":2}]\n"
-)]
-#[case::exec_from_files(
-    ["--file", "tests/data/sql.txt", "--format", "json", "-q"],
-    "[{\"Int64(1)\":1}]\n"
-)]
-#[case::set_batch_size(
-    ["--command", "show datafusion.execution.batch_size", "--format", "json", "-q", "-b", "1"],
-    "[{\"name\":\"datafusion.execution.batch_size\",\"value\":\"1\"}]\n"
-)]
+// TODO: fix these later. They're commented out since they were broken when we first received the codebase.
+// #[rstest]
+// #[case::exec_from_commands(
+//     ["--command", "select 1", "--format", "json", "-q"],
+//     "[{\"Int64(1)\":1}]\n"
+// )]
+// #[case::exec_multiple_statements(
+//     ["--command", "select 1; select 2;", "--format", "json", "-q"],
+//     "[{\"Int64(1)\":1}]\n[{\"Int64(2)\":2}]\n"
+// )]
+// #[case::exec_from_files(
+//     ["--file", "tests/data/sql.txt", "--format", "json", "-q"],
+//     "[{\"Int64(1)\":1}]\n"
+// )]
+// #[case::set_batch_size(
+//     ["--command", "show datafusion.execution.batch_size", "--format", "json", "-q", "-b", "1"],
+//     "[{\"name\":\"datafusion.execution.batch_size\",\"value\":\"1\"}]\n"
+// )]
+// #[test]
+// fn cli_quick_test<'a>(#[case] args: impl IntoIterator<Item = &'a str>, #[case] expected: &str) {
+//     let mut cmd = Command::cargo_bin("datafusion-optd-cli").unwrap();
+//     cmd.args(args);
+//     cmd.assert().stdout(predicate::eq(expected));
+// }
+
 #[test]
-fn cli_quick_test<'a>(#[case] _args: impl IntoIterator<Item = &'a str>, #[case] _expected: &str) {
-    // TODO: fix these tests. they were broken when the project was handed to us so we believe they are abandoned
-    // let mut cmd = Command::cargo_bin("datafusion-cli").unwrap();
-    // cmd.args(args);
-    // cmd.assert().stdout(predicate::eq(expected));
+fn cli_test_tpch() {
+    let mut cmd = Command::cargo_bin("datafusion-optd-cli").unwrap();
+    cmd.args(["--enable-logical", "--file", "../tpch/test.sql"]);
+    let status = cmd.status().unwrap();
+    assert!(status.success(), "should not have crashed when running tpch");
 }
