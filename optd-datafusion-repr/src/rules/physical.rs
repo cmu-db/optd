@@ -126,6 +126,14 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                 };
                 vec![node]
             }
+            OptRelNodeTyp::Limit => {
+                let node = RelNode {
+                    typ: OptRelNodeTyp::PhysicalLimit,
+                    children,
+                    data,
+                };
+                vec![node]
+            }
             _ => vec![],
         }
     }
