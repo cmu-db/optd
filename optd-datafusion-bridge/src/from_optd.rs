@@ -275,24 +275,24 @@ impl OptdPlanContext<'_> {
         &mut self,
         node: PhysicalLimit,
     ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
-        let child = self.from_optd_plan_node(node.child()).await?;
+        let child = self.conv_from_optd_plan_node(node.child()).await?;
 
         // Limit skip/fetch expressions are only allowed to be constant int
-        assert!(node.skip().typ() == OptRelNodeTyp::Constant(ConstantType::Int));
-        // Conversion from i64 -> usize could fail (also the case in into_optd)
+        assert!(node.skip().typ() == OptRelNodeTyp::Constant(ConstantType::UInt64));
+        // Conversion from u64 -> usize could fail (also the case in into_optd)
         let skip = ConstantExpr::from_rel_node(node.skip().into_rel_node())
             .unwrap()
             .value()
-            .as_i64()
+            .as_u64()
             .try_into()
             .unwrap();
 
-        assert!(node.fetch().typ() == OptRelNodeTyp::Constant(ConstantType::Int));
+        assert!(node.fetch().typ() == OptRelNodeTyp::Constant(ConstantType::UInt64));
         let fetch = ConstantExpr::from_rel_node(node.fetch().into_rel_node())
             .unwrap()
             .value()
-            .as_i64();
-        let fetch_opt: Option<usize> = if fetch < 0 {
+            .as_u64();
+        let fetch_opt: Option<usize> = if fetch == u64::MAX {
             None
         } else {
             Some(fetch.try_into().unwrap())

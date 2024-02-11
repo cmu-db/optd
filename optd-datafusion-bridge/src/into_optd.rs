@@ -298,19 +298,18 @@ impl OptdPlanContext<'_> {
     }
 
     fn conv_into_optd_limit(&mut self, node: &logical_plan::Limit) -> Result<LogicalLimit> {
-        let input = self.into_optd_plan_node(node.input.as_ref())?;
-        // try_into guys are converting usize to i64.
-        // If this is causing problems, add a usize Value type and use it directly probably?
+        let input = self.conv_into_optd_plan_node(node.input.as_ref())?;
+        // try_into guys are converting usize to u64.
         let converted_skip = node.skip.try_into().unwrap();
         let converted_fetch = if let Some(x) = node.fetch {
             x.try_into().unwrap()
         } else {
-            -1 // < 0 represents None
+            u64::MAX // u64 MAX represents infinity (not the best way to do this)
         };
         Ok(LogicalLimit::new(
             input,
-            ConstantExpr::int(converted_skip).into_expr(),
-            ConstantExpr::int(converted_fetch).into_expr(),
+            ConstantExpr::uint64(converted_skip).into_expr(),
+            ConstantExpr::uint64(converted_fetch).into_expr(),
         ))
     }
 
