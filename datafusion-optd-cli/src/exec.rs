@@ -311,7 +311,7 @@ async fn exec_and_collect(ctx: &mut SessionContext, sql: String) -> Result<Vec<V
                 .collect::<Result<Vec<_>, _>>()?;
             for row_idx in 0..batch.num_rows() {
                 let mut row = Vec::with_capacity(batch.num_columns());
-                for (_, converter) in converters.iter().enumerate() {
+                for converter in converters.iter() {
                     let mut buffer = String::with_capacity(8);
                     converter.value(row_idx).write(&mut buffer)?;
                     row.push(buffer);

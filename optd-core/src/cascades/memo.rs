@@ -167,7 +167,7 @@ impl<T: RelNodeTyp> Memo<T> {
             unreachable!("not found {}", memo_node)
         };
         let group_id = self.get_group_id_of_expr_id(expr_id);
-        return (group_id, expr_id);
+        (group_id, expr_id)
     }
 
     fn infer_properties(
@@ -204,13 +204,10 @@ impl<T: RelNodeTyp> Memo<T> {
         group_id: ReducedGroupId,
         memo_node: RelMemoNode<T>,
     ) {
-        match self.groups.entry(group_id) {
-            Entry::Occupied(mut entry) => {
-                let group = entry.get_mut();
-                group.group_exprs.insert(expr_id);
-                return;
-            }
-            _ => {}
+        if let Entry::Occupied(mut entry) = self.groups.entry(group_id) {
+            let group = entry.get_mut();
+            group.group_exprs.insert(expr_id);
+            return;
         }
         let mut group = Group {
             group_exprs: HashSet::new(),
@@ -423,8 +420,7 @@ impl<T: RelNodeTyp> Memo<T> {
             if !winner.impossible {
                 let expr_id = winner.expr_id;
                 let expr = self.get_expr_memoed(expr_id);
-                let mut children = Vec::new();
-                children.reserve(expr.children.len());
+                let mut children = Vec::with_capacity(expr.children.len());
                 for child in &expr.children {
                     children.push(self.get_best_group_binding(*child, on_produce)?);
                 }

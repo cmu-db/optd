@@ -62,12 +62,6 @@ async fn main() -> Result<()> {
         maxrows: MaxRows::Limited(5),
     };
 
-    let print_options = PrintOptions {
-        format: PrintFormat::Table,
-        quiet: false,
-        maxrows: MaxRows::Limited(5),
-    };
-
     exec_from_commands(
         &mut ctx,
         &slient_print_options,
@@ -90,7 +84,7 @@ async fn main() -> Result<()> {
     )
     .await;
 
-    let mut data_progress = vec![5; 3];
+    let mut data_progress = [5; 3];
     let mut iter = 0;
 
     fn do_insert(table: usize, begin: usize, end: usize, repeat: usize) -> String {
@@ -145,13 +139,13 @@ async fn main() -> Result<()> {
 
     loop {
         if iter % 5 == 0 {
-            for table in 0..3 {
-                let progress = rand::thread_rng().gen_range(5..=10) * data_progress[table] / 100;
+            for (table, data_progress_item) in data_progress.iter_mut().enumerate() {
+                let progress = rand::thread_rng().gen_range(5..=10) * *data_progress_item / 100;
                 let progress = progress.max(5);
                 let repeat = rand::thread_rng().gen_range(1..=2);
-                let begin = data_progress[table];
+                let begin = *data_progress_item;
                 let end = begin + progress;
-                data_progress[table] = end;
+                *data_progress_item = end;
                 let statement = do_insert(table, begin, end, repeat);
                 exec_from_commands(&mut ctx, &slient_print_options, vec![statement.clone()]).await;
                 exec_from_commands(&mut ctx_perfect, &slient_print_options, vec![statement]).await;
