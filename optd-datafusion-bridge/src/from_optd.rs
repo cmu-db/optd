@@ -262,16 +262,31 @@ impl OptdPlanContext<'_> {
         node: PhysicalLimit,
     ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
         let child = self.from_optd_plan_node(node.child()).await?;
-        let casted_fetch = if let Some(x) = node.fetch() {
-            Some(x.try_into().unwrap())
-        } else {
+
+        // Limit skip/fetch expressions are only allowed to be constant int
+        assert!(node.skip().typ() == OptRelNodeTyp::Constant(ConstantType::Int));
+        // Conversion from i64 -> usize could fail (also the case in into_optd)
+        let skip = ConstantExpr::from_rel_node(node.skip().into_rel_node())
+            .unwrap()
+            .value()
+            .as_i64()
+            .try_into()
+            .unwrap();
+
+        assert!(node.fetch().typ() == OptRelNodeTyp::Constant(ConstantType::Int));
+        let fetch = ConstantExpr::from_rel_node(node.fetch().into_rel_node())
+            .unwrap()
+            .value()
+            .as_i64();
+        let fetch_opt: Option<usize> = if fetch < 0 {
             None
+        } else {
+            Some(fetch.try_into().unwrap())
         };
+
         Ok(
             Arc::new(datafusion::physical_plan::limit::GlobalLimitExec::new(
-                child,
-                node.skip().try_into().unwrap(),
-                casted_fetch,
+                child, skip, fetch_opt,
             )) as Arc<dyn ExecutionPlan>,
         )
     }

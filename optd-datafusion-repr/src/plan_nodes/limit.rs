@@ -1,182 +1,27 @@
-use optd_core::rel_node::{RelNode, Value};
-use pretty_xmlish::Pretty;
-
-use super::{replace_typ, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
+use super::{macros::define_plan_node, Expr, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 
 #[derive(Clone, Debug)]
 pub struct LogicalLimit(pub PlanNode);
 
-impl OptRelNode for LogicalLimit {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        replace_typ(self.0.into_rel_node(), OptRelNodeTyp::Limit)
-    }
-
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if rel_node.typ != OptRelNodeTyp::Limit {
-            return None;
-        }
-        PlanNode::from_rel_node(rel_node).map(Self)
-    }
-
-    fn dispatch_explain(&self) -> Pretty<'static> {
-        Pretty::simple_record(
-            "LogicalLimit",
-            vec![
-                ("skip", self.skip().to_string().into()),
-                (
-                    "fetch",
-                    (if let Some(x) = self.fetch() {
-                        x.to_string()
-                    } else {
-                        "None".to_owned()
-                    })
-                    .into(),
-                ),
-            ],
-            vec![self.child().explain()],
-        )
-    }
-}
-
-impl LogicalLimit {
-    pub fn new(child: PlanNode, skip: i64, fetch: Option<i64>) -> LogicalLimit {
-        LogicalLimit(PlanNode(
-            RelNode {
-                typ: OptRelNodeTyp::Limit,
-                children: vec![child.into_rel_node()],
-                data: Some(Value::Pair(
-                    Value::Int(skip).into(),
-                    Value::Option(if let Some(x) = fetch {
-                        Some(Value::Int(x).into())
-                    } else {
-                        None
-                    })
-                    .into(),
-                )),
-            }
-            .into(),
-        ))
-    }
-
-    pub fn child(&self) -> PlanNode {
-        PlanNode::from_rel_node(self.clone().into_rel_node().child(0)).unwrap()
-    }
-
-    pub fn skip(&self) -> i64 {
-        self.clone()
-            .into_rel_node()
-            .data
-            .as_ref()
-            .unwrap()
-            .as_pair()
-            .0
-            .as_i64()
-    }
-
-    pub fn fetch(&self) -> Option<i64> {
-        let option = self
-            .clone()
-            .into_rel_node()
-            .data
-            .as_ref()
-            .unwrap()
-            .as_pair()
-            .1
-            .as_option();
-
-        if let Some(x) = option {
-            Some(x.as_i64())
-        } else {
-            None
-        }
-    }
-}
+define_plan_node!(
+    LogicalLimit : PlanNode,
+    Limit, [
+        { 0, child: PlanNode }
+    ], [
+        { 1, skip: Expr },
+        { 2, fetch: Expr }
+    ]
+);
 
 #[derive(Clone, Debug)]
 pub struct PhysicalLimit(pub PlanNode);
 
-impl OptRelNode for PhysicalLimit {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        replace_typ(self.0.into_rel_node(), OptRelNodeTyp::PhysicalLimit)
-    }
-
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if rel_node.typ != OptRelNodeTyp::PhysicalLimit {
-            return None;
-        }
-        PlanNode::from_rel_node(rel_node).map(Self)
-    }
-
-    fn dispatch_explain(&self) -> Pretty<'static> {
-        Pretty::simple_record(
-            "PhysicalLimit",
-            vec![
-                ("skip", self.skip().to_string().into()),
-                (
-                    "fetch",
-                    (if let Some(x) = self.fetch() {
-                        x.to_string()
-                    } else {
-                        "None".to_owned()
-                    })
-                    .into(),
-                ),
-            ],
-            vec![self.child().explain()],
-        )
-    }
-}
-
-impl PhysicalLimit {
-    pub fn new(child: PlanNode, skip: i64, fetch: Option<i64>) -> PhysicalLimit {
-        PhysicalLimit(PlanNode(
-            RelNode {
-                typ: OptRelNodeTyp::PhysicalLimit,
-                children: vec![child.into_rel_node()],
-                data: Some(Value::Pair(
-                    Value::Int(skip).into(),
-                    Value::Option(if let Some(x) = fetch {
-                        Some(Value::Int(x).into())
-                    } else {
-                        None
-                    })
-                    .into(),
-                )),
-            }
-            .into(),
-        ))
-    }
-
-    pub fn child(&self) -> PlanNode {
-        PlanNode::from_rel_node(self.clone().into_rel_node().child(0)).unwrap()
-    }
-
-    pub fn skip(&self) -> i64 {
-        self.clone()
-            .into_rel_node()
-            .data
-            .as_ref()
-            .unwrap()
-            .as_pair()
-            .0
-            .as_i64()
-    }
-
-    pub fn fetch(&self) -> Option<i64> {
-        let option = self
-            .clone()
-            .into_rel_node()
-            .data
-            .as_ref()
-            .unwrap()
-            .as_pair()
-            .1
-            .as_option();
-
-        if let Some(x) = option {
-            Some(x.as_i64())
-        } else {
-            None
-        }
-    }
-}
+define_plan_node!(
+    PhysicalLimit : PlanNode,
+    PhysicalLimit, [
+        { 0, child: PlanNode }
+    ], [
+        { 1, skip: Expr },
+        { 2, fetch: Expr }
+    ]
+);

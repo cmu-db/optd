@@ -278,15 +278,16 @@ impl OptdPlanContext<'_> {
         let input = self.into_optd_plan_node(node.input.as_ref())?;
         // try_into guys are converting usize to i64.
         // If this is causing problems, add a usize Value type and use it directly probably?
-        let casted_fetch = if let Some(x) = node.fetch {
-            Some(x.try_into().unwrap())
+        let converted_skip = node.skip.try_into().unwrap();
+        let converted_fetch = if let Some(x) = node.fetch {
+            x.try_into().unwrap()
         } else {
-            None
+            -1 // < 0 represents None
         };
         Ok(LogicalLimit::new(
             input,
-            node.skip.try_into().unwrap(),
-            casted_fetch,
+            ConstantExpr::int(converted_skip).into_expr(),
+            ConstantExpr::int(converted_fetch).into_expr(),
         ))
     }
 
