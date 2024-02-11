@@ -2,6 +2,7 @@
 
 mod agg;
 mod apply;
+mod empty_relation;
 mod expr;
 mod filter;
 mod join;
@@ -19,6 +20,7 @@ use optd_core::{
 
 pub use agg::{LogicalAgg, PhysicalAgg};
 pub use apply::{ApplyType, LogicalApply};
+pub use empty_relation::{LogicalEmptyRelation, PhysicalEmptyRelation};
 pub use expr::{
     BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, ExprList, FuncExpr, FuncType,
     LogOpExpr, LogOpType, SortOrderExpr, SortOrderType, UnOpExpr, UnOpType,
@@ -48,6 +50,7 @@ pub enum OptRelNodeTyp {
     Sort,
     Agg,
     Apply(ApplyType),
+    EmptyRelation,
     // Physical plan nodes
     PhysicalProjection,
     PhysicalFilter,
@@ -56,6 +59,7 @@ pub enum OptRelNodeTyp {
     PhysicalAgg,
     PhysicalHashJoin(JoinType),
     PhysicalNestedLoopJoin(JoinType),
+    PhysicalEmptyRelation,
     PhysicalCollector(GroupId), // only produced after optimization is done
     // Expressions
     Constant(ConstantType),
@@ -78,6 +82,7 @@ impl OptRelNodeTyp {
                 | Self::Apply(_)
                 | Self::Sort
                 | Self::Agg
+                | Self::EmptyRelation
                 | Self::PhysicalProjection
                 | Self::PhysicalFilter
                 | Self::PhysicalNestedLoopJoin(_)
@@ -86,6 +91,7 @@ impl OptRelNodeTyp {
                 | Self::PhysicalAgg
                 | Self::PhysicalHashJoin(_)
                 | Self::PhysicalCollector(_)
+                | Self::PhysicalEmptyRelation
         )
     }
 
@@ -120,6 +126,7 @@ impl RelNodeTyp for OptRelNodeTyp {
                 | Self::Apply(_)
                 | Self::Sort
                 | Self::Agg
+                | Self::EmptyRelation
         )
     }
 
@@ -194,7 +201,7 @@ impl PlanNode {
         self.0.typ.clone()
     }
 
-    pub fn schema(&self, optimizer: CascadesOptimizer<OptRelNodeTyp>) -> Schema {
+    pub fn schema(&self, optimizer: &CascadesOptimizer<OptRelNodeTyp>) -> Schema {
         let group_id = optimizer.resolve_group_id(self.0.clone());
         optimizer.get_property_by_group::<SchemaPropertyBuilder>(group_id, 0)
     }
@@ -300,6 +307,9 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
         OptRelNodeTyp::Apply(_) => LogicalApply::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
+        OptRelNodeTyp::EmptyRelation => LogicalEmptyRelation::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
         OptRelNodeTyp::PhysicalFilter => PhysicalFilter::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
@@ -343,6 +353,9 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
             .unwrap()
             .dispatch_explain(),
         OptRelNodeTyp::PhysicalCollector(group_id) => PhysicalCollector::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::PhysicalEmptyRelation => PhysicalEmptyRelation::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
     }

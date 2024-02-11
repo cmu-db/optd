@@ -1,8 +1,3 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-
 use optd_core::property::PropertyBuilder;
 
 use crate::plan_nodes::{ConstantType, OptRelNodeTyp};
@@ -10,6 +5,7 @@ use crate::plan_nodes::{ConstantType, OptRelNodeTyp};
 #[derive(Clone, Debug)]
 pub struct Schema(pub Vec<ConstantType>);
 
+// TODO: add names, nullable to schema
 impl Schema {
     pub fn len(&self) -> usize {
         self.0.len()

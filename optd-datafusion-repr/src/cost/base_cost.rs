@@ -106,6 +106,7 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                     .unwrap_or(1) as f64;
                 Self::cost(row_cnt, 0.0, row_cnt)
             }
+            OptRelNodeTyp::PhysicalEmptyRelation => Self::cost(0.5, 0.01, 0.0),
             OptRelNodeTyp::PhysicalFilter => {
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
                 let (_, compute_cost, _) = Self::cost_tuple(&children[1]);

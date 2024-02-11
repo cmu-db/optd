@@ -40,6 +40,7 @@ impl PhysicalConversionRule {
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Filter)),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Sort)),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Agg)),
+            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::EmptyRelation)),
         ]
     }
 }
@@ -112,6 +113,14 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
             OptRelNodeTyp::Agg => {
                 let node = RelNode {
                     typ: OptRelNodeTyp::PhysicalAgg,
+                    children,
+                    data,
+                };
+                vec![node]
+            }
+            OptRelNodeTyp::EmptyRelation => {
+                let node = RelNode {
+                    typ: OptRelNodeTyp::PhysicalEmptyRelation,
                     children,
                     data,
                 };
