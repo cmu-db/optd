@@ -244,7 +244,7 @@ impl OptdQueryPlanner {
             ));
             let bindings = optimizer
                 .optd_optimizer()
-                .get_all_group_physical_bindings(group_id);
+                .get_all_group_bindings(group_id, true);
             let mut join_orders = BTreeSet::new();
             let mut logical_join_orders = BTreeSet::new();
             for binding in bindings {
