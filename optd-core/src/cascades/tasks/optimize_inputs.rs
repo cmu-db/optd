@@ -51,8 +51,7 @@ impl OptimizeInputsTask {
         optimizer: &mut CascadesOptimizer<T>,
     ) -> Vec<Cost> {
         let zero_cost = optimizer.cost().zero();
-        let mut input_cost = Vec::new();
-        input_cost.reserve(children.len());
+        let mut input_cost = Vec::with_capacity(children.len());
         for &child in children.iter() {
             let group = optimizer.get_group_info(child);
             if let Some(ref winner) = group.winner {

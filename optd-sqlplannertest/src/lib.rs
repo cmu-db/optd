@@ -93,7 +93,7 @@ impl DatafusionDb {
                     .collect::<Result<Vec<_>, _>>()?;
                 for row_idx in 0..batch.num_rows() {
                     let mut row = Vec::with_capacity(batch.num_columns());
-                    for (_, converter) in converters.iter().enumerate() {
+                    for converter in converters.iter() {
                         let mut buffer = String::with_capacity(8);
                         converter.value(row_idx).write(&mut buffer)?;
                         row.push(buffer);
@@ -108,7 +108,7 @@ impl DatafusionDb {
     /// Executes the `execute` task.
     async fn task_execute(&mut self, r: &mut String, sql: &str, with_logical: bool) -> Result<()> {
         use std::fmt::Write;
-        let result = self.execute(&sql, with_logical).await?;
+        let result = self.execute(sql, with_logical).await?;
         writeln!(r, "{}", result.into_iter().map(|x| x.join(" ")).join("\n"))?;
         writeln!(r)?;
         Ok(())
@@ -132,7 +132,7 @@ impl DatafusionDb {
         } else {
             "explain:".len()
         };
-        for subtask in task[subtask_start_pos..].split(",") {
+        for subtask in task[subtask_start_pos..].split(',') {
             let subtask = subtask.trim();
             if subtask == "logical_datafusion" {
                 writeln!(
