@@ -207,7 +207,7 @@ impl PlanNode {
     }
 
     pub fn from_group(rel_node: OptRelNodeRef) -> Self {
-        return Self(rel_node);
+        Self(rel_node)
     }
 }
 
@@ -352,7 +352,7 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
         OptRelNodeTyp::LogOp(_) => LogOpExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
-        OptRelNodeTyp::PhysicalCollector(group_id) => PhysicalCollector::from_rel_node(rel_node)
+        OptRelNodeTyp::PhysicalCollector(_group_id) => PhysicalCollector::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
         OptRelNodeTyp::PhysicalEmptyRelation => PhysicalEmptyRelation::from_rel_node(rel_node)

@@ -171,8 +171,8 @@ fn apply_join_assoc(
         )
     }
     let a_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(a.clone()), 0);
-    let b_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(b.clone()), 0);
-    let c_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(c.clone()), 0);
+    let _b_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(b.clone()), 0);
+    let _c_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(c.clone()), 0);
     let cond2 = Expr::from_rel_node(cond2.into()).unwrap();
     let Some(cond2) = rewrite_column_refs(cond2, a_schema.len()) else {
         return vec![];
@@ -260,7 +260,7 @@ define_rule!(
 
 struct ProjectionMapping {
     forward: Vec<usize>,
-    backward: Vec<Option<usize>>,
+    _backward: Vec<Option<usize>>,
 }
 
 impl ProjectionMapping {
@@ -274,7 +274,7 @@ impl ProjectionMapping {
         }
         Some(Self {
             forward: mapping,
-            backward,
+            _backward: backward,
         })
     }
 
@@ -282,8 +282,8 @@ impl ProjectionMapping {
         self.forward[col]
     }
 
-    pub fn original_col_maps_to(&self, col: usize) -> Option<usize> {
-        self.backward[col]
+    pub fn _original_col_maps_to(&self, col: usize) -> Option<usize> {
+        self._backward[col]
     }
 }
 
@@ -342,7 +342,8 @@ fn apply_projection_pull_up_join(
                 .into_rel_node(),
             );
         }
-        let expr = Expr::from_rel_node(
+        
+        Expr::from_rel_node(
             RelNode {
                 typ: expr.typ.clone(),
                 children,
@@ -350,8 +351,7 @@ fn apply_projection_pull_up_join(
             }
             .into(),
         )
-        .unwrap();
-        expr
+        .unwrap()
     }
 
     let left = Arc::new(left.clone());

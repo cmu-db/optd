@@ -51,7 +51,7 @@ fn match_node<T: RelNodeTyp>(
             RuleMatcher::PickMany { pick_to } => {
                 let res = pick.insert(
                     *pick_to,
-                    RelNode::new_list(node.children[idx..].to_vec()).into(),
+                    RelNode::new_list(node.children[idx..].to_vec()),
                 );
                 assert!(res.is_none(), "dup pick");
                 should_end = true;
@@ -124,7 +124,7 @@ impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
         for rule in self.rules.as_ref() {
             let matcher = rule.matcher();
             if let Some(picks) = match_and_pick(matcher, root_rel.clone()) {
-                let mut results = rule.apply(&self, picks);
+                let mut results = rule.apply(self, picks);
                 assert_eq!(results.len(), 1);
                 root_rel = results.remove(0).into();
             }
