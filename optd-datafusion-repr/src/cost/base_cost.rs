@@ -108,9 +108,9 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
             }
             OptRelNodeTyp::PhysicalEmptyRelation => Self::cost(0.5, 0.01, 0.0),
             OptRelNodeTyp::PhysicalLimit => {
-                let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
+                let (row_cnt, compute_cost, _) = Self::cost_tuple(&children[0]);
                 let selectivity = 0.001;
-                Self::cost((row_cnt * selectivity).max(1.0), row_cnt, 0.0)
+                Self::cost((row_cnt * selectivity).max(1.0), compute_cost, 0.0)
             }
             OptRelNodeTyp::PhysicalFilter => {
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
