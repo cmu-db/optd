@@ -6,16 +6,14 @@
   tasks:
     - execute
 - sql: |
-    select 64 + 1;
-    select 64 + 1 from t1;
-  desc: Test whether the optimizer handles empty relation correctly.
+    select * from t1 where false;
+  desc: Test EliminateFilterRule (false filter to empty relation)
   tasks:
     - explain:logical_optd,physical_optd
     - execute
 - sql: |
-    select * from t1 inner join t2 on false;
-    select 64+1 from t1 inner join t2 on false;
-  desc: Test whether the optimizer eliminates join to empty relation
+    select * from t1 where true;
+  desc: Test EliminateFilterRule (replace true filter with child)
   tasks:
     - explain:logical_optd,physical_optd
     - execute

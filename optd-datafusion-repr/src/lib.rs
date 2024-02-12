@@ -8,8 +8,8 @@ use optd_core::cascades::{CascadesOptimizer, GroupId, OptimizerProperties};
 use plan_nodes::{OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 use properties::schema::{Catalog, SchemaPropertyBuilder};
 use rules::{
-    EliminateJoinRule, EliminateLimitRule, HashJoinRule, JoinAssocRule, JoinCommuteRule,
-    PhysicalConversionRule, ProjectionPullUpJoin,
+    EliminateFilterRule, EliminateJoinRule, EliminateLimitRule, HashJoinRule, JoinAssocRule,
+    JoinCommuteRule, PhysicalConversionRule, ProjectionPullUpJoin,
 };
 
 pub use adaptive::PhysicalCollector;
@@ -48,6 +48,7 @@ impl DatafusionOptimizer {
         rules.push(Arc::new(JoinAssocRule::new()));
         rules.push(Arc::new(ProjectionPullUpJoin::new()));
         rules.push(Arc::new(EliminateJoinRule::new()));
+        rules.push(Arc::new(EliminateFilterRule::new()));
         rules.push(Arc::new(EliminateLimitRule::new()));
 
         let cost_model = AdaptiveCostModel::new(50);
@@ -73,6 +74,8 @@ impl DatafusionOptimizer {
         rules.insert(0, Arc::new(JoinCommuteRule::new()));
         rules.insert(1, Arc::new(JoinAssocRule::new()));
         rules.insert(2, Arc::new(ProjectionPullUpJoin::new()));
+        rules.insert(3, Arc::new(EliminateFilterRule::new()));
+
         let cost_model = AdaptiveCostModel::new(1000); // very large decay
         let runtime_statistics = cost_model.get_runtime_map();
         let optimizer = CascadesOptimizer::new(

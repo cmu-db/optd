@@ -214,9 +214,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         group_id: GroupId,
         mut on_produce: impl FnMut(RelNodeRef<T>, GroupId) -> RelNodeRef<T>,
     ) -> Result<RelNodeRef<T>> {
-        self
-            .memo
-            .get_best_group_binding(group_id, &mut on_produce)
+        self.memo.get_best_group_binding(group_id, &mut on_produce)
     }
 
     fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
@@ -290,6 +288,10 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
 
     pub(super) fn update_group_info(&mut self, group_id: GroupId, group_info: GroupInfo) {
         self.memo.update_group_info(group_id, group_info)
+    }
+
+    pub(super) fn merge_group(&mut self, group_a: GroupId, group_b: GroupId) {
+        self.memo.merge_group(group_a, group_b);
     }
 
     pub fn get_property_by_group<P: PropertyBuilder<T>>(

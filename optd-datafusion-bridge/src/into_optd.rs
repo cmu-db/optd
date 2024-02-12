@@ -110,6 +110,10 @@ impl OptdPlanContext<'_> {
                     let x = x.as_ref().unwrap();
                     Ok(ConstantExpr::decimal(*x as f64).into_expr())
                 }
+                ScalarValue::Boolean(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::bool(*x).into_expr())
+                }
                 _ => bail!("{:?}", x),
             },
             Expr::Alias(x) => self.conv_into_optd_expr(x.expr.as_ref(), context),

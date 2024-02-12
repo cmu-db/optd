@@ -57,5 +57,8 @@ fn cli_test_tpch() {
     cmd.current_dir(".."); // all paths in `test.sql` assume we're in the base dir of the repo
     cmd.args(["--enable-logical", "--file", "tpch/test.sql"]);
     let status = cmd.status().unwrap();
-    assert!(status.success(), "should not have crashed when running tpch");
+    assert!(
+        status.success(),
+        "should not have crashed when running tpch"
+    );
 }

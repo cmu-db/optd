@@ -109,13 +109,35 @@ impl<T: RelNodeTyp> Memo<T> {
         ExprId(id)
     }
 
-    fn merge_group(&mut self, group_a: ReducedGroupId, group_b: ReducedGroupId) -> ReducedGroupId {
+    fn merge_group_inner(
+        &mut self,
+        group_a: ReducedGroupId,
+        group_b: ReducedGroupId,
+    ) -> ReducedGroupId {
         if group_a == group_b {
             return group_a;
         }
         self.merged_groups
             .insert(group_a.as_group_id(), group_b.as_group_id());
+
+        // Copy all expressions from group a to group b
+        let group_a_exprs = self.get_all_exprs_in_group(group_a.as_group_id());
+        for expr_id in group_a_exprs {
+            let expr_node = self.expr_id_to_expr_node.get(&expr_id).unwrap();
+            self.add_expr_to_group(expr_id, group_b, expr_node.as_ref().clone());
+        }
+
+        // Remove all expressions from group a (so we don't accidentally access it)
+        self.clear_exprs_in_group(group_a);
+
         group_b
+    }
+
+    pub fn merge_group(&mut self, group_a: GroupId, group_b: GroupId) -> GroupId {
+        let group_a_reduced = self.get_reduced_group_id(group_a);
+        let group_b_reduced = self.get_reduced_group_id(group_b);
+        self.merge_group_inner(group_a_reduced, group_b_reduced)
+            .as_group_id()
     }
 
     fn get_group_id_of_expr_id(&self, expr_id: ExprId) -> GroupId {
@@ -136,9 +158,11 @@ impl<T: RelNodeTyp> Memo<T> {
         rel_node: RelNodeRef<T>,
         add_to_group_id: Option<GroupId>,
     ) -> (GroupId, ExprId) {
-        if rel_node.typ.extract_group().is_some() {
-            unreachable!();
-        }
+        let node_current_group = rel_node.typ.extract_group();
+        if let (Some(grp_a), Some(grp_b)) = (add_to_group_id, node_current_group) {
+            self.merge_group(grp_a, grp_b);
+        };
+
         let (group_id, expr_id) = self.add_new_group_expr_inner(
             rel_node,
             add_to_group_id.map(|x| self.get_reduced_group_id(x)),
@@ -198,6 +222,10 @@ impl<T: RelNodeTyp> Memo<T> {
         props
     }
 
+    fn clear_exprs_in_group(&mut self, group_id: ReducedGroupId) {
+        self.groups.remove(&group_id);
+    }
+
     fn add_expr_to_group(
         &mut self,
         expr_id: ExprId,
@@ -243,7 +271,7 @@ impl<T: RelNodeTyp> Memo<T> {
             let group_id = self.get_group_id_of_expr_id(expr_id);
             let group_id = self.get_reduced_group_id(group_id);
             if let Some(add_to_group_id) = add_to_group_id {
-                self.merge_group(add_to_group_id, group_id);
+                self.merge_group_inner(add_to_group_id, group_id);
             }
             return (group_id, expr_id);
         }

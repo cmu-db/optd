@@ -68,7 +68,7 @@ fn apply_join_commute(
         cond,
         JoinType::Inner,
     );
-    let mut proj_expr = Vec::with_capacity(left_schema.0.len() + right_schema.0.len());
+    let mut proj_expr = Vec::with_capacity(left_schema.len() + right_schema.len());
     for i in 0..left_schema.len() {
         proj_expr.push(ColumnRefExpr::new(right_schema.len() + i).into_expr());
     }
@@ -218,13 +218,11 @@ fn apply_hash_join(
         let Some(mut right_expr) = ColumnRefExpr::from_rel_node(right_expr.into_rel_node()) else {
             return vec![];
         };
-        let can_convert = if left_expr.index() < left_schema.0.len()
-            && right_expr.index() >= left_schema.0.len()
+        let can_convert = if left_expr.index() < left_schema.len()
+            && right_expr.index() >= left_schema.len()
         {
             true
-        } else if right_expr.index() < left_schema.0.len()
-            && left_expr.index() >= left_schema.0.len()
-        {
+        } else if right_expr.index() < left_schema.len() && left_expr.index() >= left_schema.len() {
             (left_expr, right_expr) = (right_expr, left_expr);
             true
         } else {
@@ -232,7 +230,7 @@ fn apply_hash_join(
         };
 
         if can_convert {
-            let right_expr = ColumnRefExpr::new(right_expr.index() - left_schema.0.len());
+            let right_expr = ColumnRefExpr::new(right_expr.index() - left_schema.len());
             let node = PhysicalHashJoin::new(
                 PlanNode::from_group(left.into()),
                 PlanNode::from_group(right.into()),
@@ -342,7 +340,7 @@ fn apply_projection_pull_up_join(
                 .into_rel_node(),
             );
         }
-        
+
         Expr::from_rel_node(
             RelNode {
                 typ: expr.typ.clone(),

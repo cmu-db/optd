@@ -49,10 +49,7 @@ fn match_node<T: RelNodeTyp>(
                 assert!(res.is_none(), "dup pick");
             }
             RuleMatcher::PickMany { pick_to } => {
-                let res = pick.insert(
-                    *pick_to,
-                    RelNode::new_list(node.children[idx..].to_vec()),
-                );
+                let res = pick.insert(*pick_to, RelNode::new_list(node.children[idx..].to_vec()));
                 assert!(res.is_none(), "dup pick");
                 should_end = true;
             }

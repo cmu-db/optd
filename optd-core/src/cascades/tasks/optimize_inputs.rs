@@ -243,12 +243,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
             } else {
                 self.update_winner(
                     &cost.sum(
-                        &cost.compute_cost(
-                            &expr.typ,
-                            &expr.data,
-                            &input_cost,
-                            Some(context),
-                        ),
+                        &cost.compute_cost(&expr.typ, &expr.data, &input_cost, Some(context)),
                         &input_cost,
                     ),
                     optimizer,

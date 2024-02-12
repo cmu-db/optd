@@ -37,7 +37,7 @@ use crate::{physical_collector::CollectorExec, OptdPlanContext};
 // TODO: current DataType and ConstantType are not 1 to 1 mapping
 // optd schema stores constantType from data type in catalog.get
 // for decimal128, the precision is lost
-fn from_optd_schema(optd_schema: &OptdSchema) -> Schema {
+fn from_optd_schema(optd_schema: OptdSchema) -> Schema {
     let match_type = |typ: &ConstantType| match typ {
         ConstantType::Any => unimplemented!(),
         ConstantType::Bool => DataType::Boolean,
@@ -53,12 +53,14 @@ fn from_optd_schema(optd_schema: &OptdSchema) -> Schema {
         ConstantType::Decimal => DataType::Float64,
         ConstantType::Utf8String => DataType::Utf8,
     };
-    let fields: Vec<_> = optd_schema
-        .0
-        .iter()
-        .enumerate()
-        .map(|(i, typ)| Field::new(format!("c{}", i), match_type(typ), false))
-        .collect();
+    let mut fields = Vec::with_capacity(optd_schema.len());
+    for field in optd_schema.fields {
+        fields.push(Field::new(
+            field.name,
+            match_type(&field.typ),
+            field.nullable,
+        ));
+    }
     Schema::new(fields)
 }
 
@@ -473,7 +475,7 @@ impl OptdPlanContext<'_> {
 
     #[async_recursion]
     async fn conv_from_optd_plan_node(&mut self, node: PlanNode) -> Result<Arc<dyn ExecutionPlan>> {
-        let mut schema = OptdSchema(vec![]);
+        let mut schema = OptdSchema { fields: vec![] };
         if node.typ() == OptRelNodeTyp::PhysicalEmptyRelation {
             schema = node.schema(self.optimizer.unwrap().optd_optimizer());
         }
@@ -521,7 +523,7 @@ impl OptdPlanContext<'_> {
             }
             OptRelNodeTyp::PhysicalEmptyRelation => {
                 let physical_node = PhysicalEmptyRelation::from_rel_node(rel_node).unwrap();
-                let datafusion_schema: Schema = from_optd_schema(&schema);
+                let datafusion_schema: Schema = from_optd_schema(schema);
                 Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
                     physical_node.produce_one_row(),
                     Arc::new(datafusion_schema),

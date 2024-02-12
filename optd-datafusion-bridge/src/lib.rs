@@ -61,9 +61,10 @@ impl Catalog for DatafusionCatalog {
         let catalog = self.catalog.catalog("datafusion").unwrap();
         let schema = catalog.schema("public").unwrap();
         let table = futures_lite::future::block_on(schema.table(name.as_ref())).unwrap();
-        let fields = table.schema();
-        let mut optd_schema = vec![];
-        for field in fields.fields() {
+        let schema = table.schema();
+        let fields = schema.fields();
+        let mut optd_fields = Vec::with_capacity(fields.len());
+        for field in fields {
             let dt = match field.data_type() {
                 DataType::Date32 => ConstantType::Date,
                 DataType::Int32 => ConstantType::Int32,
@@ -73,9 +74,15 @@ impl Catalog for DatafusionCatalog {
                 DataType::Decimal128(_, _) => ConstantType::Decimal,
                 dt => unimplemented!("{:?}", dt),
             };
-            optd_schema.push(dt);
+            optd_fields.push(optd_datafusion_repr::properties::schema::Field {
+                name: field.name().to_string(),
+                typ: dt,
+                nullable: field.is_nullable(),
+            });
         }
-        optd_datafusion_repr::properties::schema::Schema(optd_schema)
+        optd_datafusion_repr::properties::schema::Schema {
+            fields: optd_fields,
+        }
     }
 }
 
