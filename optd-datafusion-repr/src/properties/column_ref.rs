@@ -43,9 +43,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
         data: Option<optd_core::rel_node::Value>,
         children: &[&Self::Prop],
     ) -> Self::Prop {
-        // Print the params for debugging.
-        println!("typ: {:?}, data: {:?}, children: {:?}", typ, data, children);
-        let p = match typ {
+        match typ {
             // Should account for PhysicalScan.
             OptRelNodeTyp::Scan => {
                 let table_name = data.unwrap().as_str().to_string();
@@ -113,9 +111,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 vec![ColumnRef::Derived]
             }
             _ => todo!("derive column ref for {:?}", typ),
-        };
-        println!("p: {:?}", p);
-        p
+        }
     }
 
     fn property_name(&self) -> &'static str {
