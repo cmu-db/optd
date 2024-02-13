@@ -25,12 +25,7 @@ impl ColumnRefPropertyBuilder {
     }
 
     fn concat_children_properties(children: &[&GroupColumnRefs]) -> GroupColumnRefs {
-        children
-            .iter()
-            .map(Deref::deref)
-            .cloned()
-            .flatten()
-            .collect()
+        children.iter().flat_map(Deref::deref).cloned().collect()
     }
 }
 
