@@ -101,7 +101,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
             | OptRelNodeTyp::Limit
             | OptRelNodeTyp::SortOrder(_) => children[0].clone(),
             OptRelNodeTyp::Cast => {
-                // TODO: we just assume the column value does not change.
+                // FIXME: we just assume the column value does not change.
                 children[0].clone()
             }
             OptRelNodeTyp::Constant(_)
@@ -110,7 +110,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
             | OptRelNodeTyp::Between => {
                 vec![ColumnRef::Derived]
             }
-            _ => todo!("derive column ref for {:?}", typ),
+            _ => unimplemented!("Unsupported rel node type {:?}", typ),
         }
     }
 
