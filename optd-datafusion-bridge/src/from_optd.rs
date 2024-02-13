@@ -22,14 +22,14 @@ use datafusion::{
 };
 use optd_datafusion_repr::{
     plan_nodes::{
-        BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, FuncExpr, FuncType,
-        JoinType, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalAgg,
-        PhysicalEmptyRelation, PhysicalFilter, PhysicalHashJoin, PhysicalLimit,
-        PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan, PhysicalSort, PlanNode,
-        SortOrderExpr, SortOrderType,
+        BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
+        Expr, ExprList, FuncExpr, FuncType, JoinType, LogOpExpr, LogOpType, OptRelNode,
+        OptRelNodeRef, OptRelNodeTyp, PhysicalAgg, PhysicalEmptyRelation, PhysicalFilter,
+        PhysicalHashJoin, PhysicalLimit, PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan,
+        PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
     },
     properties::schema::Schema as OptdSchema,
-    PhysicalCollector,
+    PhysicalCollector, Value,
 };
 
 use crate::{physical_collector::CollectorExec, OptdPlanContext};
@@ -227,6 +227,34 @@ impl OptdPlanContext<'_> {
                         left, op, right,
                     )) as Arc<dyn PhysicalExpr>,
                 )
+            }
+            OptRelNodeTyp::Between => {
+                // TODO: should we just convert between to x <= c1 and x >= c2?
+                let expr = BetweenExpr::from_rel_node(expr.into_rel_node()).unwrap();
+                Self::conv_from_optd_expr(
+                    LogOpExpr::new(
+                        LogOpType::And,
+                        ExprList::new(vec![
+                            BinOpExpr::new(expr.child(), expr.lower(), BinOpType::Geq).into_expr(),
+                            BinOpExpr::new(expr.child(), expr.upper(), BinOpType::Leq).into_expr(),
+                        ]),
+                    )
+                    .into_expr(),
+                    context,
+                )
+            }
+            OptRelNodeTyp::Cast => {
+                let expr = CastExpr::from_rel_node(expr.into_rel_node()).unwrap();
+                let child = Self::conv_from_optd_expr(expr.child(), context)?;
+                let data_type = match expr.cast_to() {
+                    Value::Bool(_) => DataType::Boolean,
+                    Value::Decimal128(_) => DataType::Decimal128(15, 2), /* TODO: AVOID HARD CODE PRECISION */
+                    Value::Date32(_) => DataType::Date32,
+                    other => unimplemented!("{}", other),
+                };
+                Ok(Arc::new(
+                    datafusion::physical_plan::expressions::CastExpr::new(child, data_type, None),
+                ))
             }
             _ => unimplemented!("{}", expr.into_rel_node()),
         }

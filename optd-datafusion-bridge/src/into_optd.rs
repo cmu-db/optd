@@ -6,11 +6,14 @@ use datafusion::{
 };
 use datafusion_expr::Expr as DFExpr;
 use optd_core::rel_node::RelNode;
-use optd_datafusion_repr::plan_nodes::{
-    BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, FuncExpr, FuncType,
-    JoinType, LogOpExpr, LogOpType, LogicalAgg, LogicalEmptyRelation, LogicalFilter, LogicalJoin,
-    LogicalLimit, LogicalProjection, LogicalScan, LogicalSort, OptRelNode, OptRelNodeRef,
-    OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
+use optd_datafusion_repr::{
+    plan_nodes::{
+        BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList,
+        FuncExpr, FuncType, JoinType, LogOpExpr, LogOpType, LogicalAgg, LogicalEmptyRelation,
+        LogicalFilter, LogicalJoin, LogicalLimit, LogicalProjection, LogicalScan, LogicalSort,
+        OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
+    },
+    Value,
 };
 
 use crate::OptdPlanContext;
@@ -150,6 +153,24 @@ impl OptdPlanContext<'_> {
                     expr,
                 )
                 .into_expr())
+            }
+            Expr::Between(x) => {
+                let expr = self.conv_into_optd_expr(x.expr.as_ref(), context)?;
+                let low = self.conv_into_optd_expr(x.low.as_ref(), context)?;
+                let high = self.conv_into_optd_expr(x.high.as_ref(), context)?;
+                assert!(!x.negated, "unimplemented");
+                Ok(BetweenExpr::new(expr, low, high).into_expr())
+            }
+            Expr::Cast(x) => {
+                let expr = self.conv_into_optd_expr(x.expr.as_ref(), context)?;
+                let data_type = x.data_type.clone();
+                let val = match data_type {
+                    arrow_schema::DataType::Int8 => Value::Int8(0),
+                    arrow_schema::DataType::Date32 => Value::Date32(0),
+                    arrow_schema::DataType::Decimal128(_, _) => Value::Decimal128(0),
+                    other => unimplemented!("unimplemented datatype {:?}", other),
+                };
+                Ok(CastExpr::new(expr, val).into_expr())
             }
             _ => bail!("Unsupported expression: {:?}", expr),
         }

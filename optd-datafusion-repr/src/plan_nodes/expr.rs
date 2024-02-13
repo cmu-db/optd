@@ -569,3 +569,111 @@ impl OptRelNode for LogOpExpr {
         )
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct BetweenExpr(pub Expr);
+
+impl BetweenExpr {
+    pub fn new(expr: Expr, lower: Expr, upper: Expr) -> Self {
+        BetweenExpr(Expr(
+            RelNode {
+                typ: OptRelNodeTyp::Between,
+                children: vec![
+                    expr.into_rel_node(),
+                    lower.into_rel_node(),
+                    upper.into_rel_node(),
+                ],
+                data: None,
+            }
+            .into(),
+        ))
+    }
+
+    pub fn child(&self) -> Expr {
+        Expr(self.0.child(0))
+    }
+
+    pub fn lower(&self) -> Expr {
+        Expr(self.0.child(1))
+    }
+
+    pub fn upper(&self) -> Expr {
+        Expr(self.0.child(2))
+    }
+}
+
+impl OptRelNode for BetweenExpr {
+    fn into_rel_node(self) -> OptRelNodeRef {
+        self.0.into_rel_node()
+    }
+
+    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
+        if !matches!(rel_node.typ, OptRelNodeTyp::Between) {
+            return None;
+        }
+        Expr::from_rel_node(rel_node).map(Self)
+    }
+
+    fn dispatch_explain(&self) -> Pretty<'static> {
+        Pretty::simple_record(
+            "Between",
+            vec![
+                ("expr", self.child().explain()),
+                ("lower", self.lower().explain()),
+                ("upper", self.upper().explain()),
+            ],
+            vec![],
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CastExpr(pub Expr);
+
+impl CastExpr {
+    pub fn new(
+        expr: Expr,
+        cast_to: Value, /* TODO: have a `type` relnode for representing type */
+    ) -> Self {
+        CastExpr(Expr(
+            RelNode {
+                typ: OptRelNodeTyp::Cast,
+                children: vec![expr.into_rel_node()],
+                data: Some(cast_to),
+            }
+            .into(),
+        ))
+    }
+
+    pub fn child(&self) -> Expr {
+        Expr(self.0.child(0))
+    }
+
+    pub fn cast_to(&self) -> Value {
+        self.0 .0.data.clone().unwrap()
+    }
+}
+
+impl OptRelNode for CastExpr {
+    fn into_rel_node(self) -> OptRelNodeRef {
+        self.0.into_rel_node()
+    }
+
+    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
+        if !matches!(rel_node.typ, OptRelNodeTyp::Cast) {
+            return None;
+        }
+        Expr::from_rel_node(rel_node).map(Self)
+    }
+
+    fn dispatch_explain(&self) -> Pretty<'static> {
+        Pretty::simple_record(
+            "Cast",
+            vec![
+                ("cast_to", format!("{:?}", self.cast_to()).into()),
+                ("expr", self.child().explain()),
+            ],
+            vec![],
+        )
+    }
+}

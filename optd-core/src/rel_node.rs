@@ -38,6 +38,8 @@ pub enum Value {
     Float(OrderedFloat<f64>),
     String(Arc<str>),
     Bool(bool),
+    Date32(i32),
+    Decimal128(i128),
     Serialized(Arc<[u8]>),
 }
 
@@ -55,6 +57,8 @@ impl std::fmt::Display for Value {
             Self::Float(x) => write!(f, "{x}"),
             Self::String(x) => write!(f, "\"{x}\""),
             Self::Bool(x) => write!(f, "{x}"),
+            Self::Date32(x) => write!(f, "{x}"),
+            Self::Decimal128(x) => write!(f, "{x}"),
             Self::Serialized(x) => write!(f, "<len:{}>", x.len()),
         }
     }
