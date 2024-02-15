@@ -65,7 +65,7 @@ fn apply_eliminate_duplicated_sort_expr(
 
     if dedup_expr.len() != sort_keys.len() {
         let node = LogicalSort::new(
-            PlanNode::from_rel_node(child.into()).unwrap(),
+            PlanNode::from_group(child.into()),
             ExprList::new(dedup_expr),
         );
         return vec![node.into_rel_node().as_ref().clone()];
