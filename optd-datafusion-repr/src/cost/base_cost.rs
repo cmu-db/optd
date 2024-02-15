@@ -5,8 +5,9 @@ use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
     cost::{Cost, CostModel},
-    rel_node::{RelNode, RelNodeTyp, Value},
+    rel_node::{RelNode, RelNodeTyp, Value, RelNodeRef},
 };
+use crate::properties::schema::Schema;
 
 fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     model: &C,
@@ -97,8 +98,6 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
         context: Option<RelNodeContext>,
         optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Cost {
-        // let bindings = optimizer.unwrap().get_all_group_bindings(context.unwrap().group_id, false);
-        // println!("bindings={:?}", bindings);
         match node {
             OptRelNodeTyp::PhysicalScan => {
                 let table_name = data.as_ref().unwrap().as_str();
@@ -118,6 +117,12 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
             OptRelNodeTyp::PhysicalFilter => {
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
                 let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
+                // TODO: don't just do optimizer.unwrap(). probably make optimizer a constructor param
+                // TODO: don't just do context.unwrap()
+                let expr_group_id = context.unwrap().children_group_ids[1];
+                let expr_tree = optimizer.unwrap().get_all_group_bindings(expr_group_id, false);
+                println!("expr_tree={:?}", expr_tree);
+                // let selectivity = Self::get_filter_selectivity(expr_tree, schema);
                 let selectivity = 0.001;
                 Self::cost(
                     (row_cnt * selectivity).max(1.0),
@@ -197,5 +202,14 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
 impl OptCostModel {
     pub fn new(table_stat: HashMap<String, usize>) -> Self {
         Self { table_stat }
+    }
+
+    /// The expr_tree input must be an expression tree, meaning each RelNode must be an expression
+    /// The schema input is the schema the predicate represented by the expr_tree is applied on
+    /// The output will be the selectivity of the expression tree if it were a "filter predicate".
+    /// A "filter predicate" operates on one input node, unlike a "join predicate" which operates on two input nodes.
+    ///     This is why the function only takes in a single schema.
+    fn get_filter_selectivity(expr_tree: RelNodeRef<OptRelNodeTyp>, schema: Schema) -> f64 {
+        0.0
     }
 }
