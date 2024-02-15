@@ -37,6 +37,10 @@ impl ExprList {
             .map(|x| Expr::from_rel_node(x.clone()).unwrap())
             .collect_vec()
     }
+
+    pub fn from_group(rel_node: OptRelNodeRef) -> Self {
+        Self(rel_node)
+    }
 }
 
 impl OptRelNode for ExprList {

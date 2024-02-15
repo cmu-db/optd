@@ -76,7 +76,7 @@ fn apply_eliminate_duplicated_sort_expr(
 define_rule!(
     EliminateDuplicatedAggExprRule,
     apply_eliminate_duplicated_agg_expr,
-    (Agg, child, [exprs], [groups])
+    (Agg, child, exprs, [groups])
 );
 
 /// Removes duplicate group by expressions
@@ -108,7 +108,7 @@ fn apply_eliminate_duplicated_agg_expr(
     if dedup_expr.len() != groups.children.len() {
         let node = LogicalAgg::new(
             PlanNode::from_group(child.into()),
-            ExprList::from_rel_node(exprs.into()).unwrap(),
+            ExprList::from_group(exprs.into()),
             ExprList::new(dedup_expr),
         );
         return vec![node.into_rel_node().as_ref().clone()];
