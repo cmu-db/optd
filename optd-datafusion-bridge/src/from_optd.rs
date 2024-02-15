@@ -22,13 +22,14 @@ use datafusion::{
 };
 use optd_datafusion_repr::{
     plan_nodes::{
-        BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, FuncExpr, FuncType,
-        JoinType, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalAgg,
-        PhysicalEmptyRelation, PhysicalFilter, PhysicalHashJoin, PhysicalNestedLoopJoin,
-        PhysicalProjection, PhysicalScan, PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
+        BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
+        Expr, ExprList, FuncExpr, FuncType, JoinType, LogOpExpr, LogOpType, OptRelNode,
+        OptRelNodeRef, OptRelNodeTyp, PhysicalAgg, PhysicalEmptyRelation, PhysicalFilter,
+        PhysicalHashJoin, PhysicalLimit, PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan,
+        PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
     },
     properties::schema::Schema as OptdSchema,
-    PhysicalCollector,
+    PhysicalCollector, Value,
 };
 
 use crate::{physical_collector::CollectorExec, OptdPlanContext};
@@ -36,21 +37,30 @@ use crate::{physical_collector::CollectorExec, OptdPlanContext};
 // TODO: current DataType and ConstantType are not 1 to 1 mapping
 // optd schema stores constantType from data type in catalog.get
 // for decimal128, the precision is lost
-fn from_optd_schema(optd_schema: &OptdSchema) -> Schema {
+fn from_optd_schema(optd_schema: OptdSchema) -> Schema {
     let match_type = |typ: &ConstantType| match typ {
         ConstantType::Any => unimplemented!(),
         ConstantType::Bool => DataType::Boolean,
-        ConstantType::Int => DataType::Int64,
+        ConstantType::UInt8 => DataType::UInt8,
+        ConstantType::UInt16 => DataType::UInt16,
+        ConstantType::UInt32 => DataType::UInt32,
+        ConstantType::UInt64 => DataType::UInt64,
+        ConstantType::Int8 => DataType::Int8,
+        ConstantType::Int16 => DataType::Int16,
+        ConstantType::Int32 => DataType::Int32,
+        ConstantType::Int64 => DataType::Int64,
         ConstantType::Date => DataType::Date32,
         ConstantType::Decimal => DataType::Float64,
         ConstantType::Utf8String => DataType::Utf8,
     };
-    let fields: Vec<_> = optd_schema
-        .0
-        .iter()
-        .enumerate()
-        .map(|(i, typ)| Field::new(format!("c{}", i), match_type(typ), false))
-        .collect();
+    let mut fields = Vec::with_capacity(optd_schema.len());
+    for field in optd_schema.fields {
+        fields.push(Field::new(
+            field.name,
+            match_type(&field.typ),
+            field.nullable,
+        ));
+    }
     Schema::new(fields)
 }
 
@@ -127,7 +137,14 @@ impl OptdPlanContext<'_> {
                 let value = expr.value();
                 let value = match typ {
                     ConstantType::Bool => ScalarValue::Boolean(Some(value.as_bool())),
-                    ConstantType::Int => ScalarValue::Int64(Some(value.as_i64())),
+                    ConstantType::UInt8 => ScalarValue::UInt8(Some(value.as_u8())),
+                    ConstantType::UInt16 => ScalarValue::UInt16(Some(value.as_u16())),
+                    ConstantType::UInt32 => ScalarValue::UInt32(Some(value.as_u32())),
+                    ConstantType::UInt64 => ScalarValue::UInt64(Some(value.as_u64())),
+                    ConstantType::Int8 => ScalarValue::Int8(Some(value.as_i8())),
+                    ConstantType::Int16 => ScalarValue::Int16(Some(value.as_i16())),
+                    ConstantType::Int32 => ScalarValue::Int32(Some(value.as_i32())),
+                    ConstantType::Int64 => ScalarValue::Int64(Some(value.as_i64())),
                     ConstantType::Decimal => {
                         ScalarValue::Decimal128(Some(value.as_f64() as i128), 20, 0)
                         // TODO(chi): no hard code decimal
@@ -211,6 +228,34 @@ impl OptdPlanContext<'_> {
                     )) as Arc<dyn PhysicalExpr>,
                 )
             }
+            OptRelNodeTyp::Between => {
+                // TODO: should we just convert between to x <= c1 and x >= c2?
+                let expr = BetweenExpr::from_rel_node(expr.into_rel_node()).unwrap();
+                Self::conv_from_optd_expr(
+                    LogOpExpr::new(
+                        LogOpType::And,
+                        ExprList::new(vec![
+                            BinOpExpr::new(expr.child(), expr.lower(), BinOpType::Geq).into_expr(),
+                            BinOpExpr::new(expr.child(), expr.upper(), BinOpType::Leq).into_expr(),
+                        ]),
+                    )
+                    .into_expr(),
+                    context,
+                )
+            }
+            OptRelNodeTyp::Cast => {
+                let expr = CastExpr::from_rel_node(expr.into_rel_node()).unwrap();
+                let child = Self::conv_from_optd_expr(expr.child(), context)?;
+                let data_type = match expr.cast_to() {
+                    Value::Bool(_) => DataType::Boolean,
+                    Value::Decimal128(_) => DataType::Decimal128(15, 2), /* TODO: AVOID HARD CODE PRECISION */
+                    Value::Date32(_) => DataType::Date32,
+                    other => unimplemented!("{}", other),
+                };
+                Ok(Arc::new(
+                    datafusion::physical_plan::expressions::CastExpr::new(child, data_type, None),
+                ))
+            }
             _ => unimplemented!("{}", expr.into_rel_node()),
         }
     }
@@ -252,6 +297,41 @@ impl OptdPlanContext<'_> {
                 physical_expr,
                 input_exec,
             )?) as Arc<dyn ExecutionPlan + 'static>,
+        )
+    }
+
+    #[async_recursion]
+    async fn conv_from_optd_limit(
+        &mut self,
+        node: PhysicalLimit,
+    ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
+        let child = self.conv_from_optd_plan_node(node.child()).await?;
+
+        // Limit skip/fetch expressions are only allowed to be constant int
+        assert!(node.skip().typ() == OptRelNodeTyp::Constant(ConstantType::UInt64));
+        // Conversion from u64 -> usize could fail (also the case in into_optd)
+        let skip = ConstantExpr::from_rel_node(node.skip().into_rel_node())
+            .unwrap()
+            .value()
+            .as_u64()
+            .try_into()
+            .unwrap();
+
+        assert!(node.fetch().typ() == OptRelNodeTyp::Constant(ConstantType::UInt64));
+        let fetch = ConstantExpr::from_rel_node(node.fetch().into_rel_node())
+            .unwrap()
+            .value()
+            .as_u64();
+        let fetch_opt: Option<usize> = if fetch == u64::MAX {
+            None
+        } else {
+            Some(fetch.try_into().unwrap())
+        };
+
+        Ok(
+            Arc::new(datafusion::physical_plan::limit::GlobalLimitExec::new(
+                child, skip, fetch_opt,
+            )) as Arc<dyn ExecutionPlan>,
         )
     }
 
@@ -337,7 +417,8 @@ impl OptdPlanContext<'_> {
             Schema::new_with_metadata(fields, HashMap::new())
         };
 
-        let physical_expr = Self::conv_from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
+        let physical_expr =
+            Self::conv_from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
 
         if let JoinType::Cross = node.join_type() {
             return Ok(Arc::new(CrossJoinExec::new(left_exec, right_exec))
@@ -422,7 +503,7 @@ impl OptdPlanContext<'_> {
 
     #[async_recursion]
     async fn conv_from_optd_plan_node(&mut self, node: PlanNode) -> Result<Arc<dyn ExecutionPlan>> {
-        let mut schema = OptdSchema(vec![]);
+        let mut schema = OptdSchema { fields: vec![] };
         if node.typ() == OptRelNodeTyp::PhysicalEmptyRelation {
             schema = node.schema(self.optimizer.unwrap().optd_optimizer());
         }
@@ -470,18 +551,25 @@ impl OptdPlanContext<'_> {
             }
             OptRelNodeTyp::PhysicalEmptyRelation => {
                 let physical_node = PhysicalEmptyRelation::from_rel_node(rel_node).unwrap();
-                let datafusion_schema: Schema = from_optd_schema(&schema);
+                let datafusion_schema: Schema = from_optd_schema(schema);
                 Ok(Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
                     physical_node.produce_one_row(),
                     Arc::new(datafusion_schema),
                 )) as Arc<dyn ExecutionPlan>)
+            }
+            OptRelNodeTyp::PhysicalLimit => {
+                self.conv_from_optd_limit(PhysicalLimit::from_rel_node(rel_node).unwrap())
+                    .await
             }
             typ => unimplemented!("{}", typ),
         };
         result.with_context(|| format!("when processing {}", rel_node_dbg))
     }
 
-    pub async fn conv_from_optd(&mut self, root_rel: OptRelNodeRef) -> Result<Arc<dyn ExecutionPlan>> {
+    pub async fn conv_from_optd(
+        &mut self,
+        root_rel: OptRelNodeRef,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
         self.conv_from_optd_plan_node(PlanNode::from_rel_node(root_rel).unwrap())
             .await
     }

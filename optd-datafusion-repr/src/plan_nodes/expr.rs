@@ -64,7 +64,14 @@ impl OptRelNode for ExprList {
 pub enum ConstantType {
     Bool,
     Utf8String,
-    Int,
+    UInt8,
+    UInt16,
+    UInt32,
+    UInt64,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
     Date,
     Decimal,
     Any,
@@ -78,7 +85,14 @@ impl ConstantExpr {
         let typ = match &value {
             Value::Bool(_) => ConstantType::Bool,
             Value::String(_) => ConstantType::Utf8String,
-            Value::Int(_) => ConstantType::Int,
+            Value::UInt8(_) => ConstantType::UInt8,
+            Value::UInt16(_) => ConstantType::UInt16,
+            Value::UInt32(_) => ConstantType::UInt32,
+            Value::UInt64(_) => ConstantType::UInt64,
+            Value::Int8(_) => ConstantType::Int8,
+            Value::Int16(_) => ConstantType::Int16,
+            Value::Int32(_) => ConstantType::Int32,
+            Value::Int64(_) => ConstantType::Int64,
             Value::Float(_) => ConstantType::Decimal,
             _ => unimplemented!(),
         };
@@ -107,12 +121,40 @@ impl ConstantExpr {
         )
     }
 
-    pub fn int(value: i64) -> Self {
-        Self::new_with_type(Value::Int(value), ConstantType::Int)
+    pub fn uint8(value: u8) -> Self {
+        Self::new_with_type(Value::UInt8(value), ConstantType::UInt8)
+    }
+
+    pub fn uint16(value: u16) -> Self {
+        Self::new_with_type(Value::UInt16(value), ConstantType::UInt16)
+    }
+
+    pub fn uint32(value: u32) -> Self {
+        Self::new_with_type(Value::UInt32(value), ConstantType::UInt32)
+    }
+
+    pub fn uint64(value: u64) -> Self {
+        Self::new_with_type(Value::UInt64(value), ConstantType::UInt64)
+    }
+
+    pub fn int8(value: i8) -> Self {
+        Self::new_with_type(Value::Int8(value), ConstantType::Int8)
+    }
+
+    pub fn int16(value: i16) -> Self {
+        Self::new_with_type(Value::Int16(value), ConstantType::Int16)
+    }
+
+    pub fn int32(value: i32) -> Self {
+        Self::new_with_type(Value::Int32(value), ConstantType::Int32)
+    }
+
+    pub fn int64(value: i64) -> Self {
+        Self::new_with_type(Value::Int64(value), ConstantType::Int64)
     }
 
     pub fn date(value: i64) -> Self {
-        Self::new_with_type(Value::Int(value), ConstantType::Date)
+        Self::new_with_type(Value::Int64(value), ConstantType::Date)
     }
 
     pub fn decimal(value: f64) -> Self {
@@ -152,7 +194,7 @@ impl ColumnRefExpr {
             RelNode {
                 typ: OptRelNodeTyp::ColumnRef,
                 children: vec![],
-                data: Some(Value::Int(column_idx as i64)),
+                data: Some(Value::Int64(column_idx as i64)),
             }
             .into(),
         ))
@@ -524,6 +566,114 @@ impl OptRelNode for LogOpExpr {
             self.op_type().to_string(),
             vec![],
             vec![self.children().explain()],
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BetweenExpr(pub Expr);
+
+impl BetweenExpr {
+    pub fn new(expr: Expr, lower: Expr, upper: Expr) -> Self {
+        BetweenExpr(Expr(
+            RelNode {
+                typ: OptRelNodeTyp::Between,
+                children: vec![
+                    expr.into_rel_node(),
+                    lower.into_rel_node(),
+                    upper.into_rel_node(),
+                ],
+                data: None,
+            }
+            .into(),
+        ))
+    }
+
+    pub fn child(&self) -> Expr {
+        Expr(self.0.child(0))
+    }
+
+    pub fn lower(&self) -> Expr {
+        Expr(self.0.child(1))
+    }
+
+    pub fn upper(&self) -> Expr {
+        Expr(self.0.child(2))
+    }
+}
+
+impl OptRelNode for BetweenExpr {
+    fn into_rel_node(self) -> OptRelNodeRef {
+        self.0.into_rel_node()
+    }
+
+    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
+        if !matches!(rel_node.typ, OptRelNodeTyp::Between) {
+            return None;
+        }
+        Expr::from_rel_node(rel_node).map(Self)
+    }
+
+    fn dispatch_explain(&self) -> Pretty<'static> {
+        Pretty::simple_record(
+            "Between",
+            vec![
+                ("expr", self.child().explain()),
+                ("lower", self.lower().explain()),
+                ("upper", self.upper().explain()),
+            ],
+            vec![],
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CastExpr(pub Expr);
+
+impl CastExpr {
+    pub fn new(
+        expr: Expr,
+        cast_to: Value, /* TODO: have a `type` relnode for representing type */
+    ) -> Self {
+        CastExpr(Expr(
+            RelNode {
+                typ: OptRelNodeTyp::Cast,
+                children: vec![expr.into_rel_node()],
+                data: Some(cast_to),
+            }
+            .into(),
+        ))
+    }
+
+    pub fn child(&self) -> Expr {
+        Expr(self.0.child(0))
+    }
+
+    pub fn cast_to(&self) -> Value {
+        self.0 .0.data.clone().unwrap()
+    }
+}
+
+impl OptRelNode for CastExpr {
+    fn into_rel_node(self) -> OptRelNodeRef {
+        self.0.into_rel_node()
+    }
+
+    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
+        if !matches!(rel_node.typ, OptRelNodeTyp::Cast) {
+            return None;
+        }
+        Expr::from_rel_node(rel_node).map(Self)
+    }
+
+    fn dispatch_explain(&self) -> Pretty<'static> {
+        Pretty::simple_record(
+            "Cast",
+            vec![
+                ("cast_to", format!("{:?}", self.cast_to()).into()),
+                ("expr", self.child().explain()),
+            ],
+            vec![],
         )
     }
 }

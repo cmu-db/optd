@@ -47,7 +47,7 @@ impl DatafusionDb {
         let ctx = {
             let mut state =
                 SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
-            let optimizer = DatafusionOptimizer::new_physical(Box::new(DatafusionCatalog::new(
+            let optimizer = DatafusionOptimizer::new_physical(Arc::new(DatafusionCatalog::new(
                 state.catalog_list(),
             )));
             if !with_logical {

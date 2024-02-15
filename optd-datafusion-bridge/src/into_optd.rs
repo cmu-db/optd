@@ -6,11 +6,14 @@ use datafusion::{
 };
 use datafusion_expr::Expr as DFExpr;
 use optd_core::rel_node::RelNode;
-use optd_datafusion_repr::plan_nodes::{
-    BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, FuncExpr, FuncType,
-    JoinType, LogOpExpr, LogOpType, LogicalAgg, LogicalEmptyRelation, LogicalFilter, LogicalJoin,
-    LogicalProjection, LogicalScan, LogicalSort, OptRelNode, OptRelNodeRef, OptRelNodeTyp,
-    PlanNode, SortOrderExpr, SortOrderType,
+use optd_datafusion_repr::{
+    plan_nodes::{
+        BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList,
+        FuncExpr, FuncType, JoinType, LogOpExpr, LogOpType, LogicalAgg, LogicalEmptyRelation,
+        LogicalFilter, LogicalJoin, LogicalLimit, LogicalProjection, LogicalScan, LogicalSort,
+        OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
+    },
+    Value,
 };
 
 use crate::OptdPlanContext;
@@ -37,7 +40,11 @@ impl OptdPlanContext<'_> {
         Ok(scan.into_plan_node())
     }
 
-    fn conv_into_optd_expr(&mut self, expr: &logical_expr::Expr, context: &DFSchema) -> Result<Expr> {
+    fn conv_into_optd_expr(
+        &mut self,
+        expr: &logical_expr::Expr,
+        context: &DFSchema,
+    ) -> Result<Expr> {
         use logical_expr::Expr;
         match expr {
             Expr::BinaryExpr(node) => {
@@ -64,15 +71,39 @@ impl OptdPlanContext<'_> {
             Expr::Literal(x) => match x {
                 ScalarValue::UInt8(x) => {
                     let x = x.as_ref().unwrap();
-                    Ok(ConstantExpr::int(*x as i64).into_expr())
+                    Ok(ConstantExpr::uint8(*x).into_expr())
+                }
+                ScalarValue::UInt16(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::uint16(*x).into_expr())
+                }
+                ScalarValue::UInt32(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::uint32(*x).into_expr())
+                }
+                ScalarValue::UInt64(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::uint64(*x).into_expr())
+                }
+                ScalarValue::Int8(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::int8(*x).into_expr())
+                }
+                ScalarValue::Int16(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::int16(*x).into_expr())
+                }
+                ScalarValue::Int32(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::int32(*x).into_expr())
+                }
+                ScalarValue::Int64(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::int64(*x).into_expr())
                 }
                 ScalarValue::Utf8(x) => {
                     let x = x.as_ref().unwrap();
                     Ok(ConstantExpr::string(x).into_expr())
-                }
-                ScalarValue::Int64(x) => {
-                    let x = x.as_ref().unwrap();
-                    Ok(ConstantExpr::int(*x).into_expr())
                 }
                 ScalarValue::Date32(x) => {
                     let x = x.as_ref().unwrap();
@@ -81,6 +112,10 @@ impl OptdPlanContext<'_> {
                 ScalarValue::Decimal128(x, _, _) => {
                     let x = x.as_ref().unwrap();
                     Ok(ConstantExpr::decimal(*x as f64).into_expr())
+                }
+                ScalarValue::Boolean(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::bool(*x).into_expr())
                 }
                 _ => bail!("{:?}", x),
             },
@@ -118,7 +153,25 @@ impl OptdPlanContext<'_> {
                     expr,
                 )
                 .into_expr())
-            } 
+            }
+            Expr::Between(x) => {
+                let expr = self.conv_into_optd_expr(x.expr.as_ref(), context)?;
+                let low = self.conv_into_optd_expr(x.low.as_ref(), context)?;
+                let high = self.conv_into_optd_expr(x.high.as_ref(), context)?;
+                assert!(!x.negated, "unimplemented");
+                Ok(BetweenExpr::new(expr, low, high).into_expr())
+            }
+            Expr::Cast(x) => {
+                let expr = self.conv_into_optd_expr(x.expr.as_ref(), context)?;
+                let data_type = x.data_type.clone();
+                let val = match data_type {
+                    arrow_schema::DataType::Int8 => Value::Int8(0),
+                    arrow_schema::DataType::Date32 => Value::Date32(0),
+                    arrow_schema::DataType::Decimal128(_, _) => Value::Decimal128(0),
+                    other => unimplemented!("unimplemented datatype {:?}", other),
+                };
+                Ok(CastExpr::new(expr, val).into_expr())
+            }
             _ => bail!("Unsupported expression: {:?}", expr),
         }
     }
@@ -224,22 +277,18 @@ impl OptdPlanContext<'_> {
             //  instead of converting them to a join on true, we bail out
 
             match node.filter {
-                Some(DFExpr::Literal(ScalarValue::Boolean(Some(val)))) => {
-                    Ok(LogicalJoin::new(
-                        left,
-                        right,
-                        ConstantExpr::bool(val).into_expr(),
-                        join_type,
-                    ))
-                }
-                None => {
-                    Ok(LogicalJoin::new(
-                        left,
-                        right,
-                        ConstantExpr::bool(true).into_expr(),
-                        join_type,
-                    ))
-                }
+                Some(DFExpr::Literal(ScalarValue::Boolean(Some(val)))) => Ok(LogicalJoin::new(
+                    left,
+                    right,
+                    ConstantExpr::bool(val).into_expr(),
+                    join_type,
+                )),
+                None => Ok(LogicalJoin::new(
+                    left,
+                    right,
+                    ConstantExpr::bool(true).into_expr(),
+                    join_type,
+                )),
                 _ => bail!("unsupported join filter: {:?}", node.filter),
             }
         } else if log_ops.len() == 1 {
@@ -273,19 +322,38 @@ impl OptdPlanContext<'_> {
         Ok(LogicalEmptyRelation::new(node.produce_one_row))
     }
 
+    fn conv_into_optd_limit(&mut self, node: &logical_plan::Limit) -> Result<LogicalLimit> {
+        let input = self.conv_into_optd_plan_node(node.input.as_ref())?;
+        // try_into guys are converting usize to u64.
+        let converted_skip = node.skip.try_into().unwrap();
+        let converted_fetch = if let Some(x) = node.fetch {
+            x.try_into().unwrap()
+        } else {
+            u64::MAX // u64 MAX represents infinity (not the best way to do this)
+        };
+        Ok(LogicalLimit::new(
+            input,
+            ConstantExpr::uint64(converted_skip).into_expr(),
+            ConstantExpr::uint64(converted_fetch).into_expr(),
+        ))
+    }
+
     fn conv_into_optd_plan_node(&mut self, node: &LogicalPlan) -> Result<PlanNode> {
         let node = match node {
             LogicalPlan::TableScan(node) => self.conv_into_optd_table_scan(node)?.into_plan_node(),
             LogicalPlan::Projection(node) => self.conv_into_optd_projection(node)?.into_plan_node(),
             LogicalPlan::Sort(node) => self.conv_into_optd_sort(node)?.into_plan_node(),
             LogicalPlan::Aggregate(node) => self.conv_into_optd_agg(node)?.into_plan_node(),
-            LogicalPlan::SubqueryAlias(node) => self.conv_into_optd_plan_node(node.input.as_ref())?,
+            LogicalPlan::SubqueryAlias(node) => {
+                self.conv_into_optd_plan_node(node.input.as_ref())?
+            }
             LogicalPlan::Join(node) => self.conv_into_optd_join(node)?.into_plan_node(),
             LogicalPlan::Filter(node) => self.conv_into_optd_filter(node)?.into_plan_node(),
             LogicalPlan::CrossJoin(node) => self.conv_into_optd_cross_join(node)?.into_plan_node(),
             LogicalPlan::EmptyRelation(node) => {
                 self.conv_into_optd_empty_relation(node)?.into_plan_node()
             }
+            LogicalPlan::Limit(node) => self.conv_into_optd_limit(node)?.into_plan_node(),
             _ => bail!(
                 "unsupported plan node: {}",
                 format!("{:?}", node).split('\n').next().unwrap()

@@ -6,10 +6,13 @@ use anyhow::Result;
 use cost::{AdaptiveCostModel, RuntimeAdaptionStorage};
 use optd_core::cascades::{CascadesOptimizer, GroupId, OptimizerProperties};
 use plan_nodes::{OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
-use properties::schema::{Catalog, SchemaPropertyBuilder};
+use properties::{
+    column_ref::ColumnRefPropertyBuilder,
+    schema::{Catalog, SchemaPropertyBuilder},
+};
 use rules::{
-    EliminateJoinRule, HashJoinRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule,
-    ProjectionPullUpJoin,
+    EliminateFilterRule, EliminateJoinRule, EliminateLimitRule, HashJoinRule, JoinAssocRule,
+    JoinCommuteRule, PhysicalConversionRule, ProjectionPullUpJoin,
 };
 
 pub use adaptive::PhysicalCollector;
@@ -41,13 +44,15 @@ impl DatafusionOptimizer {
     }
 
     /// Create an optimizer with default settings: adaptive + partial explore.
-    pub fn new_physical(catalog: Box<dyn Catalog>) -> Self {
+    pub fn new_physical(catalog: Arc<dyn Catalog>) -> Self {
         let mut rules = PhysicalConversionRule::all_conversions();
         rules.push(Arc::new(HashJoinRule::new()));
         rules.push(Arc::new(JoinCommuteRule::new()));
         rules.push(Arc::new(JoinAssocRule::new()));
         rules.push(Arc::new(ProjectionPullUpJoin::new()));
         rules.push(Arc::new(EliminateJoinRule::new()));
+        rules.push(Arc::new(EliminateFilterRule::new()));
+        rules.push(Arc::new(EliminateLimitRule::new()));
 
         let cost_model = AdaptiveCostModel::new(50);
         Self {
@@ -55,7 +60,10 @@ impl DatafusionOptimizer {
             optimizer: CascadesOptimizer::new_with_prop(
                 rules,
                 Box::new(cost_model),
-                vec![Box::new(SchemaPropertyBuilder::new(catalog))],
+                vec![
+                    Box::new(SchemaPropertyBuilder::new(catalog.clone())),
+                    Box::new(ColumnRefPropertyBuilder::new(catalog)),
+                ],
                 OptimizerProperties {
                     partial_explore_iter: Some(1 << 20),
                     partial_explore_space: Some(1 << 10),
@@ -66,18 +74,23 @@ impl DatafusionOptimizer {
     }
 
     /// The optimizer settings for three-join demo as a perfect optimizer.
-    pub fn new_alternative_physical_for_demo(catalog: Box<dyn Catalog>) -> Self {
+    pub fn new_alternative_physical_for_demo(catalog: Arc<dyn Catalog>) -> Self {
         let mut rules = PhysicalConversionRule::all_conversions();
         rules.push(Arc::new(HashJoinRule::new()));
         rules.insert(0, Arc::new(JoinCommuteRule::new()));
         rules.insert(1, Arc::new(JoinAssocRule::new()));
         rules.insert(2, Arc::new(ProjectionPullUpJoin::new()));
+        rules.insert(3, Arc::new(EliminateFilterRule::new()));
+
         let cost_model = AdaptiveCostModel::new(1000); // very large decay
         let runtime_statistics = cost_model.get_runtime_map();
         let optimizer = CascadesOptimizer::new(
             rules,
             Box::new(cost_model),
-            vec![Box::new(SchemaPropertyBuilder::new(catalog))],
+            vec![
+                Box::new(SchemaPropertyBuilder::new(catalog.clone())),
+                Box::new(ColumnRefPropertyBuilder::new(catalog)),
+            ],
         );
         Self {
             runtime_statistics,

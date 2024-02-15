@@ -6,6 +6,7 @@ mod empty_relation;
 mod expr;
 mod filter;
 mod join;
+mod limit;
 pub(super) mod macros;
 mod projection;
 mod scan;
@@ -22,11 +23,13 @@ pub use agg::{LogicalAgg, PhysicalAgg};
 pub use apply::{ApplyType, LogicalApply};
 pub use empty_relation::{LogicalEmptyRelation, PhysicalEmptyRelation};
 pub use expr::{
-    BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, ExprList, FuncExpr, FuncType,
-    LogOpExpr, LogOpType, SortOrderExpr, SortOrderType, UnOpExpr, UnOpType,
+    BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
+    ExprList, FuncExpr, FuncType, LogOpExpr, LogOpType, SortOrderExpr, SortOrderType, UnOpExpr,
+    UnOpType,
 };
 pub use filter::{LogicalFilter, PhysicalFilter};
 pub use join::{JoinType, LogicalJoin, PhysicalHashJoin, PhysicalNestedLoopJoin};
+pub use limit::{LogicalLimit, PhysicalLimit};
 use pretty_xmlish::{Pretty, PrettyConfig};
 pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
@@ -51,6 +54,7 @@ pub enum OptRelNodeTyp {
     Agg,
     Apply(ApplyType),
     EmptyRelation,
+    Limit,
     // Physical plan nodes
     PhysicalProjection,
     PhysicalFilter,
@@ -60,6 +64,7 @@ pub enum OptRelNodeTyp {
     PhysicalHashJoin(JoinType),
     PhysicalNestedLoopJoin(JoinType),
     PhysicalEmptyRelation,
+    PhysicalLimit,
     PhysicalCollector(GroupId), // only produced after optimization is done
     // Expressions
     Constant(ConstantType),
@@ -69,6 +74,8 @@ pub enum OptRelNodeTyp {
     LogOp(LogOpType),
     Func(FuncType),
     SortOrder(SortOrderType),
+    Between,
+    Cast,
 }
 
 impl OptRelNodeTyp {
@@ -83,6 +90,7 @@ impl OptRelNodeTyp {
                 | Self::Sort
                 | Self::Agg
                 | Self::EmptyRelation
+                | Self::Limit
                 | Self::PhysicalProjection
                 | Self::PhysicalFilter
                 | Self::PhysicalNestedLoopJoin(_)
@@ -91,6 +99,7 @@ impl OptRelNodeTyp {
                 | Self::PhysicalAgg
                 | Self::PhysicalHashJoin(_)
                 | Self::PhysicalCollector(_)
+                | Self::PhysicalLimit
                 | Self::PhysicalEmptyRelation
         )
     }
@@ -105,6 +114,8 @@ impl OptRelNodeTyp {
                 | Self::Func(_)
                 | Self::SortOrder(_)
                 | Self::LogOp(_)
+                | Self::Between
+                | Self::Cast
         )
     }
 }
@@ -127,6 +138,7 @@ impl RelNodeTyp for OptRelNodeTyp {
                 | Self::Sort
                 | Self::Agg
                 | Self::EmptyRelation
+                | Self::Limit
         )
     }
 
@@ -310,6 +322,9 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
         OptRelNodeTyp::EmptyRelation => LogicalEmptyRelation::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
+        OptRelNodeTyp::Limit => LogicalLimit::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
         OptRelNodeTyp::PhysicalFilter => PhysicalFilter::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
@@ -352,10 +367,19 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
         OptRelNodeTyp::LogOp(_) => LogOpExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
-        OptRelNodeTyp::PhysicalCollector(_group_id) => PhysicalCollector::from_rel_node(rel_node)
+        OptRelNodeTyp::PhysicalCollector(_) => PhysicalCollector::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
         OptRelNodeTyp::PhysicalEmptyRelation => PhysicalEmptyRelation::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::PhysicalLimit => PhysicalLimit::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::Between => BetweenExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::Cast => CastExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
     }

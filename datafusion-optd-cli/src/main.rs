@@ -199,7 +199,7 @@ pub async fn main() -> Result<()> {
             state = state.with_physical_optimizer_rules(vec![]);
         }
         // use optd-bridge query planner
-        let optimizer = DatafusionOptimizer::new_physical(Box::new(DatafusionCatalog::new(
+        let optimizer = DatafusionOptimizer::new_physical(Arc::new(DatafusionCatalog::new(
             state.catalog_list(),
         )));
         state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));

@@ -1,14 +1,23 @@
+use std::sync::Arc;
+
 use optd_core::property::PropertyBuilder;
 
 use crate::plan_nodes::{ConstantType, OptRelNodeTyp};
 
 #[derive(Clone, Debug)]
-pub struct Schema(pub Vec<ConstantType>);
+pub struct Field {
+    pub name: String,
+    pub typ: ConstantType,
+    pub nullable: bool,
+}
+#[derive(Clone, Debug)]
+pub struct Schema {
+    pub fields: Vec<Field>,
+}
 
-// TODO: add names, nullable to schema
 impl Schema {
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.fields.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -21,11 +30,11 @@ pub trait Catalog: Send + Sync + 'static {
 }
 
 pub struct SchemaPropertyBuilder {
-    catalog: Box<dyn Catalog>,
+    catalog: Arc<dyn Catalog>,
 }
 
 impl SchemaPropertyBuilder {
-    pub fn new(catalog: Box<dyn Catalog>) -> Self {
+    pub fn new(catalog: Arc<dyn Catalog>) -> Self {
         Self { catalog }
     }
 }
@@ -48,11 +57,24 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
             OptRelNodeTyp::Filter => children[0].clone(),
             OptRelNodeTyp::Join(_) => {
                 let mut schema = children[0].clone();
-                schema.0.extend(children[1].clone().0);
+                let schema2 = children[1].clone();
+                schema.fields.extend(schema2.fields);
                 schema
             }
-            OptRelNodeTyp::List => Schema(vec![ConstantType::Any; children.len()]),
-            _ => Schema(vec![]),
+            OptRelNodeTyp::List => {
+                // TODO: calculate real is_nullable for aggregations
+                Schema {
+                    fields: vec![
+                        Field {
+                            name: "unnamed".to_string(),
+                            typ: ConstantType::Any,
+                            nullable: true
+                        };
+                        children.len()
+                    ],
+                }
+            }
+            _ => Schema { fields: vec![] },
         }
     }
 
