@@ -6,7 +6,8 @@ use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 
 use crate::plan_nodes::{
-    Expr, ExprList, LogicalSort, OptRelNode, OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
+    Expr, ExprList, LogicalAgg, LogicalSort, OptRelNode, OptRelNodeTyp, PlanNode, SortOrderExpr,
+    SortOrderType,
 };
 
 use super::macros::define_rule;
@@ -49,7 +50,6 @@ fn apply_eliminate_duplicated_sort_expr(
         })
         .collect_vec();
 
-    // dedup sort.expr and keep order
     let mut dedup_expr: Vec<Expr> = Vec::new();
     let mut dedup_set: HashSet<Arc<RelNode<OptRelNodeTyp>>> = HashSet::new();
 
@@ -73,9 +73,45 @@ fn apply_eliminate_duplicated_sort_expr(
     vec![]
 }
 
-// TODO: implement rule on aggs
-// define_rule!(
-//     EliminateDuplicatedAggExprRule,
-//     apply_eliminate_duplicated_agg_expr,
-//     (Agg, child, [exprs], [groups])
-// );
+define_rule!(
+    EliminateDuplicatedAggExprRule,
+    apply_eliminate_duplicated_agg_expr,
+    (Agg, child, [exprs], [groups])
+);
+
+/// Removes duplicate group by expressions
+/// For exmaple:
+///     select *
+///     from t1
+///     group by id, name, id, id
+/// becomes
+///     select *
+///     from t1
+///     group by id, name
+fn apply_eliminate_duplicated_agg_expr(
+    _optimizer: &impl Optimizer<OptRelNodeTyp>,
+    EliminateDuplicatedAggExprRulePicks {
+        child,
+        exprs,
+        groups,
+    }: EliminateDuplicatedAggExprRulePicks,
+) -> Vec<RelNode<OptRelNodeTyp>> {
+    let mut dedup_expr: Vec<Expr> = Vec::new();
+    let mut dedup_set: HashSet<Arc<RelNode<OptRelNodeTyp>>> = HashSet::new();
+    groups.children.iter().for_each(|expr| {
+        if !dedup_set.contains(expr) {
+            dedup_expr.push(Expr::from_rel_node(expr.clone()).unwrap());
+            dedup_set.insert(expr.clone());
+        }
+    });
+
+    if dedup_expr.len() != groups.children.len() {
+        let node = LogicalAgg::new(
+            PlanNode::from_group(child.into()),
+            ExprList::from_rel_node(exprs.into()).unwrap(),
+            ExprList::new(dedup_expr),
+        );
+        return vec![node.into_rel_node().as_ref().clone()];
+    }
+    vec![]
+}

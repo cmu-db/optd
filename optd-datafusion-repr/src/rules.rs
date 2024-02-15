@@ -7,7 +7,9 @@ mod macros;
 mod physical;
 
 // pub use filter_join::FilterJoinPullUpRule;
-pub use eliminate_duplicated_expr::EliminateDuplicatedSortExprRule;
+pub use eliminate_duplicated_expr::{
+    EliminateDuplicatedAggExprRule, EliminateDuplicatedSortExprRule,
+};
 pub use eliminate_filter::EliminateFilterRule;
 pub use eliminate_limit::EliminateLimitRule;
 pub use joins::{

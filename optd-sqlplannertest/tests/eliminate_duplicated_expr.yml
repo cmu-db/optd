@@ -4,8 +4,26 @@
   tasks:
     - execute
 - sql: |
+    select * from t1;
+  desc: Test without sorts/aggs.
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
     select * from t1 order by v1, v2, v1 desc, v2 desc, v1 asc;
   desc: Test whether the optimizer handles duplicate sort expressions correctly.
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select * from t1 group by v1, v2, v1;
+  desc: Test whether the optimizer handles duplicate agg expressions correctly.
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select * from t1 group by v1, v2, v1, v2, v2 order by v1, v2, v1 desc, v2 desc, v1 asc;
+  desc: Test whether the optimizer handles duplicate sort and agg expressions correctly.
   tasks:
     - explain:logical_optd,physical_optd
     - execute
