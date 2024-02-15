@@ -3,11 +3,9 @@ use std::collections::HashMap;
 use crate::plan_nodes::OptRelNodeTyp;
 use itertools::Itertools;
 use optd_core::{
-    cascades::{CascadesOptimizer, RelNodeContext},
-    cost::{Cost, CostModel},
-    rel_node::{RelNode, RelNodeTyp, Value, RelNodeRef},
+    cascades::{CascadesOptimizer, RelNodeContext}, cost::{Cost, CostModel}, rel_node::{RelNode, RelNodeRef, RelNodeTyp, Value}
 };
-use crate::properties::schema::Schema;
+use crate::properties::column_ref::{GroupColumnRefs, ColumnRefPropertyBuilder};
 
 fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     model: &C,
@@ -118,12 +116,18 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
                 let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
                 // TODO: don't just do optimizer.unwrap(). probably make optimizer a constructor param
-                // TODO: don't just do context.unwrap()
-                let expr_group_id = context.unwrap().children_group_ids[1];
-                let expr_tree = optimizer.unwrap().get_all_group_bindings(expr_group_id, false);
-                println!("expr_tree={:?}", expr_tree);
+                let selectivity = match context {
+                    Some(context) => {
+                        let column_refs = optimizer.unwrap().get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
+                        let expr_group_id = context.children_group_ids[1];
+                        let expr_trees = optimizer.unwrap().get_all_group_bindings(expr_group_id, false);
+                        let expr_tree = expr_trees.get(0).unwrap();
+                        Self::get_filter_selectivity(expr_tree, &column_refs)
+                    },
+                    None => 0.001,
+                };
+                
                 // let selectivity = Self::get_filter_selectivity(expr_tree, schema);
-                let selectivity = 0.001;
                 Self::cost(
                     (row_cnt * selectivity).max(1.0),
                     row_cnt * compute_cost,
@@ -209,7 +213,7 @@ impl OptCostModel {
     /// The output will be the selectivity of the expression tree if it were a "filter predicate".
     /// A "filter predicate" operates on one input node, unlike a "join predicate" which operates on two input nodes.
     ///     This is why the function only takes in a single schema.
-    fn get_filter_selectivity(expr_tree: RelNodeRef<OptRelNodeTyp>, schema: Schema) -> f64 {
+    fn get_filter_selectivity(expr_tree: &RelNodeRef<OptRelNodeTyp>, schema: &GroupColumnRefs) -> f64 {
         0.0
     }
 }
