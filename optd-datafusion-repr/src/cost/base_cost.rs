@@ -153,6 +153,13 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                     None => INVALID_SELECTIVITY,
                 };
 
+                // to have a sensible "default" for now
+                let selectivity = if selectivity == INVALID_SELECTIVITY {
+                    0.001
+                } else {
+                    selectivity
+                };
+
                 Self::cost(
                     (row_cnt * selectivity).max(1.0),
                     row_cnt * compute_cost,
