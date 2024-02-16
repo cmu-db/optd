@@ -1,7 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{plan_nodes::{OptRelNodeRef, OptRelNodeTyp}, properties::column_ref::ColumnRef};
-use datafusion::physical_expr::unicode_expressions::right;
 use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext}, cost::{Cost, CostModel}, rel_node::{RelNode, RelNodeTyp, Value}
@@ -135,7 +134,7 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                             let column_refs = optimizer.get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
                             let expr_group_id = context.children_group_ids[1];
                             let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
-                            if let Some(expr_tree) = expr_trees.get(0) {
+                            if let Some(expr_tree) = expr_trees.first() {
                                 self.get_filter_selectivity(Arc::clone(expr_tree), &column_refs)
                             } else {
                                 INVALID_SELECTIVITY
@@ -260,9 +259,7 @@ impl OptCostModel {
                     } else {
                         INVALID_SELECTIVITY
                     }
-                } else if bin_op_typ.is_arithmetic() {
-                    INVALID_SELECTIVITY
-                } else if bin_op_typ.is_logical() {
+                } else if bin_op_typ.is_arithmetic() || bin_op_typ.is_logical() {
                     INVALID_SELECTIVITY
                 } else {
                     unreachable!("all BinOpTypes should be true for at least one is_*() function")
@@ -289,10 +286,7 @@ impl OptCostModel {
     }
 
     pub fn get_row_cnt(&self, table: &str) -> Option<usize> {
-        match self.per_table_stats_map.get(table) {
-            Some(per_table_stats) => Some(per_table_stats.row_cnt),
-            None => None,
-        }
+        self.per_table_stats_map.get(table).map(|per_table_stats| per_table_stats.row_cnt)
     }
 }
 
