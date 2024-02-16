@@ -18,3 +18,4 @@ optd-core = { path = "../optd-core" }
 camelpaste = "0.1"
 datafusion-expr = "32.0.0"
 async-trait = "0.1"
+datafusion = "32.0.0"

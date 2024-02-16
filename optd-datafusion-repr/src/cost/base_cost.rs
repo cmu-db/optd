@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
-use crate::plan_nodes::OptRelNodeTyp;
+use crate::plan_nodes::{OptRelNodeRef, OptRelNodeTyp};
 use itertools::Itertools;
 use optd_core::{
-    cascades::{CascadesOptimizer, RelNodeContext}, cost::{Cost, CostModel}, rel_node::{RelNode, RelNodeRef, RelNodeTyp, Value}
+    cascades::{CascadesOptimizer, RelNodeContext}, cost::{Cost, CostModel}, rel_node::{RelNode, RelNodeTyp, Value}
 };
 use crate::properties::column_ref::{GroupColumnRefs, ColumnRefPropertyBuilder};
 
@@ -29,6 +29,7 @@ pub struct OptCostModel {
 pub const ROW_COUNT: usize = 1;
 pub const COMPUTE_COST: usize = 2;
 pub const IO_COST: usize = 3;
+const DEFAULT_SELECTIVITY: f64 = 0.001;
 
 impl OptCostModel {
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
@@ -109,25 +110,30 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
             OptRelNodeTyp::PhysicalEmptyRelation => Self::cost(0.5, 0.01, 0.0),
             OptRelNodeTyp::PhysicalLimit => {
                 let (row_cnt, compute_cost, _) = Self::cost_tuple(&children[0]);
-                let selectivity = 0.001;
+                let selectivity = DEFAULT_SELECTIVITY;
                 Self::cost((row_cnt * selectivity).max(1.0), compute_cost, 0.0)
             }
             OptRelNodeTyp::PhysicalFilter => {
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
                 let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
-                // TODO: don't just do optimizer.unwrap(). probably make optimizer a constructor param
                 let selectivity = match context {
                     Some(context) => {
-                        let column_refs = optimizer.unwrap().get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
-                        let expr_group_id = context.children_group_ids[1];
-                        let expr_trees = optimizer.unwrap().get_all_group_bindings(expr_group_id, false);
-                        let expr_tree = expr_trees.get(0).unwrap();
-                        Self::get_filter_selectivity(expr_tree, &column_refs)
+                        if let Some(optimizer) = optimizer {
+                            let column_refs = optimizer.get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
+                            let expr_group_id = context.children_group_ids[1];
+                            let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
+                            if let Some(expr_tree) = expr_trees.get(0) {
+                                Self::get_filter_selectivity(Arc::clone(expr_tree), &column_refs)
+                            } else {
+                                DEFAULT_SELECTIVITY
+                            }
+                        } else {
+                            DEFAULT_SELECTIVITY
+                        }
                     },
-                    None => 0.001,
+                    None => DEFAULT_SELECTIVITY,
                 };
                 
-                // let selectivity = Self::get_filter_selectivity(expr_tree, schema);
                 Self::cost(
                     (row_cnt * selectivity).max(1.0),
                     row_cnt * compute_cost,
@@ -213,7 +219,8 @@ impl OptCostModel {
     /// The output will be the selectivity of the expression tree if it were a "filter predicate".
     /// A "filter predicate" operates on one input node, unlike a "join predicate" which operates on two input nodes.
     ///     This is why the function only takes in a single schema.
-    fn get_filter_selectivity(expr_tree: &RelNodeRef<OptRelNodeTyp>, schema: &GroupColumnRefs) -> f64 {
+    fn get_filter_selectivity(expr_tree: OptRelNodeRef, column_refs: &GroupColumnRefs) -> f64 {
+        // println!("{:?}", expr_tree);
         0.0
     }
 }

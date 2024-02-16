@@ -30,7 +30,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-struct OptdPlanContext<'a> {
+pub struct OptdPlanContext<'a> {
     tables: HashMap<String, Arc<dyn TableSource>>,
     session_state: &'a SessionState,
     pub optimizer: Option<&'a DatafusionOptimizer>,
