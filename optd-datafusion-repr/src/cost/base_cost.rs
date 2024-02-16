@@ -23,7 +23,16 @@ fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
 }
 
 pub struct OptCostModel {
-    table_stat: HashMap<String, usize>,
+    per_table_stats_map: HashMap<String, PerTableStats>,
+}
+
+pub struct PerTableStats {
+    row_cnt: usize,
+    per_column_stats_map: Vec<PerColumnStats>,
+}
+
+pub struct PerColumnStats {
+    mcv: HashMap<Value, usize>,
 }
 
 pub const ROW_COUNT: usize = 1;
@@ -101,9 +110,7 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
             OptRelNodeTyp::PhysicalScan => {
                 let table_name = data.as_ref().unwrap().as_str();
                 let row_cnt = self
-                    .table_stat
-                    .get(table_name.as_ref())
-                    .copied()
+                    .get_row_cnt(table_name.as_ref())
                     .unwrap_or(1) as f64;
                 Self::cost(row_cnt, 0.0, row_cnt)
             }
@@ -123,7 +130,7 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                             let expr_group_id = context.children_group_ids[1];
                             let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
                             if let Some(expr_tree) = expr_trees.get(0) {
-                                Self::get_filter_selectivity(Arc::clone(expr_tree), &column_refs)
+                                self.get_filter_selectivity(Arc::clone(expr_tree), &column_refs)
                             } else {
                                 DEFAULT_SELECTIVITY
                             }
@@ -210,8 +217,8 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
 }
 
 impl OptCostModel {
-    pub fn new(table_stat: HashMap<String, usize>) -> Self {
-        Self { table_stat }
+    pub fn new(per_table_stats_map: HashMap<String, PerTableStats>) -> Self {
+        Self { per_table_stats_map }
     }
 
     /// The expr_tree input must be an expression tree, meaning each RelNode must be an expression
@@ -219,8 +226,60 @@ impl OptCostModel {
     /// The output will be the selectivity of the expression tree if it were a "filter predicate".
     /// A "filter predicate" operates on one input node, unlike a "join predicate" which operates on two input nodes.
     ///     This is why the function only takes in a single schema.
-    fn get_filter_selectivity(expr_tree: OptRelNodeRef, column_refs: &GroupColumnRefs) -> f64 {
+    fn get_filter_selectivity(&self, expr_tree: OptRelNodeRef, column_refs: &GroupColumnRefs) -> f64 {
         // println!("{:?}", expr_tree);
         0.0
+    }
+
+    fn get_row_cnt(&self, table_name: &str) -> Option<usize> {
+        match self.per_table_stats_map.get(table_name) {
+            Some(per_table_stats) => Some(per_table_stats.row_cnt),
+            None => None,
+        }
+    }
+}
+
+impl PerTableStats {
+    pub fn new(row_cnt: usize, per_column_stats_map: Vec<PerColumnStats>) -> Self {
+        Self { row_cnt, per_column_stats_map }
+    }
+}
+
+/// I thought about using the system's own parser and planner to generate these expression trees, but
+/// this is not currently feasible because it would create a cyclic dependency between optd-datafusion-bridge
+/// and optd-datafusion-repr
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, hash::Hash, sync::Arc};
+
+    use optd_core::rel_node::{RelNode, Value};
+
+    use crate::plan_nodes::{BinOpType, ConstantType, OptRelNodeTyp};
+
+    use super::{OptCostModel, PerColumnStats, PerTableStats};
+
+    #[test]
+    fn test_col_eq_int_in_mcv() {
+        // let cost_model = OptCostModel::new(HashMap::new(
+        //     "t1": PerTableStats::new(100, vec![
+        //         PerColumnStats::new   
+        //     ])
+        // ));
+        let expr_tree = Arc::new(RelNode::<OptRelNodeTyp> {
+            typ: OptRelNodeTyp::BinOp(BinOpType::Eq),
+            children: vec![
+                Arc::new(RelNode::<OptRelNodeTyp> {
+                    typ: OptRelNodeTyp::ColumnRef,
+                    children: vec![],
+                    data: Some(Value::Int64(0)),
+                }),
+                Arc::new(RelNode::<OptRelNodeTyp> {
+                    typ: OptRelNodeTyp::Constant(ConstantType::Int32),
+                    children: vec![],
+                    data: Some(Value::Int32(1)),
+                }),
+            ],
+            data: None,
+        });
     }
 }

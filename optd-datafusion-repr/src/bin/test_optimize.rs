@@ -1,11 +1,11 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use optd_core::{
     cascades::CascadesOptimizer, heuristics::HeuristicsOptimizer, optimizer::Optimizer,
     rel_node::Value,
 };
 use optd_datafusion_repr::{
-    cost::OptCostModel,
+    cost::{OptCostModel, PerTableStats},
     plan_nodes::{
         BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, JoinType, LogicalFilter, LogicalJoin,
         LogicalScan, OptRelNode, OptRelNodeTyp, PlanNode,
@@ -36,7 +36,7 @@ pub fn main() {
         Box::new(OptCostModel::new(
             [("t1", 1000), ("t2", 100), ("t3", 10000)]
                 .into_iter()
-                .map(|(x, y)| (x.to_string(), y))
+                .map(|(x, y)| (x.to_string(), PerTableStats::new(y, vec![])))
                 .collect(),
         )),
         vec![],
