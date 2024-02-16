@@ -88,7 +88,7 @@ CREATE TABLE LINEITEM (
 
 */
 
--- TPC-H Q5 without top-most limit node
+-- TPC-H Q5
 SELECT
     n_name AS nation,
     SUM(l_extendedprice * (1 - l_discount)) AS revenue
@@ -107,8 +107,8 @@ WHERE
     AND s_nationkey = n_nationkey
     AND n_regionkey = r_regionkey
     AND r_name = 'Asia' -- Specified region
-    AND o_orderdate >= DATE '2023-01-01' -- Start of the specified year
-    AND o_orderdate < DATE '2024-01-01'  -- End of the specified year
+    AND o_orderdate >= DATE '2023-01-01'
+    AND o_orderdate < DATE '2024-01-01'
 GROUP BY
     n_name
 ORDER BY
