@@ -49,6 +49,7 @@ fn from_optd_schema(optd_schema: OptdSchema) -> Schema {
         ConstantType::Int16 => DataType::Int16,
         ConstantType::Int32 => DataType::Int32,
         ConstantType::Int64 => DataType::Int64,
+        ConstantType::Float64 => DataType::Float64,
         ConstantType::Date => DataType::Date32,
         ConstantType::Decimal => DataType::Float64,
         ConstantType::Utf8String => DataType::Utf8,
@@ -145,6 +146,7 @@ impl OptdPlanContext<'_> {
                     ConstantType::Int16 => ScalarValue::Int16(Some(value.as_i16())),
                     ConstantType::Int32 => ScalarValue::Int32(Some(value.as_i32())),
                     ConstantType::Int64 => ScalarValue::Int64(Some(value.as_i64())),
+                    ConstantType::Float64 => ScalarValue::Float64(Some(value.as_f64())),
                     ConstantType::Decimal => {
                         ScalarValue::Decimal128(Some(value.as_f64() as i128), 20, 0)
                         // TODO(chi): no hard code decimal

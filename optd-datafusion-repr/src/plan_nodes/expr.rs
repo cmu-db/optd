@@ -72,6 +72,7 @@ pub enum ConstantType {
     Int16,
     Int32,
     Int64,
+    Float64,
     Date,
     Decimal,
     Any,
@@ -93,7 +94,7 @@ impl ConstantExpr {
             Value::Int16(_) => ConstantType::Int16,
             Value::Int32(_) => ConstantType::Int32,
             Value::Int64(_) => ConstantType::Int64,
-            Value::Float(_) => ConstantType::Decimal,
+            Value::Float(_) => ConstantType::Float64,
             _ => unimplemented!(),
         };
         Self::new_with_type(value, typ)
@@ -151,6 +152,10 @@ impl ConstantExpr {
 
     pub fn int64(value: i64) -> Self {
         Self::new_with_type(Value::Int64(value), ConstantType::Int64)
+    }
+
+    pub fn float64(value: f64) -> Self {
+        Self::new_with_type(Value::Float(value.into()), ConstantType::Float64)
     }
 
     pub fn date(value: i64) -> Self {
