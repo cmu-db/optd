@@ -23,7 +23,7 @@ use datafusion::{
 use optd_datafusion_repr::{
     plan_nodes::{
         BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
-        Expr, ExprList, FuncExpr, FuncType, JoinType, LogOpExpr, LogOpType, OptRelNode,
+        Expr, ExprList, FuncExpr, FuncType, JoinType, LikeExpr, LogOpExpr, LogOpType, OptRelNode,
         OptRelNodeRef, OptRelNodeTyp, PhysicalAgg, PhysicalEmptyRelation, PhysicalFilter,
         PhysicalHashJoin, PhysicalLimit, PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan,
         PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
@@ -214,7 +214,9 @@ impl OptdPlanContext<'_> {
                     BinOpType::Eq => Operator::Eq,
                     BinOpType::Neq => Operator::NotEq,
                     BinOpType::Leq => Operator::LtEq,
+                    BinOpType::Lt => Operator::Lt,
                     BinOpType::Geq => Operator::GtEq,
+                    BinOpType::Gt => Operator::Gt,
                     BinOpType::And => Operator::And,
                     BinOpType::Add => Operator::Plus,
                     BinOpType::Sub => Operator::Minus,
@@ -254,6 +256,19 @@ impl OptdPlanContext<'_> {
                 };
                 Ok(Arc::new(
                     datafusion::physical_plan::expressions::CastExpr::new(child, data_type, None),
+                ))
+            }
+            OptRelNodeTyp::Like => {
+                let expr = LikeExpr::from_rel_node(expr.into_rel_node()).unwrap();
+                let child = Self::conv_from_optd_expr(expr.child(), context)?;
+                let pattern = Self::conv_from_optd_expr(expr.pattern(), context)?;
+                Ok(Arc::new(
+                    datafusion::physical_plan::expressions::LikeExpr::new(
+                        expr.negated(),
+                        expr.case_insensitive(),
+                        child,
+                        pattern,
+                    ),
                 ))
             }
             _ => unimplemented!("{}", expr.into_rel_node()),
