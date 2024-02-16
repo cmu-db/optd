@@ -144,7 +144,7 @@ impl Value {
 }
 
 /// A RelNode is consisted of a plan node type and some children.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct RelNode<T: RelNodeTyp> {
     pub typ: T,
     pub children: Vec<RelNodeRef<T>>,

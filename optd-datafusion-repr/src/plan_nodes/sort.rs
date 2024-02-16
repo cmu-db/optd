@@ -6,6 +6,10 @@ use super::{OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 #[derive(Clone, Debug)]
 pub struct LogicalSort(pub PlanNode);
 
+// each expression in ExprList is represented as a SortOrderExpr
+// 1. nulls_first is not included from DF
+// 2. node type defines sort order per expression
+// 3. actual expr is stored as a child of this node
 define_plan_node!(
     LogicalSort : PlanNode,
     Sort, [
