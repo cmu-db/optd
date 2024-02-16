@@ -37,14 +37,14 @@ pub struct PerColumnStats {
 }
 
 pub trait MostCommonValues: 'static + Send + Sync {
-    fn get_is_in_mcvs(&self, value: &Value) -> bool;
     fn get_freq(&self, value: &Value) -> Option<f64>;
 }
 
 pub const ROW_COUNT: usize = 1;
 pub const COMPUTE_COST: usize = 2;
 pub const IO_COST: usize = 3;
-const DEFAULT_SELECTIVITY: f64 = 0.001;
+// used to indicate a combination of unimplemented!(), unreachable!(), or panic!()
+const INVALID_SELECTIVITY: f64 = -1.0;
 
 impl OptCostModel {
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
@@ -123,7 +123,7 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
             OptRelNodeTyp::PhysicalEmptyRelation => Self::cost(0.5, 0.01, 0.0),
             OptRelNodeTyp::PhysicalLimit => {
                 let (row_cnt, compute_cost, _) = Self::cost_tuple(&children[0]);
-                let selectivity = DEFAULT_SELECTIVITY;
+                let selectivity = 0.001;
                 Self::cost((row_cnt * selectivity).max(1.0), compute_cost, 0.0)
             }
             OptRelNodeTyp::PhysicalFilter => {
@@ -138,13 +138,13 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                             if let Some(expr_tree) = expr_trees.get(0) {
                                 self.get_filter_selectivity(Arc::clone(expr_tree), &column_refs)
                             } else {
-                                DEFAULT_SELECTIVITY
+                                INVALID_SELECTIVITY
                             }
                         } else {
-                            DEFAULT_SELECTIVITY
+                            INVALID_SELECTIVITY
                         }
                     },
-                    None => DEFAULT_SELECTIVITY,
+                    None => INVALID_SELECTIVITY,
                 };
                 
                 Self::cost(
@@ -252,28 +252,40 @@ impl OptCostModel {
                             if let OptRelNodeTyp::Constant(_) = right_child.as_ref().typ {
                                 self.get_column_equality_selectivity(table, *col_idx, right_child.as_ref().data.as_ref().unwrap())
                             } else {
-                                DEFAULT_SELECTIVITY
+                                INVALID_SELECTIVITY
                             }
                         } else {
-                            DEFAULT_SELECTIVITY
+                            INVALID_SELECTIVITY
                         }
                     } else {
-                        DEFAULT_SELECTIVITY
+                        INVALID_SELECTIVITY
                     }
                 } else if bin_op_typ.is_arithmetic() {
-                    DEFAULT_SELECTIVITY
+                    INVALID_SELECTIVITY
                 } else if bin_op_typ.is_logical() {
-                    DEFAULT_SELECTIVITY
+                    INVALID_SELECTIVITY
                 } else {
                     unreachable!("all BinOpTypes should be true for at least one is_*() function")
                 }
             },
-            _ => unimplemented!(), // default to avoid crashing
+            _ => INVALID_SELECTIVITY
         }
     }
 
     fn get_column_equality_selectivity(&self, table: &str, col_idx: usize, value: &Value) -> f64 {
-        0.2
+        if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
+            if let Some(per_column_stats) = per_table_stats.per_column_stats_vec.get(col_idx) {
+                if let Some(freq) = per_column_stats.mcvs.get_freq(value) {
+                    freq
+                } else {
+                    INVALID_SELECTIVITY
+                }
+            } else {
+                INVALID_SELECTIVITY
+            }
+        } else {
+            INVALID_SELECTIVITY
+        }
     }
 
     pub fn get_row_cnt(&self, table: &str) -> Option<usize> {
@@ -314,10 +326,6 @@ mod tests {
     }
 
     impl MostCommonValues for MockMostCommonValues {
-        fn get_is_in_mcvs(&self, value: &Value) -> bool {
-            self.mcvs.contains_key(value)
-        }
-
         fn get_freq(&self, value: &Value) -> Option<f64> {
             self.mcvs.get(value).copied()
         }
