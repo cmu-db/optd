@@ -104,6 +104,10 @@ impl OptdPlanContext<'_> {
                     let x = x.as_ref().unwrap();
                     Ok(ConstantExpr::int64(*x).into_expr())
                 }
+                ScalarValue::Float64(x) => {
+                    let x = x.as_ref().unwrap();
+                    Ok(ConstantExpr::decimal(*x).into_expr())
+                }
                 ScalarValue::Utf8(x) => {
                     let x = x.as_ref().unwrap();
                     Ok(ConstantExpr::string(x).into_expr())
