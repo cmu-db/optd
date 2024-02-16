@@ -36,8 +36,8 @@ pub struct PerColumnStats {
 }
 
 pub trait MostCommonValues: 'static + Send + Sync {
-    fn get_is_in_mcvs(&self, value: Value) -> bool;
-    fn get_freq(&self, value: Value) -> Option<f64>;
+    fn get_is_in_mcvs(&self, value: &Value) -> bool;
+    fn get_freq(&self, value: &Value) -> Option<f64>;
 }
 
 pub const ROW_COUNT: usize = 1;
@@ -232,7 +232,8 @@ impl OptCostModel {
     /// A "filter predicate" operates on one input node, unlike a "join predicate" which operates on two input nodes.
     ///     This is why the function only takes in a single schema.
     fn get_filter_selectivity(&self, expr_tree: OptRelNodeRef, column_refs: &GroupColumnRefs) -> f64 {
-        // println!("{:?}", expr_tree);
+        println!("{:?}", expr_tree);
+        println!("{:?}", column_refs);
         0.0
     }
 
@@ -250,6 +251,12 @@ impl PerTableStats {
     }
 }
 
+impl PerColumnStats {
+    pub fn new(mcvs: Box<dyn MostCommonValues>) -> Self {
+        Self { mcvs }
+    }
+}
+
 /// I thought about using the system's own parser and planner to generate these expression trees, but
 /// this is not currently feasible because it would create a cyclic dependency between optd-datafusion-bridge
 /// and optd-datafusion-repr
@@ -257,19 +264,41 @@ impl PerTableStats {
 mod tests {
     use std::{collections::HashMap, hash::Hash, sync::Arc};
 
+    use itertools::Itertools;
     use optd_core::rel_node::{RelNode, Value};
 
-    use crate::plan_nodes::{BinOpType, ConstantType, OptRelNodeTyp};
+    use crate::{plan_nodes::{BinOpType, ConstantType, OptRelNodeTyp}, properties::column_ref::ColumnRef};
 
-    use super::{OptCostModel, PerColumnStats, PerTableStats};
+    use super::{MostCommonValues, OptCostModel, PerColumnStats, PerTableStats};
+
+    struct MockMostCommonValues {
+        mcvs: HashMap<Value, f64>,
+    }
+
+    impl MostCommonValues for MockMostCommonValues {
+        fn get_is_in_mcvs(&self, value: &Value) -> bool {
+            self.mcvs.contains_key(value)
+        }
+
+        fn get_freq(&self, value: &Value) -> Option<f64> {
+            self.mcvs.get(value).copied()
+        }
+    }
 
     #[test]
-    fn test_col_eq_int_in_mcv() {
-        // let cost_model = OptCostModel::new(HashMap::new(
-        //     "t1": PerTableStats::new(100, vec![
-        //         PerColumnStats::new   
-        //     ])
-        // ));
+    fn test_colref_eq_constint_in_mcv() {
+        let t1_c0_v1_freq = 0.1;
+        let cost_model = OptCostModel::new(vec![
+            (String::from("t1"), PerTableStats::new(100, vec![
+                PerColumnStats::new(
+                    Box::new(MockMostCommonValues {
+                        mcvs: vec![
+                            (Value::Int32(1), t1_c0_v1_freq),
+                        ].into_iter().collect()
+                    })
+                ),
+            ]))
+        ].into_iter().collect());
         let expr_tree = Arc::new(RelNode::<OptRelNodeTyp> {
             typ: OptRelNodeTyp::BinOp(BinOpType::Eq),
             children: vec![
@@ -286,5 +315,9 @@ mod tests {
             ],
             data: None,
         });
+        let column_refs = vec![
+            ColumnRef::BaseTableColumnRef { table: String::from("t1"), col_idx: 0 },
+        ];
+        assert_eq!(cost_model.get_filter_selectivity(expr_tree, &column_refs), t1_c0_v1_freq);
     }
 }
