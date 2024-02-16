@@ -309,7 +309,6 @@ pub enum BinOpType {
     Leq,
     And,
     Or,
-    Xor,
 }
 
 impl Display for BinOpType {
@@ -318,8 +317,10 @@ impl Display for BinOpType {
     }
 }
 
+// The pattern of storing numerical, comparison, and logical operators in the same type with is_*() functions
+//     to distinguish between them matches how datafusion::logical_expr::Operator does things
 impl BinOpType {
-    pub fn is_arithmetic(&self) -> bool {
+    pub fn is_numerical(&self) -> bool {
         matches!(
             self,
             Self::Add | Self::Sub | Self::Mul | Self::Div | Self::Mod
@@ -334,7 +335,7 @@ impl BinOpType {
     }
 
     pub fn is_logical(&self) -> bool {
-        matches!(self, Self::And | Self::Or | Self::Xor)
+        matches!(self, Self::And | Self::Or)
     }
 }
 
@@ -527,71 +528,6 @@ impl OptRelNode for SortOrderExpr {
             "SortOrder",
             vec![("order", self.order().to_string().into())],
             vec![self.child().explain()],
-        )
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub enum LogOpType {
-    And,
-    Or,
-}
-
-impl Display for LogOpType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct LogOpExpr(pub Expr);
-
-impl LogOpExpr {
-    pub fn new(op_type: LogOpType, expr_list: ExprList) -> Self {
-        LogOpExpr(Expr(
-            RelNode {
-                typ: OptRelNodeTyp::LogOp(op_type),
-                children: vec![expr_list.into_rel_node()],
-                data: None,
-            }
-            .into(),
-        ))
-    }
-
-    pub fn children(&self) -> ExprList {
-        ExprList::from_rel_node(self.0.child(0)).unwrap()
-    }
-
-    pub fn child(&self, idx: usize) -> Expr {
-        self.children().child(idx)
-    }
-
-    pub fn op_type(&self) -> LogOpType {
-        if let OptRelNodeTyp::LogOp(op_type) = self.clone().into_rel_node().typ {
-            op_type
-        } else {
-            panic!("not a log op")
-        }
-    }
-}
-
-impl OptRelNode for LogOpExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
-    }
-
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !matches!(rel_node.typ, OptRelNodeTyp::LogOp(_)) {
-            return None;
-        }
-        Expr::from_rel_node(rel_node).map(Self)
-    }
-
-    fn dispatch_explain(&self) -> Pretty<'static> {
-        Pretty::simple_record(
-            self.op_type().to_string(),
-            vec![],
-            vec![self.children().explain()],
         )
     }
 }

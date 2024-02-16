@@ -285,7 +285,7 @@ impl OptCostModel {
                     } else {
                         INVALID_SELECTIVITY
                     }
-                } else if bin_op_typ.is_arithmetic() || bin_op_typ.is_logical() {
+                } else if bin_op_typ.is_numerical() || bin_op_typ.is_logical() {
                     INVALID_SELECTIVITY
                 } else {
                     unreachable!("all BinOpTypes should be true for at least one is_*() function")
