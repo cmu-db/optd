@@ -28,11 +28,16 @@ pub struct OptCostModel {
 
 pub struct PerTableStats {
     row_cnt: usize,
-    per_column_stats_map: Vec<PerColumnStats>,
+    per_column_stats_vec: Vec<PerColumnStats>,
 }
 
 pub struct PerColumnStats {
-    mcv: HashMap<Value, usize>,
+    mcvs: Box<dyn MostCommonValues>,
+}
+
+pub trait MostCommonValues: 'static + Send + Sync {
+    fn get_is_in_mcvs(&self, value: Value) -> bool;
+    fn get_freq(&self, value: Value) -> Option<f64>;
 }
 
 pub const ROW_COUNT: usize = 1;
@@ -240,8 +245,8 @@ impl OptCostModel {
 }
 
 impl PerTableStats {
-    pub fn new(row_cnt: usize, per_column_stats_map: Vec<PerColumnStats>) -> Self {
-        Self { row_cnt, per_column_stats_map }
+    pub fn new(row_cnt: usize, per_column_stats_vec: Vec<PerColumnStats>) -> Self {
+        Self { row_cnt, per_column_stats_vec }
     }
 }
 
