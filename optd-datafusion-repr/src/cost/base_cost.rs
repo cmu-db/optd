@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::plan_nodes::{OptRelNodeRef, OptRelNodeTyp};
+use crate::{plan_nodes::{OptRelNodeRef, OptRelNodeTyp}, properties::column_ref::ColumnRef};
+use datafusion::physical_expr::unicode_expressions::right;
 use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext}, cost::{Cost, CostModel}, rel_node::{RelNode, RelNodeTyp, Value}
@@ -113,9 +114,9 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
     ) -> Cost {
         match node {
             OptRelNodeTyp::PhysicalScan => {
-                let table_name = data.as_ref().unwrap().as_str();
+                let table = data.as_ref().unwrap().as_str();
                 let row_cnt = self
-                    .get_row_cnt(table_name.as_ref())
+                    .get_row_cnt(table.as_ref())
                     .unwrap_or(1) as f64;
                 Self::cost(row_cnt, 0.0, row_cnt)
             }
@@ -226,19 +227,57 @@ impl OptCostModel {
         Self { per_table_stats_map }
     }
 
-    /// The expr_tree input must be an expression tree, meaning each RelNode must be an expression
+    /// The expr_tree input must be a "mixed expression tree"
+    ///     An "expression node" refers to a RelNode that returns true for is_expression()
+    ///     A "full expression tree" is where every node in the tree is an expression node
+    ///     A "mixed expression tree" is where every base-case node and all its parents are expression nodes
+    ///     A "base-case node" is a node that doesn't lead to further recursion (such as a BinOp(Eq))
     /// The schema input is the schema the predicate represented by the expr_tree is applied on
     /// The output will be the selectivity of the expression tree if it were a "filter predicate".
     /// A "filter predicate" operates on one input node, unlike a "join predicate" which operates on two input nodes.
     ///     This is why the function only takes in a single schema.
     fn get_filter_selectivity(&self, expr_tree: OptRelNodeRef, column_refs: &GroupColumnRefs) -> f64 {
-        println!("{:?}", expr_tree);
-        println!("{:?}", column_refs);
-        0.0
+        assert!(expr_tree.typ.is_expression());
+        match expr_tree.typ {
+            OptRelNodeTyp::BinOp(bin_op_typ) => {
+                if bin_op_typ.is_comparison() {
+                    let left_child = expr_tree.child(0);
+                    let right_child = expr_tree.child(1);
+
+                    if left_child.as_ref().typ == OptRelNodeTyp::ColumnRef {
+                        let col_ref_idx = left_child.as_ref().data.as_ref().unwrap().as_u64();
+                        // this is always safe since col_ref_idx was initially a usize in ColumnRefExpr::new()
+                        let usize_col_ref_idx = col_ref_idx as usize;
+                        if let ColumnRef::BaseTableColumnRef {table, col_idx} = &column_refs[usize_col_ref_idx] {
+                            if let OptRelNodeTyp::Constant(_) = right_child.as_ref().typ {
+                                self.get_column_equality_selectivity(table, *col_idx, right_child.as_ref().data.as_ref().unwrap())
+                            } else {
+                                DEFAULT_SELECTIVITY
+                            }
+                        } else {
+                            DEFAULT_SELECTIVITY
+                        }
+                    } else {
+                        DEFAULT_SELECTIVITY
+                    }
+                } else if bin_op_typ.is_arithmetic() {
+                    DEFAULT_SELECTIVITY
+                } else if bin_op_typ.is_logical() {
+                    DEFAULT_SELECTIVITY
+                } else {
+                    unreachable!("all BinOpTypes should be true for at least one is_*() function")
+                }
+            },
+            _ => unimplemented!(), // default to avoid crashing
+        }
     }
 
-    fn get_row_cnt(&self, table_name: &str) -> Option<usize> {
-        match self.per_table_stats_map.get(table_name) {
+    fn get_column_equality_selectivity(&self, table: &str, col_idx: usize, value: &Value) -> f64 {
+        0.2
+    }
+
+    pub fn get_row_cnt(&self, table: &str) -> Option<usize> {
+        match self.per_table_stats_map.get(table) {
             Some(per_table_stats) => Some(per_table_stats.row_cnt),
             None => None,
         }
@@ -262,9 +301,8 @@ impl PerColumnStats {
 /// and optd-datafusion-repr
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, hash::Hash, sync::Arc};
+    use std::{collections::HashMap, sync::Arc};
 
-    use itertools::Itertools;
     use optd_core::rel_node::{RelNode, Value};
 
     use crate::{plan_nodes::{BinOpType, ConstantType, OptRelNodeTyp}, properties::column_ref::ColumnRef};
@@ -305,7 +343,7 @@ mod tests {
                 Arc::new(RelNode::<OptRelNodeTyp> {
                     typ: OptRelNodeTyp::ColumnRef,
                     children: vec![],
-                    data: Some(Value::Int64(0)),
+                    data: Some(Value::UInt64(0)),
                 }),
                 Arc::new(RelNode::<OptRelNodeTyp> {
                     typ: OptRelNodeTyp::Constant(ConstantType::Int32),
