@@ -235,6 +235,64 @@ PhysicalSort
                 └── PhysicalScan { table: region }
 */
 
+-- TPC-H Q6
+SELECT
+    SUM(l_extendedprice * l_discount) AS revenue_loss
+FROM
+    lineitem
+WHERE
+    l_shipdate >= DATE '2023-01-01'
+    AND l_shipdate < DATE '2024-01-01'
+    AND l_discount BETWEEN 0.05 AND 0.07
+    AND l_quantity < 24;
+
+/*
+LogicalProjection { exprs: [ #0 ] }
+└── LogicalAgg
+    ├── exprs:Agg(Sum)
+    │   └── Mul
+    │       ├── #5
+    │       └── #6
+    ├── groups: []
+    └── LogicalFilter
+        ├── cond:And
+        │   ├── And
+        │   │   ├── And
+        │   │   │   ├── Geq
+        │   │   │   │   ├── #10
+        │   │   │   │   └── Cast { cast_to: Date32(0), expr: "2023-01-01" }
+        │   │   │   └── Lt
+        │   │   │       ├── #10
+        │   │   │       └── Cast { cast_to: Date32(0), expr: "2024-01-01" }
+        │   │   └── Between { expr: Cast { cast_to: Decimal128(0), expr: #6 }, lower: Cast { cast_to: Decimal128(0), expr: 0.05 }, upper: Cast { cast_to: Decimal128(0), expr: 0.07 } }
+        │   └── Lt
+        │       ├── Cast { cast_to: Decimal128(0), expr: #4 }
+        │       └── Cast { cast_to: Decimal128(0), expr: 24 }
+        └── LogicalScan { table: lineitem }
+PhysicalProjection { exprs: [ #0 ] }
+└── PhysicalAgg
+    ├── aggrs:Agg(Sum)
+    │   └── Mul
+    │       ├── #5
+    │       └── #6
+    ├── groups: []
+    └── PhysicalFilter
+        ├── cond:And
+        │   ├── And
+        │   │   ├── And
+        │   │   │   ├── Geq
+        │   │   │   │   ├── #10
+        │   │   │   │   └── Cast { cast_to: Date32(0), expr: "2023-01-01" }
+        │   │   │   └── Lt
+        │   │   │       ├── #10
+        │   │   │       └── Cast { cast_to: Date32(0), expr: "2024-01-01" }
+        │   │   └── Between { expr: Cast { cast_to: Decimal128(0), expr: #6 }, lower: Cast { cast_to: Decimal128(0), expr: 0.05 }, upper: Cast { cast_to: Decimal128(0), expr: 0.07 } }
+        │   └── Lt
+        │       ├── Cast { cast_to: Decimal128(0), expr: #4 }
+        │       └── Cast { cast_to: Decimal128(0), expr: 24 }
+        └── PhysicalScan { table: lineitem }
+*/
+
 -- TPC-H Q8 without top-most limit node
 select
     o_year,
