@@ -294,19 +294,28 @@ impl OptRelNode for UnOpExpr {
     }
 }
 
+/// The pattern of storing numerical, comparison, and logical operators in the same type with is_*() functions
+///     to distinguish between them matches how datafusion::logical_expr::Operator does things
+/// I initially thought about splitting BinOpType into three "subenums". However, having two nested levels of
+///     types leads to some really confusing code
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum BinOpType {
+    // numerical
     Add,
     Sub,
     Mul,
     Div,
     Mod,
+
+    // comparison
     Eq,
     Neq,
     Gt,
     Lt,
     Geq,
     Leq,
+
+    // logical
     And,
     Or,
 }
@@ -317,8 +326,6 @@ impl Display for BinOpType {
     }
 }
 
-// The pattern of storing numerical, comparison, and logical operators in the same type with is_*() functions
-//     to distinguish between them matches how datafusion::logical_expr::Operator does things
 impl BinOpType {
     pub fn is_numerical(&self) -> bool {
         matches!(
