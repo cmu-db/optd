@@ -24,8 +24,8 @@ pub use apply::{ApplyType, LogicalApply};
 pub use empty_relation::{LogicalEmptyRelation, PhysicalEmptyRelation};
 pub use expr::{
     BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
-    ExprList, FuncExpr, FuncType, LogOpExpr, LogOpType, SortOrderExpr, SortOrderType, UnOpExpr,
-    UnOpType,
+    ExprList, FuncExpr, FuncType, LikeExpr, LogOpExpr, LogOpType, SortOrderExpr, SortOrderType,
+    UnOpExpr, UnOpType,
 };
 pub use filter::{LogicalFilter, PhysicalFilter};
 pub use join::{JoinType, LogicalJoin, PhysicalHashJoin, PhysicalNestedLoopJoin};
@@ -76,6 +76,7 @@ pub enum OptRelNodeTyp {
     SortOrder(SortOrderType),
     Between,
     Cast,
+    Like,
 }
 
 impl OptRelNodeTyp {
@@ -116,6 +117,7 @@ impl OptRelNodeTyp {
                 | Self::LogOp(_)
                 | Self::Between
                 | Self::Cast
+                | Self::Like
         )
     }
 }
@@ -380,6 +382,9 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
             .unwrap()
             .dispatch_explain(),
         OptRelNodeTyp::Cast => CastExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::Like => LikeExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
     }

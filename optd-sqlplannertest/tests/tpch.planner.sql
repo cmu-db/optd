@@ -88,6 +88,153 @@ CREATE TABLE LINEITEM (
 
 */
 
+-- TPC-H Q5 without top-most limit node
+SELECT
+    n_name AS nation,
+    SUM(l_extendedprice * (1 - l_discount)) AS revenue
+FROM
+    customer,
+    orders,
+    lineitem,
+    supplier,
+    nation,
+    region
+WHERE
+    c_custkey = o_custkey
+    AND l_orderkey = o_orderkey
+    AND l_suppkey = s_suppkey
+    AND c_nationkey = s_nationkey
+    AND s_nationkey = n_nationkey
+    AND n_regionkey = r_regionkey
+    AND r_name = 'Asia' -- Specified region
+    AND o_orderdate >= DATE '2023-01-01' -- Start of the specified year
+    AND o_orderdate < DATE '2024-01-01'  -- End of the specified year
+GROUP BY
+    n_name
+ORDER BY
+    revenue DESC;
+
+/*
+LogicalSort
+├── exprs:SortOrder { order: Desc }
+│   └── #1
+└── LogicalProjection { exprs: [ #0, #1 ] }
+    └── LogicalAgg
+        ├── exprs:Agg(Sum)
+        │   └── Mul
+        │       ├── #22
+        │       └── Sub
+        │           ├── Cast { cast_to: Decimal128(0), expr: 1 }
+        │           └── #23
+        ├── groups: [ #41 ]
+        └── LogicalFilter
+            ├── cond:And
+            │   ├── And
+            │   │   ├── And
+            │   │   │   ├── And
+            │   │   │   │   ├── And
+            │   │   │   │   │   ├── And
+            │   │   │   │   │   │   ├── And
+            │   │   │   │   │   │   │   ├── And
+            │   │   │   │   │   │   │   │   ├── Eq
+            │   │   │   │   │   │   │   │   │   ├── #0
+            │   │   │   │   │   │   │   │   │   └── #9
+            │   │   │   │   │   │   │   │   └── Eq
+            │   │   │   │   │   │   │   │       ├── #17
+            │   │   │   │   │   │   │   │       └── #8
+            │   │   │   │   │   │   │   └── Eq
+            │   │   │   │   │   │   │       ├── #19
+            │   │   │   │   │   │   │       └── #33
+            │   │   │   │   │   │   └── Eq
+            │   │   │   │   │   │       ├── #3
+            │   │   │   │   │   │       └── #36
+            │   │   │   │   │   └── Eq
+            │   │   │   │   │       ├── #36
+            │   │   │   │   │       └── #40
+            │   │   │   │   └── Eq
+            │   │   │   │       ├── #42
+            │   │   │   │       └── #44
+            │   │   │   └── Eq
+            │   │   │       ├── #45
+            │   │   │       └── "Asia"
+            │   │   └── Geq
+            │   │       ├── #12
+            │   │       └── Cast { cast_to: Date32(0), expr: "2023-01-01" }
+            │   └── Lt
+            │       ├── #12
+            │       └── Cast { cast_to: Date32(0), expr: "2024-01-01" }
+            └── LogicalJoin { join_type: Cross, cond: true }
+                ├── LogicalJoin { join_type: Cross, cond: true }
+                │   ├── LogicalJoin { join_type: Cross, cond: true }
+                │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                │   │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                │   │   │   │   ├── LogicalScan { table: customer }
+                │   │   │   │   └── LogicalScan { table: orders }
+                │   │   │   └── LogicalScan { table: lineitem }
+                │   │   └── LogicalScan { table: supplier }
+                │   └── LogicalScan { table: nation }
+                └── LogicalScan { table: region }
+PhysicalSort
+├── exprs:SortOrder { order: Desc }
+│   └── #1
+└── PhysicalProjection { exprs: [ #0, #1 ] }
+    └── PhysicalAgg
+        ├── aggrs:Agg(Sum)
+        │   └── Mul
+        │       ├── #22
+        │       └── Sub
+        │           ├── Cast { cast_to: Decimal128(0), expr: 1 }
+        │           └── #23
+        ├── groups: [ #41 ]
+        └── PhysicalFilter
+            ├── cond:And
+            │   ├── And
+            │   │   ├── And
+            │   │   │   ├── And
+            │   │   │   │   ├── And
+            │   │   │   │   │   ├── And
+            │   │   │   │   │   │   ├── And
+            │   │   │   │   │   │   │   ├── And
+            │   │   │   │   │   │   │   │   ├── Eq
+            │   │   │   │   │   │   │   │   │   ├── #0
+            │   │   │   │   │   │   │   │   │   └── #9
+            │   │   │   │   │   │   │   │   └── Eq
+            │   │   │   │   │   │   │   │       ├── #17
+            │   │   │   │   │   │   │   │       └── #8
+            │   │   │   │   │   │   │   └── Eq
+            │   │   │   │   │   │   │       ├── #19
+            │   │   │   │   │   │   │       └── #33
+            │   │   │   │   │   │   └── Eq
+            │   │   │   │   │   │       ├── #3
+            │   │   │   │   │   │       └── #36
+            │   │   │   │   │   └── Eq
+            │   │   │   │   │       ├── #36
+            │   │   │   │   │       └── #40
+            │   │   │   │   └── Eq
+            │   │   │   │       ├── #42
+            │   │   │   │       └── #44
+            │   │   │   └── Eq
+            │   │   │       ├── #45
+            │   │   │       └── "Asia"
+            │   │   └── Geq
+            │   │       ├── #12
+            │   │       └── Cast { cast_to: Date32(0), expr: "2023-01-01" }
+            │   └── Lt
+            │       ├── #12
+            │       └── Cast { cast_to: Date32(0), expr: "2024-01-01" }
+            └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                │   │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                │   │   │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                │   │   │   │   ├── PhysicalScan { table: customer }
+                │   │   │   │   └── PhysicalScan { table: orders }
+                │   │   │   └── PhysicalScan { table: lineitem }
+                │   │   └── PhysicalScan { table: supplier }
+                │   └── PhysicalScan { table: nation }
+                └── PhysicalScan { table: region }
+*/
+
 -- TPC-H Q8 without top-most limit node
 select
     o_year,
