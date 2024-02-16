@@ -318,33 +318,19 @@ impl BinOpType {
     pub fn is_arithmetic(&self) -> bool {
         matches!(
             self,
-            Self::Add
-                | Self::Sub
-                | Self::Mul
-                | Self::Div
-                | Self::Mod
+            Self::Add | Self::Sub | Self::Mul | Self::Div | Self::Mod
         )
     }
 
     pub fn is_comparison(&self) -> bool {
         matches!(
             self,
-            Self::Eq
-                | Self::Neq
-                | Self::Gt
-                | Self::Lt
-                | Self::Geq
-                | Self::Leq
+            Self::Eq | Self::Neq | Self::Gt | Self::Lt | Self::Geq | Self::Leq
         )
     }
 
     pub fn is_logical(&self) -> bool {
-        matches!(
-            self,
-            Self::And
-                | Self::Or
-                | Self::Xor
-        )
+        matches!(self, Self::And | Self::Or | Self::Xor)
     }
 }
 

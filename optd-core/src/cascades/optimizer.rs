@@ -323,7 +323,11 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             .get_all_expr_bindings(expr_id, false, false, level)
     }
 
-    pub fn get_all_group_bindings(&self, group_id: GroupId, physical_only: bool) -> Vec<RelNodeRef<T>> {
+    pub fn get_all_group_bindings(
+        &self,
+        group_id: GroupId,
+        physical_only: bool,
+    ) -> Vec<RelNodeRef<T>> {
         self.memo
             .get_all_group_bindings(group_id, physical_only, true, Some(10))
     }
