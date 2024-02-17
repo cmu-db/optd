@@ -28,7 +28,7 @@ pub struct TDigest {
 }
 
 // A Centroid is a cluster of aggregated data points.
-#[derive(PartialEq, PartialOrd, Clone, Debug)]
+#[derive(PartialEq, PartialOrd, Clone)]
 struct Centroid {
     mean: f64,     // Mean of all aggregated points in this cluster.
     weight: usize, // The number of points in this cluster.
