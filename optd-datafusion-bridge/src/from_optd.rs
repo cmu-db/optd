@@ -23,8 +23,8 @@ use datafusion::{
 use optd_datafusion_repr::{
     plan_nodes::{
         BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
-        Expr, FuncExpr, FuncType, JoinType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalAgg,
-        PhysicalEmptyRelation, PhysicalFilter, PhysicalHashJoin, PhysicalLimit,
+        Expr, FuncExpr, FuncType, JoinType, LikeExpr, OptRelNode, OptRelNodeRef, OptRelNodeTyp,
+        PhysicalAgg, PhysicalEmptyRelation, PhysicalFilter, PhysicalHashJoin, PhysicalLimit,
         PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan, PhysicalSort, PlanNode,
         SortOrderExpr, SortOrderType,
     },
@@ -49,6 +49,7 @@ fn from_optd_schema(optd_schema: OptdSchema) -> Schema {
         ConstantType::Int16 => DataType::Int16,
         ConstantType::Int32 => DataType::Int32,
         ConstantType::Int64 => DataType::Int64,
+        ConstantType::Float64 => DataType::Float64,
         ConstantType::Date => DataType::Date32,
         ConstantType::Decimal => DataType::Float64,
         ConstantType::Utf8String => DataType::Utf8,
@@ -145,6 +146,7 @@ impl OptdPlanContext<'_> {
                     ConstantType::Int16 => ScalarValue::Int16(Some(value.as_i16())),
                     ConstantType::Int32 => ScalarValue::Int32(Some(value.as_i32())),
                     ConstantType::Int64 => ScalarValue::Int64(Some(value.as_i64())),
+                    ConstantType::Float64 => ScalarValue::Float64(Some(value.as_f64())),
                     ConstantType::Decimal => {
                         ScalarValue::Decimal128(Some(value.as_f64() as i128), 20, 0)
                         // TODO(chi): no hard code decimal
@@ -197,7 +199,9 @@ impl OptdPlanContext<'_> {
                     BinOpType::Eq => Operator::Eq,
                     BinOpType::Neq => Operator::NotEq,
                     BinOpType::Leq => Operator::LtEq,
+                    BinOpType::Lt => Operator::Lt,
                     BinOpType::Geq => Operator::GtEq,
+                    BinOpType::Gt => Operator::Gt,
                     BinOpType::And => Operator::And,
                     BinOpType::Add => Operator::Plus,
                     BinOpType::Sub => Operator::Minus,
@@ -235,6 +239,19 @@ impl OptdPlanContext<'_> {
                 };
                 Ok(Arc::new(
                     datafusion::physical_plan::expressions::CastExpr::new(child, data_type, None),
+                ))
+            }
+            OptRelNodeTyp::Like => {
+                let expr = LikeExpr::from_rel_node(expr.into_rel_node()).unwrap();
+                let child = Self::conv_from_optd_expr(expr.child(), context)?;
+                let pattern = Self::conv_from_optd_expr(expr.pattern(), context)?;
+                Ok(Arc::new(
+                    datafusion::physical_plan::expressions::LikeExpr::new(
+                        expr.negated(),
+                        expr.case_insensitive(),
+                        child,
+                        pattern,
+                    ),
                 ))
             }
             _ => unimplemented!("{}", expr.into_rel_node()),

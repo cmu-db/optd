@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, sync::Arc};
 
 use itertools::Itertools;
 use pretty_xmlish::Pretty;
@@ -76,6 +76,7 @@ pub enum ConstantType {
     Int16,
     Int32,
     Int64,
+    Float64,
     Date,
     Decimal,
     Any,
@@ -97,7 +98,7 @@ impl ConstantExpr {
             Value::Int16(_) => ConstantType::Int16,
             Value::Int32(_) => ConstantType::Int32,
             Value::Int64(_) => ConstantType::Int64,
-            Value::Float(_) => ConstantType::Decimal,
+            Value::Float(_) => ConstantType::Float64,
             _ => unimplemented!(),
         };
         Self::new_with_type(value, typ)
@@ -155,6 +156,10 @@ impl ConstantExpr {
 
     pub fn int64(value: i64) -> Self {
         Self::new_with_type(Value::Int64(value), ConstantType::Int64)
+    }
+
+    pub fn float64(value: f64) -> Self {
+        Self::new_with_type(Value::Float(value.into()), ConstantType::Float64)
     }
 
     pub fn date(value: i64) -> Self {
@@ -641,6 +646,71 @@ impl OptRelNode for CastExpr {
             vec![
                 ("cast_to", format!("{:?}", self.cast_to()).into()),
                 ("expr", self.child().explain()),
+            ],
+            vec![],
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LikeExpr(pub Expr);
+
+impl LikeExpr {
+    pub fn new(negated: bool, case_insensitive: bool, expr: Expr, pattern: Expr) -> Self {
+        // TODO: support multiple values in data.
+        let negated = if negated { 1 } else { 0 };
+        let case_insensitive = if case_insensitive { 1 } else { 0 };
+        LikeExpr(Expr(
+            RelNode {
+                typ: OptRelNodeTyp::Like,
+                children: vec![expr.into_rel_node(), pattern.into_rel_node()],
+                data: Some(Value::Serialized(Arc::new([negated, case_insensitive]))),
+            }
+            .into(),
+        ))
+    }
+
+    pub fn child(&self) -> Expr {
+        Expr(self.0.child(0))
+    }
+
+    pub fn pattern(&self) -> Expr {
+        Expr(self.0.child(1))
+    }
+
+    pub fn negated(&self) -> bool {
+        match self.0 .0.data.as_ref().unwrap() {
+            Value::Serialized(data) => data[0] != 0,
+            _ => panic!("not a serialized value"),
+        }
+    }
+
+    pub fn case_insensitive(&self) -> bool {
+        match self.0 .0.data.as_ref().unwrap() {
+            Value::Serialized(data) => data[1] != 0,
+            _ => panic!("not a serialized value"),
+        }
+    }
+}
+
+impl OptRelNode for LikeExpr {
+    fn into_rel_node(self) -> OptRelNodeRef {
+        self.0.into_rel_node()
+    }
+
+    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
+        if !matches!(rel_node.typ, OptRelNodeTyp::Like) {
+            return None;
+        }
+        Expr::from_rel_node(rel_node).map(Self)
+    }
+
+    fn dispatch_explain(&self) -> Pretty<'static> {
+        Pretty::simple_record(
+            "Like",
+            vec![
+                ("expr", self.child().explain()),
+                ("pattern", self.pattern().explain()),
             ],
             vec![],
         )
