@@ -28,7 +28,7 @@ pub struct TDigest {
 }
 
 // A Centroid is a cluster of aggregated data points.
-#[derive(PartialEq, PartialOrd, Clone)]
+#[derive(PartialEq, PartialOrd, Clone, Debug)]
 struct Centroid {
     mean: f64,     // Mean of all aggregated points in this cluster.
     weight: usize, // The number of points in this cluster.
@@ -136,7 +136,7 @@ impl TDigest {
                 Some(*acc)
             })
             .enumerate()
-            .find(|&(_, cum)| target_cum <= (cum as f64));
+            .find(|&(_, cum)| target_cum < (cum as f64));
 
         match pos_cum {
             Some((pos, cum)) => {
@@ -173,7 +173,7 @@ impl TDigest {
             .enumerate()
             .find(|(_, c)| {
                 cum_sum += c.weight; // Get the cum_sum as a side effect.
-                v <= c.mean
+                v < c.mean
             })
             .map(|(pos, _)| (pos, cum_sum));
 
@@ -211,7 +211,7 @@ fn lerp(a: f64, b: f64, f: f64) -> f64 {
 mod tests {
     use super::TDigest;
     use crossbeam::thread;
-    use rand::distributions::{Distribution, Uniform};
+    use rand::distributions::{Distribution, Uniform, WeightedIndex};
     use std::sync::{Arc, Mutex};
 
     // Whether obtained = expected +/- error
@@ -296,5 +296,40 @@ mod tests {
 
         let tdigest = result_tdigest.lock().unwrap().take().unwrap();
         check_tdigest_uniform(tdigest, buckets, max, min, error);
+    }
+
+    #[test]
+    fn weighted_merge() {
+        let buckets = 200;
+        let error = 0.03; // 3% absolute error on each quantile, note error is worse near the median.
+
+        let mut tdigest = TDigest::new(buckets as f64);
+
+        let choices = [9.0, 900.0, 990.0, 9990.0, 190000.0, 990000.0];
+        let weights = [1, 2, 1, 3, 4, 5]; // Total of 16.
+        let total_weight: i32 = weights.iter().sum();
+
+        let weighted_distr = WeightedIndex::new(weights).unwrap();
+        let mut rng = rand::thread_rng();
+
+        let batch_size = 1024;
+        let batch_numbers = 64;
+
+        for _ in 0..batch_numbers {
+            let mut random_numbers = Vec::with_capacity(batch_size);
+            for _ in 0..batch_size {
+                let num: f64 = choices[weighted_distr.sample(&mut rng)];
+                random_numbers.push(num);
+            }
+            tdigest = tdigest.merge_values(&mut random_numbers);
+        }
+
+        let mut curr_weight = 0;
+        for (c, w) in choices.iter().zip(weights) {
+            curr_weight += w;
+            let estimate_cdf = tdigest.cdf(*c);
+            let obtained_cdf = (curr_weight as f64) / (total_weight as f64);
+            assert_eq!(is_close(obtained_cdf, estimate_cdf, error), true);
+        }
     }
 }
