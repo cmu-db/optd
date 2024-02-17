@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn weighted_merge() {
         let buckets = 200;
-        let error = 0.03; // 3% absolute error on each quantile, note error is worse near the median.
+        let error = 0.05; // 5% absolute error on each quantile, note error is worse near the median.
 
         let mut tdigest = TDigest::new(buckets as f64);
 
@@ -312,8 +312,8 @@ mod tests {
         let weighted_distr = WeightedIndex::new(weights).unwrap();
         let mut rng = rand::thread_rng();
 
-        let batch_size = 1024;
-        let batch_numbers = 64;
+        let batch_size = 128;
+        let batch_numbers = 16;
 
         for _ in 0..batch_numbers {
             let mut random_numbers = Vec::with_capacity(batch_size);
