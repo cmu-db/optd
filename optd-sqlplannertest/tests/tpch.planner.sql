@@ -124,7 +124,7 @@ LogicalSort
         │   └── Mul
         │       ├── #22
         │       └── Sub
-        │           ├── Cast { cast_to: Decimal128(0), expr: 1 }
+        │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
         │           └── #23
         ├── groups: [ #41 ]
         └── LogicalFilter
@@ -159,10 +159,10 @@ LogicalSort
             │   │   │       └── "Asia"
             │   │   └── Geq
             │   │       ├── #12
-            │   │       └── Cast { cast_to: Date32(0), expr: "2023-01-01" }
+            │   │       └── Cast { cast_to: Date32, expr: "2023-01-01" }
             │   └── Lt
             │       ├── #12
-            │       └── Cast { cast_to: Date32(0), expr: "2024-01-01" }
+            │       └── Cast { cast_to: Date32, expr: "2024-01-01" }
             └── LogicalJoin { join_type: Cross, cond: true }
                 ├── LogicalJoin { join_type: Cross, cond: true }
                 │   ├── LogicalJoin { join_type: Cross, cond: true }
@@ -183,7 +183,7 @@ PhysicalSort
         │   └── Mul
         │       ├── #22
         │       └── Sub
-        │           ├── Cast { cast_to: Decimal128(0), expr: 1 }
+        │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
         │           └── #23
         ├── groups: [ #41 ]
         └── PhysicalFilter
@@ -218,10 +218,10 @@ PhysicalSort
             │   │   │       └── "Asia"
             │   │   └── Geq
             │   │       ├── #12
-            │   │       └── Cast { cast_to: Date32(0), expr: "2023-01-01" }
+            │   │       └── Cast { cast_to: Date32, expr: "2023-01-01" }
             │   └── Lt
             │       ├── #12
-            │       └── Cast { cast_to: Date32(0), expr: "2024-01-01" }
+            │       └── Cast { cast_to: Date32, expr: "2024-01-01" }
             └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
                 ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
                 │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
@@ -260,14 +260,14 @@ LogicalProjection { exprs: [ #0 ] }
         │   │   ├── And
         │   │   │   ├── Geq
         │   │   │   │   ├── #10
-        │   │   │   │   └── Cast { cast_to: Date32(0), expr: "2023-01-01" }
+        │   │   │   │   └── Cast { cast_to: Date32, expr: "2023-01-01" }
         │   │   │   └── Lt
         │   │   │       ├── #10
-        │   │   │       └── Cast { cast_to: Date32(0), expr: "2024-01-01" }
-        │   │   └── Between { expr: Cast { cast_to: Decimal128(0), expr: #6 }, lower: Cast { cast_to: Decimal128(0), expr: 0.05 }, upper: Cast { cast_to: Decimal128(0), expr: 0.07 } }
+        │   │   │       └── Cast { cast_to: Date32, expr: "2024-01-01" }
+        │   │   └── Between { expr: Cast { cast_to: Decimal128(30, 15), expr: #6 }, lower: Cast { cast_to: Decimal128(30, 15), expr: 0.05 }, upper: Cast { cast_to: Decimal128(30, 15), expr: 0.07 } }
         │   └── Lt
-        │       ├── Cast { cast_to: Decimal128(0), expr: #4 }
-        │       └── Cast { cast_to: Decimal128(0), expr: 24 }
+        │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │       └── Cast { cast_to: Decimal128(22, 2), expr: 24 }
         └── LogicalScan { table: lineitem }
 PhysicalProjection { exprs: [ #0 ] }
 └── PhysicalAgg
@@ -282,14 +282,14 @@ PhysicalProjection { exprs: [ #0 ] }
         │   │   ├── And
         │   │   │   ├── Geq
         │   │   │   │   ├── #10
-        │   │   │   │   └── Cast { cast_to: Date32(0), expr: "2023-01-01" }
+        │   │   │   │   └── Cast { cast_to: Date32, expr: "2023-01-01" }
         │   │   │   └── Lt
         │   │   │       ├── #10
-        │   │   │       └── Cast { cast_to: Date32(0), expr: "2024-01-01" }
-        │   │   └── Between { expr: Cast { cast_to: Decimal128(0), expr: #6 }, lower: Cast { cast_to: Decimal128(0), expr: 0.05 }, upper: Cast { cast_to: Decimal128(0), expr: 0.07 } }
+        │   │   │       └── Cast { cast_to: Date32, expr: "2024-01-01" }
+        │   │   └── Between { expr: Cast { cast_to: Decimal128(30, 15), expr: #6 }, lower: Cast { cast_to: Decimal128(30, 15), expr: 0.05 }, upper: Cast { cast_to: Decimal128(30, 15), expr: 0.07 } }
         │   └── Lt
-        │       ├── Cast { cast_to: Decimal128(0), expr: #4 }
-        │       └── Cast { cast_to: Decimal128(0), expr: 24 }
+        │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │       └── Cast { cast_to: Decimal128(22, 2), expr: 24 }
         └── PhysicalScan { table: lineitem }
 */
 
@@ -351,7 +351,7 @@ LogicalSort
         │   │           │   ├── #2
         │   │           │   └── "IRAQ"
         │   │           ├── #1
-        │   │           └── Cast { cast_to: Decimal128(0), expr: 0 }
+        │   │           └── Cast { cast_to: Decimal128(38, 4), expr: 0 }
         │   └── Agg(Sum)
         │       └── [ #1 ]
         ├── groups: [ #0 ]
@@ -362,7 +362,7 @@ LogicalSort
             │   ├── Mul
             │   │   ├── #21
             │   │   └── Sub
-            │   │       ├── Cast { cast_to: Decimal128(0), expr: 1 }
+            │   │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
             │   │       └── #22
             │   └── #54
             └── LogicalFilter
@@ -399,7 +399,7 @@ LogicalSort
                 │   │   │   └── Eq
                 │   │   │       ├── #12
                 │   │   │       └── #53
-                │   │   └── Between { expr: #36, lower: Cast { cast_to: Date32(0), expr: "1995-01-01" }, upper: Cast { cast_to: Date32(0), expr: "1996-12-31" } }
+                │   │   └── Between { expr: #36, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } }
                 │   └── Eq
                 │       ├── #4
                 │       └── "ECONOMY ANODIZED STEEL"
@@ -436,7 +436,7 @@ PhysicalSort
         │   │           │   ├── #2
         │   │           │   └── "IRAQ"
         │   │           ├── #1
-        │   │           └── Cast { cast_to: Decimal128(0), expr: 0 }
+        │   │           └── Cast { cast_to: Decimal128(38, 4), expr: 0 }
         │   └── Agg(Sum)
         │       └── [ #1 ]
         ├── groups: [ #0 ]
@@ -447,7 +447,7 @@ PhysicalSort
             │   ├── Mul
             │   │   ├── #21
             │   │   └── Sub
-            │   │       ├── Cast { cast_to: Decimal128(0), expr: 1 }
+            │   │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
             │   │       └── #22
             │   └── #54
             └── PhysicalFilter
@@ -484,7 +484,7 @@ PhysicalSort
                 │   │   │   └── Eq
                 │   │   │       ├── #12
                 │   │   │       └── #53
-                │   │   └── Between { expr: #36, lower: Cast { cast_to: Date32(0), expr: "1995-01-01" }, upper: Cast { cast_to: Date32(0), expr: "1996-12-31" } }
+                │   │   └── Between { expr: #36, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } }
                 │   └── Eq
                 │       ├── #4
                 │       └── "ECONOMY ANODIZED STEEL"

@@ -14,6 +14,7 @@ mod sort;
 
 use std::sync::Arc;
 
+use arrow_schema::DataType;
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId},
     rel_node::{RelNode, RelNodeRef, RelNodeTyp},
@@ -24,8 +25,8 @@ pub use apply::{ApplyType, LogicalApply};
 pub use empty_relation::{LogicalEmptyRelation, PhysicalEmptyRelation};
 pub use expr::{
     BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
-    ExprList, FuncExpr, FuncType, LikeExpr, LogOpExpr, LogOpType, SortOrderExpr, SortOrderType,
-    UnOpExpr, UnOpType,
+    DataTypeExpr, ExprList, FuncExpr, FuncType, LikeExpr, LogOpExpr, LogOpType, SortOrderExpr,
+    SortOrderType, UnOpExpr, UnOpType,
 };
 pub use filter::{LogicalFilter, PhysicalFilter};
 pub use join::{JoinType, LogicalJoin, PhysicalHashJoin, PhysicalNestedLoopJoin};
@@ -77,6 +78,7 @@ pub enum OptRelNodeTyp {
     Between,
     Cast,
     Like,
+    DataType(DataType),
 }
 
 impl OptRelNodeTyp {
@@ -118,6 +120,7 @@ impl OptRelNodeTyp {
                 | Self::Between
                 | Self::Cast
                 | Self::Like
+                | Self::DataType(_)
         )
     }
 }
@@ -385,6 +388,9 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
             .unwrap()
             .dispatch_explain(),
         OptRelNodeTyp::Like => LikeExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::DataType(_) => DataTypeExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
     }

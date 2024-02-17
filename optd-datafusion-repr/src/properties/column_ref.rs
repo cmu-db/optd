@@ -102,6 +102,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
             OptRelNodeTyp::Constant(_)
             | OptRelNodeTyp::Func(_)
             | OptRelNodeTyp::BinOp(_)
+            | OptRelNodeTyp::DataType(_)
             | OptRelNodeTyp::Between
             | OptRelNodeTyp::EmptyRelation => {
                 vec![ColumnRef::Derived]

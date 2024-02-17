@@ -6,15 +6,11 @@ use datafusion::{
 };
 use datafusion_expr::Expr as DFExpr;
 use optd_core::rel_node::RelNode;
-use optd_datafusion_repr::{
-    plan_nodes::{
-        BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList,
-        FuncExpr, FuncType, JoinType, LikeExpr, LogOpExpr, LogOpType, LogicalAgg,
-        LogicalEmptyRelation, LogicalFilter, LogicalJoin, LogicalLimit, LogicalProjection,
-        LogicalScan, LogicalSort, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode,
-        SortOrderExpr, SortOrderType,
-    },
-    Value,
+use optd_datafusion_repr::plan_nodes::{
+    BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList,
+    FuncExpr, FuncType, JoinType, LikeExpr, LogOpExpr, LogOpType, LogicalAgg, LogicalEmptyRelation,
+    LogicalFilter, LogicalJoin, LogicalLimit, LogicalProjection, LogicalScan, LogicalSort,
+    OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
 };
 
 use crate::OptdPlanContext;
@@ -170,21 +166,7 @@ impl OptdPlanContext<'_> {
             }
             Expr::Cast(x) => {
                 let expr = self.conv_into_optd_expr(x.expr.as_ref(), context)?;
-                let data_type = x.data_type.clone();
-                let val = match data_type {
-                    arrow_schema::DataType::Int8 => Value::Int8(0),
-                    arrow_schema::DataType::Int16 => Value::Int16(0),
-                    arrow_schema::DataType::Int32 => Value::Int32(0),
-                    arrow_schema::DataType::Int64 => Value::Int64(0),
-                    arrow_schema::DataType::UInt8 => Value::UInt8(0),
-                    arrow_schema::DataType::UInt16 => Value::UInt16(0),
-                    arrow_schema::DataType::UInt32 => Value::UInt32(0),
-                    arrow_schema::DataType::UInt64 => Value::UInt64(0),
-                    arrow_schema::DataType::Date32 => Value::Date32(0),
-                    arrow_schema::DataType::Decimal128(_, _) => Value::Decimal128(0),
-                    other => unimplemented!("unimplemented datatype {:?}", other),
-                };
-                Ok(CastExpr::new(expr, val).into_expr())
+                Ok(CastExpr::new(expr, x.data_type.clone()).into_expr())
             }
             Expr::Like(x) => {
                 let expr = self.conv_into_optd_expr(x.expr.as_ref(), context)?;

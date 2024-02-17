@@ -1,5 +1,6 @@
 use std::{fmt::Display, sync::Arc};
 
+use arrow_schema::DataType;
 use itertools::Itertools;
 use pretty_xmlish::Pretty;
 
@@ -637,18 +638,59 @@ impl OptRelNode for BetweenExpr {
 }
 
 #[derive(Clone, Debug)]
+pub struct DataTypeExpr(pub Expr);
+
+impl DataTypeExpr {
+    pub fn new(typ: DataType) -> Self {
+        DataTypeExpr(Expr(
+            RelNode {
+                typ: OptRelNodeTyp::DataType(typ),
+                children: vec![],
+                data: None,
+            }
+            .into(),
+        ))
+    }
+
+    pub fn data_type(&self) -> DataType {
+        if let OptRelNodeTyp::DataType(data_type) = self.0.typ() {
+            data_type
+        } else {
+            panic!("not a data type")
+        }
+    }
+}
+
+impl OptRelNode for DataTypeExpr {
+    fn into_rel_node(self) -> OptRelNodeRef {
+        self.0.into_rel_node()
+    }
+
+    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
+        if !matches!(rel_node.typ, OptRelNodeTyp::DataType(_)) {
+            return None;
+        }
+        Expr::from_rel_node(rel_node).map(Self)
+    }
+
+    fn dispatch_explain(&self) -> Pretty<'static> {
+        Pretty::display(&self.data_type().to_string())
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct CastExpr(pub Expr);
 
 impl CastExpr {
-    pub fn new(
-        expr: Expr,
-        cast_to: Value, /* TODO: have a `type` relnode for representing type */
-    ) -> Self {
+    pub fn new(expr: Expr, cast_to: DataType) -> Self {
         CastExpr(Expr(
             RelNode {
                 typ: OptRelNodeTyp::Cast,
-                children: vec![expr.into_rel_node()],
-                data: Some(cast_to),
+                children: vec![
+                    expr.into_rel_node(),
+                    DataTypeExpr::new(cast_to).into_rel_node(),
+                ],
+                data: None,
             }
             .into(),
         ))
@@ -658,8 +700,10 @@ impl CastExpr {
         Expr(self.0.child(0))
     }
 
-    pub fn cast_to(&self) -> Value {
-        self.0 .0.data.clone().unwrap()
+    pub fn cast_to(&self) -> DataType {
+        DataTypeExpr::from_rel_node(self.0.child(1))
+            .unwrap()
+            .data_type()
     }
 }
 
@@ -679,7 +723,7 @@ impl OptRelNode for CastExpr {
         Pretty::simple_record(
             "Cast",
             vec![
-                ("cast_to", format!("{:?}", self.cast_to()).into()),
+                ("cast_to", format!("{}", self.cast_to()).into()),
                 ("expr", self.child().explain()),
             ],
             vec![],
