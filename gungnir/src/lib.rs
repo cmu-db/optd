@@ -1,5 +1,5 @@
 //----------------------------------------------------//
-//   This free (MIT) Software is provided to you by   //
+// This Software is provided to you by...             //
 //       _____                         _              //
 //      / ____|                       (_)             //
 //      | |  __ _   _ _ __   __ _ _ __  _ _ __        //
@@ -12,5 +12,6 @@
 // Author: Alexis Schlomer <aschlome@andrew.cmu.edu>  //
 //----------------------------------------------------//
 
+#![allow(clippy::new_without_default)]
+
 pub mod stats;
-mod tdigest;

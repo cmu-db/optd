@@ -6,5 +6,6 @@ members = [
     "optd-datafusion-repr",
     "optd-sqlplannertest",
     "optd-adaptive-demo",
+    "gungnir",
 ]
 resolver = "2"
