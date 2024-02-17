@@ -59,6 +59,7 @@ impl OptdPlanContext<'_> {
                     Operator::GtEq => BinOpType::Geq,
                     Operator::Gt => BinOpType::Gt,
                     Operator::And => BinOpType::And,
+                    Operator::Or => BinOpType::Or,
                     Operator::Plus => BinOpType::Add,
                     Operator::Minus => BinOpType::Sub,
                     Operator::Multiply => BinOpType::Mul,

@@ -128,6 +128,49 @@
   tasks:
       - explain:logical_optd,physical_optd
 - sql: |
+      SELECT
+          supp_nation,
+          cust_nation,
+          l_year,
+          SUM(volume) AS revenue
+      FROM
+          (
+              SELECT
+                  n1.n_name AS supp_nation,
+                  n2.n_name AS cust_nation,
+                  EXTRACT(YEAR FROM l_shipdate) AS l_year,
+                  l_extendedprice * (1 - l_discount) AS volume
+              FROM
+                  supplier,
+                  lineitem,
+                  orders,
+                  customer,
+                  nation n1,
+                  nation n2
+              WHERE
+                  s_suppkey = l_suppkey
+                  AND o_orderkey = l_orderkey
+                  AND c_custkey = o_custkey
+                  AND s_nationkey = n1.n_nationkey
+                  AND c_nationkey = n2.n_nationkey
+                  AND (
+                      (n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY')
+                      OR (n1.n_name = 'GERMANY' AND n2.n_name = 'FRANCE')
+                  )
+                  AND l_shipdate BETWEEN DATE '1995-01-01' AND DATE '1996-12-31'
+          ) AS shipping
+      GROUP BY
+          supp_nation,
+          cust_nation,
+          l_year
+      ORDER BY
+          supp_nation,
+          cust_nation,
+          l_year;
+  desc: TPC-H Q7
+  tasks:
+      - explain:logical_optd,physical_optd
+- sql: |
       select
           o_year,
           sum(case
@@ -166,5 +209,41 @@
       order by
           o_year;
   desc: TPC-H Q8 without top-most limit node
+  tasks:
+      - explain:logical_optd,physical_optd
+- sql: |
+      SELECT
+          nation,
+          o_year,
+          SUM(amount) AS sum_profit
+      FROM
+          (
+              SELECT
+                  n_name AS nation,
+                  EXTRACT(YEAR FROM o_orderdate) AS o_year,
+                  l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity AS amount
+              FROM
+                  part,
+                  supplier,
+                  lineitem,
+                  partsupp,
+                  orders,
+                  nation
+              WHERE
+                  s_suppkey = l_suppkey
+                  AND ps_suppkey = l_suppkey
+                  AND ps_partkey = l_partkey
+                  AND p_partkey = l_partkey
+                  AND o_orderkey = l_orderkey
+                  AND s_nationkey = n_nationkey
+                  AND p_name LIKE '%green%'
+          ) AS profit
+      GROUP BY
+          nation,
+          o_year
+      ORDER BY
+          nation,
+          o_year DESC;
+  desc: TPC-H Q9
   tasks:
       - explain:logical_optd,physical_optd

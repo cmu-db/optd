@@ -293,6 +293,196 @@ PhysicalProjection { exprs: [ #0 ] }
         └── PhysicalScan { table: lineitem }
 */
 
+-- TPC-H Q7
+SELECT
+    supp_nation,
+    cust_nation,
+    l_year,
+    SUM(volume) AS revenue
+FROM
+    (
+        SELECT
+            n1.n_name AS supp_nation,
+            n2.n_name AS cust_nation,
+            EXTRACT(YEAR FROM l_shipdate) AS l_year,
+            l_extendedprice * (1 - l_discount) AS volume
+        FROM
+            supplier,
+            lineitem,
+            orders,
+            customer,
+            nation n1,
+            nation n2
+        WHERE
+            s_suppkey = l_suppkey
+            AND o_orderkey = l_orderkey
+            AND c_custkey = o_custkey
+            AND s_nationkey = n1.n_nationkey
+            AND c_nationkey = n2.n_nationkey
+            AND (
+                (n1.n_name = 'FRANCE' AND n2.n_name = 'GERMANY')
+                OR (n1.n_name = 'GERMANY' AND n2.n_name = 'FRANCE')
+            )
+            AND l_shipdate BETWEEN DATE '1995-01-01' AND DATE '1996-12-31'
+    ) AS shipping
+GROUP BY
+    supp_nation,
+    cust_nation,
+    l_year
+ORDER BY
+    supp_nation,
+    cust_nation,
+    l_year;
+
+/*
+LogicalSort
+├── exprs:
+│   ┌── SortOrder { order: Asc }
+│   │   └── #0
+│   ├── SortOrder { order: Asc }
+│   │   └── #1
+│   └── SortOrder { order: Asc }
+│       └── #2
+└── LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
+    └── LogicalAgg
+        ├── exprs:Agg(Sum)
+        │   └── [ #3 ]
+        ├── groups: [ #0, #1, #2 ]
+        └── LogicalProjection
+            ├── exprs:
+            │   ┌── #41
+            │   ├── #45
+            │   ├── Scalar(DatePart)
+            │   │   └── [ "YEAR", #17 ]
+            │   └── Mul
+            │       ├── #12
+            │       └── Sub
+            │           ├── Cast { cast_to: Decimal128(0), expr: 1 }
+            │           └── #13
+            └── LogicalFilter
+                ├── cond:And
+                │   ├── And
+                │   │   ├── And
+                │   │   │   ├── And
+                │   │   │   │   ├── And
+                │   │   │   │   │   ├── And
+                │   │   │   │   │   │   ├── Eq
+                │   │   │   │   │   │   │   ├── #0
+                │   │   │   │   │   │   │   └── #9
+                │   │   │   │   │   │   └── Eq
+                │   │   │   │   │   │       ├── #23
+                │   │   │   │   │   │       └── #7
+                │   │   │   │   │   └── Eq
+                │   │   │   │   │       ├── #32
+                │   │   │   │   │       └── #24
+                │   │   │   │   └── Eq
+                │   │   │   │       ├── #3
+                │   │   │   │       └── #40
+                │   │   │   └── Eq
+                │   │   │       ├── #35
+                │   │   │       └── #44
+                │   │   └── Or
+                │   │       ├── And
+                │   │       │   ├── Eq
+                │   │       │   │   ├── #41
+                │   │       │   │   └── "FRANCE"
+                │   │       │   └── Eq
+                │   │       │       ├── #45
+                │   │       │       └── "GERMANY"
+                │   │       └── And
+                │   │           ├── Eq
+                │   │           │   ├── #41
+                │   │           │   └── "GERMANY"
+                │   │           └── Eq
+                │   │               ├── #45
+                │   │               └── "FRANCE"
+                │   └── Between { expr: #17, lower: Cast { cast_to: Date32(0), expr: "1995-01-01" }, upper: Cast { cast_to: Date32(0), expr: "1996-12-31" } }
+                └── LogicalJoin { join_type: Cross, cond: true }
+                    ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   │   │   │   ├── LogicalScan { table: supplier }
+                    │   │   │   │   └── LogicalScan { table: lineitem }
+                    │   │   │   └── LogicalScan { table: orders }
+                    │   │   └── LogicalScan { table: customer }
+                    │   └── LogicalScan { table: nation }
+                    └── LogicalScan { table: nation }
+PhysicalSort
+├── exprs:
+│   ┌── SortOrder { order: Asc }
+│   │   └── #0
+│   ├── SortOrder { order: Asc }
+│   │   └── #1
+│   └── SortOrder { order: Asc }
+│       └── #2
+└── PhysicalProjection { exprs: [ #0, #1, #2, #3 ] }
+    └── PhysicalAgg
+        ├── aggrs:Agg(Sum)
+        │   └── [ #3 ]
+        ├── groups: [ #0, #1, #2 ]
+        └── PhysicalProjection
+            ├── exprs:
+            │   ┌── #41
+            │   ├── #45
+            │   ├── Scalar(DatePart)
+            │   │   └── [ "YEAR", #17 ]
+            │   └── Mul
+            │       ├── #12
+            │       └── Sub
+            │           ├── Cast { cast_to: Decimal128(0), expr: 1 }
+            │           └── #13
+            └── PhysicalFilter
+                ├── cond:And
+                │   ├── And
+                │   │   ├── And
+                │   │   │   ├── And
+                │   │   │   │   ├── And
+                │   │   │   │   │   ├── And
+                │   │   │   │   │   │   ├── Eq
+                │   │   │   │   │   │   │   ├── #0
+                │   │   │   │   │   │   │   └── #9
+                │   │   │   │   │   │   └── Eq
+                │   │   │   │   │   │       ├── #23
+                │   │   │   │   │   │       └── #7
+                │   │   │   │   │   └── Eq
+                │   │   │   │   │       ├── #32
+                │   │   │   │   │       └── #24
+                │   │   │   │   └── Eq
+                │   │   │   │       ├── #3
+                │   │   │   │       └── #40
+                │   │   │   └── Eq
+                │   │   │       ├── #35
+                │   │   │       └── #44
+                │   │   └── Or
+                │   │       ├── And
+                │   │       │   ├── Eq
+                │   │       │   │   ├── #41
+                │   │       │   │   └── "FRANCE"
+                │   │       │   └── Eq
+                │   │       │       ├── #45
+                │   │       │       └── "GERMANY"
+                │   │       └── And
+                │   │           ├── Eq
+                │   │           │   ├── #41
+                │   │           │   └── "GERMANY"
+                │   │           └── Eq
+                │   │               ├── #45
+                │   │               └── "FRANCE"
+                │   └── Between { expr: #17, lower: Cast { cast_to: Date32(0), expr: "1995-01-01" }, upper: Cast { cast_to: Date32(0), expr: "1996-12-31" } }
+                └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   │   │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   │   │   │   ├── PhysicalScan { table: supplier }
+                    │   │   │   │   └── PhysicalScan { table: lineitem }
+                    │   │   │   └── PhysicalScan { table: orders }
+                    │   │   └── PhysicalScan { table: customer }
+                    │   └── PhysicalScan { table: nation }
+                    └── PhysicalScan { table: nation }
+*/
+
 -- TPC-H Q8 without top-most limit node
 select
     o_year,
@@ -503,5 +693,166 @@ PhysicalSort
                     │   │   └── PhysicalScan { table: nation }
                     │   └── PhysicalScan { table: nation }
                     └── PhysicalScan { table: region }
+*/
+
+-- TPC-H Q9
+SELECT
+    nation,
+    o_year,
+    SUM(amount) AS sum_profit
+FROM
+    (
+        SELECT
+            n_name AS nation,
+            EXTRACT(YEAR FROM o_orderdate) AS o_year,
+            l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity AS amount
+        FROM
+            part,
+            supplier,
+            lineitem,
+            partsupp,
+            orders,
+            nation
+        WHERE
+            s_suppkey = l_suppkey
+            AND ps_suppkey = l_suppkey
+            AND ps_partkey = l_partkey
+            AND p_partkey = l_partkey
+            AND o_orderkey = l_orderkey
+            AND s_nationkey = n_nationkey
+            AND p_name LIKE '%green%'
+    ) AS profit
+GROUP BY
+    nation,
+    o_year
+ORDER BY
+    nation,
+    o_year DESC;
+
+/*
+LogicalSort
+├── exprs:
+│   ┌── SortOrder { order: Asc }
+│   │   └── #0
+│   └── SortOrder { order: Desc }
+│       └── #1
+└── LogicalProjection { exprs: [ #0, #1, #2 ] }
+    └── LogicalAgg
+        ├── exprs:Agg(Sum)
+        │   └── [ #2 ]
+        ├── groups: [ #0, #1 ]
+        └── LogicalProjection
+            ├── exprs:
+            │   ┌── #47
+            │   ├── Scalar(DatePart)
+            │   │   └── [ "YEAR", #41 ]
+            │   └── Sub
+            │       ├── Mul
+            │       │   ├── #21
+            │       │   └── Sub
+            │       │       ├── Cast { cast_to: Decimal128(0), expr: 1 }
+            │       │       └── #22
+            │       └── Mul
+            │           ├── #35
+            │           └── #20
+            └── LogicalFilter
+                ├── cond:And
+                │   ├── And
+                │   │   ├── And
+                │   │   │   ├── And
+                │   │   │   │   ├── And
+                │   │   │   │   │   ├── And
+                │   │   │   │   │   │   ├── Eq
+                │   │   │   │   │   │   │   ├── #9
+                │   │   │   │   │   │   │   └── #18
+                │   │   │   │   │   │   └── Eq
+                │   │   │   │   │   │       ├── #33
+                │   │   │   │   │   │       └── #18
+                │   │   │   │   │   └── Eq
+                │   │   │   │   │       ├── #32
+                │   │   │   │   │       └── #17
+                │   │   │   │   └── Eq
+                │   │   │   │       ├── #0
+                │   │   │   │       └── #17
+                │   │   │   └── Eq
+                │   │   │       ├── #37
+                │   │   │       └── #16
+                │   │   └── Eq
+                │   │       ├── #12
+                │   │       └── #46
+                │   └── Like { expr: #1, pattern: "%green%" }
+                └── LogicalJoin { join_type: Cross, cond: true }
+                    ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   │   │   │   ├── LogicalScan { table: part }
+                    │   │   │   │   └── LogicalScan { table: supplier }
+                    │   │   │   └── LogicalScan { table: lineitem }
+                    │   │   └── LogicalScan { table: partsupp }
+                    │   └── LogicalScan { table: orders }
+                    └── LogicalScan { table: nation }
+PhysicalSort
+├── exprs:
+│   ┌── SortOrder { order: Asc }
+│   │   └── #0
+│   └── SortOrder { order: Desc }
+│       └── #1
+└── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+    └── PhysicalAgg
+        ├── aggrs:Agg(Sum)
+        │   └── [ #2 ]
+        ├── groups: [ #0, #1 ]
+        └── PhysicalProjection
+            ├── exprs:
+            │   ┌── #47
+            │   ├── Scalar(DatePart)
+            │   │   └── [ "YEAR", #41 ]
+            │   └── Sub
+            │       ├── Mul
+            │       │   ├── #21
+            │       │   └── Sub
+            │       │       ├── Cast { cast_to: Decimal128(0), expr: 1 }
+            │       │       └── #22
+            │       └── Mul
+            │           ├── #35
+            │           └── #20
+            └── PhysicalFilter
+                ├── cond:And
+                │   ├── And
+                │   │   ├── And
+                │   │   │   ├── And
+                │   │   │   │   ├── And
+                │   │   │   │   │   ├── And
+                │   │   │   │   │   │   ├── Eq
+                │   │   │   │   │   │   │   ├── #9
+                │   │   │   │   │   │   │   └── #18
+                │   │   │   │   │   │   └── Eq
+                │   │   │   │   │   │       ├── #33
+                │   │   │   │   │   │       └── #18
+                │   │   │   │   │   └── Eq
+                │   │   │   │   │       ├── #32
+                │   │   │   │   │       └── #17
+                │   │   │   │   └── Eq
+                │   │   │   │       ├── #0
+                │   │   │   │       └── #17
+                │   │   │   └── Eq
+                │   │   │       ├── #37
+                │   │   │       └── #16
+                │   │   └── Eq
+                │   │       ├── #12
+                │   │       └── #46
+                │   └── Like { expr: #1, pattern: "%green%" }
+                └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   │   │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   │   │   │   ├── PhysicalScan { table: part }
+                    │   │   │   │   └── PhysicalScan { table: supplier }
+                    │   │   │   └── PhysicalScan { table: lineitem }
+                    │   │   └── PhysicalScan { table: partsupp }
+                    │   └── PhysicalScan { table: orders }
+                    └── PhysicalScan { table: nation }
 */
 
