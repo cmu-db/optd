@@ -12,4 +12,5 @@
 // Author: Alexis Schlomer <aschlome@andrew.cmu.edu>  //
 //----------------------------------------------------//
 
+mod hyperloglog;
 mod tdigest;

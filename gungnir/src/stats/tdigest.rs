@@ -12,8 +12,8 @@
 // Author: Alexis Schlomer <aschlome@andrew.cmu.edu>  //
 //----------------------------------------------------//
 
-//! Simplfied implementation of the TDigest data structure as described in
-//! Ted Dunning's paper:
+//! Simplified implementation of the TDigest data structure as described in
+//! Ted Dunning et al. paper:
 //! "Computing Extremely Accurate Quantiles Using t-Digests" (2019).
 //! For more details, refer to: https://arxiv.org/pdf/1902.04023.pdf
 

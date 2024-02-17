@@ -158,11 +158,10 @@ pub async fn main() -> Result<()> {
     };
 
     let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
-    
+
     if !args.enable_logical {
         session_config.options_mut().optimizer.max_passes = 0;
     }
-    
 
     if let Some(batch_size) = args.batch_size {
         session_config = session_config.with_batch_size(batch_size);
