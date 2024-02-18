@@ -357,7 +357,7 @@ LogicalSort
             │   └── Mul
             │       ├── #12
             │       └── Sub
-            │           ├── Cast { cast_to: Decimal128(0), expr: 1 }
+            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
             │           └── #13
             └── LogicalFilter
                 ├── cond:And
@@ -396,7 +396,7 @@ LogicalSort
                 │   │           └── Eq
                 │   │               ├── #45
                 │   │               └── "FRANCE"
-                │   └── Between { expr: #17, lower: Cast { cast_to: Date32(0), expr: "1995-01-01" }, upper: Cast { cast_to: Date32(0), expr: "1996-12-31" } }
+                │   └── Between { expr: #17, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } }
                 └── LogicalJoin { join_type: Cross, cond: true }
                     ├── LogicalJoin { join_type: Cross, cond: true }
                     │   ├── LogicalJoin { join_type: Cross, cond: true }
@@ -430,7 +430,7 @@ PhysicalSort
             │   └── Mul
             │       ├── #12
             │       └── Sub
-            │           ├── Cast { cast_to: Decimal128(0), expr: 1 }
+            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
             │           └── #13
             └── PhysicalFilter
                 ├── cond:And
@@ -469,7 +469,7 @@ PhysicalSort
                 │   │           └── Eq
                 │   │               ├── #45
                 │   │               └── "FRANCE"
-                │   └── Between { expr: #17, lower: Cast { cast_to: Date32(0), expr: "1995-01-01" }, upper: Cast { cast_to: Date32(0), expr: "1996-12-31" } }
+                │   └── Between { expr: #17, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } }
                 └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
                     ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
                     │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
@@ -750,7 +750,7 @@ LogicalSort
             │       ├── Mul
             │       │   ├── #21
             │       │   └── Sub
-            │       │       ├── Cast { cast_to: Decimal128(0), expr: 1 }
+            │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
             │       │       └── #22
             │       └── Mul
             │           ├── #35
@@ -812,7 +812,7 @@ PhysicalSort
             │       ├── Mul
             │       │   ├── #21
             │       │   └── Sub
-            │       │       ├── Cast { cast_to: Decimal128(0), expr: 1 }
+            │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
             │       │       └── #22
             │       └── Mul
             │           ├── #35
