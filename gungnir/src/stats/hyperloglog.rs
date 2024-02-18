@@ -63,7 +63,7 @@ where
     // Digests an array of ByteSerializable data into the HLL.
     pub fn aggregate(&mut self, data: &[T]) {
         for d in data {
-            let hash = murmur_hash(d.to_bytes(), 0);
+            let hash = murmur_hash(d.to_bytes(), 0); // TODO(alexis): Setup seed.
             let mask = (1 << (self.precision)) - 1;
             let idx = (hash & mask) as usize; // LSB is bucket discriminator; MSB is zero streak.
             self.registers[idx] = max(self.registers[idx], self.zeros(hash));
