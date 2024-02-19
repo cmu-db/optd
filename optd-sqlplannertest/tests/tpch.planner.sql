@@ -856,3 +856,89 @@ PhysicalSort
                     └── PhysicalScan { table: nation }
 */
 
+-- TPC-H Q18
+SELECT
+    c_name,
+    c_custkey,
+    o_orderkey,
+    o_orderdate,
+    o_totalprice,
+    sum(l_quantity) as total_quantity
+FROM
+    customer,
+    orders,
+    lineitem
+WHERE
+    c_custkey = o_custkey
+    AND o_orderkey = l_orderkey
+GROUP BY
+    c_name,
+    c_custkey,
+    o_orderkey,
+    o_orderdate,
+    o_totalprice
+HAVING
+    sum(l_quantity) > 300
+ORDER BY
+    o_totalprice DESC,
+    o_orderdate;
+
+/*
+LogicalSort
+├── exprs:
+│   ┌── SortOrder { order: Desc }
+│   │   └── #4
+│   └── SortOrder { order: Asc }
+│       └── #3
+└── LogicalProjection { exprs: [ #0, #1, #2, #3, #4, #5 ] }
+    └── LogicalFilter
+        ├── cond:Gt
+        │   ├── #5
+        │   └── Cast { cast_to: Decimal128(25, 2), expr: 300 }
+        └── LogicalAgg
+            ├── exprs:Agg(Sum)
+            │   └── [ #21 ]
+            ├── groups: [ #1, #0, #8, #12, #11 ]
+            └── LogicalFilter
+                ├── cond:And
+                │   ├── Eq
+                │   │   ├── #0
+                │   │   └── #9
+                │   └── Eq
+                │       ├── #8
+                │       └── #17
+                └── LogicalJoin { join_type: Cross, cond: true }
+                    ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   ├── LogicalScan { table: customer }
+                    │   └── LogicalScan { table: orders }
+                    └── LogicalScan { table: lineitem }
+PhysicalSort
+├── exprs:
+│   ┌── SortOrder { order: Desc }
+│   │   └── #4
+│   └── SortOrder { order: Asc }
+│       └── #3
+└── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5 ] }
+    └── PhysicalFilter
+        ├── cond:Gt
+        │   ├── #5
+        │   └── Cast { cast_to: Decimal128(25, 2), expr: 300 }
+        └── PhysicalAgg
+            ├── aggrs:Agg(Sum)
+            │   └── [ #21 ]
+            ├── groups: [ #1, #0, #8, #12, #11 ]
+            └── PhysicalFilter
+                ├── cond:And
+                │   ├── Eq
+                │   │   ├── #0
+                │   │   └── #9
+                │   └── Eq
+                │       ├── #8
+                │       └── #17
+                └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   ├── PhysicalScan { table: customer }
+                    │   └── PhysicalScan { table: orders }
+                    └── PhysicalScan { table: lineitem }
+*/
+

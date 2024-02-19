@@ -247,3 +247,32 @@
   desc: TPC-H Q9
   tasks:
       - explain:logical_optd,physical_optd
+- sql: |
+      SELECT
+          c_name,
+          c_custkey,
+          o_orderkey,
+          o_orderdate,
+          o_totalprice,
+          sum(l_quantity) as total_quantity
+      FROM
+          customer,
+          orders,
+          lineitem
+      WHERE
+          c_custkey = o_custkey
+          AND o_orderkey = l_orderkey
+      GROUP BY
+          c_name,
+          c_custkey,
+          o_orderkey,
+          o_orderdate,
+          o_totalprice
+      HAVING
+          sum(l_quantity) > 300
+      ORDER BY
+          o_totalprice DESC,
+          o_orderdate;
+  desc: TPC-H Q18
+  tasks:
+      - explain:logical_optd,physical_optd
