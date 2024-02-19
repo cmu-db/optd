@@ -790,6 +790,64 @@ impl OptRelNode for LikeExpr {
             vec![
                 ("expr", self.child().explain()),
                 ("pattern", self.pattern().explain()),
+                ("negated", self.negated().to_string().into()),
+                (
+                    "case_insensitive",
+                    self.case_insensitive().to_string().into(),
+                ),
+            ],
+            vec![],
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct InListExpr(pub Expr);
+
+impl InListExpr {
+    pub fn new(expr: Expr, list: ExprList, negated: bool) -> Self {
+        InListExpr(Expr(
+            RelNode {
+                typ: OptRelNodeTyp::InList,
+                children: vec![expr.into_rel_node(), list.into_rel_node()],
+                data: Some(Value::Bool(negated)),
+            }
+            .into(),
+        ))
+    }
+
+    pub fn child(&self) -> Expr {
+        Expr(self.0.child(0))
+    }
+
+    pub fn list(&self) -> ExprList {
+        ExprList::from_rel_node(self.0.child(1)).unwrap()
+    }
+
+    pub fn negated(&self) -> bool {
+        self.0 .0.data.as_ref().unwrap().as_bool()
+    }
+}
+
+impl OptRelNode for InListExpr {
+    fn into_rel_node(self) -> OptRelNodeRef {
+        self.0.into_rel_node()
+    }
+
+    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
+        if !matches!(rel_node.typ, OptRelNodeTyp::InList) {
+            return None;
+        }
+        Expr::from_rel_node(rel_node).map(Self)
+    }
+
+    fn dispatch_explain(&self) -> Pretty<'static> {
+        Pretty::simple_record(
+            "InList",
+            vec![
+                ("expr", self.child().explain()),
+                ("list", self.list().explain()),
+                ("negated", self.negated().to_string().into()),
             ],
             vec![],
         )

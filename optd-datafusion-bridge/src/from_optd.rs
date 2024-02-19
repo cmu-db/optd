@@ -23,10 +23,10 @@ use datafusion::{
 use optd_datafusion_repr::{
     plan_nodes::{
         BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
-        Expr, ExprList, FuncExpr, FuncType, JoinType, LikeExpr, LogOpExpr, LogOpType, OptRelNode,
-        OptRelNodeRef, OptRelNodeTyp, PhysicalAgg, PhysicalEmptyRelation, PhysicalFilter,
-        PhysicalHashJoin, PhysicalLimit, PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan,
-        PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
+        Expr, ExprList, FuncExpr, FuncType, InListExpr, JoinType, LikeExpr, LogOpExpr, LogOpType,
+        OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalAgg, PhysicalEmptyRelation,
+        PhysicalFilter, PhysicalHashJoin, PhysicalLimit, PhysicalNestedLoopJoin,
+        PhysicalProjection, PhysicalScan, PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
     },
     properties::schema::Schema as OptdSchema,
     PhysicalCollector,
@@ -269,6 +269,22 @@ impl OptdPlanContext<'_> {
                         expr.case_insensitive(),
                         child,
                         pattern,
+                    ),
+                ))
+            }
+            OptRelNodeTyp::InList => {
+                let expr = InListExpr::from_rel_node(expr.into_rel_node()).unwrap();
+                let child = Self::conv_from_optd_expr(expr.child(), context)?;
+                let list = expr
+                    .list()
+                    .to_vec()
+                    .into_iter()
+                    .map(|expr| Self::conv_from_optd_expr(expr, context))
+                    .collect::<Result<Vec<_>>>()?;
+                let negated = expr.negated();
+                Ok(Arc::new(
+                    datafusion::physical_plan::expressions::InListExpr::new(
+                        child, list, negated, None,
                     ),
                 ))
             }

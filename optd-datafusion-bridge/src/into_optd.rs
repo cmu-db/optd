@@ -8,9 +8,9 @@ use datafusion_expr::Expr as DFExpr;
 use optd_core::rel_node::RelNode;
 use optd_datafusion_repr::plan_nodes::{
     BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList,
-    FuncExpr, FuncType, JoinType, LikeExpr, LogOpExpr, LogOpType, LogicalAgg, LogicalEmptyRelation,
-    LogicalFilter, LogicalJoin, LogicalLimit, LogicalProjection, LogicalScan, LogicalSort,
-    OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
+    FuncExpr, FuncType, InListExpr, JoinType, LikeExpr, LogOpExpr, LogOpType, LogicalAgg,
+    LogicalEmptyRelation, LogicalFilter, LogicalJoin, LogicalLimit, LogicalProjection, LogicalScan,
+    LogicalSort, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
 };
 
 use crate::OptdPlanContext;
@@ -173,6 +173,11 @@ impl OptdPlanContext<'_> {
                 let expr = self.conv_into_optd_expr(x.expr.as_ref(), context)?;
                 let pattern = self.conv_into_optd_expr(x.pattern.as_ref(), context)?;
                 Ok(LikeExpr::new(x.negated, x.case_insensitive, expr, pattern).into_expr())
+            }
+            Expr::InList(x) => {
+                let expr = self.conv_into_optd_expr(x.expr.as_ref(), context)?;
+                let list = self.conv_into_optd_expr_list(&x.list, context)?;
+                Ok(InListExpr::new(expr, list, x.negated).into_expr())
             }
             _ => bail!("Unsupported expression: {:?}", expr),
         }
