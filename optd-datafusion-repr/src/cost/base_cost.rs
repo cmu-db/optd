@@ -141,6 +141,8 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                                 );
                             let expr_group_id = context.children_group_ids[1];
                             let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
+                            // there may be more than one expression tree in a group (you can see this trivially as you can just swap the order of two subtrees for commutative operators)
+                            // however, we just take an arbitrary expression tree from the group to compute selectivity
                             if let Some(expr_tree) = expr_trees.first() {
                                 self.get_filter_selectivity(Arc::clone(expr_tree), &column_refs)
                             } else {

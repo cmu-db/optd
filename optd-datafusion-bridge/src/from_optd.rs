@@ -29,7 +29,7 @@ use optd_datafusion_repr::{
         SortOrderExpr, SortOrderType,
     },
     properties::schema::Schema as OptdSchema,
-    PhysicalCollector, Value,
+    PhysicalCollector,
 };
 
 use crate::{physical_collector::CollectorExec, OptdPlanContext};
@@ -203,6 +203,7 @@ impl OptdPlanContext<'_> {
                     BinOpType::Geq => Operator::GtEq,
                     BinOpType::Gt => Operator::Gt,
                     BinOpType::And => Operator::And,
+                    BinOpType::Or => Operator::Or,
                     BinOpType::Add => Operator::Plus,
                     BinOpType::Sub => Operator::Minus,
                     BinOpType::Mul => Operator::Multiply,
@@ -231,14 +232,12 @@ impl OptdPlanContext<'_> {
             OptRelNodeTyp::Cast => {
                 let expr = CastExpr::from_rel_node(expr.into_rel_node()).unwrap();
                 let child = Self::conv_from_optd_expr(expr.child(), context)?;
-                let data_type = match expr.cast_to() {
-                    Value::Bool(_) => DataType::Boolean,
-                    Value::Decimal128(_) => DataType::Decimal128(15, 2), /* TODO: AVOID HARD CODE PRECISION */
-                    Value::Date32(_) => DataType::Date32,
-                    other => unimplemented!("{}", other),
-                };
                 Ok(Arc::new(
-                    datafusion::physical_plan::expressions::CastExpr::new(child, data_type, None),
+                    datafusion::physical_plan::expressions::CastExpr::new(
+                        child,
+                        expr.cast_to(),
+                        None,
+                    ),
                 ))
             }
             OptRelNodeTyp::Like => {

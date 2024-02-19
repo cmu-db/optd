@@ -38,6 +38,10 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
         data: Option<optd_core::rel_node::Value>,
         children: &[&Self::Prop],
     ) -> Self::Prop {
+        // println!(
+        //     "derive column_ref: {:?}, data: {:?}, children: {:?}",
+        //     typ, data, children
+        // );
         match typ {
             // Should account for PhysicalScan.
             OptRelNodeTyp::Scan => {
@@ -104,8 +108,10 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
             OptRelNodeTyp::Constant(_)
             | OptRelNodeTyp::Func(_)
             | OptRelNodeTyp::BinOp(_)
+            | OptRelNodeTyp::DataType(_)
             | OptRelNodeTyp::Between
-            | OptRelNodeTyp::EmptyRelation => {
+            | OptRelNodeTyp::EmptyRelation
+            | OptRelNodeTyp::Like => {
                 vec![ColumnRef::Derived]
             }
             _ => unimplemented!("Unsupported rel node type {:?}", typ),
