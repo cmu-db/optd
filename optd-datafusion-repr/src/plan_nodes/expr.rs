@@ -79,6 +79,7 @@ pub enum ConstantType {
     Int64,
     Float64,
     Date,
+    IntervalMonthDateNano,
     Decimal,
     Any,
 }
@@ -159,6 +160,10 @@ impl ConstantExpr {
         Self::new_with_type(Value::Int64(value), ConstantType::Int64)
     }
 
+    pub fn interval_month_day_nano(value: i128) -> Self {
+        Self::new_with_type(Value::Int128(value), ConstantType::IntervalMonthDateNano)
+    }
+
     pub fn float64(value: f64) -> Self {
         Self::new_with_type(Value::Float(value.into()), ConstantType::Float64)
     }
@@ -175,6 +180,14 @@ impl ConstantExpr {
     pub fn value(&self) -> Value {
         self.0 .0.data.clone().unwrap()
     }
+
+    pub fn constant_type(&self) -> ConstantType {
+        if let OptRelNodeTyp::Constant(typ) = self.0.typ() {
+            typ
+        } else {
+            panic!("not a constant")
+        }
+    }
 }
 
 impl OptRelNode for ConstantExpr {
@@ -190,7 +203,18 @@ impl OptRelNode for ConstantExpr {
     }
 
     fn dispatch_explain(&self) -> Pretty<'static> {
-        Pretty::display(&self.value())
+        if self.constant_type() == ConstantType::IntervalMonthDateNano {
+            let value = self.value().as_i128();
+            let month = (value >> 96) as u32;
+            let day = ((value >> 64) & 0xFFFFFFFF) as u32;
+            let nano = value as u64;
+            Pretty::display(&format!(
+                "INTERVAL_MONTH_DAY_NANO ({}, {}, {})",
+                month, day, nano
+            ))
+        } else {
+            Pretty::display(&self.value())
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{bail, Context, Result};
+use arrow_schema::IntervalUnit;
 use async_recursion::async_recursion;
 use datafusion::{
     arrow::datatypes::{DataType, Field, Schema, SchemaRef},
@@ -51,6 +52,7 @@ fn from_optd_schema(optd_schema: OptdSchema) -> Schema {
         ConstantType::Int64 => DataType::Int64,
         ConstantType::Float64 => DataType::Float64,
         ConstantType::Date => DataType::Date32,
+        ConstantType::IntervalMonthDateNano => DataType::Interval(IntervalUnit::MonthDayNano),
         ConstantType::Decimal => DataType::Float64,
         ConstantType::Utf8String => DataType::Utf8,
     };
@@ -152,6 +154,9 @@ impl OptdPlanContext<'_> {
                         // TODO(chi): no hard code decimal
                     }
                     ConstantType::Date => ScalarValue::Date32(Some(value.as_i64() as i32)),
+                    ConstantType::IntervalMonthDateNano => {
+                        ScalarValue::IntervalMonthDayNano(Some(value.as_i128()))
+                    }
                     ConstantType::Utf8String => ScalarValue::Utf8(Some(value.as_str().to_string())),
                     ConstantType::Any => unimplemented!(),
                 };

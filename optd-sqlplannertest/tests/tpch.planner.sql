@@ -88,6 +88,120 @@ CREATE TABLE LINEITEM (
 
 */
 
+-- TPC-H Q1
+SELECT
+    l_returnflag,
+    l_linestatus,
+    sum(l_quantity) as sum_qty,
+    sum(l_extendedprice) as sum_base_price,
+    sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+    sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
+    avg(l_quantity) as avg_qty,
+    avg(l_extendedprice) as avg_price,
+    avg(l_discount) as avg_disc,
+    count(*) as count_order
+FROM
+    lineitem
+WHERE
+    l_shipdate <= date '1998-12-01' - interval '90' day
+GROUP BY
+    l_returnflag, l_linestatus
+ORDER BY
+    l_returnflag, l_linestatus;
+
+/*
+LogicalSort
+├── exprs:
+│   ┌── SortOrder { order: Asc }
+│   │   └── #0
+│   └── SortOrder { order: Asc }
+│       └── #1
+└── LogicalProjection { exprs: [ #0, #1, #2, #3, #4, #5, #6, #7, #8, #9 ] }
+    └── LogicalAgg
+        ├── exprs:
+        │   ┌── Agg(Sum)
+        │   │   └── [ #4 ]
+        │   ├── Agg(Sum)
+        │   │   └── [ #5 ]
+        │   ├── Agg(Sum)
+        │   │   └── Mul
+        │   │       ├── #5
+        │   │       └── Sub
+        │   │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │   │           └── #6
+        │   ├── Agg(Sum)
+        │   │   └── Mul
+        │   │       ├── Mul
+        │   │       │   ├── #5
+        │   │       │   └── Sub
+        │   │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │   │       │       └── #6
+        │   │       └── Add
+        │   │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │   │           └── #7
+        │   ├── Agg(Avg)
+        │   │   └── [ #4 ]
+        │   ├── Agg(Avg)
+        │   │   └── [ #5 ]
+        │   ├── Agg(Avg)
+        │   │   └── [ #6 ]
+        │   └── Agg(Count)
+        │       └── [ 1 ]
+        ├── groups: [ #8, #9 ]
+        └── LogicalFilter
+            ├── cond:Leq
+            │   ├── #10
+            │   └── Sub
+            │       ├── Cast { cast_to: Date32, expr: "1998-12-01" }
+            │       └── INTERVAL_MONTH_DAY_NANO (0, 90, 0)
+            └── LogicalScan { table: lineitem }
+PhysicalSort
+├── exprs:
+│   ┌── SortOrder { order: Asc }
+│   │   └── #0
+│   └── SortOrder { order: Asc }
+│       └── #1
+└── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5, #6, #7, #8, #9 ] }
+    └── PhysicalAgg
+        ├── aggrs:
+        │   ┌── Agg(Sum)
+        │   │   └── [ #4 ]
+        │   ├── Agg(Sum)
+        │   │   └── [ #5 ]
+        │   ├── Agg(Sum)
+        │   │   └── Mul
+        │   │       ├── #5
+        │   │       └── Sub
+        │   │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │   │           └── #6
+        │   ├── Agg(Sum)
+        │   │   └── Mul
+        │   │       ├── Mul
+        │   │       │   ├── #5
+        │   │       │   └── Sub
+        │   │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │   │       │       └── #6
+        │   │       └── Add
+        │   │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │   │           └── #7
+        │   ├── Agg(Avg)
+        │   │   └── [ #4 ]
+        │   ├── Agg(Avg)
+        │   │   └── [ #5 ]
+        │   ├── Agg(Avg)
+        │   │   └── [ #6 ]
+        │   └── Agg(Count)
+        │       └── [ 1 ]
+        ├── groups: [ #8, #9 ]
+        └── PhysicalFilter
+            ├── cond:Leq
+            │   ├── #10
+            │   └── Sub
+            │       ├── Cast { cast_to: Date32, expr: "1998-12-01" }
+            │       └── INTERVAL_MONTH_DAY_NANO (0, 90, 0)
+            └── PhysicalScan { table: lineitem }
+*/
+
 -- TPC-H Q5
 SELECT
     n_name AS nation,
@@ -854,6 +968,235 @@ PhysicalSort
                     │   │   └── PhysicalScan { table: partsupp }
                     │   └── PhysicalScan { table: orders }
                     └── PhysicalScan { table: nation }
+*/
+
+-- TPC-H Q10
+SELECT
+    c_custkey,
+    c_name,
+    sum(l_extendedprice * (1 - l_discount)) as revenue,
+    c_acctbal,
+    n_name,
+    c_address,
+    c_phone,
+    c_comment
+FROM
+    customer,
+    orders,
+    lineitem,
+    nation
+WHERE
+    c_custkey = o_custkey
+    AND l_orderkey = o_orderkey
+    AND o_orderdate >= DATE '1993-07-01'
+    AND o_orderdate < DATE '1993-07-01' + INTERVAL '3' MONTH
+    AND l_returnflag = 'R'
+    AND c_nationkey = n_nationkey
+GROUP BY
+    c_custkey,
+    c_name,
+    c_acctbal,
+    c_phone,
+    n_name,
+    c_address,
+    c_comment
+ORDER BY
+    revenue DESC
+LIMIT 20;
+
+/*
+LogicalLimit { skip: 0, fetch: 20 }
+└── LogicalSort
+    ├── exprs:SortOrder { order: Desc }
+    │   └── #2
+    └── LogicalProjection { exprs: [ #0, #1, #7, #2, #4, #5, #3, #6 ] }
+        └── LogicalAgg
+            ├── exprs:Agg(Sum)
+            │   └── Mul
+            │       ├── #22
+            │       └── Sub
+            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │           └── #23
+            ├── groups: [ #0, #1, #5, #4, #34, #2, #7 ]
+            └── LogicalFilter
+                ├── cond:And
+                │   ├── And
+                │   │   ├── And
+                │   │   │   ├── And
+                │   │   │   │   ├── And
+                │   │   │   │   │   ├── Eq
+                │   │   │   │   │   │   ├── #0
+                │   │   │   │   │   │   └── #9
+                │   │   │   │   │   └── Eq
+                │   │   │   │   │       ├── #17
+                │   │   │   │   │       └── #8
+                │   │   │   │   └── Geq
+                │   │   │   │       ├── #12
+                │   │   │   │       └── Cast { cast_to: Date32, expr: "1993-07-01" }
+                │   │   │   └── Lt
+                │   │   │       ├── #12
+                │   │   │       └── Add
+                │   │   │           ├── Cast { cast_to: Date32, expr: "1993-07-01" }
+                │   │   │           └── INTERVAL_MONTH_DAY_NANO (3, 0, 0)
+                │   │   └── Eq
+                │   │       ├── #25
+                │   │       └── "R"
+                │   └── Eq
+                │       ├── #3
+                │       └── #33
+                └── LogicalJoin { join_type: Cross, cond: true }
+                    ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   │   ├── LogicalScan { table: customer }
+                    │   │   └── LogicalScan { table: orders }
+                    │   └── LogicalScan { table: lineitem }
+                    └── LogicalScan { table: nation }
+PhysicalLimit { skip: 0, fetch: 20 }
+└── PhysicalSort
+    ├── exprs:SortOrder { order: Desc }
+    │   └── #2
+    └── PhysicalProjection { exprs: [ #0, #1, #7, #2, #4, #5, #3, #6 ] }
+        └── PhysicalAgg
+            ├── aggrs:Agg(Sum)
+            │   └── Mul
+            │       ├── #22
+            │       └── Sub
+            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │           └── #23
+            ├── groups: [ #0, #1, #5, #4, #34, #2, #7 ]
+            └── PhysicalFilter
+                ├── cond:And
+                │   ├── And
+                │   │   ├── And
+                │   │   │   ├── And
+                │   │   │   │   ├── And
+                │   │   │   │   │   ├── Eq
+                │   │   │   │   │   │   ├── #0
+                │   │   │   │   │   │   └── #9
+                │   │   │   │   │   └── Eq
+                │   │   │   │   │       ├── #17
+                │   │   │   │   │       └── #8
+                │   │   │   │   └── Geq
+                │   │   │   │       ├── #12
+                │   │   │   │       └── Cast { cast_to: Date32, expr: "1993-07-01" }
+                │   │   │   └── Lt
+                │   │   │       ├── #12
+                │   │   │       └── Add
+                │   │   │           ├── Cast { cast_to: Date32, expr: "1993-07-01" }
+                │   │   │           └── INTERVAL_MONTH_DAY_NANO (3, 0, 0)
+                │   │   └── Eq
+                │   │       ├── #25
+                │   │       └── "R"
+                │   └── Eq
+                │       ├── #3
+                │       └── #33
+                └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   │   ├── PhysicalScan { table: customer }
+                    │   │   └── PhysicalScan { table: orders }
+                    │   └── PhysicalScan { table: lineitem }
+                    └── PhysicalScan { table: nation }
+*/
+
+-- TPC-H Q14
+SELECT
+    100.00 * sum(case when p_type like 'PROMO%'
+                    then l_extendedprice * (1 - l_discount)
+                    else 0 end) / sum(l_extendedprice * (1 - l_discount)) as promo_revenue
+FROM
+    lineitem,
+    part
+WHERE
+    l_partkey = p_partkey
+    AND l_shipdate >= DATE '1995-09-01'
+    AND l_shipdate < DATE '1995-09-01' + INTERVAL '1' MONTH;
+
+/*
+LogicalProjection
+├── exprs:Div
+│   ├── Mul
+│   │   ├── 100
+│   │   └── Cast { cast_to: Float64, expr: #0 }
+│   └── Cast { cast_to: Float64, expr: #1 }
+└── LogicalAgg
+    ├── exprs:
+    │   ┌── Agg(Sum)
+    │   │   └── Case
+    │   │       └── 
+    │   │           ┌── Like { expr: #20, pattern: "PROMO%" }
+    │   │           ├── Mul
+    │   │           │   ├── #5
+    │   │           │   └── Sub
+    │   │           │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+    │   │           │       └── #6
+    │   │           └── Cast { cast_to: Decimal128(38, 4), expr: 0 }
+    │   └── Agg(Sum)
+    │       └── Mul
+    │           ├── #5
+    │           └── Sub
+    │               ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+    │               └── #6
+    ├── groups: []
+    └── LogicalFilter
+        ├── cond:And
+        │   ├── And
+        │   │   ├── Eq
+        │   │   │   ├── #1
+        │   │   │   └── #16
+        │   │   └── Geq
+        │   │       ├── #10
+        │   │       └── Cast { cast_to: Date32, expr: "1995-09-01" }
+        │   └── Lt
+        │       ├── #10
+        │       └── Add
+        │           ├── Cast { cast_to: Date32, expr: "1995-09-01" }
+        │           └── INTERVAL_MONTH_DAY_NANO (1, 0, 0)
+        └── LogicalJoin { join_type: Cross, cond: true }
+            ├── LogicalScan { table: lineitem }
+            └── LogicalScan { table: part }
+PhysicalProjection
+├── exprs:Div
+│   ├── Mul
+│   │   ├── 100
+│   │   └── Cast { cast_to: Float64, expr: #0 }
+│   └── Cast { cast_to: Float64, expr: #1 }
+└── PhysicalAgg
+    ├── aggrs:
+    │   ┌── Agg(Sum)
+    │   │   └── Case
+    │   │       └── 
+    │   │           ┌── Like { expr: #20, pattern: "PROMO%" }
+    │   │           ├── Mul
+    │   │           │   ├── #5
+    │   │           │   └── Sub
+    │   │           │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+    │   │           │       └── #6
+    │   │           └── Cast { cast_to: Decimal128(38, 4), expr: 0 }
+    │   └── Agg(Sum)
+    │       └── Mul
+    │           ├── #5
+    │           └── Sub
+    │               ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+    │               └── #6
+    ├── groups: []
+    └── PhysicalFilter
+        ├── cond:And
+        │   ├── And
+        │   │   ├── Eq
+        │   │   │   ├── #1
+        │   │   │   └── #16
+        │   │   └── Geq
+        │   │       ├── #10
+        │   │       └── Cast { cast_to: Date32, expr: "1995-09-01" }
+        │   └── Lt
+        │       ├── #10
+        │       └── Add
+        │           ├── Cast { cast_to: Date32, expr: "1995-09-01" }
+        │           └── INTERVAL_MONTH_DAY_NANO (1, 0, 0)
+        └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+            ├── PhysicalScan { table: lineitem }
+            └── PhysicalScan { table: part }
 */
 
 -- TPC-H Q18
