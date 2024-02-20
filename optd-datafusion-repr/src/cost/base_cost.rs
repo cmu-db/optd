@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::plan_nodes::BinOpType;
+use crate::plan_nodes::{BinOpType, UnOpType};
 use crate::properties::column_ref::{ColumnRefPropertyBuilder, GroupColumnRefs};
 use crate::{
     plan_nodes::{OptRelNodeRef, OptRelNodeTyp},
@@ -80,7 +80,7 @@ pub const ROW_COUNT: usize = 1;
 pub const COMPUTE_COST: usize = 2;
 pub const IO_COST: usize = 3;
 // used to indicate a combination of unimplemented!(), unreachable!(), or panic!()
-// this is only temporary. TODO: remove this when I'm done with get_filter_selectivity()
+// TODO: a future PR will remove this and get the code working for all of TPC-H
 const INVALID_SELECTIVITY: f64 = 0.001;
 
 impl OptCostModel {
@@ -304,6 +304,16 @@ impl OptCostModel {
                     INVALID_SELECTIVITY
                 } else {
                     unreachable!("all BinOpTypes should be true for at least one is_*() function")
+                }
+            }
+            OptRelNodeTyp::UnOp(un_op_typ) => {
+                assert!(expr_tree.children.len() == 1);
+                let child = expr_tree.child(0);
+                match un_op_typ {
+                    // not doesn't care about nulls so there's no complex logic. it just reverses the selectivity
+                    // for instance, != _will not_ include nulls but "NOT ==" _will_ include nulls
+                    UnOpType::Not => 1.0 - self.get_filter_selectivity(child, column_refs),
+                    _ => INVALID_SELECTIVITY,
                 }
             }
             _ => INVALID_SELECTIVITY,
@@ -585,7 +595,7 @@ mod tests {
     use optd_core::rel_node::{RelNode, Value};
 
     use crate::{
-        plan_nodes::{BinOpType, ConstantType, OptRelNodeRef, OptRelNodeTyp},
+        plan_nodes::{BinOpType, ConstantType, OptRelNodeRef, OptRelNodeTyp, UnOpType},
         properties::column_ref::ColumnRef,
     };
 
@@ -661,6 +671,14 @@ mod tests {
         Arc::new(RelNode::<OptRelNodeTyp> {
             typ: OptRelNodeTyp::BinOp(op_type),
             children: vec![left, right],
+            data: None,
+        })
+    }
+
+    fn un_op(op_type: UnOpType, child: OptRelNodeRef) -> OptRelNodeRef {
+        Arc::new(RelNode::<OptRelNodeTyp> {
+            typ: OptRelNodeTyp::UnOp(op_type),
+            children: vec![child],
             data: None,
         })
     }
@@ -1208,6 +1226,54 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
             0.65
+        );
+    }
+
+    #[test]
+    fn test_not_no_nulls() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![(Value::Int32(1), 0.3)].into_iter().collect(),
+            }),
+            0,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = un_op(UnOpType::Not, bin_op(BinOpType::Eq, col_ref(0), const_i32(1)));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.7
+        );
+    }
+
+    #[test]
+    fn test_not_with_nulls() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![(Value::Int32(1), 0.3)].into_iter().collect(),
+            }),
+            0,
+            0.1,
+            Box::new(MockDistribution {
+                cdfs: vec![].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = un_op(UnOpType::Not, bin_op(BinOpType::Eq, col_ref(0), const_i32(1)));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        // not doesn't care about nulls. it just reverses the selectivity
+        // for instance, != _will not_ include nulls but "NOT ==" _will_ include nulls
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.7
         );
     }
 }
