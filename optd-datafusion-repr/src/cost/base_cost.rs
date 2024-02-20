@@ -45,12 +45,12 @@ pub struct PerColumnStats {
     // ndistinct _does not_ include nulls
     ndistinct: i32,
 
-    // distribution _does not_ include the values in mcvs
-    // distribution _does not_ include nulls
-    distribution: Box<dyn Distribution>,
-
     // postgres uses null_frac instead of something like "num_nulls" so we'll follow suit
     null_frac: f64,
+
+    // distribution _does not_ include the values in mcvs
+    // distribution _does not_ include nulls
+    _distr: Box<dyn Distribution>,
 }
 
 pub trait MostCommonValues: 'static + Send + Sync {
@@ -283,7 +283,12 @@ impl OptCostModel {
                 let right_child = expr_tree.child(1);
 
                 if bin_op_typ.is_comparison() {
-                    self.get_comparison_op_selectivity(bin_op_typ, left_child, right_child, column_refs)
+                    self.get_comparison_op_selectivity(
+                        bin_op_typ,
+                        left_child,
+                        right_child,
+                        column_refs,
+                    )
                 } else if bin_op_typ.is_numerical() || bin_op_typ.is_logical() {
                     INVALID_SELECTIVITY
                 } else {
@@ -295,7 +300,13 @@ impl OptCostModel {
     }
 
     /// Comparison operators are one of the base cases for recursion in get_filter_selectivity()
-    fn get_comparison_op_selectivity(&self, bin_op_typ: BinOpType, left: OptRelNodeRef, right: OptRelNodeRef, column_refs: &GroupColumnRefs) -> f64 {
+    fn get_comparison_op_selectivity(
+        &self,
+        bin_op_typ: BinOpType,
+        left: OptRelNodeRef,
+        right: OptRelNodeRef,
+        column_refs: &GroupColumnRefs,
+    ) -> f64 {
         assert!(bin_op_typ.is_comparison());
 
         // the # of column refs determines how we handle the logic
@@ -328,11 +339,10 @@ impl OptCostModel {
                 let value = non_col_ref_node.as_ref().data.as_ref().unwrap();
 
                 if let OptRelNodeTyp::Constant(_) = non_col_ref_node.as_ref().typ {
-                    self.get_column_equality_selectivity(
-                        table,
-                        *col_idx,
-                        value,
-                    )
+                    match self.get_column_equality_selectivity(table, *col_idx, value) {
+                        Some(sel) => sel,
+                        None => INVALID_SELECTIVITY,
+                    }
                 } else {
                     INVALID_SELECTIVITY
                 }
@@ -342,30 +352,37 @@ impl OptCostModel {
         } else if col_ref_nodes.len() == 2 {
             INVALID_SELECTIVITY
         } else {
-            unreachable!()
+            unreachable!("We could have at most pushed left and right into col_ref_nodes")
         }
     }
 
     /// Get the selectivity of an expression of the form "column equals value" (or "value equals column")
+    /// Computes selectivity based off of statistics
     /// Equality predicates are handled entirely differently from range predicates so this is its own function
-    fn get_column_equality_selectivity(&self, table: &str, col_idx: usize, value: &Value) -> f64 {
+    /// If it is unable to find the statistics, it returns None
+    fn get_column_equality_selectivity(
+        &self,
+        table: &str,
+        col_idx: usize,
+        value: &Value,
+    ) -> Option<f64> {
         if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
             if let Some(per_column_stats) = per_table_stats.per_column_stats_vec.get(col_idx) {
                 if let Some(freq) = per_column_stats.mcvs.freq(value) {
-                    freq
+                    Some(freq)
                 } else {
                     let non_mcv_freq = 1.0 - per_column_stats.mcvs.total_freq();
                     // always safe because usize is at least as large as i32
                     let ndistinct_as_usize = per_column_stats.ndistinct as usize;
                     let non_mcv_cnt = ndistinct_as_usize - per_column_stats.mcvs.cnt();
                     // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
-                    (non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64)
+                    Some((non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64))
                 }
             } else {
-                panic!("col_idx {} should exist but doesn't", col_idx)
+                None
             }
         } else {
-            panic!("table {} should exist but doesn't", table)
+            None
         }
     }
 
@@ -386,8 +403,18 @@ impl PerTableStats {
 }
 
 impl PerColumnStats {
-    pub fn new(mcvs: Box<dyn MostCommonValues>, ndistinct: i32, null_frac: f64) -> Self {
-        Self { mcvs, ndistinct, null_frac }
+    pub fn new(
+        mcvs: Box<dyn MostCommonValues>,
+        ndistinct: i32,
+        null_frac: f64,
+        distr: Box<dyn Distribution>,
+    ) -> Self {
+        Self {
+            mcvs,
+            ndistinct,
+            null_frac,
+            _distr: distr,
+        }
     }
 }
 
@@ -405,10 +432,14 @@ mod tests {
         properties::column_ref::ColumnRef,
     };
 
-    use super::{MostCommonValues, OptCostModel, PerColumnStats, PerTableStats};
+    use super::{Distribution, MostCommonValues, OptCostModel, PerColumnStats, PerTableStats};
 
     struct MockMostCommonValues {
         mcvs: HashMap<Value, f64>,
+    }
+
+    struct MockDistribution {
+        cdfs: HashMap<Value, f64>,
     }
 
     impl MostCommonValues for MockMostCommonValues {
@@ -417,11 +448,17 @@ mod tests {
         }
 
         fn total_freq(&self) -> f64 {
-            self.mcvs.values().into_iter().sum()
+            self.mcvs.values().sum()
         }
 
         fn cnt(&self) -> usize {
             self.mcvs.len()
+        }
+    }
+
+    impl Distribution for MockDistribution {
+        fn cdf(&self, value: &Value) -> f64 {
+            *self.cdfs.get(value).unwrap_or(&0.0)
         }
     }
 
@@ -432,10 +469,7 @@ mod tests {
         OptCostModel::new(
             vec![(
                 String::from(TABLE1_NAME),
-                PerTableStats::new(
-                    100,
-                    vec![per_column_stats],
-                ),
+                PerTableStats::new(100, vec![per_column_stats]),
             )]
             .into_iter()
             .collect(),
@@ -468,17 +502,16 @@ mod tests {
 
     #[test]
     fn test_colref_eq_constint_in_mcv() {
-        let cost_model = create_one_column_cost_model(
-            PerColumnStats::new(
-                Box::new(MockMostCommonValues {
-                    mcvs: vec![
-                        (Value::Int32(1), 0.3),
-                    ].into_iter().collect(),
-                }),
-                0,
-                0.0,
-            )
-        );
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![(Value::Int32(1), 0.3)].into_iter().collect(),
+            }),
+            0,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![].into_iter().collect(),
+            }),
+        ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(1));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
@@ -492,17 +525,16 @@ mod tests {
 
     #[test]
     fn test_colref_eq_constint_in_mcv_reverse_children() {
-        let cost_model = create_one_column_cost_model(
-            PerColumnStats::new(
-                Box::new(MockMostCommonValues {
-                    mcvs: vec![
-                        (Value::Int32(1), 0.3),
-                    ].into_iter().collect(),
-                }),
-                0,
-                0.0,
-            )
-        );
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![(Value::Int32(1), 0.3)].into_iter().collect(),
+            }),
+            0,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![].into_iter().collect(),
+            }),
+        ));
         let expr_tree = bin_op(BinOpType::Eq, const_i32(1), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
@@ -516,18 +548,18 @@ mod tests {
 
     #[test]
     fn test_colref_eq_constint_not_in_mcv_no_nulls() {
-        let cost_model = create_one_column_cost_model(
-            PerColumnStats::new(
-                Box::new(MockMostCommonValues {
-                    mcvs: vec![
-                        (Value::Int32(1), 0.2),
-                        (Value::Int32(3), 0.44),
-                    ].into_iter().collect(),
-                }),
-                5,
-                0.0,
-            )
-        );
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)]
+                    .into_iter()
+                    .collect(),
+            }),
+            5,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![].into_iter().collect(),
+            }),
+        ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(2));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
@@ -541,18 +573,18 @@ mod tests {
 
     #[test]
     fn test_colref_eq_constint_not_in_mcv_with_nulls() {
-        let cost_model = create_one_column_cost_model(
-            PerColumnStats::new(
-                Box::new(MockMostCommonValues {
-                    mcvs: vec![
-                        (Value::Int32(1), 0.2),
-                        (Value::Int32(3), 0.44),
-                    ].into_iter().collect(),
-                }),
-                5,
-                0.03,
-            )
-        );
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)]
+                    .into_iter()
+                    .collect(),
+            }),
+            5,
+            0.03,
+            Box::new(MockDistribution {
+                cdfs: vec![].into_iter().collect(),
+            }),
+        ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(2));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
