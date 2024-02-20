@@ -54,8 +54,16 @@ pub struct PerColumnStats {
 }
 
 pub trait MostCommonValues: 'static + Send + Sync {
+    // it is true that we could just expose freq_over_pred() and use that for freq() and total_freq()
+    // however, freq() and total_freq() each have potential optimizations (freq() is O(1) instead of
+    //     O(n) and total_freq() can be cached)
+    // additionally, it makes sense to return an Option<f64> for freq() instead of just 0 if value doesn't exist
+    // thus, I expose three different functions
     fn freq(&self, value: &Value) -> Option<f64>;
     fn total_freq(&self) -> f64;
+    fn freq_over_pred(&self, pred: Box<dyn Fn(&Value) -> bool>) -> f64;
+
+    // returns the # of entries (i.e. value + freq) in the most common values structure
     fn cnt(&self) -> usize;
 }
 
@@ -422,16 +430,16 @@ impl OptCostModel {
     ) -> Option<f64> {
         if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
             if let Some(per_column_stats) = per_table_stats.per_column_stats_vec.get(col_idx) {
-                if let Some(freq) = per_column_stats.mcvs.freq(value) {
-                    Some(freq)
+                Some(if let Some(freq) = per_column_stats.mcvs.freq(value) {
+                    freq
                 } else {
                     let non_mcv_freq = 1.0 - per_column_stats.mcvs.total_freq();
                     // always safe because usize is at least as large as i32
                     let ndistinct_as_usize = per_column_stats.ndistinct as usize;
                     let non_mcv_cnt = ndistinct_as_usize - per_column_stats.mcvs.cnt();
                     // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
-                    Some((non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64))
-                }
+                    (non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64)
+                })
             } else {
                 None
             }
@@ -440,11 +448,11 @@ impl OptCostModel {
         }
     }
 
-    /// Get the selectivity of an expression of the form "column </<=/=>/> value" (or "value </<=/=>/> column")
+    /// Get the selectivity of an expression of the form "column </<=/>=/> value" (or "value </<=/>=/> column")
     /// Computes selectivity based off of statistics
     /// Range predicates are handled entirely differently from equality predicates so this is its own function
     /// If it is unable to find the statistics, it returns None
-    /// Like in the Postgres source code, we decompose the four operators "</<=/=>/>" into "is_lt" and "is_eq"
+    /// Like in the Postgres source code, we decompose the four operators "</<=/>=/>" into "is_lt" and "is_eq"
     /// The "is_lt" and "is_eq" values are set as if column is on the left hand side
     fn get_column_range_selectivity(
         &self,
@@ -458,15 +466,35 @@ impl OptCostModel {
             if let Some(per_column_stats) = per_table_stats.per_column_stats_vec.get(col_idx) {
                 // because distr does not include the values in MCVs, we need to compute the CDFs there as well
                 // because nulls return false in any comparison, they are never included when computing range selectivity
-                // TODO: do lt, eq, and gt for both distr and MCVs
-                let distr_leq_cdf = per_column_stats.distr.cdf(value);
-                let mcvs_cdf = 0.0;
-                let total_leq_cdf = distr_leq_cdf + mcvs_cdf;
-                if is_col_lt_val && is_col_eq_val {
-                    Some(total_leq_cdf)
+                let distr_leq_freq = per_column_stats.distr.cdf(value);
+                let value_clone = value.clone(); // clone the value so that we can move it into the closure to avoid lifetime issues
+                let pred = Box::new(move |val: &Value| val.as_i32() <= value_clone.as_i32());
+                let mcvs_leq_freq = per_column_stats.mcvs.freq_over_pred(pred);
+                let total_leq_freq = distr_leq_freq + mcvs_leq_freq;
+
+                // depending on whether value is in mcvs or not, we use different logic to turn total_leq_cdf into total_lt_cdf
+                // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
+                // we can unwrap safely because we already know that table and col_idx exist
+                let total_lt_freq = total_leq_freq - self.get_column_equality_selectivity(table, col_idx, value).unwrap();
+
+                // use either total_leq_freq or total_lt_freq to get the selectivity
+                Some(if is_col_lt_val {
+                    if is_col_eq_val {
+                        // this branch means <=
+                        total_leq_freq
+                    } else {
+                        // this branch means <
+                        total_lt_freq
+                    }
                 } else {
-                    Some(1.0 - total_leq_cdf)
-                }
+                    if is_col_eq_val {
+                        // this branch means >=, which is 1 - <
+                        1.0 - total_lt_freq
+                    } else {
+                        // this branch means >, which is 1 - <=
+                        1.0 - total_leq_freq
+                    }
+                })
             } else {
                 None
             }
@@ -538,6 +566,10 @@ mod tests {
 
         fn total_freq(&self) -> f64 {
             self.mcvs.values().sum()
+        }
+
+        fn freq_over_pred(&self, pred: Box<dyn Fn(&Value) -> bool>) -> f64 {
+            self.mcvs.iter().filter(|(val, _)| pred(val)).map(|(_, freq)| freq).sum()
         }
 
         fn cnt(&self) -> usize {
@@ -683,7 +715,7 @@ mod tests {
             Box::new(MockMostCommonValues {
                 mcvs: vec![].into_iter().collect(),
             }),
-            0,
+            10,
             0.0,
             Box::new(MockDistribution {
                 cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
@@ -702,6 +734,260 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
             0.7
+        );
+    }
+
+    #[test]
+    fn test_colref_leq_constint_no_mcvs_in_range_with_nulls() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![].into_iter().collect(),
+            }),
+            10,
+            0.1,
+            Box::new(MockDistribution {
+                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), const_i32(15));
+        let expr_tree_rev = bin_op(BinOpType::Geq, const_i32(15), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.7
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.7
+        );
+    }
+
+    #[test]
+    fn test_colref_leq_constint_with_mcvs_in_range_not_at_border() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![(Value::Int32(6), 0.05), (Value::Int32(10), 0.1), (Value::Int32(17), 0.08), (Value::Int32(25), 0.07)].into_iter().collect(),
+            }),
+            10,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), const_i32(15));
+        let expr_tree_rev = bin_op(BinOpType::Geq, const_i32(15), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.85
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.85
+        );
+    }
+
+    #[test]
+    fn test_colref_leq_constint_with_mcv_at_border() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![(Value::Int32(6), 0.05), (Value::Int32(10), 0.1), (Value::Int32(15), 0.08), (Value::Int32(25), 0.07)].into_iter().collect(),
+            }),
+            10,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), const_i32(15));
+        let expr_tree_rev = bin_op(BinOpType::Geq, const_i32(15), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.93
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.93
+        );
+    }
+
+    #[test]
+    fn test_colref_lt_constint_no_mcvs_in_range() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![].into_iter().collect(),
+            }),
+            10,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), const_i32(15));
+        let expr_tree_rev = bin_op(BinOpType::Gt, const_i32(15), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.6
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.6
+        );
+    }
+
+    #[test]
+    fn test_colref_lt_constint_no_mcvs_in_range_with_nulls() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![].into_iter().collect(),
+            }),
+            9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
+            0.1,
+            Box::new(MockDistribution {
+                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), const_i32(15));
+        let expr_tree_rev = bin_op(BinOpType::Gt, const_i32(15), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.6
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.6
+        );
+    }
+
+    #[test]
+    fn test_colref_lt_constint_with_mcvs_in_range_not_at_border() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![(Value::Int32(6), 0.05), (Value::Int32(10), 0.1), (Value::Int32(17), 0.08), (Value::Int32(25), 0.07)].into_iter().collect(),
+            }),
+            11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), const_i32(15));
+        let expr_tree_rev = bin_op(BinOpType::Gt, const_i32(15), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.75
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.75
+        );
+    }
+
+    #[test]
+    fn test_colref_lt_constint_with_mcv_at_border() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![(Value::Int32(6), 0.05), (Value::Int32(10), 0.1), (Value::Int32(15), 0.08), (Value::Int32(25), 0.07)].into_iter().collect(),
+            }),
+            11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), const_i32(15));
+        let expr_tree_rev = bin_op(BinOpType::Gt, const_i32(15), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.85
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.85
+        );
+    }
+
+    // I only have one test for GT since I'll assume that it uses the same underlying logic as LEQ
+    #[test]
+    fn test_colref_gt_constint_no_mcvs_in_range() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![].into_iter().collect(),
+            }),
+            10,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Gt, col_ref(0), const_i32(15));
+        let expr_tree_rev = bin_op(BinOpType::Lt, const_i32(15), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            1.0 - 0.7
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            1.0 - 0.7
+        );
+    }
+
+    // I only have one test for GEQ since I'll assume that it uses the same underlying logic as LT
+    #[test]
+    fn test_colref_geq_constint_no_mcvs_in_range() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![].into_iter().collect(),
+            }),
+            10,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Geq, col_ref(0), const_i32(15));
+        let expr_tree_rev = bin_op(BinOpType::Leq, const_i32(15), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            1.0 - 0.6
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            1.0 - 0.6
         );
     }
 
