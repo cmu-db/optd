@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use crate::plan_nodes::BinOpType;
 use crate::properties::column_ref::{ColumnRefPropertyBuilder, GroupColumnRefs};
 use crate::{
     plan_nodes::{OptRelNodeRef, OptRelNodeTyp},
@@ -261,32 +262,12 @@ impl OptCostModel {
         assert!(expr_tree.typ.is_expression());
         match expr_tree.typ {
             OptRelNodeTyp::BinOp(bin_op_typ) => {
-                if bin_op_typ.is_comparison() {
-                    let left_child = expr_tree.child(0);
-                    let right_child = expr_tree.child(1);
+                assert!(expr_tree.children.len() == 2);
+                let left_child = expr_tree.child(0);
+                let right_child = expr_tree.child(1);
 
-                    if left_child.as_ref().typ == OptRelNodeTyp::ColumnRef {
-                        let col_ref_idx = left_child.as_ref().data.as_ref().unwrap().as_u64();
-                        // this is always safe since col_ref_idx was initially a usize in ColumnRefExpr::new()
-                        let usize_col_ref_idx = col_ref_idx as usize;
-                        if let ColumnRef::BaseTableColumnRef { table, col_idx } =
-                            &column_refs[usize_col_ref_idx]
-                        {
-                            if let OptRelNodeTyp::Constant(_) = right_child.as_ref().typ {
-                                self.get_column_equality_selectivity(
-                                    table,
-                                    *col_idx,
-                                    right_child.as_ref().data.as_ref().unwrap(),
-                                )
-                            } else {
-                                INVALID_SELECTIVITY
-                            }
-                        } else {
-                            INVALID_SELECTIVITY
-                        }
-                    } else {
-                        INVALID_SELECTIVITY
-                    }
+                if bin_op_typ.is_comparison() {
+                    self.get_comparison_op_equality(bin_op_typ, left_child, right_child, column_refs)
                 } else if bin_op_typ.is_numerical() || bin_op_typ.is_logical() {
                     INVALID_SELECTIVITY
                 } else {
@@ -297,6 +278,60 @@ impl OptCostModel {
         }
     }
 
+    /// Comparison operators are one of the base cases for recursion in get_filter_selectivity()
+    fn get_comparison_op_equality(&self, bin_op_typ: BinOpType, left: OptRelNodeRef, right: OptRelNodeRef, column_refs: &GroupColumnRefs) -> f64 {
+        assert!(bin_op_typ.is_comparison());
+
+        // the # of column refs determines how we handle the logic
+        let mut col_ref_nodes = vec![];
+        let mut non_col_ref_nodes = vec![];
+        // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
+        // We always want to use "col_ref_node" and "non_col_ref_node" instead of "left" or "right"
+        if left.as_ref().typ == OptRelNodeTyp::ColumnRef {
+            col_ref_nodes.push(left);
+        } else {
+            non_col_ref_nodes.push(left);
+        }
+        if right.as_ref().typ == OptRelNodeTyp::ColumnRef {
+            col_ref_nodes.push(right);
+        } else {
+            non_col_ref_nodes.push(right);
+        }
+
+        if col_ref_nodes.is_empty() {
+            INVALID_SELECTIVITY
+        } else if col_ref_nodes.len() == 1 {
+            let col_ref_node = col_ref_nodes.pop().unwrap();
+            let col_ref_idx = col_ref_node.as_ref().data.as_ref().unwrap().as_u64();
+            let usize_col_ref_idx = col_ref_idx as usize;
+
+            if let ColumnRef::BaseTableColumnRef { table, col_idx } =
+                &column_refs[usize_col_ref_idx]
+            {
+                let non_col_ref_node = non_col_ref_nodes.pop().unwrap();
+                let value = non_col_ref_node.as_ref().data.as_ref().unwrap();
+
+                if let OptRelNodeTyp::Constant(_) = non_col_ref_node.as_ref().typ {
+                    self.get_column_equality_selectivity(
+                        table,
+                        *col_idx,
+                        value,
+                    )
+                } else {
+                    INVALID_SELECTIVITY
+                }
+            } else {
+                INVALID_SELECTIVITY
+            }
+        } else if col_ref_nodes.len() == 2 {
+            INVALID_SELECTIVITY
+        } else {
+            unreachable!()
+        }
+    }
+
+    /// Get the selectivity of an expression of the form "column equals value" (or "value equals column")
+    /// Equality predicates are handled entirely differently from range predicates so this is its own function
     fn get_column_equality_selectivity(&self, table: &str, col_idx: usize, value: &Value) -> f64 {
         if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
             if let Some(per_column_stats) = per_table_stats.per_column_stats_vec.get(col_idx) {
@@ -403,6 +438,19 @@ mod tests {
     #[test]
     fn test_colref_eq_constint_in_mcv() {
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(1));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from("t1"),
+            col_idx: 0,
+        }];
+        assert_eq!(
+            BASIC_COST_MODEL.get_filter_selectivity(expr_tree, &column_refs),
+            0.1
+        );
+    }
+
+    #[test]
+    fn test_colref_eq_constint_in_mcv_reverse_children() {
+        let expr_tree = bin_op(BinOpType::Eq, const_i32(1), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from("t1"),
             col_idx: 0,
