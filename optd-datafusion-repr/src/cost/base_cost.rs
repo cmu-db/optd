@@ -299,7 +299,12 @@ impl OptCostModel {
                         column_refs,
                     )
                 } else if bin_op_typ.is_logical() {
-                    self.get_logical_bin_op_selectivity(bin_op_typ, left_child, right_child, column_refs)
+                    self.get_logical_bin_op_selectivity(
+                        bin_op_typ,
+                        left_child,
+                        right_child,
+                        column_refs,
+                    )
                 } else if bin_op_typ.is_numerical() {
                     INVALID_SELECTIVITY
                 } else {
@@ -352,17 +357,30 @@ impl OptCostModel {
         if col_ref_nodes.is_empty() {
             INVALID_SELECTIVITY
         } else if col_ref_nodes.len() == 1 {
-            let col_ref_node = col_ref_nodes.pop().expect("we just checked that col_ref_nodes.len() == 1");
-            let col_ref_idx = col_ref_node.as_ref().data.as_ref().expect("colrefs should have data").as_u64();
+            let col_ref_node = col_ref_nodes
+                .pop()
+                .expect("we just checked that col_ref_nodes.len() == 1");
+            let col_ref_idx = col_ref_node
+                .as_ref()
+                .data
+                .as_ref()
+                .expect("colrefs should have data")
+                .as_u64();
             let usize_col_ref_idx = col_ref_idx as usize;
 
             if let ColumnRef::BaseTableColumnRef { table, col_idx } =
                 &column_refs[usize_col_ref_idx]
             {
-                let non_col_ref_node = non_col_ref_nodes.pop().expect("non_col_ref_nodes should have a value since col_ref_nodes.len() == 1");
+                let non_col_ref_node = non_col_ref_nodes
+                    .pop()
+                    .expect("non_col_ref_nodes should have a value since col_ref_nodes.len() == 1");
 
                 if let OptRelNodeTyp::Constant(_) = non_col_ref_node.as_ref().typ {
-                    let value = non_col_ref_node.as_ref().data.as_ref().expect("constants should have data");
+                    let value = non_col_ref_node
+                        .as_ref()
+                        .data
+                        .as_ref()
+                        .expect("constants should have data");
                     match match bin_op_typ {
                         BinOpType::Eq => {
                             self.get_column_equality_selectivity(table, *col_idx, value, true)
@@ -491,7 +509,7 @@ impl OptCostModel {
                 // because nulls return false in any comparison, they are never included when computing range selectivity
                 let distr_leq_freq = per_column_stats.distr.cdf(value);
                 let value_clone = value.clone(); // clone the value so that we can move it into the closure to avoid lifetime issues
-                // TODO: in a future PR, figure out how to make Values comparable. rn I just hardcoded as_i32() to work around this
+                                                 // TODO: in a future PR, figure out how to make Values comparable. rn I just hardcoded as_i32() to work around this
                 let pred = Box::new(move |val: &Value| val.as_i32() <= value_clone.as_i32());
                 let mcvs_leq_freq = per_column_stats.mcvs.freq_over_pred(pred);
                 let total_leq_freq = distr_leq_freq + mcvs_leq_freq;
@@ -549,7 +567,7 @@ impl OptCostModel {
             // it's also impossible to even account for nulls because we don't know which columns the left and right selectivities are
             BinOpType::And => left_sel * right_sel,
             BinOpType::Or => left_sel + right_sel - left_sel * right_sel,
-            _ => unreachable!("we covered all bin_op_typ.is_logical() cases")
+            _ => unreachable!("we covered all bin_op_typ.is_logical() cases"),
         }
     }
 
@@ -1173,7 +1191,9 @@ mod tests {
     fn test_and() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
             Box::new(MockMostCommonValues {
-                mcvs: vec![(Value::Int32(1), 0.3), (Value::Int32(5), 0.5)].into_iter().collect(),
+                mcvs: vec![(Value::Int32(1), 0.3), (Value::Int32(5), 0.5)]
+                    .into_iter()
+                    .collect(),
             }),
             0,
             0.0,
@@ -1203,7 +1223,9 @@ mod tests {
     fn test_or() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
             Box::new(MockMostCommonValues {
-                mcvs: vec![(Value::Int32(1), 0.3), (Value::Int32(5), 0.5)].into_iter().collect(),
+                mcvs: vec![(Value::Int32(1), 0.3), (Value::Int32(5), 0.5)]
+                    .into_iter()
+                    .collect(),
             }),
             0,
             0.0,
@@ -1241,7 +1263,10 @@ mod tests {
                 cdfs: vec![].into_iter().collect(),
             }),
         ));
-        let expr_tree = un_op(UnOpType::Not, bin_op(BinOpType::Eq, col_ref(0), const_i32(1)));
+        let expr_tree = un_op(
+            UnOpType::Not,
+            bin_op(BinOpType::Eq, col_ref(0), const_i32(1)),
+        );
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1264,7 +1289,10 @@ mod tests {
                 cdfs: vec![].into_iter().collect(),
             }),
         ));
-        let expr_tree = un_op(UnOpType::Not, bin_op(BinOpType::Eq, col_ref(0), const_i32(1)));
+        let expr_tree = un_op(
+            UnOpType::Not,
+            bin_op(BinOpType::Eq, col_ref(0), const_i32(1)),
+        );
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
