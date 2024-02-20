@@ -343,13 +343,19 @@ impl OptCostModel {
         // We always want to use "col_ref_node" and "non_col_ref_node" instead of "left" or "right"
         if left.as_ref().typ == OptRelNodeTyp::ColumnRef {
             is_left_col_ref = true;
-            col_ref_nodes.push(ColumnRefExpr::from_rel_node(left).expect("we already checked that the type is ColumnRef"));
+            col_ref_nodes.push(
+                ColumnRefExpr::from_rel_node(left)
+                    .expect("we already checked that the type is ColumnRef"),
+            );
         } else {
             is_left_col_ref = false;
             non_col_ref_nodes.push(left);
         }
         if right.as_ref().typ == OptRelNodeTyp::ColumnRef {
-            col_ref_nodes.push(ColumnRefExpr::from_rel_node(right).expect("we already checked that the type is ColumnRef"));
+            col_ref_nodes.push(
+                ColumnRefExpr::from_rel_node(right)
+                    .expect("we already checked that the type is ColumnRef"),
+            );
         } else {
             non_col_ref_nodes.push(right);
         }
@@ -383,26 +389,34 @@ impl OptCostModel {
                         BinOpType::Neq => {
                             self.get_column_equality_selectivity(table, *col_idx, value, false)
                         }
-                        BinOpType::Lt => {
-                            self.get_column_range_selectivity(
-                                table, *col_idx, value, is_left_col_ref, false,
-                            )
-                        }
-                        BinOpType::Leq => {
-                            self.get_column_range_selectivity(
-                                table, *col_idx, value, is_left_col_ref, true,
-                            )
-                        }
-                        BinOpType::Gt => {
-                            self.get_column_range_selectivity(
-                                table, *col_idx, value, !is_left_col_ref, false,
-                            )
-                        }
-                        BinOpType::Geq => {
-                            self.get_column_range_selectivity(
-                                table, *col_idx, value, !is_left_col_ref, true,
-                            )
-                        }
+                        BinOpType::Lt => self.get_column_range_selectivity(
+                            table,
+                            *col_idx,
+                            value,
+                            is_left_col_ref,
+                            false,
+                        ),
+                        BinOpType::Leq => self.get_column_range_selectivity(
+                            table,
+                            *col_idx,
+                            value,
+                            is_left_col_ref,
+                            true,
+                        ),
+                        BinOpType::Gt => self.get_column_range_selectivity(
+                            table,
+                            *col_idx,
+                            value,
+                            !is_left_col_ref,
+                            false,
+                        ),
+                        BinOpType::Geq => self.get_column_range_selectivity(
+                            table,
+                            *col_idx,
+                            value,
+                            !is_left_col_ref,
+                            true,
+                        ),
                         _ => None,
                     } {
                         Some(sel) => sel,
@@ -585,7 +599,10 @@ mod tests {
     use optd_core::rel_node::{RelNode, Value};
 
     use crate::{
-        plan_nodes::{BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, OptRelNode, OptRelNodeRef, OptRelNodeTyp, UnOpExpr, UnOpType},
+        plan_nodes::{
+            BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, OptRelNode,
+            OptRelNodeRef, OptRelNodeTyp, UnOpExpr, UnOpType,
+        },
         properties::column_ref::ColumnRef,
     };
 
@@ -602,7 +619,7 @@ mod tests {
     impl MockMostCommonValues {
         fn new(mcvs_vec: Vec<(Value, f64)>) -> Self {
             Self {
-                mcvs: mcvs_vec.into_iter().collect()
+                mcvs: mcvs_vec.into_iter().collect(),
             }
         }
 
@@ -636,7 +653,7 @@ mod tests {
     impl MockDistribution {
         fn new(cdfs_vec: Vec<(Value, f64)>) -> Self {
             Self {
-                cdfs: cdfs_vec.into_iter().collect()
+                cdfs: cdfs_vec.into_iter().collect(),
             }
         }
 
@@ -676,11 +693,20 @@ mod tests {
     }
 
     fn bin_op(op_type: BinOpType, left: OptRelNodeRef, right: OptRelNodeRef) -> OptRelNodeRef {
-        BinOpExpr::new(Expr::from_rel_node(left).expect("left should be an Expr"), Expr::from_rel_node(right).expect("right should be an Expr"), op_type).into_rel_node()
+        BinOpExpr::new(
+            Expr::from_rel_node(left).expect("left should be an Expr"),
+            Expr::from_rel_node(right).expect("right should be an Expr"),
+            op_type,
+        )
+        .into_rel_node()
     }
 
     fn un_op(op_type: UnOpType, child: OptRelNodeRef) -> OptRelNodeRef {
-        UnOpExpr::new(Expr::from_rel_node(child).expect("child should be an Expr"), op_type).into_rel_node()
+        UnOpExpr::new(
+            Expr::from_rel_node(child).expect("child should be an Expr"),
+            op_type,
+        )
+        .into_rel_node()
     }
 
     #[test]
@@ -710,7 +736,10 @@ mod tests {
     #[test]
     fn test_colref_eq_constint_not_in_mcv_no_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)])),
+            Box::new(MockMostCommonValues::new(vec![
+                (Value::Int32(1), 0.2),
+                (Value::Int32(3), 0.44),
+            ])),
             5,
             0.0,
             Box::new(MockDistribution::empty()),
@@ -734,7 +763,10 @@ mod tests {
     #[test]
     fn test_colref_eq_constint_not_in_mcv_with_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)])),
+            Box::new(MockMostCommonValues::new(vec![
+                (Value::Int32(1), 0.2),
+                (Value::Int32(3), 0.44),
+            ])),
             5,
             0.03,
             Box::new(MockDistribution::empty()),
