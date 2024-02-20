@@ -352,6 +352,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "assert_approx_eq"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c07dab4369547dbe5114677b33fbbf724971019f3818172d59a97a61c774ffd"
+
+[[package]]
 name = "assert_cmd"
 version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2499,6 +2505,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow-schema",
+ "assert_approx_eq",
  "async-trait",
  "camelpaste",
  "datafusion",

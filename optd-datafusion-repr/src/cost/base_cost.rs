@@ -271,7 +271,7 @@ impl OptCostModel {
                 let right_child = expr_tree.child(1);
 
                 if bin_op_typ.is_comparison() {
-                    self.get_comparison_op_equality(bin_op_typ, left_child, right_child, column_refs)
+                    self.get_comparison_op_selectivity(bin_op_typ, left_child, right_child, column_refs)
                 } else if bin_op_typ.is_numerical() || bin_op_typ.is_logical() {
                     INVALID_SELECTIVITY
                 } else {
@@ -283,7 +283,7 @@ impl OptCostModel {
     }
 
     /// Comparison operators are one of the base cases for recursion in get_filter_selectivity()
-    fn get_comparison_op_equality(&self, bin_op_typ: BinOpType, left: OptRelNodeRef, right: OptRelNodeRef, column_refs: &GroupColumnRefs) -> f64 {
+    fn get_comparison_op_selectivity(&self, bin_op_typ: BinOpType, left: OptRelNodeRef, right: OptRelNodeRef, column_refs: &GroupColumnRefs) -> f64 {
         assert!(bin_op_typ.is_comparison());
 
         // the # of column refs determines how we handle the logic
@@ -346,7 +346,8 @@ impl OptCostModel {
                     // always safe because usize is at least as large as i32
                     let ndistinct_as_usize = per_column_stats.ndistinct as usize;
                     let non_mcv_cnt = ndistinct_as_usize - per_column_stats.mcvs.get_cnt();
-                    non_mcv_freq / (non_mcv_cnt as f64)
+                    // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
+                    (non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64)
                 }
             } else {
                 unreachable!("col_idx {} should exist but doesn't", col_idx)
@@ -471,7 +472,7 @@ mod tests {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
         }];
-        assert_eq!(
+        assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.3
         );
@@ -495,7 +496,7 @@ mod tests {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
         }];
-        assert_eq!(
+        assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.3
         );
@@ -520,9 +521,35 @@ mod tests {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
         }];
-        assert_eq!(
+        assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.12
+        );
+    }
+
+    #[test]
+    fn test_colref_eq_constint_not_in_mcv_with_nulls() {
+        let cost_model = create_one_column_cost_model(
+            PerColumnStats::new(
+                Box::new(MockMostCommonValues {
+                    mcvs: vec![
+                        (Value::Int32(1), 0.2),
+                        (Value::Int32(3), 0.44),
+                    ].into_iter().collect(),
+                }),
+                5,
+                0.03,
+            )
+        );
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(2));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.11,
+            0.1
         );
     }
 }
