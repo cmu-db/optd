@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::plan_nodes::{BinOpType, UnOpType};
+use crate::plan_nodes::{BinOpType, ColumnRefExpr, OptRelNode, UnOpType};
 use crate::properties::column_ref::{ColumnRefPropertyBuilder, GroupColumnRefs};
 use crate::{
     plan_nodes::{OptRelNodeRef, OptRelNodeTyp},
@@ -343,13 +343,13 @@ impl OptCostModel {
         // We always want to use "col_ref_node" and "non_col_ref_node" instead of "left" or "right"
         if left.as_ref().typ == OptRelNodeTyp::ColumnRef {
             is_left_col_ref = true;
-            col_ref_nodes.push(left);
+            col_ref_nodes.push(ColumnRefExpr::from_rel_node(left).expect("we already checked that the type is ColumnRef"));
         } else {
             is_left_col_ref = false;
             non_col_ref_nodes.push(left);
         }
         if right.as_ref().typ == OptRelNodeTyp::ColumnRef {
-            col_ref_nodes.push(right);
+            col_ref_nodes.push(ColumnRefExpr::from_rel_node(right).expect("we already checked that the type is ColumnRef"));
         } else {
             non_col_ref_nodes.push(right);
         }
@@ -360,12 +360,7 @@ impl OptCostModel {
             let col_ref_node = col_ref_nodes
                 .pop()
                 .expect("we just checked that col_ref_nodes.len() == 1");
-            let col_ref_idx = col_ref_node
-                .as_ref()
-                .data
-                .as_ref()
-                .expect("colrefs should have data")
-                .as_u64();
+            let col_ref_idx = col_ref_node.index();
             let usize_col_ref_idx = col_ref_idx as usize;
 
             if let ColumnRef::BaseTableColumnRef { table, col_idx } =
@@ -389,48 +384,24 @@ impl OptCostModel {
                             self.get_column_equality_selectivity(table, *col_idx, value, false)
                         }
                         BinOpType::Lt => {
-                            if is_left_col_ref {
-                                self.get_column_range_selectivity(
-                                    table, *col_idx, value, true, false,
-                                )
-                            } else {
-                                self.get_column_range_selectivity(
-                                    table, *col_idx, value, false, false,
-                                )
-                            }
+                            self.get_column_range_selectivity(
+                                table, *col_idx, value, is_left_col_ref, false,
+                            )
                         }
                         BinOpType::Leq => {
-                            if is_left_col_ref {
-                                self.get_column_range_selectivity(
-                                    table, *col_idx, value, true, true,
-                                )
-                            } else {
-                                self.get_column_range_selectivity(
-                                    table, *col_idx, value, false, true,
-                                )
-                            }
-                        }
-                        BinOpType::Geq => {
-                            if is_left_col_ref {
-                                self.get_column_range_selectivity(
-                                    table, *col_idx, value, false, true,
-                                )
-                            } else {
-                                self.get_column_range_selectivity(
-                                    table, *col_idx, value, true, true,
-                                )
-                            }
+                            self.get_column_range_selectivity(
+                                table, *col_idx, value, is_left_col_ref, true,
+                            )
                         }
                         BinOpType::Gt => {
-                            if is_left_col_ref {
-                                self.get_column_range_selectivity(
-                                    table, *col_idx, value, false, false,
-                                )
-                            } else {
-                                self.get_column_range_selectivity(
-                                    table, *col_idx, value, true, false,
-                                )
-                            }
+                            self.get_column_range_selectivity(
+                                table, *col_idx, value, !is_left_col_ref, false,
+                            )
+                        }
+                        BinOpType::Geq => {
+                            self.get_column_range_selectivity(
+                                table, *col_idx, value, !is_left_col_ref, true,
+                            )
                         }
                         _ => None,
                     } {
@@ -610,10 +581,11 @@ impl PerColumnStats {
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
+    use itertools::Itertools;
     use optd_core::rel_node::{RelNode, Value};
 
     use crate::{
-        plan_nodes::{BinOpType, ConstantType, OptRelNodeRef, OptRelNodeTyp, UnOpType},
+        plan_nodes::{BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, OptRelNode, OptRelNodeRef, OptRelNodeTyp, UnOpExpr, UnOpType},
         properties::column_ref::ColumnRef,
     };
 
@@ -625,6 +597,18 @@ mod tests {
 
     struct MockDistribution {
         cdfs: HashMap<Value, f64>,
+    }
+
+    impl MockMostCommonValues {
+        fn new(mcvs_vec: Vec<(Value, f64)>) -> Self {
+            Self {
+                mcvs: mcvs_vec.into_iter().collect()
+            }
+        }
+
+        fn empty() -> Self {
+            MockMostCommonValues::new(vec![])
+        }
     }
 
     impl MostCommonValues for MockMostCommonValues {
@@ -649,6 +633,18 @@ mod tests {
         }
     }
 
+    impl MockDistribution {
+        fn new(cdfs_vec: Vec<(Value, f64)>) -> Self {
+            Self {
+                cdfs: cdfs_vec.into_iter().collect()
+            }
+        }
+
+        fn empty() -> Self {
+            MockDistribution::new(vec![])
+        }
+    }
+
     impl Distribution for MockDistribution {
         fn cdf(&self, value: &Value) -> f64 {
             *self.cdfs.get(value).unwrap_or(&0.0)
@@ -670,51 +666,33 @@ mod tests {
     }
 
     fn col_ref(idx: u64) -> OptRelNodeRef {
-        Arc::new(RelNode::<OptRelNodeTyp> {
-            typ: OptRelNodeTyp::ColumnRef,
-            children: vec![],
-            data: Some(Value::UInt64(idx)),
-        })
+        // this conversion is always safe because idx was originally a usize
+        let idx_as_usize = idx as usize;
+        ColumnRefExpr::new(idx_as_usize).into_rel_node()
     }
 
-    fn const_i32(val: i32) -> OptRelNodeRef {
-        Arc::new(RelNode::<OptRelNodeTyp> {
-            typ: OptRelNodeTyp::Constant(ConstantType::Int32),
-            children: vec![],
-            data: Some(Value::Int32(val)),
-        })
+    fn cnst(value: Value) -> OptRelNodeRef {
+        ConstantExpr::new(value).into_rel_node()
     }
 
     fn bin_op(op_type: BinOpType, left: OptRelNodeRef, right: OptRelNodeRef) -> OptRelNodeRef {
-        Arc::new(RelNode::<OptRelNodeTyp> {
-            typ: OptRelNodeTyp::BinOp(op_type),
-            children: vec![left, right],
-            data: None,
-        })
+        BinOpExpr::new(Expr::from_rel_node(left).expect("left should be an Expr"), Expr::from_rel_node(right).expect("right should be an Expr"), op_type).into_rel_node()
     }
 
     fn un_op(op_type: UnOpType, child: OptRelNodeRef) -> OptRelNodeRef {
-        Arc::new(RelNode::<OptRelNodeTyp> {
-            typ: OptRelNodeTyp::UnOp(op_type),
-            children: vec![child],
-            data: None,
-        })
+        UnOpExpr::new(Expr::from_rel_node(child).expect("child should be an Expr"), op_type).into_rel_node()
     }
 
     #[test]
     fn test_colref_eq_constint_in_mcv() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![(Value::Int32(1), 0.3)].into_iter().collect(),
-            }),
+            Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.3)])),
             0,
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::empty()),
         ));
-        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(1));
-        let expr_tree_rev = bin_op(BinOpType::Eq, const_i32(1), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
+        let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(1)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -732,19 +710,13 @@ mod tests {
     #[test]
     fn test_colref_eq_constint_not_in_mcv_no_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)]
-                    .into_iter()
-                    .collect(),
-            }),
+            Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)])),
             5,
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::empty()),
         ));
-        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(2));
-        let expr_tree_rev = bin_op(BinOpType::Eq, const_i32(2), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
+        let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -762,19 +734,13 @@ mod tests {
     #[test]
     fn test_colref_eq_constint_not_in_mcv_with_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)]
-                    .into_iter()
-                    .collect(),
-            }),
+            Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)])),
             5,
             0.03,
-            Box::new(MockDistribution {
-                cdfs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::empty()),
         ));
-        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(2));
-        let expr_tree_rev = bin_op(BinOpType::Eq, const_i32(2), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
+        let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -793,17 +759,13 @@ mod tests {
     #[test]
     fn test_colref_neq_constint_in_mcv() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![(Value::Int32(1), 0.3)].into_iter().collect(),
-            }),
+            Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.3)])),
             0,
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::empty()),
         ));
-        let expr_tree = bin_op(BinOpType::Neq, col_ref(0), const_i32(1));
-        let expr_tree_rev = bin_op(BinOpType::Neq, const_i32(1), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Neq, col_ref(0), cnst(Value::Int32(1)));
+        let expr_tree_rev = bin_op(BinOpType::Neq, cnst(Value::Int32(1)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -821,17 +783,13 @@ mod tests {
     #[test]
     fn test_colref_leq_constint_no_mcvs_in_range() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockMostCommonValues::empty()),
             10,
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
-        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), const_i32(15));
-        let expr_tree_rev = bin_op(BinOpType::Geq, const_i32(15), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -849,17 +807,13 @@ mod tests {
     #[test]
     fn test_colref_leq_constint_no_mcvs_in_range_with_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockMostCommonValues::empty()),
             10,
             0.1,
-            Box::new(MockDistribution {
-                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
-        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), const_i32(15));
-        let expr_tree_rev = bin_op(BinOpType::Geq, const_i32(15), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -889,12 +843,10 @@ mod tests {
             }),
             10,
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
-        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), const_i32(15));
-        let expr_tree_rev = bin_op(BinOpType::Geq, const_i32(15), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -912,24 +864,18 @@ mod tests {
     #[test]
     fn test_colref_leq_constint_with_mcv_at_border() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![
-                    (Value::Int32(6), 0.05),
-                    (Value::Int32(10), 0.1),
-                    (Value::Int32(15), 0.08),
-                    (Value::Int32(25), 0.07),
-                ]
-                .into_iter()
-                .collect(),
-            }),
+            Box::new(MockMostCommonValues::new(vec![
+                (Value::Int32(6), 0.05),
+                (Value::Int32(10), 0.1),
+                (Value::Int32(15), 0.08),
+                (Value::Int32(25), 0.07),
+            ])),
             10,
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
-        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), const_i32(15));
-        let expr_tree_rev = bin_op(BinOpType::Geq, const_i32(15), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -947,17 +893,13 @@ mod tests {
     #[test]
     fn test_colref_lt_constint_no_mcvs_in_range() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockMostCommonValues::empty()),
             10,
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
-        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), const_i32(15));
-        let expr_tree_rev = bin_op(BinOpType::Gt, const_i32(15), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -975,17 +917,13 @@ mod tests {
     #[test]
     fn test_colref_lt_constint_no_mcvs_in_range_with_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockMostCommonValues::empty()),
             9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
             0.1,
-            Box::new(MockDistribution {
-                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
-        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), const_i32(15));
-        let expr_tree_rev = bin_op(BinOpType::Gt, const_i32(15), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1015,12 +953,10 @@ mod tests {
             }),
             11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
-        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), const_i32(15));
-        let expr_tree_rev = bin_op(BinOpType::Gt, const_i32(15), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1050,12 +986,10 @@ mod tests {
             }),
             11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
-        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), const_i32(15));
-        let expr_tree_rev = bin_op(BinOpType::Gt, const_i32(15), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1075,17 +1009,13 @@ mod tests {
     #[test]
     fn test_colref_gt_constint_no_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockMostCommonValues::empty()),
             10,
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
-        let expr_tree = bin_op(BinOpType::Gt, col_ref(0), const_i32(15));
-        let expr_tree_rev = bin_op(BinOpType::Lt, const_i32(15), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1103,17 +1033,13 @@ mod tests {
     #[test]
     fn test_colref_gt_constint_with_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockMostCommonValues::empty()),
             10,
             0.1,
-            Box::new(MockDistribution {
-                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
-        let expr_tree = bin_op(BinOpType::Gt, col_ref(0), const_i32(15));
-        let expr_tree_rev = bin_op(BinOpType::Lt, const_i32(15), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1133,17 +1059,13 @@ mod tests {
     #[test]
     fn test_colref_geq_constint_no_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockMostCommonValues::empty()),
             10,
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
-        let expr_tree = bin_op(BinOpType::Geq, col_ref(0), const_i32(15));
-        let expr_tree_rev = bin_op(BinOpType::Leq, const_i32(15), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1161,17 +1083,13 @@ mod tests {
     #[test]
     fn test_colref_geq_constint_with_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockMostCommonValues::empty()),
             9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
             0.1,
-            Box::new(MockDistribution {
-                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
-        let expr_tree = bin_op(BinOpType::Geq, col_ref(0), const_i32(15));
-        let expr_tree_rev = bin_op(BinOpType::Leq, const_i32(15), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1197,12 +1115,10 @@ mod tests {
             }),
             0,
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::empty()),
         ));
-        let eq1 = bin_op(BinOpType::Eq, col_ref(0), const_i32(1));
-        let eq5 = bin_op(BinOpType::Eq, col_ref(0), const_i32(5));
+        let eq1 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
+        let eq5 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(5)));
         let expr_tree = bin_op(BinOpType::And, eq1.clone(), eq5.clone());
         let expr_tree_rev = bin_op(BinOpType::And, eq5.clone(), eq1.clone());
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
@@ -1229,12 +1145,10 @@ mod tests {
             }),
             0,
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::empty()),
         ));
-        let eq1 = bin_op(BinOpType::Eq, col_ref(0), const_i32(1));
-        let eq5 = bin_op(BinOpType::Eq, col_ref(0), const_i32(5));
+        let eq1 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
+        let eq5 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(5)));
         let expr_tree = bin_op(BinOpType::Or, eq1.clone(), eq5.clone());
         let expr_tree_rev = bin_op(BinOpType::Or, eq5.clone(), eq1.clone());
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
@@ -1254,18 +1168,14 @@ mod tests {
     #[test]
     fn test_not_no_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![(Value::Int32(1), 0.3)].into_iter().collect(),
-            }),
+            Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.3)])),
             0,
             0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::empty()),
         ));
         let expr_tree = un_op(
             UnOpType::Not,
-            bin_op(BinOpType::Eq, col_ref(0), const_i32(1)),
+            bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1))),
         );
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
@@ -1280,18 +1190,14 @@ mod tests {
     #[test]
     fn test_not_with_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![(Value::Int32(1), 0.3)].into_iter().collect(),
-            }),
+            Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.3)])),
             0,
             0.1,
-            Box::new(MockDistribution {
-                cdfs: vec![].into_iter().collect(),
-            }),
+            Box::new(MockDistribution::empty()),
         ));
         let expr_tree = un_op(
             UnOpType::Not,
-            bin_op(BinOpType::Eq, col_ref(0), const_i32(1)),
+            bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1))),
         );
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),

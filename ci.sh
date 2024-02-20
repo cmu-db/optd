@@ -7,3 +7,9 @@ set -ex
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --no-fail-fast --workspace --all-features --locked
+
+if [ "$?" -eq 0 ]; then
+  echo "PASSED"
+else
+  echo "FAILED"
+fi
