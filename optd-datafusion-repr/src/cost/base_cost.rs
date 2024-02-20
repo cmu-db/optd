@@ -298,7 +298,9 @@ impl OptCostModel {
                         right_child,
                         column_refs,
                     )
-                } else if bin_op_typ.is_numerical() || bin_op_typ.is_logical() {
+                } else if bin_op_typ.is_logical() {
+                    self.get_logical_bin_op_selectivity(bin_op_typ, left_child, right_child, column_refs)
+                } else if bin_op_typ.is_numerical() {
                     INVALID_SELECTIVITY
                 } else {
                     unreachable!("all BinOpTypes should be true for at least one is_*() function")
@@ -308,7 +310,7 @@ impl OptCostModel {
         }
     }
 
-    /// Comparison operators are one of the base cases for recursion in get_filter_selectivity()
+    /// Comparison operators are the base case for recursion in get_filter_selectivity()
     fn get_comparison_op_selectivity(
         &self,
         bin_op_typ: BinOpType,
@@ -340,17 +342,17 @@ impl OptCostModel {
         if col_ref_nodes.is_empty() {
             INVALID_SELECTIVITY
         } else if col_ref_nodes.len() == 1 {
-            let col_ref_node = col_ref_nodes.pop().unwrap();
-            let col_ref_idx = col_ref_node.as_ref().data.as_ref().unwrap().as_u64();
+            let col_ref_node = col_ref_nodes.pop().expect("we just checked that col_ref_nodes.len() == 1");
+            let col_ref_idx = col_ref_node.as_ref().data.as_ref().expect("colrefs should have data").as_u64();
             let usize_col_ref_idx = col_ref_idx as usize;
 
             if let ColumnRef::BaseTableColumnRef { table, col_idx } =
                 &column_refs[usize_col_ref_idx]
             {
-                let non_col_ref_node = non_col_ref_nodes.pop().unwrap();
-                let value = non_col_ref_node.as_ref().data.as_ref().unwrap();
+                let non_col_ref_node = non_col_ref_nodes.pop().expect("non_col_ref_nodes should have a value since col_ref_nodes.len() == 1");
 
                 if let OptRelNodeTyp::Constant(_) = non_col_ref_node.as_ref().typ {
+                    let value = non_col_ref_node.as_ref().data.as_ref().expect("constants should have data");
                     match match bin_op_typ {
                         BinOpType::Eq => {
                             self.get_column_equality_selectivity(table, *col_idx, value, true)
@@ -479,17 +481,17 @@ impl OptCostModel {
                 // because nulls return false in any comparison, they are never included when computing range selectivity
                 let distr_leq_freq = per_column_stats.distr.cdf(value);
                 let value_clone = value.clone(); // clone the value so that we can move it into the closure to avoid lifetime issues
+                // TODO: in a future PR, figure out how to make Values comparable. rn I just hardcoded as_i32() to work around this
                 let pred = Box::new(move |val: &Value| val.as_i32() <= value_clone.as_i32());
                 let mcvs_leq_freq = per_column_stats.mcvs.freq_over_pred(pred);
                 let total_leq_freq = distr_leq_freq + mcvs_leq_freq;
 
                 // depending on whether value is in mcvs or not, we use different logic to turn total_leq_cdf into total_lt_cdf
                 // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
-                // we can unwrap safely because we already know that table and col_idx exist
                 let total_lt_freq = total_leq_freq
                     - self
                         .get_column_equality_selectivity(table, col_idx, value, true)
-                        .unwrap();
+                        .expect("we already know that table and col_idx exist");
 
                 // use either total_leq_freq or total_lt_freq to get the selectivity
                 Some(if is_col_lt_val {
@@ -517,6 +519,27 @@ impl OptCostModel {
             }
         } else {
             None
+        }
+    }
+
+    fn get_logical_bin_op_selectivity(
+        &self,
+        bin_op_typ: BinOpType,
+        left: OptRelNodeRef,
+        right: OptRelNodeRef,
+        column_refs: &GroupColumnRefs,
+    ) -> f64 {
+        assert!(bin_op_typ.is_logical());
+
+        let left_sel = self.get_filter_selectivity(left, column_refs);
+        let right_sel = self.get_filter_selectivity(right, column_refs);
+
+        match bin_op_typ {
+            // note that there's no need to account for nulls here
+            // it's also impossible to even account for nulls because we don't know which columns the left and right selectivities are
+            BinOpType::And => left_sel * right_sel,
+            BinOpType::Or => left_sel + right_sel - left_sel * right_sel,
+            _ => unreachable!("we covered all bin_op_typ.is_logical() cases")
         }
     }
 
@@ -1125,6 +1148,66 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
             1.0 - 0.6 - 0.1
+        );
+    }
+
+    #[test]
+    fn test_and() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![(Value::Int32(1), 0.3), (Value::Int32(5), 0.5)].into_iter().collect(),
+            }),
+            0,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![].into_iter().collect(),
+            }),
+        ));
+        let eq1 = bin_op(BinOpType::Eq, col_ref(0), const_i32(1));
+        let eq5 = bin_op(BinOpType::Eq, col_ref(0), const_i32(5));
+        let expr_tree = bin_op(BinOpType::And, eq1.clone(), eq5.clone());
+        let expr_tree_rev = bin_op(BinOpType::And, eq5.clone(), eq1.clone());
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.15
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.15
+        );
+    }
+
+    #[test]
+    fn test_or() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![(Value::Int32(1), 0.3), (Value::Int32(5), 0.5)].into_iter().collect(),
+            }),
+            0,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![].into_iter().collect(),
+            }),
+        ));
+        let eq1 = bin_op(BinOpType::Eq, col_ref(0), const_i32(1));
+        let eq5 = bin_op(BinOpType::Eq, col_ref(0), const_i32(5));
+        let expr_tree = bin_op(BinOpType::Or, eq1.clone(), eq5.clone());
+        let expr_tree_rev = bin_op(BinOpType::Or, eq5.clone(), eq1.clone());
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.65
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.65
         );
     }
 }
