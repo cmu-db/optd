@@ -411,6 +411,8 @@ impl OptCostModel {
     /// Get the selectivity of an expression of the form "column equals value" (or "value equals column")
     /// Computes selectivity based off of statistics
     /// Equality predicates are handled entirely differently from range predicates so this is its own function
+    /// Also, get_column_equality_selectivity is a subroutine when computing range selectivity, which is another
+    ///     reason for separating these into two functions
     /// If it is unable to find the statistics, it returns None
     fn get_column_equality_selectivity(
         &self,
@@ -600,6 +602,7 @@ mod tests {
             }),
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(1));
+        let expr_tree_rev = bin_op(BinOpType::Eq, const_i32(1), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -608,27 +611,8 @@ mod tests {
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.3
         );
-    }
-
-    #[test]
-    fn test_colref_eq_constint_in_mcv_reverse_children() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![(Value::Int32(1), 0.3)].into_iter().collect(),
-            }),
-            0,
-            0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![].into_iter().collect(),
-            }),
-        ));
-        let expr_tree = bin_op(BinOpType::Eq, const_i32(1), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
         assert_approx_eq::assert_approx_eq!(
-            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
             0.3
         );
     }
@@ -648,12 +632,17 @@ mod tests {
             }),
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(2));
+        let expr_tree_rev = bin_op(BinOpType::Eq, const_i32(2), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
         }];
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.12
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
             0.12
         );
     }
@@ -673,14 +662,18 @@ mod tests {
             }),
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(2));
+        let expr_tree_rev = bin_op(BinOpType::Eq, const_i32(2), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
         }];
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
-            0.11,
-            0.1
+            0.11
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.11
         );
     }
 
@@ -697,6 +690,7 @@ mod tests {
             }),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), const_i32(15));
+        let expr_tree_rev = bin_op(BinOpType::Geq, const_i32(15), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -705,27 +699,8 @@ mod tests {
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.7
         );
-    }
-
-    #[test]
-    fn test_colref_leq_constint_no_mcvs_in_range_reversed() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
-                mcvs: vec![].into_iter().collect(),
-            }),
-            0,
-            0.0,
-            Box::new(MockDistribution {
-                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
-            }),
-        ));
-        let expr_tree = bin_op(BinOpType::Geq, const_i32(15), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
         assert_approx_eq::assert_approx_eq!(
-            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
             0.7
         );
     }
