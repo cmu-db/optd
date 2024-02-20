@@ -42,17 +42,29 @@ pub struct PerColumnStats {
     mcvs: Box<dyn MostCommonValues>,
 
     // ndistinct _does_ include the values in mcvs
-    // ndistinct _does not_ include null
+    // ndistinct _does not_ include nulls
     ndistinct: i32,
+
+    // distribution _does not_ include the values in mcvs
+    // distribution _does not_ include nulls
+    distribution: Box<dyn Distribution>,
 
     // postgres uses null_frac instead of something like "num_nulls" so we'll follow suit
     null_frac: f64,
 }
 
 pub trait MostCommonValues: 'static + Send + Sync {
-    fn get_freq(&self, value: &Value) -> Option<f64>;
-    fn get_total_freq(&self) -> f64;
-    fn get_cnt(&self) -> usize;
+    fn freq(&self, value: &Value) -> Option<f64>;
+    fn total_freq(&self) -> f64;
+    fn cnt(&self) -> usize;
+}
+
+// A more general interface meant to perform the task of a histogram
+// This more general interface is still compatible with histograms but allows
+//     more powerful statistics like TDigest
+pub trait Distribution: 'static + Send + Sync {
+    // Give the probability of a random value sampled from the distribution being <= `value`
+    fn cdf(&self, value: &Value) -> f64;
 }
 
 pub const ROW_COUNT: usize = 1;
@@ -339,21 +351,21 @@ impl OptCostModel {
     fn get_column_equality_selectivity(&self, table: &str, col_idx: usize, value: &Value) -> f64 {
         if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
             if let Some(per_column_stats) = per_table_stats.per_column_stats_vec.get(col_idx) {
-                if let Some(freq) = per_column_stats.mcvs.get_freq(value) {
+                if let Some(freq) = per_column_stats.mcvs.freq(value) {
                     freq
                 } else {
-                    let non_mcv_freq = 1.0 - per_column_stats.mcvs.get_total_freq();
+                    let non_mcv_freq = 1.0 - per_column_stats.mcvs.total_freq();
                     // always safe because usize is at least as large as i32
                     let ndistinct_as_usize = per_column_stats.ndistinct as usize;
-                    let non_mcv_cnt = ndistinct_as_usize - per_column_stats.mcvs.get_cnt();
+                    let non_mcv_cnt = ndistinct_as_usize - per_column_stats.mcvs.cnt();
                     // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
                     (non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64)
                 }
             } else {
-                unreachable!("col_idx {} should exist but doesn't", col_idx)
+                panic!("col_idx {} should exist but doesn't", col_idx)
             }
         } else {
-            unreachable!("table {} should exist but doesn't", table)
+            panic!("table {} should exist but doesn't", table)
         }
     }
 
@@ -400,15 +412,15 @@ mod tests {
     }
 
     impl MostCommonValues for MockMostCommonValues {
-        fn get_freq(&self, value: &Value) -> Option<f64> {
+        fn freq(&self, value: &Value) -> Option<f64> {
             self.mcvs.get(value).copied()
         }
 
-        fn get_total_freq(&self) -> f64 {
+        fn total_freq(&self) -> f64 {
             self.mcvs.values().into_iter().sum()
         }
 
-        fn get_cnt(&self) -> usize {
+        fn cnt(&self) -> usize {
             self.mcvs.len()
         }
     }
