@@ -486,7 +486,10 @@ impl OptCostModel {
                 // depending on whether value is in mcvs or not, we use different logic to turn total_leq_cdf into total_lt_cdf
                 // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
                 // we can unwrap safely because we already know that table and col_idx exist
-                let total_lt_freq = total_leq_freq - self.get_column_equality_selectivity(table, col_idx, value, true).unwrap();
+                let total_lt_freq = total_leq_freq
+                    - self
+                        .get_column_equality_selectivity(table, col_idx, value, true)
+                        .unwrap();
 
                 // use either total_leq_freq or total_lt_freq to get the selectivity
                 Some(if is_col_lt_val {
@@ -581,7 +584,11 @@ mod tests {
         }
 
         fn freq_over_pred(&self, pred: Box<dyn Fn(&Value) -> bool>) -> f64 {
-            self.mcvs.iter().filter(|(val, _)| pred(val)).map(|(_, freq)| freq).sum()
+            self.mcvs
+                .iter()
+                .filter(|(val, _)| pred(val))
+                .map(|(_, freq)| freq)
+                .sum()
         }
 
         fn cnt(&self) -> usize {
@@ -810,7 +817,14 @@ mod tests {
     fn test_colref_leq_constint_with_mcvs_in_range_not_at_border() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
             Box::new(MockMostCommonValues {
-                mcvs: vec![(Value::Int32(6), 0.05), (Value::Int32(10), 0.1), (Value::Int32(17), 0.08), (Value::Int32(25), 0.07)].into_iter().collect(),
+                mcvs: vec![
+                    (Value::Int32(6), 0.05),
+                    (Value::Int32(10), 0.1),
+                    (Value::Int32(17), 0.08),
+                    (Value::Int32(25), 0.07),
+                ]
+                .into_iter()
+                .collect(),
             }),
             10,
             0.0,
@@ -838,7 +852,14 @@ mod tests {
     fn test_colref_leq_constint_with_mcv_at_border() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
             Box::new(MockMostCommonValues {
-                mcvs: vec![(Value::Int32(6), 0.05), (Value::Int32(10), 0.1), (Value::Int32(15), 0.08), (Value::Int32(25), 0.07)].into_iter().collect(),
+                mcvs: vec![
+                    (Value::Int32(6), 0.05),
+                    (Value::Int32(10), 0.1),
+                    (Value::Int32(15), 0.08),
+                    (Value::Int32(25), 0.07),
+                ]
+                .into_iter()
+                .collect(),
             }),
             10,
             0.0,
@@ -922,7 +943,14 @@ mod tests {
     fn test_colref_lt_constint_with_mcvs_in_range_not_at_border() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
             Box::new(MockMostCommonValues {
-                mcvs: vec![(Value::Int32(6), 0.05), (Value::Int32(10), 0.1), (Value::Int32(17), 0.08), (Value::Int32(25), 0.07)].into_iter().collect(),
+                mcvs: vec![
+                    (Value::Int32(6), 0.05),
+                    (Value::Int32(10), 0.1),
+                    (Value::Int32(17), 0.08),
+                    (Value::Int32(25), 0.07),
+                ]
+                .into_iter()
+                .collect(),
             }),
             11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
             0.0,
@@ -950,7 +978,14 @@ mod tests {
     fn test_colref_lt_constint_with_mcv_at_border() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
             Box::new(MockMostCommonValues {
-                mcvs: vec![(Value::Int32(6), 0.05), (Value::Int32(10), 0.1), (Value::Int32(15), 0.08), (Value::Int32(25), 0.07)].into_iter().collect(),
+                mcvs: vec![
+                    (Value::Int32(6), 0.05),
+                    (Value::Int32(10), 0.1),
+                    (Value::Int32(15), 0.08),
+                    (Value::Int32(25), 0.07),
+                ]
+                .into_iter()
+                .collect(),
             }),
             11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
             0.0,
