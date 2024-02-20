@@ -46,6 +46,7 @@ pub struct PerColumnStats {
     ndistinct: i32,
 
     // postgres uses null_frac instead of something like "num_nulls" so we'll follow suit
+    // my guess for why they use null_frac is because we only ever use the fraction of nulls, not the #
     null_frac: f64,
 
     // distribution _does not_ include the values in mcvs
@@ -352,7 +353,10 @@ impl OptCostModel {
                 if let OptRelNodeTyp::Constant(_) = non_col_ref_node.as_ref().typ {
                     match match bin_op_typ {
                         BinOpType::Eq => {
-                            self.get_column_equality_selectivity(table, *col_idx, value)
+                            self.get_column_equality_selectivity(table, *col_idx, value, true)
+                        }
+                        BinOpType::Neq => {
+                            self.get_column_equality_selectivity(table, *col_idx, value, false)
                         }
                         BinOpType::Lt => {
                             if is_left_col_ref {
@@ -422,15 +426,17 @@ impl OptCostModel {
     /// Also, get_column_equality_selectivity is a subroutine when computing range selectivity, which is another
     ///     reason for separating these into two functions
     /// If it is unable to find the statistics, it returns None
+    /// is_eq means whether it's == or !=
     fn get_column_equality_selectivity(
         &self,
         table: &str,
         col_idx: usize,
         value: &Value,
+        is_eq: bool,
     ) -> Option<f64> {
         if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
             if let Some(per_column_stats) = per_table_stats.per_column_stats_vec.get(col_idx) {
-                Some(if let Some(freq) = per_column_stats.mcvs.freq(value) {
+                let eq_freq = if let Some(freq) = per_column_stats.mcvs.freq(value) {
                     freq
                 } else {
                     let non_mcv_freq = 1.0 - per_column_stats.mcvs.total_freq();
@@ -439,6 +445,11 @@ impl OptCostModel {
                     let non_mcv_cnt = ndistinct_as_usize - per_column_stats.mcvs.cnt();
                     // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
                     (non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64)
+                };
+                Some(if is_eq {
+                    eq_freq
+                } else {
+                    1.0 - eq_freq - per_column_stats.null_frac
                 })
             } else {
                 None
@@ -475,7 +486,7 @@ impl OptCostModel {
                 // depending on whether value is in mcvs or not, we use different logic to turn total_leq_cdf into total_lt_cdf
                 // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
                 // we can unwrap safely because we already know that table and col_idx exist
-                let total_lt_freq = total_leq_freq - self.get_column_equality_selectivity(table, col_idx, value).unwrap();
+                let total_lt_freq = total_leq_freq - self.get_column_equality_selectivity(table, col_idx, value, true).unwrap();
 
                 // use either total_leq_freq or total_lt_freq to get the selectivity
                 Some(if is_col_lt_val {
@@ -488,11 +499,12 @@ impl OptCostModel {
                     }
                 } else {
                     if is_col_eq_val {
-                        // this branch means >=, which is 1 - <
-                        1.0 - total_lt_freq
+                        // this branch means >=, which is 1 - < - null_frac
+                        // we need to subtract null_frac since that isn't included in >= either
+                        1.0 - total_lt_freq - per_column_stats.null_frac
                     } else {
-                        // this branch means >, which is 1 - <=
-                        1.0 - total_leq_freq
+                        // this branch means >. same logic as above
+                        1.0 - total_leq_freq - per_column_stats.null_frac
                     }
                 })
             } else {
@@ -706,6 +718,35 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
             0.11
+        );
+    }
+
+    /// I only have one test for NEQ since I'll assume that it uses the same underlying logic as EQ
+    #[test]
+    fn test_colref_neq_constint_in_mcv() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![(Value::Int32(1), 0.3)].into_iter().collect(),
+            }),
+            0,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Neq, col_ref(0), const_i32(1));
+        let expr_tree_rev = bin_op(BinOpType::Neq, const_i32(1), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            1.0 - 0.3
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            1.0 - 0.3
         );
     }
 
@@ -933,9 +974,10 @@ mod tests {
         );
     }
 
-    // I only have one test for GT since I'll assume that it uses the same underlying logic as LEQ
+    /// I have fewer tests for GT since I'll assume that it uses the same underlying logic as LEQ
+    /// The only interesting thing to test is that if there are nulls, those aren't included in GT
     #[test]
-    fn test_colref_gt_constint_no_mcvs_in_range() {
+    fn test_colref_gt_constint_no_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
             Box::new(MockMostCommonValues {
                 mcvs: vec![].into_iter().collect(),
@@ -962,9 +1004,38 @@ mod tests {
         );
     }
 
-    // I only have one test for GEQ since I'll assume that it uses the same underlying logic as LT
     #[test]
-    fn test_colref_geq_constint_no_mcvs_in_range() {
+    fn test_colref_gt_constint_with_nulls() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![].into_iter().collect(),
+            }),
+            10,
+            0.1,
+            Box::new(MockDistribution {
+                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Gt, col_ref(0), const_i32(15));
+        let expr_tree_rev = bin_op(BinOpType::Lt, const_i32(15), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        // we have to subtract 0.1 since we don't want to include them in GT either
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            1.0 - 0.7 - 0.1
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            1.0 - 0.7 - 0.1
+        );
+    }
+
+    /// As with above, I have one test without nulls and one test with nulls
+    #[test]
+    fn test_colref_geq_constint_no_nulls() {
         let cost_model = create_one_column_cost_model(PerColumnStats::new(
             Box::new(MockMostCommonValues {
                 mcvs: vec![].into_iter().collect(),
@@ -991,5 +1062,32 @@ mod tests {
         );
     }
 
-    // TODO: neq
+    #[test]
+    fn test_colref_geq_constint_with_nulls() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![].into_iter().collect(),
+            }),
+            9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
+            0.1,
+            Box::new(MockDistribution {
+                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Geq, col_ref(0), const_i32(15));
+        let expr_tree_rev = bin_op(BinOpType::Leq, const_i32(15), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        // we have to subtract 0.1 since we don't want to include them in GT either
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            1.0 - 0.6 - 0.1
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            1.0 - 0.6 - 0.1
+        );
+    }
 }
