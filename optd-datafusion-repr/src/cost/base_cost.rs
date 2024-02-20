@@ -50,7 +50,7 @@ pub struct PerColumnStats {
 
     // distribution _does not_ include the values in mcvs
     // distribution _does not_ include nulls
-    _distr: Box<dyn Distribution>,
+    distr: Box<dyn Distribution>,
 }
 
 pub trait MostCommonValues: 'static + Send + Sync {
@@ -312,11 +312,14 @@ impl OptCostModel {
         // the # of column refs determines how we handle the logic
         let mut col_ref_nodes = vec![];
         let mut non_col_ref_nodes = vec![];
+        let is_left_col_ref;
         // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
         // We always want to use "col_ref_node" and "non_col_ref_node" instead of "left" or "right"
         if left.as_ref().typ == OptRelNodeTyp::ColumnRef {
+            is_left_col_ref = true;
             col_ref_nodes.push(left);
         } else {
+            is_left_col_ref = false;
             non_col_ref_nodes.push(left);
         }
         if right.as_ref().typ == OptRelNodeTyp::ColumnRef {
@@ -339,7 +342,56 @@ impl OptCostModel {
                 let value = non_col_ref_node.as_ref().data.as_ref().unwrap();
 
                 if let OptRelNodeTyp::Constant(_) = non_col_ref_node.as_ref().typ {
-                    match self.get_column_equality_selectivity(table, *col_idx, value) {
+                    match match bin_op_typ {
+                        BinOpType::Eq => {
+                            self.get_column_equality_selectivity(table, *col_idx, value)
+                        }
+                        BinOpType::Lt => {
+                            if is_left_col_ref {
+                                self.get_column_range_selectivity(
+                                    table, *col_idx, value, true, false,
+                                )
+                            } else {
+                                self.get_column_range_selectivity(
+                                    table, *col_idx, value, false, false,
+                                )
+                            }
+                        }
+                        BinOpType::Leq => {
+                            if is_left_col_ref {
+                                self.get_column_range_selectivity(
+                                    table, *col_idx, value, true, true,
+                                )
+                            } else {
+                                self.get_column_range_selectivity(
+                                    table, *col_idx, value, false, true,
+                                )
+                            }
+                        }
+                        BinOpType::Geq => {
+                            if is_left_col_ref {
+                                self.get_column_range_selectivity(
+                                    table, *col_idx, value, false, true,
+                                )
+                            } else {
+                                self.get_column_range_selectivity(
+                                    table, *col_idx, value, true, true,
+                                )
+                            }
+                        }
+                        BinOpType::Gt => {
+                            if is_left_col_ref {
+                                self.get_column_range_selectivity(
+                                    table, *col_idx, value, false, false,
+                                )
+                            } else {
+                                self.get_column_range_selectivity(
+                                    table, *col_idx, value, true, false,
+                                )
+                            }
+                        }
+                        _ => None,
+                    } {
                         Some(sel) => sel,
                         None => INVALID_SELECTIVITY,
                     }
@@ -386,6 +438,41 @@ impl OptCostModel {
         }
     }
 
+    /// Get the selectivity of an expression of the form "column </<=/=>/> value" (or "value </<=/=>/> column")
+    /// Computes selectivity based off of statistics
+    /// Range predicates are handled entirely differently from equality predicates so this is its own function
+    /// If it is unable to find the statistics, it returns None
+    /// Like in the Postgres source code, we decompose the four operators "</<=/=>/>" into "is_lt" and "is_eq"
+    /// The "is_lt" and "is_eq" values are set as if column is on the left hand side
+    fn get_column_range_selectivity(
+        &self,
+        table: &str,
+        col_idx: usize,
+        value: &Value,
+        is_col_lt_val: bool,
+        is_col_eq_val: bool,
+    ) -> Option<f64> {
+        if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
+            if let Some(per_column_stats) = per_table_stats.per_column_stats_vec.get(col_idx) {
+                // because distr does not include the values in MCVs, we need to compute the CDFs there as well
+                // because nulls return false in any comparison, they are never included when computing range selectivity
+                // TODO: do lt, eq, and gt for both distr and MCVs
+                let distr_leq_cdf = per_column_stats.distr.cdf(value);
+                let mcvs_cdf = 0.0;
+                let total_leq_cdf = distr_leq_cdf + mcvs_cdf;
+                if is_col_lt_val && is_col_eq_val {
+                    Some(total_leq_cdf)
+                } else {
+                    Some(1.0 - total_leq_cdf)
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
     pub fn get_row_cnt(&self, table: &str) -> Option<usize> {
         self.per_table_stats_map
             .get(table)
@@ -413,7 +500,7 @@ impl PerColumnStats {
             mcvs,
             ndistinct,
             null_frac,
-            _distr: distr,
+            distr,
         }
     }
 }
@@ -596,4 +683,52 @@ mod tests {
             0.1
         );
     }
+
+    #[test]
+    fn test_colref_leq_constint_no_mcvs_in_range() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![].into_iter().collect(),
+            }),
+            0,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), const_i32(15));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.7
+        );
+    }
+
+    #[test]
+    fn test_colref_leq_constint_no_mcvs_in_range_reversed() {
+        let cost_model = create_one_column_cost_model(PerColumnStats::new(
+            Box::new(MockMostCommonValues {
+                mcvs: vec![].into_iter().collect(),
+            }),
+            0,
+            0.0,
+            Box::new(MockDistribution {
+                cdfs: vec![(Value::Int32(15), 0.7)].into_iter().collect(),
+            }),
+        ));
+        let expr_tree = bin_op(BinOpType::Geq, const_i32(15), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.7
+        );
+    }
+
+    // TODO: neq
 }
