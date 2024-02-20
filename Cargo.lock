@@ -2506,6 +2506,7 @@ dependencies = [
  "itertools",
  "num-derive",
  "num-traits",
+ "once_cell",
  "optd-core",
  "ordered-float 4.2.0",
  "pretty-xmlish",

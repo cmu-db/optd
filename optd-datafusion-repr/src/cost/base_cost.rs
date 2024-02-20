@@ -340,12 +340,13 @@ impl PerColumnStats {
 /// and optd-datafusion-repr
 #[cfg(test)]
 mod tests {
+    use once_cell::sync::Lazy;
     use std::{collections::HashMap, sync::Arc};
 
     use optd_core::rel_node::{RelNode, Value};
 
     use crate::{
-        plan_nodes::{BinOpType, ConstantType, OptRelNodeTyp},
+        plan_nodes::{BinOpType, ConstantType, OptRelNodeRef, OptRelNodeTyp},
         properties::column_ref::ColumnRef,
     };
 
@@ -361,45 +362,54 @@ mod tests {
         }
     }
 
+    static BASIC_COST_MODEL: Lazy<OptCostModel> = Lazy::new(|| OptCostModel::new(
+        vec![(
+            String::from("t1"),
+            PerTableStats::new(
+                100,
+                vec![PerColumnStats::new(Box::new(MockMostCommonValues {
+                    mcvs: vec![(Value::Int32(1), 0.1)].into_iter().collect(),
+                }))],
+            ),
+        )]
+        .into_iter()
+        .collect(),
+    ));
+
+    fn col_ref(idx: u64) -> OptRelNodeRef {
+        Arc::new(RelNode::<OptRelNodeTyp> {
+            typ: OptRelNodeTyp::ColumnRef,
+            children: vec![],
+            data: Some(Value::UInt64(idx)),
+        })
+    }
+
+    fn const_i32(val: i32) -> OptRelNodeRef {
+        Arc::new(RelNode::<OptRelNodeTyp> {
+            typ: OptRelNodeTyp::Constant(ConstantType::Int32),
+            children: vec![],
+            data: Some(Value::Int32(val)),
+        })
+    }
+
+    fn bin_op(op_type: BinOpType, left: OptRelNodeRef, right: OptRelNodeRef) -> OptRelNodeRef {
+        Arc::new(RelNode::<OptRelNodeTyp> {
+            typ: OptRelNodeTyp::BinOp(op_type),
+            children: vec![left, right],
+            data: None,
+        })
+    }
+
     #[test]
     fn test_colref_eq_constint_in_mcv() {
-        let t1_c0_v1_freq = 0.1;
-        let cost_model = OptCostModel::new(
-            vec![(
-                String::from("t1"),
-                PerTableStats::new(
-                    100,
-                    vec![PerColumnStats::new(Box::new(MockMostCommonValues {
-                        mcvs: vec![(Value::Int32(1), t1_c0_v1_freq)].into_iter().collect(),
-                    }))],
-                ),
-            )]
-            .into_iter()
-            .collect(),
-        );
-        let expr_tree = Arc::new(RelNode::<OptRelNodeTyp> {
-            typ: OptRelNodeTyp::BinOp(BinOpType::Eq),
-            children: vec![
-                Arc::new(RelNode::<OptRelNodeTyp> {
-                    typ: OptRelNodeTyp::ColumnRef,
-                    children: vec![],
-                    data: Some(Value::UInt64(0)),
-                }),
-                Arc::new(RelNode::<OptRelNodeTyp> {
-                    typ: OptRelNodeTyp::Constant(ConstantType::Int32),
-                    children: vec![],
-                    data: Some(Value::Int32(1)),
-                }),
-            ],
-            data: None,
-        });
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(1));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from("t1"),
             col_idx: 0,
         }];
         assert_eq!(
-            cost_model.get_filter_selectivity(expr_tree, &column_refs),
-            t1_c0_v1_freq
+            BASIC_COST_MODEL.get_filter_selectivity(expr_tree, &column_refs),
+            0.1
         );
     }
 }
