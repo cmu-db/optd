@@ -27,9 +27,9 @@ async fn main() -> Result<()> {
         let runtime_env = RuntimeEnv::new(rn_config.clone())?;
         let mut state =
             SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
-        let mut optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical(Arc::new(
-            DatafusionCatalog::new(state.catalog_list()),
-        ));
+        let mut optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical_adaptive(
+            Arc::new(DatafusionCatalog::new(state.catalog_list())),
+        );
         optimizer.optd_optimizer_mut().prop.partial_explore_iter = None;
         optimizer.optd_optimizer_mut().prop.partial_explore_space = None;
         state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));

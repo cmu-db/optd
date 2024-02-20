@@ -1,4 +1,5 @@
 use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
+use datafusion::catalog::CatalogList;
 use datafusion::execution::context::{SessionConfig, SessionState};
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
 use datafusion::prelude::SessionContext;
@@ -26,8 +27,9 @@ pub struct DatafusionDb {
 
 impl DatafusionDb {
     pub async fn new() -> Result<Self> {
-        let ctx = DatafusionDb::new_session_ctx(false).await?;
-        let with_logical_ctx = DatafusionDb::new_session_ctx(true).await?;
+        let ctx = DatafusionDb::new_session_ctx(false, None).await?;
+        let with_logical_ctx =
+            DatafusionDb::new_session_ctx(true, Some(ctx.state().catalog_list().clone())).await?;
         Ok(Self {
             ctx,
             with_logical_ctx,
@@ -35,7 +37,10 @@ impl DatafusionDb {
     }
 
     /// Creates a new session context. If the `with_logical` flag is set, datafusion's logical optimizer will be used.
-    async fn new_session_ctx(with_logical: bool) -> Result<SessionContext> {
+    async fn new_session_ctx(
+        with_logical: bool,
+        catalog: Option<Arc<dyn CatalogList>>,
+    ) -> Result<SessionContext> {
         let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
         if !with_logical {
             session_config.options_mut().optimizer.max_passes = 0;
@@ -45,16 +50,23 @@ impl DatafusionDb {
         let runtime_env = RuntimeEnv::new(rn_config.clone())?;
 
         let ctx = {
-            let mut state =
-                SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
+            let mut state = if let Some(catalog) = catalog {
+                SessionState::new_with_config_rt_and_catalog_list(
+                    session_config.clone(),
+                    Arc::new(runtime_env),
+                    catalog,
+                )
+            } else {
+                SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env))
+            };
             let optimizer = DatafusionOptimizer::new_physical(Arc::new(DatafusionCatalog::new(
                 state.catalog_list(),
             )));
             if !with_logical {
                 // clean up optimizer rules so that we can plug in our own optimizer
                 state = state.with_optimizer_rules(vec![]);
-                state = state.with_physical_optimizer_rules(vec![]);
             }
+            state = state.with_physical_optimizer_rules(vec![]);
             // use optd-bridge query planner
             state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));
             SessionContext::new_with_state(state)
