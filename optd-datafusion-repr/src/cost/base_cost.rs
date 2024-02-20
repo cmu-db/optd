@@ -367,11 +367,8 @@ impl OptCostModel {
                 .pop()
                 .expect("we just checked that col_ref_nodes.len() == 1");
             let col_ref_idx = col_ref_node.index();
-            let usize_col_ref_idx = col_ref_idx as usize;
 
-            if let ColumnRef::BaseTableColumnRef { table, col_idx } =
-                &column_refs[usize_col_ref_idx]
-            {
+            if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
                 let non_col_ref_node = non_col_ref_nodes
                     .pop()
                     .expect("non_col_ref_nodes should have a value since col_ref_nodes.len() == 1");
@@ -593,15 +590,13 @@ impl PerColumnStats {
 /// and optd-datafusion-repr
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
-
-    use itertools::Itertools;
-    use optd_core::rel_node::{RelNode, Value};
+    use optd_core::rel_node::Value;
+    use std::collections::HashMap;
 
     use crate::{
         plan_nodes::{
-            BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, OptRelNode,
-            OptRelNodeRef, OptRelNodeTyp, UnOpExpr, UnOpType,
+            BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, OptRelNode, OptRelNodeRef,
+            UnOpExpr, UnOpType,
         },
         properties::column_ref::ColumnRef,
     };
