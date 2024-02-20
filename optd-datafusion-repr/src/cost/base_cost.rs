@@ -38,18 +38,29 @@ pub struct PerTableStats {
 }
 
 pub struct PerColumnStats {
+    // even if nulls are the most common, they cannot appear in mcvs
     mcvs: Box<dyn MostCommonValues>,
+
+    // ndistinct _does_ include the values in mcvs
+    // ndistinct _does not_ include null
+    ndistinct: i32,
+
+    // postgres uses null_frac instead of something like "num_nulls" so we'll follow suit
+    null_frac: f64,
 }
 
 pub trait MostCommonValues: 'static + Send + Sync {
     fn get_freq(&self, value: &Value) -> Option<f64>;
+    fn get_total_freq(&self) -> f64;
+    fn get_cnt(&self) -> usize;
 }
 
 pub const ROW_COUNT: usize = 1;
 pub const COMPUTE_COST: usize = 2;
 pub const IO_COST: usize = 3;
 // used to indicate a combination of unimplemented!(), unreachable!(), or panic!()
-const INVALID_SELECTIVITY: f64 = -1.0;
+// this is only temporary. TODO: remove this when I'm done with get_filter_selectivity()
+const INVALID_SELECTIVITY: f64 = 0.001;
 
 impl OptCostModel {
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
@@ -154,13 +165,6 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                         }
                     }
                     None => INVALID_SELECTIVITY,
-                };
-
-                // to have a sensible "default" for now
-                let selectivity = if selectivity == INVALID_SELECTIVITY {
-                    0.001
-                } else {
-                    selectivity
                 };
 
                 Self::cost(
@@ -338,13 +342,17 @@ impl OptCostModel {
                 if let Some(freq) = per_column_stats.mcvs.get_freq(value) {
                     freq
                 } else {
-                    INVALID_SELECTIVITY
+                    let non_mcv_freq = 1.0 - per_column_stats.mcvs.get_total_freq();
+                    // always safe because usize is at least as large as i32
+                    let ndistinct_as_usize = per_column_stats.ndistinct as usize;
+                    let non_mcv_cnt = ndistinct_as_usize - per_column_stats.mcvs.get_cnt();
+                    non_mcv_freq / (non_mcv_cnt as f64)
                 }
             } else {
-                INVALID_SELECTIVITY
+                unreachable!("col_idx {} should exist but doesn't", col_idx)
             }
         } else {
-            INVALID_SELECTIVITY
+            unreachable!("table {} should exist but doesn't", table)
         }
     }
 
@@ -365,8 +373,8 @@ impl PerTableStats {
 }
 
 impl PerColumnStats {
-    pub fn new(mcvs: Box<dyn MostCommonValues>) -> Self {
-        Self { mcvs }
+    pub fn new(mcvs: Box<dyn MostCommonValues>, ndistinct: i32, null_frac: f64) -> Self {
+        Self { mcvs, ndistinct, null_frac }
     }
 }
 
@@ -375,7 +383,6 @@ impl PerColumnStats {
 /// and optd-datafusion-repr
 #[cfg(test)]
 mod tests {
-    use once_cell::sync::Lazy;
     use std::{collections::HashMap, sync::Arc};
 
     use optd_core::rel_node::{RelNode, Value};
@@ -395,21 +402,32 @@ mod tests {
         fn get_freq(&self, value: &Value) -> Option<f64> {
             self.mcvs.get(value).copied()
         }
+
+        fn get_total_freq(&self) -> f64 {
+            self.mcvs.values().into_iter().sum()
+        }
+
+        fn get_cnt(&self) -> usize {
+            self.mcvs.len()
+        }
     }
 
-    static BASIC_COST_MODEL: Lazy<OptCostModel> = Lazy::new(|| OptCostModel::new(
-        vec![(
-            String::from("t1"),
-            PerTableStats::new(
-                100,
-                vec![PerColumnStats::new(Box::new(MockMostCommonValues {
-                    mcvs: vec![(Value::Int32(1), 0.1)].into_iter().collect(),
-                }))],
-            ),
-        )]
-        .into_iter()
-        .collect(),
-    ));
+    const TABLE1_NAME: &str = "t1";
+
+    // one column is sufficient for all filter selectivity predicates
+    fn create_one_column_cost_model(per_column_stats: PerColumnStats) -> OptCostModel {
+        OptCostModel::new(
+            vec![(
+                String::from(TABLE1_NAME),
+                PerTableStats::new(
+                    100,
+                    vec![per_column_stats],
+                ),
+            )]
+            .into_iter()
+            .collect(),
+        )
+    }
 
     fn col_ref(idx: u64) -> OptRelNodeRef {
         Arc::new(RelNode::<OptRelNodeTyp> {
@@ -437,27 +455,74 @@ mod tests {
 
     #[test]
     fn test_colref_eq_constint_in_mcv() {
+        let cost_model = create_one_column_cost_model(
+            PerColumnStats::new(
+                Box::new(MockMostCommonValues {
+                    mcvs: vec![
+                        (Value::Int32(1), 0.3),
+                    ].into_iter().collect(),
+                }),
+                0,
+                0.0,
+            )
+        );
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(1));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from("t1"),
+            table: String::from(TABLE1_NAME),
             col_idx: 0,
         }];
         assert_eq!(
-            BASIC_COST_MODEL.get_filter_selectivity(expr_tree, &column_refs),
-            0.1
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.3
         );
     }
 
     #[test]
     fn test_colref_eq_constint_in_mcv_reverse_children() {
+        let cost_model = create_one_column_cost_model(
+            PerColumnStats::new(
+                Box::new(MockMostCommonValues {
+                    mcvs: vec![
+                        (Value::Int32(1), 0.3),
+                    ].into_iter().collect(),
+                }),
+                0,
+                0.0,
+            )
+        );
         let expr_tree = bin_op(BinOpType::Eq, const_i32(1), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from("t1"),
+            table: String::from(TABLE1_NAME),
             col_idx: 0,
         }];
         assert_eq!(
-            BASIC_COST_MODEL.get_filter_selectivity(expr_tree, &column_refs),
-            0.1
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.3
+        );
+    }
+
+    #[test]
+    fn test_colref_eq_constint_not_in_mcv_no_nulls() {
+        let cost_model = create_one_column_cost_model(
+            PerColumnStats::new(
+                Box::new(MockMostCommonValues {
+                    mcvs: vec![
+                        (Value::Int32(1), 0.2),
+                        (Value::Int32(3), 0.44),
+                    ].into_iter().collect(),
+                }),
+                5,
+                0.0,
+            )
+        );
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), const_i32(2));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.12
         );
     }
 }
