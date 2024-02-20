@@ -10,7 +10,7 @@ use crate::{
     cost::CostModel,
     optimizer::Optimizer,
     property::{PropertyBuilder, PropertyBuilderAny},
-    rel_node::{RelNodeRef, RelNodeTyp},
+    rel_node::{RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeRefPtr, RelNodeTyp},
     rules::Rule,
 };
 
@@ -207,6 +207,12 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         let (group_id, _) = self.add_group_expr(root_rel, None);
         self.fire_optimize_tasks(group_id)?;
         Ok(group_id)
+    }
+
+    pub fn step_get_optimize_rel_with_meta(&self, group_id: GroupId, meta: &mut RelNodeMetaMap<T>) -> Result<RelNodeRef<T>> {
+        let rel = self.memo.get_best_group_binding_with_meta(group_id, meta)?;
+        meta.insert(RelNodeRefPtr(&rel), RelNodeMeta::new(group_id));
+        Ok(rel)
     }
 
     /// Get the group binding.

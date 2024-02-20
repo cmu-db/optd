@@ -17,7 +17,7 @@ use std::sync::Arc;
 use arrow_schema::DataType;
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId},
-    rel_node::{RelNode, RelNodeRef, RelNodeTyp},
+    rel_node::{RelNode, RelNodeMetaMap, RelNodeRef, RelNodeTyp},
 };
 
 pub use agg::{LogicalAgg, PhysicalAgg};
@@ -165,6 +165,8 @@ impl RelNodeTyp for OptRelNodeTyp {
 }
 
 pub type OptRelNodeRef = RelNodeRef<OptRelNodeTyp>;
+
+pub type OptRelNodeMetaMap = RelNodeMetaMap<OptRelNodeTyp>;
 
 pub trait OptRelNode: 'static + Clone {
     fn into_rel_node(self) -> OptRelNodeRef;

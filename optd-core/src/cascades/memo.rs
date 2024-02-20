@@ -11,7 +11,7 @@ use std::any::Any;
 use crate::{
     cost::Cost,
     property::PropertyBuilderAny,
-    rel_node::{RelNode, RelNodeRef, RelNodeTyp, Value},
+    rel_node::{RelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeRefPtr, RelNodeTyp, Value},
 };
 
 use super::optimizer::{ExprId, GroupId};
@@ -438,6 +438,29 @@ impl<T: RelNodeTyp> Memo<T> {
         }
         let grp = self.groups.get_mut(&self.get_reduced_group_id(group_id));
         grp.unwrap().info = group_info;
+    }
+
+    /// Gets the best group binding with metadata collected.
+    pub fn get_best_group_binding_with_meta(&self, group_id: GroupId, meta: &mut RelNodeMetaMap<T>) -> Result<RelNodeRef<T>> {
+        let info = self.get_group_info(group_id);
+        if let Some(winner) = info.winner {
+            if !winner.impossible {
+                let expr_id = winner.expr_id;
+                let expr = self.get_expr_memoed(expr_id);
+                let mut children = Vec::with_capacity(expr.children.len());
+                for child in &expr.children {
+                    children.push(self.get_best_group_binding_with_meta(*child, meta)?);
+                    meta.insert(RelNodeRefPtr(children.last().unwrap()), RelNodeMeta::new(*child));
+                }
+                let node = Arc::new(RelNode {
+                    typ: expr.typ.clone(),
+                    children,
+                    data: expr.data.clone(),
+                });
+                return Ok(node);
+            }
+        }
+        bail!("no best group binding for group {}", group_id)
     }
 
     pub fn get_best_group_binding(
