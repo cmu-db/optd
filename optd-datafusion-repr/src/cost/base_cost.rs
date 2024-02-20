@@ -501,6 +501,8 @@ impl OptCostModel {
                         total_lt_freq
                     }
                 } else {
+                    // clippy wants me to collapse this into an else if, but keeping two nested if else statements is clearer
+                    #[allow(clippy::collapsible_else_if)]
                     if is_col_eq_val {
                         // this branch means >=, which is 1 - < - null_frac
                         // we need to subtract null_frac since that isn't included in >= either
