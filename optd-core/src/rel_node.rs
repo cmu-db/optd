@@ -2,7 +2,10 @@
 //! the internal representation of the plan nodes.
 
 use std::{
-    collections::HashMap, fmt::{Debug, Display}, hash::Hash, sync::Arc
+    collections::HashMap,
+    fmt::{Debug, Display},
+    hash::Hash,
+    sync::Arc,
 };
 
 use ordered_float::OrderedFloat;
@@ -212,7 +215,7 @@ impl RelNodeMeta {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct RelNodeRefPtr<T: RelNodeTyp>(pub * const RelNodeRef<T>);
+pub struct RelNodeRefPtr<T: RelNodeTyp>(pub *const RelNodeRef<T>);
 
 unsafe impl<T: RelNodeTyp> Send for RelNodeRefPtr<T> {}
 

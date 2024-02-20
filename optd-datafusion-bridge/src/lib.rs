@@ -230,7 +230,7 @@ impl OptdQueryPlanner {
         let mut optimizer = self.optimizer.lock().unwrap().take().unwrap();
         let (group_id, optimized_rel, meta) = optimizer.optimize(optd_rel)?;
 
-        meta.iter().for_each(|(k,v)| {
+        meta.iter().for_each(|(k, v)| {
             println!("(rel@{:?}, group_id={:?})", k, v);
         });
 
