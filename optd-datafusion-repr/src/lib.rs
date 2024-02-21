@@ -5,10 +5,9 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 use cost::{AdaptiveCostModel, RuntimeAdaptionStorage};
 use optd_core::{
-    cascades::{CascadesOptimizer, GroupId, OptimizerProperties},
-    rules::Rule,
+    cascades::{CascadesOptimizer, GroupId, OptimizerProperties}, rel_node::RelNodeMetaMap, rules::Rule
 };
-use plan_nodes::{OptRelNode, OptRelNodeMetaMap, OptRelNodeRef, OptRelNodeTyp, PlanNode};
+use plan_nodes::{OptRelNodeRef, OptRelNodeTyp};
 use properties::{
     column_ref::ColumnRefPropertyBuilder,
     schema::{Catalog, SchemaPropertyBuilder},
@@ -134,7 +133,7 @@ impl DatafusionOptimizer {
     pub fn optimize(
         &mut self,
         root_rel: OptRelNodeRef,
-    ) -> Result<(GroupId, OptRelNodeRef, OptRelNodeMetaMap)> {
+    ) -> Result<(GroupId, OptRelNodeRef, RelNodeMetaMap)> {
         if self.enable_adaptive {
             self.runtime_statistics.lock().unwrap().iter_cnt += 1;
             self.optimizer.step_clear_winner();

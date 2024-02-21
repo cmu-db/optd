@@ -12,7 +12,7 @@ use crate::{
     cost::Cost,
     property::PropertyBuilderAny,
     rel_node::{
-        RelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeRefPtr, RelNodeTyp, Value,
+        RelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp, Value,
     },
 };
 
@@ -446,7 +446,7 @@ impl<T: RelNodeTyp> Memo<T> {
     pub fn get_best_group_binding_with_meta(
         &self,
         group_id: GroupId,
-        meta: &mut RelNodeMetaMap<T>,
+        meta: &mut RelNodeMetaMap,
     ) -> Result<RelNodeRef<T>> {
         let info = self.get_group_info(group_id);
         if let Some(winner) = info.winner {
@@ -457,7 +457,7 @@ impl<T: RelNodeTyp> Memo<T> {
                 for child in &expr.children {
                     children.push(self.get_best_group_binding_with_meta(*child, meta)?);
                     meta.insert(
-                        RelNodeRefPtr(children.last().unwrap()),
+                        children.last().unwrap() as * const _ as usize,
                         RelNodeMeta::new(*child),
                     );
                 }

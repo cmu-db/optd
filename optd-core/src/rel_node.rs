@@ -214,9 +214,6 @@ impl RelNodeMeta {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct RelNodeRefPtr<T: RelNodeTyp>(pub *const RelNodeRef<T>);
 
-unsafe impl<T: RelNodeTyp> Send for RelNodeRefPtr<T> {}
-
-pub type RelNodeMetaMap<T> = HashMap<RelNodeRefPtr<T>, RelNodeMeta>;
+/// A hash table storing `RelNode` (memory address, metadata) pairs.
+pub type RelNodeMetaMap = HashMap<usize, RelNodeMeta>;

@@ -231,7 +231,7 @@ impl OptdQueryPlanner {
         let (group_id, optimized_rel, meta) = optimizer.optimize(optd_rel)?;
 
         meta.iter().for_each(|(k, v)| {
-            println!("(rel@{:?}, group_id={:?})", k, v);
+            println!("(rel@0x{:x}, group_id={:?})", k, v.group_id);
         });
 
         if let Some(explains) = &mut explains {
