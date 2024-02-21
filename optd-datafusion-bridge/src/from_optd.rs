@@ -24,10 +24,10 @@ use datafusion::{
 use optd_datafusion_repr::{
     plan_nodes::{
         BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
-        Expr, ExprList, FuncExpr, FuncType, JoinType, LikeExpr, LogOpExpr, LogOpType, OptRelNode,
-        OptRelNodeRef, OptRelNodeTyp, PhysicalAgg, PhysicalEmptyRelation, PhysicalFilter,
-        PhysicalHashJoin, PhysicalLimit, PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan,
-        PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
+        Expr, FuncExpr, FuncType, JoinType, LikeExpr, OptRelNode, OptRelNodeRef, OptRelNodeTyp,
+        PhysicalAgg, PhysicalEmptyRelation, PhysicalFilter, PhysicalHashJoin, PhysicalLimit,
+        PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan, PhysicalSort, PlanNode,
+        SortOrderExpr, SortOrderType,
     },
     properties::schema::Schema as OptdSchema,
     PhysicalCollector,
@@ -196,23 +196,6 @@ impl OptdPlanContext<'_> {
                 }
             }
             OptRelNodeTyp::Sort => unreachable!(),
-            OptRelNodeTyp::LogOp(typ) => {
-                let expr = LogOpExpr::from_rel_node(expr.into_rel_node()).unwrap();
-                let mut children = expr.children().to_vec().into_iter();
-                let first_expr = Self::conv_from_optd_expr(children.next().unwrap(), context)?;
-                let op = match typ {
-                    LogOpType::And => datafusion::logical_expr::Operator::And,
-                    LogOpType::Or => datafusion::logical_expr::Operator::Or,
-                };
-                children.try_fold(first_expr, |acc, expr| {
-                    let expr = Self::conv_from_optd_expr(expr, context)?;
-                    Ok(
-                        Arc::new(datafusion::physical_plan::expressions::BinaryExpr::new(
-                            acc, op, expr,
-                        )) as Arc<dyn PhysicalExpr>,
-                    )
-                })
-            }
             OptRelNodeTyp::BinOp(op) => {
                 let expr = BinOpExpr::from_rel_node(expr.into_rel_node()).unwrap();
                 let left = Self::conv_from_optd_expr(expr.left_child(), context)?;
@@ -242,12 +225,10 @@ impl OptdPlanContext<'_> {
                 // TODO: should we just convert between to x <= c1 and x >= c2?
                 let expr = BetweenExpr::from_rel_node(expr.into_rel_node()).unwrap();
                 Self::conv_from_optd_expr(
-                    LogOpExpr::new(
-                        LogOpType::And,
-                        ExprList::new(vec![
-                            BinOpExpr::new(expr.child(), expr.lower(), BinOpType::Geq).into_expr(),
-                            BinOpExpr::new(expr.child(), expr.upper(), BinOpType::Leq).into_expr(),
-                        ]),
+                    BinOpExpr::new(
+                        BinOpExpr::new(expr.child(), expr.lower(), BinOpType::Geq).into_expr(),
+                        BinOpExpr::new(expr.child(), expr.upper(), BinOpType::Leq).into_expr(),
+                        BinOpType::And,
                     )
                     .into_expr(),
                     context,

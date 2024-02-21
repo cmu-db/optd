@@ -8,9 +8,9 @@ use datafusion_expr::Expr as DFExpr;
 use optd_core::rel_node::RelNode;
 use optd_datafusion_repr::plan_nodes::{
     BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList,
-    FuncExpr, FuncType, JoinType, LikeExpr, LogOpExpr, LogOpType, LogicalAgg, LogicalEmptyRelation,
-    LogicalFilter, LogicalJoin, LogicalLimit, LogicalProjection, LogicalScan, LogicalSort,
-    OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
+    FuncExpr, FuncType, JoinType, LikeExpr, LogicalAgg, LogicalEmptyRelation, LogicalFilter,
+    LogicalJoin, LogicalLimit, LogicalProjection, LogicalScan, LogicalSort, OptRelNode,
+    OptRelNodeRef, OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
 };
 
 use crate::OptdPlanContext;
@@ -300,13 +300,19 @@ impl OptdPlanContext<'_> {
         } else if log_ops.len() == 1 {
             Ok(LogicalJoin::new(left, right, log_ops.remove(0), join_type))
         } else {
-            let expr_list = ExprList::new(log_ops);
-            Ok(LogicalJoin::new(
-                left,
-                right,
-                LogOpExpr::new(LogOpType::And, expr_list).into_expr(),
-                join_type,
-            ))
+            // Build a left-deep tree from log_ops
+            // I wanted to pop from the left instead of the right to maintain the order, even if it's slower
+            // you can obv change log_ops to a Deque to avoid this issue but I didn't bother since I don't wanna
+            // do premature optimization
+            let left_nonlog_op = log_ops.remove(0);
+            let right_nonlog_op = log_ops.remove(0);
+            let mut cond =
+                BinOpExpr::new(left_nonlog_op, right_nonlog_op, BinOpType::And).into_expr();
+            while !log_ops.is_empty() {
+                cond = BinOpExpr::new(cond, log_ops.remove(0), BinOpType::And).into_expr();
+            }
+
+            Ok(LogicalJoin::new(left, right, cond, join_type))
         }
     }
 

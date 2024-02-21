@@ -100,3 +100,13 @@ We have the `Schema` property that will be used in the optimizer rules to determ
 ## Cost Model
 
 We have a simple cost model that computes I/O cost and compute cost based on number of rows of the children plan nodes.
+
+## Cardinality Estimation
+
+As per [Leis 2015](https://15721.courses.cs.cmu.edu/spring2024/papers/16-costmodels/p204-leis.pdf), we define cardinality estimation to be a separate component from the cost model. Statistics are considered a part of the cardinality estimation component. The internal name for our cardinality estimation component is Gungnir™. Gungnir is the mythical spear wielded by Odin which _adaptively_ changes course mid-air so as to never miss its mark. It represents both the accuracy and adaptivity of our cardinality estimation subsystem.
+
+Our base cardinality estimation scheme is inspired by [Postgres](https://www.postgresql.org/docs/current/planner-stats-details.html). We utilize roughly the same four per-column statistics as Postgres: the most common values of that column, the # of distinct values of that column, the fraction of nulls of that column, and a distribution of values for that column. Our base predicate (filter or join) selectivity formulas are also the same as Postgres. This is as opposed to [Microsoft SQLServer](https://learn.microsoft.com/en-us/previous-versions/sql/sql-server-2008/dd535534(v=sql.100)?redirectedfrom=MSDN), for instance, which utilizes very different per-column statistics and predicate selectivity formulas. Our statistics are not exactly the same as Postgres though. For one, while Postgres uses a simple equi-height histogram, we utilize the more advanced T-Digest data structure to model the distribution of values. Additionally, Postgres samples its tables to build its statistics whereas we do a full sequential scan of all tables. This full sequential scan is made efficient by the fact that we use sketches, which have a low time complexity, and we implemented our sketching algorithms to be easily parallelizable.
+
+(TODO @AlSchlo: explain the benefits of T-Digest in more detail and explain how they're parallelized)
+
+(TODO @CostModelTeam: explain adaptivity once we've implemented it)
