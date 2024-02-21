@@ -35,6 +35,7 @@ pub enum Value {
     Int16(i16),
     Int32(i32),
     Int64(i64),
+    Int128(i128),
     Float(OrderedFloat<f64>),
     String(Arc<str>),
     Bool(bool),
@@ -54,6 +55,7 @@ impl std::fmt::Display for Value {
             Self::Int16(x) => write!(f, "{x}"),
             Self::Int32(x) => write!(f, "{x}"),
             Self::Int64(x) => write!(f, "{x}"),
+            Self::Int128(x) => write!(f, "{x}"),
             Self::Float(x) => write!(f, "{x}"),
             Self::String(x) => write!(f, "\"{x}\""),
             Self::Bool(x) => write!(f, "{x}"),
@@ -118,6 +120,13 @@ impl Value {
         match self {
             Value::Int64(i) => *i,
             _ => panic!("Value is not an i64"),
+        }
+    }
+
+    pub fn as_i128(&self) -> i128 {
+        match self {
+            Value::Int128(i) => *i,
+            _ => panic!("Value is not an i128"),
         }
     }
 

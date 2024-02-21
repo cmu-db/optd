@@ -226,6 +226,8 @@ impl<T: RelNodeTyp> Memo<T> {
         self.groups.remove(&group_id);
     }
 
+    /// If group_id exists, it adds expr_id to the existing group
+    /// Otherwise, it creates a new group of that group_id and insert expr_id into the new group
     fn add_expr_to_group(
         &mut self,
         expr_id: ExprId,

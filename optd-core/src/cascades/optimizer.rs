@@ -52,10 +52,11 @@ pub struct CascadesOptimizer<T: RelNodeTyp> {
 
 /// `RelNode` only contains the representation of the plan nodes. Sometimes, we need more context, i.e., group id and
 /// expr id, during the optimization phase. All these information are collected in this struct.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
 pub struct RelNodeContext {
     pub group_id: GroupId,
     pub expr_id: ExprId,
+    pub children_group_ids: Vec<GroupId>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
@@ -322,9 +323,13 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             .get_all_expr_bindings(expr_id, false, false, level)
     }
 
-    pub fn get_all_group_physical_bindings(&self, group_id: GroupId) -> Vec<RelNodeRef<T>> {
+    pub fn get_all_group_bindings(
+        &self,
+        group_id: GroupId,
+        physical_only: bool,
+    ) -> Vec<RelNodeRef<T>> {
         self.memo
-            .get_all_group_bindings(group_id, true, true, Some(10))
+            .get_all_group_bindings(group_id, physical_only, true, Some(10))
     }
 
     pub(super) fn is_group_explored(&self, group_id: GroupId) -> bool {

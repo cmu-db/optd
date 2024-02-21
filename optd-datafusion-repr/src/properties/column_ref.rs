@@ -56,9 +56,11 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                     .collect()
             }
             OptRelNodeTyp::ColumnRef => {
-                let col_idx = data.unwrap().as_i64();
+                let col_ref_idx = data.unwrap().as_u64();
+                // this is always safe since col_ref_idx was initially a usize in ColumnRefExpr::new()
+                let usize_col_ref_idx = col_ref_idx as usize;
                 vec![ColumnRef::ChildColumnRef {
-                    col_idx: col_idx as usize,
+                    col_idx: usize_col_ref_idx,
                 }]
             }
             OptRelNodeTyp::List => {
