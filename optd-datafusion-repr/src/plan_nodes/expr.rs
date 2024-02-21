@@ -746,6 +746,7 @@ impl LikeExpr {
         Expr(self.0.child(1))
     }
 
+    /// `true` for `NOT LIKE`.
     pub fn negated(&self) -> bool {
         match self.0 .0.data.as_ref().unwrap() {
             Value::Serialized(data) => data[0] != 0,
@@ -813,6 +814,7 @@ impl InListExpr {
         ExprList::from_rel_node(self.0.child(1)).unwrap()
     }
 
+    /// `true` for `NOT IN`.
     pub fn negated(&self) -> bool {
         self.0 .0.data.as_ref().unwrap().as_bool()
     }
