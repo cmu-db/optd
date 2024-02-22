@@ -11,9 +11,7 @@ use std::any::Any;
 use crate::{
     cost::Cost,
     property::PropertyBuilderAny,
-    rel_node::{
-        RelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp, Value,
-    },
+    rel_node::{RelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp, Value},
 };
 
 use super::optimizer::{ExprId, GroupId};
@@ -456,16 +454,17 @@ impl<T: RelNodeTyp> Memo<T> {
                 let mut children = Vec::with_capacity(expr.children.len());
                 for child in &expr.children {
                     children.push(self.get_best_group_binding_with_meta(*child, meta)?);
-                    meta.insert(
-                        children.last().unwrap() as * const _ as usize,
-                        RelNodeMeta::new(*child),
-                    );
                 }
                 let node = Arc::new(RelNode {
                     typ: expr.typ.clone(),
                     children,
                     data: expr.data.clone(),
                 });
+
+                meta.insert(
+                    node.as_ref() as *const _ as usize,
+                    RelNodeMeta::new(group_id),
+                );
                 return Ok(node);
             }
         }

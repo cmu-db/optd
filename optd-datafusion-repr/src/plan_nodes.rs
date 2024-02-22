@@ -166,7 +166,6 @@ impl RelNodeTyp for OptRelNodeTyp {
 
 pub type OptRelNodeRef = RelNodeRef<OptRelNodeTyp>;
 
-
 pub trait OptRelNode: 'static + Clone {
     fn into_rel_node(self) -> OptRelNodeRef;
 

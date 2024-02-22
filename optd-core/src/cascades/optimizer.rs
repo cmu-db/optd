@@ -215,7 +215,10 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         meta: &mut RelNodeMetaMap,
     ) -> Result<RelNodeRef<T>> {
         let rel = self.memo.get_best_group_binding_with_meta(group_id, meta)?;
-        meta.insert(rel.as_ref() as * const _ as usize, RelNodeMeta::new(group_id));
+        meta.insert(
+            rel.as_ref() as *const _ as usize,
+            RelNodeMeta::new(group_id),
+        );
         Ok(rel)
     }
 

@@ -5,7 +5,9 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 use cost::{AdaptiveCostModel, RuntimeAdaptionStorage};
 use optd_core::{
-    cascades::{CascadesOptimizer, GroupId, OptimizerProperties}, rel_node::RelNodeMetaMap, rules::Rule
+    cascades::{CascadesOptimizer, GroupId, OptimizerProperties},
+    rel_node::RelNodeMetaMap,
+    rules::Rule,
 };
 use plan_nodes::{OptRelNodeRef, OptRelNodeTyp};
 use properties::{

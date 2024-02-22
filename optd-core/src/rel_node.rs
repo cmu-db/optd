@@ -214,6 +214,5 @@ impl RelNodeMeta {
     }
 }
 
-
 /// A hash table storing `RelNode` (memory address, metadata) pairs.
 pub type RelNodeMetaMap = HashMap<usize, RelNodeMeta>;

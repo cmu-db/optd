@@ -230,10 +230,6 @@ impl OptdQueryPlanner {
         let mut optimizer = self.optimizer.lock().unwrap().take().unwrap();
         let (group_id, optimized_rel, meta) = optimizer.optimize(optd_rel)?;
 
-        meta.iter().for_each(|(k, v)| {
-            println!("(rel@0x{:x}, group_id={:?})", k, v.group_id);
-        });
-
         if let Some(explains) = &mut explains {
             explains.push(StringifiedPlan::new(
                 PlanType::OptimizedPhysicalPlan {
@@ -285,7 +281,7 @@ impl OptdQueryPlanner {
         // );
         // optimizer.dump(Some(group_id));
         ctx.optimizer = Some(&optimizer);
-        let physical_plan = ctx.conv_from_optd(optimized_rel).await?;
+        let physical_plan = ctx.conv_from_optd(optimized_rel, meta).await?;
         if let Some(explains) = &mut explains {
             explains.push(
                 displayable(&*physical_plan)
