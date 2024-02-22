@@ -134,8 +134,12 @@ struct Args {
         default_value = "40"
     )]
     maxrows: MaxRows,
+
     #[clap(long, help = "Turn on datafusion logical optimizer before optd")]
     enable_logical: bool,
+
+    #[clap(long, help = "Turn on adaptive optimization")]
+    enable_adaptive: bool,
 }
 
 #[tokio::main]
@@ -199,9 +203,15 @@ pub async fn main() -> Result<()> {
             state = state.with_physical_optimizer_rules(vec![]);
         }
         // use optd-bridge query planner
-        let optimizer = DatafusionOptimizer::new_physical(Arc::new(DatafusionCatalog::new(
-            state.catalog_list(),
-        )));
+        let optimizer = if args.enable_adaptive {
+            DatafusionOptimizer::new_physical_adaptive(Arc::new(DatafusionCatalog::new(
+                state.catalog_list(),
+            )))
+        } else {
+            DatafusionOptimizer::new_physical(Arc::new(DatafusionCatalog::new(
+                state.catalog_list(),
+            )))
+        };
         state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));
         SessionContext::new_with_state(state)
     };
