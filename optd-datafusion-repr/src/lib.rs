@@ -20,7 +20,7 @@ use rules::{
     PhysicalConversionRule, ProjectionPullUpJoin,
 };
 
-pub use adaptive::PhysicalCollector;
+// pub use adaptive::PhysicalCollector;
 pub use optd_core::rel_node::Value;
 
 mod adaptive;

@@ -223,12 +223,8 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
     }
 
     /// Get the group binding.
-    pub fn step_get_optimize_rel(
-        &self,
-        group_id: GroupId,
-        mut on_produce: impl FnMut(RelNodeRef<T>, GroupId) -> RelNodeRef<T>,
-    ) -> Result<RelNodeRef<T>> {
-        self.memo.get_best_group_binding(group_id, &mut on_produce)
+    pub fn step_get_optimize_rel(&self, group_id: GroupId) -> Result<RelNodeRef<T>> {
+        self.memo.get_best_group_binding(group_id)
     }
 
     fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
@@ -269,7 +265,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
     fn optimize_inner(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
         let (group_id, _) = self.add_group_expr(root_rel, None);
         self.fire_optimize_tasks(group_id)?;
-        self.memo.get_best_group_binding(group_id, &mut |x, _| x)
+        self.memo.get_best_group_binding(group_id)
     }
 
     pub fn resolve_group_id(&self, root_rel: RelNodeRef<T>) -> GroupId {

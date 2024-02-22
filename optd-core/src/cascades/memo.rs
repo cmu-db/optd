@@ -471,11 +471,7 @@ impl<T: RelNodeTyp> Memo<T> {
         bail!("no best group binding for group {}", group_id)
     }
 
-    pub fn get_best_group_binding(
-        &self,
-        group_id: GroupId,
-        on_produce: &mut impl FnMut(RelNodeRef<T>, GroupId) -> RelNodeRef<T>,
-    ) -> Result<RelNodeRef<T>> {
+    pub fn get_best_group_binding(&self, group_id: GroupId) -> Result<RelNodeRef<T>> {
         let info = self.get_group_info(group_id);
         if let Some(winner) = info.winner {
             if !winner.impossible {
@@ -483,14 +479,14 @@ impl<T: RelNodeTyp> Memo<T> {
                 let expr = self.get_expr_memoed(expr_id);
                 let mut children = Vec::with_capacity(expr.children.len());
                 for child in &expr.children {
-                    children.push(self.get_best_group_binding(*child, on_produce)?);
+                    children.push(self.get_best_group_binding(*child)?);
                 }
                 let node = Arc::new(RelNode {
                     typ: expr.typ.clone(),
                     children,
                     data: expr.data.clone(),
                 });
-                return Ok(on_produce(node, group_id));
+                return Ok(node);
             }
         }
         bail!("no best group binding for group {}", group_id)
