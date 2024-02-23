@@ -209,22 +209,9 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         Ok(group_id)
     }
 
-    pub fn step_get_optimize_rel_with_meta(
-        &self,
-        group_id: GroupId,
-        meta: &mut RelNodeMetaMap,
-    ) -> Result<RelNodeRef<T>> {
-        let rel = self.memo.get_best_group_binding_with_meta(group_id, meta)?;
-        meta.insert(
-            rel.as_ref() as *const _ as usize,
-            RelNodeMeta::new(group_id),
-        );
-        Ok(rel)
-    }
-
-    /// Get the group binding.
-    pub fn step_get_optimize_rel(&self, group_id: GroupId) -> Result<RelNodeRef<T>> {
-        self.memo.get_best_group_binding(group_id)
+    /// Gets the group binding.
+    pub fn step_get_optimize_rel(&self, group_id: GroupId, meta: &mut Option<RelNodeMetaMap>) -> Result<RelNodeRef<T>> {
+        self.memo.get_best_group_binding(group_id, meta)
     }
 
     fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
@@ -265,7 +252,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
     fn optimize_inner(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
         let (group_id, _) = self.add_group_expr(root_rel, None);
         self.fire_optimize_tasks(group_id)?;
-        self.memo.get_best_group_binding(group_id)
+        self.memo.get_best_group_binding(group_id, &mut None)
     }
 
     pub fn resolve_group_id(&self, root_rel: RelNodeRef<T>) -> GroupId {

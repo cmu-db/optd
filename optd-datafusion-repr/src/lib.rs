@@ -145,25 +145,12 @@ impl DatafusionOptimizer {
 
         let group_id = self.optimizer.step_optimize_rel(root_rel)?;
 
-        // let optimized_rel =
-        //     self.optimizer
-        //         .step_get_optimize_rel(group_id, |rel_node, group_id| {
-        //             if rel_node.typ.is_plan_node() && self.enable_adaptive {
-        //                 return PhysicalCollector::new(
-        //                     PlanNode::from_rel_node(rel_node).unwrap(),
-        //                     group_id,
-        //                 )
-        //                 .into_rel_node();
-        //             }
-        //             rel_node
-        //         })?;
-
-        let mut meta = HashMap::new();
+        let mut meta = Some(HashMap::new());
         let optimized_rel = self
             .optimizer
-            .step_get_optimize_rel_with_meta(group_id, &mut meta)?;
+            .step_get_optimize_rel(group_id, &mut meta)?;
 
-        Ok((group_id, optimized_rel, meta))
+        Ok((group_id, optimized_rel, meta.unwrap()))
     }
 
     pub fn dump(&self, group_id: Option<GroupId>) {
