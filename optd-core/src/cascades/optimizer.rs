@@ -210,7 +210,11 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
     }
 
     /// Gets the group binding.
-    pub fn step_get_optimize_rel(&self, group_id: GroupId, meta: &mut Option<RelNodeMetaMap>) -> Result<RelNodeRef<T>> {
+    pub fn step_get_optimize_rel(
+        &self,
+        group_id: GroupId,
+        meta: &mut Option<RelNodeMetaMap>,
+    ) -> Result<RelNodeRef<T>> {
         self.memo.get_best_group_binding(group_id, meta)
     }
 

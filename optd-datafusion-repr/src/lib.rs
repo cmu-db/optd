@@ -146,9 +146,7 @@ impl DatafusionOptimizer {
         let group_id = self.optimizer.step_optimize_rel(root_rel)?;
 
         let mut meta = Some(HashMap::new());
-        let optimized_rel = self
-            .optimizer
-            .step_get_optimize_rel(group_id, &mut meta)?;
+        let optimized_rel = self.optimizer.step_get_optimize_rel(group_id, &mut meta)?;
 
         Ok((group_id, optimized_rel, meta.unwrap()))
     }

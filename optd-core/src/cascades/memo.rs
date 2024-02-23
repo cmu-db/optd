@@ -471,7 +471,11 @@ impl<T: RelNodeTyp> Memo<T> {
         bail!("no best group binding for group {}", group_id)
     }
 
-    pub fn get_best_group_binding(&self, group_id: GroupId, meta: &mut Option<RelNodeMetaMap>) -> Result<RelNodeRef<T>> {
+    pub fn get_best_group_binding(
+        &self,
+        group_id: GroupId,
+        meta: &mut Option<RelNodeMetaMap>,
+    ) -> Result<RelNodeRef<T>> {
         let info = self.get_group_info(group_id);
         if let Some(winner) = info.winner {
             if !winner.impossible {
@@ -486,7 +490,7 @@ impl<T: RelNodeTyp> Memo<T> {
                     children,
                     data: expr.data.clone(),
                 });
-                
+
                 if let Some(meta) = meta {
                     meta.insert(
                         node.as_ref() as *const _ as usize,
