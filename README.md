@@ -37,6 +37,8 @@ The documentation is available in the mdbook format in the [docs](docs) director
 * `optd-datafusion-repr`: Representation of Apache Arrow Datafusion plan nodes in optd.
 * `optd-adaptive-demo`: Demo of adaptive optimization capabilities of optd. More information available in the [docs](docs/).
 * `optd-sqlplannertest`: Planner test of optd based on [risinglightdb/sqlplannertest-rs](https://github.com/risinglightdb/sqlplannertest-rs).
+* `gungnir`: Scalable, memory-efficient, and parallelizable statistical methods for cardinality estimation (e.g. TDigest, HyperLogLog).
+
 
 # Related Works
 
