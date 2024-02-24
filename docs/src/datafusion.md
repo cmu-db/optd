@@ -107,6 +107,14 @@ As per [Leis 2015](https://15721.courses.cs.cmu.edu/spring2024/papers/16-costmod
 
 Our base cardinality estimation scheme is inspired by [Postgres](https://www.postgresql.org/docs/current/planner-stats-details.html). We utilize roughly the same four per-column statistics as Postgres: the most common values of that column, the # of distinct values of that column, the fraction of nulls of that column, and a distribution of values for that column. Our base predicate (filter or join) selectivity formulas are also the same as Postgres. This is as opposed to [Microsoft SQLServer](https://learn.microsoft.com/en-us/previous-versions/sql/sql-server-2008/dd535534(v=sql.100)?redirectedfrom=MSDN), for instance, which utilizes very different per-column statistics and predicate selectivity formulas. Our statistics are not exactly the same as Postgres though. For one, while Postgres uses a simple equi-height histogram, we utilize the more advanced T-Digest data structure to model the distribution of values. Additionally, Postgres samples its tables to build its statistics whereas we do a full sequential scan of all tables. This full sequential scan is made efficient by the fact that we use sketches, which have a low time complexity, and we implemented our sketching algorithms to be easily parallelizable.
 
-(TODO @AlSchlo: explain the benefits of T-Digest in more detail and explain how they're parallelized)
+We obtain our statistics with highly parallel and minimal memory footprint using probabilistic algorithms, which trade off accuracy for scalability. Specifically:
+
+1. The distribution of each column (i.e., CDF) is computed using the TDigest algorithm designed by [Ted Dunning et al.](https://arxiv.org/pdf/1902.04023.pdf), rather than traditional equi-width histograms. TDigests can be seen as dynamically resizable histograms that offer particular precision at the tails of the distribution.
+
+2. The value of N-Distinct is calculated using [Philippe Flajolet et al.](https://algo.inria.fr/flajolet/Publications/FlFuGaMe07.pdf) HyperLogLog algorithm. Similarly, it estimates the unique number of values within a column by examining the pattern of the most unique element. This approach is memory-bounded and doesn't require a hash-set, unlike traditional methods.
+
+3. (TODO @AlSchlo: Whatever we use for MCV)
+
+All of these techniques are embarrassingly parallel tasks by design: threads first scan a partition of the data, maintain a memory-bounded structure (with higher memory leading to higher accuracy), and then merge their individual results into the final column statistics.
 
 (TODO @CostModelTeam: explain adaptivity once we've implemented it)
