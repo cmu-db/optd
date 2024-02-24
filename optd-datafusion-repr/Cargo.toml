@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+arrow-schema = "47.0.0"
 num-traits = "0.2"
 num-derive = "0.2"
 tracing = "0.1"
@@ -18,3 +19,5 @@ optd-core = { path = "../optd-core" }
 camelpaste = "0.1"
 datafusion-expr = "32.0.0"
 async-trait = "0.1"
+datafusion = "32.0.0"
+assert_approx_eq = "1.1.0"

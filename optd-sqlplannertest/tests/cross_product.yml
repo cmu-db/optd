@@ -1,0 +1,14 @@
+- sql: |
+    create table t1(t1v1 int);
+    create table t2(t2v1 int);
+    insert into t1 values (0), (1), (2);
+    insert into t2 values (0), (1), (2);
+  tasks:
+    - execute
+- sql: |
+    select * from t1, t2;
+  desc: Test optimizer logical for a cross product.
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+

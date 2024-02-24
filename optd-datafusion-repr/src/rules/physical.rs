@@ -25,6 +25,7 @@ impl PhysicalConversionRule {
 
 impl PhysicalConversionRule {
     pub fn all_conversions<O: Optimizer<OptRelNodeTyp>>() -> Vec<Arc<dyn Rule<OptRelNodeTyp, O>>> {
+        // Define conversions below, and add them to this list!
         vec![
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Scan)),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Projection)),
@@ -40,6 +41,8 @@ impl PhysicalConversionRule {
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Filter)),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Sort)),
             Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Agg)),
+            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::EmptyRelation)),
+            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Limit)),
         ]
     }
 }
@@ -112,6 +115,22 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
             OptRelNodeTyp::Agg => {
                 let node = RelNode {
                     typ: OptRelNodeTyp::PhysicalAgg,
+                    children,
+                    data,
+                };
+                vec![node]
+            }
+            OptRelNodeTyp::EmptyRelation => {
+                let node = RelNode {
+                    typ: OptRelNodeTyp::PhysicalEmptyRelation,
+                    children,
+                    data,
+                };
+                vec![node]
+            }
+            OptRelNodeTyp::Limit => {
+                let node = RelNode {
+                    typ: OptRelNodeTyp::PhysicalLimit,
                     children,
                     data,
                 };
