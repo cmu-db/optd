@@ -219,11 +219,12 @@ mod tests {
             let obtained_cdf = tdigest.cdf(expected_quantile);
             let obtained_quantile = tdigest.quantile(expected_cdf);
 
-            assert_eq!(is_close(obtained_cdf, expected_cdf, error), true);
-            assert_eq!(
-                is_close(obtained_quantile, expected_quantile, (max - min) * error),
-                true
-            );
+            assert!(is_close(obtained_cdf, expected_cdf, error));
+            assert!(is_close(
+                obtained_quantile,
+                expected_quantile,
+                (max - min) * error,
+            ));
         }
     }
 
@@ -320,7 +321,7 @@ mod tests {
             curr_weight += w;
             let estimate_cdf = tdigest.cdf(*c);
             let obtained_cdf = (curr_weight as f64) / (total_weight as f64);
-            assert_eq!(is_close(obtained_cdf, estimate_cdf, error), true);
+            assert!(is_close(obtained_cdf, estimate_cdf, error));
         }
     }
 }
