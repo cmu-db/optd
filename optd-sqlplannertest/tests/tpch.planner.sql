@@ -429,6 +429,121 @@ PhysicalLimit { skip: 0, fetch: 100 }
                                         └── PhysicalScan { table: region }
 */
 
+-- TPC-H Q3
+SELECT
+    l_orderkey,
+    SUM(l_extendedprice * (1 - l_discount)) AS revenue,
+    o_orderdate,
+    o_shippriority 
+FROM
+    customer,
+    orders,
+    lineitem 
+WHERE
+    c_mktsegment = 'FURNITURE' 
+    AND c_custkey = o_custkey 
+    AND l_orderkey = o_orderkey 
+    AND o_orderdate < DATE '1995-03-29' 
+    AND l_shipdate > DATE '1995-03-29' 
+GROUP BY
+    l_orderkey,
+    o_orderdate,
+    o_shippriority 
+ORDER BY
+    revenue DESC,
+    o_orderdate LIMIT 10;
+
+/*
+LogicalLimit { skip: 0, fetch: 10 }
+└── LogicalSort
+    ├── exprs:
+    │   ┌── SortOrder { order: Desc }
+    │   │   └── #1
+    │   └── SortOrder { order: Asc }
+    │       └── #2
+    └── LogicalProjection { exprs: [ #0, #3, #1, #2 ] }
+        └── LogicalAgg
+            ├── exprs:Agg(Sum)
+            │   └── Mul
+            │       ├── #3
+            │       └── Sub
+            │           ├── 1
+            │           └── #4
+            ├── groups: [ #2, #0, #1 ]
+            └── LogicalProjection { exprs: [ #1, #2, #3, #4, #5 ] }
+                └── LogicalJoin
+                    ├── join_type: Inner
+                    ├── cond:Eq
+                    │   ├── #0
+                    │   └── #3
+                    ├── LogicalProjection { exprs: [ #1, #3, #4 ] }
+                    │   └── LogicalJoin
+                    │       ├── join_type: Inner
+                    │       ├── cond:Eq
+                    │       │   ├── #0
+                    │       │   └── #2
+                    │       ├── LogicalProjection { exprs: [ #0 ] }
+                    │       │   └── LogicalFilter
+                    │       │       ├── cond:Eq
+                    │       │       │   ├── #1
+                    │       │       │   └── "FURNITURE"
+                    │       │       └── LogicalProjection { exprs: [ #0, #6 ] }
+                    │       │           └── LogicalScan { table: customer }
+                    │       └── LogicalFilter
+                    │           ├── cond:Lt
+                    │           │   ├── #2
+                    │           │   └── 9218
+                    │           └── LogicalProjection { exprs: [ #0, #1, #4, #7 ] }
+                    │               └── LogicalScan { table: orders }
+                    └── LogicalProjection { exprs: [ #0, #1, #2 ] }
+                        └── LogicalFilter
+                            ├── cond:Gt
+                            │   ├── #3
+                            │   └── 9218
+                            └── LogicalProjection { exprs: [ #0, #5, #6, #10 ] }
+                                └── LogicalScan { table: lineitem }
+PhysicalLimit { skip: 0, fetch: 10 }
+└── PhysicalSort
+    ├── exprs:
+    │   ┌── SortOrder { order: Desc }
+    │   │   └── #1
+    │   └── SortOrder { order: Asc }
+    │       └── #2
+    └── PhysicalProjection { exprs: [ #0, #3, #1, #2 ] }
+        └── PhysicalAgg
+            ├── aggrs:Agg(Sum)
+            │   └── Mul
+            │       ├── #3
+            │       └── Sub
+            │           ├── 1
+            │           └── #4
+            ├── groups: [ #2, #0, #1 ]
+            └── PhysicalProjection { exprs: [ #1, #2, #3, #4, #5 ] }
+                └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+                    ├── PhysicalProjection { exprs: [ #1, #3, #4 ] }
+                    │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
+                    │       ├── PhysicalProjection { exprs: [ #0 ] }
+                    │       │   └── PhysicalFilter
+                    │       │       ├── cond:Eq
+                    │       │       │   ├── #1
+                    │       │       │   └── "FURNITURE"
+                    │       │       └── PhysicalProjection { exprs: [ #0, #6 ] }
+                    │       │           └── PhysicalScan { table: customer }
+                    │       └── PhysicalFilter
+                    │           ├── cond:Lt
+                    │           │   ├── #2
+                    │           │   └── 9218
+                    │           └── PhysicalProjection { exprs: [ #0, #1, #4, #7 ] }
+                    │               └── PhysicalScan { table: orders }
+                    └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+                        └── PhysicalFilter
+                            ├── cond:Gt
+                            │   ├── #3
+                            │   └── 9218
+                            └── PhysicalProjection { exprs: [ #0, #5, #6, #10 ] }
+                                └── PhysicalScan { table: lineitem }
+*/
+
 -- TPC-H Q5
 SELECT
     n_name AS nation,
@@ -1197,6 +1312,296 @@ PhysicalSort
                     └── PhysicalScan { table: nation }
 */
 
+-- TPC-H Q9
+SELECT
+    nation,
+    o_year,
+    SUM(amount) AS sum_profit
+FROM
+    (
+        SELECT
+            n_name AS nation,
+            EXTRACT(YEAR FROM o_orderdate) AS o_year,
+            l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity AS amount
+        FROM
+            part,
+            supplier,
+            lineitem,
+            partsupp,
+            orders,
+            nation
+        WHERE
+            s_suppkey = l_suppkey
+            AND ps_suppkey = l_suppkey
+            AND ps_partkey = l_partkey
+            AND p_partkey = l_partkey
+            AND o_orderkey = l_orderkey
+            AND s_nationkey = n_nationkey
+            AND p_name LIKE '%green%'
+    ) AS profit
+GROUP BY
+    nation,
+    o_year
+ORDER BY
+    nation,
+    o_year DESC;
+
+/*
+LogicalSort
+├── exprs:
+│   ┌── SortOrder { order: Asc }
+│   │   └── #0
+│   └── SortOrder { order: Desc }
+│       └── #1
+└── LogicalProjection { exprs: [ #0, #1, #2 ] }
+    └── LogicalAgg
+        ├── exprs:Agg(Sum)
+        │   └── [ #2 ]
+        ├── groups: [ #0, #1 ]
+        └── LogicalProjection
+            ├── exprs:
+            │   ┌── #47
+            │   ├── Scalar(DatePart)
+            │   │   └── [ "YEAR", #41 ]
+            │   └── Sub
+            │       ├── Mul
+            │       │   ├── #21
+            │       │   └── Sub
+            │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │       │       └── #22
+            │       └── Mul
+            │           ├── #35
+            │           └── #20
+            └── LogicalFilter
+                ├── cond:And
+                │   ├── And
+                │   │   ├── And
+                │   │   │   ├── And
+                │   │   │   │   ├── And
+                │   │   │   │   │   ├── And
+                │   │   │   │   │   │   ├── Eq
+                │   │   │   │   │   │   │   ├── #9
+                │   │   │   │   │   │   │   └── #18
+                │   │   │   │   │   │   └── Eq
+                │   │   │   │   │   │       ├── #33
+                │   │   │   │   │   │       └── #18
+                │   │   │   │   │   └── Eq
+                │   │   │   │   │       ├── #32
+                │   │   │   │   │       └── #17
+                │   │   │   │   └── Eq
+                │   │   │   │       ├── #0
+                │   │   │   │       └── #17
+                │   │   │   └── Eq
+                │   │   │       ├── #37
+                │   │   │       └── #16
+                │   │   └── Eq
+                │   │       ├── #12
+                │   │       └── #46
+                │   └── Like { expr: #1, pattern: "%green%", negated: false, case_insensitive: false }
+                └── LogicalJoin { join_type: Cross, cond: true }
+                    ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   │   │   │   ├── LogicalScan { table: part }
+                    │   │   │   │   └── LogicalScan { table: supplier }
+                    │   │   │   └── LogicalScan { table: lineitem }
+                    │   │   └── LogicalScan { table: partsupp }
+                    │   └── LogicalScan { table: orders }
+                    └── LogicalScan { table: nation }
+PhysicalSort
+├── exprs:
+│   ┌── SortOrder { order: Asc }
+│   │   └── #0
+│   └── SortOrder { order: Desc }
+│       └── #1
+└── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+    └── PhysicalAgg
+        ├── aggrs:Agg(Sum)
+        │   └── [ #2 ]
+        ├── groups: [ #0, #1 ]
+        └── PhysicalProjection
+            ├── exprs:
+            │   ┌── #47
+            │   ├── Scalar(DatePart)
+            │   │   └── [ "YEAR", #41 ]
+            │   └── Sub
+            │       ├── Mul
+            │       │   ├── #21
+            │       │   └── Sub
+            │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │       │       └── #22
+            │       └── Mul
+            │           ├── #35
+            │           └── #20
+            └── PhysicalFilter
+                ├── cond:And
+                │   ├── And
+                │   │   ├── And
+                │   │   │   ├── And
+                │   │   │   │   ├── And
+                │   │   │   │   │   ├── And
+                │   │   │   │   │   │   ├── Eq
+                │   │   │   │   │   │   │   ├── #9
+                │   │   │   │   │   │   │   └── #18
+                │   │   │   │   │   │   └── Eq
+                │   │   │   │   │   │       ├── #33
+                │   │   │   │   │   │       └── #18
+                │   │   │   │   │   └── Eq
+                │   │   │   │   │       ├── #32
+                │   │   │   │   │       └── #17
+                │   │   │   │   └── Eq
+                │   │   │   │       ├── #0
+                │   │   │   │       └── #17
+                │   │   │   └── Eq
+                │   │   │       ├── #37
+                │   │   │       └── #16
+                │   │   └── Eq
+                │   │       ├── #12
+                │   │       └── #46
+                │   └── Like { expr: #1, pattern: "%green%", negated: false, case_insensitive: false }
+                └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   │   │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   │   │   │   ├── PhysicalScan { table: part }
+                    │   │   │   │   └── PhysicalScan { table: supplier }
+                    │   │   │   └── PhysicalScan { table: lineitem }
+                    │   │   └── PhysicalScan { table: partsupp }
+                    │   └── PhysicalScan { table: orders }
+                    └── PhysicalScan { table: nation }
+*/
+
+-- TPC-H Q10
+SELECT
+    c_custkey,
+    c_name,
+    sum(l_extendedprice * (1 - l_discount)) as revenue,
+    c_acctbal,
+    n_name,
+    c_address,
+    c_phone,
+    c_comment
+FROM
+    customer,
+    orders,
+    lineitem,
+    nation
+WHERE
+    c_custkey = o_custkey
+    AND l_orderkey = o_orderkey
+    AND o_orderdate >= DATE '1993-07-01'
+    AND o_orderdate < DATE '1993-07-01' + INTERVAL '3' MONTH
+    AND l_returnflag = 'R'
+    AND c_nationkey = n_nationkey
+GROUP BY
+    c_custkey,
+    c_name,
+    c_acctbal,
+    c_phone,
+    n_name,
+    c_address,
+    c_comment
+ORDER BY
+    revenue DESC
+LIMIT 20;
+
+/*
+LogicalLimit { skip: 0, fetch: 20 }
+└── LogicalSort
+    ├── exprs:SortOrder { order: Desc }
+    │   └── #2
+    └── LogicalProjection { exprs: [ #0, #1, #7, #2, #4, #5, #3, #6 ] }
+        └── LogicalAgg
+            ├── exprs:Agg(Sum)
+            │   └── Mul
+            │       ├── #22
+            │       └── Sub
+            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │           └── #23
+            ├── groups: [ #0, #1, #5, #4, #34, #2, #7 ]
+            └── LogicalFilter
+                ├── cond:And
+                │   ├── And
+                │   │   ├── And
+                │   │   │   ├── And
+                │   │   │   │   ├── And
+                │   │   │   │   │   ├── Eq
+                │   │   │   │   │   │   ├── #0
+                │   │   │   │   │   │   └── #9
+                │   │   │   │   │   └── Eq
+                │   │   │   │   │       ├── #17
+                │   │   │   │   │       └── #8
+                │   │   │   │   └── Geq
+                │   │   │   │       ├── #12
+                │   │   │   │       └── Cast { cast_to: Date32, expr: "1993-07-01" }
+                │   │   │   └── Lt
+                │   │   │       ├── #12
+                │   │   │       └── Add
+                │   │   │           ├── Cast { cast_to: Date32, expr: "1993-07-01" }
+                │   │   │           └── INTERVAL_MONTH_DAY_NANO (3, 0, 0)
+                │   │   └── Eq
+                │   │       ├── #25
+                │   │       └── "R"
+                │   └── Eq
+                │       ├── #3
+                │       └── #33
+                └── LogicalJoin { join_type: Cross, cond: true }
+                    ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   │   ├── LogicalScan { table: customer }
+                    │   │   └── LogicalScan { table: orders }
+                    │   └── LogicalScan { table: lineitem }
+                    └── LogicalScan { table: nation }
+PhysicalLimit { skip: 0, fetch: 20 }
+└── PhysicalSort
+    ├── exprs:SortOrder { order: Desc }
+    │   └── #2
+    └── PhysicalProjection { exprs: [ #0, #1, #7, #2, #4, #5, #3, #6 ] }
+        └── PhysicalAgg
+            ├── aggrs:Agg(Sum)
+            │   └── Mul
+            │       ├── #22
+            │       └── Sub
+            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │           └── #23
+            ├── groups: [ #0, #1, #5, #4, #34, #2, #7 ]
+            └── PhysicalFilter
+                ├── cond:And
+                │   ├── And
+                │   │   ├── And
+                │   │   │   ├── And
+                │   │   │   │   ├── And
+                │   │   │   │   │   ├── Eq
+                │   │   │   │   │   │   ├── #0
+                │   │   │   │   │   │   └── #9
+                │   │   │   │   │   └── Eq
+                │   │   │   │   │       ├── #17
+                │   │   │   │   │       └── #8
+                │   │   │   │   └── Geq
+                │   │   │   │       ├── #12
+                │   │   │   │       └── Cast { cast_to: Date32, expr: "1993-07-01" }
+                │   │   │   └── Lt
+                │   │   │       ├── #12
+                │   │   │       └── Add
+                │   │   │           ├── Cast { cast_to: Date32, expr: "1993-07-01" }
+                │   │   │           └── INTERVAL_MONTH_DAY_NANO (3, 0, 0)
+                │   │   └── Eq
+                │   │       ├── #25
+                │   │       └── "R"
+                │   └── Eq
+                │       ├── #3
+                │       └── #33
+                └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                    │   │   ├── PhysicalScan { table: customer }
+                    │   │   └── PhysicalScan { table: orders }
+                    │   └── PhysicalScan { table: lineitem }
+                    └── PhysicalScan { table: nation }
+*/
+
 -- TPC-H Q12
 SELECT
     l_shipmode,
@@ -1336,135 +1741,6 @@ PhysicalSort
                 └── PhysicalScan { table: lineitem }
 */
 
--- TPC-H Q10
-SELECT
-    c_custkey,
-    c_name,
-    sum(l_extendedprice * (1 - l_discount)) as revenue,
-    c_acctbal,
-    n_name,
-    c_address,
-    c_phone,
-    c_comment
-FROM
-    customer,
-    orders,
-    lineitem,
-    nation
-WHERE
-    c_custkey = o_custkey
-    AND l_orderkey = o_orderkey
-    AND o_orderdate >= DATE '1993-07-01'
-    AND o_orderdate < DATE '1993-07-01' + INTERVAL '3' MONTH
-    AND l_returnflag = 'R'
-    AND c_nationkey = n_nationkey
-GROUP BY
-    c_custkey,
-    c_name,
-    c_acctbal,
-    c_phone,
-    n_name,
-    c_address,
-    c_comment
-ORDER BY
-    revenue DESC
-LIMIT 20;
-
-/*
-LogicalLimit { skip: 0, fetch: 20 }
-└── LogicalSort
-    ├── exprs:SortOrder { order: Desc }
-    │   └── #2
-    └── LogicalProjection { exprs: [ #0, #1, #7, #2, #4, #5, #3, #6 ] }
-        └── LogicalAgg
-            ├── exprs:Agg(Sum)
-            │   └── Mul
-            │       ├── #22
-            │       └── Sub
-            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
-            │           └── #23
-            ├── groups: [ #0, #1, #5, #4, #34, #2, #7 ]
-            └── LogicalFilter
-                ├── cond:And
-                │   ├── And
-                │   │   ├── And
-                │   │   │   ├── And
-                │   │   │   │   ├── And
-                │   │   │   │   │   ├── Eq
-                │   │   │   │   │   │   ├── #0
-                │   │   │   │   │   │   └── #9
-                │   │   │   │   │   └── Eq
-                │   │   │   │   │       ├── #17
-                │   │   │   │   │       └── #8
-                │   │   │   │   └── Geq
-                │   │   │   │       ├── #12
-                │   │   │   │       └── Cast { cast_to: Date32, expr: "1993-07-01" }
-                │   │   │   └── Lt
-                │   │   │       ├── #12
-                │   │   │       └── Add
-                │   │   │           ├── Cast { cast_to: Date32, expr: "1993-07-01" }
-                │   │   │           └── INTERVAL_MONTH_DAY_NANO (3, 0, 0)
-                │   │   └── Eq
-                │   │       ├── #25
-                │   │       └── "R"
-                │   └── Eq
-                │       ├── #3
-                │       └── #33
-                └── LogicalJoin { join_type: Cross, cond: true }
-                    ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   │   ├── LogicalScan { table: customer }
-                    │   │   └── LogicalScan { table: orders }
-                    │   └── LogicalScan { table: lineitem }
-                    └── LogicalScan { table: nation }
-PhysicalLimit { skip: 0, fetch: 20 }
-└── PhysicalSort
-    ├── exprs:SortOrder { order: Desc }
-    │   └── #2
-    └── PhysicalProjection { exprs: [ #0, #1, #7, #2, #4, #5, #3, #6 ] }
-        └── PhysicalAgg
-            ├── aggrs:Agg(Sum)
-            │   └── Mul
-            │       ├── #22
-            │       └── Sub
-            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
-            │           └── #23
-            ├── groups: [ #0, #1, #5, #4, #34, #2, #7 ]
-            └── PhysicalFilter
-                ├── cond:And
-                │   ├── And
-                │   │   ├── And
-                │   │   │   ├── And
-                │   │   │   │   ├── And
-                │   │   │   │   │   ├── Eq
-                │   │   │   │   │   │   ├── #0
-                │   │   │   │   │   │   └── #9
-                │   │   │   │   │   └── Eq
-                │   │   │   │   │       ├── #17
-                │   │   │   │   │       └── #8
-                │   │   │   │   └── Geq
-                │   │   │   │       ├── #12
-                │   │   │   │       └── Cast { cast_to: Date32, expr: "1993-07-01" }
-                │   │   │   └── Lt
-                │   │   │       ├── #12
-                │   │   │       └── Add
-                │   │   │           ├── Cast { cast_to: Date32, expr: "1993-07-01" }
-                │   │   │           └── INTERVAL_MONTH_DAY_NANO (3, 0, 0)
-                │   │   └── Eq
-                │   │       ├── #25
-                │   │       └── "R"
-                │   └── Eq
-                │       ├── #3
-                │       └── #33
-                └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                    ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                    │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                    │   │   ├── PhysicalScan { table: customer }
-                    │   │   └── PhysicalScan { table: orders }
-                    │   └── PhysicalScan { table: lineitem }
-                    └── PhysicalScan { table: nation }
-*/
-
 -- TPC-H Q14
 SELECT
     100.00 * sum(case when p_type like 'PROMO%'
@@ -1565,90 +1841,272 @@ PhysicalProjection
             └── PhysicalScan { table: part }
 */
 
--- TPC-H Q18
+-- TPC-H Q15
+WITH revenue0 (supplier_no, total_revenue) AS 
+(
+    SELECT
+        l_suppkey,
+        SUM(l_extendedprice * (1 - l_discount)) 
+    FROM
+        lineitem 
+    WHERE
+        l_shipdate >= DATE '1993-01-01' 
+        AND l_shipdate < DATE '1993-01-01' + INTERVAL '3' MONTH 
+    GROUP BY
+        l_suppkey 
+)
 SELECT
-    c_name,
-    c_custkey,
-    o_orderkey,
-    o_orderdate,
-    o_totalprice,
-    sum(l_quantity) as total_quantity
+    s_suppkey,
+    s_name,
+    s_address,
+    s_phone,
+    total_revenue 
 FROM
-    customer,
-    orders,
-    lineitem
+    supplier,
+    revenue0 
 WHERE
-    c_custkey = o_custkey
-    AND o_orderkey = l_orderkey
-GROUP BY
-    c_name,
-    c_custkey,
-    o_orderkey,
-    o_orderdate,
-    o_totalprice
-HAVING
-    sum(l_quantity) > 300
+    s_suppkey = supplier_no 
+    AND total_revenue = 
+    (
+        SELECT
+            MAX(total_revenue) 
+        FROM
+            revenue0 
+    )
 ORDER BY
-    o_totalprice DESC,
-    o_orderdate;
+    s_suppkey;
 
 /*
 LogicalSort
-├── exprs:
-│   ┌── SortOrder { order: Desc }
-│   │   └── #4
-│   └── SortOrder { order: Asc }
-│       └── #3
-└── LogicalProjection { exprs: [ #0, #1, #2, #3, #4, #5 ] }
-    └── LogicalFilter
-        ├── cond:Gt
-        │   ├── #5
-        │   └── Cast { cast_to: Decimal128(25, 2), expr: 300 }
+├── exprs:SortOrder { order: Asc }
+│   └── #0
+└── LogicalProjection { exprs: [ #0, #1, #2, #3, #4 ] }
+    └── LogicalJoin
+        ├── join_type: Inner
+        ├── cond:Eq
+        │   ├── #4
+        │   └── #5
+        ├── LogicalProjection { exprs: [ #0, #1, #2, #3, #5 ] }
+        │   └── LogicalJoin
+        │       ├── join_type: Inner
+        │       ├── cond:Eq
+        │       │   ├── #0
+        │       │   └── #4
+        │       ├── LogicalProjection { exprs: [ #0, #1, #2, #4 ] }
+        │       │   └── LogicalScan { table: supplier }
+        │       └── LogicalProjection { exprs: [ #0, #1 ] }
+        │           └── LogicalAgg
+        │               ├── exprs:Agg(Sum)
+        │               │   └── Mul
+        │               │       ├── #1
+        │               │       └── Sub
+        │               │           ├── 1
+        │               │           └── #2
+        │               ├── groups: [ #0 ]
+        │               └── LogicalProjection { exprs: [ #0, #1, #2 ] }
+        │                   └── LogicalFilter
+        │                       ├── cond:And
+        │                       │   ├── Geq
+        │                       │   │   ├── #3
+        │                       │   │   └── 8401
+        │                       │   └── Lt
+        │                       │       ├── #3
+        │                       │       └── 8491
+        │                       └── LogicalProjection { exprs: [ #2, #5, #6, #10 ] }
+        │                           └── LogicalScan { table: lineitem }
         └── LogicalAgg
-            ├── exprs:Agg(Sum)
-            │   └── [ #21 ]
-            ├── groups: [ #1, #0, #8, #12, #11 ]
-            └── LogicalFilter
-                ├── cond:And
-                │   ├── Eq
-                │   │   ├── #0
-                │   │   └── #9
-                │   └── Eq
-                │       ├── #8
-                │       └── #17
-                └── LogicalJoin { join_type: Cross, cond: true }
-                    ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   ├── LogicalScan { table: customer }
-                    │   └── LogicalScan { table: orders }
-                    └── LogicalScan { table: lineitem }
+            ├── exprs:Agg(Max)
+            │   └── [ #0 ]
+            ├── groups: []
+            └── LogicalProjection { exprs: [ #1 ] }
+                └── LogicalAgg
+                    ├── exprs:Agg(Sum)
+                    │   └── Mul
+                    │       ├── #1
+                    │       └── Sub
+                    │           ├── 1
+                    │           └── #2
+                    ├── groups: [ #0 ]
+                    └── LogicalProjection { exprs: [ #0, #1, #2 ] }
+                        └── LogicalFilter
+                            ├── cond:And
+                            │   ├── Geq
+                            │   │   ├── #3
+                            │   │   └── 8401
+                            │   └── Lt
+                            │       ├── #3
+                            │       └── 8491
+                            └── LogicalProjection { exprs: [ #2, #5, #6, #10 ] }
+                                └── LogicalScan { table: lineitem }
 PhysicalSort
-├── exprs:
-│   ┌── SortOrder { order: Desc }
-│   │   └── #4
-│   └── SortOrder { order: Asc }
-│       └── #3
-└── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5 ] }
-    └── PhysicalFilter
-        ├── cond:Gt
-        │   ├── #5
-        │   └── Cast { cast_to: Decimal128(25, 2), expr: 300 }
-        └── PhysicalAgg
-            ├── aggrs:Agg(Sum)
-            │   └── [ #21 ]
-            ├── groups: [ #1, #0, #8, #12, #11 ]
-            └── PhysicalFilter
-                ├── cond:And
-                │   ├── Eq
-                │   │   ├── #0
-                │   │   └── #9
-                │   └── Eq
-                │       ├── #8
-                │       └── #17
-                └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                    ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                    │   ├── PhysicalScan { table: customer }
-                    │   └── PhysicalScan { table: orders }
-                    └── PhysicalScan { table: lineitem }
+├── exprs:SortOrder { order: Asc }
+│   └── #0
+└── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4 ] }
+    └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #5 ] }
+        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+            ├── PhysicalProjection { exprs: [ #0, #1, #2, #4 ] }
+            │   └── PhysicalScan { table: supplier }
+            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
+                ├── PhysicalProjection { exprs: [ #0, #1 ] }
+                │   └── PhysicalAgg
+                │       ├── aggrs:Agg(Sum)
+                │       │   └── Mul
+                │       │       ├── #1
+                │       │       └── Sub
+                │       │           ├── 1
+                │       │           └── #2
+                │       ├── groups: [ #0 ]
+                │       └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+                │           └── PhysicalFilter
+                │               ├── cond:And
+                │               │   ├── Geq
+                │               │   │   ├── #3
+                │               │   │   └── 8401
+                │               │   └── Lt
+                │               │       ├── #3
+                │               │       └── 8491
+                │               └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
+                │                   └── PhysicalScan { table: lineitem }
+                └── PhysicalAgg
+                    ├── aggrs:Agg(Max)
+                    │   └── [ #0 ]
+                    ├── groups: []
+                    └── PhysicalProjection { exprs: [ #1 ] }
+                        └── PhysicalAgg
+                            ├── aggrs:Agg(Sum)
+                            │   └── Mul
+                            │       ├── #1
+                            │       └── Sub
+                            │           ├── 1
+                            │           └── #2
+                            ├── groups: [ #0 ]
+                            └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+                                └── PhysicalFilter
+                                    ├── cond:And
+                                    │   ├── Geq
+                                    │   │   ├── #3
+                                    │   │   └── 8401
+                                    │   └── Lt
+                                    │       ├── #3
+                                    │       └── 8491
+                                    └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
+                                        └── PhysicalScan { table: lineitem }
+*/
+
+-- TPC-H Q17
+SELECT
+    ROUND(SUM(l_extendedprice) / 7.0, 16) AS avg_yearly 
+FROM
+    lineitem,
+    part 
+WHERE
+    p_partkey = l_partkey 
+    AND p_brand = 'Brand#13' 
+    AND p_container = 'JUMBO PKG' 
+    AND l_quantity < ( 
+        SELECT
+            0.2 * AVG(l_quantity) 
+        FROM
+            lineitem 
+        WHERE
+            l_partkey = p_partkey 
+    );
+
+/*
+LogicalProjection
+├── exprs:Scalar(Round)
+│   └── 
+│       ┌── Div
+│       │   ├── Cast { cast_to: Float64, expr: #0 }
+│       │   └── 7
+│       └── 16
+└── LogicalAgg
+    ├── exprs:Agg(Sum)
+    │   └── [ #0 ]
+    ├── groups: []
+    └── LogicalProjection { exprs: [ #1 ] }
+        └── LogicalJoin
+            ├── join_type: Inner
+            ├── cond:Eq
+            │   ├── #2
+            │   └── #4
+            ├── LogicalProjection { exprs: [ #1, #2, #3 ] }
+            │   └── LogicalJoin
+            │       ├── join_type: Inner
+            │       ├── cond:Eq
+            │       │   ├── #0
+            │       │   └── #3
+            │       ├── LogicalProjection { exprs: [ #1, #4, #5 ] }
+            │       │   └── LogicalScan { table: lineitem }
+            │       └── LogicalProjection { exprs: [ #0 ] }
+            │           └── LogicalFilter
+            │               ├── cond:And
+            │               │   ├── Eq
+            │               │   │   ├── #1
+            │               │   │   └── "Brand#13"
+            │               │   └── Eq
+            │               │       ├── #2
+            │               │       └── "JUMBO PKG"
+            │               └── LogicalProjection { exprs: [ #0, #3, #6 ] }
+            │                   └── LogicalScan { table: part }
+            └── LogicalProjection
+                ├── exprs:
+                │   ┌── Cast
+                │   │   ├── cast_to: Decimal128(30, 15)
+                │   │   ├── expr:Mul
+                │   │   │   ├── 0.2
+                │   │   │   └── Cast { cast_to: Float64, expr: #1 }
+
+                │   └── #0
+                └── LogicalAgg
+                    ├── exprs:Agg(Avg)
+                    │   └── [ #1 ]
+                    ├── groups: [ #0 ]
+                    └── LogicalProjection { exprs: [ #1, #4 ] }
+                        └── LogicalScan { table: lineitem }
+PhysicalProjection
+├── exprs:Scalar(Round)
+│   └── 
+│       ┌── Div
+│       │   ├── Cast { cast_to: Float64, expr: #0 }
+│       │   └── 7
+│       └── 16
+└── PhysicalAgg
+    ├── aggrs:Agg(Sum)
+    │   └── [ #0 ]
+    ├── groups: []
+    └── PhysicalProjection { exprs: [ #1 ] }
+        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #1 ] }
+            ├── PhysicalProjection { exprs: [ #1, #2, #3 ] }
+            │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+            │       ├── PhysicalProjection { exprs: [ #1, #4, #5 ] }
+            │       │   └── PhysicalScan { table: lineitem }
+            │       └── PhysicalProjection { exprs: [ #0 ] }
+            │           └── PhysicalFilter
+            │               ├── cond:And
+            │               │   ├── Eq
+            │               │   │   ├── #1
+            │               │   │   └── "Brand#13"
+            │               │   └── Eq
+            │               │       ├── #2
+            │               │       └── "JUMBO PKG"
+            │               └── PhysicalProjection { exprs: [ #0, #3, #6 ] }
+            │                   └── PhysicalScan { table: part }
+            └── PhysicalProjection
+                ├── exprs:
+                │   ┌── Cast
+                │   │   ├── cast_to: Decimal128(30, 15)
+                │   │   ├── expr:Mul
+                │   │   │   ├── 0.2
+                │   │   │   └── Cast { cast_to: Float64, expr: #1 }
+
+                │   └── #0
+                └── PhysicalAgg
+                    ├── aggrs:Agg(Avg)
+                    │   └── [ #1 ]
+                    ├── groups: [ #0 ]
+                    └── PhysicalProjection { exprs: [ #1, #4 ] }
+                        └── PhysicalScan { table: lineitem }
 */
 
 -- TPC-H Q19
