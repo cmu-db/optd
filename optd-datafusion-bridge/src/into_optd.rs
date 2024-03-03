@@ -162,8 +162,6 @@ impl OptdPlanContext<'_> {
                 )
                 .into_expr())
             }
-<<<<<<< HEAD
-=======
             Expr::Between(x) => {
                 let expr = self.conv_into_optd_expr(x.expr.as_ref(), context)?;
                 let low = self.conv_into_optd_expr(x.low.as_ref(), context)?;
@@ -185,7 +183,6 @@ impl OptdPlanContext<'_> {
                 let list = self.conv_into_optd_expr_list(&x.list, context)?;
                 Ok(InListExpr::new(expr, list, x.negated).into_expr())
             }
->>>>>>> main
             _ => bail!("Unsupported expression: {:?}", expr),
         }
     }
@@ -324,15 +321,9 @@ impl OptdPlanContext<'_> {
         }
     }
 
-<<<<<<< HEAD
-    fn into_optd_cross_join(&mut self, node: &logical_plan::CrossJoin) -> Result<LogicalJoin> {
-        let left = self.into_optd_plan_node(node.left.as_ref())?;
-        let right = self.into_optd_plan_node(node.right.as_ref())?;
-=======
     fn conv_into_optd_cross_join(&mut self, node: &logical_plan::CrossJoin) -> Result<LogicalJoin> {
         let left = self.conv_into_optd_plan_node(node.left.as_ref())?;
         let right = self.conv_into_optd_plan_node(node.right.as_ref())?;
->>>>>>> main
         Ok(LogicalJoin::new(
             left,
             right,
