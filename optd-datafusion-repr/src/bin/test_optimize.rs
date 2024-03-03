@@ -5,7 +5,7 @@ use optd_core::{
     rel_node::Value,
 };
 use optd_datafusion_repr::{
-    cost::OptCostModel,
+    cost::{OptCostModel, PerTableStats},
     plan_nodes::{
         BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, JoinType, LogicalFilter, LogicalJoin,
         LogicalScan, OptRelNode, OptRelNodeTyp, PlanNode,
@@ -36,7 +36,7 @@ pub fn main() {
         Box::new(OptCostModel::new(
             [("t1", 1000), ("t2", 100), ("t3", 10000)]
                 .into_iter()
-                .map(|(x, y)| (x.to_string(), y))
+                .map(|(x, y)| (x.to_string(), PerTableStats::new(y, vec![])))
                 .collect(),
         )),
         vec![],
@@ -46,7 +46,7 @@ pub fn main() {
     let scan1 = LogicalScan::new("t1".into());
     let filter_cond = BinOpExpr::new(
         ColumnRefExpr::new(1).0,
-        ConstantExpr::new(Value::Int(2)).0,
+        ConstantExpr::new(Value::Int64(2)).0,
         BinOpType::Eq,
     );
     let filter1 = LogicalFilter::new(scan1.0, filter_cond.0);

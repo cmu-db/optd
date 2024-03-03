@@ -51,8 +51,7 @@ impl OptimizeInputsTask {
         optimizer: &mut CascadesOptimizer<T>,
     ) -> Vec<Cost> {
         let zero_cost = optimizer.cost().zero();
-        let mut input_cost = Vec::new();
-        input_cost.reserve(children.len());
+        let mut input_cost = Vec::with_capacity(children.len());
         for &child in children.iter() {
             let group = optimizer.get_group_info(child);
             if let Some(ref winner) = group.winner {
@@ -138,7 +137,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
         trace!(event = "task_begin", task = "optimize_inputs", expr_id = %self.expr_id, continue_from = ?self.continue_from);
         let expr = optimizer.get_expr_memoed(self.expr_id);
         let group_id = optimizer.get_group_id(self.expr_id);
-        let children = &expr.children;
+        let children_group_ids = &expr.children;
         let cost = optimizer.cost();
 
         if let Some(ContinueTask {
@@ -150,10 +149,17 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
             let context = RelNodeContext {
                 expr_id: self.expr_id,
                 group_id,
+                children_group_ids: children_group_ids.clone(),
             };
             if self.should_terminate(
                 cost.sum(
-                    &cost.compute_cost(&expr.typ, &expr.data, &input_cost, Some(context.clone())),
+                    &cost.compute_cost(
+                        &expr.typ,
+                        &expr.data,
+                        &input_cost,
+                        Some(context.clone()),
+                        Some(optimizer),
+                    ),
                     &input_cost,
                 )
                 .0[0],
@@ -162,8 +168,8 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                 trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id);
                 return Ok(vec![]);
             }
-            if next_group_idx < children.len() {
-                let group_id = children[next_group_idx];
+            if next_group_idx < children_group_ids.len() {
+                let group_id = children_group_ids[next_group_idx];
                 let group_idx = next_group_idx;
                 let group_info = optimizer.get_group_info(group_id);
                 let mut has_full_winner = false;
@@ -178,6 +184,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                                     &expr.data,
                                     &input_cost,
                                     Some(context.clone()),
+                                    Some(optimizer),
                                 ),
                                 &input_cost,
                             )
@@ -249,6 +256,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                             &expr.data,
                             &input_cost,
                             Some(context.clone()),
+                            Some(optimizer),
                         ),
                         &input_cost,
                     ),
@@ -258,7 +266,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                 Ok(vec![])
             }
         } else {
-            let input_cost = self.first_invoke(children, optimizer);
+            let input_cost = self.first_invoke(children_group_ids, optimizer);
             trace!(event = "task_yield", task = "optimize_inputs", expr_id = %self.expr_id);
             Ok(vec![Box::new(self.continue_from(
                 ContinueTask {

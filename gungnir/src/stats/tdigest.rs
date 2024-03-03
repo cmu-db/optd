@@ -1,37 +1,28 @@
-//----------------------------------------------------//
-// This Software is provided to you by...             //
-//       _____                         _              //
-//      / ____|                       (_)             //
-//      | |  __ _   _ _ __   __ _ _ __  _ _ __        //
-//      | | |_ | | | | '_ \ / _` | '_ \| | '__|       //
-//      | |__| | |_| | | | | (_| | | | | | |          //
-//       \_____|\__,_|_| |_|\__, |_| |_|_|_|          //
-//                           __/ |                    //
-//                          |___/                     //
-//                                                    //
-// Author: Alexis Schlomer <aschlome@andrew.cmu.edu>  //
-//----------------------------------------------------//
-
 //! Simplified implementation of the TDigest data structure as described in
-//! Ted Dunning et al. paper:
+//! Ted Dunning's paper:
 //! "Computing Extremely Accurate Quantiles Using t-Digests" (2019).
 //! For more details, refer to: https://arxiv.org/pdf/1902.04023.pdf
 
 use itertools::Itertools;
 use std::f64::consts::PI;
 
-// The TDigest structure for the statistical aggregator to query quantiles.
+/// The TDigest structure for the statistical aggregator to query quantiles.
 pub struct TDigest {
-    centroids: Vec<Centroid>, // A sorted array of Centroids, according to their mean.
-    compression: f64, // Compression factor: higher is more precise, but has higher memory requirements.
-    total_weight: usize, // Number of values in the TDigest (sum of all centroids).
+    /// A sorted array of Centroids, according to their mean.
+    centroids: Vec<Centroid>,
+    /// Compression factor: higher is more precise, but has higher memory requirements.
+    compression: f64,
+    /// Number of values in the TDigest (sum of all centroids).
+    total_weight: usize,
 }
 
-// A Centroid is a cluster of aggregated data points.
+/// A Centroid is a cluster of aggregated data points.
 #[derive(PartialEq, PartialOrd, Clone)]
 struct Centroid {
-    mean: f64,     // Mean of all aggregated points in this cluster.
-    weight: usize, // The number of points in this cluster.
+    /// Mean of all aggregated points in this cluster.
+    mean: f64,
+    /// The number of points in this cluster.
+    weight: usize,
 }
 
 // Utility functions defined on a Centroid.
@@ -47,7 +38,7 @@ impl Centroid {
 
 // Self-contained implementation of the TDigest data structure.
 impl TDigest {
-    // Creates and initializes a new empty TDigest.
+    /// Creates and initializes a new empty TDigest.
     pub fn new(compression: f64) -> Self {
         TDigest {
             centroids: Vec::new(),
@@ -56,10 +47,10 @@ impl TDigest {
         }
     }
 
-    // Ingests an array of non-NaN f64 values into the TDigest.
-    // This is achieved by invoking the merge operation on unit Centroids.
-    // 'Values' serves as a bounded buffer utilized by the execution engine, responsible
-    // for determining when to merge and flush the accumulated values into the TDigest.
+    /// Ingests an array of non-NaN f64 values into the TDigest.
+    /// This is achieved by invoking the merge operation on unit Centroids.
+    /// 'Values' serves as a bounded buffer utilized by the execution engine, responsible
+    /// for determining when to merge and flush the accumulated values into the TDigest.
     pub fn merge_values(self, values: &mut [f64]) -> Self {
         values.sort_by(|a, b| a.partial_cmp(b).expect("Slice should not contain NaNs"));
 
@@ -80,9 +71,9 @@ impl TDigest {
         })
     }
 
-    // Merges two TDigests together and returns a new one.
-    // Particularly useful for parallel execution.
-    // NOTE: Takes ownership of self and other.
+    /// Merges two TDigests together and returns a new one.
+    /// Particularly useful for parallel execution.
+    /// NOTE: Takes ownership of self and other.
     pub fn merge(self, other: TDigest) -> Self {
         let mut sorted_centroids = self.centroids.iter().merge(other.centroids.iter());
 
@@ -104,7 +95,7 @@ impl TDigest {
         for centroid in sorted_centroids {
             let q_new = (tmp_centroid.weight + centroid.weight) as f64 / total_weight as f64;
             if (q_curr + q_new) <= q_limit {
-                tmp_centroid.merge(&centroid)
+                tmp_centroid.merge(centroid)
             } else {
                 q_curr += tmp_centroid.weight as f64 / total_weight as f64;
                 q_limit = self.k_rev_scale(self.k_scale(q_curr) + 1.0);
@@ -122,9 +113,9 @@ impl TDigest {
         }
     }
 
-    // Obtains a given quantile from the TDigest.
-    // Returns 0.0 if TDigest is empty.
-    // Performs a linear interpollation between two neighboring Centroids if needed.
+    /// Obtains a given quantile from the TDigest.
+    /// Returns 0.0 if TDigest is empty.
+    /// Performs a linear interpollation between two neighboring Centroids if needed.
     pub fn quantile(&self, q: f64) -> f64 {
         let target_cum = q * (self.total_weight as f64);
         let pos_cum = self // Finds the centroid whose *cumulative weight* exceeds or equals the quantile.
@@ -163,8 +154,8 @@ impl TDigest {
         }
     }
 
-    // Obtains the CDF corresponding to a given value.
-    // Returns 0.0 if the TDigest is empty.
+    /// Obtains the CDF corresponding to a given value.
+    /// Returns 0.0 if the TDigest is empty.
     pub fn cdf(&self, v: f64) -> f64 {
         let mut cum_sum = 0;
         let pos_cum = self // Finds the centroid whose *mean* exceeds or equals the given value.
@@ -228,11 +219,12 @@ mod tests {
             let obtained_cdf = tdigest.cdf(expected_quantile);
             let obtained_quantile = tdigest.quantile(expected_cdf);
 
-            assert_eq!(is_close(obtained_cdf, expected_cdf, error), true);
-            assert_eq!(
-                is_close(obtained_quantile, expected_quantile, (max - min) * error),
-                true
-            );
+            assert!(is_close(obtained_cdf, expected_cdf, error));
+            assert!(is_close(
+                obtained_quantile,
+                expected_quantile,
+                (max - min) * error,
+            ));
         }
     }
 
@@ -329,7 +321,7 @@ mod tests {
             curr_weight += w;
             let estimate_cdf = tdigest.cdf(*c);
             let obtained_cdf = (curr_weight as f64) / (total_weight as f64);
-            assert_eq!(is_close(obtained_cdf, estimate_cdf, error), true);
+            assert!(is_close(obtained_cdf, estimate_cdf, error));
         }
     }
 }

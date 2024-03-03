@@ -197,8 +197,10 @@ impl<T: RelNodeTyp> Task<T> for ApplyRuleTask {
             let applied = rule.apply(optimizer, expr);
             for expr in applied {
                 let RelNode { typ, .. } = &expr;
-                if typ.extract_group().is_some() {
-                    unreachable!();
+                if let Some(group_id_2) = typ.extract_group() {
+                    // If this is a group, merge the groups!
+                    optimizer.merge_group(group_id, group_id_2);
+                    continue;
                 }
                 let expr_typ = typ.clone();
                 let (_, expr_id) = optimizer.add_group_expr(expr.into(), Some(group_id));

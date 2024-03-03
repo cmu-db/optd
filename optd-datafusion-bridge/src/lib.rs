@@ -30,7 +30,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-struct OptdPlanContext<'a> {
+pub struct OptdPlanContext<'a> {
     tables: HashMap<String, Arc<dyn TableSource>>,
     session_state: &'a SessionState,
     pub optimizer: Option<&'a DatafusionOptimizer>,
@@ -61,21 +61,28 @@ impl Catalog for DatafusionCatalog {
         let catalog = self.catalog.catalog("datafusion").unwrap();
         let schema = catalog.schema("public").unwrap();
         let table = futures_lite::future::block_on(schema.table(name.as_ref())).unwrap();
-        let fields = table.schema();
-        let mut optd_schema = vec![];
-        for field in fields.fields() {
+        let schema = table.schema();
+        let fields = schema.fields();
+        let mut optd_fields = Vec::with_capacity(fields.len());
+        for field in fields {
             let dt = match field.data_type() {
                 DataType::Date32 => ConstantType::Date,
-                DataType::Int32 => ConstantType::Int,
-                DataType::Int64 => ConstantType::Int,
+                DataType::Int32 => ConstantType::Int32,
+                DataType::Int64 => ConstantType::Int64,
                 DataType::Float64 => ConstantType::Decimal,
                 DataType::Utf8 => ConstantType::Utf8String,
                 DataType::Decimal128(_, _) => ConstantType::Decimal,
                 dt => unimplemented!("{:?}", dt),
             };
-            optd_schema.push(dt);
+            optd_fields.push(optd_datafusion_repr::properties::schema::Field {
+                name: field.name().to_string(),
+                typ: dt,
+                nullable: field.is_nullable(),
+            });
         }
-        optd_datafusion_repr::properties::schema::Schema(optd_schema)
+        optd_datafusion_repr::properties::schema::Schema {
+            fields: optd_fields,
+        }
     }
 }
 
@@ -91,16 +98,16 @@ enum JoinOrder {
 }
 
 impl JoinOrder {
-    pub fn into_logical_join_order(&self) -> LogicalJoinOrder {
+    pub fn conv_into_logical_join_order(&self) -> LogicalJoinOrder {
         match self {
             JoinOrder::Table(name) => LogicalJoinOrder::Table(name.clone()),
             JoinOrder::HashJoin(left, right) => LogicalJoinOrder::Join(
-                Box::new(left.into_logical_join_order()),
-                Box::new(right.into_logical_join_order()),
+                Box::new(left.conv_into_logical_join_order()),
+                Box::new(right.conv_into_logical_join_order()),
             ),
             JoinOrder::NestedLoopJoin(left, right) => LogicalJoinOrder::Join(
-                Box::new(left.into_logical_join_order()),
-                Box::new(right.into_logical_join_order()),
+                Box::new(left.conv_into_logical_join_order()),
+                Box::new(right.conv_into_logical_join_order()),
             ),
         }
     }
@@ -209,7 +216,7 @@ impl OptdQueryPlanner {
                 optimizer_name: "datafusion".to_string(),
             }));
         }
-        let optd_rel = ctx.into_optd(logical_plan)?;
+        let optd_rel = ctx.conv_into_optd(logical_plan)?;
         if let Some(explains) = &mut explains {
             explains.push(StringifiedPlan::new(
                 PlanType::OptimizedLogicalPlan {
@@ -244,12 +251,12 @@ impl OptdQueryPlanner {
             ));
             let bindings = optimizer
                 .optd_optimizer()
-                .get_all_group_physical_bindings(group_id);
+                .get_all_group_bindings(group_id, true);
             let mut join_orders = BTreeSet::new();
             let mut logical_join_orders = BTreeSet::new();
             for binding in bindings {
                 if let Some(join_order) = get_join_order(binding) {
-                    logical_join_orders.insert(join_order.into_logical_join_order());
+                    logical_join_orders.insert(join_order.conv_into_logical_join_order());
                     join_orders.insert(join_order);
                 }
             }
@@ -273,7 +280,7 @@ impl OptdQueryPlanner {
         // );
         // optimizer.dump(Some(group_id));
         ctx.optimizer = Some(&optimizer);
-        let physical_plan = ctx.from_optd(optimized_rel).await?;
+        let physical_plan = ctx.conv_from_optd(optimized_rel).await?;
         if let Some(explains) = &mut explains {
             explains.push(
                 displayable(&*physical_plan)

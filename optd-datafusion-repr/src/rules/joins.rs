@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::vec;
 
 use itertools::Itertools;
 use optd_core::optimizer::Optimizer;
@@ -8,8 +9,9 @@ use optd_core::rules::{Rule, RuleMatcher};
 
 use super::macros::{define_impl_rule, define_rule};
 use crate::plan_nodes::{
-    BinOpExpr, BinOpType, ColumnRefExpr, Expr, ExprList, JoinType, LogicalJoin, LogicalProjection,
-    OptRelNode, OptRelNodeTyp, PhysicalHashJoin, PlanNode,
+    BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, ExprList, JoinType,
+    LogicalEmptyRelation, LogicalJoin, LogicalProjection, OptRelNode, OptRelNodeTyp,
+    PhysicalHashJoin, PlanNode,
 };
 use crate::properties::schema::SchemaPropertyBuilder;
 
@@ -66,7 +68,7 @@ fn apply_join_commute(
         cond,
         JoinType::Inner,
     );
-    let mut proj_expr = Vec::with_capacity(left_schema.0.len() + right_schema.0.len());
+    let mut proj_expr = Vec::with_capacity(left_schema.len() + right_schema.len());
     for i in 0..left_schema.len() {
         proj_expr.push(ColumnRefExpr::new(right_schema.len() + i).into_expr());
     }
@@ -76,6 +78,44 @@ fn apply_join_commute(
     let node =
         LogicalProjection::new(node.into_plan_node(), ExprList::new(proj_expr)).into_rel_node();
     vec![node.as_ref().clone()]
+}
+
+define_rule!(
+    EliminateJoinRule,
+    apply_eliminate_join,
+    (Join(JoinType::Inner), left, right, [cond])
+);
+
+/// Eliminate logical join with constant predicates
+/// True predicates becomes CrossJoin (not yet implemented)
+/// False predicates become EmptyRelation (not yet implemented)
+#[allow(unused_variables)]
+fn apply_eliminate_join(
+    optimizer: &impl Optimizer<OptRelNodeTyp>,
+    EliminateJoinRulePicks { left, right, cond }: EliminateJoinRulePicks,
+) -> Vec<RelNode<OptRelNodeTyp>> {
+    if let OptRelNodeTyp::Constant(const_type) = cond.typ {
+        if const_type == ConstantType::Bool {
+            if let Some(data) = cond.data {
+                if data.as_bool() {
+                    // change it to cross join if filter is always true
+                    let node = LogicalJoin::new(
+                        PlanNode::from_group(left.into()),
+                        PlanNode::from_group(right.into()),
+                        ConstantExpr::bool(true).into_expr(),
+                        JoinType::Cross,
+                    );
+                    return vec![node.into_rel_node().as_ref().clone()];
+                } else {
+                    // No need to handle schema here, as all exprs in the same group
+                    // will have same logical properties
+                    let node = LogicalEmptyRelation::new(false);
+                    return vec![node.into_rel_node().as_ref().clone()];
+                }
+            }
+        }
+    }
+    vec![]
 }
 
 // (A join B) join C -> A join (B join C)
@@ -131,8 +171,8 @@ fn apply_join_assoc(
         )
     }
     let a_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(a.clone()), 0);
-    let b_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(b.clone()), 0);
-    let c_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(c.clone()), 0);
+    let _b_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(b.clone()), 0);
+    let _c_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(c.clone()), 0);
     let cond2 = Expr::from_rel_node(cond2.into()).unwrap();
     let Some(cond2) = rewrite_column_refs(cond2, a_schema.len()) else {
         return vec![];
@@ -178,13 +218,11 @@ fn apply_hash_join(
         let Some(mut right_expr) = ColumnRefExpr::from_rel_node(right_expr.into_rel_node()) else {
             return vec![];
         };
-        let can_convert = if left_expr.index() < left_schema.0.len()
-            && right_expr.index() >= left_schema.0.len()
+        let can_convert = if left_expr.index() < left_schema.len()
+            && right_expr.index() >= left_schema.len()
         {
             true
-        } else if right_expr.index() < left_schema.0.len()
-            && left_expr.index() >= left_schema.0.len()
-        {
+        } else if right_expr.index() < left_schema.len() && left_expr.index() >= left_schema.len() {
             (left_expr, right_expr) = (right_expr, left_expr);
             true
         } else {
@@ -192,7 +230,7 @@ fn apply_hash_join(
         };
 
         if can_convert {
-            let right_expr = ColumnRefExpr::new(right_expr.index() - left_schema.0.len());
+            let right_expr = ColumnRefExpr::new(right_expr.index() - left_schema.len());
             let node = PhysicalHashJoin::new(
                 PlanNode::from_group(left.into()),
                 PlanNode::from_group(right.into()),
@@ -220,7 +258,7 @@ define_rule!(
 
 struct ProjectionMapping {
     forward: Vec<usize>,
-    backward: Vec<Option<usize>>,
+    _backward: Vec<Option<usize>>,
 }
 
 impl ProjectionMapping {
@@ -234,7 +272,7 @@ impl ProjectionMapping {
         }
         Some(Self {
             forward: mapping,
-            backward,
+            _backward: backward,
         })
     }
 
@@ -242,8 +280,8 @@ impl ProjectionMapping {
         self.forward[col]
     }
 
-    pub fn original_col_maps_to(&self, col: usize) -> Option<usize> {
-        self.backward[col]
+    pub fn _original_col_maps_to(&self, col: usize) -> Option<usize> {
+        self._backward[col]
     }
 }
 
@@ -302,7 +340,8 @@ fn apply_projection_pull_up_join(
                 .into_rel_node(),
             );
         }
-        let expr = Expr::from_rel_node(
+
+        Expr::from_rel_node(
             RelNode {
                 typ: expr.typ.clone(),
                 children,
@@ -310,8 +349,7 @@ fn apply_projection_pull_up_join(
             }
             .into(),
         )
-        .unwrap();
-        expr
+        .unwrap()
     }
 
     let left = Arc::new(left.clone());

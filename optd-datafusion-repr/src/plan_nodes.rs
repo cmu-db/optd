@@ -2,9 +2,11 @@
 
 mod agg;
 mod apply;
+mod empty_relation;
 mod expr;
 mod filter;
 mod join;
+mod limit;
 pub(super) mod macros;
 mod projection;
 mod scan;
@@ -12,6 +14,7 @@ mod sort;
 
 use std::sync::Arc;
 
+use arrow_schema::DataType;
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId},
     rel_node::{RelNode, RelNodeRef, RelNodeTyp},
@@ -19,12 +22,15 @@ use optd_core::{
 
 pub use agg::{LogicalAgg, PhysicalAgg};
 pub use apply::{ApplyType, LogicalApply};
+pub use empty_relation::{LogicalEmptyRelation, PhysicalEmptyRelation};
 pub use expr::{
-    BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, ExprList, FuncExpr, FuncType,
-    LogOpExpr, LogOpType, SortOrderExpr, SortOrderType, UnOpExpr, UnOpType,
+    BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
+    DataTypeExpr, ExprList, FuncExpr, FuncType, InListExpr, LikeExpr, SortOrderExpr, SortOrderType,
+    UnOpExpr, UnOpType,
 };
 pub use filter::{LogicalFilter, PhysicalFilter};
 pub use join::{JoinType, LogicalJoin, PhysicalHashJoin, PhysicalNestedLoopJoin};
+pub use limit::{LogicalLimit, PhysicalLimit};
 use pretty_xmlish::{Pretty, PrettyConfig};
 pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
@@ -48,6 +54,8 @@ pub enum OptRelNodeTyp {
     Sort,
     Agg,
     Apply(ApplyType),
+    EmptyRelation,
+    Limit,
     // Physical plan nodes
     PhysicalProjection,
     PhysicalFilter,
@@ -56,15 +64,21 @@ pub enum OptRelNodeTyp {
     PhysicalAgg,
     PhysicalHashJoin(JoinType),
     PhysicalNestedLoopJoin(JoinType),
+    PhysicalEmptyRelation,
+    PhysicalLimit,
     PhysicalCollector(GroupId), // only produced after optimization is done
     // Expressions
     Constant(ConstantType),
     ColumnRef,
     UnOp(UnOpType),
     BinOp(BinOpType),
-    LogOp(LogOpType),
     Func(FuncType),
     SortOrder(SortOrderType),
+    Between,
+    Cast,
+    Like,
+    DataType(DataType),
+    InList,
 }
 
 impl OptRelNodeTyp {
@@ -78,6 +92,8 @@ impl OptRelNodeTyp {
                 | Self::Apply(_)
                 | Self::Sort
                 | Self::Agg
+                | Self::EmptyRelation
+                | Self::Limit
                 | Self::PhysicalProjection
                 | Self::PhysicalFilter
                 | Self::PhysicalNestedLoopJoin(_)
@@ -86,6 +102,8 @@ impl OptRelNodeTyp {
                 | Self::PhysicalAgg
                 | Self::PhysicalHashJoin(_)
                 | Self::PhysicalCollector(_)
+                | Self::PhysicalLimit
+                | Self::PhysicalEmptyRelation
         )
     }
 
@@ -98,7 +116,11 @@ impl OptRelNodeTyp {
                 | Self::BinOp(_)
                 | Self::Func(_)
                 | Self::SortOrder(_)
-                | Self::LogOp(_)
+                | Self::Between
+                | Self::Cast
+                | Self::Like
+                | Self::DataType(_)
+                | Self::InList
         )
     }
 }
@@ -120,6 +142,8 @@ impl RelNodeTyp for OptRelNodeTyp {
                 | Self::Apply(_)
                 | Self::Sort
                 | Self::Agg
+                | Self::EmptyRelation
+                | Self::Limit
         )
     }
 
@@ -194,13 +218,13 @@ impl PlanNode {
         self.0.typ.clone()
     }
 
-    pub fn schema(&self, optimizer: CascadesOptimizer<OptRelNodeTyp>) -> Schema {
+    pub fn schema(&self, optimizer: &CascadesOptimizer<OptRelNodeTyp>) -> Schema {
         let group_id = optimizer.resolve_group_id(self.0.clone());
         optimizer.get_property_by_group::<SchemaPropertyBuilder>(group_id, 0)
     }
 
     pub fn from_group(rel_node: OptRelNodeRef) -> Self {
-        return Self(rel_node);
+        Self(rel_node)
     }
 }
 
@@ -300,6 +324,12 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
         OptRelNodeTyp::Apply(_) => LogicalApply::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
+        OptRelNodeTyp::EmptyRelation => LogicalEmptyRelation::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::Limit => LogicalLimit::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
         OptRelNodeTyp::PhysicalFilter => PhysicalFilter::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
@@ -339,10 +369,28 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
         OptRelNodeTyp::SortOrder(_) => SortOrderExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
-        OptRelNodeTyp::LogOp(_) => LogOpExpr::from_rel_node(rel_node)
+        OptRelNodeTyp::PhysicalCollector(_) => PhysicalCollector::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
-        OptRelNodeTyp::PhysicalCollector(group_id) => PhysicalCollector::from_rel_node(rel_node)
+        OptRelNodeTyp::PhysicalEmptyRelation => PhysicalEmptyRelation::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::PhysicalLimit => PhysicalLimit::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::Between => BetweenExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::Cast => CastExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::Like => LikeExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::DataType(_) => DataTypeExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(),
+        OptRelNodeTyp::InList => InListExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
     }
