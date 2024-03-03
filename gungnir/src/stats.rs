@@ -1,1 +1,1 @@
-mod tdigest;
+pub mod tdigest;

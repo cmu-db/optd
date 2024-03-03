@@ -2575,6 +2575,7 @@ dependencies = [
  "camelpaste",
  "datafusion",
  "datafusion-expr",
+ "gungnir",
  "itertools",
  "num-derive",
  "num-traits",
