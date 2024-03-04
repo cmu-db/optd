@@ -1,17 +1,3 @@
-//----------------------------------------------------//
-// This Software is provided to you by...             //
-//       _____                         _              //
-//      / ____|                       (_)             //
-//      | |  __ _   _ _ __   __ _ _ __  _ _ __        //
-//      | | |_ | | | | '_ \ / _` | '_ \| | '__|       //
-//      | |__| | |_| | | | | (_| | | | | | |          //
-//       \_____|\__,_|_| |_|\__, |_| |_|_|_|          //
-//                           __/ |                    //
-//                          |___/                     //
-//                                                    //
-// Author: Alexis Schlomer <aschlome@andrew.cmu.edu>  //
-//----------------------------------------------------//
-
 //! Implementation of the HyperLogLog data structure as described in Flajolet et al. paper:
 //! "HyperLogLog: the analysis of a near-optimal cardinality estimation algorithm" (2007).
 //! For more details, refer to:
@@ -21,14 +7,13 @@
 
 use std::{cmp::max, marker::PhantomData};
 
-// Trait to transform any object into a stream of bytes.
-// TODO(alexis): Lifetimes, perhaps.
+/// Trait to transform any object into a stream of bytes.
 pub trait ByteSerializable {
-    fn to_bytes(&self) -> &[u8];
+    fn to_bytes(&self) -> Vec<u8>;
 }
 
-// The HyperLogLog (HLL) structure to provide a statistical estimate of NDistinct.
-// For safety reasons, HLLs can only count elements of the same ByteSerializable type.
+/// The HyperLogLog (HLL) structure to provide a statistical estimate of NDistinct.
+/// For safety reasons, HLLs can only count elements of the same ByteSerializable type.
 pub struct HyperLogLog<T: ByteSerializable> {
     registers: Vec<u8>, // The buckets to estimate HLL on (i.e. upper p bits).
     precision: u8,      // The precision (p) of our HLL; 4 <= p <= 16.
@@ -38,20 +23,45 @@ pub struct HyperLogLog<T: ByteSerializable> {
     hll_type: PhantomData<T>, // A marker to the data type of our HLL (to silent warnings).
 }
 
+// Serialize common data types for hashing (&str).
+impl ByteSerializable for &str {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.as_bytes().to_vec()
+    }
+}
+
+// Serialize common data types for hashing (numeric).
+macro_rules! impl_byte_serializable_for_numeric {
+        ($($type:ty),*) => {
+            $(
+                impl ByteSerializable for $type {
+                    fn to_bytes(&self) -> Vec<u8> {
+                        self.to_le_bytes().to_vec()
+                    }
+                }
+            )*
+        };
+    }
+
+impl_byte_serializable_for_numeric!(u128, u64, u32, u16, u8);
+impl_byte_serializable_for_numeric!(i128, i64, i32, i16, i8);
+impl_byte_serializable_for_numeric!(usize, isize);
+impl_byte_serializable_for_numeric!(f64, f32);
+
 // Self-contained implementation of the HyperLogLog data structure.
 impl<T> HyperLogLog<T>
 where
     T: ByteSerializable,
 {
-    // Creates and initializes a new empty HyperLogLog.
+    /// Creates and initializes a new empty HyperLogLog.
     pub fn new(precision: u8) -> Self {
-        assert!(4 <= precision && precision <= 16);
+        assert!((4..=16).contains(&precision));
 
         let m = 1 << precision;
         let alpha = compute_alpha(m);
 
         HyperLogLog::<T> {
-            registers: vec![0; m as usize],
+            registers: vec![0; m],
             precision,
             m,
             alpha,
@@ -60,26 +70,26 @@ where
         }
     }
 
-    // Digests an array of ByteSerializable data into the HLL.
+    /// Digests an array of ByteSerializable data into the HLL.
     pub fn aggregate(&mut self, data: &[T]) {
         for d in data {
-            let hash = murmur_hash(d.to_bytes(), 0); // TODO(alexis): Setup seed.
+            let hash = murmur_hash(&d.to_bytes(), 0); // TODO: We ignore DoS attacks (seed).
             let mask = (1 << (self.precision)) - 1;
             let idx = (hash & mask) as usize; // LSB is bucket discriminator; MSB is zero streak.
             self.registers[idx] = max(self.registers[idx], self.zeros(hash));
         }
     }
 
-    // Merges two HLLs together and returns a new one.
-    // Particularly useful for parallel execution.
-    // NOTE: Takes ownership of self and other.
+    /// Merges two HLLs together and returns a new one.
+    /// Particularly useful for parallel execution.
+    /// NOTE: Takes ownership of self and other.
     pub fn merge(self, other: HyperLogLog<T>) -> Self {
         assert!(self.precision == other.precision);
 
         let merged_registers = self
             .registers
             .into_iter()
-            .zip(other.registers.into_iter())
+            .zip(other.registers)
             .map(|(x, y)| x.max(y))
             .collect();
 
@@ -93,12 +103,11 @@ where
         }
     }
 
-    // Returns an estimation of the n_distinct seen so far by the HLL.
+    /// Returns an estimation of the n_distinct seen so far by the HLL.
     pub fn n_distinct(&self) -> u64 {
         let m = self.m as f64;
-        let raw_estimate = self.alpha
-            * (m * m)
-            * self
+        let raw_estimate = self.alpha * (m * m)
+            / self
                 .registers
                 .iter()
                 .fold(0.0, |acc, elem| (1.0 / (1 << elem) as f64) + acc);
@@ -174,6 +183,7 @@ fn compute_alpha(m: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::murmur_hash;
+    use super::HyperLogLog;
 
     #[test]
     fn murmur_string() {
@@ -195,5 +205,21 @@ mod tests {
         );
     }
 
-    // TODO(alexis): Test HLL.
+    #[test]
+    fn hll_small_strings() {
+        let mut hll = HyperLogLog::<&str>::new(12);
+
+        let data = vec!["a", "b"];
+        hll.aggregate(&data);
+        assert_eq!(hll.n_distinct(), data.len() as u64);
+    }
+
+    #[test]
+    fn hll_small_u64() {
+        let mut hll = HyperLogLog::<u64>::new(12);
+
+        let data = vec![1, 2];
+        hll.aggregate(&data);
+        assert_eq!(hll.n_distinct(), data.len() as u64);
+    }
 }
