@@ -184,6 +184,7 @@ fn compute_alpha(m: usize) -> f64 {
 mod tests {
     use super::murmur_hash;
     use super::HyperLogLog;
+    use rand::{distributions::Alphanumeric, Rng};
 
     #[test]
     fn murmur_string() {
@@ -222,4 +223,32 @@ mod tests {
         hll.aggregate(&data);
         assert_eq!(hll.n_distinct(), data.len() as u64);
     }
+
+    // Generates n random 10-char length strings that have an occurance sampled from
+    // the uniform [1:max_occ] distribution. Returns (vec<(str, occ)>, total_occ).
+    fn generate_random_strings(n: usize, max_occ: usize) -> (Vec<(String, usize)>, usize) {
+        let mut total_occ: usize = 0;
+        let mut strings = Vec::with_capacity(n);
+        for _ in 0..n {
+            let rand_string: String = rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(10)
+                .map(char::from)
+                .collect();
+
+            let occ: usize = rand::thread_rng().gen_range(1..=max_occ);
+            strings.push((rand_string, occ));
+
+            total_occ += occ;
+        }
+
+        (strings, total_occ)
+    }
+
+    #[test]
+    fn hll_big() {
+        println!("{:#?}", generate_random_strings(10, 10));
+    }
+
+    // TODO(Alexis): Then just test w/ merging.
 }
