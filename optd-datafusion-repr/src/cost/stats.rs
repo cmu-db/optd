@@ -1,4 +1,4 @@
-use gungnir::stats::tdigest::TDigest;
+use optd_gungnir::stats::tdigest::TDigest;
 use optd_core::rel_node::Value;
 
 use super::base_cost::Distribution;

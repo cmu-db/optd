@@ -210,7 +210,23 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn hll_massive_parallel() {
+        let mut hll = HyperLogLog::<&str>::new(12);
+        let n_distinct = 100000;
+        let relative_error = 0.03; // We allow a 3% relatative error rate.
 
+        let strings = generate_random_strings(n_distinct, 1);
+        let slices: Vec<&str> = strings.iter().map(AsRef::as_ref).collect();
+
+        hll.aggregate(&slices);
+
+        assert!(is_close(
+            hll.n_distinct() as f64,
+            n_distinct as f64,
+            relative_error
+        ));
+    }
 
     // TODO(Alexis): Then just test w/ merging.
 }

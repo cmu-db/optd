@@ -1785,15 +1785,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2fabcfbdc87f4758337ca535fb41a6d701b65693ce38287d856d1674551ec9b"
 
 [[package]]
-name = "gungnir"
-version = "0.1.0"
-dependencies = [
- "crossbeam",
- "itertools",
- "rand",
-]
-
-[[package]]
 name = "h2"
 version = "0.3.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2575,15 +2566,24 @@ dependencies = [
  "camelpaste",
  "datafusion",
  "datafusion-expr",
- "gungnir",
  "itertools",
  "num-derive",
  "num-traits",
  "optd-core",
+ "optd-gungnir",
  "ordered-float 4.2.0",
  "pretty-xmlish",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "optd-gungnir"
+version = "0.1.0"
+dependencies = [
+ "crossbeam",
+ "itertools",
+ "rand",
 ]
 
 [[package]]
