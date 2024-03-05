@@ -202,7 +202,10 @@ fn lerp(a: f64, b: f64, f: f64) -> f64 {
 mod tests {
     use super::TDigest;
     use crossbeam::thread;
-    use rand::distributions::{Distribution, Uniform, WeightedIndex};
+    use rand::{
+        distributions::{Distribution, Uniform, WeightedIndex},
+        rngs::StdRng, SeedableRng,
+    };
     use std::sync::{Arc, Mutex};
 
     // Whether obtained = expected +/- error
@@ -236,7 +239,7 @@ mod tests {
 
         let (min, max) = (-1000.0, 1000.0);
         let uniform_distr = Uniform::new(min, max);
-        let mut rng = rand::thread_rng();
+        let mut rng = StdRng::seed_from_u64(0);
 
         let batch_size = 1024;
         let batch_numbers = 64;
@@ -271,7 +274,7 @@ mod tests {
 
                     let mut random_numbers = Vec::with_capacity(batch_size);
                     let uniform_distr = Uniform::new(min, max);
-                    let mut rng = rand::thread_rng();
+                    let mut rng = StdRng::seed_from_u64(0);
 
                     for _ in 0..batch_size {
                         let num: f64 = uniform_distr.sample(&mut rng);
@@ -302,7 +305,7 @@ mod tests {
         let total_weight: i32 = weights.iter().sum();
 
         let weighted_distr = WeightedIndex::new(weights).unwrap();
-        let mut rng = rand::thread_rng();
+        let mut rng = StdRng::seed_from_u64(0);
 
         let batch_size = 128;
         let batch_numbers = 16;

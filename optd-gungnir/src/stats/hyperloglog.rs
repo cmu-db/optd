@@ -5,6 +5,7 @@
 //! We modified it by hashing objects into 64-bit values instead of 32-bit ones to reduce the
 //! number of collisions and eliminate the need for a large range correction estimator.
 
+use crate::stats::murmur2::murmur_hash;
 use std::{cmp::max, marker::PhantomData};
 
 /// Trait to transform any object into a stream of bytes.
@@ -76,7 +77,7 @@ where
             let hash = murmur_hash(&d.to_bytes(), 0); // TODO: We ignore DoS attacks (seed).
             let mask = (1 << (self.precision)) - 1;
             let idx = (hash & mask) as usize; // LSB is bucket discriminator; MSB is zero streak.
-            self.registers[idx] = max(self.registers[idx], self.zeros(hash));
+            self.registers[idx] = max(self.registers[idx], self.zeros(hash) + 1);
         }
     }
 
@@ -133,42 +134,6 @@ where
     }
 }
 
-// Implementation of the MurmurHash2 function, for 64b outputs, by Austin Appleby (2008).
-// Note: Assumes little-endian machines.
-fn murmur_hash(bytes: &[u8], seed: u64) -> u64 {
-    const M: u64 = 0xc6a4a7935bd1e995;
-    const R: u8 = 47;
-
-    let mut hash = seed ^ (bytes.len() as u64).wrapping_mul(M);
-
-    let div = bytes.len() / 8;
-    let rem = bytes.len() % 8;
-
-    let whole_part: &[u64] =
-        unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const u64, div) };
-
-    for batch in whole_part {
-        let mut k = batch.wrapping_mul(M);
-        k ^= k >> R;
-        k = k.wrapping_mul(M);
-
-        hash ^= k;
-        hash = hash.wrapping_mul(M);
-    }
-
-    if rem > 0 {
-        for i in 0..rem {
-            hash ^= (bytes[div * 8 + i] as u64) << (i * 8);
-        }
-        hash = hash.wrapping_mul(M);
-    }
-
-    hash ^= hash >> R;
-    hash = hash.wrapping_mul(M);
-    hash ^= hash >> R;
-    hash
-}
-
 // Computes the alpha HLL parameter based on m.
 fn compute_alpha(m: usize) -> f64 {
     match m {
@@ -182,29 +147,8 @@ fn compute_alpha(m: usize) -> f64 {
 // Start of unit testing section.
 #[cfg(test)]
 mod tests {
-    use super::murmur_hash;
     use super::HyperLogLog;
     use rand::{distributions::Alphanumeric, Rng};
-
-    #[test]
-    fn murmur_string() {
-        assert_eq!(
-            murmur_hash("Hyper🪵🪵 Rules!".as_bytes(), 1257851387),
-            1623602735526180105
-        );
-        assert_eq!(
-            murmur_hash(
-                "All work and no play makes Jack a dull boy".as_bytes(),
-                1111111111
-            ),
-            1955247671966919985
-        );
-        assert_eq!(murmur_hash("".as_bytes(), 0), 0);
-        assert_eq!(
-            murmur_hash("Gungnir™".as_bytes(), 4242424242),
-            13329505761566523763
-        );
-    }
 
     #[test]
     fn hll_small_strings() {
@@ -224,31 +168,49 @@ mod tests {
         assert_eq!(hll.n_distinct(), data.len() as u64);
     }
 
-    // Generates n random 10-char length strings that have an occurance sampled from
-    // the uniform [1:max_occ] distribution. Returns (vec<(str, occ)>, total_occ).
-    fn generate_random_strings(n: usize, max_occ: usize) -> (Vec<(String, usize)>, usize) {
-        let mut total_occ: usize = 0;
+    // Generates n random 32-char length strings that have an occurance sampled from
+    // the uniform [1:max_occ] distribution.
+    fn generate_random_strings(n: usize, max_occ: usize) -> Vec<String> {
         let mut strings = Vec::with_capacity(n);
         for _ in 0..n {
             let rand_string: String = rand::thread_rng()
                 .sample_iter(&Alphanumeric)
-                .take(10)
+                .take(32)
                 .map(char::from)
                 .collect();
 
             let occ: usize = rand::thread_rng().gen_range(1..=max_occ);
-            strings.push((rand_string, occ));
-
-            total_occ += occ;
+            strings.extend(std::iter::repeat(rand_string).take(occ));
         }
 
-        (strings, total_occ)
+        strings
+    }
+
+    // Whether obtained = expected +/- relative_error
+    fn is_close(obtained: f64, expected: f64, relative_error: f64) -> bool {
+        let margin = expected * relative_error;
+        ((expected - margin) < obtained) && (obtained < (expected + margin))
     }
 
     #[test]
     fn hll_big() {
-        println!("{:#?}", generate_random_strings(10, 10));
+        let mut hll = HyperLogLog::<&str>::new(12);
+        let n_distinct = 100000;
+        let relative_error = 0.03; // We allow a 3% relatative error rate.
+
+        let strings = generate_random_strings(n_distinct, 100);
+        let slices: Vec<&str> = strings.iter().map(AsRef::as_ref).collect();
+
+        hll.aggregate(&slices);
+
+        assert!(is_close(
+            hll.n_distinct() as f64,
+            n_distinct as f64,
+            relative_error
+        ));
     }
+
+
 
     // TODO(Alexis): Then just test w/ merging.
 }
