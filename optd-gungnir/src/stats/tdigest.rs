@@ -204,7 +204,8 @@ mod tests {
     use crossbeam::thread;
     use rand::{
         distributions::{Distribution, Uniform, WeightedIndex},
-        rngs::StdRng, SeedableRng,
+        rngs::StdRng,
+        SeedableRng,
     };
     use std::sync::{Arc, Mutex};
 
