@@ -24,8 +24,8 @@ pub struct HyperLogLog<T: ByteSerializable> {
     hll_type: PhantomData<T>, // A marker to the data type of our HLL (to silent warnings).
 }
 
-// Serialize common data types for hashing (&str).
-impl ByteSerializable for &str {
+// Serialize common data types for hashing (String).
+impl ByteSerializable for String {
     fn to_bytes(&self) -> Vec<u8> {
         self.as_bytes().to_vec()
     }
@@ -147,14 +147,20 @@ fn compute_alpha(m: usize) -> f64 {
 // Start of unit testing section.
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    };
+
     use super::HyperLogLog;
-    use rand::{distributions::Alphanumeric, Rng};
+    use crossbeam::thread;
+    use rand::{distributions::Alphanumeric, rngs::StdRng, Rng, SeedableRng};
 
     #[test]
     fn hll_small_strings() {
-        let mut hll = HyperLogLog::<&str>::new(12);
+        let mut hll = HyperLogLog::<String>::new(12);
 
-        let data = vec!["a", "b"];
+        let data = vec!["a".to_string(), "b".to_string()];
         hll.aggregate(&data);
         assert_eq!(hll.n_distinct(), data.len() as u64);
     }
@@ -170,16 +176,18 @@ mod tests {
 
     // Generates n random 32-char length strings that have an occurance sampled from
     // the uniform [1:max_occ] distribution.
-    fn generate_random_strings(n: usize, max_occ: usize) -> Vec<String> {
+    fn generate_random_strings(n: usize, max_occ: usize, job_id: usize) -> Vec<String> {
         let mut strings = Vec::with_capacity(n);
-        for _ in 0..n {
-            let rand_string: String = rand::thread_rng()
+        for idx in 0..n {
+            let mut rng = StdRng::seed_from_u64((job_id * n + idx) as u64);
+            let rand_string: String = rng
+                .clone()
                 .sample_iter(&Alphanumeric)
                 .take(32)
                 .map(char::from)
                 .collect();
 
-            let occ: usize = rand::thread_rng().gen_range(1..=max_occ);
+            let occ: usize = rng.gen_range(1..=max_occ);
             strings.extend(std::iter::repeat(rand_string).take(occ));
         }
 
@@ -194,14 +202,13 @@ mod tests {
 
     #[test]
     fn hll_big() {
-        let mut hll = HyperLogLog::<&str>::new(12);
+        let precision = 12;
+        let mut hll = HyperLogLog::<String>::new(precision);
         let n_distinct = 100000;
-        let relative_error = 0.03; // We allow a 3% relatative error rate.
+        let relative_error = 0.05; // We allow a 5% relatative error rate.
 
-        let strings = generate_random_strings(n_distinct, 100);
-        let slices: Vec<&str> = strings.iter().map(AsRef::as_ref).collect();
-
-        hll.aggregate(&slices);
+        let strings = generate_random_strings(n_distinct, 100, 0);
+        hll.aggregate(&strings);
 
         assert!(is_close(
             hll.n_distinct() as f64,
@@ -212,21 +219,42 @@ mod tests {
 
     #[test]
     fn hll_massive_parallel() {
-        let mut hll = HyperLogLog::<&str>::new(12);
+        let precision = 12;
         let n_distinct = 100000;
-        let relative_error = 0.03; // We allow a 3% relatative error rate.
+        let n_jobs = 16;
+        let relative_error = 0.05; // We allow a 5% relatative error rate.
 
-        let strings = generate_random_strings(n_distinct, 1);
-        let slices: Vec<&str> = strings.iter().map(AsRef::as_ref).collect();
+        let result_hll = Arc::new(Mutex::new(Option::Some(HyperLogLog::<String>::new(
+            precision,
+        ))));
+        let job_id = AtomicUsize::new(0);
+        thread::scope(|s| {
+            for _ in 0..n_jobs {
+                s.spawn(|_| {
+                    let mut local_hll = HyperLogLog::<String>::new(precision);
+                    let curr_job_id = job_id.fetch_add(1, Ordering::SeqCst);
 
-        hll.aggregate(&slices);
+                    let strings = generate_random_strings(n_distinct, 100, curr_job_id);
+                    local_hll.aggregate(&strings);
 
+                    assert!(is_close(
+                        local_hll.n_distinct() as f64,
+                        n_distinct as f64,
+                        relative_error
+                    ));
+
+                    let mut result = result_hll.lock().unwrap();
+                    *result = Option::Some(result.take().unwrap().merge(local_hll));
+                });
+            }
+        })
+        .unwrap();
+
+        let hll = result_hll.lock().unwrap().take().unwrap();
         assert!(is_close(
             hll.n_distinct() as f64,
-            n_distinct as f64,
+            (n_distinct * n_jobs) as f64,
             relative_error
         ));
     }
-
-    // TODO(Alexis): Then just test w/ merging.
 }

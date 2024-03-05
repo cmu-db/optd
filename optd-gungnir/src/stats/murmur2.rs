@@ -1,6 +1,7 @@
 //! Implementation of the MurmurHash2 function, for 64b outputs, by Austin Appleby (2008).
 //! Note: Assumes little-endian machines.
 
+/// Returns the MurmurHash2 (u64) given a stream of bytes and a seed.
 pub fn murmur_hash(bytes: &[u8], seed: u64) -> u64 {
     const M: u64 = 0xc6a4a7935bd1e995;
     const R: u8 = 47;
