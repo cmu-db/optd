@@ -3,14 +3,15 @@
 //! For more details, refer to:
 //! https://people.csail.mit.edu/rrw/6.045-2017/encalgs-mg.pdf
 
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
 use itertools::Itertools;
 
 /// The Misra-Gries structure to approximate the k most frequent elements in
 /// a stream of N elements. It will always identify elements with frequency
 /// f >= (n/k), and include additional leftovers.
-pub struct MisraGries<T: PartialEq + Eq + Hash + Clone> {
+#[derive(Debug)]
+pub struct MisraGries<T: PartialEq + Eq + Hash + Clone + Debug> {
     frequencies: HashMap<T, i32>, // The approximated frequencies of an element T.
     k: u16,                       // The max size of our frequencies hashmap.
 }
@@ -18,7 +19,7 @@ pub struct MisraGries<T: PartialEq + Eq + Hash + Clone> {
 // Self-contained implementation of the Misra-Gries data structure.
 impl<T> MisraGries<T>
 where
-    T: PartialEq + Eq + Hash + Clone,
+    T: PartialEq + Eq + Hash + Clone + Debug,
 {
     /// Creates and initializes a new empty Misra-Gries.
     pub fn new(k: u16) -> Self {
@@ -89,4 +90,59 @@ where
 
 // Start of unit testing section.
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::MisraGries;
+    use rand::seq::SliceRandom;
+    use rand::{rngs::StdRng, SeedableRng};
+
+    #[test]
+    fn aggregate_full_size() {
+        let data = vec![0, 1, 2, 3];
+        let mut misra_gries = MisraGries::<i32>::new(data.len() as u16);
+
+        misra_gries.aggregate(&data);
+
+        for key in misra_gries.most_frequent_keys() {
+            assert!(data.contains(key));
+        }
+    }
+
+    #[test]
+    fn aggregate_half_size() {
+        let data = vec![0, 1, 2, 3];
+        let data_dup = [data.as_slice(), data.as_slice()].concat();
+
+        let mut misra_gries = MisraGries::<i32>::new(data.len() as u16);
+
+        misra_gries.aggregate(&data_dup);
+
+        for key in misra_gries.most_frequent_keys() {
+            assert!(data.contains(key));
+        }
+    }
+
+    #[test]
+    fn aggregate_zipfian() {
+        // TODO(Alexis): Cleanup below & handle only 4 but have room for 16.
+        let n_distinct = 1000;
+        let mut data = Vec::<i32>::new();
+
+        for idx in 1..=n_distinct {
+            let occurance = n_distinct / idx;
+            for _ in 0..occurance {
+                data.push(idx);
+            }
+        }
+
+        let mut rng = StdRng::seed_from_u64(0);
+        data.shuffle(&mut rng);
+
+        let n = data.len();
+        let mut misra_gries = MisraGries::<i32>::new(16);
+
+        misra_gries.aggregate(&data);
+
+        println!("{:#?}", misra_gries);
+        println!("{}", n);
+    }
+}
