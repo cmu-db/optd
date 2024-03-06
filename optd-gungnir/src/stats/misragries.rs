@@ -5,6 +5,8 @@
 
 use std::{collections::HashMap, hash::Hash};
 
+use itertools::Itertools;
+
 /// The Misra-Gries structure to approximate the k most frequent elements in
 /// a stream of N elements. It will always identify elements with frequency
 /// f >= (n/k), and include additional leftovers.
@@ -75,6 +77,13 @@ where
             .frequencies
             .iter()
             .for_each(|(key, occ)| self.insert_element(key.clone(), *occ));
+    }
+
+    /// Returns an estimate of the K most frequent keys.
+    /// Returns less than K results if less than N distinct
+    /// values have been encountered so far.
+    pub fn most_frequent_keys(&self) -> Vec<&T> {
+        self.frequencies.keys().collect_vec()
     }
 }
 
