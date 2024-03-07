@@ -38,6 +38,7 @@ The documentation is available in the mdbook format in the [docs](docs) director
 * `optd-adaptive-demo`: Demo of adaptive optimization capabilities of optd. More information available in the [docs](docs/).
 * `optd-sqlplannertest`: Planner test of optd based on [risinglightdb/sqlplannertest-rs](https://github.com/risinglightdb/sqlplannertest-rs).
 * `optd-gungnir`: Scalable, memory-efficient, and parallelizable statistical methods for cardinality estimation (e.g. TDigest, HyperLogLog).
+* `optd-perftest`: A CLI program for testing performance (cardinality, throughput, etc.) against other databases.
 
 
 # Related Works
