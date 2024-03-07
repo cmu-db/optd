@@ -1,7 +1,7 @@
-use optd_sqlplannertest::DatafusionDb;
-use anyhow::{self};
 use crate::postgres::PostgresDb;
+use anyhow::{self};
 use async_trait::async_trait;
+use optd_sqlplannertest::DatafusionDb;
 
 /// This struct performs cardinality testing across one or more databases.
 /// Another design would be for the CardtestRunnerDBHelper trait to expose a function
@@ -14,7 +14,7 @@ pub struct CardtestRunner {
 
 impl CardtestRunner {
     pub async fn new(databases: Vec<Box<dyn CardtestRunnerDBHelper>>) -> anyhow::Result<Self> {
-        Ok(CardtestRunner{databases})
+        Ok(CardtestRunner { databases })
     }
 
     /// Get the Q-error of a query using the cost models of all databases being tested
@@ -25,19 +25,21 @@ impl CardtestRunner {
     pub async fn eval_qerrors(&self, sql: &str) -> anyhow::Result<Vec<f64>> {
         let mut qerrors = vec![];
         let mut first_true_card = None;
-        
+
         for database in &self.databases {
             let true_card = database.eval_true_card(sql).await?;
             match first_true_card {
                 None => first_true_card = Some(true_card),
-                Some(first_true_card) => if true_card != first_true_card {
-                    // you could return an error here but that involves creating
-                    // a custom error type which seems overkill for now
-                    // this is a testing tool anyways and not production software
-                    panic!("The true cardinality of {} ({}), is != the true cardinality of {} ({})", database.as_ref().get_name(), true_card, self.databases.get(0).unwrap().as_ref().get_name(), first_true_card)
-                },
+                Some(first_true_card) => {
+                    if true_card != first_true_card {
+                        // you could return an error here but that involves creating
+                        // a custom error type which seems overkill for now
+                        // this is a testing tool anyways and not production software
+                        panic!("The true cardinality of {} ({}), is != the true cardinality of {} ({})", database.as_ref().get_name(), true_card, self.databases.get(0).unwrap().as_ref().get_name(), first_true_card)
+                    }
+                }
             };
-            
+
             let est_card = database.eval_est_card(sql).await?;
             let qerror = Self::calc_qerror(true_card, est_card);
             qerrors.push(qerror);
@@ -47,7 +49,10 @@ impl CardtestRunner {
     }
 
     fn calc_qerror(true_card: usize, est_card: usize) -> f64 {
-        f64::max(true_card as f64 / est_card as f64, est_card as f64 / true_card as f64)
+        f64::max(
+            true_card as f64 / est_card as f64,
+            est_card as f64 / true_card as f64,
+        )
     }
 }
 
