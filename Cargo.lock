@@ -2587,6 +2587,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "optd-perftest"
+version = "0.1.0"
+
+[[package]]
 name = "optd-sqlplannertest"
 version = "0.1.0"
 dependencies = [
