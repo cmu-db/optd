@@ -35,7 +35,7 @@ impl CardtestRunner {
                         // you could return an error here but that involves creating
                         // a custom error type which seems overkill for now
                         // this is a testing tool anyways and not production software
-                        panic!("The true cardinality of {} ({}), is != the true cardinality of {} ({})", database.as_ref().get_name(), true_card, self.databases.get(0).unwrap().as_ref().get_name(), first_true_card)
+                        panic!("The true cardinality of {} ({}), is != the true cardinality of {} ({})", database.as_ref().get_name(), true_card, self.databases.first().unwrap().as_ref().get_name(), first_true_card)
                     }
                 }
             };
