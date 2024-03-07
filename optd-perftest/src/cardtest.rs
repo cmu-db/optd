@@ -1,21 +1,53 @@
 use optd_sqlplannertest::DatafusionDb;
-use anyhow::Result;
+use anyhow::{self};
+use crate::postgres::PostgresDb;
+use async_trait::async_trait;
 
 /// This struct performs cardinality testing across one or more databases.
-/// Another design would be for the CardtestRunnerHelper trait to expose a function
+/// Another design would be for the CardtestRunnerDBHelper trait to expose a function
 ///   to evaluate the Q-error. However, I chose not to do this design for reasons
-///   described in the comments of the CardtestRunnerHelper trait. This is why
+///   described in the comments of the CardtestRunnerDBHelper trait. This is why
 ///   you would use CardtestRunner even for computing the Q-error of a single database.
-pub struct CardtestRunner {}
+pub struct CardtestRunner {
+    databases: Vec<Box<dyn CardtestRunnerDBHelper>>,
+}
 
 impl CardtestRunner {
+    pub async fn new(databases: Vec<Box<dyn CardtestRunnerDBHelper>>) -> anyhow::Result<Self> {
+        Ok(CardtestRunner{databases})
+    }
+
     /// Get the Q-error of a query using the cost models of all databases being tested
     /// Q-error is defined in [Leis 2015](https://15721.courses.cs.cmu.edu/spring2024/papers/16-costmodels/p204-leis.pdf)
     /// One detail not specified in the paper is that Q-error is based on the ratio of true and estimated cardinality
     ///   of the entire query, not of a subtree of the query. This detail is specified in Section 7.1 of
     ///   [Yang 2020](https://arxiv.org/pdf/2006.08109.pdf)
-    async fn eval_qerrors(&self, sql: &str) -> Result<Vec<f64>> {
-        todo!()
+    pub async fn eval_qerrors(&self, sql: &str) -> anyhow::Result<Vec<f64>> {
+        let mut qerrors = vec![];
+        let mut first_true_card = None;
+        
+        for database in &self.databases {
+            let true_card = database.eval_true_card(sql).await?;
+            match first_true_card {
+                None => first_true_card = Some(true_card),
+                Some(first_true_card) => if true_card != first_true_card {
+                    // you could return an error here but that involves creating
+                    // a custom error type which seems overkill for now
+                    // this is a testing tool anyways and not production software
+                    panic!("The true cardinality of {} ({}), is != the true cardinality of {} ({})", database.as_ref().get_name(), true_card, self.databases.get(0).unwrap().as_ref().get_name(), first_true_card)
+                },
+            };
+            
+            let est_card = database.eval_est_card(sql).await?;
+            let qerror = Self::calc_qerror(true_card, est_card);
+            qerrors.push(qerror);
+        }
+
+        Ok(qerrors)
+    }
+
+    fn calc_qerror(true_card: usize, est_card: usize) -> f64 {
+        f64::max(true_card as f64 / est_card as f64, est_card as f64 / true_card as f64)
     }
 }
 
@@ -28,39 +60,40 @@ impl CardtestRunner {
 ///   indeed the same when doing cardinality testing.
 /// If you want to compute the Q-error of a single database, just create a
 ///   CardtestRunner with a single database as input.
-trait CardtestRunnerHelper {
-    async fn eval_true_card(&self, sql: &str) -> Result<usize>;
-    async fn eval_est_card(&self, sql: &str) -> Result<usize>;
+#[async_trait]
+pub trait CardtestRunnerDBHelper {
+    // get_name() has &self so that we're able to do Box<dyn CardtestRunnerDBHelper>
+    fn get_name(&self) -> &str;
+    async fn eval_true_card(&self, sql: &str) -> anyhow::Result<usize>;
+    async fn eval_est_card(&self, sql: &str) -> anyhow::Result<usize>;
 }
 
-impl CardtestRunnerHelper for DatafusionDb {
-    async fn eval_true_card(&self, sql: &str) -> Result<usize> {
-        // think about await vs block_on
-        let datafusion_db = DatafusionDb::new().await?;
-        let rows = datafusion_db.execute(sql, true).await?;
-        let num_rows = rows.len();
-        Ok(num_rows)
+#[async_trait]
+impl CardtestRunnerDBHelper for DatafusionDb {
+    fn get_name(&self) -> &str {
+        "DataFusion"
     }
 
-    async fn eval_est_card(&self, _sql: &str) -> Result<usize> {
-        Ok(0)
+    async fn eval_true_card(&self, _sql: &str) -> anyhow::Result<usize> {
+        Ok(10)
     }
-}
 
-struct PostgresDb {}
-
-impl PostgresDb {
-    async fn new() -> Result<Self> {
-        Ok(PostgresDb{})
+    async fn eval_est_card(&self, _sql: &str) -> anyhow::Result<usize> {
+        Ok(12)
     }
 }
 
-impl CardtestRunnerHelper for PostgresDb {
-    async fn eval_true_card(&self, _sql: &str) -> Result<usize> {
-        Ok(0)
+#[async_trait]
+impl CardtestRunnerDBHelper for PostgresDb {
+    fn get_name(&self) -> &str {
+        "Postgres"
     }
 
-    async fn eval_est_card(&self, _sql: &str) -> Result<usize> {
-        Ok(0)
+    async fn eval_true_card(&self, _sql: &str) -> anyhow::Result<usize> {
+        Ok(10)
+    }
+
+    async fn eval_est_card(&self, _sql: &str) -> anyhow::Result<usize> {
+        Ok(5)
     }
 }
