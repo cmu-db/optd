@@ -1,7 +1,7 @@
 use crate::{cardtest::{Benchmark, CardtestRunnerDBHelper}, shell};
 use anyhow::Result;
 use async_trait::async_trait;
-use std::{env::{self, consts::OS}, fs::{self, File}, path::{Path, PathBuf}};
+use std::{env::{self, consts::OS}, fs::{self, File}, path::{Path, PathBuf}, process::Command};
 
 const OPTD_DB_NAME: &str = "optd";
 
@@ -9,8 +9,9 @@ pub struct PostgresDb {
     verbose: bool,
 
     // cache these paths so we don't have to build them multiple times
-    postgres_db_dpath: PathBuf,
+    _postgres_db_dpath: PathBuf,
     pgdata_dpath: PathBuf,
+    log_fpath: PathBuf,
 }
 
 impl PostgresDb {
@@ -27,14 +28,14 @@ impl PostgresDb {
             panic!("postgres_db_dpath ({:?}) doesn't exist. Make sure to run this script from the base optd/ dir", postgres_db_dpath);
         }
         let pgdata_dpath = postgres_db_dpath.join("pgdata");
+        let log_fpath = postgres_db_dpath.join("log");
 
         // create Self
-        let db = PostgresDb {verbose, postgres_db_dpath, pgdata_dpath};
+        let db = PostgresDb {verbose, _postgres_db_dpath: postgres_db_dpath, pgdata_dpath, log_fpath};
 
         // (re)start postgres
         // TODO(phw2): do this in next commit
-        db.install_postgres().await?;
-        db.init_pgdata().await?;
+        db.restart_postgres().await?;
 
         Ok(db)
     }
@@ -61,6 +62,7 @@ impl PostgresDb {
 
     /// Initializes pgdata_dpath directory if it wasn't already initialized
     async fn init_pgdata(&self) -> Result<()> {
+        self.install_postgres().await?;
         let done_fpath = self.pgdata_dpath.join("initdb_done");
         if !done_fpath.exists() {
             if self.verbose {
@@ -77,6 +79,25 @@ impl PostgresDb {
                 );
             }
         }
+        Ok(())
+    }
+
+    /// (Re)start the Postgres process
+    /// It will always be started using the pg_ctl binary installed with the package manager
+    /// It will always be started on port 5432
+    async fn restart_postgres(&self) -> Result<()> {
+        self.init_pgdata().await?;
+        let is_postgres_running = Command::new("pg_isready").output()?.status.success();
+        if is_postgres_running {
+            if self.verbose {
+                println!("stopping postgres...");
+            }
+            shell::run_command_with_status_check(&format!("pg_ctl -D{} stop", self.pgdata_dpath.to_str().unwrap()))?;
+        }
+        if self.verbose {
+            println!("starting postgres...");
+        }
+        shell::run_command_with_status_check(&format!("pg_ctl -D{} -l{} start", self.pgdata_dpath.to_str().unwrap(), self.log_fpath.to_str().unwrap()))?;
         Ok(())
     }
 

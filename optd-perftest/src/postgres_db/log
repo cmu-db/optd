@@ -1,0 +1,32 @@
+2024-03-08 15:25:56.397 PST [8203] LOG:  starting PostgreSQL 14.11 (Homebrew) on aarch64-apple-darwin23.2.0, compiled by Apple clang version 15.0.0 (clang-1500.1.0.2.5), 64-bit
+2024-03-08 15:25:56.398 PST [8203] LOG:  listening on IPv6 address "::1", port 5432
+2024-03-08 15:25:56.398 PST [8203] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2024-03-08 15:25:56.398 PST [8203] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5432"
+2024-03-08 15:25:56.400 PST [8204] LOG:  database system was shut down at 2024-03-08 14:58:16 PST
+2024-03-08 15:25:56.402 PST [8203] LOG:  database system is ready to accept connections
+2024-03-08 15:26:05.943 PST [8953] FATAL:  lock file "postmaster.pid" already exists
+2024-03-08 15:26:05.943 PST [8953] HINT:  Is another postmaster (PID 8203) running in data directory "/Users/patrickwang/Documents/mastersStuff/15721/optd/optd-perftest/src/postgres_db/pgdata"?
+2024-03-08 15:28:36.168 PST [10511] FATAL:  database "patrickwang" does not exist
+2024-03-08 15:28:36.176 PST [8203] LOG:  received fast shutdown request
+2024-03-08 15:28:36.176 PST [8203] LOG:  aborting any active transactions
+2024-03-08 15:28:36.177 PST [8203] LOG:  background worker "logical replication launcher" (PID 8210) exited with exit code 1
+2024-03-08 15:28:36.177 PST [8205] LOG:  shutting down
+2024-03-08 15:28:36.179 PST [8203] LOG:  database system is shut down
+2024-03-08 15:28:36.319 PST [10529] LOG:  starting PostgreSQL 14.11 (Homebrew) on aarch64-apple-darwin23.2.0, compiled by Apple clang version 15.0.0 (clang-1500.1.0.2.5), 64-bit
+2024-03-08 15:28:36.320 PST [10529] LOG:  listening on IPv6 address "::1", port 5432
+2024-03-08 15:28:36.320 PST [10529] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2024-03-08 15:28:36.321 PST [10529] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5432"
+2024-03-08 15:28:36.322 PST [10530] LOG:  database system was shut down at 2024-03-08 15:28:36 PST
+2024-03-08 15:28:36.324 PST [10529] LOG:  database system is ready to accept connections
+2024-03-08 15:28:51.566 PST [11233] FATAL:  database "patrickwang" does not exist
+2024-03-08 15:28:51.570 PST [10529] LOG:  received fast shutdown request
+2024-03-08 15:28:51.570 PST [10529] LOG:  aborting any active transactions
+2024-03-08 15:28:51.571 PST [10529] LOG:  background worker "logical replication launcher" (PID 10536) exited with exit code 1
+2024-03-08 15:28:51.571 PST [10531] LOG:  shutting down
+2024-03-08 15:28:51.572 PST [10529] LOG:  database system is shut down
+2024-03-08 15:28:51.701 PST [11251] LOG:  starting PostgreSQL 14.11 (Homebrew) on aarch64-apple-darwin23.2.0, compiled by Apple clang version 15.0.0 (clang-1500.1.0.2.5), 64-bit
+2024-03-08 15:28:51.702 PST [11251] LOG:  listening on IPv6 address "::1", port 5432
+2024-03-08 15:28:51.702 PST [11251] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2024-03-08 15:28:51.703 PST [11251] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5432"
+2024-03-08 15:28:51.704 PST [11252] LOG:  database system was shut down at 2024-03-08 15:28:51 PST
+2024-03-08 15:28:51.705 PST [11251] LOG:  database system is ready to accept connections
