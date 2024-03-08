@@ -2,9 +2,8 @@ use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
 use anyhow::Result;
 use optd_sqlplannertest::DatafusionDb;
 use postgres_db::PostgresDb;
-use std::path::Path;
 
-use crate::{cardtest::Benchmark, tpch::{TpchConfig, TpchKit}};
+use crate::{cardtest::Benchmark, tpch::{TpchKit, TPCH_KIT_POSTGRES}};
 
 mod cardtest;
 mod datafusion_db_cardtest;
@@ -22,8 +21,7 @@ async fn main() -> Result<()> {
     cardtest_runner.load_databases(Benchmark::Test).await?;
     let qerrors = cardtest_runner.eval_qerrors("SELECT * FROM t1;").await?;
     println!("qerrors: {:?}", qerrors);
-    let kit = TpchKit::build(TpchConfig {scale_factor: 1}).unwrap();
-    kit.gen_tpch_tables();
-    println!("file!(): {:?}", Path::new(file!()).parent().unwrap().to_path_buf());
+    let kit = TpchKit::build(true).unwrap();
+    kit.gen_tpch_tables(TPCH_KIT_POSTGRES, 1)?;
     Ok(())
 }

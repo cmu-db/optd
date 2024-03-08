@@ -16,6 +16,12 @@ pub enum Benchmark {
     Tpch(TpchConfig),
 }
 
+/// Describes a complete TPC-H "workload", which is all information needed to
+/// generate the data and execute the queries.
+pub struct TpchConfig {
+    pub scale_factor: i32,
+}
+
 impl CardtestRunner {
     pub async fn new(databases: Vec<Box<dyn CardtestRunnerDBHelper>>) -> anyhow::Result<Self> {
         Ok(CardtestRunner { databases })
