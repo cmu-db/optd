@@ -97,7 +97,11 @@ impl TpchKit {
         if self.verbose {
             println!("building dbgen...")
         }
-        cmd::run_command_with_status_check(&format!("make MACHINE={} DATABASE={}", TpchKit::get_machine(), database))?;
+        cmd::run_command_with_status_check(&format!(
+            "make MACHINE={} DATABASE={}",
+            TpchKit::get_machine(),
+            database
+        ))?;
         Ok(())
     }
 

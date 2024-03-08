@@ -5,14 +5,15 @@ use postgres_db::PostgresDb;
 
 use crate::{
     cardtest::Benchmark,
-    tpch::{TpchKit, TPCH_KIT_POSTGRES},
+    tpch_kit::{TpchKit, TPCH_KIT_POSTGRES},
 };
 
 mod cardtest;
 mod datafusion_db_cardtest;
 mod postgres_db;
 mod cmd;
-mod tpch;
+mod postgres;
+mod tpch_kit;
 
 #[tokio::main]
 async fn main() -> Result<()> {
