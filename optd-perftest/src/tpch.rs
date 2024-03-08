@@ -26,6 +26,7 @@ fn run_command_fastexit(cmd_str: &str) {
 }
 
 fn clone_tpch_kit_repo() -> Result<()> {
-    run_command_fastexit(format!("git clone {}", TPCH_KIT_REPO_URL).as_str());
+    let tpch_kit_dpath = get_tpch_dpath().join("tpch-kit").to_str().unwrap().to_string();
+    run_command_fastexit(format!("git clone {} {}", TPCH_KIT_REPO_URL, tpch_kit_dpath).as_str());
     Ok(())
 }
