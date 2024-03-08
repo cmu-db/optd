@@ -3,5 +3,6 @@
 /.DS_Store
 /.idea
 .history
-optd-perftest/**/tables
+optd-perftest/**/genned_tables
+optd-perftest/**/genned_queries
 optd-perftest/**/tpch-kit

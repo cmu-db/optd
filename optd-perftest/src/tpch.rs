@@ -17,10 +17,12 @@ pub const TPCH_KIT_POSTGRES: &str = "POSTGRESQL";
 pub struct TpchKit {
     verbose: bool,
     // cache these paths so we don't have to build them multiple times
-    tpch_kit_dpath: PathBuf,
+    _tpch_dpath: PathBuf,
+    _tpch_kit_dpath: PathBuf,
+    _queries_dpath: PathBuf,
     dbgen_dpath: PathBuf,
-    tables_dpath: PathBuf,
-    queries_dpath: PathBuf,
+    genned_tables_dpath: PathBuf,
+    genned_queries_dpath: PathBuf,
 }
 
 impl TpchKit {
@@ -35,25 +37,28 @@ impl TpchKit {
         let tpch_kit_dpath = tpch_dpath.join("tpch-kit");
         TpchKit::clonepull_tpch_kit_repo(&tpch_kit_dpath, verbose)?;
         let dbgen_dpath = tpch_kit_dpath.join("dbgen");
-        let tables_dpath = tpch_dpath.join("tables");
-        if !tables_dpath.exists() {
-            fs::create_dir(&tables_dpath)?;
+        let queries_dpath = dbgen_dpath.join("queries");
+        let genned_tables_dpath = tpch_dpath.join("genned_tables");
+        if !genned_tables_dpath.exists() {
+            fs::create_dir(&genned_tables_dpath)?;
         }
-        let queries_dpath = tpch_dpath.join("queries");
-        if !queries_dpath.exists() {
-            fs::create_dir(&queries_dpath)?;
+        let genned_queries_dpath = tpch_dpath.join("genned_queries");
+        if !genned_queries_dpath.exists() {
+            fs::create_dir(&genned_queries_dpath)?;
         }
 
         // set necessary envvars for dbgen (DSS_PATH can change so we don't set it now)
+        env::set_var("DSS_CONFIG", dbgen_dpath.to_str().unwrap());
+        env::set_var("DSS_QUERY", queries_dpath.to_str().unwrap());
 
         // create the kit
-        let kit = TpchKit {verbose, tpch_kit_dpath, dbgen_dpath, tables_dpath, queries_dpath};
+        let kit = TpchKit {verbose, _tpch_dpath: tpch_dpath, _tpch_kit_dpath: tpch_kit_dpath, _queries_dpath: queries_dpath, dbgen_dpath, genned_tables_dpath, genned_queries_dpath};
         Ok(kit)
     }
 
     fn clonepull_tpch_kit_repo<P>(tpch_kit_dpath: P, verbose: bool) -> io::Result<()>
         where P: AsRef<Path> {
-        if tpch_kit_dpath.as_ref().exists() {
+        if !tpch_kit_dpath.as_ref().exists() {
             if verbose {
                 println!("cloning tpch-kit repo...");
             }
@@ -78,15 +83,15 @@ impl TpchKit {
     }
 
     pub fn gen_tables(&self, database: &str, scale_factor: i32) -> io::Result<()> {
-        let this_tables_dpath = self.tables_dpath.join(format!("{}-sf{}", database, scale_factor));
-        let done_fpath = this_tables_dpath.join(DONE_FNAME);
+        let this_genned_tables_dpath = self.genned_tables_dpath.join(format!("{}-sf{}", database, scale_factor));
+        let done_fpath = this_genned_tables_dpath.join(DONE_FNAME);
         if !done_fpath.exists() {
             self.build_dbgen(database)?;
-            if !this_tables_dpath.exists() {
-                fs::create_dir(&this_tables_dpath)?;
+            if !this_genned_tables_dpath.exists() {
+                fs::create_dir(&this_genned_tables_dpath)?;
             }
             env::set_current_dir(&self.dbgen_dpath)?;
-            env::set_var("DSS_PATH", this_tables_dpath.to_str().unwrap());
+            env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
             if self.verbose {
                 println!("generating tables for scale factor {}...", scale_factor);
             }
@@ -101,14 +106,21 @@ impl TpchKit {
     }
 
     pub fn gen_queries(&self, database: &str, scale_factor: i32, seed: i32) -> io::Result<()> {
-        let this_queries_dpath = self.queries_dpath.join(format!("{}-sf{}-sd{}", database, scale_factor, seed));
-        let done_fpath = this_queries_dpath.join(DONE_FNAME);
+        let this_genned_queries_dpath = self.genned_queries_dpath.join(format!("{}-sf{}-sd{}", database, scale_factor, seed));
+        let this_genned_queries_fpath = this_genned_queries_dpath.join("queries.sql");
+        let done_fpath = this_genned_queries_dpath.join(DONE_FNAME);
         if !done_fpath.exists() {
             self.build_dbgen(database)?;
-            if !this_queries_dpath.exists() {
-                fs::create_dir(&this_queries_dpath)?;
+            if !this_genned_queries_dpath.exists() {
+                fs::create_dir(&this_genned_queries_dpath)?;
             }
             env::set_current_dir(&self.dbgen_dpath)?;
+            if self.verbose {
+                println!("generating queries for scale factor {}...", scale_factor);
+            }
+            let output = cmd::run_command_with_status_check(&format!("./qgen -s{} -r{}", scale_factor, seed))?;
+            fs::write(this_genned_queries_fpath, output.stdout)?;
+            File::create(done_fpath)?;
         } else {
             if self.verbose {
                 println!("skipped generating queries for database={} scale_factor={} seed={}", database, scale_factor, seed);

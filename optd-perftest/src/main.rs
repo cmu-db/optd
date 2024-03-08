@@ -23,5 +23,6 @@ async fn main() -> Result<()> {
     println!("qerrors: {:?}", qerrors);
     let kit = TpchKit::build(true).unwrap();
     kit.gen_tables(TPCH_KIT_POSTGRES, 1)?;
+    kit.gen_queries(TPCH_KIT_POSTGRES, 1, 15721)?;
     Ok(())
 }
