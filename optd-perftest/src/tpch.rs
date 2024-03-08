@@ -1,6 +1,7 @@
 use crate::cmd;
 /// A wrapper around tpch-kit (https://github.com/gregrahn/tpch-kit)
 use std::env;
+use std::env::consts::OS;
 use std::fs;
 use std::fs::File;
 use std::io;
@@ -96,8 +97,17 @@ impl TpchKit {
         if self.verbose {
             println!("building dbgen...")
         }
-        cmd::run_command_with_status_check(&format!("make MACHINE=MACOS DATABASE={}", database))?;
+        cmd::run_command_with_status_check(&format!("make MACHINE={} DATABASE={}", TpchKit::get_machine(), database))?;
         Ok(())
+    }
+
+    fn get_machine() -> &'static str {
+        match OS {
+            "linux" => "LINUX",
+            "macos" => "MACOS",
+            "windows" => "WIN32",
+            _ => unimplemented!(),
+        }
     }
 
     pub fn gen_tables(&self, database: &str, scale_factor: i32) -> io::Result<()> {
