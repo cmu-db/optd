@@ -9,16 +9,21 @@ use crate::{
 };
 
 mod cardtest;
-mod cmd;
+mod shell;
 mod datafusion_db_cardtest;
 mod postgres_db;
 mod tpch_kit;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let pg_db = PostgresDb::build(true).await?;
+    if true {
+        return Ok(());
+    }
+    let df_db = DatafusionDb::new().await?;
     let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![
-        Box::new(PostgresDb::new().await?),
-        Box::new(DatafusionDb::new().await?),
+        Box::new(pg_db),
+        Box::new(df_db),
     ];
     let cardtest_runner = CardtestRunner::new(databases).await?;
     cardtest_runner.load_databases(Benchmark::Test).await?;
