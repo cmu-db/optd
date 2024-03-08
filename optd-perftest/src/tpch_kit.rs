@@ -122,12 +122,7 @@ impl TpchKit {
         let done_fpath = this_genned_tables_dpath.join("dbgen_done");
         if !done_fpath.exists() {
             self.build_dbgen(database)?;
-            if this_genned_tables_dpath.exists() {
-                fs::create_dir(&this_genned_tables_dpath)?;
-            }
-            if !this_genned_tables_dpath.exists() {
-                fs::create_dir(&this_genned_tables_dpath)?;
-            }
+            shell::make_into_empty_dir(&this_genned_tables_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
             if self.verbose {
@@ -155,9 +150,7 @@ impl TpchKit {
         let done_fpath = this_genned_queries_dpath.join("qgen_done");
         if !done_fpath.exists() {
             self.build_dbgen(database)?;
-            if !this_genned_queries_dpath.exists() {
-                fs::create_dir(&this_genned_queries_dpath)?;
-            }
+            shell::make_into_empty_dir(&this_genned_queries_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             if self.verbose {
                 println!("generating queries for scale factor {}...", scale_factor);

@@ -1,7 +1,7 @@
 use crate::{cardtest::{Benchmark, CardtestRunnerDBHelper}, shell};
 use anyhow::Result;
 use async_trait::async_trait;
-use std::{env::{self, consts::OS}, fs, path::{Path, PathBuf}};
+use std::{env::{self, consts::OS}, fs::{self, File}, path::{Path, PathBuf}};
 
 pub struct PostgresDb {
     verbose: bool,
@@ -65,7 +65,9 @@ impl PostgresDb {
             if verbose {
                 println!("running initdb...");
             }
+            shell::make_into_empty_dir(&pgdata_dpath)?;
             shell::run_command_with_status_check(&format!("initdb {}", pgdata_dpath.as_ref().to_str().unwrap()))?;
+            File::create(done_fpath)?;
         } else {
             #[allow(clippy::collapsible_else_if)]
             if verbose {

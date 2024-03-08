@@ -1,4 +1,5 @@
-use std::io;
+use std::{fs, io};
+use std::path::Path;
 use std::process::{Command, Output};
 
 /// Runs a command, exiting the program immediately if the command fails
@@ -20,4 +21,18 @@ pub fn run_command_with_status_check(cmd_str: &str) -> io::Result<Output> {
             .as_str(),
         ))
     }
+}
+
+/// Make dpath an existent but empty directory.
+pub fn make_into_empty_dir<P>(dpath: P) -> io::Result<()>
+where
+    P: AsRef<Path>,
+{
+    if dpath.as_ref().exists() {
+        fs::remove_dir_all(&dpath)?;
+    }
+    if !dpath.as_ref().exists() {
+        fs::create_dir(&dpath)?;
+    }
+    Ok(())
 }
