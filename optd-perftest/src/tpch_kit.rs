@@ -26,6 +26,7 @@ pub struct TpchKit {
     pub schema_fpath: PathBuf,
 }
 
+/// I keep the same conventions for these methods as I do for PostgresDb
 impl TpchKit {
     pub fn build(verbose: bool) -> io::Result<Self> {
         // build paths, sometimes creating them if they don't exist

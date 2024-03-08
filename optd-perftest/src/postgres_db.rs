@@ -14,6 +14,10 @@ pub struct PostgresDb {
     log_fpath: PathBuf,
 }
 
+/// Conventions I keep for methods of this class:
+///   - Functions should be idempotent. For instance, start_postgres() should not fail if Postgres is already running
+///   - Stop and start functions should be separate
+///   - Setup should be done in build() unless it requires more information (like benchmark)
 impl PostgresDb {
     pub async fn build(verbose: bool) -> Result<Self> {
         // build paths, sometimes creating them if they don't exist
@@ -28,7 +32,7 @@ impl PostgresDb {
             panic!("postgres_db_dpath ({:?}) doesn't exist. Make sure to run this script from the base optd/ dir", postgres_db_dpath);
         }
         let pgdata_dpath = postgres_db_dpath.join("pgdata");
-        let log_fpath = postgres_db_dpath.join("log");
+        let log_fpath = postgres_db_dpath.join("postgres_log");
 
         // create Self
         let db = PostgresDb {verbose, _postgres_db_dpath: postgres_db_dpath, pgdata_dpath, log_fpath};
@@ -58,6 +62,17 @@ impl PostgresDb {
             },
             _ => unimplemented!(),
         };
+        Ok(())
+    }
+
+    /// Remove the pgdata dir, making sure to stop a running Postgres process if there is one
+    /// If there is a Postgres process running on pgdata, it's important to stop it to avoid
+    ///   corrupting it (not stopping it leads to lots of weird behavior)
+    async fn remove_pgdata(&self) -> Result<()> {
+        if PostgresDb::get_is_postgres_running()? {
+            self.stop_postgres().await?;
+        }
+        shell::make_into_empty_dir(&self.pgdata_dpath)?;
         Ok(())
     }
 
@@ -98,6 +113,21 @@ impl PostgresDb {
         Ok(())
     }
 
+    /// Stop the Postgres process started by start_postgres()
+    async fn stop_postgres(&self) -> Result<()> {
+        if PostgresDb::get_is_postgres_running()? {
+            if self.verbose {
+                println!("stopping postgres...");
+            }
+            shell::run_command_with_status_check(&format!("pg_ctl -D{} stop", self.pgdata_dpath.to_str().unwrap()))?;
+        } else {
+            println!("skipped stopping postgres");
+        }
+        
+        Ok(())
+    }
+
+    /// Check whether postgres is running
     fn get_is_postgres_running() -> Result<bool> {
         Ok(Command::new("pg_isready").output()?.status.success())
     }
@@ -111,10 +141,12 @@ impl PostgresDb {
         if self.verbose {
             println!("loading TPC-H data");
         }
-        // delete pgdata entirely to start from a clean slate
-        shell::make_into_empty_dir(&self.pgdata_dpath)?;
+        // start from a clean slate
+        self.remove_pgdata().await?;
         // since we deleted pgdata we'll need to re-init it
         self.init_pgdata().await?;
+        // postgres must be started again since remove_pgdata() stops it
+        self.start_postgres().await?;
         // load the schema. createdb should not fail since we just make a fresh pgdata
         shell::run_command_with_status_check(&format!("createdb {}", OPTD_DB_NAME))?;
         let tpch_kit = TpchKit::build(self.verbose)?;
