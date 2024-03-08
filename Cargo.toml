@@ -7,5 +7,6 @@ members = [
     "optd-sqlplannertest",
     "optd-adaptive-demo",
     "optd-gungnir",
+    "optd-perftest",
 ]
 resolver = "2"

@@ -75,7 +75,7 @@ impl DatafusionDb {
         Ok(ctx)
     }
 
-    async fn execute(&self, sql: &str, with_logical: bool) -> Result<Vec<Vec<String>>> {
+    pub async fn execute(&self, sql: &str, with_logical: bool) -> Result<Vec<Vec<String>>> {
         let sql = unescape_input(sql)?;
         let dialect = Box::new(GenericDialect);
         let statements = DFParser::parse_sql_with_dialect(&sql, dialect.as_ref())?;

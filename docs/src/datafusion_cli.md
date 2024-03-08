@@ -9,5 +9,5 @@ cargo run --bin datafusion-optd-cli
 We also have a scale 0.01 TPC-H dataset to test. The test SQL can be executed with the Datafusion cli.
 
 ```shell
-cargo run --bin datafusion-optd-cli -- -f tpch/test.sql
+cargo run --bin datafusion-optd-cli -- -f datafusion-optd-cli/tpch-sf0_01/test.sql
 ```
