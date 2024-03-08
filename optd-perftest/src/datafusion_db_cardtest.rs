@@ -10,7 +10,10 @@ impl CardtestRunnerDBHelper for DatafusionDb {
 
     async fn load_database(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
-            Benchmark::Test => self.execute("CREATE TABLE t1 (c1 INT);", true).await?,
+            Benchmark::Test => {
+                self.execute("CREATE TABLE t1 (c1 INT);", true).await?;
+                self.execute("INSERT INTO t1 VALUES (0);", true).await?;
+            },
         };
         Ok(())
     }
@@ -22,6 +25,8 @@ impl CardtestRunnerDBHelper for DatafusionDb {
     }
 
     async fn eval_est_card(&self, _sql: &str) -> anyhow::Result<usize> {
+        let rows = self.execute("EXPLAIN SELECT * FROM t1;", true).await?;
+        println!("eval_est_card(): rows={:?}", rows);
         Ok(12)
     }
 }

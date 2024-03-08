@@ -7,7 +7,7 @@ use async_trait::async_trait;
 ///   described in the comments of the CardtestRunnerDBHelper trait. This is why
 ///   you would use CardtestRunner even for computing the Q-error of a single database.
 pub struct CardtestRunner {
-    databases: Vec<Box<dyn CardtestRunnerDBHelper>>,
+    pub databases: Vec<Box<dyn CardtestRunnerDBHelper>>,
 }
 
 pub enum Benchmark {
