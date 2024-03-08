@@ -1,10 +1,11 @@
 use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
 use futures::executor::block_on;
 use optd_sqlplannertest::DatafusionDb;
-use postgres::PostgresDb;
+use postgres_db::PostgresDb;
 
 mod cardtest;
-mod postgres;
+mod datafusion_db_cardtest;
+mod postgres_db;
 
 fn main() {
     let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![

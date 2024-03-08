@@ -1,7 +1,5 @@
-use crate::postgres::PostgresDb;
 use anyhow::{self};
 use async_trait::async_trait;
-use optd_sqlplannertest::DatafusionDb;
 
 /// This struct performs cardinality testing across one or more databases.
 /// Another design would be for the CardtestRunnerDBHelper trait to expose a function
@@ -71,34 +69,4 @@ pub trait CardtestRunnerDBHelper {
     fn get_name(&self) -> &str;
     async fn eval_true_card(&self, sql: &str) -> anyhow::Result<usize>;
     async fn eval_est_card(&self, sql: &str) -> anyhow::Result<usize>;
-}
-
-#[async_trait]
-impl CardtestRunnerDBHelper for DatafusionDb {
-    fn get_name(&self) -> &str {
-        "DataFusion"
-    }
-
-    async fn eval_true_card(&self, _sql: &str) -> anyhow::Result<usize> {
-        Ok(10)
-    }
-
-    async fn eval_est_card(&self, _sql: &str) -> anyhow::Result<usize> {
-        Ok(12)
-    }
-}
-
-#[async_trait]
-impl CardtestRunnerDBHelper for PostgresDb {
-    fn get_name(&self) -> &str {
-        "Postgres"
-    }
-
-    async fn eval_true_card(&self, _sql: &str) -> anyhow::Result<usize> {
-        Ok(10)
-    }
-
-    async fn eval_est_card(&self, _sql: &str) -> anyhow::Result<usize> {
-        Ok(5)
-    }
 }
