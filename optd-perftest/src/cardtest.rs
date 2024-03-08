@@ -1,3 +1,4 @@
+use crate::tpch::TpchConfig;
 use anyhow::{self};
 use async_trait::async_trait;
 
@@ -13,10 +14,6 @@ pub struct CardtestRunner {
 pub enum Benchmark {
     Test,
     Tpch(TpchConfig),
-}
-
-pub struct TpchConfig {
-    scale_factor: i32,
 }
 
 impl CardtestRunner {

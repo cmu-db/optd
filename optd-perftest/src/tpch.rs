@@ -1,32 +1,44 @@
-use std::io::Result;
-use std::process::Command;
+use std::env;
+use std::io;
 use std::path::{Path, PathBuf};
+use crate::cmd;
 
 const TPCH_KIT_REPO_URL: &str = "git@github.com:gregrahn/tpch-kit.git";
 
-pub fn test_tpch() {
-    clone_tpch_kit_repo().unwrap();
+/// Describes a complete TPC-H "workload", which is all information needed to
+/// generate the data and execute the queries.
+pub struct TpchConfig {
+    pub scale_factor: i32,
 }
 
-fn get_tpch_dpath() -> PathBuf {
-    // This would ideally be a const, but unwrap() makes it so it can't be a const
-    Path::new(file!()).parent().unwrap().join("tpch").to_path_buf()
+/// Provides many helper functions for running a TPC-H workload.
+/// It does not actually execute the queries as it is meant to be DBMS-agnostic.
+/// Is essentially a wrapper around the tpch-kit repo.
+pub struct TpchKit {
+    // cache these paths so we don't have to build them multiple times
+    tpch_dpath: PathBuf,
+    tpch_kit_dpath: PathBuf,
+    cfg: TpchConfig,
 }
 
-/// Runs a command, exiting the program immediately if the command fails
-fn run_command_fastexit(cmd_str: &str) {
-    let mut cmd_components: Vec<&str> = cmd_str.split_whitespace().collect();
-    let cmd = cmd_components.remove(0);
-    let args = cmd_components;
-    let output = Command::new(cmd)
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "```{}``` failed with ```{}```", cmd_str, String::from_utf8_lossy(&output.stderr));
-}
+impl TpchKit {
+    pub fn build(cfg: TpchConfig) -> io::Result<Self> {
+        let tpch_dpath = Path::new(file!()).parent().unwrap().join("tpch").to_path_buf();
+        let tpch_kit_dpath = tpch_dpath.join("tpch-kit");
+        let kit = TpchKit {tpch_dpath, tpch_kit_dpath, cfg};
+        kit.setup_tpch_kit_repo()?;
+        Ok(kit)
+    }
 
-fn clone_tpch_kit_repo() -> Result<()> {
-    let tpch_kit_dpath = get_tpch_dpath().join("tpch-kit").to_str().unwrap().to_string();
-    run_command_fastexit(format!("git clone {} {}", TPCH_KIT_REPO_URL, tpch_kit_dpath).as_str());
-    Ok(())
+    fn setup_tpch_kit_repo(&self) -> io::Result<()> {
+        if !self.tpch_kit_dpath.exists() {
+            cmd::run_command_with_status_check(format!("git clone {} {}", TPCH_KIT_REPO_URL, self.tpch_kit_dpath.to_str().unwrap()).as_str())?;
+        } else {
+            env::set_current_dir(&self.tpch_kit_dpath)?;
+            cmd::run_command_with_status_check("git pull")?;
+        }
+        Ok(())
+    }
+
+    pub fn gen_tpch_tables(&self) {}
 }
