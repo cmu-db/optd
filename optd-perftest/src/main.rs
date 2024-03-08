@@ -6,8 +6,13 @@ use postgres_db::PostgresDb;
 use crate::cardtest::Benchmark;
 
 mod cardtest;
+<<<<<<< HEAD
 mod datafusion_db_cardtest;
 mod postgres_db;
+=======
+mod postgres;
+mod tpch;
+>>>>>>> 1eb364c (moved tpch/ into cli/. updated readme)
 
 #[tokio::main]
 async fn main() -> Result<()> {

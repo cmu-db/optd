@@ -14,6 +14,7 @@ impl CardtestRunnerDBHelper for DatafusionDb {
                 self.execute("CREATE TABLE t1 (c1 INT);", true).await?;
                 self.execute("INSERT INTO t1 VALUES (0);", true).await?;
             },
+            Benchmark::Tpch(tpch_config) => {}
         };
         Ok(())
     }

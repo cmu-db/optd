@@ -12,6 +12,11 @@ pub struct CardtestRunner {
 
 pub enum Benchmark {
     Test,
+    Tpch(TpchConfig),
+}
+
+pub struct TpchConfig {
+    scale_factor: i32,
 }
 
 impl CardtestRunner {

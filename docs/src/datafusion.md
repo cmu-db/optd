@@ -4,7 +4,7 @@ optd is currently used as a physical optimizer for Apache Arrow Datafusion. To i
 
 ```bash
 cargo run --bin datafusion-optd-cli
-cargo run --bin datafusion-optd-cli -- -f tpch/test.sql # run TPC-H queries
+cargo run --bin datafusion-optd-cli -- -f datafusion-optd-cli/tpch-sf0_01/test.sql # run TPC-H queries
 ```
 
 optd is designed as a flexible optimizer framework that can be used in any database systems. The core of optd is in `optd-core`, which contains the Cascades optimizer implementation and the definition of key structures in the optimization process. Users can implement the interfaces and use optd in their own database systems by using the `optd-core` crate.
