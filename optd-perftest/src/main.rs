@@ -22,6 +22,6 @@ async fn main() -> Result<()> {
     let qerrors = cardtest_runner.eval_qerrors("SELECT * FROM t1;").await?;
     println!("qerrors: {:?}", qerrors);
     let kit = TpchKit::build(true).unwrap();
-    kit.gen_tpch_tables(TPCH_KIT_POSTGRES, 1)?;
+    kit.gen_tables(TPCH_KIT_POSTGRES, 1)?;
     Ok(())
 }
