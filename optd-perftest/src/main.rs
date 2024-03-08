@@ -1,15 +1,18 @@
-use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
 use anyhow::Result;
+use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
 use optd_sqlplannertest::DatafusionDb;
 use postgres_db::PostgresDb;
 
-use crate::{cardtest::Benchmark, tpch::{TpchKit, TPCH_KIT_POSTGRES}};
+use crate::{
+    cardtest::Benchmark,
+    tpch::{TpchKit, TPCH_KIT_POSTGRES},
+};
 
 mod cardtest;
 mod datafusion_db_cardtest;
 mod postgres_db;
-mod tpch;
 mod cmd;
+mod tpch;
 
 #[tokio::main]
 async fn main() -> Result<()> {

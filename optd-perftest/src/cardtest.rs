@@ -13,13 +13,6 @@ pub struct CardtestRunner {
 
 pub enum Benchmark {
     Test,
-    Tpch(TpchConfig),
-}
-
-/// Describes a complete TPC-H "workload", which is all information needed to
-/// generate the data and execute the queries.
-pub struct TpchConfig {
-    pub scale_factor: i32,
 }
 
 impl CardtestRunner {
@@ -89,4 +82,56 @@ pub trait CardtestRunnerDBHelper {
     async fn load_database(&self, benchmark: &Benchmark) -> anyhow::Result<()>;
     async fn eval_true_card(&self, sql: &str) -> anyhow::Result<usize>;
     async fn eval_est_card(&self, sql: &str) -> anyhow::Result<usize>;
+<<<<<<< HEAD
 }
+=======
+}
+
+#[async_trait]
+impl CardtestRunnerDBHelper for DatafusionDb {
+    fn get_name(&self) -> &str {
+        "DataFusion"
+    }
+
+    async fn load_database(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
+        match benchmark {
+            Benchmark::Test => {
+                self.execute("CREATE TABLE t1 (c1 INT);", true).await?;
+                self.execute("INSERT INTO t1 VALUES (0);", true).await?;
+            }
+        };
+        Ok(())
+    }
+
+    async fn eval_true_card(&self, sql: &str) -> anyhow::Result<usize> {
+        let rows = self.execute(sql, true).await?;
+        let num_rows = rows.len();
+        Ok(num_rows)
+    }
+
+    async fn eval_est_card(&self, _sql: &str) -> anyhow::Result<usize> {
+        let rows = self.execute("EXPLAIN SELECT * FROM t1;", true).await?;
+        println!("eval_est_card(): rows={:?}", rows);
+        Ok(12)
+    }
+}
+
+#[async_trait]
+impl CardtestRunnerDBHelper for PostgresDb {
+    fn get_name(&self) -> &str {
+        "Postgres"
+    }
+
+    async fn load_database(&self, _benchmark: &Benchmark) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn eval_true_card(&self, _sql: &str) -> anyhow::Result<usize> {
+        Ok(1)
+    }
+
+    async fn eval_est_card(&self, _sql: &str) -> anyhow::Result<usize> {
+        Ok(5)
+    }
+}
+>>>>>>> 882ecab (passing ci)

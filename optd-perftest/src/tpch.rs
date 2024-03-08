@@ -1,10 +1,10 @@
+use crate::cmd;
 /// A wrapper around tpch-kit (https://github.com/gregrahn/tpch-kit)
 use std::env;
 use std::fs;
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
-use crate::cmd;
 
 const TPCH_KIT_REPO_URL: &str = "git@github.com:gregrahn/tpch-kit.git";
 /// done files are used to indicate that an operation is done so that it can be skipped in the future
@@ -29,7 +29,11 @@ impl TpchKit {
     pub fn build(verbose: bool) -> io::Result<Self> {
         // build paths, creating them if they don't exist
         let curr_dpath = env::current_dir()?;
-        let tpch_dpath = Path::new(file!()).parent().unwrap().join("tpch").to_path_buf();
+        let tpch_dpath = Path::new(file!())
+            .parent()
+            .unwrap()
+            .join("tpch")
+            .to_path_buf();
         let tpch_dpath = curr_dpath.join(tpch_dpath); // make it absolute
         if !tpch_dpath.exists() {
             panic!("tpch_dpath ({:?}) doesn't exist. Make sure to run this script from the base optd/ dir", tpch_dpath);
@@ -52,17 +56,31 @@ impl TpchKit {
         env::set_var("DSS_QUERY", queries_dpath.to_str().unwrap());
 
         // create the kit
-        let kit = TpchKit {verbose, _tpch_dpath: tpch_dpath, _tpch_kit_dpath: tpch_kit_dpath, _queries_dpath: queries_dpath, dbgen_dpath, genned_tables_dpath, genned_queries_dpath};
+        let kit = TpchKit {
+            verbose,
+            _tpch_dpath: tpch_dpath,
+            _tpch_kit_dpath: tpch_kit_dpath,
+            _queries_dpath: queries_dpath,
+            dbgen_dpath,
+            genned_tables_dpath,
+            genned_queries_dpath,
+        };
         Ok(kit)
     }
 
     fn clonepull_tpch_kit_repo<P>(tpch_kit_dpath: P, verbose: bool) -> io::Result<()>
-        where P: AsRef<Path> {
+    where
+        P: AsRef<Path>,
+    {
         if !tpch_kit_dpath.as_ref().exists() {
             if verbose {
                 println!("cloning tpch-kit repo...");
             }
-            cmd::run_command_with_status_check(&format!("git clone {} {}", TPCH_KIT_REPO_URL, tpch_kit_dpath.as_ref().to_str().unwrap()))?;
+            cmd::run_command_with_status_check(&format!(
+                "git clone {} {}",
+                TPCH_KIT_REPO_URL,
+                tpch_kit_dpath.as_ref().to_str().unwrap()
+            ))?;
         } else {
             env::set_current_dir(tpch_kit_dpath)?;
             if verbose {
@@ -83,7 +101,9 @@ impl TpchKit {
     }
 
     pub fn gen_tables(&self, database: &str, scale_factor: i32) -> io::Result<()> {
-        let this_genned_tables_dpath = self.genned_tables_dpath.join(format!("{}-sf{}", database, scale_factor));
+        let this_genned_tables_dpath = self
+            .genned_tables_dpath
+            .join(format!("{}-sf{}", database, scale_factor));
         let done_fpath = this_genned_tables_dpath.join(DONE_FNAME);
         if !done_fpath.exists() {
             self.build_dbgen(database)?;
@@ -98,15 +118,21 @@ impl TpchKit {
             cmd::run_command_with_status_check(&format!("./dbgen -s{}", scale_factor))?;
             File::create(done_fpath)?;
         } else {
+            #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!("skipped generating tables for database={} scale_factor={}", database, scale_factor);
+                println!(
+                    "skipped generating tables for database={} scale_factor={}",
+                    database, scale_factor
+                );
             }
         }
         Ok(())
     }
 
     pub fn gen_queries(&self, database: &str, scale_factor: i32, seed: i32) -> io::Result<()> {
-        let this_genned_queries_dpath = self.genned_queries_dpath.join(format!("{}-sf{}-sd{}", database, scale_factor, seed));
+        let this_genned_queries_dpath = self
+            .genned_queries_dpath
+            .join(format!("{}-sf{}-sd{}", database, scale_factor, seed));
         let this_genned_queries_fpath = this_genned_queries_dpath.join("queries.sql");
         let done_fpath = this_genned_queries_dpath.join(DONE_FNAME);
         if !done_fpath.exists() {
@@ -118,12 +144,19 @@ impl TpchKit {
             if self.verbose {
                 println!("generating queries for scale factor {}...", scale_factor);
             }
-            let output = cmd::run_command_with_status_check(&format!("./qgen -s{} -r{}", scale_factor, seed))?;
+            let output = cmd::run_command_with_status_check(&format!(
+                "./qgen -s{} -r{}",
+                scale_factor, seed
+            ))?;
             fs::write(this_genned_queries_fpath, output.stdout)?;
             File::create(done_fpath)?;
         } else {
+            #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!("skipped generating queries for database={} scale_factor={} seed={}", database, scale_factor, seed);
+                println!(
+                    "skipped generating queries for database={} scale_factor={} seed={}",
+                    database, scale_factor, seed
+                );
             }
         }
         Ok(())
