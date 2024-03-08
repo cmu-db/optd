@@ -17,6 +17,7 @@ mod tpch_kit;
 #[tokio::main]
 async fn main() -> Result<()> {
     let pg_db = PostgresDb::build(true).await?;
+    pg_db.load_benchmark_data().await?;
     if true {
         return Ok(());
     }
@@ -29,8 +30,5 @@ async fn main() -> Result<()> {
     cardtest_runner.load_databases(Benchmark::Test).await?;
     let qerrors = cardtest_runner.eval_qerrors("SELECT * FROM t1;").await?;
     println!("qerrors: {:?}", qerrors);
-    let kit = TpchKit::build(true).unwrap();
-    kit.gen_tables(TPCH_KIT_POSTGRES, 1)?;
-    kit.gen_queries(TPCH_KIT_POSTGRES, 1, 15721)?;
     Ok(())
 }

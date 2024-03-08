@@ -1,4 +1,4 @@
-use crate::{cardtest::{Benchmark, CardtestRunnerDBHelper}, shell};
+use crate::{cardtest::{Benchmark, CardtestRunnerDBHelper}, shell, tpch_kit::TpchKit};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::{env::{self, consts::OS}, fs::{self, File}, path::{Path, PathBuf}, process::Command};
@@ -34,8 +34,9 @@ impl PostgresDb {
         let db = PostgresDb {verbose, _postgres_db_dpath: postgres_db_dpath, pgdata_dpath, log_fpath};
 
         // (re)start postgres
-        // TODO(phw2): do this in next commit
-        db.restart_postgres().await?;
+        db.install_postgres().await?;
+        db.init_pgdata().await?;
+        db.start_postgres().await?;
 
         Ok(db)
     }
@@ -62,7 +63,6 @@ impl PostgresDb {
 
     /// Initializes pgdata_dpath directory if it wasn't already initialized
     async fn init_pgdata(&self) -> Result<()> {
-        self.install_postgres().await?;
         let done_fpath = self.pgdata_dpath.join("initdb_done");
         if !done_fpath.exists() {
             if self.verbose {
@@ -82,23 +82,24 @@ impl PostgresDb {
         Ok(())
     }
 
-    /// (Re)start the Postgres process
+    /// Start the Postgres process if it's not already started
     /// It will always be started using the pg_ctl binary installed with the package manager
     /// It will always be started on port 5432
-    async fn restart_postgres(&self) -> Result<()> {
-        self.init_pgdata().await?;
-        let is_postgres_running = Command::new("pg_isready").output()?.status.success();
-        if is_postgres_running {
+    async fn start_postgres(&self) -> Result<()> {
+        if !PostgresDb::get_is_postgres_running()? {
             if self.verbose {
-                println!("stopping postgres...");
+                println!("starting postgres...");
             }
-            shell::run_command_with_status_check(&format!("pg_ctl -D{} stop", self.pgdata_dpath.to_str().unwrap()))?;
+            shell::run_command_with_status_check(&format!("pg_ctl -D{} -l{} start", self.pgdata_dpath.to_str().unwrap(), self.log_fpath.to_str().unwrap()))?;
+        } else {
+            println!("skipped starting postgres");
         }
-        if self.verbose {
-            println!("starting postgres...");
-        }
-        shell::run_command_with_status_check(&format!("pg_ctl -D{} -l{} start", self.pgdata_dpath.to_str().unwrap(), self.log_fpath.to_str().unwrap()))?;
+        
         Ok(())
+    }
+
+    fn get_is_postgres_running() -> Result<bool> {
+        Ok(Command::new("pg_isready").output()?.status.success())
     }
 
     /// Load the data of a benchmark with parameters
@@ -106,7 +107,18 @@ impl PostgresDb {
     ///   data currently loaded was with the same benchmark and parameters, we don't
     ///   need to load it again
     pub async fn load_benchmark_data(&self) -> Result<()> {
-        shell::run_command_with_status_check(&format!("create db {}", OPTD_DB_NAME))?;
+        // TODO(phw2): cache
+        if self.verbose {
+            println!("loading TPC-H data");
+        }
+        // delete pgdata entirely to start from a clean slate
+        shell::make_into_empty_dir(&self.pgdata_dpath)?;
+        // since we deleted pgdata we'll need to re-init it
+        self.init_pgdata().await?;
+        // load the schema. createdb should not fail since we just make a fresh pgdata
+        shell::run_command_with_status_check(&format!("createdb {}", OPTD_DB_NAME))?;
+        let tpch_kit = TpchKit::build(self.verbose)?;
+        shell::run_command_with_status_check(&format!("psql {} -f {}", OPTD_DB_NAME, tpch_kit.schema_fpath.to_str().unwrap()))?;
         Ok(())
     }
 }

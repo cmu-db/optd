@@ -23,6 +23,7 @@ pub struct TpchKit {
     dbgen_dpath: PathBuf,
     genned_tables_dpath: PathBuf,
     genned_queries_dpath: PathBuf,
+    pub schema_fpath: PathBuf,
 }
 
 impl TpchKit {
@@ -49,6 +50,7 @@ impl TpchKit {
         if !genned_queries_dpath.exists() {
             fs::create_dir(&genned_queries_dpath)?;
         }
+        let schema_fpath = dbgen_dpath.join("dss.ddl");
 
         // create Self
         let kit = TpchKit {
@@ -59,6 +61,7 @@ impl TpchKit {
             dbgen_dpath,
             genned_tables_dpath,
             genned_queries_dpath,
+            schema_fpath,
         };
 
         // set envvars (DSS_PATH can change so we don't set it now)
