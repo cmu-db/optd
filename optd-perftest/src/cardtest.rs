@@ -10,9 +10,20 @@ pub struct CardtestRunner {
     databases: Vec<Box<dyn CardtestRunnerDBHelper>>,
 }
 
+pub enum Benchmark {
+    Test,
+}
+
 impl CardtestRunner {
     pub async fn new(databases: Vec<Box<dyn CardtestRunnerDBHelper>>) -> anyhow::Result<Self> {
         Ok(CardtestRunner { databases })
+    }
+
+    pub async fn load_databases(&self, benchmark: Benchmark) -> anyhow::Result<()> {
+        for database in &self.databases {
+            database.load_database(&benchmark).await?;
+        }
+        Ok(())
     }
 
     /// Get the Q-error of a query using the cost models of all databases being tested
@@ -67,6 +78,7 @@ impl CardtestRunner {
 pub trait CardtestRunnerDBHelper {
     // get_name() has &self so that we're able to do Box<dyn CardtestRunnerDBHelper>
     fn get_name(&self) -> &str;
+    async fn load_database(&self, benchmark: &Benchmark) -> anyhow::Result<()>;
     async fn eval_true_card(&self, sql: &str) -> anyhow::Result<usize>;
     async fn eval_est_card(&self, sql: &str) -> anyhow::Result<usize>;
 }

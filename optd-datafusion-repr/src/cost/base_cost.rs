@@ -149,6 +149,7 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
         context: Option<RelNodeContext>,
         optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Cost {
+        println!("compute_cost(): entered");
         match node {
             OptRelNodeTyp::PhysicalScan => {
                 let table = data.as_ref().unwrap().as_str();

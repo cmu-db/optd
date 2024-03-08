@@ -8,8 +8,17 @@ impl CardtestRunnerDBHelper for DatafusionDb {
         "DataFusion"
     }
 
-    async fn eval_true_card(&self, _sql: &str) -> anyhow::Result<usize> {
-        Ok(10)
+    async fn load_database(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
+        match benchmark {
+            Benchmark::Test => self.execute("CREATE TABLE t1 (c1 INT);", true).await?,
+        };
+        Ok(())
+    }
+
+    async fn eval_true_card(&self, sql: &str) -> anyhow::Result<usize> {
+        let rows = self.execute(sql, true).await?;
+        let num_rows = rows.len();
+        Ok(num_rows)
     }
 
     async fn eval_est_card(&self, _sql: &str) -> anyhow::Result<usize> {

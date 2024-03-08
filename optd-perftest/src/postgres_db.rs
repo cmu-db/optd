@@ -16,8 +16,12 @@ impl CardtestRunnerDBHelper for PostgresDb {
         "Postgres"
     }
 
+    async fn load_database(&self, _benchmark: &Benchmark) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     async fn eval_true_card(&self, _sql: &str) -> anyhow::Result<usize> {
-        Ok(10)
+        Ok(0)
     }
 
     async fn eval_est_card(&self, _sql: &str) -> anyhow::Result<usize> {
