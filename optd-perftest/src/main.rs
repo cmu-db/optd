@@ -9,10 +9,9 @@ use crate::{
 };
 
 mod cardtest;
+mod cmd;
 mod datafusion_db_cardtest;
 mod postgres_db;
-mod cmd;
-mod postgres;
 mod tpch_kit;
 
 #[tokio::main]

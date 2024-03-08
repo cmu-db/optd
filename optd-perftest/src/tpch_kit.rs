@@ -33,7 +33,7 @@ impl TpchKit {
         let tpch_dpath = Path::new(file!())
             .parent()
             .unwrap()
-            .join("tpch")
+            .join("tpch_kit")
             .to_path_buf();
         let tpch_dpath = curr_dpath.join(tpch_dpath); // make it absolute
         if !tpch_dpath.exists() {
