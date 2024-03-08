@@ -18,8 +18,8 @@ pub struct TpchKit {
 
     // cache these paths so we don't have to build them multiple times
     _tpch_kit_dpath: PathBuf,
-    _tpch_kit_repo_dpath: PathBuf,
-    _queries_dpath: PathBuf,
+    tpch_kit_repo_dpath: PathBuf,
+    queries_dpath: PathBuf,
     dbgen_dpath: PathBuf,
     genned_tables_dpath: PathBuf,
     genned_queries_dpath: PathBuf,
@@ -50,42 +50,40 @@ impl TpchKit {
             fs::create_dir(&genned_queries_dpath)?;
         }
 
-        // set envvars (DSS_PATH can change so we don't set it now)
-        env::set_var("DSS_CONFIG", dbgen_dpath.to_str().unwrap());
-        env::set_var("DSS_QUERY", queries_dpath.to_str().unwrap());
-
-        // install tpch-kit
-        TpchKit::clonepull_tpch_kit_repo(&tpch_kit_repo_dpath, verbose)?;
-
         // create Self
         let kit = TpchKit {
             verbose,
             _tpch_kit_dpath: tpch_kit_dpath,
-            _tpch_kit_repo_dpath: tpch_kit_repo_dpath,
-            _queries_dpath: queries_dpath,
+            tpch_kit_repo_dpath,
+            queries_dpath,
             dbgen_dpath,
             genned_tables_dpath,
             genned_queries_dpath,
         };
+
+        // set envvars (DSS_PATH can change so we don't set it now)
+        env::set_var("DSS_CONFIG", kit.dbgen_dpath.to_str().unwrap());
+        env::set_var("DSS_QUERY", kit.queries_dpath.to_str().unwrap());
+
+        // install the tpch-kit repo
+        kit.clonepull_tpch_kit_repo()?;
+
         Ok(kit)
     }
 
-    fn clonepull_tpch_kit_repo<P>(tpch_kit_repo_dpath: P, verbose: bool) -> io::Result<()>
-    where
-        P: AsRef<Path>,
-    {
-        if !tpch_kit_repo_dpath.as_ref().exists() {
-            if verbose {
+    fn clonepull_tpch_kit_repo(&self) -> io::Result<()> {
+        if !self.tpch_kit_repo_dpath.exists() {
+            if self.verbose {
                 println!("cloning tpch-kit repo...");
             }
             shell::run_command_with_status_check(&format!(
                 "git clone {} {}",
                 TPCH_KIT_REPO_URL,
-                tpch_kit_repo_dpath.as_ref().to_str().unwrap()
+                self.tpch_kit_repo_dpath.to_str().unwrap()
             ))?;
         } else {
-            env::set_current_dir(tpch_kit_repo_dpath)?;
-            if verbose {
+            env::set_current_dir(&self.tpch_kit_repo_dpath)?;
+            if self.verbose {
                 println!("pulling latest tpch-kit repo...");
             }
             shell::run_command_with_status_check("git pull")?;

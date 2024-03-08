@@ -3,6 +3,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::{env::{self, consts::OS}, fs::{self, File}, path::{Path, PathBuf}};
 
+const OPTD_DB_NAME: &str = "optd";
+
 pub struct PostgresDb {
     verbose: bool,
 
@@ -26,7 +28,8 @@ impl PostgresDb {
         }
         let pgdata_dpath = postgres_db_dpath.join("pgdata");
 
-        // install, init, and start postgres
+        // (re)start postgres
+        // TODO(phw2): do this in next commit
         PostgresDb::install_postgres(verbose).await?;
         PostgresDb::init_pgdata(&pgdata_dpath, verbose).await?;
 
@@ -79,8 +82,15 @@ impl PostgresDb {
         Ok(())
     }
 
-    /// Tries to run a Postgres instance on port 5432 with the pg_ctl installed with the package manager
-    async fn start_postgres(verbose: bool) -> Result<()> {
+    /// Load the data of a benchmark with parameters
+    /// As an optimization, if this benchmark only has read-only queries and the
+    ///   data currently loaded was with the same benchmark and parameters, we don't
+    ///   need to load it again
+    pub async fn load_benchmark_data<P>(pgdata_dpath: P, verbose: bool) -> Result<()>
+    where
+        P: AsRef<Path>,
+    {
+        shell::run_command_with_status_check(&format!("create db {}", OPTD_DB_NAME))?;
         Ok(())
     }
 }
