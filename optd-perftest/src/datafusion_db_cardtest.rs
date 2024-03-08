@@ -1,4 +1,4 @@
-use crate::cardtest::CardtestRunnerDBHelper;
+use crate::cardtest::{Benchmark, CardtestRunnerDBHelper};
 use async_trait::async_trait;
 use optd_sqlplannertest::DatafusionDb;
 

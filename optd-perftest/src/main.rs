@@ -2,17 +2,14 @@ use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
 use anyhow::Result;
 use optd_sqlplannertest::DatafusionDb;
 use postgres_db::PostgresDb;
+use std::path::Path;
 
-use crate::cardtest::Benchmark;
+use crate::{cardtest::Benchmark, tpch::test_tpch};
 
 mod cardtest;
-<<<<<<< HEAD
 mod datafusion_db_cardtest;
 mod postgres_db;
-=======
-mod postgres;
 mod tpch;
->>>>>>> 1eb364c (moved tpch/ into cli/. updated readme)
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -24,5 +21,7 @@ async fn main() -> Result<()> {
     cardtest_runner.load_databases(Benchmark::Test).await?;
     let qerrors = cardtest_runner.eval_qerrors("SELECT * FROM t1;").await?;
     println!("qerrors: {:?}", qerrors);
+    test_tpch();
+    println!("file!(): {:?}", Path::new(file!()).parent().unwrap().to_path_buf());
     Ok(())
 }

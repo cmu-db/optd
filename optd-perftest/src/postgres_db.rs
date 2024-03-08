@@ -1,4 +1,4 @@
-use crate::cardtest::CardtestRunnerDBHelper;
+use crate::cardtest::{Benchmark, CardtestRunnerDBHelper};
 use anyhow::Result;
 use async_trait::async_trait;
 

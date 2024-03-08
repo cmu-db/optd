@@ -3,3 +3,5 @@
 /.DS_Store
 /.idea
 .history
+optd-perftest/**/*.tbl
+optd-perftest/**/tpch-kit
