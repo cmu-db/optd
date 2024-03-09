@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
         seed: 15721,
     };
     let tpch_benchmark = Benchmark::Tpch(tpch_cfg.clone());
-    pg_db.load_benchmark_data(&tpch_benchmark).await?;
+    pg_db.load_database(&tpch_benchmark).await?;
     if true {
         return Ok(());
     }

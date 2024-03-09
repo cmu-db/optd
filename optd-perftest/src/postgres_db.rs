@@ -161,36 +161,6 @@ impl PostgresDb {
         Ok(Command::new("pg_isready").output()?.status.success())
     }
 
-    /// Load the data of a benchmark with parameters
-    /// As an optimization, if this benchmark only has read-only queries and the
-    ///   data currently loaded was with the same benchmark and parameters, we don't
-    ///   need to load it again
-    pub async fn load_benchmark_data(
-        &self,
-        benchmark: &Benchmark,
-    ) -> Result<()> {
-        if benchmark.is_readonly() {
-            let benchmark_strid = benchmark.get_strid();
-            let done_fname = format!("{}_done", benchmark_strid);
-            let done_fpath = self.pgdata_dpath.join(done_fname);
-            if !done_fpath.exists() {
-                if self.verbose {
-                    println!("loading data for {}...", benchmark_strid);
-                }
-                self.load_benchmark_data_raw(benchmark).await?;
-                File::create(done_fpath)?;
-            } else {
-                #[allow(clippy::collapsible_else_if)]
-                if self.verbose {
-                    println!("skipped loading data for {}", benchmark_strid);
-                }
-            }
-            Ok(())
-        } else {
-            self.load_benchmark_data_raw(benchmark).await
-        }
-    }
-
     /// Load the benchmark data without worrying about caching
     async fn load_benchmark_data_raw(&self, benchmark: &Benchmark) -> Result<()> {
         match benchmark {
@@ -239,7 +209,30 @@ impl CardtestRunnerDBHelper for PostgresDb {
         "Postgres"
     }
 
-    async fn load_database(&self, _benchmark: &Benchmark) -> anyhow::Result<()> {
+    /// Load the data of a benchmark with parameters
+    /// As an optimization, if this benchmark only has read-only queries and the
+    ///   data currently loaded was with the same benchmark and parameters, we don't
+    ///   need to load it again
+    async fn load_database(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
+        if benchmark.is_readonly() {
+            let benchmark_strid = benchmark.get_strid();
+            let done_fname = format!("{}_done", benchmark_strid);
+            let done_fpath = self.pgdata_dpath.join(done_fname);
+            if !done_fpath.exists() {
+                if self.verbose {
+                    println!("loading data for {}...", benchmark_strid);
+                }
+                self.load_benchmark_data_raw(benchmark).await?;
+                File::create(done_fpath)?;
+            } else {
+                #[allow(clippy::collapsible_else_if)]
+                if self.verbose {
+                    println!("skipped loading data for {}", benchmark_strid);
+                }
+            }
+        } else {
+            self.load_benchmark_data_raw(benchmark).await?
+        }
         Ok(())
     }
 
