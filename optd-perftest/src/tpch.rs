@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
-const TPCH_KIT_REPO_URL: &str = "git@github.com:gregrahn/tpch-kit.git";
+const TPCH_KIT_REPO_URL: &str = "git@github.com:lmwnshn/tpch-kit.git";
 pub const TPCH_KIT_POSTGRES: &str = "POSTGRESQL";
 const NUM_TPCH_QUERIES: usize = 22;
 

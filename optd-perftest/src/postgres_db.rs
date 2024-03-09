@@ -30,6 +30,7 @@ pub struct PostgresDb {
 
 /// Conventions I keep for methods of this class:
 ///   - Functions should be idempotent. For instance, start_postgres() should not fail if Postgres is already running
+///       - For instance, this is why "createdb" is _not_ a function
 ///   - Stop and start functions should be separate
 ///   - Setup should be done in build() unless it requires more information (like benchmark)
 impl PostgresDb {
@@ -61,6 +62,8 @@ impl PostgresDb {
         db.install_postgres().await?;
         db.init_pgdata().await?;
         db.start_postgres().await?;
+        // create the database. createdb should not fail since we just make a fresh pgdata
+        shell::run_command_with_status_check(&format!("createdb {}", OPTD_DBNAME))?;
         db.connect_to_postgres().await?;
 
         Ok(db)
@@ -132,6 +135,7 @@ impl PostgresDb {
                 self.pgdata_dpath.to_str().unwrap(),
                 self.log_fpath.to_str().unwrap()
             ))?;
+            println!("done starting postgres");
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
@@ -219,15 +223,17 @@ impl PostgresDb {
         self.init_pgdata().await?;
         // postgres must be started again since remove_pgdata() stops it
         self.start_postgres().await?;
-        // load the schema. createdb should not fail since we just make a fresh pgdata
+        // create the database. createdb should not fail since we just make a fresh pgdata
         shell::run_command_with_status_check(&format!("createdb {}", OPTD_DBNAME))?;
+        // load the schema
         let tpch_kit = TpchKit::build(self.verbose)?;
-        tpch_kit.gen_tables(tpch_config)?;
         shell::run_command_with_status_check(&format!(
             "psql {} -f {}",
             OPTD_DBNAME,
             tpch_kit.schema_fpath.to_str().unwrap()
         ))?;
+        // load the tables
+        tpch_kit.gen_tables(tpch_config)?;
         let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
@@ -300,6 +306,7 @@ impl PostgresDb {
     }
 
     async fn eval_query_truecard(&self, sql: &str) -> anyhow::Result<usize> {
+        println!("eval_query_truecard(): called on {}", sql);
         let rows = self.client.as_ref().unwrap().query(sql, &vec![]).await?;
         let true_card = rows.len();
         Ok(true_card)
