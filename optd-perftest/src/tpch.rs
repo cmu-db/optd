@@ -124,9 +124,7 @@ impl TpchKit {
     }
 
     pub fn gen_tables(&self, cfg: &TpchConfig) -> io::Result<()> {
-        let this_genned_tables_dpath = self
-            .genned_tables_dpath
-            .join(format!("{}-sf{}", cfg.database, cfg.scale_factor));
+        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(cfg);
         let done_fpath = this_genned_tables_dpath.join("dbgen_done");
         if !done_fpath.exists() {
             self.build_dbgen(&cfg.database)?;
@@ -151,9 +149,7 @@ impl TpchKit {
     }
 
     pub fn gen_queries(&self, cfg: &TpchConfig) -> io::Result<()> {
-        let this_genned_queries_dpath = self
-            .genned_queries_dpath
-            .join(format!("{}-sf{}-sd{}", cfg.database, cfg.scale_factor, cfg.seed));
+        let this_genned_queries_dpath = self.get_this_genned_queries_dpath(cfg);
         let this_genned_queries_fpath = this_genned_queries_dpath.join("queries.sql");
         let done_fpath = this_genned_queries_dpath.join("qgen_done");
         if !done_fpath.exists() {
@@ -179,5 +175,18 @@ impl TpchKit {
             }
         }
         Ok(())
+    }
+
+    // TODO: migrate paths and then create the .tbl iterator
+    fn get_this_genned_tables_dpath(&self, cfg: &TpchConfig) -> PathBuf {
+        self
+            .genned_tables_dpath
+            .join(format!("{}-sf{}", cfg.database, cfg.scale_factor))
+    }
+
+    fn get_this_genned_queries_dpath(&self, cfg: &TpchConfig) -> PathBuf {
+        self
+            .genned_queries_dpath
+            .join(format!("{}-sf{}-sd{}", cfg.database, cfg.scale_factor, cfg.seed))
     }
 }
