@@ -9,7 +9,7 @@ impl Benchmark {
     pub fn get_strid(&self) -> String {
         match self {
             Self::Test => String::from("test"),
-            Self::Tpch(tpch_cfg) => format!("tpch_{}", tpch_cfg.get_strid()),
+            Self::Tpch(tpch_config) => format!("tpch_{}", tpch_config.get_strid()),
         }
     }
 

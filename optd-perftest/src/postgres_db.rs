@@ -181,13 +181,13 @@ impl PostgresDb {
     /// Load the benchmark data without worrying about caching
     async fn load_benchmark_data_raw(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
-            Benchmark::Tpch(tpch_cfg) => self.load_tpch_data(tpch_cfg).await?,
+            Benchmark::Tpch(tpch_config) => self.load_tpch_data(tpch_config).await?,
             _ => unimplemented!(),
         };
         Ok(())
     }
 
-    async fn load_tpch_data(&self, tpch_cfg: &TpchConfig) -> anyhow::Result<()> {
+    async fn load_tpch_data(&self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
         // start from a clean slate
         self.remove_pgdata().await?;
         // since we deleted pgdata we'll need to re-init it
@@ -197,13 +197,13 @@ impl PostgresDb {
         // load the schema. createdb should not fail since we just make a fresh pgdata
         shell::run_command_with_status_check(&format!("createdb {}", OPTD_DBNAME))?;
         let tpch_kit = TpchKit::build(self.verbose)?;
-        tpch_kit.gen_tables(tpch_cfg)?;
+        tpch_kit.gen_tables(tpch_config)?;
         shell::run_command_with_status_check(&format!(
             "psql {} -f {}",
             OPTD_DBNAME,
             tpch_kit.schema_fpath.to_str().unwrap()
         ))?;
-        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(tpch_cfg).unwrap();
+        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
             let copy_table_cmd = format!(
@@ -258,7 +258,10 @@ impl CardtestRunnerDBHelper for PostgresDb {
         Ok(rows.len())
     }
 
-    async fn eval_est_card(&self, _sql: &str) -> anyhow::Result<usize> {
+    async fn eval_est_card(&self, sql: &str) -> anyhow::Result<usize> {
+        let result = self.client.as_ref().unwrap().query(&format!("EXPLAIN {}", sql), &vec![]).await?;
+        let explain_result: &str = result.first().unwrap().get(0);
+        println!("explain_result={:?}", explain_result);
         Ok(5)
     }
 }

@@ -130,68 +130,68 @@ impl TpchKit {
         }
     }
 
-    pub fn gen_tables(&self, cfg: &TpchConfig) -> io::Result<()> {
-        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(cfg);
+    pub fn gen_tables(&self, config: &TpchConfig) -> io::Result<()> {
+        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(config);
         let done_fpath = this_genned_tables_dpath.join("dbgen_done");
         if !done_fpath.exists() {
-            self.build_dbgen(&cfg.database)?;
+            self.build_dbgen(&config.database)?;
             shell::make_into_empty_dir(&this_genned_tables_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
             if self.verbose {
-                println!("generating tables for {}...", cfg.get_strid());
+                println!("generating tables for {}...", config.get_strid());
             }
-            shell::run_command_with_status_check(&format!("./dbgen -s{}", cfg.scale_factor))?;
+            shell::run_command_with_status_check(&format!("./dbgen -s{}", config.scale_factor))?;
             File::create(done_fpath)?;
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!("skipped generating tables for {}", cfg.get_strid());
+                println!("skipped generating tables for {}", config.get_strid());
             }
         }
         Ok(())
     }
 
-    pub fn gen_queries(&self, cfg: &TpchConfig) -> io::Result<()> {
-        let this_genned_queries_dpath = self.get_this_genned_queries_dpath(cfg);
+    pub fn gen_queries(&self, config: &TpchConfig) -> io::Result<()> {
+        let this_genned_queries_dpath = self.get_this_genned_queries_dpath(config);
         let this_genned_queries_fpath = this_genned_queries_dpath.join("queries.sql");
         let done_fpath = this_genned_queries_dpath.join("qgen_done");
         if !done_fpath.exists() {
-            self.build_dbgen(&cfg.database)?;
+            self.build_dbgen(&config.database)?;
             shell::make_into_empty_dir(&this_genned_queries_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             if self.verbose {
-                println!("generating queries for {}...", cfg.get_strid());
+                println!("generating queries for {}...", config.get_strid());
             }
             let output = shell::run_command_with_status_check(&format!(
                 "./qgen -s{} -r{}",
-                cfg.scale_factor, cfg.seed
+                config.scale_factor, config.seed
             ))?;
             fs::write(this_genned_queries_fpath, output.stdout)?;
             File::create(done_fpath)?;
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!("skipped generating queries for {}", cfg.get_strid());
+                println!("skipped generating queries for {}", config.get_strid());
             }
         }
         Ok(())
     }
 
     // TODO: migrate paths and then create the .tbl iterator
-    fn get_this_genned_tables_dpath(&self, cfg: &TpchConfig) -> PathBuf {
-        self.genned_tables_dpath.join(cfg.get_strid())
+    fn get_this_genned_tables_dpath(&self, config: &TpchConfig) -> PathBuf {
+        self.genned_tables_dpath.join(config.get_strid())
     }
 
-    fn get_this_genned_queries_dpath(&self, cfg: &TpchConfig) -> PathBuf {
-        self.genned_queries_dpath.join(cfg.get_strid())
+    fn get_this_genned_queries_dpath(&self, config: &TpchConfig) -> PathBuf {
+        self.genned_queries_dpath.join(config.get_strid())
     }
 
     pub fn get_tbl_fpath_iter(
         &self,
-        cfg: &TpchConfig,
+        config: &TpchConfig,
     ) -> io::Result<impl Iterator<Item = PathBuf>> {
-        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(cfg);
+        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(config);
         let dirent_iter = fs::read_dir(this_genned_tables_dpath)?;
         // all results/options are fine to be unwrapped except for path.extension() because that could
         // return None in various cases
