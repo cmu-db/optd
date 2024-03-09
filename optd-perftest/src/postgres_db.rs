@@ -4,8 +4,9 @@ use crate::{
     shell,
     tpch::{TpchConfig, TpchKit},
 };
-use anyhow::Result;
+use anyhow;
 use async_trait::async_trait;
+use tokio_postgres::NoTls;
 use std::{
     env::{self, consts::OS},
     fs::{self, File},
@@ -13,7 +14,7 @@ use std::{
     process::Command,
 };
 
-const OPTD_DB_NAME: &str = "optd";
+const OPTD_DBNAME: &str = "optd";
 
 pub struct PostgresDb {
     verbose: bool,
@@ -29,7 +30,7 @@ pub struct PostgresDb {
 ///   - Stop and start functions should be separate
 ///   - Setup should be done in build() unless it requires more information (like benchmark)
 impl PostgresDb {
-    pub async fn build(verbose: bool) -> Result<Self> {
+    pub async fn build(verbose: bool) -> anyhow::Result<Self> {
         // build paths, sometimes creating them if they don't exist
         let curr_dpath = env::current_dir()?;
         let postgres_db_dpath = Path::new(file!())
@@ -52,16 +53,17 @@ impl PostgresDb {
             log_fpath,
         };
 
-        // (re)start postgres
+        // start postgres and our connection to it
         db.install_postgres().await?;
         db.init_pgdata().await?;
         db.start_postgres().await?;
+        db.connect_to_postgres().await?;
 
         Ok(db)
     }
 
     /// Installs an up-to-date version of Postgres using the OS's package manager
-    async fn install_postgres(&self) -> Result<()> {
+    async fn install_postgres(&self) -> anyhow::Result<()> {
         match OS {
             "macos" => {
                 if self.verbose {
@@ -83,7 +85,7 @@ impl PostgresDb {
     /// Remove the pgdata dir, making sure to stop a running Postgres process if there is one
     /// If there is a Postgres process running on pgdata, it's important to stop it to avoid
     ///   corrupting it (not stopping it leads to lots of weird behavior)
-    async fn remove_pgdata(&self) -> Result<()> {
+    async fn remove_pgdata(&self) -> anyhow::Result<()> {
         if PostgresDb::get_is_postgres_running()? {
             self.stop_postgres().await?;
         }
@@ -92,7 +94,7 @@ impl PostgresDb {
     }
 
     /// Initializes pgdata_dpath directory if it wasn't already initialized
-    async fn init_pgdata(&self) -> Result<()> {
+    async fn init_pgdata(&self) -> anyhow::Result<()> {
         let done_fpath = self.pgdata_dpath.join("initdb_done");
         if !done_fpath.exists() {
             if self.verbose {
@@ -116,7 +118,7 @@ impl PostgresDb {
     /// Start the Postgres process if it's not already started
     /// It will always be started using the pg_ctl binary installed with the package manager
     /// It will always be started on port 5432
-    async fn start_postgres(&self) -> Result<()> {
+    async fn start_postgres(&self) -> anyhow::Result<()> {
         if !PostgresDb::get_is_postgres_running()? {
             if self.verbose {
                 println!("starting postgres...");
@@ -137,7 +139,7 @@ impl PostgresDb {
     }
 
     /// Stop the Postgres process started by start_postgres()
-    async fn stop_postgres(&self) -> Result<()> {
+    async fn stop_postgres(&self) -> anyhow::Result<()> {
         if PostgresDb::get_is_postgres_running()? {
             if self.verbose {
                 println!("stopping postgres...");
@@ -157,12 +159,25 @@ impl PostgresDb {
     }
 
     /// Check whether postgres is running
-    fn get_is_postgres_running() -> Result<bool> {
+    fn get_is_postgres_running() -> anyhow::Result<bool> {
         Ok(Command::new("pg_isready").output()?.status.success())
     }
 
+    /// Create a connection to the postgres database
+    async fn connect_to_postgres(&self) -> anyhow::Result<()> {
+        let (client, connection) = tokio_postgres::connect(&format!("host=localhost dbname={}", OPTD_DBNAME), NoTls).await?;
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("connection error: {}", e);
+            }
+        });
+        let rows = client.query("SELECT * FROM t1;", &vec![]).await?;
+        println!("rows={:?}", rows);
+        Ok(())
+    }
+
     /// Load the benchmark data without worrying about caching
-    async fn load_benchmark_data_raw(&self, benchmark: &Benchmark) -> Result<()> {
+    async fn load_benchmark_data_raw(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
             Benchmark::Tpch(tpch_cfg) => self.load_tpch_data(tpch_cfg).await?,
             _ => unimplemented!(),
@@ -170,7 +185,7 @@ impl PostgresDb {
         Ok(())
     }
 
-    async fn load_tpch_data(&self, tpch_cfg: &TpchConfig) -> Result<()> {
+    async fn load_tpch_data(&self, tpch_cfg: &TpchConfig) -> anyhow::Result<()> {
         // start from a clean slate
         self.remove_pgdata().await?;
         // since we deleted pgdata we'll need to re-init it
@@ -178,12 +193,12 @@ impl PostgresDb {
         // postgres must be started again since remove_pgdata() stops it
         self.start_postgres().await?;
         // load the schema. createdb should not fail since we just make a fresh pgdata
-        shell::run_command_with_status_check(&format!("createdb {}", OPTD_DB_NAME))?;
+        shell::run_command_with_status_check(&format!("createdb {}", OPTD_DBNAME))?;
         let tpch_kit = TpchKit::build(self.verbose)?;
         tpch_kit.gen_tables(tpch_cfg)?;
         shell::run_command_with_status_check(&format!(
             "psql {} -f {}",
-            OPTD_DB_NAME,
+            OPTD_DBNAME,
             tpch_kit.schema_fpath.to_str().unwrap()
         ))?;
         let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(tpch_cfg).unwrap();
@@ -196,7 +211,7 @@ impl PostgresDb {
             );
             shell::run_command_with_status_check(&format!(
                 "psql {} -c \"{}\"",
-                OPTD_DB_NAME, copy_table_cmd
+                OPTD_DBNAME, copy_table_cmd
             ))?;
         }
         Ok(())

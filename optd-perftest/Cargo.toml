@@ -18,3 +18,4 @@ tokio = { version = "1.24", features = [
     "parking_lot",
 ] }
 shlex = "1.3"
+tokio-postgres = "0.7"
