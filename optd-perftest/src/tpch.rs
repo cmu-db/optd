@@ -51,7 +51,7 @@ impl TpchKit {
             .to_path_buf();
         let tpch_dpath = curr_dpath.join(tpch_dpath); // make it absolute
         if !tpch_dpath.exists() {
-            panic!("tpch_dpath ({:?}) doesn't exist. Make sure to run this script from the base optd/ dir", tpch_dpath);
+            fs::create_dir(&tpch_dpath)?;
         }
         let tpch_kit_repo_dpath = tpch_dpath.join("tpch-kit");
         let dbgen_dpath = tpch_kit_repo_dpath.join("dbgen");

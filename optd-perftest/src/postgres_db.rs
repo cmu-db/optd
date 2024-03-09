@@ -8,7 +8,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::{
     env::{self, consts::OS},
-    fs::File,
+    fs::{self, File},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -39,7 +39,7 @@ impl PostgresDb {
             .to_path_buf();
         let postgres_db_dpath = curr_dpath.join(postgres_db_dpath); // make it absolute
         if !postgres_db_dpath.exists() {
-            panic!("postgres_db_dpath ({:?}) doesn't exist. Make sure to run this script from the base optd/ dir", postgres_db_dpath);
+            fs::create_dir(&postgres_db_dpath)?;
         }
         let pgdata_dpath = postgres_db_dpath.join("pgdata");
         let log_fpath = postgres_db_dpath.join("postgres_log");
@@ -165,27 +165,39 @@ impl PostgresDb {
     /// As an optimization, if this benchmark only has read-only queries and the
     ///   data currently loaded was with the same benchmark and parameters, we don't
     ///   need to load it again
-    pub async fn load_benchmark_data(&self, benchmark: &Benchmark) -> Result<()> {
-        // TODO(phw2): cache
-        // TODO(phw2): take in benchmark (with config). make enum for benchmark. make tpch config object to pass to dbgen and qgen
-        let benchmark_strid = benchmark.get_strid();
-        let done_fname = format!("{}_done", benchmark_strid);
-        let done_fpath = self.pgdata_dpath.join(done_fname);
-        if !done_fpath.exists() {
-            if self.verbose {
-                println!("loading data for {}...", benchmark_strid);
+    pub async fn load_benchmark_data(
+        &self,
+        benchmark: &Benchmark,
+        is_benchmark_readonly: bool,
+    ) -> Result<()> {
+        if is_benchmark_readonly {
+            let benchmark_strid = benchmark.get_strid();
+            let done_fname = format!("{}_done", benchmark_strid);
+            let done_fpath = self.pgdata_dpath.join(done_fname);
+            if !is_benchmark_readonly || !done_fpath.exists() {
+                if self.verbose {
+                    println!("loading data for {}...", benchmark_strid);
+                }
+                self.load_benchmark_data_raw(benchmark).await?;
+                File::create(done_fpath)?;
+            } else {
+                #[allow(clippy::collapsible_else_if)]
+                if self.verbose {
+                    println!("skipped loading data for {}", benchmark_strid);
+                }
             }
-            match benchmark {
-                Benchmark::Tpch(tpch_cfg) => self.load_tpch_data(tpch_cfg).await?,
-                _ => unimplemented!(),
-            }
-            File::create(done_fpath)?;
+            Ok(())
         } else {
-            #[allow(clippy::collapsible_else_if)]
-            if self.verbose {
-                println!("skipped loading data for {}", benchmark_strid);
-            }
+            self.load_benchmark_data_raw(benchmark).await
         }
+    }
+
+    /// Load the benchmark data without worrying about caching
+    async fn load_benchmark_data_raw(&self, benchmark: &Benchmark) -> Result<()> {
+        match benchmark {
+            Benchmark::Tpch(tpch_cfg) => self.load_tpch_data(tpch_cfg).await?,
+            _ => unimplemented!(),
+        };
         Ok(())
     }
 
