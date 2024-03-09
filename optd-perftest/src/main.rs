@@ -18,23 +18,16 @@ mod tpch;
 #[tokio::main]
 async fn main() -> Result<()> {
     let pg_db = PostgresDb::build(true).await?;
+    let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db)];
+    let cardtest_runner = CardtestRunner::new(databases).await?;
     let tpch_cfg = TpchConfig {
         database: String::from(TPCH_KIT_POSTGRES),
         scale_factor: 1,
         seed: 15721,
     };
     let tpch_benchmark = Benchmark::Tpch(tpch_cfg.clone());
-    pg_db.load_database(&tpch_benchmark).await?;
-    if true {
-        return Ok(());
-    }
-    let df_db = DatafusionDb::new().await?;
-    let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db), Box::new(df_db)];
-    let cardtest_runner = CardtestRunner::new(databases).await?;
-    cardtest_runner.load_databases(Benchmark::Test).await?;
-    let qerrors = cardtest_runner.eval_qerrors("SELECT * FROM t1;").await?;
+    cardtest_runner.load_databases(tpch_benchmark).await?;
+    let qerrors = cardtest_runner.eval_qerrors("SELECT * FROM region;").await?;
     println!("qerrors: {:?}", qerrors);
-    let tpch_kit = TpchKit::build(true)?;
-    tpch_kit.gen_queries(&tpch_cfg)?;
     Ok(())
 }

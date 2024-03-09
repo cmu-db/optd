@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow;
 use async_trait::async_trait;
-use tokio_postgres::NoTls;
+use tokio_postgres::{Client, NoTls};
 use std::{
     env::{self, consts::OS},
     fs::{self, File},
@@ -18,6 +18,8 @@ const OPTD_DBNAME: &str = "optd";
 
 pub struct PostgresDb {
     verbose: bool,
+    // is an option because we need to initialize the struct before setting this
+    client: Option<Client>,
 
     // cache these paths so we don't have to build them multiple times
     _postgres_db_dpath: PathBuf,
@@ -46,8 +48,9 @@ impl PostgresDb {
         let log_fpath = postgres_db_dpath.join("postgres_log");
 
         // create Self
-        let db = PostgresDb {
+        let mut db = PostgresDb {
             verbose,
+            client: None,
             _postgres_db_dpath: postgres_db_dpath,
             pgdata_dpath,
             log_fpath,
@@ -164,15 +167,14 @@ impl PostgresDb {
     }
 
     /// Create a connection to the postgres database
-    async fn connect_to_postgres(&self) -> anyhow::Result<()> {
+    async fn connect_to_postgres(&mut self) -> anyhow::Result<()> {
         let (client, connection) = tokio_postgres::connect(&format!("host=localhost dbname={}", OPTD_DBNAME), NoTls).await?;
         tokio::spawn(async move {
             if let Err(e) = connection.await {
                 eprintln!("connection error: {}", e);
             }
         });
-        let rows = client.query("SELECT * FROM t1;", &vec![]).await?;
-        println!("rows={:?}", rows);
+        self.client = Some(client);
         Ok(())
     }
 
@@ -251,8 +253,9 @@ impl CardtestRunnerDBHelper for PostgresDb {
         Ok(())
     }
 
-    async fn eval_true_card(&self, _sql: &str) -> anyhow::Result<usize> {
-        Ok(1)
+    async fn eval_true_card(&self, sql: &str) -> anyhow::Result<usize> {
+        let rows = self.client.as_ref().unwrap().query(sql, &vec![]).await?;
+        Ok(rows.len())
     }
 
     async fn eval_est_card(&self, _sql: &str) -> anyhow::Result<usize> {
