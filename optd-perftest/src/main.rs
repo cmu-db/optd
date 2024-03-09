@@ -5,7 +5,7 @@ use postgres_db::PostgresDb;
 
 use crate::{
     benchmark::Benchmark,
-    tpch::{TpchConfig, TPCH_KIT_POSTGRES},
+    tpch::{TpchConfig, TpchKit, TPCH_KIT_POSTGRES},
 };
 
 mod benchmark;
@@ -34,5 +34,7 @@ async fn main() -> Result<()> {
     cardtest_runner.load_databases(Benchmark::Test).await?;
     let qerrors = cardtest_runner.eval_qerrors("SELECT * FROM t1;").await?;
     println!("qerrors: {:?}", qerrors);
+    let tpch_kit = TpchKit::build(true)?;
+    tpch_kit.gen_queries(&tpch_cfg)?;
     Ok(())
 }

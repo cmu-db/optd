@@ -212,7 +212,6 @@ impl PostgresDb {
         shell::run_command_with_status_check(&format!("createdb {}", OPTD_DB_NAME))?;
         let tpch_kit = TpchKit::build(self.verbose)?;
         tpch_kit.gen_tables(tpch_cfg)?;
-        tpch_kit.gen_queries(tpch_cfg)?;
         shell::run_command_with_status_check(&format!(
             "psql {} -f {}",
             OPTD_DB_NAME,
