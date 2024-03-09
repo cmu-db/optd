@@ -4,7 +4,7 @@ use optd_sqlplannertest::DatafusionDb;
 use postgres_db::PostgresDb;
 
 use crate::{
-    benchmark::Benchmark, tpch::{TpchKit, TPCH_KIT_POSTGRES}
+    benchmark::Benchmark, tpch::{TpchConfig, TpchKit, TPCH_KIT_POSTGRES}
 };
 
 mod cardtest;
@@ -30,8 +30,13 @@ async fn main() -> Result<()> {
     cardtest_runner.load_databases(Benchmark::Test).await?;
     let qerrors = cardtest_runner.eval_qerrors("SELECT * FROM t1;").await?;
     println!("qerrors: {:?}", qerrors);
+    let tpch_cfg = TpchConfig {
+        database: String::from(TPCH_KIT_POSTGRES),
+        scale_factor: 1,
+        seed: 15721,
+    };
     let tpch_kit = TpchKit::build(true)?;
-    tpch_kit.gen_tables(TPCH_KIT_POSTGRES, 1)?;
-    tpch_kit.gen_queries(TPCH_KIT_POSTGRES, 1, 15721)?;
+    tpch_kit.gen_tables(&tpch_cfg)?;
+    tpch_kit.gen_queries(&tpch_cfg)?;
     Ok(())
 }

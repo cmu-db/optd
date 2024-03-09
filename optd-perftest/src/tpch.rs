@@ -10,6 +10,12 @@ use std::path::{Path, PathBuf};
 const TPCH_KIT_REPO_URL: &str = "git@github.com:gregrahn/tpch-kit.git";
 pub const TPCH_KIT_POSTGRES: &str = "POSTGRESQL";
 
+pub struct TpchConfig {
+    pub database: String,
+    pub scale_factor: i32,
+    pub seed: i32,
+}
+
 /// Provides many helper functions for running a TPC-H workload.
 /// It does not actually execute the queries as it is meant to be DBMS-agnostic.
 /// Is essentially a wrapper around the tpch-kit repo.
@@ -117,49 +123,49 @@ impl TpchKit {
         }
     }
 
-    pub fn gen_tables(&self, database: &str, scale_factor: i32) -> io::Result<()> {
+    pub fn gen_tables(&self, cfg: &TpchConfig) -> io::Result<()> {
         let this_genned_tables_dpath = self
             .genned_tables_dpath
-            .join(format!("{}-sf{}", database, scale_factor));
+            .join(format!("{}-sf{}", cfg.database, cfg.scale_factor));
         let done_fpath = this_genned_tables_dpath.join("dbgen_done");
         if !done_fpath.exists() {
-            self.build_dbgen(database)?;
+            self.build_dbgen(&cfg.database)?;
             shell::make_into_empty_dir(&this_genned_tables_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
             if self.verbose {
-                println!("generating tables for scale factor {}...", scale_factor);
+                println!("generating tables for scale factor {}...", cfg.scale_factor);
             }
-            shell::run_command_with_status_check(&format!("./dbgen -s{}", scale_factor))?;
+            shell::run_command_with_status_check(&format!("./dbgen -s{}", cfg.scale_factor))?;
             File::create(done_fpath)?;
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
                 println!(
                     "skipped generating tables for database={} scale_factor={}",
-                    database, scale_factor
+                    cfg.database, cfg.scale_factor
                 );
             }
         }
         Ok(())
     }
 
-    pub fn gen_queries(&self, database: &str, scale_factor: i32, seed: i32) -> io::Result<()> {
+    pub fn gen_queries(&self, cfg: &TpchConfig) -> io::Result<()> {
         let this_genned_queries_dpath = self
             .genned_queries_dpath
-            .join(format!("{}-sf{}-sd{}", database, scale_factor, seed));
+            .join(format!("{}-sf{}-sd{}", cfg.database, cfg.scale_factor, cfg.seed));
         let this_genned_queries_fpath = this_genned_queries_dpath.join("queries.sql");
         let done_fpath = this_genned_queries_dpath.join("qgen_done");
         if !done_fpath.exists() {
-            self.build_dbgen(database)?;
+            self.build_dbgen(&cfg.database)?;
             shell::make_into_empty_dir(&this_genned_queries_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             if self.verbose {
-                println!("generating queries for scale factor {}...", scale_factor);
+                println!("generating queries for scale factor {}...", cfg.scale_factor);
             }
             let output = shell::run_command_with_status_check(&format!(
                 "./qgen -s{} -r{}",
-                scale_factor, seed
+                cfg.scale_factor, cfg.seed
             ))?;
             fs::write(this_genned_queries_fpath, output.stdout)?;
             File::create(done_fpath)?;
@@ -168,7 +174,7 @@ impl TpchKit {
             if self.verbose {
                 println!(
                     "skipped generating queries for database={} scale_factor={} seed={}",
-                    database, scale_factor, seed
+                    cfg.database, cfg.scale_factor, cfg.seed
                 );
             }
         }
