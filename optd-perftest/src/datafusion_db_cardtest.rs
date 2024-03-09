@@ -8,7 +8,7 @@ impl CardtestRunnerDBHelper for DatafusionDb {
         "DataFusion"
     }
 
-    async fn load_database(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
+    async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
             Benchmark::Test => {
                 self.execute("CREATE TABLE t1 (c1 INT);", true).await?;

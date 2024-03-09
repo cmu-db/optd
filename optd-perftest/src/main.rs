@@ -26,8 +26,7 @@ async fn main() -> Result<()> {
     };
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
     let cardtest_runner = CardtestRunner::new(databases).await?;
-    cardtest_runner.load_databases(tpch_benchmark).await?;
-    let qerrors = cardtest_runner.eval_qerrors("").await?;
+    let qerrors = cardtest_runner.eval_qerrors_of_benchmark(&tpch_benchmark).await?;
     println!("qerrors: {:?}", qerrors);
     Ok(())
 }

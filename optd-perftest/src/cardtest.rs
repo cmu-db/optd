@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::{self};
 use async_trait::async_trait;
 
@@ -17,9 +19,14 @@ impl CardtestRunner {
         Ok(CardtestRunner { databases })
     }
 
-    pub async fn load_databases(&self, benchmark: Benchmark) -> anyhow::Result<()> {
+    pub async fn eval_qerrors_of_benchmark(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<HashSet<f64>>> {
+        self.load_databases(benchmark);
+        Ok(vec![])
+    }
+
+    async fn load_databases(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
         for database in &self.databases {
-            database.load_database(&benchmark).await?;
+            database.load_benchmark_data(benchmark).await?;
         }
         Ok(())
     }
@@ -29,7 +36,7 @@ impl CardtestRunner {
     /// One detail not specified in the paper is that Q-error is based on the ratio of true and estimated cardinality
     ///   of the entire query, not of a subtree of the query. This detail is specified in Section 7.1 of
     ///   [Yang 2020](https://arxiv.org/pdf/2006.08109.pdf)
-    pub async fn eval_qerrors(&self, sql: &str) -> anyhow::Result<Vec<f64>> {
+    pub async fn eval_qerrors_of_query(&self, sql: &str) -> anyhow::Result<Vec<f64>> {
         let mut qerrors = vec![];
         let mut first_true_card = None;
 
@@ -64,19 +71,28 @@ impl CardtestRunner {
 }
 
 /// This trait defines helper functions to enable cardinality testing on a database
-/// The reason a "get_qerror()" function is not exposed is because of the potential
-///   for inconsistency. Computing Q-error requires knowing the true cardinality of
-///   the SQL query, which theoretically should stay the same when the query is
-///   executed across different databases but may not be the same in practice. It's
-///   good to assert that the true cardinalities across different databases is
-///   indeed the same when doing cardinality testing.
-/// If you want to compute the Q-error of a single database, just create a
-///   CardtestRunner with a single database as input.
+/// The reason a "get qerror" function is not exposed is to allow for greater
+///   flexibility. If we exposed "get qerror" for each database, we would need to
+///   get the true and estimated cardinalities for _each_ database. However, we
+///   can now choose to only get the true cardinalities of _one_ database to
+///   improve performance or even cache the true cardinalities. Additionally, if
+///   we do want to get the true cardinalities of all databases, we can compare
+///   them against each other to ensure they're all equal. All these options are
+///   possible when exposing "get true card" and "get est card" instead of a
+///   single "get qerror". If you want to compute the Q-error of a single
+///   database, just create a CardtestRunner with a single database as input.
+/// When exposing a "get true card" and "get est card" interface, you could
+///   ostensibly do it on the granularity of a single SQL string or on the
+///   granularity of an entire benchmark. I chose the latter for a simple reason:
+///   different databases might have different SQL strings for the same conceptual
+///   query (see how qgen in tpch-kit takes in database as an input).
+/// When more performance tests are implemented, you would probably want to extract
+///   get_name() into a generic "Database" trait.
 #[async_trait]
 pub trait CardtestRunnerDBHelper {
     // get_name() has &self so that we're able to do Box<dyn CardtestRunnerDBHelper>
     fn get_name(&self) -> &str;
-    async fn load_database(&self, benchmark: &Benchmark) -> anyhow::Result<()>;
+    async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()>;
     async fn eval_true_card(&self, sql: &str) -> anyhow::Result<usize>;
     async fn eval_est_card(&self, sql: &str) -> anyhow::Result<usize>;
 }

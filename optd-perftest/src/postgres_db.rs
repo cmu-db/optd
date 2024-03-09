@@ -249,7 +249,7 @@ impl CardtestRunnerDBHelper for PostgresDb {
     /// As an optimization, if this benchmark only has read-only queries and the
     ///   data currently loaded was with the same benchmark and parameters, we don't
     ///   need to load it again
-    async fn load_database(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
+    async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
         if benchmark.is_readonly() {
             let benchmark_strid = benchmark.get_strid();
             let done_fname = format!("{}_done", benchmark_strid);
