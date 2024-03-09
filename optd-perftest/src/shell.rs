@@ -1,10 +1,12 @@
 use std::{fs, io};
 use std::path::Path;
 use std::process::{Command, Output};
+use shlex;
 
 /// Runs a command, exiting the program immediately if the command fails
 pub fn run_command_with_status_check(cmd_str: &str) -> io::Result<Output> {
-    let mut cmd_components: Vec<&str> = cmd_str.split_whitespace().collect();
+    // use shlex::split() instead of split_whitespace() to handle cases like quotes and escape chars
+    let mut cmd_components: Vec<String> = shlex::split(cmd_str).unwrap();
     let cmd = cmd_components.remove(0);
     let args = cmd_components;
     let output = Command::new(cmd).args(args).output()?;

@@ -1,4 +1,4 @@
-use crate::{benchmark::Benchmark, cardtest::CardtestRunnerDBHelper, shell, tpch::{TpchConfig, TpchKit, TPCH_KIT_POSTGRES}};
+use crate::{benchmark::Benchmark, cardtest::CardtestRunnerDBHelper, shell::{self, run_command_with_status_check}, tpch::{TpchConfig, TpchKit, TPCH_KIT_POSTGRES}};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::{env::{self, consts::OS}, fs::{self, File}, path::{Path, PathBuf}, process::Command};
@@ -159,7 +159,9 @@ impl PostgresDb {
         };
         let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(&cfg).unwrap();
         for tbl_fpath in tbl_fpath_iter {
-            println!("path={:?}", tbl_fpath);
+            let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
+            let copy_table_cmd = format!("\\copy {} from {} csv delimiter '|'", tbl_name, tbl_fpath.to_str().unwrap());
+            shell::run_command_with_status_check(&format!("psql {} -c \"{}\"", OPTD_DB_NAME, copy_table_cmd))?;
         }
         Ok(())
     }
