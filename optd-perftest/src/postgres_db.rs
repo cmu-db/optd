@@ -62,8 +62,6 @@ impl PostgresDb {
         db.install_postgres().await?;
         db.init_pgdata().await?;
         db.start_postgres().await?;
-        // create the database. createdb should not fail since we just make a fresh pgdata
-        shell::run_command_with_status_check(&format!("createdb {}", OPTD_DBNAME))?;
         db.connect_to_postgres().await?;
 
         Ok(db)
@@ -101,17 +99,29 @@ impl PostgresDb {
     }
 
     /// Initializes pgdata_dpath directory if it wasn't already initialized
+    /// Create the optd database if initdb was just called. The reason I create
+    ///   it here is because createdb crashes if the database already exists,
+    ///   and there's no simple way to say "create db if not existing".
     async fn init_pgdata(&self) -> anyhow::Result<()> {
         let done_fpath = self.pgdata_dpath.join("initdb_done");
         if !done_fpath.exists() {
             if self.verbose {
                 println!("running initdb...");
             }
+
+            // call initdb
             shell::make_into_empty_dir(&self.pgdata_dpath)?;
             shell::run_command_with_status_check(&format!(
                 "initdb {}",
                 self.pgdata_dpath.to_str().unwrap()
             ))?;
+
+            // create the database. createdb should not fail since we just make a fresh pgdata
+            self.start_postgres().await?;
+            shell::run_command_with_status_check(&format!("createdb {}", OPTD_DBNAME))?;
+            self.stop_postgres().await?;
+
+            // mark done
             File::create(done_fpath)?;
         } else {
             #[allow(clippy::collapsible_else_if)]
@@ -223,8 +233,6 @@ impl PostgresDb {
         self.init_pgdata().await?;
         // postgres must be started again since remove_pgdata() stops it
         self.start_postgres().await?;
-        // create the database. createdb should not fail since we just make a fresh pgdata
-        shell::run_command_with_status_check(&format!("createdb {}", OPTD_DBNAME))?;
         // load the schema
         let tpch_kit = TpchKit::build(self.verbose)?;
         shell::run_command_with_status_check(&format!(
