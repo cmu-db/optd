@@ -1,4 +1,3 @@
-use shlex;
 use std::path::Path;
 use std::process::{Command, Output};
 use std::{fs, io};

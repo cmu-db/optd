@@ -196,9 +196,8 @@ impl TpchKit {
         // all results/options are fine to be unwrapped except for path.extension() because that could
         // return None in various cases
         let path_iter = dirent_iter.map(|dirent| dirent.unwrap().path());
-        let tbl_fpath_iter = path_iter.filter(|path| {
-            path.extension().and_then(|ext| Some(ext.to_str().unwrap())) == Some("tbl")
-        });
+        let tbl_fpath_iter = path_iter
+            .filter(|path| path.extension().map(|ext| ext.to_str().unwrap()) == Some("tbl"));
         Ok(tbl_fpath_iter)
     }
 }

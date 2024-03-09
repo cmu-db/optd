@@ -127,6 +127,7 @@ impl PostgresDb {
                 self.log_fpath.to_str().unwrap()
             ))?;
         } else {
+            #[allow(clippy::collapsible_else_if)]
             if self.verbose {
                 println!("skipped starting postgres");
             }
@@ -146,6 +147,7 @@ impl PostgresDb {
                 self.pgdata_dpath.to_str().unwrap()
             ))?;
         } else {
+            #[allow(clippy::collapsible_else_if)]
             if self.verbose {
                 println!("skipped stopping postgres");
             }
@@ -179,6 +181,7 @@ impl PostgresDb {
             }
             File::create(done_fpath)?;
         } else {
+            #[allow(clippy::collapsible_else_if)]
             if self.verbose {
                 println!("skipped loading data for {}", benchmark_strid);
             }
@@ -203,7 +206,7 @@ impl PostgresDb {
             OPTD_DB_NAME,
             tpch_kit.schema_fpath.to_str().unwrap()
         ))?;
-        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(&tpch_cfg).unwrap();
+        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(tpch_cfg).unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
             let copy_table_cmd = format!(
