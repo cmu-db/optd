@@ -1,4 +1,4 @@
-use crate::{cardtest::{Benchmark, CardtestRunnerDBHelper}, shell, tpch_kit::TpchKit};
+use crate::{benchmark::Benchmark, cardtest::CardtestRunnerDBHelper, shell, tpch_kit::TpchKit};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::{env::{self, consts::OS}, fs::{self, File}, path::{Path, PathBuf}, process::Command};
@@ -138,6 +138,7 @@ impl PostgresDb {
     ///   need to load it again
     pub async fn load_benchmark_data(&self) -> Result<()> {
         // TODO(phw2): cache
+        // TODO(phw2): take in benchmark (with config). make enum for benchmark. make tpch config object to pass to dbgen and qgen
         if self.verbose {
             println!("loading TPC-H data");
         }
