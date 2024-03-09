@@ -1,4 +1,4 @@
-use crate::{benchmark::Benchmark, cardtest::CardtestRunnerDBHelper, shell, tpch::TpchKit};
+use crate::{benchmark::Benchmark, cardtest::CardtestRunnerDBHelper, shell, tpch::{TpchConfig, TpchKit, TPCH_KIT_POSTGRES}};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::{env::{self, consts::OS}, fs::{self, File}, path::{Path, PathBuf}, process::Command};
@@ -152,6 +152,15 @@ impl PostgresDb {
         shell::run_command_with_status_check(&format!("createdb {}", OPTD_DB_NAME))?;
         let tpch_kit = TpchKit::build(self.verbose)?;
         shell::run_command_with_status_check(&format!("psql {} -f {}", OPTD_DB_NAME, tpch_kit.schema_fpath.to_str().unwrap()))?;
+        let cfg = TpchConfig {
+            database: String::from(TPCH_KIT_POSTGRES),
+            scale_factor: 1,
+            seed: 15721,
+        };
+        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(&cfg).unwrap();
+        for tbl_fpath in tbl_fpath_iter {
+            println!("path={:?}", tbl_fpath);
+        }
         Ok(())
     }
 }
