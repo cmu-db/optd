@@ -6,6 +6,7 @@ use crate::{
 };
 use anyhow;
 use async_trait::async_trait;
+use regex::Regex;
 use tokio_postgres::{Client, NoTls};
 use std::{
     env::{self, consts::OS},
@@ -218,6 +219,24 @@ impl PostgresDb {
         }
         Ok(())
     }
+
+    /// Extract the row count from a line of an EXPLAIN output
+    fn extract_row_count(explain_line: &str) -> Option<usize> {
+        let re = Regex::new(r"rows=(\d+)").unwrap();
+        if let Some(caps) = re.captures(explain_line) {
+            if let Some(matched) = caps.get(1) {
+                let rows_str = matched.as_str();
+                match rows_str.parse::<usize>() {
+                    Ok(row_cnt) => Some(row_cnt),
+                    Err(_) => None,
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
 }
 
 #[async_trait]
@@ -255,13 +274,15 @@ impl CardtestRunnerDBHelper for PostgresDb {
 
     async fn eval_true_card(&self, sql: &str) -> anyhow::Result<usize> {
         let rows = self.client.as_ref().unwrap().query(sql, &vec![]).await?;
-        Ok(rows.len())
+        let true_card = rows.len();
+        Ok(true_card)
     }
 
     async fn eval_est_card(&self, sql: &str) -> anyhow::Result<usize> {
         let result = self.client.as_ref().unwrap().query(&format!("EXPLAIN {}", sql), &vec![]).await?;
-        let explain_result: &str = result.first().unwrap().get(0);
-        println!("explain_result={:?}", explain_result);
-        Ok(5)
+        // the first line contains the explain of the root node
+        let first_explain_line: &str = result.first().unwrap().get(0);
+        let est_card = PostgresDb::extract_row_count(first_explain_line).unwrap();
+        Ok(est_card)
     }
 }

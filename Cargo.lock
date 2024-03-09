@@ -2606,6 +2606,7 @@ dependencies = [
  "async-trait",
  "futures",
  "optd-sqlplannertest",
+ "regex",
  "shlex",
  "tokio",
  "tokio-postgres",
