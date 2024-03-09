@@ -94,19 +94,28 @@ impl TpchKit {
     fn clonepull_tpch_kit_repo(&self) -> io::Result<()> {
         if !self.tpch_kit_repo_dpath.exists() {
             if self.verbose {
-                println!("cloning tpch-kit repo...");
+                println!("[start] cloning tpch-kit repo");
             }
             shell::run_command_with_status_check(&format!(
                 "git clone {} {}",
                 TPCH_KIT_REPO_URL,
                 self.tpch_kit_repo_dpath.to_str().unwrap()
             ))?;
-        } else {
-            env::set_current_dir(&self.tpch_kit_repo_dpath)?;
             if self.verbose {
-                println!("pulling latest tpch-kit repo...");
+                println!("[end] cloning tpch-kit repo");
             }
-            shell::run_command_with_status_check("git pull")?;
+        } else {
+            if self.verbose {
+                println!("[skip] cloning tpch-kit repo");
+            }
+        }
+        env::set_current_dir(&self.tpch_kit_repo_dpath)?;
+        if self.verbose {
+            println!("[start] pulling latest tpch-kit repo");
+        }
+        shell::run_command_with_status_check("git pull")?;
+        if self.verbose {
+            println!("[end] pulling latest tpch-kit repo");
         }
         Ok(())
     }
@@ -114,13 +123,16 @@ impl TpchKit {
     fn build_dbgen(&self, database: &str) -> io::Result<()> {
         env::set_current_dir(&self.dbgen_dpath)?;
         if self.verbose {
-            println!("building dbgen...")
+            println!("[start] building dbgen")
         }
         shell::run_command_with_status_check(&format!(
             "make MACHINE={} DATABASE={}",
             TpchKit::get_machine(),
             database
         ))?;
+        if self.verbose {
+            println!("[end] building dbgen")
+        }
         Ok(())
     }
 
@@ -143,14 +155,17 @@ impl TpchKit {
             env::set_current_dir(&self.dbgen_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
             if self.verbose {
-                println!("generating tables for {}...", tpch_config.get_strid());
+                println!("[start] generating tables for {}", tpch_config.get_strid());
             }
             shell::run_command_with_status_check(&format!("./dbgen -s{}", tpch_config.scale_factor))?;
             File::create(done_fpath)?;
+            if self.verbose {
+                println!("[end] generating tables for {}", tpch_config.get_strid());
+            }
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!("skipped generating tables for {}", tpch_config.get_strid());
+                println!("[skip] generating tables for {}", tpch_config.get_strid());
             }
         }
         Ok(())
@@ -165,7 +180,7 @@ impl TpchKit {
             shell::make_into_empty_dir(&this_genned_queries_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             if self.verbose {
-                println!("generating queries for {}...", tpch_config.get_strid());
+                println!("[start] generating queries for {}", tpch_config.get_strid());
             }
             // we don't use -d in qgen because -r controls the substitution values we use
             for query_i in 1..=NUM_TPCH_QUERIES {
@@ -177,10 +192,13 @@ impl TpchKit {
                 fs::write(&this_genned_queries_fpath, output.stdout)?;
             }
             File::create(done_fpath)?;
+            if self.verbose {
+                println!("[end] generating queries for {}", tpch_config.get_strid());
+            }
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!("skipped generating queries for {}", tpch_config.get_strid());
+                println!("[skip] generating queries for {}", tpch_config.get_strid());
             }
         }
         Ok(())

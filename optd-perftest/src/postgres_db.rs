@@ -72,15 +72,21 @@ impl PostgresDb {
         match OS {
             "macos" => {
                 if self.verbose {
-                    println!("updating and upgrading brew...");
+                    println!("[start] updating and upgrading brew");
                 }
                 shell::run_command_with_status_check("brew update")?;
                 shell::run_command_with_status_check("brew upgrade")?;
+                if self.verbose {
+                    println!("[end] updating and upgrading brew");
+                }
 
                 if self.verbose {
-                    println!("installing postgresql...");
+                    println!("[start] installing postgresql");
                 }
                 shell::run_command_with_status_check("brew install postgresql")?;
+                if self.verbose {
+                    println!("[end] installing postgresql");
+                }
             }
             _ => unimplemented!(),
         };
@@ -106,7 +112,7 @@ impl PostgresDb {
         let done_fpath = self.pgdata_dpath.join("initdb_done");
         if !done_fpath.exists() {
             if self.verbose {
-                println!("running initdb...");
+                println!("[start] initializing pgdata");
             }
 
             // call initdb
@@ -123,10 +129,14 @@ impl PostgresDb {
 
             // mark done
             File::create(done_fpath)?;
+
+            if self.verbose {
+                println!("[end] initializing pgdata");
+            }
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!("skipped running initdb");
+                println!("[skip] initializing pgdata");
             }
         }
         Ok(())
@@ -138,18 +148,20 @@ impl PostgresDb {
     async fn start_postgres(&self) -> anyhow::Result<()> {
         if !PostgresDb::get_is_postgres_running()? {
             if self.verbose {
-                println!("starting postgres...");
+                println!("[start] starting postgres");
             }
             shell::run_command_with_status_check(&format!(
                 "pg_ctl -D{} -l{} start",
                 self.pgdata_dpath.to_str().unwrap(),
                 self.log_fpath.to_str().unwrap()
             ))?;
-            println!("done starting postgres");
+            if self.verbose {
+                println!("[end] starting postgres");
+            }
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!("skipped starting postgres");
+                println!("[skip] starting postgres");
             }
         }
 
@@ -160,16 +172,19 @@ impl PostgresDb {
     async fn stop_postgres(&self) -> anyhow::Result<()> {
         if PostgresDb::get_is_postgres_running()? {
             if self.verbose {
-                println!("stopping postgres...");
+                println!("[start] stopping postgres");
             }
             shell::run_command_with_status_check(&format!(
                 "pg_ctl -D{} stop",
                 self.pgdata_dpath.to_str().unwrap()
             ))?;
+            if self.verbose {
+                println!("[end] stopping postgres");
+            }
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!("skipped stopping postgres");
+                println!("[skip] stopping postgres");
             }
         }
 
@@ -200,14 +215,17 @@ impl PostgresDb {
             let done_fpath = self.pgdata_dpath.join(done_fname);
             if !done_fpath.exists() {
                 if self.verbose {
-                    println!("loading data for {}...", benchmark_strid);
+                    println!("[start] loading data for {}", benchmark_strid);
                 }
                 self.load_benchmark_data_raw(benchmark).await?;
                 File::create(done_fpath)?;
+                if self.verbose {
+                    println!("[end] loading data for {}", benchmark_strid);
+                }
             } else {
                 #[allow(clippy::collapsible_else_if)]
                 if self.verbose {
-                    println!("skipped loading data for {}", benchmark_strid);
+                    println!("[skip] loading data for {}", benchmark_strid);
                 }
             }
         } else {
