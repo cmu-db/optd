@@ -4,15 +4,16 @@ use optd_sqlplannertest::DatafusionDb;
 use postgres_db::PostgresDb;
 
 use crate::{
-    benchmark::Benchmark, tpch::{TpchConfig, TpchKit, TPCH_KIT_POSTGRES}
+    benchmark::Benchmark,
+    tpch::{TpchConfig, TPCH_KIT_POSTGRES},
 };
 
+mod benchmark;
 mod cardtest;
-mod shell;
 mod datafusion_db_cardtest;
 mod postgres_db;
+mod shell;
 mod tpch;
-mod benchmark;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -28,16 +29,10 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     let df_db = DatafusionDb::new().await?;
-    let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![
-        Box::new(pg_db),
-        Box::new(df_db),
-    ];
+    let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db), Box::new(df_db)];
     let cardtest_runner = CardtestRunner::new(databases).await?;
     cardtest_runner.load_databases(Benchmark::Test).await?;
     let qerrors = cardtest_runner.eval_qerrors("SELECT * FROM t1;").await?;
     println!("qerrors: {:?}", qerrors);
-    let tpch_kit = TpchKit::build(true)?;
-    tpch_kit.gen_tables(&tpch_cfg)?;
-    tpch_kit.gen_queries(&tpch_cfg)?;
     Ok(())
 }

@@ -1,7 +1,17 @@
-use crate::{benchmark::Benchmark, cardtest::CardtestRunnerDBHelper, shell::{self, run_command_with_status_check}, tpch::{TpchConfig, TpchKit, TPCH_KIT_POSTGRES}};
+use crate::{
+    benchmark::Benchmark,
+    cardtest::CardtestRunnerDBHelper,
+    shell,
+    tpch::{TpchConfig, TpchKit},
+};
 use anyhow::Result;
 use async_trait::async_trait;
-use std::{env::{self, consts::OS}, fs::{self, File}, path::{Path, PathBuf}, process::Command};
+use std::{
+    env::{self, consts::OS},
+    fs::File,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 const OPTD_DB_NAME: &str = "optd";
 
@@ -35,7 +45,12 @@ impl PostgresDb {
         let log_fpath = postgres_db_dpath.join("postgres_log");
 
         // create Self
-        let db = PostgresDb {verbose, _postgres_db_dpath: postgres_db_dpath, pgdata_dpath, log_fpath};
+        let db = PostgresDb {
+            verbose,
+            _postgres_db_dpath: postgres_db_dpath,
+            pgdata_dpath,
+            log_fpath,
+        };
 
         // (re)start postgres
         db.install_postgres().await?;
@@ -59,7 +74,7 @@ impl PostgresDb {
                     println!("installing postgresql...");
                 }
                 shell::run_command_with_status_check("brew install postgresql")?;
-            },
+            }
             _ => unimplemented!(),
         };
         Ok(())
@@ -84,14 +99,15 @@ impl PostgresDb {
                 println!("running initdb...");
             }
             shell::make_into_empty_dir(&self.pgdata_dpath)?;
-            shell::run_command_with_status_check(&format!("initdb {}", self.pgdata_dpath.to_str().unwrap()))?;
+            shell::run_command_with_status_check(&format!(
+                "initdb {}",
+                self.pgdata_dpath.to_str().unwrap()
+            ))?;
             File::create(done_fpath)?;
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!(
-                    "skipped running initdb"
-                );
+                println!("skipped running initdb");
             }
         }
         Ok(())
@@ -105,13 +121,17 @@ impl PostgresDb {
             if self.verbose {
                 println!("starting postgres...");
             }
-            shell::run_command_with_status_check(&format!("pg_ctl -D{} -l{} start", self.pgdata_dpath.to_str().unwrap(), self.log_fpath.to_str().unwrap()))?;
+            shell::run_command_with_status_check(&format!(
+                "pg_ctl -D{} -l{} start",
+                self.pgdata_dpath.to_str().unwrap(),
+                self.log_fpath.to_str().unwrap()
+            ))?;
         } else {
             if self.verbose {
                 println!("skipped starting postgres");
             }
         }
-        
+
         Ok(())
     }
 
@@ -121,13 +141,16 @@ impl PostgresDb {
             if self.verbose {
                 println!("stopping postgres...");
             }
-            shell::run_command_with_status_check(&format!("pg_ctl -D{} stop", self.pgdata_dpath.to_str().unwrap()))?;
+            shell::run_command_with_status_check(&format!(
+                "pg_ctl -D{} stop",
+                self.pgdata_dpath.to_str().unwrap()
+            ))?;
         } else {
             if self.verbose {
                 println!("skipped stopping postgres");
             }
         }
-        
+
         Ok(())
     }
 
@@ -175,12 +198,23 @@ impl PostgresDb {
         let tpch_kit = TpchKit::build(self.verbose)?;
         tpch_kit.gen_tables(tpch_cfg)?;
         tpch_kit.gen_queries(tpch_cfg)?;
-        shell::run_command_with_status_check(&format!("psql {} -f {}", OPTD_DB_NAME, tpch_kit.schema_fpath.to_str().unwrap()))?;
+        shell::run_command_with_status_check(&format!(
+            "psql {} -f {}",
+            OPTD_DB_NAME,
+            tpch_kit.schema_fpath.to_str().unwrap()
+        ))?;
         let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(&tpch_cfg).unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
-            let copy_table_cmd = format!("\\copy {} from {} csv delimiter '|'", tbl_name, tbl_fpath.to_str().unwrap());
-            shell::run_command_with_status_check(&format!("psql {} -c \"{}\"", OPTD_DB_NAME, copy_table_cmd))?;
+            let copy_table_cmd = format!(
+                "\\copy {} from {} csv delimiter '|'",
+                tbl_name,
+                tbl_fpath.to_str().unwrap()
+            );
+            shell::run_command_with_status_check(&format!(
+                "psql {} -c \"{}\"",
+                OPTD_DB_NAME, copy_table_cmd
+            ))?;
         }
         Ok(())
     }

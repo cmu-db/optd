@@ -146,10 +146,7 @@ impl TpchKit {
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!(
-                    "skipped generating tables for {}",
-                    cfg.get_strid()
-                );
+                println!("skipped generating tables for {}", cfg.get_strid());
             }
         }
         Ok(())
@@ -175,10 +172,7 @@ impl TpchKit {
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!(
-                    "skipped generating queries for {}",
-                    cfg.get_strid()
-                );
+                println!("skipped generating queries for {}", cfg.get_strid());
             }
         }
         Ok(())
@@ -186,26 +180,25 @@ impl TpchKit {
 
     // TODO: migrate paths and then create the .tbl iterator
     fn get_this_genned_tables_dpath(&self, cfg: &TpchConfig) -> PathBuf {
-        self
-            .genned_tables_dpath
-            .join(cfg.get_strid())
+        self.genned_tables_dpath.join(cfg.get_strid())
     }
 
     fn get_this_genned_queries_dpath(&self, cfg: &TpchConfig) -> PathBuf {
-        self
-            .genned_queries_dpath
-            .join(cfg.get_strid())
+        self.genned_queries_dpath.join(cfg.get_strid())
     }
 
-    pub fn get_tbl_fpath_iter(&self, cfg: &TpchConfig) -> io::Result<impl Iterator<Item = PathBuf>> {
+    pub fn get_tbl_fpath_iter(
+        &self,
+        cfg: &TpchConfig,
+    ) -> io::Result<impl Iterator<Item = PathBuf>> {
         let this_genned_tables_dpath = self.get_this_genned_tables_dpath(cfg);
         let dirent_iter = fs::read_dir(this_genned_tables_dpath)?;
         // all results/options are fine to be unwrapped except for path.extension() because that could
         // return None in various cases
         let path_iter = dirent_iter.map(|dirent| dirent.unwrap().path());
-        let tbl_fpath_iter = path_iter.filter(|path|
+        let tbl_fpath_iter = path_iter.filter(|path| {
             path.extension().and_then(|ext| Some(ext.to_str().unwrap())) == Some("tbl")
-        );
+        });
         Ok(tbl_fpath_iter)
     }
 }

@@ -1,7 +1,7 @@
-use std::{fs, io};
+use shlex;
 use std::path::Path;
 use std::process::{Command, Output};
-use shlex;
+use std::{fs, io};
 
 /// Runs a command, exiting the program immediately if the command fails
 pub fn run_command_with_status_check(cmd_str: &str) -> io::Result<Output> {
