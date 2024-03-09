@@ -134,44 +134,44 @@ impl TpchKit {
     }
 
     /// Generates the .tbl files for all tables of TPC-H
-    pub fn gen_tables(&self, config: &TpchConfig) -> io::Result<()> {
-        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(config);
+    pub fn gen_tables(&self, tpch_config: &TpchConfig) -> io::Result<()> {
+        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(tpch_config);
         let done_fpath = this_genned_tables_dpath.join("dbgen_done");
         if !done_fpath.exists() {
-            self.build_dbgen(&config.database)?;
+            self.build_dbgen(&tpch_config.database)?;
             shell::make_into_empty_dir(&this_genned_tables_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
             if self.verbose {
-                println!("generating tables for {}...", config.get_strid());
+                println!("generating tables for {}...", tpch_config.get_strid());
             }
-            shell::run_command_with_status_check(&format!("./dbgen -s{}", config.scale_factor))?;
+            shell::run_command_with_status_check(&format!("./dbgen -s{}", tpch_config.scale_factor))?;
             File::create(done_fpath)?;
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!("skipped generating tables for {}", config.get_strid());
+                println!("skipped generating tables for {}", tpch_config.get_strid());
             }
         }
         Ok(())
     }
 
     /// Generates the .sql files for all queries of TPC-H, with one .sql file per query
-    pub fn gen_queries(&self, config: &TpchConfig) -> io::Result<()> {
-        let this_genned_queries_dpath = self.get_this_genned_queries_dpath(config);
+    pub fn gen_queries(&self, tpch_config: &TpchConfig) -> io::Result<()> {
+        let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_config);
         let done_fpath = this_genned_queries_dpath.join("qgen_done");
         if !done_fpath.exists() {
-            self.build_dbgen(&config.database)?;
+            self.build_dbgen(&tpch_config.database)?;
             shell::make_into_empty_dir(&this_genned_queries_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             if self.verbose {
-                println!("generating queries for {}...", config.get_strid());
+                println!("generating queries for {}...", tpch_config.get_strid());
             }
             // we don't use -d in qgen because -r controls the substitution values we use
             for query_i in 1..=NUM_TPCH_QUERIES {
                 let output = shell::run_command_with_status_check(&format!(
                     "./qgen -s{} -r{} {}",
-                    config.scale_factor, config.seed, query_i
+                    tpch_config.scale_factor, tpch_config.seed, query_i
                 ))?;
                 let this_genned_queries_fpath = this_genned_queries_dpath.join(format!("{}.sql", query_i));
                 fs::write(&this_genned_queries_fpath, output.stdout)?;
@@ -180,26 +180,27 @@ impl TpchKit {
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!("skipped generating queries for {}", config.get_strid());
+                println!("skipped generating queries for {}", tpch_config.get_strid());
             }
         }
         Ok(())
     }
 
     // TODO: migrate paths and then create the .tbl iterator
-    fn get_this_genned_tables_dpath(&self, config: &TpchConfig) -> PathBuf {
-        self.genned_tables_dpath.join(config.get_strid())
+    fn get_this_genned_tables_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
+        self.genned_tables_dpath.join(tpch_config.get_strid())
     }
 
-    fn get_this_genned_queries_dpath(&self, config: &TpchConfig) -> PathBuf {
-        self.genned_queries_dpath.join(config.get_strid())
+    fn get_this_genned_queries_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
+        self.genned_queries_dpath.join(tpch_config.get_strid())
     }
 
+    /// Get an iterator through all generated .tbl files of a given config
     pub fn get_tbl_fpath_iter(
         &self,
-        config: &TpchConfig,
+        tpch_config: &TpchConfig,
     ) -> io::Result<impl Iterator<Item = PathBuf>> {
-        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(config);
+        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(tpch_config);
         let dirent_iter = fs::read_dir(this_genned_tables_dpath)?;
         // all results/options are fine to be unwrapped except for path.extension() because that could
         // return None in various cases
@@ -207,5 +208,17 @@ impl TpchKit {
         let tbl_fpath_iter = path_iter
             .filter(|path| path.extension().map(|ext| ext.to_str().unwrap()) == Some("tbl"));
         Ok(tbl_fpath_iter)
+    }
+
+    /// Get an iterator through all generated .sql files _in order_ of a given config
+    /// It's important to iterate _in order_ due to the interface of CardtestRunnerDBHelper
+    pub fn get_sql_fpath_ordered_iter(
+        &self,
+        tpch_config: &TpchConfig,
+    ) -> io::Result<impl Iterator<Item = PathBuf>> {
+        let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_config);
+        let query_i_iter = 1..=NUM_TPCH_QUERIES;
+        let sql_fpath_ordered_iter = query_i_iter.map(move |query_i| this_genned_queries_dpath.join(&format!("{}.sql", query_i)));
+        Ok(sql_fpath_ordered_iter)
     }
 }

@@ -25,6 +25,10 @@ impl CardtestRunner {
     ///   of the entire query, not of a subtree of the query. This detail is specified in Section 7.1 of
     ///   [Yang 2020](https://arxiv.org/pdf/2006.08109.pdf)
     pub async fn eval_benchmark_qerrors_alldbs(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<HashSet<f64>>> {
+        for database in &self.databases {
+            let true_cards = database.eval_benchmark_truecards(benchmark).await?;
+        }
+
         // let mut qerrors = vec![];
         // let mut first_true_card = None;
 
@@ -82,6 +86,8 @@ impl CardtestRunner {
 pub trait CardtestRunnerDBHelper {
     // get_name() has &self so that we're able to do Box<dyn CardtestRunnerDBHelper>
     fn get_name(&self) -> &str;
+
+    // the order of queries has to be the same between these two functions
     async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>>;
     async fn eval_benchmark_estcards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>>;
 }
