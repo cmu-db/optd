@@ -107,7 +107,9 @@ impl PostgresDb {
             }
             shell::run_command_with_status_check(&format!("pg_ctl -D{} -l{} start", self.pgdata_dpath.to_str().unwrap(), self.log_fpath.to_str().unwrap()))?;
         } else {
-            println!("skipped starting postgres");
+            if self.verbose {
+                println!("skipped starting postgres");
+            }
         }
         
         Ok(())
@@ -121,7 +123,9 @@ impl PostgresDb {
             }
             shell::run_command_with_status_check(&format!("pg_ctl -D{} stop", self.pgdata_dpath.to_str().unwrap()))?;
         } else {
-            println!("skipped stopping postgres");
+            if self.verbose {
+                println!("skipped stopping postgres");
+            }
         }
         
         Ok(())
@@ -169,6 +173,8 @@ impl PostgresDb {
         // load the schema. createdb should not fail since we just make a fresh pgdata
         shell::run_command_with_status_check(&format!("createdb {}", OPTD_DB_NAME))?;
         let tpch_kit = TpchKit::build(self.verbose)?;
+        tpch_kit.gen_tables(tpch_cfg)?;
+        tpch_kit.gen_queries(tpch_cfg)?;
         shell::run_command_with_status_check(&format!("psql {} -f {}", OPTD_DB_NAME, tpch_kit.schema_fpath.to_str().unwrap()))?;
         let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(&tpch_cfg).unwrap();
         for tbl_fpath in tbl_fpath_iter {
