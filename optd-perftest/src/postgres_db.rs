@@ -136,12 +136,30 @@ impl PostgresDb {
     /// As an optimization, if this benchmark only has read-only queries and the
     ///   data currently loaded was with the same benchmark and parameters, we don't
     ///   need to load it again
-    pub async fn load_benchmark_data(&self) -> Result<()> {
+    pub async fn load_benchmark_data(&self, benchmark: &Benchmark) -> Result<()> {
         // TODO(phw2): cache
         // TODO(phw2): take in benchmark (with config). make enum for benchmark. make tpch config object to pass to dbgen and qgen
-        if self.verbose {
-            println!("loading TPC-H data");
+        let benchmark_strid = benchmark.get_strid();
+        let done_fname = format!("{}_done", benchmark_strid);
+        let done_fpath = self.pgdata_dpath.join(done_fname);
+        if !done_fpath.exists() {
+            if self.verbose {
+                println!("loading data for {}...", benchmark_strid);
+            }
+            match benchmark {
+                Benchmark::Tpch(tpch_cfg) => self.load_tpch_data(tpch_cfg).await?,
+                _ => unimplemented!(),
+            }
+            File::create(done_fpath)?;
+        } else {
+            if self.verbose {
+                println!("skipped loading data for {}", benchmark_strid);
+            }
         }
+        Ok(())
+    }
+
+    async fn load_tpch_data(&self, tpch_cfg: &TpchConfig) -> Result<()> {
         // start from a clean slate
         self.remove_pgdata().await?;
         // since we deleted pgdata we'll need to re-init it
@@ -152,12 +170,7 @@ impl PostgresDb {
         shell::run_command_with_status_check(&format!("createdb {}", OPTD_DB_NAME))?;
         let tpch_kit = TpchKit::build(self.verbose)?;
         shell::run_command_with_status_check(&format!("psql {} -f {}", OPTD_DB_NAME, tpch_kit.schema_fpath.to_str().unwrap()))?;
-        let cfg = TpchConfig {
-            database: String::from(TPCH_KIT_POSTGRES),
-            scale_factor: 1,
-            seed: 15721,
-        };
-        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(&cfg).unwrap();
+        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(&tpch_cfg).unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
             let copy_table_cmd = format!("\\copy {} from {} csv delimiter '|'", tbl_name, tbl_fpath.to_str().unwrap());

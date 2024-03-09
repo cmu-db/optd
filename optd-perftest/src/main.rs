@@ -17,7 +17,13 @@ mod benchmark;
 #[tokio::main]
 async fn main() -> Result<()> {
     let pg_db = PostgresDb::build(true).await?;
-    pg_db.load_benchmark_data().await?;
+    let tpch_cfg = TpchConfig {
+        database: String::from(TPCH_KIT_POSTGRES),
+        scale_factor: 1,
+        seed: 15721,
+    };
+    let tpch_benchmark = Benchmark::Tpch(tpch_cfg.clone());
+    pg_db.load_benchmark_data(&tpch_benchmark).await?;
     if true {
         return Ok(());
     }
@@ -30,11 +36,6 @@ async fn main() -> Result<()> {
     cardtest_runner.load_databases(Benchmark::Test).await?;
     let qerrors = cardtest_runner.eval_qerrors("SELECT * FROM t1;").await?;
     println!("qerrors: {:?}", qerrors);
-    let tpch_cfg = TpchConfig {
-        database: String::from(TPCH_KIT_POSTGRES),
-        scale_factor: 1,
-        seed: 15721,
-    };
     let tpch_kit = TpchKit::build(true)?;
     tpch_kit.gen_tables(&tpch_cfg)?;
     tpch_kit.gen_queries(&tpch_cfg)?;

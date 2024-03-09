@@ -10,10 +10,17 @@ use std::path::{Path, PathBuf};
 const TPCH_KIT_REPO_URL: &str = "git@github.com:gregrahn/tpch-kit.git";
 pub const TPCH_KIT_POSTGRES: &str = "POSTGRESQL";
 
+#[derive(Clone)]
 pub struct TpchConfig {
     pub database: String,
     pub scale_factor: i32,
     pub seed: i32,
+}
+
+impl TpchConfig {
+    pub fn get_strid(&self) -> String {
+        format!("{}_sf{}_sd{}", self.database, self.scale_factor, self.seed)
+    }
 }
 
 /// Provides many helper functions for running a TPC-H workload.
@@ -132,7 +139,7 @@ impl TpchKit {
             env::set_current_dir(&self.dbgen_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
             if self.verbose {
-                println!("generating tables for scale factor {}...", cfg.scale_factor);
+                println!("generating tables for {}...", cfg.get_strid());
             }
             shell::run_command_with_status_check(&format!("./dbgen -s{}", cfg.scale_factor))?;
             File::create(done_fpath)?;
@@ -140,8 +147,8 @@ impl TpchKit {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
                 println!(
-                    "skipped generating tables for database={} scale_factor={}",
-                    cfg.database, cfg.scale_factor
+                    "skipped generating tables for {}",
+                    cfg.get_strid()
                 );
             }
         }
@@ -157,7 +164,7 @@ impl TpchKit {
             shell::make_into_empty_dir(&this_genned_queries_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             if self.verbose {
-                println!("generating queries for scale factor {}...", cfg.scale_factor);
+                println!("generating queries for {}...", cfg.get_strid());
             }
             let output = shell::run_command_with_status_check(&format!(
                 "./qgen -s{} -r{}",
@@ -169,8 +176,8 @@ impl TpchKit {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
                 println!(
-                    "skipped generating queries for database={} scale_factor={} seed={}",
-                    cfg.database, cfg.scale_factor, cfg.seed
+                    "skipped generating queries for {}",
+                    cfg.get_strid()
                 );
             }
         }
@@ -181,13 +188,13 @@ impl TpchKit {
     fn get_this_genned_tables_dpath(&self, cfg: &TpchConfig) -> PathBuf {
         self
             .genned_tables_dpath
-            .join(format!("{}-sf{}", cfg.database, cfg.scale_factor))
+            .join(cfg.get_strid())
     }
 
     fn get_this_genned_queries_dpath(&self, cfg: &TpchConfig) -> PathBuf {
         self
             .genned_queries_dpath
-            .join(format!("{}-sf{}-sd{}", cfg.database, cfg.scale_factor, cfg.seed))
+            .join(cfg.get_strid())
     }
 
     pub fn get_tbl_fpath_iter(&self, cfg: &TpchConfig) -> io::Result<impl Iterator<Item = PathBuf>> {
