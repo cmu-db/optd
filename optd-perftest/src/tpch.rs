@@ -17,7 +17,7 @@ pub struct TpchKit {
     verbose: bool,
 
     // cache these paths so we don't have to build them multiple times
-    _tpch_kit_dpath: PathBuf,
+    _tpch_dpath: PathBuf,
     tpch_kit_repo_dpath: PathBuf,
     queries_dpath: PathBuf,
     dbgen_dpath: PathBuf,
@@ -31,23 +31,23 @@ impl TpchKit {
     pub fn build(verbose: bool) -> io::Result<Self> {
         // build paths, sometimes creating them if they don't exist
         let curr_dpath = env::current_dir()?;
-        let tpch_kit_dpath = Path::new(file!())
+        let tpch_dpath = Path::new(file!())
             .parent()
             .unwrap()
-            .join("tpch_kit")
+            .join("tpch")
             .to_path_buf();
-        let tpch_kit_dpath = curr_dpath.join(tpch_kit_dpath); // make it absolute
-        if !tpch_kit_dpath.exists() {
-            panic!("tpch_kit_dpath ({:?}) doesn't exist. Make sure to run this script from the base optd/ dir", tpch_kit_dpath);
+        let tpch_dpath = curr_dpath.join(tpch_dpath); // make it absolute
+        if !tpch_dpath.exists() {
+            panic!("tpch_dpath ({:?}) doesn't exist. Make sure to run this script from the base optd/ dir", tpch_dpath);
         }
-        let tpch_kit_repo_dpath = tpch_kit_dpath.join("tpch-kit");
+        let tpch_kit_repo_dpath = tpch_dpath.join("tpch-kit");
         let dbgen_dpath = tpch_kit_repo_dpath.join("dbgen");
         let queries_dpath = dbgen_dpath.join("queries");
-        let genned_tables_dpath = tpch_kit_dpath.join("genned_tables");
+        let genned_tables_dpath = tpch_dpath.join("genned_tables");
         if !genned_tables_dpath.exists() {
             fs::create_dir(&genned_tables_dpath)?;
         }
-        let genned_queries_dpath = tpch_kit_dpath.join("genned_queries");
+        let genned_queries_dpath = tpch_dpath.join("genned_queries");
         if !genned_queries_dpath.exists() {
             fs::create_dir(&genned_queries_dpath)?;
         }
@@ -56,7 +56,7 @@ impl TpchKit {
         // create Self
         let kit = TpchKit {
             verbose,
-            _tpch_kit_dpath: tpch_kit_dpath,
+            _tpch_dpath: tpch_dpath,
             tpch_kit_repo_dpath,
             queries_dpath,
             dbgen_dpath,

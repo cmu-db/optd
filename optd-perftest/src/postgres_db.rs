@@ -1,4 +1,4 @@
-use crate::{benchmark::Benchmark, cardtest::CardtestRunnerDBHelper, shell, tpch_kit::TpchKit};
+use crate::{benchmark::Benchmark, cardtest::CardtestRunnerDBHelper, shell, tpch::TpchKit};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::{env::{self, consts::OS}, fs::{self, File}, path::{Path, PathBuf}, process::Command};

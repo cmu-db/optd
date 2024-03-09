@@ -4,14 +4,14 @@ use optd_sqlplannertest::DatafusionDb;
 use postgres_db::PostgresDb;
 
 use crate::{
-    benchmark::Benchmark, tpch_kit::{TpchKit, TPCH_KIT_POSTGRES}
+    benchmark::Benchmark, tpch::{TpchKit, TPCH_KIT_POSTGRES}
 };
 
 mod cardtest;
 mod shell;
 mod datafusion_db_cardtest;
 mod postgres_db;
-mod tpch_kit;
+mod tpch;
 mod benchmark;
 
 #[tokio::main]
