@@ -168,13 +168,12 @@ impl PostgresDb {
     pub async fn load_benchmark_data(
         &self,
         benchmark: &Benchmark,
-        is_benchmark_readonly: bool,
     ) -> Result<()> {
-        if is_benchmark_readonly {
+        if benchmark.is_readonly() {
             let benchmark_strid = benchmark.get_strid();
             let done_fname = format!("{}_done", benchmark_strid);
             let done_fpath = self.pgdata_dpath.join(done_fname);
-            if !is_benchmark_readonly || !done_fpath.exists() {
+            if !done_fpath.exists() {
                 if self.verbose {
                     println!("loading data for {}...", benchmark_strid);
                 }

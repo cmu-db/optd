@@ -12,4 +12,11 @@ impl Benchmark {
             Self::Tpch(tpch_cfg) => format!("tpch_{}", tpch_cfg.get_strid()),
         }
     }
+
+    pub fn is_readonly(&self) -> bool {
+        match self {
+            Self::Test => true,
+            Self::Tpch(_) => true,
+        }
+    }
 }
