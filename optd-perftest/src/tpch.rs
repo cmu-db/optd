@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 const TPCH_KIT_REPO_URL: &str = "git@github.com:gregrahn/tpch-kit.git";
 pub const TPCH_KIT_POSTGRES: &str = "POSTGRESQL";
+const NUM_TPCH_QUERIES: usize = 22;
 
 #[derive(Clone)]
 pub struct TpchConfig {
@@ -130,6 +131,7 @@ impl TpchKit {
         }
     }
 
+    /// Generates the .tbl files for all tables of TPC-H
     pub fn gen_tables(&self, config: &TpchConfig) -> io::Result<()> {
         let this_genned_tables_dpath = self.get_this_genned_tables_dpath(config);
         let done_fpath = this_genned_tables_dpath.join("dbgen_done");
@@ -152,9 +154,9 @@ impl TpchKit {
         Ok(())
     }
 
+    /// Generates the .sql files for all queries of TPC-H, with one .sql file per query
     pub fn gen_queries(&self, config: &TpchConfig) -> io::Result<()> {
         let this_genned_queries_dpath = self.get_this_genned_queries_dpath(config);
-        let this_genned_queries_fpath = this_genned_queries_dpath.join("queries.sql");
         let done_fpath = this_genned_queries_dpath.join("qgen_done");
         if !done_fpath.exists() {
             self.build_dbgen(&config.database)?;
@@ -163,11 +165,15 @@ impl TpchKit {
             if self.verbose {
                 println!("generating queries for {}...", config.get_strid());
             }
-            let output = shell::run_command_with_status_check(&format!(
-                "./qgen -s{} -r{}",
-                config.scale_factor, config.seed
-            ))?;
-            fs::write(this_genned_queries_fpath, output.stdout)?;
+            // we don't use -d in qgen because -r controls the substitution values we use
+            for query_i in 1..=NUM_TPCH_QUERIES {
+                let output = shell::run_command_with_status_check(&format!(
+                    "./qgen -s{} -r{} {}",
+                    config.scale_factor, config.seed, query_i
+                ))?;
+                let this_genned_queries_fpath = this_genned_queries_dpath.join(format!("{}.sql", query_i));
+                fs::write(&this_genned_queries_fpath, output.stdout)?;
+            }
             File::create(done_fpath)?;
         } else {
             #[allow(clippy::collapsible_else_if)]
