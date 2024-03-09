@@ -27,6 +27,7 @@ impl CardtestRunner {
     pub async fn eval_benchmark_qerrors_alldbs(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<HashSet<f64>>> {
         for database in &self.databases {
             let true_cards = database.eval_benchmark_truecards(benchmark).await?;
+            println!("true_cards={:?}", true_cards);
         }
 
         // let mut qerrors = vec![];

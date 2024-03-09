@@ -270,6 +270,7 @@ impl CardtestRunnerDBHelper for PostgresDb {
     }
 
     async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+        self.load_benchmark_data(benchmark).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
             Benchmark::Tpch(tpch_config) => self.eval_tpch_truecards(tpch_config).await,
@@ -277,6 +278,7 @@ impl CardtestRunnerDBHelper for PostgresDb {
     }
 
     async fn eval_benchmark_estcards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+        self.load_benchmark_data(benchmark).await?;
         Ok(vec![])
     }
 }
