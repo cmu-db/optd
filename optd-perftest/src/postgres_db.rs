@@ -245,40 +245,24 @@ impl CardtestRunnerDBHelper for PostgresDb {
         "Postgres"
     }
 
-    /// Load the data of a benchmark with parameters
-    /// As an optimization, if this benchmark only has read-only queries and the
-    ///   data currently loaded was with the same benchmark and parameters, we don't
-    ///   need to load it again
-    async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
-        if benchmark.is_readonly() {
-            let benchmark_strid = benchmark.get_strid();
-            let done_fname = format!("{}_done", benchmark_strid);
-            let done_fpath = self.pgdata_dpath.join(done_fname);
-            if !done_fpath.exists() {
-                if self.verbose {
-                    println!("loading data for {}...", benchmark_strid);
-                }
-                self.load_benchmark_data_raw(benchmark).await?;
-                File::create(done_fpath)?;
-            } else {
-                #[allow(clippy::collapsible_else_if)]
-                if self.verbose {
-                    println!("skipped loading data for {}", benchmark_strid);
-                }
-            }
-        } else {
-            self.load_benchmark_data_raw(benchmark).await?
-        }
-        Ok(())
+    async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+        Ok(vec![])
     }
 
-    async fn eval_true_card(&self, sql: &str) -> anyhow::Result<usize> {
+    async fn eval_benchmark_estcards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+        Ok(vec![])
+    }
+}
+
+/// This impl has helpers for ```impl CardtestRunnerDBHelper for PostgresDb```
+impl PostgresDb {
+    async fn eval_query_truecards(&self, sql: &str) -> anyhow::Result<usize> {
         let rows = self.client.as_ref().unwrap().query(sql, &vec![]).await?;
         let true_card = rows.len();
         Ok(true_card)
     }
 
-    async fn eval_est_card(&self, sql: &str) -> anyhow::Result<usize> {
+    async fn eval_query_estcards(&self, sql: &str) -> anyhow::Result<usize> {
         let result = self.client.as_ref().unwrap().query(&format!("EXPLAIN {}", sql), &vec![]).await?;
         // the first line contains the explain of the root node
         let first_explain_line: &str = result.first().unwrap().get(0);

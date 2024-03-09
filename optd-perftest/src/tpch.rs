@@ -27,6 +27,8 @@ impl TpchConfig {
 /// Provides many helper functions for running a TPC-H workload.
 /// It does not actually execute the queries as it is meant to be DBMS-agnostic.
 /// Is essentially a wrapper around the tpch-kit repo.
+/// Since it's conceptually a wrapper around the repo, I chose _not_ to make
+///   TpchConfig an initialization parameter.
 pub struct TpchKit {
     verbose: bool,
 

@@ -8,26 +8,25 @@ impl CardtestRunnerDBHelper for DatafusionDb {
         "DataFusion"
     }
 
-    async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
-        match benchmark {
-            Benchmark::Test => {
-                self.execute("CREATE TABLE t1 (c1 INT);", true).await?;
-                self.execute("INSERT INTO t1 VALUES (0);", true).await?;
-            }
-            _ => unimplemented!(),
-        };
-        Ok(())
+    async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+        Ok(vec![])
     }
 
-    async fn eval_true_card(&self, sql: &str) -> anyhow::Result<usize> {
-        let rows = self.execute(sql, true).await?;
-        let num_rows = rows.len();
-        Ok(num_rows)
+    async fn eval_benchmark_estcards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+        Ok(vec![])
     }
+}
 
-    async fn eval_est_card(&self, _sql: &str) -> anyhow::Result<usize> {
-        let rows = self.execute("EXPLAIN SELECT * FROM t1;", true).await?;
-        println!("eval_est_card(): rows={:?}", rows);
-        Ok(12)
-    }
+// helper functions for ```impl CardtestRunnerDBHelper for DatafusionDb```
+// they can't be put in an impl because DatafusionDb is a foreign struct
+async fn eval_query_truecard(slf: &DatafusionDb, sql: &str) -> anyhow::Result<usize> {
+    let rows = slf.execute(sql, true).await?;
+    let num_rows = rows.len();
+    Ok(num_rows)
+}
+
+async fn eval_query_estcard(slf: &DatafusionDb, _sql: &str) -> anyhow::Result<usize> {
+    let rows = slf.execute("EXPLAIN SELECT * FROM t1;", true).await?;
+    println!("eval_est_card(): rows={:?}", rows);
+    Ok(12)
 }

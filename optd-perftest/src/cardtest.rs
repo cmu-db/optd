@@ -19,47 +19,37 @@ impl CardtestRunner {
         Ok(CardtestRunner { databases })
     }
 
-    pub async fn eval_qerrors_of_benchmark(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<HashSet<f64>>> {
-        self.load_databases(benchmark);
-        Ok(vec![])
-    }
-
-    async fn load_databases(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
-        for database in &self.databases {
-            database.load_benchmark_data(benchmark).await?;
-        }
-        Ok(())
-    }
-
     /// Get the Q-error of a query using the cost models of all databases being tested
     /// Q-error is defined in [Leis 2015](https://15721.courses.cs.cmu.edu/spring2024/papers/16-costmodels/p204-leis.pdf)
     /// One detail not specified in the paper is that Q-error is based on the ratio of true and estimated cardinality
     ///   of the entire query, not of a subtree of the query. This detail is specified in Section 7.1 of
     ///   [Yang 2020](https://arxiv.org/pdf/2006.08109.pdf)
-    pub async fn eval_qerrors_of_query(&self, sql: &str) -> anyhow::Result<Vec<f64>> {
-        let mut qerrors = vec![];
-        let mut first_true_card = None;
+    pub async fn eval_benchmark_qerrors_alldbs(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<HashSet<f64>>> {
+        // let mut qerrors = vec![];
+        // let mut first_true_card = None;
 
-        for database in &self.databases {
-            let true_card = database.eval_true_card(sql).await?;
-            match first_true_card {
-                None => first_true_card = Some(true_card),
-                Some(first_true_card) => {
-                    if true_card != first_true_card {
-                        // you could return an error here but that involves creating
-                        // a custom error type which seems overkill for now
-                        // this is a testing tool anyways and not production software
-                        panic!("The true cardinality of {} ({}), is != the true cardinality of {} ({})", database.as_ref().get_name(), true_card, self.databases.first().unwrap().as_ref().get_name(), first_true_card)
-                    }
-                }
-            };
+        // for database in &self.databases {
+        //     let true_card = database.eval_true_card(sql).await?;
+        //     match first_true_card {
+        //         None => first_true_card = Some(true_card),
+        //         Some(first_true_card) => {
+        //             if true_card != first_true_card {
+        //                 // you could return an error here but that involves creating
+        //                 // a custom error type which seems overkill for now
+        //                 // this is a testing tool anyways and not production software
+        //                 panic!("The true cardinality of {} ({}), is != the true cardinality of {} ({})", database.as_ref().get_name(), true_card, self.databases.first().unwrap().as_ref().get_name(), first_true_card)
+        //             }
+        //         }
+        //     };
 
-            let est_card = database.eval_est_card(sql).await?;
-            let qerror = Self::calc_qerror(true_card, est_card);
-            qerrors.push(qerror);
-        }
+        //     let est_card = database.eval_est_card(sql).await?;
+        //     let qerror = Self::calc_qerror(true_card, est_card);
+        //     qerrors.push(qerror);
+        // }
 
-        Ok(qerrors)
+        // Ok(qerrors)
+
+        Ok(vec![])
     }
 
     fn calc_qerror(true_card: usize, est_card: usize) -> f64 {
@@ -92,7 +82,6 @@ impl CardtestRunner {
 pub trait CardtestRunnerDBHelper {
     // get_name() has &self so that we're able to do Box<dyn CardtestRunnerDBHelper>
     fn get_name(&self) -> &str;
-    async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()>;
-    async fn eval_true_card(&self, sql: &str) -> anyhow::Result<usize>;
-    async fn eval_est_card(&self, sql: &str) -> anyhow::Result<usize>;
+    async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>>;
+    async fn eval_benchmark_estcards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>>;
 }
