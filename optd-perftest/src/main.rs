@@ -1,3 +1,5 @@
+use std::{fs, path::{Path, PathBuf}};
+
 use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
 use clap::{Parser, Subcommand};
 use postgres_db::PostgresDb;
@@ -16,6 +18,10 @@ mod tpch;
 
 #[derive(Parser)]
 struct Cli {
+    #[arg(long)]
+    #[clap(default_value = "../optd_perftest_workspace")]
+    #[clap(help = "The directory where artifacts required for performance testing (such as pgdata or TPC-H queries) are generated. Can be an absolute path or a relative path. Regardless of where this CLI is run, relative paths are evaluated relative to the optd repo root.")]
+    workspace: String,
     #[command(subcommand)]
     command: Commands,
 }
@@ -35,6 +41,17 @@ enum Commands {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    let workspace = PathBuf::from(cli.workspace);
+    let workspace = if workspace.is_relative() {
+        shell::get_optd_root()?.join(workspace)
+    } else {
+        workspace
+    };
+    if !workspace.exists() {
+        fs::create_dir(&workspace)?;
+    }
+
     match &cli.command {
         Commands::Cardtest { scale_factor, seed } => {
             let tpch_config = TpchConfig {
@@ -42,17 +59,20 @@ async fn main() -> anyhow::Result<()> {
                 scale_factor: *scale_factor,
                 seed: *seed,
             };
-            cardtest(tpch_config).await
+            cardtest(&workspace, tpch_config).await
         }
     }
 }
 
-async fn cardtest(tpch_config: TpchConfig) -> anyhow::Result<()> {
+async fn cardtest<P>(workspace: P, tpch_config: TpchConfig) -> anyhow::Result<()>
+where
+    P: AsRef<Path>,
+{
     let pg_db = PostgresDb::build(true).await?;
     let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db)];
     
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
-    let cardtest_runner = CardtestRunner::new(databases).await?;
+    let cardtest_runner = CardtestRunner::new(workspace, databases).await?;
     let qerrors = cardtest_runner
         .eval_benchmark_qerrors_alldbs(&tpch_benchmark)
         .await?;
