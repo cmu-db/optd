@@ -42,12 +42,12 @@ async fn main() -> anyhow::Result<()> {
                 scale_factor: *scale_factor,
                 seed: *seed,
             };
-            perftest(tpch_config).await
+            cardtest(tpch_config).await
         }
     }
 }
 
-async fn perftest(tpch_config: TpchConfig) -> anyhow::Result<()> {
+async fn cardtest(tpch_config: TpchConfig) -> anyhow::Result<()> {
     let pg_db = PostgresDb::build(true).await?;
     let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db)];
     

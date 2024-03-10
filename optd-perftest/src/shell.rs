@@ -1,6 +1,7 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::{fs, io};
+use std::str;
 
 /// Runs a command, exiting the program immediately if the command fails
 pub fn run_command_with_status_check(cmd_str: &str) -> io::Result<Output> {
@@ -36,4 +37,12 @@ where
         fs::create_dir(&dpath)?;
     }
     Ok(())
+}
+
+/// Get the path of the root "optd" repo directory
+pub fn get_optd_root() -> io::Result<PathBuf> {
+    let output = run_command_with_status_check("git rev-parse --show-toplevel")?;
+    let path = str::from_utf8(&output.stdout).unwrap().trim();
+    let path = PathBuf::from(path);
+    Ok(path)
 }
