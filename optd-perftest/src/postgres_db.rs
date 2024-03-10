@@ -298,7 +298,10 @@ impl CardtestRunnerDBHelper for PostgresDb {
         "Postgres"
     }
 
-    async fn eval_benchmark_estcards(&mut self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+    async fn eval_benchmark_estcards(
+        &mut self,
+        benchmark: &Benchmark,
+    ) -> anyhow::Result<Vec<usize>> {
         self.load_benchmark_data(benchmark).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
@@ -306,7 +309,10 @@ impl CardtestRunnerDBHelper for PostgresDb {
         }
     }
 
-    async fn eval_benchmark_truecards(&mut self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+    async fn eval_benchmark_truecards(
+        &mut self,
+        benchmark: &Benchmark,
+    ) -> anyhow::Result<Vec<usize>> {
         self.load_benchmark_data(benchmark).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),

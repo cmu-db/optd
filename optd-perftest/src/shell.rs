@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::{fs, io};
 use std::str;
+use std::{fs, io};
 
 /// Runs a command, exiting the program immediately if the command fails
 pub fn run_command_with_status_check(cmd_str: &str) -> io::Result<Output> {
