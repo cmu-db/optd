@@ -14,7 +14,7 @@ const NUM_TPCH_QUERIES: usize = 22;
 #[derive(Clone)]
 pub struct TpchConfig {
     pub database: String,
-    pub scale_factor: i32,
+    pub scale_factor: f64,
     pub seed: i32,
 }
 
