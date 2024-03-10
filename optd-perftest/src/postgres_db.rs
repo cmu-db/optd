@@ -209,8 +209,8 @@ impl PostgresDb {
     }
 
     async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
+        let benchmark_strid = benchmark.get_strid();
         if benchmark.is_readonly() {
-            let benchmark_strid = benchmark.get_strid();
             let done_fname = format!("{}_done", benchmark_strid);
             let done_fpath = self.pgdata_dpath.join(done_fname);
             if !done_fpath.exists() {
@@ -229,7 +229,13 @@ impl PostgresDb {
                 }
             }
         } else {
-            self.load_benchmark_data_raw(benchmark).await?
+            if self.verbose {
+                println!("[start] loading data for {}", benchmark_strid);
+            }
+            self.load_benchmark_data_raw(benchmark).await?;
+            if self.verbose {
+                println!("[end] loading data for {}", benchmark_strid);
+            }
         }
         Ok(())
     }

@@ -33,6 +33,7 @@ pub struct TpchKit {
     verbose: bool,
 
     // cache these paths so we don't have to build them multiple times
+    optd_repo_dpath: PathBuf,
     _tpch_dpath: PathBuf,
     tpch_kit_repo_dpath: PathBuf,
     queries_dpath: PathBuf,
@@ -46,15 +47,16 @@ pub struct TpchKit {
 impl TpchKit {
     pub fn build(verbose: bool) -> io::Result<Self> {
         // build paths, sometimes creating them if they don't exist
-        let curr_dpath = env::current_dir()?;
+        // we assume that this is being run in the base optd repo dir
+        let optd_repo_dpath = env::current_dir()?;
         let tpch_dpath = Path::new(file!())
             .parent()
             .unwrap()
             .join("tpch")
             .to_path_buf();
-        let tpch_dpath = curr_dpath.join(tpch_dpath); // make it absolute
+        let tpch_dpath = optd_repo_dpath.join(tpch_dpath); // make tpch_dpath absolute
         if !tpch_dpath.exists() {
-            fs::create_dir(&tpch_dpath)?;
+            fs::create_dir(&tpch_dpath).expect(&format!("tpch_dpath ({:?}) doesn't exist. make sure that the current dir is the base repo dir. right now, the current dir is {:?}", tpch_dpath, optd_repo_dpath));
         }
         let tpch_kit_repo_dpath = tpch_dpath.join("tpch-kit");
         let dbgen_dpath = tpch_kit_repo_dpath.join("dbgen");
@@ -72,6 +74,7 @@ impl TpchKit {
         // create Self
         let kit = TpchKit {
             verbose,
+            optd_repo_dpath,
             _tpch_dpath: tpch_dpath,
             tpch_kit_repo_dpath,
             queries_dpath,
@@ -85,10 +88,14 @@ impl TpchKit {
         env::set_var("DSS_CONFIG", kit.dbgen_dpath.to_str().unwrap());
         env::set_var("DSS_QUERY", kit.queries_dpath.to_str().unwrap());
 
-        // install the tpch-kit repo
+        // do setup after creating kit
         kit.clonepull_tpch_kit_repo()?;
 
         Ok(kit)
+    }
+
+    fn cd_to_optd(&self) -> io::Result<()> {
+        env::set_current_dir(&self.optd_repo_dpath)
     }
 
     fn clonepull_tpch_kit_repo(&self) -> io::Result<()> {
@@ -117,7 +124,7 @@ impl TpchKit {
         if self.verbose {
             println!("[end] pulling latest tpch-kit repo");
         }
-        Ok(())
+        self.cd_to_optd()
     }
 
     fn build_dbgen(&self, database: &str) -> io::Result<()> {
@@ -133,7 +140,7 @@ impl TpchKit {
         if self.verbose {
             println!("[end] building dbgen")
         }
-        Ok(())
+        self.cd_to_optd()
     }
 
     fn get_machine() -> &'static str {
@@ -158,6 +165,7 @@ impl TpchKit {
                 println!("[start] generating tables for {}", tpch_config.get_strid());
             }
             shell::run_command_with_status_check(&format!("./dbgen -s{}", tpch_config.scale_factor))?;
+            self.cd_to_optd()?;
             File::create(done_fpath)?;
             if self.verbose {
                 println!("[end] generating tables for {}", tpch_config.get_strid());
@@ -191,6 +199,7 @@ impl TpchKit {
                 let this_genned_queries_fpath = this_genned_queries_dpath.join(format!("{}.sql", query_i));
                 fs::write(&this_genned_queries_fpath, output.stdout)?;
             }
+            self.cd_to_optd()?;
             File::create(done_fpath)?;
             if self.verbose {
                 println!("[end] generating queries for {}", tpch_config.get_strid());
