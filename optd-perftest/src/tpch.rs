@@ -164,7 +164,10 @@ impl TpchKit {
             if self.verbose {
                 println!("[start] generating tables for {}", tpch_config.get_strid());
             }
-            shell::run_command_with_status_check(&format!("./dbgen -s{}", tpch_config.scale_factor))?;
+            shell::run_command_with_status_check(&format!(
+                "./dbgen -s{}",
+                tpch_config.scale_factor
+            ))?;
             self.cd_to_optd()?;
             File::create(done_fpath)?;
             if self.verbose {
@@ -196,7 +199,8 @@ impl TpchKit {
                     "./qgen -s{} -r{} {}",
                     tpch_config.scale_factor, tpch_config.seed, query_i
                 ))?;
-                let this_genned_queries_fpath = this_genned_queries_dpath.join(format!("{}.sql", query_i));
+                let this_genned_queries_fpath =
+                    this_genned_queries_dpath.join(format!("{}.sql", query_i));
                 fs::write(&this_genned_queries_fpath, output.stdout)?;
             }
             self.cd_to_optd()?;
@@ -244,8 +248,9 @@ impl TpchKit {
         tpch_config: &TpchConfig,
     ) -> io::Result<impl Iterator<Item = PathBuf>> {
         let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_config);
-        let query_i_iter = 3..=6;//NUM_TPCH_QUERIES; TODO(phw2): support all TPC-H queries in the future with custom tpch-kit + truecard caching
-        let sql_fpath_ordered_iter = query_i_iter.map(move |query_i| this_genned_queries_dpath.join(&format!("{}.sql", query_i)));
+        let query_i_iter = 3..=6; //NUM_TPCH_QUERIES; TODO(phw2): support all TPC-H queries in the future with custom tpch-kit + truecard caching
+        let sql_fpath_ordered_iter = query_i_iter
+            .map(move |query_i| this_genned_queries_dpath.join(&format!("{}.sql", query_i)));
         Ok(sql_fpath_ordered_iter)
     }
 }

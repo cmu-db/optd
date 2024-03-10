@@ -7,13 +7,13 @@ use crate::{
 use anyhow;
 use async_trait::async_trait;
 use regex::Regex;
-use tokio_postgres::{Client, NoTls};
 use std::{
     env::{self, consts::OS},
     fs::{self, File},
     path::{Path, PathBuf},
     process::Command,
 };
+use tokio_postgres::{Client, NoTls};
 
 const OPTD_DBNAME: &str = "optd";
 
@@ -198,7 +198,9 @@ impl PostgresDb {
 
     /// Create a connection to the postgres database
     async fn connect_to_postgres(&mut self) -> anyhow::Result<()> {
-        let (client, connection) = tokio_postgres::connect(&format!("host=localhost dbname={}", OPTD_DBNAME), NoTls).await?;
+        let (client, connection) =
+            tokio_postgres::connect(&format!("host=localhost dbname={}", OPTD_DBNAME), NoTls)
+                .await?;
         tokio::spawn(async move {
             if let Err(e) = connection.await {
                 eprintln!("connection error: {}", e);
@@ -337,7 +339,12 @@ impl PostgresDb {
     }
 
     async fn eval_query_estcard(&self, sql: &str) -> anyhow::Result<usize> {
-        let result = self.client.as_ref().unwrap().query(&format!("EXPLAIN {}", sql), &vec![]).await?;
+        let result = self
+            .client
+            .as_ref()
+            .unwrap()
+            .query(&format!("EXPLAIN {}", sql), &vec![])
+            .await?;
         // the first line contains the explain of the root node
         let first_explain_line: &str = result.first().unwrap().get(0);
         let estcard = PostgresDb::extract_row_count(first_explain_line).unwrap();

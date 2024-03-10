@@ -24,14 +24,21 @@ impl CardtestRunner {
     /// One detail not specified in the paper is that Q-error is based on the ratio of true and estimated cardinality
     ///   of the entire query, not of a subtree of the query. This detail is specified in Section 7.1 of
     ///   [Yang 2020](https://arxiv.org/pdf/2006.08109.pdf)
-    pub async fn eval_benchmark_qerrors_alldbs(&self, benchmark: &Benchmark) -> anyhow::Result<HashMap<String, Vec<f64>>> {
+    pub async fn eval_benchmark_qerrors_alldbs(
+        &self,
+        benchmark: &Benchmark,
+    ) -> anyhow::Result<HashMap<String, Vec<f64>>> {
         let mut qerrors_alldbs = HashMap::new();
 
         for database in &self.databases {
             let estcards = database.eval_benchmark_estcards(benchmark).await?;
             let truecards = database.eval_benchmark_truecards(benchmark).await?;
             assert!(truecards.len() == estcards.len());
-            let qerrors = estcards.into_iter().zip(truecards.into_iter()).map(|(estcard, truecard)| CardtestRunner::calc_qerror(estcard, truecard)).collect();
+            let qerrors = estcards
+                .into_iter()
+                .zip(truecards.into_iter())
+                .map(|(estcard, truecard)| CardtestRunner::calc_qerror(estcard, truecard))
+                .collect();
             qerrors_alldbs.insert(String::from(database.get_name()), qerrors);
         }
 
