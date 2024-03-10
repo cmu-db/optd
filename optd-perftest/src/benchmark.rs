@@ -1,6 +1,7 @@
 use crate::tpch::TpchConfig;
 
 pub enum Benchmark {
+    #[allow(dead_code)]
     Test,
     Tpch(TpchConfig),
 }

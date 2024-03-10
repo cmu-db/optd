@@ -1,5 +1,5 @@
 use crate::{
-    benchmark::{self, Benchmark},
+    benchmark::Benchmark,
     cardtest::CardtestRunnerDBHelper,
     shell,
     tpch::{TpchConfig, TpchKit},

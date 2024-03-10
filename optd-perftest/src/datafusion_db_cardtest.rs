@@ -8,24 +8,24 @@ impl CardtestRunnerDBHelper for DatafusionDb {
         "DataFusion"
     }
 
-    async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+    async fn eval_benchmark_truecards(&self, _benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
         Ok(vec![])
     }
 
-    async fn eval_benchmark_estcards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+    async fn eval_benchmark_estcards(&self, _benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
         Ok(vec![])
     }
 }
 
 // helper functions for ```impl CardtestRunnerDBHelper for DatafusionDb```
 // they can't be put in an impl because DatafusionDb is a foreign struct
-async fn eval_query_truecard(slf: &DatafusionDb, sql: &str) -> anyhow::Result<usize> {
+async fn _eval_query_truecard(slf: &DatafusionDb, sql: &str) -> anyhow::Result<usize> {
     let rows = slf.execute(sql, true).await?;
     let num_rows = rows.len();
     Ok(num_rows)
 }
 
-async fn eval_query_estcard(slf: &DatafusionDb, _sql: &str) -> anyhow::Result<usize> {
+async fn _eval_query_estcard(slf: &DatafusionDb, _sql: &str) -> anyhow::Result<usize> {
     let rows = slf.execute("EXPLAIN SELECT * FROM t1;", true).await?;
     println!("eval_est_card(): rows={:?}", rows);
     Ok(12)

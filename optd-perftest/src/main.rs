@@ -1,11 +1,10 @@
 use anyhow::Result;
 use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
-use optd_sqlplannertest::DatafusionDb;
 use postgres_db::PostgresDb;
 
 use crate::{
     benchmark::Benchmark,
-    tpch::{TpchConfig, TpchKit, TPCH_KIT_POSTGRES},
+    tpch::{TpchConfig, TPCH_KIT_POSTGRES},
 };
 
 mod benchmark;
