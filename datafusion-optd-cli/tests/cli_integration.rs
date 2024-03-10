@@ -58,7 +58,7 @@ fn cli_test_tpch() {
     cmd.args([
         "--enable-logical",
         "--file",
-        "datafusion-optd-cli/tpch-sf0_01/test.sql",
+        "datafusion-optd-cli/tpch-sf0.01/test.sql",
     ]);
     let status = cmd.status().unwrap();
     assert!(
