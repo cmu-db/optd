@@ -17,13 +17,17 @@ mod tpch;
 #[derive(Parser)]
 struct Cli {
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 }
 
 #[derive(Subcommand)]
 enum Commands {
     Cardtest {
+        #[arg(long)]
+        #[clap(default_value = "1")]
         scale_factor: i32,
+        #[arg(long)]
+        #[clap(default_value = "15721")]
         seed: i32,
     }
 }
@@ -32,7 +36,7 @@ enum Commands {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match &cli.command {
-        Some(Commands::Cardtest { scale_factor, seed }) => {
+        Commands::Cardtest { scale_factor, seed } => {
             let tpch_config = TpchConfig {
                 database: String::from(TPCH_KIT_POSTGRES),
                 scale_factor: *scale_factor,
@@ -40,7 +44,6 @@ async fn main() -> anyhow::Result<()> {
             };
             perftest(tpch_config).await
         }
-        _ => panic!("please enter a command")
     }
 }
 
