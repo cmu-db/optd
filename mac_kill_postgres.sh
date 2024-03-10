@@ -4,6 +4,7 @@
 # use this script to avoid having to manually do "ps aux" and "kill [pid]" every time cardtest_integration (or something similar) fails
 
 # the "main" process has bin/postgres in it
+# we kill it in a loop because sometimes it's required for some reason I don't understand
 while pid=$(ps aux | grep bin/postgres | grep -v grep | head -n1 | awk '{print $2}'); do
   if [ -z "$pid" ]; then
     break
