@@ -1,5 +1,5 @@
-use anyhow::Result;
 use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
+use clap::{Parser, Subcommand};
 use postgres_db::PostgresDb;
 
 use crate::{
@@ -14,15 +14,40 @@ mod postgres_db;
 mod shell;
 mod tpch;
 
+#[derive(Parser)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Cardtest {
+        scale_factor: i32,
+        seed: i32,
+    }
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    match &cli.command {
+        Some(Commands::Cardtest { scale_factor, seed }) => {
+            let tpch_config = TpchConfig {
+                database: String::from(TPCH_KIT_POSTGRES),
+                scale_factor: *scale_factor,
+                seed: *seed,
+            };
+            perftest(tpch_config).await
+        }
+        _ => panic!("please enter a command")
+    }
+}
+
+async fn perftest(tpch_config: TpchConfig) -> anyhow::Result<()> {
     let pg_db = PostgresDb::build(true).await?;
     let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db)];
-    let tpch_config = TpchConfig {
-        database: String::from(TPCH_KIT_POSTGRES),
-        scale_factor: 1,
-        seed: 15721,
-    };
+    
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
     let cardtest_runner = CardtestRunner::new(databases).await?;
     let qerrors = cardtest_runner
