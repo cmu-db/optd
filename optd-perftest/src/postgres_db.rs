@@ -7,7 +7,7 @@ use crate::{
 use async_trait::async_trait;
 use regex::Regex;
 use std::{
-    env::{self, consts::OS},
+    env::consts::OS,
     fs::{self, File},
     path::{Path, PathBuf},
     process::Command,
@@ -17,6 +17,7 @@ use tokio_postgres::{Client, NoTls};
 const OPTD_DBNAME: &str = "optd";
 
 pub struct PostgresDb {
+    workspace_dpath: PathBuf,
     verbose: bool,
     // is an option because we need to initialize the struct before setting this
     client: Option<Client>,
@@ -33,15 +34,11 @@ pub struct PostgresDb {
 ///   - Stop and start functions should be separate
 ///   - Setup should be done in build() unless it requires more information (like benchmark)
 impl PostgresDb {
-    pub async fn build(verbose: bool) -> anyhow::Result<Self> {
+    pub async fn build<P: AsRef<Path>>(workspace_dpath: P, verbose: bool) -> anyhow::Result<Self> {
         // build paths, sometimes creating them if they don't exist
-        let curr_dpath = env::current_dir()?;
-        let postgres_db_dpath = Path::new(file!())
-            .parent()
-            .unwrap()
-            .join("postgres_db")
-            .to_path_buf();
-        let postgres_db_dpath = curr_dpath.join(postgres_db_dpath); // make it absolute
+        let workspace_dpath = workspace_dpath.as_ref().to_path_buf();
+        let postgres_db_dpath = workspace_dpath.join("postgres_db");
+        let postgres_db_dpath = workspace_dpath.join(postgres_db_dpath); // make it absolute
         if !postgres_db_dpath.exists() {
             fs::create_dir(&postgres_db_dpath)?;
         }
@@ -50,6 +47,7 @@ impl PostgresDb {
 
         // create Self
         let mut db = PostgresDb {
+            workspace_dpath,
             verbose,
             client: None,
             _postgres_db_dpath: postgres_db_dpath,
@@ -259,7 +257,7 @@ impl PostgresDb {
         // postgres must be started again since remove_pgdata() stops it
         self.start_postgres().await?;
         // load the schema
-        let tpch_kit = TpchKit::build(self.verbose)?;
+        let tpch_kit = TpchKit::build(&self.workspace_dpath, self.verbose)?;
         shell::run_command_with_status_check(&format!(
             "psql {} -f {}",
             OPTD_DBNAME,
@@ -310,7 +308,7 @@ impl CardtestRunnerDBHelper for PostgresDb {
 /// This impl has helpers for ```impl CardtestRunnerDBHelper for PostgresDb```
 impl PostgresDb {
     async fn eval_tpch_estcards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
-        let tpch_kit = TpchKit::build(self.verbose)?;
+        let tpch_kit = TpchKit::build(&self.workspace_dpath, self.verbose)?;
         tpch_kit.gen_queries(tpch_config)?;
 
         let mut estcards = vec![];
@@ -324,7 +322,7 @@ impl PostgresDb {
     }
 
     async fn eval_tpch_truecards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
-        let tpch_kit = TpchKit::build(self.verbose)?;
+        let tpch_kit = TpchKit::build(&self.workspace_dpath, self.verbose)?;
         tpch_kit.gen_queries(tpch_config)?;
 
         let mut truecards = vec![];

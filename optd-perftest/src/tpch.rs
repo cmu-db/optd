@@ -30,10 +30,10 @@ impl TpchConfig {
 /// Since it's conceptually a wrapper around the repo, I chose _not_ to make
 ///   TpchConfig an initialization parameter.
 pub struct TpchKit {
+    _workspace_dpath: PathBuf,
     verbose: bool,
 
     // cache these paths so we don't have to build them multiple times
-    optd_root_dpath: PathBuf,
     _tpch_dpath: PathBuf,
     tpch_kit_repo_dpath: PathBuf,
     queries_dpath: PathBuf,
@@ -45,17 +45,12 @@ pub struct TpchKit {
 
 /// I keep the same conventions for these methods as I do for PostgresDb
 impl TpchKit {
-    pub fn build(verbose: bool) -> io::Result<Self> {
+    pub fn build<P: AsRef<Path>>(workspace_dpath: P, verbose: bool) -> io::Result<Self> {
         // build paths, sometimes creating them if they don't exist
-        let optd_root_dpath = shell::get_optd_root()?;
-        let tpch_dpath = Path::new(file!())
-            .parent()
-            .unwrap()
-            .join("tpch")
-            .to_path_buf();
-        let tpch_dpath = optd_root_dpath.join(tpch_dpath); // make tpch_dpath absolute
+        let workspace_dpath = workspace_dpath.as_ref().to_path_buf();
+        let tpch_dpath = workspace_dpath.join("tpch");
         if !tpch_dpath.exists() {
-            fs::create_dir(&tpch_dpath).unwrap_or_else(|_| panic!("tpch_dpath ({:?}) doesn't exist. make sure that this command was executed somewhere inside the optd repo so that optd_root_dpath (currently {:?}) is correct", tpch_dpath, optd_root_dpath));
+            fs::create_dir(&tpch_dpath)?;
         }
         let tpch_kit_repo_dpath = tpch_dpath.join("tpch-kit");
         let dbgen_dpath = tpch_kit_repo_dpath.join("dbgen");
@@ -72,8 +67,8 @@ impl TpchKit {
 
         // create Self
         let kit = TpchKit {
+            _workspace_dpath: workspace_dpath,
             verbose,
-            optd_root_dpath,
             _tpch_dpath: tpch_dpath,
             tpch_kit_repo_dpath,
             queries_dpath,
@@ -91,15 +86,6 @@ impl TpchKit {
         kit.clonepull_tpch_kit_repo()?;
 
         Ok(kit)
-    }
-
-    /// I call this after changing directory so that we're in a "predictable" location
-    /// It's not that we strictly need to be in optd root. It's just a nice and predictable
-    /// place where things won't go wrong. For instance, one weird edge case I encountered
-    /// was get_optd_root() returning the directory of tpch-kit instead of optd because
-    /// tpch-kit is also a git repo.
-    fn cd_to_optd_root(&self) -> io::Result<()> {
-        env::set_current_dir(&self.optd_root_dpath)
     }
 
     fn clonepull_tpch_kit_repo(&self) -> io::Result<()> {
@@ -129,7 +115,7 @@ impl TpchKit {
         if self.verbose {
             println!("[end] pulling latest tpch-kit repo");
         }
-        self.cd_to_optd_root()
+        Ok(())
     }
 
     fn build_dbgen(&self, database: &str) -> io::Result<()> {
@@ -145,7 +131,7 @@ impl TpchKit {
         if self.verbose {
             println!("[end] building dbgen")
         }
-        self.cd_to_optd_root()
+        Ok(())
     }
 
     fn get_machine() -> &'static str {
@@ -173,7 +159,6 @@ impl TpchKit {
                 "./dbgen -s{}",
                 tpch_config.scale_factor
             ))?;
-            self.cd_to_optd_root()?;
             File::create(done_fpath)?;
             if self.verbose {
                 println!("[end] generating tables for {}", tpch_config.get_strid());
@@ -208,7 +193,6 @@ impl TpchKit {
                     this_genned_queries_dpath.join(format!("{}.sql", query_i));
                 fs::write(&this_genned_queries_fpath, output.stdout)?;
             }
-            self.cd_to_optd_root()?;
             File::create(done_fpath)?;
             if self.verbose {
                 println!("[end] generating queries for {}", tpch_config.get_strid());

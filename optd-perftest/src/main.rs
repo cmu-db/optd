@@ -42,14 +42,14 @@ enum Commands {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    let workspace = PathBuf::from(cli.workspace);
-    let workspace = if workspace.is_relative() {
-        shell::get_optd_root()?.join(workspace)
+    let workspace_dpath = PathBuf::from(cli.workspace);
+    let workspace_dpath = if workspace_dpath.is_relative() {
+        shell::get_optd_root()?.join(workspace_dpath)
     } else {
-        workspace
+        workspace_dpath
     };
-    if !workspace.exists() {
-        fs::create_dir(&workspace)?;
+    if !workspace_dpath.exists() {
+        fs::create_dir(&workspace_dpath)?;
     }
 
     match &cli.command {
@@ -59,20 +59,17 @@ async fn main() -> anyhow::Result<()> {
                 scale_factor: *scale_factor,
                 seed: *seed,
             };
-            cardtest(&workspace, tpch_config).await
+            cardtest(&workspace_dpath, tpch_config).await
         }
     }
 }
 
-async fn cardtest<P>(workspace: P, tpch_config: TpchConfig) -> anyhow::Result<()>
-where
-    P: AsRef<Path>,
-{
-    let pg_db = PostgresDb::build(true).await?;
+async fn cardtest<P: AsRef<Path>>(workspace_dpath: P, tpch_config: TpchConfig) -> anyhow::Result<()> {
+    let pg_db = PostgresDb::build(workspace_dpath, true).await?;
     let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db)];
     
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
-    let cardtest_runner = CardtestRunner::new(workspace, databases).await?;
+    let cardtest_runner = CardtestRunner::new(databases).await?;
     let qerrors = cardtest_runner
         .eval_benchmark_qerrors_alldbs(&tpch_benchmark)
         .await?;
