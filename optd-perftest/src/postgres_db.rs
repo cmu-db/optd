@@ -338,9 +338,9 @@ impl PostgresDb {
     }
 
     async fn eval_query_truecard(&self, sql: &str) -> anyhow::Result<usize> {
-        println!("eval_query_truecard(): called on {}", sql);
         let rows = self.client.as_ref().unwrap().query(sql, &vec![]).await?;
         let true_card = rows.len();
+        println!("true_card: {}", true_card);
         Ok(true_card)
     }
 
