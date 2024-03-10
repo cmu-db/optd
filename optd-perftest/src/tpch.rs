@@ -56,7 +56,7 @@ impl TpchKit {
             .to_path_buf();
         let tpch_dpath = optd_repo_dpath.join(tpch_dpath); // make tpch_dpath absolute
         if !tpch_dpath.exists() {
-            fs::create_dir(&tpch_dpath).expect(&format!("tpch_dpath ({:?}) doesn't exist. make sure that the current dir is the base repo dir. right now, the current dir is {:?}", tpch_dpath, optd_repo_dpath));
+            fs::create_dir(&tpch_dpath).unwrap_or_else(|_| panic!("tpch_dpath ({:?}) doesn't exist. make sure that the current dir is the base repo dir. right now, the current dir is {:?}", tpch_dpath, optd_repo_dpath));
         }
         let tpch_kit_repo_dpath = tpch_dpath.join("tpch-kit");
         let dbgen_dpath = tpch_kit_repo_dpath.join("dbgen");
@@ -112,6 +112,7 @@ impl TpchKit {
                 println!("[end] cloning tpch-kit repo");
             }
         } else {
+            #[allow(clippy::collapsible_else_if)]
             if self.verbose {
                 println!("[skip] cloning tpch-kit repo");
             }
@@ -250,7 +251,7 @@ impl TpchKit {
         let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_config);
         let query_i_iter = 3..=6; //NUM_TPCH_QUERIES; TODO(phw2): support all TPC-H queries in the future with custom tpch-kit + truecard caching
         let sql_fpath_ordered_iter = query_i_iter
-            .map(move |query_i| this_genned_queries_dpath.join(&format!("{}.sql", query_i)));
+            .map(move |query_i| this_genned_queries_dpath.join(format!("{}.sql", query_i)));
         Ok(sql_fpath_ordered_iter)
     }
 }

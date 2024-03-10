@@ -4,7 +4,6 @@ use crate::{
     shell,
     tpch::{TpchConfig, TpchKit},
 };
-use anyhow;
 use async_trait::async_trait;
 use regex::Regex;
 use std::{
@@ -343,7 +342,7 @@ impl PostgresDb {
             .client
             .as_ref()
             .unwrap()
-            .query(&format!("EXPLAIN {}", sql), &vec![])
+            .query(&format!("EXPLAIN {}", sql), &[])
             .await?;
         // the first line contains the explain of the root node
         let first_explain_line: &str = result.first().unwrap().get(0);
@@ -352,7 +351,7 @@ impl PostgresDb {
     }
 
     async fn eval_query_truecard(&self, sql: &str) -> anyhow::Result<usize> {
-        let rows = self.client.as_ref().unwrap().query(sql, &vec![]).await?;
+        let rows = self.client.as_ref().unwrap().query(sql, &[]).await?;
         let truecard = rows.len();
         Ok(truecard)
     }
