@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{self};
 use async_trait::async_trait;
@@ -24,43 +24,24 @@ impl CardtestRunner {
     /// One detail not specified in the paper is that Q-error is based on the ratio of true and estimated cardinality
     ///   of the entire query, not of a subtree of the query. This detail is specified in Section 7.1 of
     ///   [Yang 2020](https://arxiv.org/pdf/2006.08109.pdf)
-    pub async fn eval_benchmark_qerrors_alldbs(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<HashSet<f64>>> {
+    pub async fn eval_benchmark_qerrors_alldbs(&self, benchmark: &Benchmark) -> anyhow::Result<HashMap<String, Vec<f64>>> {
+        let mut qerrors_alldbs = HashMap::new();
+
         for database in &self.databases {
-            let true_cards = database.eval_benchmark_truecards(benchmark).await?;
-            println!("true_cards={:?}", true_cards);
+            let estcards = database.eval_benchmark_estcards(benchmark).await?;
+            let truecards = database.eval_benchmark_truecards(benchmark).await?;
+            assert!(truecards.len() == estcards.len());
+            let qerrors = estcards.into_iter().zip(truecards.into_iter()).map(|(estcard, truecard)| CardtestRunner::calc_qerror(estcard, truecard)).collect();
+            qerrors_alldbs.insert(String::from(database.get_name()), qerrors);
         }
 
-        // let mut qerrors = vec![];
-        // let mut first_true_card = None;
-
-        // for database in &self.databases {
-        //     let true_card = database.eval_true_card(sql).await?;
-        //     match first_true_card {
-        //         None => first_true_card = Some(true_card),
-        //         Some(first_true_card) => {
-        //             if true_card != first_true_card {
-        //                 // you could return an error here but that involves creating
-        //                 // a custom error type which seems overkill for now
-        //                 // this is a testing tool anyways and not production software
-        //                 panic!("The true cardinality of {} ({}), is != the true cardinality of {} ({})", database.as_ref().get_name(), true_card, self.databases.first().unwrap().as_ref().get_name(), first_true_card)
-        //             }
-        //         }
-        //     };
-
-        //     let est_card = database.eval_est_card(sql).await?;
-        //     let qerror = Self::calc_qerror(true_card, est_card);
-        //     qerrors.push(qerror);
-        // }
-
-        // Ok(qerrors)
-
-        Ok(vec![])
+        Ok(qerrors_alldbs)
     }
 
-    fn calc_qerror(true_card: usize, est_card: usize) -> f64 {
+    fn calc_qerror(estcard: usize, truecard: usize) -> f64 {
         f64::max(
-            true_card as f64 / est_card as f64,
-            est_card as f64 / true_card as f64,
+            estcard as f64 / truecard as f64,
+            truecard as f64 / estcard as f64,
         )
     }
 }
@@ -89,6 +70,6 @@ pub trait CardtestRunnerDBHelper {
     fn get_name(&self) -> &str;
 
     // the order of queries has to be the same between these two functions
-    async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>>;
     async fn eval_benchmark_estcards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>>;
+    async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>>;
 }

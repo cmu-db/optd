@@ -281,6 +281,74 @@ impl PostgresDb {
         }
         Ok(())
     }
+}
+
+#[async_trait]
+impl CardtestRunnerDBHelper for PostgresDb {
+    fn get_name(&self) -> &str {
+        "Postgres"
+    }
+
+    async fn eval_benchmark_estcards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+        self.load_benchmark_data(benchmark).await?;
+        match benchmark {
+            Benchmark::Test => unimplemented!(),
+            Benchmark::Tpch(tpch_config) => self.eval_tpch_estcards(tpch_config).await,
+        }
+    }
+
+    async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+        self.load_benchmark_data(benchmark).await?;
+        match benchmark {
+            Benchmark::Test => unimplemented!(),
+            Benchmark::Tpch(tpch_config) => self.eval_tpch_truecards(tpch_config).await,
+        }
+    }
+}
+
+/// This impl has helpers for ```impl CardtestRunnerDBHelper for PostgresDb```
+impl PostgresDb {
+    async fn eval_tpch_estcards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
+        let tpch_kit = TpchKit::build(self.verbose)?;
+        tpch_kit.gen_queries(tpch_config)?;
+
+        let mut estcards = vec![];
+        for sql_fpath in tpch_kit.get_sql_fpath_ordered_iter(tpch_config)? {
+            let sql = fs::read_to_string(sql_fpath)?;
+            let estcard = self.eval_query_estcard(&sql).await?;
+            estcards.push(estcard);
+        }
+
+        Ok(estcards)
+    }
+
+    async fn eval_tpch_truecards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
+        let tpch_kit = TpchKit::build(self.verbose)?;
+        tpch_kit.gen_queries(tpch_config)?;
+
+        let mut truecards = vec![];
+        for sql_fpath in tpch_kit.get_sql_fpath_ordered_iter(tpch_config)? {
+            let sql = fs::read_to_string(sql_fpath)?;
+            let truecard = self.eval_query_truecard(&sql).await?;
+            truecards.push(truecard);
+        }
+
+        Ok(truecards)
+    }
+
+    async fn eval_query_estcard(&self, sql: &str) -> anyhow::Result<usize> {
+        let result = self.client.as_ref().unwrap().query(&format!("EXPLAIN {}", sql), &vec![]).await?;
+        // the first line contains the explain of the root node
+        let first_explain_line: &str = result.first().unwrap().get(0);
+        let estcard = PostgresDb::extract_row_count(first_explain_line).unwrap();
+        Ok(estcard)
+    }
+
+    async fn eval_query_truecard(&self, sql: &str) -> anyhow::Result<usize> {
+        let rows = self.client.as_ref().unwrap().query(sql, &vec![]).await?;
+        let truecard = rows.len();
+        Ok(truecard)
+    }
 
     /// Extract the row count from a line of an EXPLAIN output
     fn extract_row_count(explain_line: &str) -> Option<usize> {
@@ -298,57 +366,5 @@ impl PostgresDb {
         } else {
             None
         }
-    }
-}
-
-#[async_trait]
-impl CardtestRunnerDBHelper for PostgresDb {
-    fn get_name(&self) -> &str {
-        "Postgres"
-    }
-
-    async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
-        self.load_benchmark_data(benchmark).await?;
-        match benchmark {
-            Benchmark::Test => unimplemented!(),
-            Benchmark::Tpch(tpch_config) => self.eval_tpch_truecards(tpch_config).await,
-        }
-    }
-
-    async fn eval_benchmark_estcards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
-        self.load_benchmark_data(benchmark).await?;
-        Ok(vec![])
-    }
-}
-
-/// This impl has helpers for ```impl CardtestRunnerDBHelper for PostgresDb```
-impl PostgresDb {
-    async fn eval_tpch_truecards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
-        let tpch_kit = TpchKit::build(self.verbose)?;
-        tpch_kit.gen_queries(tpch_config)?;
-
-        let mut true_cards = vec![];
-        for sql_fpath in tpch_kit.get_sql_fpath_ordered_iter(tpch_config)? {
-            let sql = fs::read_to_string(sql_fpath)?;
-            let true_card = self.eval_query_truecard(&sql).await?;
-            true_cards.push(true_card);
-        }
-
-        Ok(true_cards)
-    }
-
-    async fn eval_query_truecard(&self, sql: &str) -> anyhow::Result<usize> {
-        let rows = self.client.as_ref().unwrap().query(sql, &vec![]).await?;
-        let true_card = rows.len();
-        println!("true_card: {}", true_card);
-        Ok(true_card)
-    }
-
-    async fn eval_query_estcard(&self, sql: &str) -> anyhow::Result<usize> {
-        let result = self.client.as_ref().unwrap().query(&format!("EXPLAIN {}", sql), &vec![]).await?;
-        // the first line contains the explain of the root node
-        let first_explain_line: &str = result.first().unwrap().get(0);
-        let est_card = PostgresDb::extract_row_count(first_explain_line).unwrap();
-        Ok(est_card)
     }
 }
