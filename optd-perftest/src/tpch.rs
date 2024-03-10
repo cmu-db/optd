@@ -46,6 +46,10 @@ pub struct TpchKit {
 /// I keep the same conventions for these methods as I do for PostgresDb
 impl TpchKit {
     pub fn build<P: AsRef<Path>>(workspace_dpath: P, verbose: bool) -> io::Result<Self> {
+        if verbose {
+            println!("[start] building TpchKit");
+        }
+
         // build paths, sometimes creating them if they don't exist
         let workspace_dpath = workspace_dpath.as_ref().to_path_buf();
         let tpch_dpath = workspace_dpath.join("tpch");
@@ -84,6 +88,10 @@ impl TpchKit {
 
         // do setup after creating kit
         kit.clonepull_tpch_kit_repo()?;
+
+        if verbose {
+            println!("[end] building TpchKit");
+        }
 
         Ok(kit)
     }
