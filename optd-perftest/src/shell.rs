@@ -46,3 +46,14 @@ pub fn get_optd_root() -> io::Result<PathBuf> {
     let path = PathBuf::from(path);
     Ok(path)
 }
+
+/// Can be an absolute path or a relative path. Regardless of where this CLI is run, relative paths are evaluated relative to the optd repo root.
+pub fn parse_pathstr(pathstr: &str) -> io::Result<PathBuf> {
+    let path = PathBuf::from(pathstr);
+    let path = if path.is_relative() {
+        get_optd_root()?.join(path)
+    } else {
+        path
+    };
+    Ok(path)
+}

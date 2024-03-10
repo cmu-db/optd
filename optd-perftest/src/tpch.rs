@@ -206,7 +206,6 @@ impl TpchKit {
         Ok(())
     }
 
-    // TODO: migrate paths and then create the .tbl iterator
     fn get_this_genned_tables_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
         self.genned_tables_dpath.join(tpch_config.get_strid())
     }

@@ -1,4 +1,4 @@
-use std::{fs, path::{Path, PathBuf}};
+use std::{fs, path::Path};
 
 use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
 use clap::{Parser, Subcommand};
@@ -15,12 +15,13 @@ mod datafusion_db_cardtest;
 mod postgres_db;
 mod shell;
 mod tpch;
+mod cardtest_integration;
 
 #[derive(Parser)]
 struct Cli {
     #[arg(long)]
     #[clap(default_value = "../optd_perftest_workspace")]
-    #[clap(help = "The directory where artifacts required for performance testing (such as pgdata or TPC-H queries) are generated. Can be an absolute path or a relative path. Regardless of where this CLI is run, relative paths are evaluated relative to the optd repo root.")]
+    #[clap(help = "The directory where artifacts required for performance testing (such as pgdata or TPC-H queries) are generated. See comment of parse_pathstr() to see what paths are allowed (TLDR: absolute and relative both ok).")]
     workspace: String,
     #[command(subcommand)]
     command: Commands,
@@ -42,12 +43,7 @@ enum Commands {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    let workspace_dpath = PathBuf::from(cli.workspace);
-    let workspace_dpath = if workspace_dpath.is_relative() {
-        shell::get_optd_root()?.join(workspace_dpath)
-    } else {
-        workspace_dpath
-    };
+    let workspace_dpath = shell::parse_pathstr(&cli.workspace)?;
     if !workspace_dpath.exists() {
         fs::create_dir(&workspace_dpath)?;
     }
