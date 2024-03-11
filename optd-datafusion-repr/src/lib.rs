@@ -20,10 +20,8 @@ use rules::{
     PhysicalConversionRule, ProjectionPullUpJoin,
 };
 
-// pub use adaptive::PhysicalCollector;
 pub use optd_core::rel_node::Value;
 
-mod adaptive;
 pub mod cost;
 pub mod plan_nodes;
 pub mod properties;
