@@ -145,7 +145,7 @@ macro_rules! apply_matcher {
 }
 
 macro_rules! define_rule_inner {
-    ($is_impl_rule:expr, $name:ident, $apply:ident, $($matcher:tt)+) => {
+    ($rule_type:expr, $name:ident, $apply:ident, $($matcher:tt)+) => {
         pub struct $name {
             matcher: RuleMatcher<OptRelNodeTyp>,
         }
@@ -197,7 +197,7 @@ macro_rules! define_rule_inner {
             }
 
             fn is_impl_rule(&self) -> bool {
-                $is_impl_rule
+                $rule_type
             }
         }
     };
