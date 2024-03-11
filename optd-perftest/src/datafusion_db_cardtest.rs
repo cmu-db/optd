@@ -1,4 +1,4 @@
-use crate::cardtest::{Benchmark, CardtestRunnerDBHelper};
+use crate::{benchmark::Benchmark, cardtest::CardtestRunnerDBHelper};
 use async_trait::async_trait;
 use optd_sqlplannertest::DatafusionDb;
 
@@ -14,6 +14,7 @@ impl CardtestRunnerDBHelper for DatafusionDb {
                 self.execute("CREATE TABLE t1 (c1 INT);", true).await?;
                 self.execute("INSERT INTO t1 VALUES (0);", true).await?;
             }
+            _ => unimplemented!(),
         };
         Ok(())
     }

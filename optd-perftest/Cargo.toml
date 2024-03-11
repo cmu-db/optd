@@ -17,3 +17,4 @@ tokio = { version = "1.24", features = [
     "sync",
     "parking_lot",
 ] }
+shlex = "1.3"

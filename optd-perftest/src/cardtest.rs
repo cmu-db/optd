@@ -1,6 +1,8 @@
 use anyhow::{self};
 use async_trait::async_trait;
 
+use crate::benchmark::Benchmark;
+
 /// This struct performs cardinality testing across one or more databases.
 /// Another design would be for the CardtestRunnerDBHelper trait to expose a function
 ///   to evaluate the Q-error. However, I chose not to do this design for reasons
@@ -8,10 +10,6 @@ use async_trait::async_trait;
 ///   you would use CardtestRunner even for computing the Q-error of a single database.
 pub struct CardtestRunner {
     pub databases: Vec<Box<dyn CardtestRunnerDBHelper>>,
-}
-
-pub enum Benchmark {
-    Test,
 }
 
 impl CardtestRunner {
