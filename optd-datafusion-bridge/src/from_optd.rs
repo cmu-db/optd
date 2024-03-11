@@ -595,13 +595,18 @@ impl OptdPlanContext<'_> {
             typ => unimplemented!("{}", typ),
         };
 
-        let bare_with_collector: Result<Arc<dyn ExecutionPlan>> = Ok(Arc::new(CollectorExec::new(
-            bare,
-            group_id,
-            self.optimizer.as_ref().unwrap().runtime_statistics.clone(),
-        ))
-            as Arc<dyn ExecutionPlan>);
-        bare_with_collector.with_context(|| format!("when processing {}", rel_node_dbg))
+        let optimizer = self.optimizer.as_ref().unwrap();
+        if optimizer.adaptive_enabled() {
+            let bare_with_collector: Result<Arc<dyn ExecutionPlan>> =
+                Ok(Arc::new(CollectorExec::new(
+                    bare,
+                    group_id,
+                    self.optimizer.as_ref().unwrap().runtime_statistics.clone(),
+                )) as Arc<dyn ExecutionPlan>);
+            bare_with_collector.with_context(|| format!("when processing {}", rel_node_dbg))
+        } else {
+            Ok(bare)
+        }
     }
 
     pub async fn conv_from_optd(

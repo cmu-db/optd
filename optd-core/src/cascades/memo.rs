@@ -495,37 +495,6 @@ impl<T: RelNodeTyp> Memo<T> {
         grp.unwrap().info = group_info;
     }
 
-    /// Gets the best group binding with metadata collected.
-    pub fn get_best_group_binding_with_meta(
-        &self,
-        group_id: GroupId,
-        meta: &mut RelNodeMetaMap,
-    ) -> Result<RelNodeRef<T>> {
-        let info = self.get_group_info(group_id);
-        if let Some(winner) = info.winner {
-            if !winner.impossible {
-                let expr_id = winner.expr_id;
-                let expr = self.get_expr_memoed(expr_id);
-                let mut children = Vec::with_capacity(expr.children.len());
-                for child in &expr.children {
-                    children.push(self.get_best_group_binding_with_meta(*child, meta)?);
-                }
-                let node = Arc::new(RelNode {
-                    typ: expr.typ.clone(),
-                    children,
-                    data: expr.data.clone(),
-                });
-
-                meta.insert(
-                    node.as_ref() as *const _ as usize,
-                    RelNodeMeta::new(group_id),
-                );
-                return Ok(node);
-            }
-        }
-        bail!("no best group binding for group {}", group_id)
-    }
-
     pub fn get_best_group_binding(
         &self,
         group_id: GroupId,

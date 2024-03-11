@@ -10,7 +10,7 @@ use crate::{
     cost::CostModel,
     optimizer::Optimizer,
     property::{PropertyBuilder, PropertyBuilderAny},
-    rel_node::{RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp},
+    rel_node::{RelNodeMetaMap, RelNodeRef, RelNodeTyp},
     rules::RuleWrapper,
 };
 

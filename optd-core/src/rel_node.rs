@@ -203,8 +203,10 @@ impl<T: RelNodeTyp> RelNode<T> {
     }
 }
 
+/// Metadata for a rel node.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RelNodeMeta {
+    /// The group (id) of the `RelNode`
     pub group_id: GroupId,
 }
 

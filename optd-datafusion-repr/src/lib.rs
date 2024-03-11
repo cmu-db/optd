@@ -40,6 +40,10 @@ impl DatafusionOptimizer {
         self.enable_adaptive = enable;
     }
 
+    pub fn adaptive_enabled(&self) -> bool {
+        self.enable_adaptive
+    }
+
     pub fn optd_optimizer(&self) -> &CascadesOptimizer<OptRelNodeTyp> {
         &self.optimizer
     }
