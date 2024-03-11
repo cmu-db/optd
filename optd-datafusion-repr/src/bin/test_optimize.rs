@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
 use optd_core::{
-    cascades::CascadesOptimizer, heuristics::HeuristicsOptimizer, optimizer::Optimizer,
+    cascades::CascadesOptimizer,
+    heuristics::HeuristicsOptimizer,
+    optimizer::Optimizer,
     rel_node::Value,
+    rules::{Rule, RuleWrapper},
 };
 use optd_datafusion_repr::{
     cost::{OptCostModel, PerTableStats},
@@ -22,17 +25,23 @@ pub fn main() {
         .with_target(false)
         .init();
 
+    let rules: Vec<Arc<dyn Rule<OptRelNodeTyp, CascadesOptimizer<OptRelNodeTyp>>>> = vec![
+        Arc::new(JoinCommuteRule::new()),
+        Arc::new(JoinAssocRule::new()),
+        Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Scan)),
+        Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Join(
+            JoinType::Inner,
+        ))),
+        Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Filter)),
+        Arc::new(HashJoinRule::new()),
+    ];
+    let mut rule_wrappers = Vec::new();
+    for rule in rules {
+        rule_wrappers.push(RuleWrapper::new_cascades(rule));
+    }
+
     let mut optimizer = CascadesOptimizer::new(
-        vec![
-            Arc::new(JoinCommuteRule::new()),
-            Arc::new(JoinAssocRule::new()),
-            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Scan)),
-            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Join(
-                JoinType::Inner,
-            ))),
-            Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Filter)),
-            Arc::new(HashJoinRule::new()),
-        ],
+        rule_wrappers,
         Box::new(OptCostModel::new(
             [("t1", 1000), ("t2", 100), ("t3", 10000)]
                 .into_iter()

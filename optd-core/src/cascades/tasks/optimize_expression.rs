@@ -44,13 +44,16 @@ impl<T: RelNodeTyp> Task<T> for OptimizeExpressionTask {
         let expr = optimizer.get_expr_memoed(self.expr_id);
         trace!(event = "task_begin", task = "optimize_expr", expr_id = %self.expr_id, expr = %expr);
         let mut tasks = vec![];
-        for (rule_id, rule) in optimizer.rules().iter().enumerate() {
+        for (rule_id, rule_wrapper) in optimizer.rules().iter().enumerate() {
+            let rule = rule_wrapper.rule();
             if optimizer.is_rule_fired(self.expr_id, rule_id) {
                 continue;
             }
+            // Skip impl rules when exploring
             if self.exploring && rule.is_impl_rule() {
                 continue;
             }
+            // Skip transformation rules when budget is used
             if optimizer.ctx.budget_used && !rule.is_impl_rule() {
                 break;
             }

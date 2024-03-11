@@ -248,6 +248,61 @@ impl<T: RelNodeTyp> Memo<T> {
         self.groups.insert(group_id, group);
     }
 
+    // return true: replace success, the expr_id is replaced by the new rel_node
+    // return false: replace failed as the new rel node already exists in other groups,
+    //             the old expr_id should be marked as all rules are fired for it
+    pub fn replace_group_expr(
+        &mut self,
+        expr_id: ExprId,
+        replace_group_id: GroupId,
+        rel_node: RelNodeRef<T>,
+    ) -> bool {
+        let replace_group_id = self.get_reduced_group_id(replace_group_id);
+
+        if let Entry::Occupied(mut entry) = self.groups.entry(replace_group_id) {
+            let group = entry.get_mut();
+            if !group.group_exprs.contains(&expr_id) {
+                unreachable!("expr not found in group in replace_group_expr");
+            }
+
+            let children_group_ids = rel_node
+                .children
+                .iter()
+                .map(|child| {
+                    if let Some(group) = child.typ.extract_group() {
+                        group
+                    } else {
+                        self.add_new_group_expr(child.clone(), None).0
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let memo_node = RelMemoNode {
+                typ: rel_node.typ.clone(),
+                children: children_group_ids,
+                data: rel_node.data.clone(),
+            };
+
+            // if the new expr already in the memo table, merge the group and remove old expr
+            if let Some(&expr_id) = self.expr_node_to_expr_id.get(&memo_node) {
+                let group_id = self.get_group_id_of_expr_id(expr_id);
+                let group_id = self.get_reduced_group_id(group_id);
+                self.merge_group_inner(replace_group_id, group_id);
+
+                // TODO: instead of remove this expr from the old group,
+                // we mark the expr as all rules have been fired to make it a dead end
+                return false;
+            }
+
+            self.expr_id_to_expr_node
+                .insert(expr_id, memo_node.clone().into());
+            self.expr_node_to_expr_id.insert(memo_node.clone(), expr_id);
+
+            return true;
+        }
+        unreachable!("group not found in replace_group_expr");
+    }
+
     fn add_new_group_expr_inner(
         &mut self,
         rel_node: RelNodeRef<T>,
