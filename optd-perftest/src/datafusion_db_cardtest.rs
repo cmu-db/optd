@@ -9,6 +9,7 @@ impl CardtestRunnerDBHelper for DatafusionDb {
     }
 
     async fn eval_benchmark_truecards(&self, _benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+        Ok(vec![])
     }
 
     async fn eval_benchmark_estcards(&self, _benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
@@ -24,8 +25,8 @@ async fn _eval_query_truecard(db: &DatafusionDb, sql: &str) -> anyhow::Result<us
     Ok(num_rows)
 }
 
-async fn _eval_query_estcard(slf: &DatafusionDb, _sql: &str) -> anyhow::Result<usize> {
-    let rows = slf.execute("EXPLAIN SELECT * FROM t1;", true).await?;
+async fn _eval_query_estcard(db: &DatafusionDb, _sql: &str) -> anyhow::Result<usize> {
+    let rows = db.execute("EXPLAIN SELECT * FROM t1;", true).await?;
     println!("eval_est_card(): rows={:?}", rows);
     Ok(12)
 }
