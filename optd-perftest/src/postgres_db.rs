@@ -210,32 +210,32 @@ impl PostgresDb {
     }
 
     async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
-        let benchmark_strid = benchmark.get_strid();
+        let benchmark_stringid = benchmark.get_stringid();
         if benchmark.is_readonly() {
-            let done_fname = format!("{}_done", benchmark_strid);
+            let done_fname = format!("{}_done", benchmark_stringid);
             let done_fpath = self.pgdata_dpath.join(done_fname);
             if !done_fpath.exists() {
                 if self.verbose {
-                    println!("[start] loading data for {}", benchmark_strid);
+                    println!("[start] loading data for {}", benchmark_stringid);
                 }
                 self.load_benchmark_data_raw(benchmark).await?;
                 File::create(done_fpath)?;
                 if self.verbose {
-                    println!("[end] loading data for {}", benchmark_strid);
+                    println!("[end] loading data for {}", benchmark_stringid);
                 }
             } else {
                 #[allow(clippy::collapsible_else_if)]
                 if self.verbose {
-                    println!("[skip] loading data for {}", benchmark_strid);
+                    println!("[skip] loading data for {}", benchmark_stringid);
                 }
             }
         } else {
             if self.verbose {
-                println!("[start] loading data for {}", benchmark_strid);
+                println!("[start] loading data for {}", benchmark_stringid);
             }
             self.load_benchmark_data_raw(benchmark).await?;
             if self.verbose {
-                println!("[end] loading data for {}", benchmark_strid);
+                println!("[end] loading data for {}", benchmark_stringid);
             }
         }
         Ok(())

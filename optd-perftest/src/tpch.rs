@@ -19,7 +19,7 @@ pub struct TpchConfig {
 }
 
 impl TpchConfig {
-    pub fn get_strid(&self) -> String {
+    pub fn get_stringid(&self) -> String {
         format!("{}_sf{}_sd{}", self.database, self.scale_factor, self.seed)
     }
 }
@@ -163,7 +163,7 @@ impl TpchKit {
             env::set_current_dir(&self.dbgen_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
             if self.verbose {
-                println!("[start] generating tables for {}", tpch_config.get_strid());
+                println!("[start] generating tables for {}", tpch_config.get_stringid());
             }
             shell::run_command_with_status_check(&format!(
                 "./dbgen -s{}",
@@ -172,12 +172,12 @@ impl TpchKit {
             self.cd_to_optd()?;
             File::create(done_fpath)?;
             if self.verbose {
-                println!("[end] generating tables for {}", tpch_config.get_strid());
+                println!("[end] generating tables for {}", tpch_config.get_stringid());
             }
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!("[skip] generating tables for {}", tpch_config.get_strid());
+                println!("[skip] generating tables for {}", tpch_config.get_stringid());
             }
         }
         Ok(())
@@ -192,7 +192,7 @@ impl TpchKit {
             shell::make_into_empty_dir(&this_genned_queries_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             if self.verbose {
-                println!("[start] generating queries for {}", tpch_config.get_strid());
+                println!("[start] generating queries for {}", tpch_config.get_stringid());
             }
             // we don't use -d in qgen because -r controls the substitution values we use
             for query_i in 1..=NUM_TPCH_QUERIES {
@@ -207,12 +207,12 @@ impl TpchKit {
             self.cd_to_optd()?;
             File::create(done_fpath)?;
             if self.verbose {
-                println!("[end] generating queries for {}", tpch_config.get_strid());
+                println!("[end] generating queries for {}", tpch_config.get_stringid());
             }
         } else {
             #[allow(clippy::collapsible_else_if)]
             if self.verbose {
-                println!("[skip] generating queries for {}", tpch_config.get_strid());
+                println!("[skip] generating queries for {}", tpch_config.get_stringid());
             }
         }
         Ok(())
@@ -220,11 +220,11 @@ impl TpchKit {
 
     // TODO: migrate paths and then create the .tbl iterator
     fn get_this_genned_tables_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
-        self.genned_tables_dpath.join(tpch_config.get_strid())
+        self.genned_tables_dpath.join(tpch_config.get_stringid())
     }
 
     fn get_this_genned_queries_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
-        self.genned_queries_dpath.join(tpch_config.get_strid())
+        self.genned_queries_dpath.join(tpch_config.get_stringid())
     }
 
     /// Get an iterator through all generated .tbl files of a given config

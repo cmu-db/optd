@@ -7,10 +7,10 @@ pub enum Benchmark {
 }
 
 impl Benchmark {
-    pub fn get_strid(&self) -> String {
+    pub fn get_stringid(&self) -> String {
         match self {
             Self::Test => String::from("test"),
-            Self::Tpch(tpch_config) => format!("tpch_{}", tpch_config.get_strid()),
+            Self::Tpch(tpch_config) => format!("tpch_{}", tpch_config.get_stringid()),
         }
     }
 
