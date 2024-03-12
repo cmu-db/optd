@@ -2696,6 +2696,7 @@ dependencies = [
  "dirs",
  "env_logger 0.9.3",
  "itertools",
+ "lazy_static",
  "mimalloc",
  "optd-datafusion-bridge",
  "optd-datafusion-repr",

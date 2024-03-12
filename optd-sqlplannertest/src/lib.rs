@@ -7,6 +7,7 @@ use datafusion::sql::parser::DFParser;
 use datafusion::sql::sqlparser::dialect::GenericDialect;
 use datafusion_optd_cli::helper::unescape_input;
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::DatafusionOptimizer;
@@ -239,11 +240,14 @@ impl sqlplannertest::PlannerTestRunner for DatafusionDb {
     }
 }
 
+lazy_static! {
+    static ref FLAGS_REGEX: Regex = Regex::new(r"\[(.*)\]").unwrap();
+}
+
 /// Extract the flags from a task. The flags are specified in square brackets.
 /// For example, the flags for the task `explain[with_logical, verbose]` are `["with_logical", "verbose"]`.
 fn extract_flags(task: &str) -> Result<Vec<String>> {
-    let options_regex = Regex::new(r"\[(.*)\]").unwrap();
-    if let Some(captures) = options_regex.captures(task) {
+    if let Some(captures) = FLAGS_REGEX.captures(task) {
         Ok(captures
             .get(1)
             .unwrap()
