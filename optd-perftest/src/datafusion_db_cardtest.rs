@@ -9,7 +9,6 @@ impl CardtestRunnerDBHelper for DatafusionDb {
     }
 
     async fn eval_benchmark_truecards(&self, _benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
-        Ok(vec![])
     }
 
     async fn eval_benchmark_estcards(&self, _benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
@@ -19,8 +18,8 @@ impl CardtestRunnerDBHelper for DatafusionDb {
 
 // helper functions for ```impl CardtestRunnerDBHelper for DatafusionDb```
 // they can't be put in an impl because DatafusionDb is a foreign struct
-async fn _eval_query_truecard(slf: &DatafusionDb, sql: &str) -> anyhow::Result<usize> {
-    let rows = slf.execute(sql, true).await?;
+async fn _eval_query_truecard(db: &DatafusionDb, sql: &str) -> anyhow::Result<usize> {
+    let rows = db.execute(sql, true).await?;
     let num_rows = rows.len();
     Ok(num_rows)
 }

@@ -1,12 +1,12 @@
-= Usage
+# Usage
 
-**Update the test cases**
+## Update the test cases
 
 ```shell
 cargo run -p optd-sqlplannertest --bin planner_test_apply
 ```
 
-**Verify the test cases**
+## Verify the test cases
 
 ```shell
 cargo test -p optd-sqlplannertest
@@ -14,7 +14,26 @@ cargo test -p optd-sqlplannertest
 cargo nextest run -p optd-sqlplannertest
 ```
 
-The `explain` and `execute` task will be run with datafusion's logical optimizer disabled. To keep using datafusion's logical optimizer, you could use the `execute_with_logical` and `explain_with_logical` tasks instead.
+## Tasks
+
+The `explain` and `execute` task will be run with datafusion's logical optimizer disabled. Each task has some toggleable flags to control its behavior.
+
+### `execute` Task
+
+#### Flags
+
+| Name | Description |
+| -- | -- |
+| with_logical | Enable Datafusion's logical optimizer |
+
+### Explain Task
+
+#### Flags
+
+| Name | Description |
+| -- | -- |
+| with_logical | Enable Datafusion's logical optimizer |
+| verbose | Display estimated cost in physical plan |
 
 Currently we have the following options for the explain task:
 
@@ -24,4 +43,3 @@ Currently we have the following options for the explain task:
 - `physical_datafusion`: datafusion's physical plan.
 - `join_orders`: physical join orders.
 - `logical_join_orders`: logical join orders.
-

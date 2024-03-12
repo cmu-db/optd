@@ -10,6 +10,7 @@ use itertools::Itertools;
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::DatafusionOptimizer;
+use regex::Regex;
 use std::sync::Arc;
 
 #[global_allocator]
@@ -118,8 +119,9 @@ impl DatafusionDb {
     }
 
     /// Executes the `execute` task.
-    async fn task_execute(&mut self, r: &mut String, sql: &str, with_logical: bool) -> Result<()> {
+    async fn task_execute(&mut self, r: &mut String, sql: &str, flags: &[String]) -> Result<()> {
         use std::fmt::Write;
+        let with_logical = flags.contains(&"with_logical".to_string());
         let result = self.execute(sql, with_logical).await?;
         writeln!(r, "{}", result.into_iter().map(|x| x.join(" ")).join("\n"))?;
         writeln!(r)?;
@@ -132,18 +134,17 @@ impl DatafusionDb {
         r: &mut String,
         sql: &str,
         task: &str,
-        with_logical: bool,
+        flags: &[String],
     ) -> Result<()> {
         use std::fmt::Write;
+
+        let with_logical = flags.contains(&"with_logical".to_string());
+        let _verbose = flags.contains(&"verbose".to_string());
 
         let result = self
             .execute(&format!("explain {}", &sql), with_logical)
             .await?;
-        let subtask_start_pos = if with_logical {
-            "explain_with_logical:".len()
-        } else {
-            "explain:".len()
-        };
+        let subtask_start_pos = task.find(':').unwrap() + 1;
         for subtask in task[subtask_start_pos..].split(',') {
             let subtask = subtask.trim();
             if subtask == "logical_datafusion" {
@@ -227,16 +228,30 @@ impl sqlplannertest::PlannerTestRunner for DatafusionDb {
         let mut result = String::new();
         let r = &mut result;
         for task in &test_case.tasks {
-            if task == "execute" {
-                self.task_execute(r, &test_case.sql, false).await?;
-            } else if task == "execute_with_logical" {
-                self.task_execute(r, &test_case.sql, true).await?;
-            } else if task.starts_with("explain:") {
-                self.task_explain(r, &test_case.sql, task, false).await?;
-            } else if task.starts_with("explain_with_logical:") {
-                self.task_explain(r, &test_case.sql, task, true).await?;
+            let flags = extract_flags(task)?;
+            if task.starts_with("execute") {
+                self.task_execute(r, &test_case.sql, &flags).await?;
+            } else if task.starts_with("explain") {
+                self.task_explain(r, &test_case.sql, task, &flags).await?;
             }
         }
         Ok(result)
+    }
+}
+
+/// Extract the flags from a task. The flags are specified in square brackets.
+/// For example, the flags for the task `explain[with_logical, verbose]` are `["with_logical", "verbose"]`.
+fn extract_flags(task: &str) -> Result<Vec<String>> {
+    let options_regex = Regex::new(r"\[(.*)\]").unwrap();
+    if let Some(captures) = options_regex.captures(task) {
+        Ok(captures
+            .get(1)
+            .unwrap()
+            .as_str()
+            .split(',')
+            .map(|x| x.trim().to_string())
+            .collect())
+    } else {
+        Ok(vec![])
     }
 }

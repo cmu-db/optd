@@ -156,7 +156,7 @@
       limit 100;
   desc: TPC-H Q2
   tasks:
-      - explain_with_logical:logical_optd,physical_optd
+      - explain[with_logical]:logical_optd,physical_optd
 - sql: |
       SELECT
           l_orderkey,
@@ -182,7 +182,7 @@
           o_orderdate LIMIT 10;
   desc: TPC-H Q3
   tasks:
-      - explain_with_logical:logical_optd,physical_optd
+      - explain[with_logical]:logical_optd,physical_optd
 - sql: |
       SELECT
           n_name AS nation,
@@ -493,7 +493,7 @@
           s_suppkey;
   desc: TPC-H Q15
   tasks:
-      - explain_with_logical:logical_optd,physical_optd
+      - explain[with_logical]:logical_optd,physical_optd
 - sql: |
       SELECT
           ROUND(SUM(l_extendedprice) / 7.0, 16) AS avg_yearly 
@@ -514,7 +514,7 @@
           );
   desc: TPC-H Q17
   tasks:
-      - explain_with_logical:logical_optd,physical_optd
+      - explain[with_logical]:logical_optd,physical_optd
 - sql: |
       SELECT
           sum(l_extendedprice* (1 - l_discount)) as revenue
