@@ -1,14 +1,15 @@
 #![allow(clippy::new_without_default)]
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
 use cost::{AdaptiveCostModel, RuntimeAdaptionStorage};
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId, OptimizerProperties},
+    rel_node::RelNodeMetaMap,
     rules::RuleWrapper,
 };
-use plan_nodes::{OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
+use plan_nodes::{OptRelNodeRef, OptRelNodeTyp};
 use properties::{
     column_ref::ColumnRefPropertyBuilder,
     schema::{Catalog, SchemaPropertyBuilder},
@@ -19,10 +20,8 @@ use rules::{
     PhysicalConversionRule, ProjectionPullUpJoin,
 };
 
-pub use adaptive::PhysicalCollector;
 pub use optd_core::rel_node::Value;
 
-mod adaptive;
 pub mod cost;
 pub mod plan_nodes;
 pub mod properties;
@@ -37,6 +36,10 @@ pub struct DatafusionOptimizer {
 impl DatafusionOptimizer {
     pub fn enable_adaptive(&mut self, enable: bool) {
         self.enable_adaptive = enable;
+    }
+
+    pub fn adaptive_enabled(&self) -> bool {
+        self.enable_adaptive
     }
 
     pub fn optd_optimizer(&self) -> &CascadesOptimizer<OptRelNodeTyp> {
@@ -162,7 +165,10 @@ impl DatafusionOptimizer {
         }
     }
 
-    pub fn optimize(&mut self, root_rel: OptRelNodeRef) -> Result<(GroupId, OptRelNodeRef)> {
+    pub fn optimize(
+        &mut self,
+        root_rel: OptRelNodeRef,
+    ) -> Result<(GroupId, OptRelNodeRef, RelNodeMetaMap)> {
         if self.enable_adaptive {
             self.runtime_statistics.lock().unwrap().iter_cnt += 1;
             self.optimizer.step_clear_winner();
@@ -172,20 +178,10 @@ impl DatafusionOptimizer {
 
         let group_id = self.optimizer.step_optimize_rel(root_rel)?;
 
-        let optimized_rel =
-            self.optimizer
-                .step_get_optimize_rel(group_id, |rel_node, group_id| {
-                    if rel_node.typ.is_plan_node() && self.enable_adaptive {
-                        return PhysicalCollector::new(
-                            PlanNode::from_rel_node(rel_node).unwrap(),
-                            group_id,
-                        )
-                        .into_rel_node();
-                    }
-                    rel_node
-                })?;
+        let mut meta = Some(HashMap::new());
+        let optimized_rel = self.optimizer.step_get_optimize_rel(group_id, &mut meta)?;
 
-        Ok((group_id, optimized_rel))
+        Ok((group_id, optimized_rel, meta.unwrap()))
     }
 
     pub fn dump(&self, group_id: Option<GroupId>) {

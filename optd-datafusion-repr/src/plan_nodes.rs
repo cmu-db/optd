@@ -36,10 +36,7 @@ pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
 pub use sort::{LogicalSort, PhysicalSort};
 
-use crate::{
-    adaptive::PhysicalCollector,
-    properties::schema::{Schema, SchemaPropertyBuilder},
-};
+use crate::properties::schema::{Schema, SchemaPropertyBuilder};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OptRelNodeTyp {
@@ -66,7 +63,6 @@ pub enum OptRelNodeTyp {
     PhysicalNestedLoopJoin(JoinType),
     PhysicalEmptyRelation,
     PhysicalLimit,
-    PhysicalCollector(GroupId), // only produced after optimization is done
     // Expressions
     Constant(ConstantType),
     ColumnRef,
@@ -101,7 +97,6 @@ impl OptRelNodeTyp {
                 | Self::PhysicalSort
                 | Self::PhysicalAgg
                 | Self::PhysicalHashJoin(_)
-                | Self::PhysicalCollector(_)
                 | Self::PhysicalLimit
                 | Self::PhysicalEmptyRelation
         )
@@ -367,9 +362,6 @@ pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
             .unwrap()
             .dispatch_explain(),
         OptRelNodeTyp::SortOrder(_) => SortOrderExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(),
-        OptRelNodeTyp::PhysicalCollector(_) => PhysicalCollector::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(),
         OptRelNodeTyp::PhysicalEmptyRelation => PhysicalEmptyRelation::from_rel_node(rel_node)
