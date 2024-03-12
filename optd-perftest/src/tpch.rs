@@ -30,8 +30,6 @@ impl TpchConfig {
 /// Since it's conceptually a wrapper around the repo, I chose _not_ to make
 ///   TpchConfig an initialization parameter.
 pub struct TpchKit {
-    verbose: bool,
-
     // cache these paths so we don't have to build them multiple times
     optd_repo_dpath: PathBuf,
     _tpch_dpath: PathBuf,
@@ -45,7 +43,7 @@ pub struct TpchKit {
 
 /// I keep the same conventions for these methods as I do for PostgresDb
 impl TpchKit {
-    pub fn build(verbose: bool) -> io::Result<Self> {
+    pub fn build() -> io::Result<Self> {
         // build paths, sometimes creating them if they don't exist
         // we assume that this is being run in the base optd repo dir
         let optd_repo_dpath = env::current_dir()?;
@@ -73,7 +71,6 @@ impl TpchKit {
 
         // create Self
         let kit = TpchKit {
-            verbose,
             optd_repo_dpath,
             _tpch_dpath: tpch_dpath,
             tpch_kit_repo_dpath,
@@ -100,47 +97,32 @@ impl TpchKit {
 
     fn clonepull_tpch_kit_repo(&self) -> io::Result<()> {
         if !self.tpch_kit_repo_dpath.exists() {
-            if self.verbose {
-                println!("[start] cloning tpch-kit repo");
-            }
+            log::debug!("[start] cloning tpch-kit repo");
             shell::run_command_with_status_check(&format!(
                 "git clone {} {}",
                 TPCH_KIT_REPO_URL,
                 self.tpch_kit_repo_dpath.to_str().unwrap()
             ))?;
-            if self.verbose {
-                println!("[end] cloning tpch-kit repo");
-            }
+            log::debug!("[end] cloning tpch-kit repo");
         } else {
-            #[allow(clippy::collapsible_else_if)]
-            if self.verbose {
-                println!("[skip] cloning tpch-kit repo");
-            }
+            log::debug!("[skip] cloning tpch-kit repo");
         }
         env::set_current_dir(&self.tpch_kit_repo_dpath)?;
-        if self.verbose {
-            println!("[start] pulling latest tpch-kit repo");
-        }
+        log::debug!("[start] pulling latest tpch-kit repo");
         shell::run_command_with_status_check("git pull")?;
-        if self.verbose {
-            println!("[end] pulling latest tpch-kit repo");
-        }
+        log::debug!("[end] pulling latest tpch-kit repo");
         self.cd_to_optd()
     }
 
     fn build_dbgen(&self, database: &str) -> io::Result<()> {
         env::set_current_dir(&self.dbgen_dpath)?;
-        if self.verbose {
-            println!("[start] building dbgen")
-        }
+        log::debug!("[start] building dbgen");
         shell::run_command_with_status_check(&format!(
             "make MACHINE={} DATABASE={}",
             TpchKit::get_machine(),
             database
         ))?;
-        if self.verbose {
-            println!("[end] building dbgen")
-        }
+        log::debug!("[end] building dbgen");
         self.cd_to_optd()
     }
 
@@ -162,23 +144,22 @@ impl TpchKit {
             shell::make_into_empty_dir(&this_genned_tables_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
-            if self.verbose {
-                println!("[start] generating tables for {}", tpch_config.get_stringid());
-            }
+            log::debug!(
+                "[start] generating tables for {}",
+                tpch_config.get_stringid()
+            );
             shell::run_command_with_status_check(&format!(
                 "./dbgen -s{}",
                 tpch_config.scale_factor
             ))?;
             self.cd_to_optd()?;
             File::create(done_fpath)?;
-            if self.verbose {
-                println!("[end] generating tables for {}", tpch_config.get_stringid());
-            }
+            log::debug!("[end] generating tables for {}", tpch_config.get_stringid());
         } else {
-            #[allow(clippy::collapsible_else_if)]
-            if self.verbose {
-                println!("[skip] generating tables for {}", tpch_config.get_stringid());
-            }
+            log::debug!(
+                "[skip] generating tables for {}",
+                tpch_config.get_stringid()
+            );
         }
         Ok(())
     }
@@ -191,9 +172,10 @@ impl TpchKit {
             self.build_dbgen(&tpch_config.database)?;
             shell::make_into_empty_dir(&this_genned_queries_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
-            if self.verbose {
-                println!("[start] generating queries for {}", tpch_config.get_stringid());
-            }
+            log::debug!(
+                "[start] generating queries for {}",
+                tpch_config.get_stringid()
+            );
             // we don't use -d in qgen because -r controls the substitution values we use
             for query_i in 1..=NUM_TPCH_QUERIES {
                 let output = shell::run_command_with_status_check(&format!(
@@ -206,14 +188,15 @@ impl TpchKit {
             }
             self.cd_to_optd()?;
             File::create(done_fpath)?;
-            if self.verbose {
-                println!("[end] generating queries for {}", tpch_config.get_stringid());
-            }
+            log::debug!(
+                "[end] generating queries for {}",
+                tpch_config.get_stringid()
+            );
         } else {
-            #[allow(clippy::collapsible_else_if)]
-            if self.verbose {
-                println!("[skip] generating queries for {}", tpch_config.get_stringid());
-            }
+            log::debug!(
+                "[skip] generating queries for {}",
+                tpch_config.get_stringid()
+            );
         }
         Ok(())
     }

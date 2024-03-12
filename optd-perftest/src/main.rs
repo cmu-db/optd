@@ -16,7 +16,8 @@ mod tpch;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let pg_db = PostgresDb::build(true).await?;
+    env_logger::init();
+    let pg_db = PostgresDb::build().await?;
     let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db)];
     let tpch_config = TpchConfig {
         database: String::from(TPCH_KIT_POSTGRES),
