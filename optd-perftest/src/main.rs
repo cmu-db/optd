@@ -43,6 +43,7 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    env_logger::init();
     let cli = Cli::parse();
 
     let workspace_dpath = shell::parse_pathstr(&cli.workspace)?;
@@ -66,7 +67,7 @@ async fn cardtest<P: AsRef<Path>>(
     workspace_dpath: P,
     tpch_config: TpchConfig,
 ) -> anyhow::Result<()> {
-    let pg_db = PostgresDb::build(workspace_dpath, true).await?;
+    let pg_db = PostgresDb::build(workspace_dpath).await?;
     let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db)];
 
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());

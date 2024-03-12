@@ -18,7 +18,6 @@ const OPTD_DBNAME: &str = "optd";
 
 pub struct PostgresDb {
     workspace_dpath: PathBuf,
-    verbose: bool,
     // is an option because we need to initialize the struct before setting this
     client: Option<Client>,
 
@@ -34,10 +33,8 @@ pub struct PostgresDb {
 ///   - Stop and start functions should be separate
 ///   - Setup should be done in build() unless it requires more information (like benchmark)
 impl PostgresDb {
-    pub async fn build<P: AsRef<Path>>(workspace_dpath: P, verbose: bool) -> anyhow::Result<Self> {
-        if verbose {
-            println!("[start] building PostgresDb");
-        }
+    pub async fn build<P: AsRef<Path>>(workspace_dpath: P) -> anyhow::Result<Self> {
+        log::debug!("[start] building PostgresDb");
 
         // build paths, sometimes creating them if they don't exist
         let workspace_dpath = workspace_dpath.as_ref().to_path_buf();
@@ -52,7 +49,6 @@ impl PostgresDb {
         // create Self
         let mut db = PostgresDb {
             workspace_dpath,
-            verbose,
             client: None,
             _postgres_db_dpath: postgres_db_dpath,
             pgdata_dpath,
@@ -65,10 +61,7 @@ impl PostgresDb {
         db.start_postgres().await?;
         db.connect_to_postgres().await?;
 
-        if verbose {
-            println!("[end] building PostgresDb");
-        }
-
+        log::debug!("[end] building PostgresDb");
         Ok(db)
     }
 
@@ -76,22 +69,14 @@ impl PostgresDb {
     async fn install_postgres(&self) -> anyhow::Result<()> {
         match OS {
             "macos" => {
-                if self.verbose {
-                    println!("[start] updating and upgrading brew");
-                }
+                log::debug!("[start] updating and upgrading brew");
                 shell::run_command_with_status_check("brew update")?;
                 shell::run_command_with_status_check("brew upgrade")?;
-                if self.verbose {
-                    println!("[end] updating and upgrading brew");
-                }
+                log::debug!("[end] updating and upgrading brew");
 
-                if self.verbose {
-                    println!("[start] installing postgresql");
-                }
+                log::debug!("[start] installing postgresql");
                 shell::run_command_with_status_check("brew install postgresql")?;
-                if self.verbose {
-                    println!("[end] installing postgresql");
-                }
+                log::debug!("[end] installing postgresql");
             }
             _ => unimplemented!(),
         };
@@ -116,9 +101,7 @@ impl PostgresDb {
     async fn init_pgdata(&self) -> anyhow::Result<()> {
         let done_fpath = self.pgdata_dpath.join("initdb_done");
         if !done_fpath.exists() {
-            if self.verbose {
-                println!("[start] initializing pgdata");
-            }
+            log::debug!("[start] initializing pgdata");
 
             // call initdb
             shell::make_into_empty_dir(&self.pgdata_dpath)?;
@@ -135,14 +118,9 @@ impl PostgresDb {
             // mark done
             File::create(done_fpath)?;
 
-            if self.verbose {
-                println!("[end] initializing pgdata");
-            }
+            log::debug!("[end] initializing pgdata");
         } else {
-            #[allow(clippy::collapsible_else_if)]
-            if self.verbose {
-                println!("[skip] initializing pgdata");
-            }
+            log::debug!("[skip] initializing pgdata");
         }
         Ok(())
     }
@@ -152,22 +130,15 @@ impl PostgresDb {
     /// It will always be started on port 5432
     async fn start_postgres(&self) -> anyhow::Result<()> {
         if !PostgresDb::get_is_postgres_running()? {
-            if self.verbose {
-                println!("[start] starting postgres");
-            }
+            log::debug!("[start] starting postgres");
             shell::run_command_with_status_check(&format!(
                 "pg_ctl -D{} -l{} start",
                 self.pgdata_dpath.to_str().unwrap(),
                 self.log_fpath.to_str().unwrap()
             ))?;
-            if self.verbose {
-                println!("[end] starting postgres");
-            }
+            log::debug!("[end] starting postgres");
         } else {
-            #[allow(clippy::collapsible_else_if)]
-            if self.verbose {
-                println!("[skip] starting postgres");
-            }
+            log::debug!("[skip] starting postgres");
         }
 
         Ok(())
@@ -176,21 +147,14 @@ impl PostgresDb {
     /// Stop the Postgres process started by start_postgres()
     async fn stop_postgres(&self) -> anyhow::Result<()> {
         if PostgresDb::get_is_postgres_running()? {
-            if self.verbose {
-                println!("[start] stopping postgres");
-            }
+            log::debug!("[start] stopping postgres");
             shell::run_command_with_status_check(&format!(
                 "pg_ctl -D{} stop",
                 self.pgdata_dpath.to_str().unwrap()
             ))?;
-            if self.verbose {
-                println!("[end] stopping postgres");
-            }
+            log::debug!("[end] stopping postgres");
         } else {
-            #[allow(clippy::collapsible_else_if)]
-            if self.verbose {
-                println!("[skip] stopping postgres");
-            }
+            log::debug!("[skip] stopping postgres");
         }
 
         Ok(())
@@ -216,33 +180,22 @@ impl PostgresDb {
     }
 
     async fn load_benchmark_data(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
-        let benchmark_strid = benchmark.get_strid();
+        let benchmark_stringid = benchmark.get_stringid();
         if benchmark.is_readonly() {
-            let done_fname = format!("{}_done", benchmark_strid);
+            let done_fname = format!("{}_done", benchmark_stringid);
             let done_fpath = self.pgdata_dpath.join(done_fname);
             if !done_fpath.exists() {
-                if self.verbose {
-                    println!("[start] loading data for {}", benchmark_strid);
-                }
+                log::debug!("[start] loading data for {}", benchmark_stringid);
                 self.load_benchmark_data_raw(benchmark).await?;
                 File::create(done_fpath)?;
-                if self.verbose {
-                    println!("[end] loading data for {}", benchmark_strid);
-                }
+                log::debug!("[end] loading data for {}", benchmark_stringid);
             } else {
-                #[allow(clippy::collapsible_else_if)]
-                if self.verbose {
-                    println!("[skip] loading data for {}", benchmark_strid);
-                }
+                log::debug!("[skip] loading data for {}", benchmark_stringid);
             }
         } else {
-            if self.verbose {
-                println!("[start] loading data for {}", benchmark_strid);
-            }
+            log::debug!("[start] loading data for {}", benchmark_stringid);
             self.load_benchmark_data_raw(benchmark).await?;
-            if self.verbose {
-                println!("[end] loading data for {}", benchmark_strid);
-            }
+            log::debug!("[end] loading data for {}", benchmark_stringid);
         }
         Ok(())
     }
@@ -267,7 +220,7 @@ impl PostgresDb {
         // deleting pgdata would also delete the old connection so we have to reconnect
         self.connect_to_postgres().await?;
         // load the schema
-        let tpch_kit = TpchKit::build(&self.workspace_dpath, self.verbose)?;
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         shell::run_command_with_status_check(&format!(
             "psql {} -f {}",
             OPTD_DBNAME,
@@ -324,7 +277,7 @@ impl CardtestRunnerDBHelper for PostgresDb {
 /// This impl has helpers for ```impl CardtestRunnerDBHelper for PostgresDb```
 impl PostgresDb {
     async fn eval_tpch_estcards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
-        let tpch_kit = TpchKit::build(&self.workspace_dpath, self.verbose)?;
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
         let mut estcards = vec![];
@@ -338,7 +291,7 @@ impl PostgresDb {
     }
 
     async fn eval_tpch_truecards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
-        let tpch_kit = TpchKit::build(&self.workspace_dpath, self.verbose)?;
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
         let mut truecards = vec![];
