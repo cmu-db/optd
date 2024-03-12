@@ -167,3 +167,19 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for JoinCommuteRule {
     }
 }
 ```
+
+## Rule Mode
+
+Currently, cascades can support two types of modes for logical rules: heuristics and cascades. In other words, with the support of two different types of modes, cascades can work as a hybrid optimizer.
+
+### Heuristics
+One can register a heuristics rule by calling `RuleWrapper::new_heuristic(Arc::new(rule)`. It adds the rule wrapper into the optimizer's rules queue. The heuristic rules are applied bottom up by default.
+
+With the rule wrapper, one can register any rules in heuristic mode and cascade mode. A rule register in heuristic mode will replace the input expressions by the generated expressions, therefore, shrink the search space and improve search efficiencies. Rules registered as heuristic mode should be the rules that always get a better expression when being applied, for example, `select * from t1 join t2 on false` can be replaced by an empty relation.
+
+A constraint for the rules registered as heuristics is that it can only return one expression when it finds the input matched with its pattern and can generate a new expression, and return zero expression when it cannot generate new expressions.
+
+### Cascades
+One can register a heuristics rule by calling `RuleWrapper::new_cascades(Arc::new(rule)`. It adds the rule wrapper into the optimizer's rules queue in cascades mode.
+
+Rules registered as cascades mode are the rules that depend on cost models to figure out which one is better, for example, `select * from t1 join t2 on t1.a = t2.a` can be transformed to `select * from t2 join t1 on t1.a = t2.a`. Rules registered as cascades modes can return multiple expressions once matched.

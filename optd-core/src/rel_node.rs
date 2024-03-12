@@ -2,6 +2,7 @@
 //! the internal representation of the plan nodes.
 
 use std::{
+    collections::HashMap,
     fmt::{Debug, Display},
     hash::Hash,
     sync::Arc,
@@ -201,3 +202,19 @@ impl<T: RelNodeTyp> RelNode<T> {
         }
     }
 }
+
+/// Metadata for a rel node.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RelNodeMeta {
+    /// The group (id) of the `RelNode`
+    pub group_id: GroupId,
+}
+
+impl RelNodeMeta {
+    pub fn new(group_id: GroupId) -> Self {
+        RelNodeMeta { group_id }
+    }
+}
+
+/// A hash table storing `RelNode` (memory address, metadata) pairs.
+pub type RelNodeMetaMap = HashMap<usize, RelNodeMeta>;
