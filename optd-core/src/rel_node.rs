@@ -10,7 +10,7 @@ use std::{
 
 use ordered_float::OrderedFloat;
 
-use crate::cascades::GroupId;
+use crate::{cascades::GroupId, cost::Cost};
 
 pub type RelNodeRef<T> = Arc<RelNode<T>>;
 
@@ -208,11 +208,13 @@ impl<T: RelNodeTyp> RelNode<T> {
 pub struct RelNodeMeta {
     /// The group (id) of the `RelNode`
     pub group_id: GroupId,
+    /// Cost of the `RelNode`
+    pub cost: Cost,
 }
 
 impl RelNodeMeta {
-    pub fn new(group_id: GroupId) -> Self {
-        RelNodeMeta { group_id }
+    pub fn new(group_id: GroupId, cost: Cost) -> Self {
+        RelNodeMeta { group_id, cost }
     }
 }
 

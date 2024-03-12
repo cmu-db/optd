@@ -518,7 +518,7 @@ impl<T: RelNodeTyp> Memo<T> {
                 if let Some(meta) = meta {
                     meta.insert(
                         node.as_ref() as *const _ as usize,
-                        RelNodeMeta::new(group_id),
+                        RelNodeMeta::new(group_id, winner.cost),
                     );
                 }
                 return Ok(node);
