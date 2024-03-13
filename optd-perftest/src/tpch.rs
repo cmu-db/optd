@@ -11,7 +11,7 @@ const TPCH_KIT_REPO_URL: &str = "git@github.com:lmwnshn/tpch-kit.git";
 pub const TPCH_KIT_POSTGRES: &str = "POSTGRESQL";
 const NUM_TPCH_QUERIES: usize = 22;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TpchConfig {
     pub database: String,
     pub scale_factor: i32,
