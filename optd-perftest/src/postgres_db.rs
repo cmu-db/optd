@@ -33,6 +33,8 @@ pub struct PostgresDb {
 ///   - Setup should be done in build() unless it requires more information (like benchmark)
 impl PostgresDb {
     pub async fn build() -> anyhow::Result<Self> {
+        log::debug!("[start] building PostgresDb");
+
         // build paths, sometimes creating them if they don't exist
         let curr_dpath = env::current_dir()?;
         let postgres_db_dpath = Path::new(file!())
@@ -61,6 +63,7 @@ impl PostgresDb {
         db.start_postgres().await?;
         db.connect_to_postgres().await?;
 
+        log::debug!("[end] building PostgresDb");
         Ok(db)
     }
 
@@ -178,7 +181,7 @@ impl PostgresDb {
         Ok(())
     }
 
-    async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
+    async fn load_benchmark_data(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
         let benchmark_stringid = benchmark.get_stringid();
         if benchmark.is_readonly() {
             let done_fname = format!("{}_done", benchmark_stringid);
@@ -200,7 +203,7 @@ impl PostgresDb {
     }
 
     /// Load the benchmark data without worrying about caching
-    async fn load_benchmark_data_raw(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
+    async fn load_benchmark_data_raw(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
             Benchmark::Tpch(tpch_config) => self.load_tpch_data_raw(tpch_config).await?,
             _ => unimplemented!(),
@@ -209,13 +212,15 @@ impl PostgresDb {
     }
 
     /// Load the TPC-H data without worrying about caching
-    async fn load_tpch_data_raw(&self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
+    async fn load_tpch_data_raw(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
         // start from a clean slate
         self.remove_pgdata().await?;
         // since we deleted pgdata we'll need to re-init it
         self.init_pgdata().await?;
         // postgres must be started again since remove_pgdata() stops it
         self.start_postgres().await?;
+        // deleting pgdata would also delete the old connection so we have to reconnect
+        self.connect_to_postgres().await?;
         // load the schema
         let tpch_kit = TpchKit::build()?;
         shell::run_command_with_status_check(&format!(
@@ -248,7 +253,10 @@ impl CardtestRunnerDBHelper for PostgresDb {
         "Postgres"
     }
 
-    async fn eval_benchmark_estcards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+    async fn eval_benchmark_estcards(
+        &mut self,
+        benchmark: &Benchmark,
+    ) -> anyhow::Result<Vec<usize>> {
         self.load_benchmark_data(benchmark).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
@@ -256,7 +264,10 @@ impl CardtestRunnerDBHelper for PostgresDb {
         }
     }
 
-    async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+    async fn eval_benchmark_truecards(
+        &mut self,
+        benchmark: &Benchmark,
+    ) -> anyhow::Result<Vec<usize>> {
         self.load_benchmark_data(benchmark).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),

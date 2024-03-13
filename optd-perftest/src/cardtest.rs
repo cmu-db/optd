@@ -25,12 +25,12 @@ impl CardtestRunner {
     ///   of the entire query, not of a subtree of the query. This detail is specified in Section 7.1 of
     ///   [Yang 2020](https://arxiv.org/pdf/2006.08109.pdf)
     pub async fn eval_benchmark_qerrors_alldbs(
-        &self,
+        &mut self,
         benchmark: &Benchmark,
     ) -> anyhow::Result<HashMap<String, Vec<f64>>> {
         let mut qerrors_alldbs = HashMap::new();
 
-        for database in &self.databases {
+        for database in &mut self.databases {
             let estcards = database.eval_benchmark_estcards(benchmark).await?;
             let truecards = database.eval_benchmark_truecards(benchmark).await?;
             assert!(truecards.len() == estcards.len());
@@ -76,7 +76,16 @@ pub trait CardtestRunnerDBHelper {
     // get_name() has &self so that we're able to do Box<dyn CardtestRunnerDBHelper>
     fn get_name(&self) -> &str;
 
-    // the order of queries has to be the same between these two functions
-    async fn eval_benchmark_estcards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>>;
-    async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>>;
+    // The order of queries has to be the same between these two functions.
+    // They take mutable references because evaluation sometimes involves mutating self.
+    //   One example of this is in PostgresDb where we may need to reconnect to the database,
+    //   which requires modifying the PostgresDb object.
+    async fn eval_benchmark_estcards(
+        &mut self,
+        benchmark: &Benchmark,
+    ) -> anyhow::Result<Vec<usize>>;
+    async fn eval_benchmark_truecards(
+        &mut self,
+        benchmark: &Benchmark,
+    ) -> anyhow::Result<Vec<usize>>;
 }

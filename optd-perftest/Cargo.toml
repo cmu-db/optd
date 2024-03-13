@@ -20,5 +20,8 @@ tokio = { version = "1.24", features = [
 shlex = "1.3"
 tokio-postgres = "0.7"
 regex = "1.10"
+clap = { version = "4.5", features = [
+    "derive",
+] }
 log = "0.4"
 env_logger = "0.11"

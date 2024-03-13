@@ -11,10 +11,10 @@ const TPCH_KIT_REPO_URL: &str = "git@github.com:lmwnshn/tpch-kit.git";
 pub const TPCH_KIT_POSTGRES: &str = "POSTGRESQL";
 const NUM_TPCH_QUERIES: usize = 22;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TpchConfig {
     pub database: String,
-    pub scale_factor: i32,
+    pub scale_factor: f64,
     pub seed: i32,
 }
 
@@ -44,6 +44,8 @@ pub struct TpchKit {
 /// I keep the same conventions for these methods as I do for PostgresDb
 impl TpchKit {
     pub fn build() -> io::Result<Self> {
+        log::debug!("[start] building TpchKit");
+
         // build paths, sometimes creating them if they don't exist
         // we assume that this is being run in the base optd repo dir
         let optd_repo_dpath = env::current_dir()?;
@@ -88,6 +90,7 @@ impl TpchKit {
         // do setup after creating kit
         kit.clonepull_tpch_kit_repo()?;
 
+        log::debug!("[end] building TpchKit");
         Ok(kit)
     }
 
