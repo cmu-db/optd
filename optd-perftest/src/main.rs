@@ -24,8 +24,8 @@ struct Cli {
 enum Commands {
     Cardtest {
         #[arg(long)]
-        #[clap(default_value = "1")]
-        scale_factor: i32,
+        #[clap(default_value = "0.01")]
+        scale_factor: f64,
         #[arg(long)]
         #[clap(default_value = "15721")]
         seed: i32,
