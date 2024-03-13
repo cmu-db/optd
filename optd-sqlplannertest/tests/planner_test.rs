@@ -3,16 +3,9 @@ use std::path::Path;
 use anyhow::Result;
 
 fn main() -> Result<()> {
-<<<<<<< Updated upstream
     sqlplannertest::planner_test_runner(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"),
         || async { optd_sqlplannertest::DatafusionDb::new().await },
     )?;
-=======
-    // sqlplannertest::planner_test_runner(
-    //     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"),
-    //     || async { Ok(optd_sqlplannertest::DatafusionDb::new().await?) },
-    // )?;
->>>>>>> Stashed changes
     Ok(())
 }
