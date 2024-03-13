@@ -140,11 +140,13 @@ impl DatafusionDb {
         use std::fmt::Write;
 
         let with_logical = flags.contains(&"with_logical".to_string());
-        let _verbose = flags.contains(&"verbose".to_string());
-
-        let result = self
-            .execute(&format!("explain {}", &sql), with_logical)
-            .await?;
+        let verbose = flags.contains(&"verbose".to_string());
+        let explain_sql = if verbose {
+            format!("explain verbose {}", &sql)
+        } else {
+            format!("explain {}", &sql)
+        };
+        let result = self.execute(&explain_sql, with_logical).await?;
         let subtask_start_pos = task.find(':').unwrap() + 1;
         for subtask in task[subtask_start_pos..].split(',') {
             let subtask = subtask.trim();

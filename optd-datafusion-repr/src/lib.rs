@@ -23,6 +23,7 @@ use rules::{
 pub use optd_core::rel_node::Value;
 
 pub mod cost;
+mod explain;
 pub mod plan_nodes;
 pub mod properties;
 pub mod rules;
