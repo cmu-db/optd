@@ -69,7 +69,7 @@ impl OptRelNode for PhysicalEmptyRelation {
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         let mut fields = vec![("produce_one_row", self.produce_one_row().to_string().into())];
         if let Some(meta_map) = meta_map {
-            fields = fields.with_meta(self.get_meta(meta_map));
+            fields = fields.with_meta(self.0.get_meta(meta_map));
         }
         Pretty::childless_record("PhysicalEmptyRelation", fields)
     }

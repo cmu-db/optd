@@ -28,7 +28,7 @@ macro_rules! define_plan_node {
                     $( (stringify!($attr_name), self.$attr_name().explain(meta_map) ) ),*
                 ];
                 if let Some(meta_map) = meta_map {
-                    fields = fields.with_meta(self.get_meta(meta_map));
+                    fields = fields.with_meta(self.0.get_meta(meta_map));
                 };
                 pretty_xmlish::Pretty::simple_record(
                     stringify!($struct_name),

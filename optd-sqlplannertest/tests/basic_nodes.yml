@@ -11,5 +11,5 @@
     select * from t1 limit 5;
   desc: Test limit nodes
   tasks:
-    - explain[verbose]:logical_optd,physical_optd
+    - explain:logical_optd,physical_optd
     - execute

@@ -12,6 +12,7 @@ mod projection;
 mod scan;
 mod sort;
 
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use arrow_schema::DataType;
@@ -203,10 +204,6 @@ pub trait OptRelNode: 'static + Clone {
         };
         e
     }
-
-    fn get_meta<'a>(&'a self, meta_map: &'a RelNodeMetaMap) -> &'a RelNodeMeta {
-        meta_map.get(&(self.as_ref() as *const _ as usize)).unwrap()
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -224,6 +221,12 @@ impl PlanNode {
 
     pub fn from_group(rel_node: OptRelNodeRef) -> Self {
         Self(rel_node)
+    }
+
+    pub fn get_meta<'a>(&self, meta_map: &'a RelNodeMetaMap) -> &'a RelNodeMeta {
+        meta_map
+            .get(&(self.0.as_ref() as *const _ as usize))
+            .unwrap()
     }
 }
 
