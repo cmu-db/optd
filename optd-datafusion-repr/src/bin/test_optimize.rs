@@ -75,7 +75,9 @@ pub fn main() {
     );
     println!(
         "{}",
-        PlanNode::from_rel_node(node).unwrap().explain_to_string()
+        PlanNode::from_rel_node(node)
+            .unwrap()
+            .explain_to_string(None)
     );
 
     let mut optimizer = HeuristicsOptimizer::new_with_rules(
@@ -94,6 +96,8 @@ pub fn main() {
     let node = optimizer.optimize(fnal.0.into_rel_node()).unwrap();
     println!(
         "{}",
-        PlanNode::from_rel_node(node).unwrap().explain_to_string()
+        PlanNode::from_rel_node(node)
+            .unwrap()
+            .explain_to_string(None)
     );
 }

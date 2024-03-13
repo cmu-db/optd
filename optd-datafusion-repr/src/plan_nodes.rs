@@ -12,12 +12,13 @@ mod projection;
 mod scan;
 mod sort;
 
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use arrow_schema::DataType;
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId},
-    rel_node::{RelNode, RelNodeRef, RelNodeTyp},
+    rel_node::{RelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp},
 };
 
 pub use agg::{LogicalAgg, PhysicalAgg};
@@ -168,13 +169,13 @@ pub trait OptRelNode: 'static + Clone {
     where
         Self: Sized;
 
-    fn dispatch_explain(&self) -> Pretty<'static>;
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static>;
 
-    fn explain(&self) -> Pretty<'static> {
-        explain(self.clone().into_rel_node())
+    fn explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
+        explain(self.clone().into_rel_node(), meta_map)
     }
 
-    fn explain_to_string(&self) -> String {
+    fn explain_to_string(&self, meta_map: Option<&RelNodeMetaMap>) -> String {
         let mut config = PrettyConfig {
             need_boundaries: false,
             reduced_spaces: false,
@@ -182,7 +183,7 @@ pub trait OptRelNode: 'static + Clone {
             ..Default::default()
         };
         let mut out = String::new();
-        config.unicode(&mut out, &self.explain());
+        config.unicode(&mut out, &self.explain(meta_map));
         out
     }
 
@@ -221,6 +222,12 @@ impl PlanNode {
     pub fn from_group(rel_node: OptRelNodeRef) -> Self {
         Self(rel_node)
     }
+
+    pub fn get_meta<'a>(&self, meta_map: &'a RelNodeMetaMap) -> &'a RelNodeMeta {
+        meta_map
+            .get(&(self.0.as_ref() as *const _ as usize))
+            .unwrap()
+    }
 }
 
 impl OptRelNode for PlanNode {
@@ -235,7 +242,7 @@ impl OptRelNode for PlanNode {
         Some(Self(rel_node))
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::simple_record(
             "<PlanNode>",
             vec![(
@@ -245,7 +252,7 @@ impl OptRelNode for PlanNode {
             self.0
                 .children
                 .iter()
-                .map(|child| explain(child.clone()))
+                .map(|child| explain(child.clone(), meta_map))
                 .collect(),
         )
     }
@@ -274,7 +281,7 @@ impl OptRelNode for Expr {
         }
         Some(Self(rel_node))
     }
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::simple_record(
             "<Expr>",
             vec![(
@@ -284,107 +291,107 @@ impl OptRelNode for Expr {
             self.0
                 .children
                 .iter()
-                .map(|child| explain(child.clone()))
+                .map(|child| explain(child.clone(), meta_map))
                 .collect(),
         )
     }
 }
 
-pub fn explain(rel_node: OptRelNodeRef) -> Pretty<'static> {
+pub fn explain(rel_node: OptRelNodeRef, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
     match rel_node.typ {
         OptRelNodeTyp::ColumnRef => ColumnRefExpr::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Constant(_) => ConstantExpr::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::UnOp(_) => UnOpExpr::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::BinOp(_) => BinOpExpr::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Func(_) => FuncExpr::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Join(_) => LogicalJoin::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Scan => LogicalScan::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Filter => LogicalFilter::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Apply(_) => LogicalApply::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::EmptyRelation => LogicalEmptyRelation::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Limit => LogicalLimit::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::PhysicalFilter => PhysicalFilter::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::PhysicalScan => PhysicalScan::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::PhysicalNestedLoopJoin(_) => PhysicalNestedLoopJoin::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Placeholder(_) => unreachable!("should not explain a placeholder"),
         OptRelNodeTyp::List => {
             ExprList::from_rel_node(rel_node) // ExprList is the only place that we will have list in the datafusion repr
                 .unwrap()
-                .dispatch_explain()
+                .dispatch_explain(meta_map)
         }
         OptRelNodeTyp::Agg => LogicalAgg::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Sort => LogicalSort::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Projection => LogicalProjection::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::PhysicalProjection => PhysicalProjection::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::PhysicalAgg => PhysicalAgg::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::PhysicalSort => PhysicalSort::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::PhysicalHashJoin(_) => PhysicalHashJoin::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::SortOrder(_) => SortOrderExpr::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::PhysicalEmptyRelation => PhysicalEmptyRelation::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::PhysicalLimit => PhysicalLimit::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Between => BetweenExpr::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Cast => CastExpr::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Like => LikeExpr::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::DataType(_) => DataTypeExpr::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::InList => InListExpr::from_rel_node(rel_node)
             .unwrap()
-            .dispatch_explain(),
+            .dispatch_explain(meta_map),
     }
 }
 

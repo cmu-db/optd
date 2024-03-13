@@ -206,9 +206,11 @@ impl OptdQueryPlanner {
                 .create_physical_plan(logical_plan, session_state)
                 .await?);
         }
-        let (mut explains, logical_plan) = match logical_plan {
-            LogicalPlan::Explain(Explain { plan, .. }) => (Some(Vec::new()), plan.as_ref()),
-            _ => (None, logical_plan),
+        let (mut explains, verbose, logical_plan) = match logical_plan {
+            LogicalPlan::Explain(Explain { plan, verbose, .. }) => {
+                (Some(Vec::new()), *verbose, plan.as_ref())
+            }
+            _ => (None, false, logical_plan),
         };
         let mut ctx = OptdPlanContext::new(session_state);
         if let Some(explains) = &mut explains {
@@ -224,7 +226,7 @@ impl OptdQueryPlanner {
                 },
                 PlanNode::from_rel_node(optd_rel.clone())
                     .unwrap()
-                    .explain_to_string(),
+                    .explain_to_string(None),
             ));
         }
         let mut optimizer = self.optimizer.lock().unwrap().take().unwrap();
@@ -237,7 +239,7 @@ impl OptdQueryPlanner {
                 },
                 PlanNode::from_rel_node(optimized_rel.clone())
                     .unwrap()
-                    .explain_to_string(),
+                    .explain_to_string(if verbose { Some(&meta) } else { None }),
             ));
             let join_order = get_join_order(optimized_rel.clone());
             explains.push(StringifiedPlan::new(

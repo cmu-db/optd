@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use pretty_xmlish::Pretty;
 
-use optd_core::rel_node::{RelNode, Value};
+use crate::explain::Insertable;
+use optd_core::rel_node::{RelNode, RelNodeMetaMap, Value};
 
 use super::{replace_typ, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 
@@ -21,7 +22,7 @@ impl OptRelNode for LogicalScan {
         PlanNode::from_rel_node(rel_node).map(Self)
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, _meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::childless_record(
             "LogicalScan",
             vec![("table", self.table().to_string().into())],
@@ -61,11 +62,12 @@ impl OptRelNode for PhysicalScan {
         PlanNode::from_rel_node(rel_node).map(Self)
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
-        Pretty::childless_record(
-            "PhysicalScan",
-            vec![("table", self.table().to_string().into())],
-        )
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
+        let mut fields = vec![("table", self.table().to_string().into())];
+        if let Some(meta_map) = meta_map {
+            fields = fields.with_meta(self.0.get_meta(meta_map));
+        }
+        Pretty::childless_record("PhysicalScan", fields)
     }
 }
 

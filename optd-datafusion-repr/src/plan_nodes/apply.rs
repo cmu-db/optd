@@ -3,7 +3,7 @@ use std::fmt::Display;
 
 use pretty_xmlish::Pretty;
 
-use optd_core::rel_node::RelNode;
+use optd_core::rel_node::{RelNode, RelNodeMetaMap};
 
 use super::{Expr, JoinType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 
@@ -48,14 +48,17 @@ impl OptRelNode for LogicalApply {
         }
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::simple_record(
             "LogicalApply",
             vec![
                 ("typ", self.apply_type().to_string().into()),
-                ("cond", self.cond().explain()),
+                ("cond", self.cond().explain(meta_map)),
             ],
-            vec![self.left_child().explain(), self.right_child().explain()],
+            vec![
+                self.left_child().explain(meta_map),
+                self.right_child().explain(meta_map),
+            ],
         )
     }
 }

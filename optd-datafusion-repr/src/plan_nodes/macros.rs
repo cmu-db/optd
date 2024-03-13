@@ -20,15 +20,21 @@ macro_rules! define_plan_node {
                 }
             }
 
-            fn dispatch_explain(&self) -> pretty_xmlish::Pretty<'static> {
+            fn dispatch_explain(&self, meta_map: Option<&crate::RelNodeMetaMap>) -> pretty_xmlish::Pretty<'static> {
+                use crate::explain::Insertable;
+
+                let mut fields = vec![
+                    $( (stringify!($inner_name), self.$inner_name().to_string().into() ) , )?
+                    $( (stringify!($attr_name), self.$attr_name().explain(meta_map) ) ),*
+                ];
+                if let Some(meta_map) = meta_map {
+                    fields = fields.with_meta(self.0.get_meta(meta_map));
+                };
                 pretty_xmlish::Pretty::simple_record(
                     stringify!($struct_name),
+                    fields,
                     vec![
-                        $( (stringify!($inner_name), self.$inner_name().to_string().into() ) , )?
-                        $( (stringify!($attr_name), self.$attr_name().explain() ) ),*
-                    ],
-                    vec![
-                        $( self.$child_name().explain() ),*
+                        $( self.$child_name().explain(meta_map) ),*
                     ],
                 )
             }
