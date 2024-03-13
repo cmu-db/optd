@@ -50,6 +50,14 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn cardtest(tpch_config: TpchConfig) -> anyhow::Result<()> {
-    println!("tpch_config={:?}", tpch_config);
+    let pg_db = PostgresDb::build().await?;
+    let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db)];
+
+    let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
+    let cardtest_runner = CardtestRunner::new(databases).await?;
+    let qerrors = cardtest_runner
+        .eval_benchmark_qerrors_alldbs(&tpch_benchmark)
+        .await?;
+    println!("qerrors: {:?}", qerrors);
     Ok(())
 }
