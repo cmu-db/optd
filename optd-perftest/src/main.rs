@@ -4,6 +4,7 @@ use postgres_db::PostgresDb;
 
 use crate::{
     benchmark::Benchmark,
+    datafusion_db_cardtest::DatafusionDb,
     tpch::{TpchConfig, TPCH_KIT_POSTGRES},
 };
 
@@ -17,15 +18,17 @@ mod tpch;
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
-    let pg_db = PostgresDb::build().await?;
-    let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db)];
+    // let pg_db = PostgresDb::build().await?;
+    let datafusion_db = DatafusionDb::new().await?;
+    let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(datafusion_db)];
     let tpch_config = TpchConfig {
         database: String::from(TPCH_KIT_POSTGRES),
         scale_factor: 1,
         seed: 15721,
+        queries: vec![2, 3],
     };
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
-    let cardtest_runner = CardtestRunner::new(databases).await?;
+    let mut cardtest_runner = CardtestRunner::new(databases).await?;
     let qerrors = cardtest_runner
         .eval_benchmark_qerrors_alldbs(&tpch_benchmark)
         .await?;

@@ -6,7 +6,17 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-optd-sqlplannertest = { path = "../optd-sqlplannertest" }
+datafusion = { version = "32.0.0", features = [
+    "avro",
+    "crypto_expressions",
+    "encoding_expressions",
+    "regex_expressions",
+    "unicode_expressions",
+    "compression",
+] }
+optd-datafusion-repr = { path = "../optd-datafusion-repr" }
+optd-datafusion-bridge = { path = "../optd-datafusion-bridge" }
+datafusion-optd-cli = { path = "../datafusion-optd-cli" }
 futures = "0.3"
 anyhow = { version = "1", features = ["backtrace"] }
 async-trait = "0.1"
