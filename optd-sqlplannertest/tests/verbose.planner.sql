@@ -22,7 +22,7 @@ PhysicalProjection { exprs: [ #0 ], rows: 1 }
 └── PhysicalScan { table: t1, rows: 1 }
 */
 
--- Test verbose explain
+-- Test verbose explain with aggregation
 select count(*) from t1;
 
 /*
