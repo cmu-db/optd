@@ -1,0 +1,21 @@
+- sql: |
+    create table t1(v1 int);
+    insert into t1 values (0), (1), (2), (3);
+  tasks:
+    - execute
+- sql: |
+    select * from t1;
+  desc: Test non-verbose explain
+  tasks:
+    - explain:physical_optd
+- sql: |
+    select * from t1;
+  desc: Test verbose explain
+  tasks:
+    - explain[verbose]:physical_optd
+- sql: |
+    select count(*) from t1;
+  desc: Test verbose explain with aggregation
+  tasks:
+    - explain[verbose]:physical_optd
+
