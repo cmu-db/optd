@@ -1,7 +1,6 @@
 use crate::{
     benchmark::Benchmark,
     cardtest::CardtestRunnerDBHelper,
-    shell,
     tpch::{TpchConfig, TpchKit},
 };
 use async_trait::async_trait;
@@ -33,7 +32,6 @@ impl PostgresDb {
             if let Err(e) = connection.await {
                 eprintln!("connection error: {}", e);
             }
-            println!("dropping connection");
         });
         Ok(client)
     }
@@ -66,7 +64,7 @@ impl PostgresDb {
             // now that we've created `dbname`, we can connect to that
             let client = Self::connect_to_db(&dbname).await?;
             match benchmark {
-                Benchmark::Tpch(tpch_config) => Self::load_tpch_data(&client, &dbname, tpch_config).await?,
+                Benchmark::Tpch(tpch_config) => Self::load_tpch_data(&client, tpch_config).await?,
                 _ => unimplemented!(),
             };
             log::debug!("[end] loading benchmark data");
@@ -76,31 +74,26 @@ impl PostgresDb {
         Ok(())
     }
 
-    /// Load the TPC-H data assuming the dbname database already exists
-    async fn load_tpch_data(client: &Client, dbname: &str, tpch_config: &TpchConfig) -> anyhow::Result<()> {
-        // load the schema
+    /// Load the TPC-H data to the database that client is connected to
+    async fn load_tpch_data(client: &Client, tpch_config: &TpchConfig) -> anyhow::Result<()> {
+        // set up TpchKit
         let tpch_kit = TpchKit::build()?;
-        // TODO(phw2): factor out psql and change function doc
-        shell::run_command_with_status_check(&format!(
-            "psql {} -f {}",
-            dbname,
-            tpch_kit.schema_fpath.to_str().unwrap()
-        ))?;
+
+        // load the schema
+        // we need to call make to ensure that the schema file exists
+        // tpch_kit.make(TPCH_KIT_POSTGRES);
+        let sql = fs::read_to_string(tpch_kit.schema_fpath.to_str().unwrap())?;
+        client.batch_execute(&sql).await?;
+
         // load the tables
         tpch_kit.gen_tables(tpch_config)?;
-        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap();
-        for tbl_fpath in tbl_fpath_iter {
-            let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
-            let copy_table_cmd = format!(
-                "\\copy {} from {} csv delimiter '|'",
-                tbl_name,
-                tbl_fpath.to_str().unwrap()
-            );
-            shell::run_command_with_status_check(&format!(
-                "psql {} -c \"{}\"",
-                dbname, copy_table_cmd
-            ))?;
+        for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config)? {
+            let tbl_fpath_str = &tbl_fpath.to_str().unwrap();
+            let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
+            // client.query(&format!("COPY {} FROM '{}' WITH (FORMAT csv, DELIMITER '|')", tbl_name, tbl_fpath_str), &[]).await?;
+            client.query(&format!("COPY {} FROM '{}' WITH (FORMAT csv)", tbl_name, tbl_fpath_str), &[]).await?;
         }
+        
         Ok(())
     }
 }

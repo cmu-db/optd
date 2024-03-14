@@ -120,7 +120,7 @@ impl TpchKit {
         self.cd_to_optd()
     }
 
-    fn build_dbgen(&self, database: &str) -> io::Result<()> {
+    pub fn make(&self, database: &str) -> io::Result<()> {
         env::set_current_dir(&self.dbgen_dpath)?;
         log::debug!("[start] building dbgen");
         // we need to call "make clean" because we might have called make earlier with
@@ -149,7 +149,7 @@ impl TpchKit {
         let this_genned_tables_dpath = self.get_this_genned_tables_dpath(tpch_config);
         let done_fpath = this_genned_tables_dpath.join("dbgen_done");
         if !done_fpath.exists() {
-            self.build_dbgen(&tpch_config.database)?;
+            self.make(&tpch_config.database)?;
             shell::make_into_empty_dir(&this_genned_tables_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
@@ -178,7 +178,7 @@ impl TpchKit {
         let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_config);
         let done_fpath = this_genned_queries_dpath.join("qgen_done");
         if !done_fpath.exists() {
-            self.build_dbgen(&tpch_config.database)?;
+            self.make(&tpch_config.database)?;
             shell::make_into_empty_dir(&this_genned_queries_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             log::debug!(
@@ -223,6 +223,11 @@ impl TpchKit {
     fn get_this_genned_queries_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
         let dname = format!("db{}_sf{}_sd{}", tpch_config.database, tpch_config.scale_factor, tpch_config.seed);
         self.genned_queries_dpath.join(dname)
+    }
+
+    /// Convert a tbl_fpath into the table name
+    pub fn get_tbl_name_from_tbl_fpath<P: AsRef<Path>>(tbl_fpath: P) -> String {
+        tbl_fpath.as_ref().file_stem().unwrap().to_str().unwrap().to_string()
     }
 
     /// Get an iterator through all generated .tbl files of a given config
