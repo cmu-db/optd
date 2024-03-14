@@ -7,7 +7,7 @@ use crate::{
 use async_trait::async_trait;
 use regex::Regex;
 use std::{
-    env::{self, consts::OS},
+    env,
     fs::{self, File},
     path::{Path, PathBuf},
     process::Command,
@@ -58,31 +58,12 @@ impl PostgresDb {
         };
 
         // start postgres and our connection to it
-        db.install_postgres().await?;
         db.init_pgdata().await?;
         db.start_postgres().await?;
         db.connect_to_postgres().await?;
 
         log::debug!("[end] building PostgresDb");
         Ok(db)
-    }
-
-    /// Installs an up-to-date version of Postgres using the OS's package manager
-    async fn install_postgres(&self) -> anyhow::Result<()> {
-        match OS {
-            "macos" => {
-                log::debug!("[start] updating and upgrading brew");
-                shell::run_command_with_status_check("brew update")?;
-                shell::run_command_with_status_check("brew upgrade")?;
-                log::debug!("[end] updating and upgrading brew");
-
-                log::debug!("[start] installing postgresql");
-                shell::run_command_with_status_check("brew install postgresql")?;
-                log::debug!("[end] installing postgresql");
-            }
-            _ => unimplemented!(),
-        };
-        Ok(())
     }
 
     /// Remove the pgdata dir, making sure to stop a running Postgres process if there is one
