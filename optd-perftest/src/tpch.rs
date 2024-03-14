@@ -30,8 +30,9 @@ impl TpchConfig {
 /// Since it's conceptually a wrapper around the repo, I chose _not_ to make
 ///   TpchConfig an initialization parameter.
 pub struct TpchKit {
+    _workspace_dpath: PathBuf,
+
     // cache these paths so we don't have to build them multiple times
-    optd_repo_dpath: PathBuf,
     _tpch_dpath: PathBuf,
     tpch_kit_repo_dpath: PathBuf,
     queries_dpath: PathBuf,
@@ -43,20 +44,14 @@ pub struct TpchKit {
 
 /// I keep the same conventions for these methods as I do for PostgresDb
 impl TpchKit {
-    pub fn build() -> io::Result<Self> {
+    pub fn build<P: AsRef<Path>>(workspace_dpath: P) -> io::Result<Self> {
         log::debug!("[start] building TpchKit");
 
         // build paths, sometimes creating them if they don't exist
-        // we assume that this is being run in the base optd repo dir
-        let optd_repo_dpath = env::current_dir()?;
-        let tpch_dpath = Path::new(file!())
-            .parent()
-            .unwrap()
-            .join("tpch")
-            .to_path_buf();
-        let tpch_dpath = optd_repo_dpath.join(tpch_dpath); // make tpch_dpath absolute
+        let workspace_dpath = workspace_dpath.as_ref().to_path_buf();
+        let tpch_dpath = workspace_dpath.join("tpch");
         if !tpch_dpath.exists() {
-            fs::create_dir(&tpch_dpath).unwrap_or_else(|_| panic!("tpch_dpath ({:?}) doesn't exist. make sure that the current dir is the base repo dir. right now, the current dir is {:?}", tpch_dpath, optd_repo_dpath));
+            fs::create_dir(&tpch_dpath)?;
         }
         let tpch_kit_repo_dpath = tpch_dpath.join("tpch-kit");
         let dbgen_dpath = tpch_kit_repo_dpath.join("dbgen");
@@ -73,7 +68,7 @@ impl TpchKit {
 
         // create Self
         let kit = TpchKit {
-            optd_repo_dpath,
+            _workspace_dpath: workspace_dpath,
             _tpch_dpath: tpch_dpath,
             tpch_kit_repo_dpath,
             queries_dpath,
@@ -94,10 +89,6 @@ impl TpchKit {
         Ok(kit)
     }
 
-    fn cd_to_optd(&self) -> io::Result<()> {
-        env::set_current_dir(&self.optd_repo_dpath)
-    }
-
     fn clonepull_tpch_kit_repo(&self) -> io::Result<()> {
         if !self.tpch_kit_repo_dpath.exists() {
             log::debug!("[start] cloning tpch-kit repo");
@@ -114,7 +105,7 @@ impl TpchKit {
         log::debug!("[start] pulling latest tpch-kit repo");
         shell::run_command_with_status_check("git pull")?;
         log::debug!("[end] pulling latest tpch-kit repo");
-        self.cd_to_optd()
+        Ok(())
     }
 
     fn build_dbgen(&self, database: &str) -> io::Result<()> {
@@ -126,7 +117,7 @@ impl TpchKit {
             database
         ))?;
         log::debug!("[end] building dbgen");
-        self.cd_to_optd()
+        Ok(())
     }
 
     fn get_machine() -> &'static str {
@@ -155,7 +146,6 @@ impl TpchKit {
                 "./dbgen -s{}",
                 tpch_config.scale_factor
             ))?;
-            self.cd_to_optd()?;
             File::create(done_fpath)?;
             log::debug!("[end] generating tables for {}", tpch_config.get_stringid());
         } else {
@@ -189,7 +179,6 @@ impl TpchKit {
                     this_genned_queries_dpath.join(format!("{}.sql", query_i));
                 fs::write(&this_genned_queries_fpath, output.stdout)?;
             }
-            self.cd_to_optd()?;
             File::create(done_fpath)?;
             log::debug!(
                 "[end] generating queries for {}",
