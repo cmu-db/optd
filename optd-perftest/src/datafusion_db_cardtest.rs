@@ -16,8 +16,10 @@ use datafusion::{
     sql::{parser::DFParser, sqlparser::dialect::GenericDialect},
 };
 use datafusion_optd_cli::helper::unescape_input;
+use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::DatafusionOptimizer;
+use regex::Regex;
 
 pub struct DatafusionDb {
     ctx: SessionContext,
@@ -155,10 +157,29 @@ impl DatafusionDb {
     }
 
     async fn eval_query_estcard(&self, sql: &str) -> anyhow::Result<usize> {
-        let rows = self.execute(&format!("explain verbose {}", sql)).await?;
-        // TODO: extract estcard from explain plan
-        print!("{:?}", rows);
-        Ok(12)
+        lazy_static! {
+            static ref RE: Regex = Regex::new(r"row_cnt=(\d+\.\d+)").unwrap();
+        }
+        let explains = self.execute(&format!("explain verbose {}", sql)).await?;
+        // Find first occurrence of row_cnt=... in the output.
+        let row_cnt = explains
+            .iter()
+            .find_map(|explain| {
+                // First element is task name, second is the actual explain output.
+                assert!(explain.len() == 2);
+                let explain = &explain[1];
+                if let Some(caps) = RE.captures(explain) {
+                    if let Some(row_cnt) = caps.get(1) {
+                        Some(row_cnt.as_str().parse::<f32>().unwrap() as usize)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        Ok(row_cnt)
     }
 
     async fn load_benchmark_data(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {

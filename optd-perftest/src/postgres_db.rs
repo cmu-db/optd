@@ -5,7 +5,9 @@ use crate::{
     tpch::{TpchConfig, TpchKit},
 };
 use async_trait::async_trait;
+use lazy_static::lazy_static;
 use regex::Regex;
+
 use std::{
     env::{self, consts::OS},
     fs::{self, File},
@@ -327,8 +329,10 @@ impl PostgresDb {
 
     /// Extract the row count from a line of an EXPLAIN output
     fn extract_row_count(explain_line: &str) -> Option<usize> {
-        let re = Regex::new(r"rows=(\d+)").unwrap();
-        if let Some(caps) = re.captures(explain_line) {
+        lazy_static! {
+            static ref RE: Regex = Regex::new(r"row_cnt=(\d+\.\d+)").unwrap();
+        }
+        if let Some(caps) = RE.captures(explain_line) {
             if let Some(matched) = caps.get(1) {
                 let rows_str = matched.as_str();
                 match rows_str.parse::<usize>() {
