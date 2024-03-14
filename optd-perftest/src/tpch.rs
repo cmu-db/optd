@@ -123,6 +123,9 @@ impl TpchKit {
     fn build_dbgen(&self, database: &str) -> io::Result<()> {
         env::set_current_dir(&self.dbgen_dpath)?;
         log::debug!("[start] building dbgen");
+        // we need to call "make clean" because we might have called make earlier with
+        //   a different database
+        shell::run_command_with_status_check("make clean")?;
         shell::run_command_with_status_check(&format!(
             "make MACHINE={} DATABASE={}",
             TpchKit::get_machine(),
@@ -212,13 +215,13 @@ impl TpchKit {
     /// If two TpchConfig instances would *not always* generate the same data, then their
     ///   directory names must be different.
     fn get_this_genned_tables_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
-        let dname = format!("sf{}_sd{}", tpch_config.scale_factor, tpch_config.seed);
+        let dname = format!("db{}_sf{}_sd{}", tpch_config.database, tpch_config.scale_factor, tpch_config.seed);
         self.genned_tables_dpath.join(dname)
     }
 
     /// Same comment as for get_this_genned_tables_dpath, but replace "data" with "queries"
     fn get_this_genned_queries_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
-        let dname = format!("sf{}_sd{}", tpch_config.scale_factor, tpch_config.seed);
+        let dname = format!("db{}_sf{}_sd{}", tpch_config.database, tpch_config.scale_factor, tpch_config.seed);
         self.genned_queries_dpath.join(dname)
     }
 
