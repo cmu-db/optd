@@ -2,6 +2,7 @@ use crate::shell;
 /// A wrapper around tpch-kit (https://github.com/gregrahn/tpch-kit)
 use std::env;
 use std::env::consts::OS;
+use std::fmt::{self, Display, Formatter};
 use std::fs;
 use std::fs::File;
 use std::io;
@@ -13,14 +14,16 @@ const NUM_TPCH_QUERIES: usize = 22;
 
 #[derive(Clone, Debug)]
 pub struct TpchConfig {
+    // TODO(phw2): remove database from config
     pub database: String,
     pub scale_factor: f64,
     pub seed: i32,
 }
 
-impl TpchConfig {
-    pub fn get_stringid(&self) -> String {
-        format!("{}_sf{}_sd{}", self.database, self.scale_factor, self.seed)
+impl Display for TpchConfig {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        // Use write! macro to write formatted string to `f`
+        write!(f, "TpchConfig(scale_factor={}, seed={})", self.scale_factor, self.seed)
     }
 }
 
@@ -149,7 +152,7 @@ impl TpchKit {
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
             log::debug!(
                 "[start] generating tables for {}",
-                tpch_config.get_stringid()
+                tpch_config
             );
             shell::run_command_with_status_check(&format!(
                 "./dbgen -s{}",
@@ -157,11 +160,11 @@ impl TpchKit {
             ))?;
             self.cd_to_optd()?;
             File::create(done_fpath)?;
-            log::debug!("[end] generating tables for {}", tpch_config.get_stringid());
+            log::debug!("[end] generating tables for {}", tpch_config);
         } else {
             log::debug!(
                 "[skip] generating tables for {}",
-                tpch_config.get_stringid()
+                tpch_config
             );
         }
         Ok(())
@@ -177,7 +180,7 @@ impl TpchKit {
             env::set_current_dir(&self.dbgen_dpath)?;
             log::debug!(
                 "[start] generating queries for {}",
-                tpch_config.get_stringid()
+                tpch_config
             );
             // we don't use -d in qgen because -r controls the substitution values we use
             for query_i in 1..=NUM_TPCH_QUERIES {
@@ -193,24 +196,30 @@ impl TpchKit {
             File::create(done_fpath)?;
             log::debug!(
                 "[end] generating queries for {}",
-                tpch_config.get_stringid()
+                tpch_config
             );
         } else {
             log::debug!(
                 "[skip] generating queries for {}",
-                tpch_config.get_stringid()
+                tpch_config
             );
         }
         Ok(())
     }
 
-    // TODO: migrate paths and then create the .tbl iterator
+    /// If two TpchConfig instances would always generate the same data, then their directory
+    ///   names must be the same.
+    /// If two TpchConfig instances would *not always* generate the same data, then their
+    ///   directory names must be different.
     fn get_this_genned_tables_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
-        self.genned_tables_dpath.join(tpch_config.get_stringid())
+        let dname = format!("sf{}_sd{}", tpch_config.scale_factor, tpch_config.seed);
+        self.genned_tables_dpath.join(dname)
     }
 
+    /// Same comment as for get_this_genned_tables_dpath, but replace "data" with "queries"
     fn get_this_genned_queries_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
-        self.genned_queries_dpath.join(tpch_config.get_stringid())
+        let dname = format!("sf{}_sd{}", tpch_config.scale_factor, tpch_config.seed);
+        self.genned_queries_dpath.join(dname)
     }
 
     /// Get an iterator through all generated .tbl files of a given config
