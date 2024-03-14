@@ -169,11 +169,8 @@ impl DatafusionDb {
                 assert!(explain.len() == 2);
                 let explain = &explain[1];
                 if let Some(caps) = RE.captures(explain) {
-                    if let Some(row_cnt) = caps.get(1) {
-                        Some(row_cnt.as_str().parse::<f32>().unwrap() as usize)
-                    } else {
-                        None
-                    }
+                    caps.get(1)
+                        .map(|row_cnt| row_cnt.as_str().parse::<f32>().unwrap() as usize)
                 } else {
                     None
                 }
