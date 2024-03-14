@@ -11,9 +11,7 @@ use tokio_postgres::{Client, NoTls};
 
 const DEFAULT_DBNAME: &str = "postgres";
 
-pub struct PostgresDb {
-    client: Client,
-}
+pub struct PostgresDb {}
 
 /// Conventions I keep for methods of this class:
 ///   - Functions should be idempotent. For instance, start_postgres() should not fail if Postgres is already running
@@ -21,19 +19,8 @@ pub struct PostgresDb {
 ///   - Stop and start functions should be separate
 ///   - Setup should be done in build() unless it requires more information (like benchmark)
 impl PostgresDb {
-    pub async fn build() -> anyhow::Result<Self> {
-        log::debug!("[start] building PostgresDb");
-
-        // create postgres connection
-        let client = PostgresDb::make_postgres_client().await?;
-
-        // create Self
-        let db = PostgresDb {
-            client,
-        };
-
-        log::debug!("[end] building PostgresDb");
-        Ok(db)
+    pub fn new() -> Self {
+        Self {}
     }
 
     /// Check whether a certain database exists
