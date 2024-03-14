@@ -1,3 +1,5 @@
+use std::fs;
+
 use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
 use clap::{Parser, Subcommand};
 use postgres_db::PostgresDb;
@@ -42,6 +44,11 @@ enum Commands {
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let cli = Cli::parse();
+
+    let workspace_dpath = shell::parse_pathstr(&cli.workspace)?;
+    if !workspace_dpath.exists() {
+        fs::create_dir(&workspace_dpath)?;
+    }
 
     match &cli.command {
         Commands::Cardtest { scale_factor, seed } => {
