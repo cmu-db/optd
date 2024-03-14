@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, path::Path};
 
 use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
 use clap::{Parser, Subcommand};
@@ -57,13 +57,16 @@ async fn main() -> anyhow::Result<()> {
                 scale_factor: *scale_factor,
                 seed: *seed,
             };
-            cardtest(tpch_config).await
+            cardtest(&workspace_dpath, tpch_config).await
         }
     }
 }
 
-async fn cardtest(tpch_config: TpchConfig) -> anyhow::Result<()> {
-    let pg_db = PostgresDb::build().await?;
+async fn cardtest<P: AsRef<Path>>(
+    workspace_dpath: P,
+    tpch_config: TpchConfig,
+) -> anyhow::Result<()> {
+    let pg_db = PostgresDb::build(workspace_dpath).await?;
     let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db)];
 
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
