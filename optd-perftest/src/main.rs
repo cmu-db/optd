@@ -16,6 +16,12 @@ mod tpch;
 
 #[derive(Parser)]
 struct Cli {
+    #[arg(long)]
+    #[clap(default_value = "../optd_perftest_workspace")]
+    #[clap(
+        help = "The directory where artifacts required for performance testing (such as pgdata or TPC-H queries) are generated. See comment of parse_pathstr() to see what paths are allowed (TLDR: absolute and relative both ok)."
+    )]
+    workspace: String,
     #[command(subcommand)]
     command: Commands,
 }
