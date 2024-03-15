@@ -62,6 +62,8 @@ impl PostgresDb {
         let done_fpath = pgdata_dpath.join(done_fname);
         // determine whether we should load the data
         let should_load = if benchmark.is_readonly() {
+            // we use the existence of done_fpath to indicate that loading was finished rather than
+            // whether dbname exists as it's possible for dbname to be created by only partially loaded
             !done_fpath.exists()
         } else {
             true
