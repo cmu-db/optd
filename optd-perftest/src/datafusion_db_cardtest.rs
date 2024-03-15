@@ -158,7 +158,7 @@ impl DatafusionDb {
 
     async fn eval_query_estcard(&self, sql: &str) -> anyhow::Result<usize> {
         lazy_static! {
-            static ref RE: Regex = Regex::new(r"row_cnt=(\d+\.\d+)").unwrap();
+            static ref ROW_CNT_RE: Regex = Regex::new(r"row_cnt=(\d+\.\d+)").unwrap();
         }
         let explains = self.execute(&format!("explain verbose {}", sql)).await?;
         // Find first occurrence of row_cnt=... in the output.
@@ -168,7 +168,7 @@ impl DatafusionDb {
                 // First element is task name, second is the actual explain output.
                 assert!(explain.len() == 2);
                 let explain = &explain[1];
-                if let Some(caps) = RE.captures(explain) {
+                if let Some(caps) = ROW_CNT_RE.captures(explain) {
                     caps.get(1)
                         .map(|row_cnt| row_cnt.as_str().parse::<f32>().unwrap() as usize)
                 } else {

@@ -32,7 +32,7 @@ enum Commands {
         seed: i32,
         #[arg(long)]
         #[clap(value_delimiter = ' ', num_args = 1..)]
-        queries: Vec<u32>,
+        query_ids: Vec<u32>,
     },
 }
 
@@ -45,13 +45,14 @@ async fn main() -> anyhow::Result<()> {
         Commands::Cardtest {
             scale_factor,
             seed,
-            queries,
+            query_ids,
         } => {
+            // We only run tests on Postgres-compatible databases, thus the hard-coded database name.
             let tpch_config = TpchConfig {
                 database: String::from(TPCH_KIT_POSTGRES),
                 scale_factor,
                 seed,
-                queries,
+                query_ids,
             };
             cardtest(tpch_config).await
         }

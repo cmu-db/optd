@@ -16,7 +16,7 @@ pub struct TpchConfig {
     pub database: String,
     pub scale_factor: f64,
     pub seed: i32,
-    pub queries: Vec<u32>,
+    pub query_ids: Vec<u32>,
 }
 
 impl TpchConfig {
@@ -237,7 +237,7 @@ impl TpchKit {
     ) -> io::Result<impl Iterator<Item = PathBuf>> {
         let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_config);
         let sql_fpath_ordered_iter = tpch_config
-            .queries
+            .query_ids
             .clone()
             .into_iter()
             .map(move |query_i| this_genned_queries_dpath.join(format!("{}.sql", query_i)));
