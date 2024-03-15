@@ -5,7 +5,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use regex::Regex;
-use std::fs;
+use tokio::fs::File;
+use std::{fs, path::PathBuf};
 use tokio_postgres::{Client, NoTls};
 
 /// This dbname is assumed to always exist
@@ -42,23 +43,36 @@ impl PostgresDb {
         Ok(result.len() > 0)
     }
 
+    // Retrieves the location of pgdata
+    async fn get_pgdata_dpath_str(client: &Client) -> anyhow::Result<String> {
+        let row = client
+            .query_one("SELECT setting FROM pg_settings WHERE name = 'data_directory'", &[])
+            .await?;
+        let pgdata_location: String = row.get("setting");
+        Ok(pgdata_location)
+    }
+
     async fn load_benchmark_data(benchmark: &Benchmark) -> anyhow::Result<()> {
         let dbname = benchmark.get_dbname();
         // since we don't know whether dbname exists at this point, we have to connect to the default database
         let default_db_client = Self::connect_to_db(DEFAULT_DBNAME).await?;
+        let pgdata_dpath_str = Self::get_pgdata_dpath_str(&default_db_client).await?;
+        let pgdata_dpath = PathBuf::from(pgdata_dpath_str);
+        let done_fname = format!("{}_done", dbname);
+        let done_fpath = pgdata_dpath.join(done_fname);
         // determine whether we should load the data
-        // if so, get the state of the system to one where data can be loaded (i.e. `dbname` doesn't exist)
-        let does_db_exist = Self::get_does_db_exist(&default_db_client, &dbname).await?;
         let should_load = if benchmark.is_readonly() {
-            !does_db_exist
+            !done_fpath.exists()
         } else {
-            if does_db_exist {
-                default_db_client.query(&format!("DROP DATABASE {}", dbname), &[]).await?;
-            }
             true
         };
         if should_load {
             log::debug!("[start] loading benchmark data");
+            // it's possible for the db to exist or not after we have determined we should load the data
+            let does_db_exist = Self::get_does_db_exist(&default_db_client, &dbname).await?;
+            if does_db_exist {
+                default_db_client.query(&format!("DROP DATABASE {}", dbname), &[]).await?;
+            }
             default_db_client.query(&format!("CREATE DATABASE {}", dbname), &[]).await?;
             drop(default_db_client);
             // now that we've created `dbname`, we can connect to that
@@ -67,6 +81,7 @@ impl PostgresDb {
                 Benchmark::Tpch(tpch_config) => Self::load_tpch_data(&client, tpch_config).await?,
                 _ => unimplemented!(),
             };
+            File::create(done_fpath).await?;
             log::debug!("[end] loading benchmark data");
         } else {
             log::debug!("[skip] loading benchmark data");
@@ -90,8 +105,7 @@ impl PostgresDb {
         for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config)? {
             let tbl_fpath_str = &tbl_fpath.to_str().unwrap();
             let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
-            // client.query(&format!("COPY {} FROM '{}' WITH (FORMAT csv, DELIMITER '|')", tbl_name, tbl_fpath_str), &[]).await?;
-            client.query(&format!("COPY {} FROM '{}' WITH (FORMAT csv)", tbl_name, tbl_fpath_str), &[]).await?;
+            client.query(&format!("COPY {} FROM '{}' WITH (FORMAT csv, DELIMITER '|')", tbl_name, tbl_fpath_str), &[]).await?;
         }
         
         Ok(())
