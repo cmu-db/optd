@@ -33,8 +33,6 @@ impl CardtestRunner {
         for database in &mut self.databases {
             let estcards = database.eval_benchmark_estcards(benchmark).await?;
             let truecards = database.eval_benchmark_truecards(benchmark).await?;
-            println!("estcards: {:?}", estcards);
-            println!("truecards: {:?}", truecards);
             assert!(truecards.len() == estcards.len());
             let qerrors = estcards
                 .into_iter()
