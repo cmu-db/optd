@@ -22,7 +22,11 @@ pub struct TpchConfig {
 impl Display for TpchConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         // Use write! macro to write formatted string to `f`
-        write!(f, "TpchConfig(scale_factor={}, seed={})", self.scale_factor, self.seed)
+        write!(
+            f,
+            "TpchConfig(scale_factor={}, seed={})",
+            self.scale_factor, self.seed
+        )
     }
 }
 
@@ -152,10 +156,7 @@ impl TpchKit {
             shell::make_into_empty_dir(&this_genned_tables_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
-            log::debug!(
-                "[start] generating tables for {}",
-                tpch_config
-            );
+            log::debug!("[start] generating tables for {}", tpch_config);
             shell::run_command_with_status_check(&format!(
                 "./dbgen -s{}",
                 tpch_config.scale_factor
@@ -164,10 +165,7 @@ impl TpchKit {
             File::create(done_fpath)?;
             log::debug!("[end] generating tables for {}", tpch_config);
         } else {
-            log::debug!(
-                "[skip] generating tables for {}",
-                tpch_config
-            );
+            log::debug!("[skip] generating tables for {}", tpch_config);
         }
         Ok(())
     }
@@ -180,10 +178,7 @@ impl TpchKit {
             self.make(&tpch_config.database)?;
             shell::make_into_empty_dir(&this_genned_queries_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
-            log::debug!(
-                "[start] generating queries for {}",
-                tpch_config
-            );
+            log::debug!("[start] generating queries for {}", tpch_config);
             // we don't use -d in qgen because -r controls the substitution values we use
             for query_i in 1..=NUM_TPCH_QUERIES {
                 let output = shell::run_command_with_status_check(&format!(
@@ -196,15 +191,9 @@ impl TpchKit {
             }
             self.cd_to_optd()?;
             File::create(done_fpath)?;
-            log::debug!(
-                "[end] generating queries for {}",
-                tpch_config
-            );
+            log::debug!("[end] generating queries for {}", tpch_config);
         } else {
-            log::debug!(
-                "[skip] generating queries for {}",
-                tpch_config
-            );
+            log::debug!("[skip] generating queries for {}", tpch_config);
         }
         Ok(())
     }
@@ -214,19 +203,31 @@ impl TpchKit {
     /// If two TpchConfig instances would *not always* generate the same data, then their
     ///   directory names must be different.
     fn get_this_genned_tables_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
-        let dname = format!("db{}_sf{}_sd{}", tpch_config.database, tpch_config.scale_factor, tpch_config.seed);
+        let dname = format!(
+            "db{}_sf{}_sd{}",
+            tpch_config.database, tpch_config.scale_factor, tpch_config.seed
+        );
         self.genned_tables_dpath.join(dname)
     }
 
     /// Same comment as for get_this_genned_tables_dpath, but replace "data" with "queries"
     fn get_this_genned_queries_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
-        let dname = format!("db{}_sf{}_sd{}", tpch_config.database, tpch_config.scale_factor, tpch_config.seed);
+        let dname = format!(
+            "db{}_sf{}_sd{}",
+            tpch_config.database, tpch_config.scale_factor, tpch_config.seed
+        );
         self.genned_queries_dpath.join(dname)
     }
 
     /// Convert a tbl_fpath into the table name
     pub fn get_tbl_name_from_tbl_fpath<P: AsRef<Path>>(tbl_fpath: P) -> String {
-        tbl_fpath.as_ref().file_stem().unwrap().to_str().unwrap().to_string()
+        tbl_fpath
+            .as_ref()
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
     }
 
     /// Get an iterator through all generated .tbl files of a given config

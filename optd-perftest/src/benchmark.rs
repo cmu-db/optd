@@ -14,7 +14,7 @@ impl Benchmark {
     ///   have the same dbname.
     /// This name must be compatible with the rules all databases have for their names, which
     ///   are described below:
-    /// 
+    ///
     /// Postgres' rules:
     ///   - The name can only contain A-Z a-z 0-9 _ and cannot start with 0-9.
     ///   - There is a weird behavior where if you use CREATE DATABASE to create a database,
@@ -25,7 +25,9 @@ impl Benchmark {
     pub fn get_dbname(&self) -> String {
         let dbname = match self {
             Self::Test => String::from("test"),
-            Self::Tpch(tpch_config) => format!("tpch_sf{}_sd{}", tpch_config.scale_factor, tpch_config.seed),
+            Self::Tpch(tpch_config) => {
+                format!("tpch_sf{}_sd{}", tpch_config.scale_factor, tpch_config.seed)
+            }
         };
         // since Postgres names cannot contain periods
         let dbname = dbname.replace(".", "point");

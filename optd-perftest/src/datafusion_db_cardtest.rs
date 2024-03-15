@@ -8,17 +8,11 @@ impl CardtestRunnerDBHelper for DatafusionDb {
         "DataFusion"
     }
 
-    async fn eval_benchmark_truecards(
-        &self,
-        _benchmark: &Benchmark,
-    ) -> anyhow::Result<Vec<usize>> {
+    async fn eval_benchmark_truecards(&self, _benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
         Ok(vec![])
     }
 
-    async fn eval_benchmark_estcards(
-        &self,
-        _benchmark: &Benchmark,
-    ) -> anyhow::Result<Vec<usize>> {
+    async fn eval_benchmark_estcards(&self, _benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
         Ok(vec![])
     }
 }

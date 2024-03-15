@@ -5,8 +5,8 @@ use crate::{
 };
 use async_trait::async_trait;
 use regex::Regex;
-use tokio::fs::File;
 use std::{fs, path::PathBuf};
+use tokio::fs::File;
 use tokio_postgres::{Client, NoTls};
 
 /// This dbname is assumed to always exist
@@ -27,8 +27,7 @@ impl PostgresDb {
     /// Create a connection to a Postgres database
     async fn connect_to_db(dbname: &str) -> anyhow::Result<Client> {
         let (client, connection) =
-            tokio_postgres::connect(&format!("host=localhost dbname={}", dbname), NoTls)
-                .await?;
+            tokio_postgres::connect(&format!("host=localhost dbname={}", dbname), NoTls).await?;
         tokio::spawn(async move {
             if let Err(e) = connection.await {
                 eprintln!("connection error: {}", e);
@@ -39,14 +38,22 @@ impl PostgresDb {
 
     /// Check whether a certain database exists
     async fn get_does_db_exist(client: &Client, dbname: &str) -> anyhow::Result<bool> {
-        let result = client.query(&format!("SELECT FROM pg_database WHERE datname = '{}'", dbname), &[]).await?;
+        let result = client
+            .query(
+                &format!("SELECT FROM pg_database WHERE datname = '{}'", dbname),
+                &[],
+            )
+            .await?;
         Ok(result.len() > 0)
     }
 
     // Retrieves the location of pgdata
     async fn get_pgdata_dpath_str(client: &Client) -> anyhow::Result<String> {
         let row = client
-            .query_one("SELECT setting FROM pg_settings WHERE name = 'data_directory'", &[])
+            .query_one(
+                "SELECT setting FROM pg_settings WHERE name = 'data_directory'",
+                &[],
+            )
             .await?;
         let pgdata_location: String = row.get("setting");
         Ok(pgdata_location)
@@ -73,9 +80,13 @@ impl PostgresDb {
             // it's possible for the db to exist or not after we have determined we should load the data
             let does_db_exist = Self::get_does_db_exist(&default_db_client, &dbname).await?;
             if does_db_exist {
-                default_db_client.query(&format!("DROP DATABASE {}", dbname), &[]).await?;
+                default_db_client
+                    .query(&format!("DROP DATABASE {}", dbname), &[])
+                    .await?;
             }
-            default_db_client.query(&format!("CREATE DATABASE {}", dbname), &[]).await?;
+            default_db_client
+                .query(&format!("CREATE DATABASE {}", dbname), &[])
+                .await?;
             drop(default_db_client);
             // now that we've created `dbname`, we can connect to that
             let client = Self::connect_to_db(&dbname).await?;
@@ -107,9 +118,17 @@ impl PostgresDb {
         for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config)? {
             let tbl_fpath_str = &tbl_fpath.to_str().unwrap();
             let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
-            client.query(&format!("COPY {} FROM '{}' WITH (FORMAT csv, DELIMITER '|')", tbl_name, tbl_fpath_str), &[]).await?;
+            client
+                .query(
+                    &format!(
+                        "COPY {} FROM '{}' WITH (FORMAT csv, DELIMITER '|')",
+                        tbl_name, tbl_fpath_str
+                    ),
+                    &[],
+                )
+                .await?;
         }
-        
+
         Ok(())
     }
 }
@@ -120,10 +139,7 @@ impl CardtestRunnerDBHelper for PostgresDb {
         "Postgres"
     }
 
-    async fn eval_benchmark_estcards(
-        &self,
-        benchmark: &Benchmark,
-    ) -> anyhow::Result<Vec<usize>> {
+    async fn eval_benchmark_estcards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
         Self::load_benchmark_data(benchmark).await?;
         let dbname = benchmark.get_dbname();
         let client = Self::connect_to_db(&dbname).await?;
@@ -133,10 +149,7 @@ impl CardtestRunnerDBHelper for PostgresDb {
         }
     }
 
-    async fn eval_benchmark_truecards(
-        &self,
-        benchmark: &Benchmark,
-    ) -> anyhow::Result<Vec<usize>> {
+    async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
         Self::load_benchmark_data(benchmark).await?;
         let dbname = benchmark.get_dbname();
         let client = Self::connect_to_db(&dbname).await?;
@@ -149,7 +162,10 @@ impl CardtestRunnerDBHelper for PostgresDb {
 
 /// This impl has helpers for ```impl CardtestRunnerDBHelper for PostgresDb```
 impl PostgresDb {
-    async fn eval_tpch_estcards(client: &Client, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
+    async fn eval_tpch_estcards(
+        client: &Client,
+        tpch_config: &TpchConfig,
+    ) -> anyhow::Result<Vec<usize>> {
         let tpch_kit = TpchKit::build()?;
         tpch_kit.gen_queries(tpch_config)?;
 
@@ -163,7 +179,10 @@ impl PostgresDb {
         Ok(estcards)
     }
 
-    async fn eval_tpch_truecards(client: &Client, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
+    async fn eval_tpch_truecards(
+        client: &Client,
+        tpch_config: &TpchConfig,
+    ) -> anyhow::Result<Vec<usize>> {
         let tpch_kit = TpchKit::build()?;
         tpch_kit.gen_queries(tpch_config)?;
 
@@ -178,9 +197,7 @@ impl PostgresDb {
     }
 
     async fn eval_query_estcard(client: &Client, sql: &str) -> anyhow::Result<usize> {
-        let result = client
-            .query(&format!("EXPLAIN {}", sql), &[])
-            .await?;
+        let result = client.query(&format!("EXPLAIN {}", sql), &[]).await?;
         // the first line contains the explain of the root node
         let first_explain_line: &str = result.first().unwrap().get(0);
         let estcard = PostgresDb::extract_row_count(first_explain_line).unwrap();
