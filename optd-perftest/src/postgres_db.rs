@@ -5,7 +5,10 @@ use crate::{
 };
 use async_trait::async_trait;
 use regex::Regex;
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 use tokio::fs::File;
 use tokio_postgres::{Client, NoTls};
 
@@ -24,7 +27,7 @@ pub struct PostgresDb {
 impl PostgresDb {
     pub fn new<P: AsRef<Path>>(workspace_dpath: P) -> Self {
         Self {
-            workspace_dpath: PathBuf::from(workspace_dpath.as_ref())
+            workspace_dpath: PathBuf::from(workspace_dpath.as_ref()),
         }
     }
 
@@ -107,7 +110,11 @@ impl PostgresDb {
     }
 
     /// Load the TPC-H data to the database that client is connected to
-    async fn load_tpch_data(&self, client: &Client, tpch_config: &TpchConfig) -> anyhow::Result<()> {
+    async fn load_tpch_data(
+        &self,
+        client: &Client,
+        tpch_config: &TpchConfig,
+    ) -> anyhow::Result<()> {
         // set up TpchKit
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
 

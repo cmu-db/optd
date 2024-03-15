@@ -62,7 +62,10 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn cardtest<P: AsRef<Path>>(workspace_dpath: P, tpch_config: TpchConfig) -> anyhow::Result<()> {
+async fn cardtest<P: AsRef<Path>>(
+    workspace_dpath: P,
+    tpch_config: TpchConfig,
+) -> anyhow::Result<()> {
     let pg_db = PostgresDb::new(workspace_dpath);
     let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db)];
 
