@@ -14,7 +14,6 @@ const NUM_TPCH_QUERIES: usize = 22;
 
 #[derive(Clone, Debug)]
 pub struct TpchConfig {
-    // TODO(phw2): remove database from config
     pub database: String,
     pub scale_factor: f64,
     pub seed: i32,
