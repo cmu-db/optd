@@ -44,7 +44,7 @@ impl PostgresDb {
                 &[],
             )
             .await?;
-        Ok(result.len() > 0)
+        Ok(!result.is_empty())
     }
 
     // Retrieves the location of pgdata

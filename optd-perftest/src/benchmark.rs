@@ -30,10 +30,9 @@ impl Benchmark {
             }
         };
         // since Postgres names cannot contain periods
-        let dbname = dbname.replace(".", "point");
-        // see the function doc for the weird inconsistency with Postgres
-        let dbname = dbname.to_lowercase();
-        dbname
+        let dbname = dbname.replace('.', "point");
+        // due to the weird inconsistency with Postgres (see function comment)
+        dbname.to_lowercase()
     }
 
     pub fn is_readonly(&self) -> bool {
