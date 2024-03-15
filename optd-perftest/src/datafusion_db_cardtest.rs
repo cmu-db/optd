@@ -1,4 +1,8 @@
-use std::{fs, sync::Arc};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use crate::{
     benchmark::Benchmark,
@@ -22,6 +26,7 @@ use optd_datafusion_repr::DatafusionOptimizer;
 use regex::Regex;
 
 pub struct DatafusionDb {
+    workspace_dpath: PathBuf,
     ctx: SessionContext,
 }
 
@@ -57,8 +62,9 @@ impl CardtestRunnerDBHelper for DatafusionDb {
 }
 
 impl DatafusionDb {
-    pub async fn new() -> anyhow::Result<Self> {
+    pub async fn new<P: AsRef<Path>>(workspace_dpath: P) -> anyhow::Result<Self> {
         Ok(DatafusionDb {
+            workspace_dpath: workspace_dpath.as_ref().to_path_buf(),
             ctx: Self::new_session_ctx().await?,
         })
     }
@@ -123,7 +129,7 @@ impl DatafusionDb {
     }
 
     async fn eval_tpch_estcards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
-        let tpch_kit = TpchKit::build()?;
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
         let mut estcards = vec![];
@@ -137,7 +143,7 @@ impl DatafusionDb {
     }
 
     async fn eval_tpch_truecards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
-        let tpch_kit = TpchKit::build()?;
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
         let mut truecards = vec![];
@@ -187,7 +193,7 @@ impl DatafusionDb {
     }
 
     async fn load_tpch_data(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
-        let tpch_kit = TpchKit::build()?;
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_config)?;
 
         // Create the tables.

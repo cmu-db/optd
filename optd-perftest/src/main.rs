@@ -1,3 +1,5 @@
+use std::{fs, path::Path};
+
 use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
 use clap::{Parser, Subcommand};
 use postgres_db::PostgresDb;
@@ -17,6 +19,12 @@ mod tpch;
 
 #[derive(Parser)]
 struct Cli {
+    #[arg(long)]
+    #[clap(default_value = "../optd_perftest_workspace")]
+    #[clap(
+        help = "The directory where artifacts required for performance testing (such as pgdata or TPC-H queries) are generated. See comment of parse_pathstr() to see what paths are allowed (TLDR: absolute and relative both ok)."
+    )]
+    workspace: String,
     #[command(subcommand)]
     command: Commands,
 }
@@ -41,27 +49,34 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let cli = Cli::parse();
 
+    let workspace_dpath = shell::parse_pathstr(&cli.workspace)?;
+    if !workspace_dpath.exists() {
+        fs::create_dir(&workspace_dpath)?;
+    }
+
     match cli.command {
         Commands::Cardtest {
             scale_factor,
             seed,
             query_ids,
         } => {
-            // We only run tests on Postgres-compatible databases, thus the hard-coded database name.
             let tpch_config = TpchConfig {
                 database: String::from(TPCH_KIT_POSTGRES),
                 scale_factor,
                 seed,
                 query_ids,
             };
-            cardtest(tpch_config).await
+            cardtest(&workspace_dpath, tpch_config).await
         }
     }
 }
 
-async fn cardtest(tpch_config: TpchConfig) -> anyhow::Result<()> {
-    let pg_db = PostgresDb::build().await?;
-    let df_db = DatafusionDb::new().await?;
+async fn cardtest<P: AsRef<Path> + Clone>(
+    workspace_dpath: P,
+    tpch_config: TpchConfig,
+) -> anyhow::Result<()> {
+    let pg_db = PostgresDb::new(workspace_dpath.clone());
+    let df_db = DatafusionDb::new(workspace_dpath).await?;
     let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db), Box::new(df_db)];
 
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());

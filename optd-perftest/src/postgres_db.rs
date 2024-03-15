@@ -1,7 +1,6 @@
 use crate::{
     benchmark::Benchmark,
     cardtest::CardtestRunnerDBHelper,
-    shell,
     tpch::{TpchConfig, TpchKit},
 };
 use async_trait::async_trait;
@@ -9,23 +8,17 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 use std::{
-    env::{self, consts::OS},
-    fs::{self, File},
+    fs,
     path::{Path, PathBuf},
-    process::Command,
 };
+use tokio::fs::File;
 use tokio_postgres::{Client, NoTls};
 
-const OPTD_DBNAME: &str = "optd";
+/// This dbname is assumed to always exist
+const DEFAULT_DBNAME: &str = "postgres";
 
 pub struct PostgresDb {
-    // is an option because we need to initialize the struct before setting this
-    client: Option<Client>,
-
-    // cache these paths so we don't have to build them multiple times
-    _postgres_db_dpath: PathBuf,
-    pgdata_dpath: PathBuf,
-    log_fpath: PathBuf,
+    workspace_dpath: PathBuf,
 }
 
 /// Conventions I keep for methods of this class:
@@ -34,217 +27,121 @@ pub struct PostgresDb {
 ///   - Stop and start functions should be separate
 ///   - Setup should be done in build() unless it requires more information (like benchmark)
 impl PostgresDb {
-    pub async fn build() -> anyhow::Result<Self> {
-        log::debug!("[start] building PostgresDb");
-
-        // build paths, sometimes creating them if they don't exist
-        let curr_dpath = env::current_dir()?;
-        let postgres_db_dpath = Path::new(file!())
-            .parent()
-            .unwrap()
-            .join("postgres_db")
-            .to_path_buf();
-        let postgres_db_dpath = curr_dpath.join(postgres_db_dpath); // make it absolute
-        if !postgres_db_dpath.exists() {
-            fs::create_dir(&postgres_db_dpath)?;
+    pub fn new<P: AsRef<Path>>(workspace_dpath: P) -> Self {
+        Self {
+            workspace_dpath: PathBuf::from(workspace_dpath.as_ref()),
         }
-        let pgdata_dpath = postgres_db_dpath.join("pgdata");
-        let log_fpath = postgres_db_dpath.join("postgres_log");
-
-        // create Self
-        let mut db = PostgresDb {
-            client: None,
-            _postgres_db_dpath: postgres_db_dpath,
-            pgdata_dpath,
-            log_fpath,
-        };
-
-        // start postgres and our connection to it
-        db.install_postgres().await?;
-        db.init_pgdata().await?;
-        db.start_postgres().await?;
-        db.connect_to_postgres().await?;
-
-        log::debug!("[end] building PostgresDb");
-        Ok(db)
     }
 
-    /// Installs an up-to-date version of Postgres using the OS's package manager
-    async fn install_postgres(&self) -> anyhow::Result<()> {
-        match OS {
-            "macos" => {
-                log::debug!("[start] updating and upgrading brew");
-                shell::run_command_with_status_check("brew update")?;
-                shell::run_command_with_status_check("brew upgrade")?;
-                log::debug!("[end] updating and upgrading brew");
-
-                log::debug!("[start] installing postgresql");
-                shell::run_command_with_status_check("brew install postgresql")?;
-                log::debug!("[end] installing postgresql");
-            }
-            _ => unimplemented!(),
-        };
-        Ok(())
-    }
-
-    /// Remove the pgdata dir, making sure to stop a running Postgres process if there is one
-    /// If there is a Postgres process running on pgdata, it's important to stop it to avoid
-    ///   corrupting it (not stopping it leads to lots of weird behavior)
-    async fn remove_pgdata(&self) -> anyhow::Result<()> {
-        if PostgresDb::get_is_postgres_running()? {
-            self.stop_postgres().await?;
-        }
-        shell::make_into_empty_dir(&self.pgdata_dpath)?;
-        Ok(())
-    }
-
-    /// Initializes pgdata_dpath directory if it wasn't already initialized
-    /// Create the optd database if initdb was just called. The reason I create
-    ///   it here is because createdb crashes if the database already exists,
-    ///   and there's no simple way to say "create db if not existing".
-    async fn init_pgdata(&self) -> anyhow::Result<()> {
-        let done_fpath = self.pgdata_dpath.join("initdb_done");
-        if !done_fpath.exists() {
-            log::debug!("[start] initializing pgdata");
-
-            // call initdb
-            shell::make_into_empty_dir(&self.pgdata_dpath)?;
-            shell::run_command_with_status_check(&format!(
-                "initdb {}",
-                self.pgdata_dpath.to_str().unwrap()
-            ))?;
-
-            // create the database. createdb should not fail since we just make a fresh pgdata
-            self.start_postgres().await?;
-            shell::run_command_with_status_check(&format!("createdb {}", OPTD_DBNAME))?;
-            self.stop_postgres().await?;
-
-            // mark done
-            File::create(done_fpath)?;
-
-            log::debug!("[end] initializing pgdata");
-        } else {
-            log::debug!("[skip] initializing pgdata");
-        }
-        Ok(())
-    }
-
-    /// Start the Postgres process if it's not already started
-    /// It will always be started using the pg_ctl binary installed with the package manager
-    /// It will always be started on port 5432
-    async fn start_postgres(&self) -> anyhow::Result<()> {
-        if !PostgresDb::get_is_postgres_running()? {
-            log::debug!("[start] starting postgres");
-            shell::run_command_with_status_check(&format!(
-                "pg_ctl -D{} -l{} start",
-                self.pgdata_dpath.to_str().unwrap(),
-                self.log_fpath.to_str().unwrap()
-            ))?;
-            log::debug!("[end] starting postgres");
-        } else {
-            log::debug!("[skip] starting postgres");
-        }
-
-        Ok(())
-    }
-
-    /// Stop the Postgres process started by start_postgres()
-    async fn stop_postgres(&self) -> anyhow::Result<()> {
-        if PostgresDb::get_is_postgres_running()? {
-            log::debug!("[start] stopping postgres");
-            shell::run_command_with_status_check(&format!(
-                "pg_ctl -D{} stop",
-                self.pgdata_dpath.to_str().unwrap()
-            ))?;
-            log::debug!("[end] stopping postgres");
-        } else {
-            log::debug!("[skip] stopping postgres");
-        }
-
-        Ok(())
-    }
-
-    /// Check whether postgres is running
-    fn get_is_postgres_running() -> anyhow::Result<bool> {
-        Ok(Command::new("pg_isready").output()?.status.success())
-    }
-
-    /// Create a connection to the postgres database
-    async fn connect_to_postgres(&mut self) -> anyhow::Result<()> {
+    /// Create a connection to a Postgres database
+    async fn connect_to_db(dbname: &str) -> anyhow::Result<Client> {
         let (client, connection) =
-            tokio_postgres::connect(&format!("host=localhost dbname={}", OPTD_DBNAME), NoTls)
-                .await?;
+            tokio_postgres::connect(&format!("host=localhost dbname={}", dbname), NoTls).await?;
         tokio::spawn(async move {
             if let Err(e) = connection.await {
                 eprintln!("connection error: {}", e);
             }
         });
-        self.client = Some(client);
-        Ok(())
+        Ok(client)
     }
 
-    async fn load_benchmark_data(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
-        let benchmark_stringid = benchmark.get_stringid();
-        if benchmark.is_readonly() {
-            let done_fname = format!("{}_done", benchmark_stringid);
-            let done_fpath = self.pgdata_dpath.join(done_fname);
-            if !done_fpath.exists() {
-                log::debug!("[start] loading data for {}", benchmark_stringid);
-                self.load_benchmark_data_raw(benchmark).await?;
-                File::create(done_fpath)?;
-                log::debug!("[end] loading data for {}", benchmark_stringid);
-            } else {
-                log::debug!("[skip] loading data for {}", benchmark_stringid);
-            }
+    /// Check whether a certain database exists
+    async fn get_does_db_exist(client: &Client, dbname: &str) -> anyhow::Result<bool> {
+        let result = client
+            .query(
+                &format!("SELECT FROM pg_database WHERE datname = '{}'", dbname),
+                &[],
+            )
+            .await?;
+        Ok(!result.is_empty())
+    }
+
+    // Retrieves the location of pgdata
+    async fn get_pgdata_dpath_str(client: &Client) -> anyhow::Result<String> {
+        let row = client
+            .query_one(
+                "SELECT setting FROM pg_settings WHERE name = 'data_directory'",
+                &[],
+            )
+            .await?;
+        let pgdata_location: String = row.get("setting");
+        Ok(pgdata_location)
+    }
+
+    async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
+        let dbname = benchmark.get_dbname();
+        // since we don't know whether dbname exists at this point, we have to connect to the default database
+        let default_db_client = Self::connect_to_db(DEFAULT_DBNAME).await?;
+        let pgdata_dpath_str = Self::get_pgdata_dpath_str(&default_db_client).await?;
+        let pgdata_dpath = PathBuf::from(pgdata_dpath_str);
+        let done_fname = format!("{}_done", dbname);
+        let done_fpath = pgdata_dpath.join(done_fname);
+        // determine whether we should load the data
+        let should_load = if benchmark.is_readonly() {
+            // we use the existence of done_fpath to indicate that loading was finished rather than
+            // whether dbname exists as it's possible for dbname to be created by only partially loaded
+            !done_fpath.exists()
         } else {
-            log::debug!("[start] loading data for {}", benchmark_stringid);
-            self.load_benchmark_data_raw(benchmark).await?;
-            log::debug!("[end] loading data for {}", benchmark_stringid);
+            true
+        };
+        if should_load {
+            log::debug!("[start] loading benchmark data");
+            // it's possible for the db to exist or not after we have determined we should load the data
+            let does_db_exist = Self::get_does_db_exist(&default_db_client, &dbname).await?;
+            if does_db_exist {
+                default_db_client
+                    .query(&format!("DROP DATABASE {}", dbname), &[])
+                    .await?;
+            }
+            default_db_client
+                .query(&format!("CREATE DATABASE {}", dbname), &[])
+                .await?;
+            drop(default_db_client);
+            // now that we've created `dbname`, we can connect to that
+            let client = Self::connect_to_db(&dbname).await?;
+            match benchmark {
+                Benchmark::Tpch(tpch_config) => self.load_tpch_data(&client, tpch_config).await?,
+                _ => unimplemented!(),
+            };
+            File::create(done_fpath).await?;
+            log::debug!("[end] loading benchmark data");
+        } else {
+            log::debug!("[skip] loading benchmark data");
         }
         Ok(())
     }
 
-    /// Load the benchmark data without worrying about caching
-    async fn load_benchmark_data_raw(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
-        match benchmark {
-            Benchmark::Tpch(tpch_config) => self.load_tpch_data_raw(tpch_config).await?,
-            _ => unimplemented!(),
-        };
-        Ok(())
-    }
+    /// Load the TPC-H data to the database that client is connected to
+    async fn load_tpch_data(
+        &self,
+        client: &Client,
+        tpch_config: &TpchConfig,
+    ) -> anyhow::Result<()> {
+        // set up TpchKit
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
 
-    /// Load the TPC-H data without worrying about caching
-    async fn load_tpch_data_raw(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
-        // start from a clean slate
-        self.remove_pgdata().await?;
-        // since we deleted pgdata we'll need to re-init it
-        self.init_pgdata().await?;
-        // postgres must be started again since remove_pgdata() stops it
-        self.start_postgres().await?;
-        // deleting pgdata would also delete the old connection so we have to reconnect
-        self.connect_to_postgres().await?;
         // load the schema
-        let tpch_kit = TpchKit::build()?;
-        shell::run_command_with_status_check(&format!(
-            "psql {} -f {}",
-            OPTD_DBNAME,
-            tpch_kit.schema_fpath.to_str().unwrap()
-        ))?;
+        // we need to call make to ensure that the schema file exists
+        // tpch_kit.make(TPCH_KIT_POSTGRES);
+        let sql = fs::read_to_string(tpch_kit.schema_fpath.to_str().unwrap())?;
+        client.batch_execute(&sql).await?;
+
         // load the tables
         tpch_kit.gen_tables(tpch_config)?;
-        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap();
-        for tbl_fpath in tbl_fpath_iter {
-            let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
-            let copy_table_cmd = format!(
-                "\\copy {} from {} csv delimiter '|'",
-                tbl_name,
-                tbl_fpath.to_str().unwrap()
-            );
-            shell::run_command_with_status_check(&format!(
-                "psql {} -c \"{}\"",
-                OPTD_DBNAME, copy_table_cmd
-            ))?;
+        for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config)? {
+            let tbl_fpath_str = &tbl_fpath.to_str().unwrap();
+            let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
+            client
+                .query(
+                    &format!(
+                        "COPY {} FROM '{}' WITH (FORMAT csv, DELIMITER '|')",
+                        tbl_name, tbl_fpath_str
+                    ),
+                    &[],
+                )
+                .await?;
         }
+
         Ok(())
     }
 }
@@ -260,9 +157,11 @@ impl CardtestRunnerDBHelper for PostgresDb {
         benchmark: &Benchmark,
     ) -> anyhow::Result<Vec<usize>> {
         self.load_benchmark_data(benchmark).await?;
+        let dbname = benchmark.get_dbname();
+        let client = Self::connect_to_db(&dbname).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
-            Benchmark::Tpch(tpch_config) => self.eval_tpch_estcards(tpch_config).await,
+            Benchmark::Tpch(tpch_config) => self.eval_tpch_estcards(&client, tpch_config).await,
         }
     }
 
@@ -271,58 +170,63 @@ impl CardtestRunnerDBHelper for PostgresDb {
         benchmark: &Benchmark,
     ) -> anyhow::Result<Vec<usize>> {
         self.load_benchmark_data(benchmark).await?;
+        let dbname = benchmark.get_dbname();
+        let client = Self::connect_to_db(&dbname).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
-            Benchmark::Tpch(tpch_config) => self.eval_tpch_truecards(tpch_config).await,
+            Benchmark::Tpch(tpch_config) => self.eval_tpch_truecards(&client, tpch_config).await,
         }
     }
 }
 
 /// This impl has helpers for ```impl CardtestRunnerDBHelper for PostgresDb```
 impl PostgresDb {
-    async fn eval_tpch_estcards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
-        let tpch_kit = TpchKit::build()?;
+    async fn eval_tpch_estcards(
+        &self,
+        client: &Client,
+        tpch_config: &TpchConfig,
+    ) -> anyhow::Result<Vec<usize>> {
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
         let mut estcards = vec![];
         for sql_fpath in tpch_kit.get_sql_fpath_ordered_iter(tpch_config)? {
             let sql = fs::read_to_string(sql_fpath)?;
-            let estcard = self.eval_query_estcard(&sql).await?;
+            let estcard = Self::eval_query_estcard(client, &sql).await?;
             estcards.push(estcard);
         }
 
         Ok(estcards)
     }
 
-    async fn eval_tpch_truecards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
-        let tpch_kit = TpchKit::build()?;
+    async fn eval_tpch_truecards(
+        &self,
+        client: &Client,
+        tpch_config: &TpchConfig,
+    ) -> anyhow::Result<Vec<usize>> {
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
         let mut truecards = vec![];
         for sql_fpath in tpch_kit.get_sql_fpath_ordered_iter(tpch_config)? {
             let sql = fs::read_to_string(sql_fpath)?;
-            let truecard = self.eval_query_truecard(&sql).await?;
+            let truecard = Self::eval_query_truecard(client, &sql).await?;
             truecards.push(truecard);
         }
 
         Ok(truecards)
     }
 
-    async fn eval_query_estcard(&self, sql: &str) -> anyhow::Result<usize> {
-        let result = self
-            .client
-            .as_ref()
-            .unwrap()
-            .query(&format!("EXPLAIN {}", sql), &[])
-            .await?;
+    async fn eval_query_estcard(client: &Client, sql: &str) -> anyhow::Result<usize> {
+        let result = client.query(&format!("EXPLAIN {}", sql), &[]).await?;
         // the first line contains the explain of the root node
         let first_explain_line: &str = result.first().unwrap().get(0);
         let estcard = PostgresDb::extract_row_count(first_explain_line).unwrap();
         Ok(estcard)
     }
 
-    async fn eval_query_truecard(&self, sql: &str) -> anyhow::Result<usize> {
-        let rows = self.client.as_ref().unwrap().query(sql, &[]).await?;
+    async fn eval_query_truecard(client: &Client, sql: &str) -> anyhow::Result<usize> {
+        let rows = client.query(sql, &[]).await?;
         let truecard = rows.len();
         Ok(truecard)
     }

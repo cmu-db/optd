@@ -77,9 +77,6 @@ pub trait CardtestRunnerDBHelper {
     fn get_name(&self) -> &str;
 
     // The order of queries has to be the same between these two functions.
-    // They take mutable references because evaluation sometimes involves mutating self.
-    //   One example of this is in PostgresDb where we may need to reconnect to the database,
-    //   which requires modifying the PostgresDb object.
     async fn eval_benchmark_estcards(
         &mut self,
         benchmark: &Benchmark,
