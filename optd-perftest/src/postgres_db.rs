@@ -5,14 +5,16 @@ use crate::{
 };
 use async_trait::async_trait;
 use regex::Regex;
-use std::{fs, path::PathBuf};
+use std::{fs, path::{Path, PathBuf}};
 use tokio::fs::File;
 use tokio_postgres::{Client, NoTls};
 
 /// This dbname is assumed to always exist
 const DEFAULT_DBNAME: &str = "postgres";
 
-pub struct PostgresDb {}
+pub struct PostgresDb {
+    workspace_dpath: PathBuf,
+}
 
 /// Conventions I keep for methods of this class:
 ///   - Functions should be idempotent. For instance, start_postgres() should not fail if Postgres is already running
@@ -20,8 +22,10 @@ pub struct PostgresDb {}
 ///   - Stop and start functions should be separate
 ///   - Setup should be done in build() unless it requires more information (like benchmark)
 impl PostgresDb {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new<P: AsRef<Path>>(workspace_dpath: P) -> Self {
+        Self {
+            workspace_dpath: PathBuf::from(workspace_dpath.as_ref())
+        }
     }
 
     /// Create a connection to a Postgres database
@@ -59,7 +63,7 @@ impl PostgresDb {
         Ok(pgdata_location)
     }
 
-    async fn load_benchmark_data(benchmark: &Benchmark) -> anyhow::Result<()> {
+    async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
         let dbname = benchmark.get_dbname();
         // since we don't know whether dbname exists at this point, we have to connect to the default database
         let default_db_client = Self::connect_to_db(DEFAULT_DBNAME).await?;
@@ -91,7 +95,7 @@ impl PostgresDb {
             // now that we've created `dbname`, we can connect to that
             let client = Self::connect_to_db(&dbname).await?;
             match benchmark {
-                Benchmark::Tpch(tpch_config) => Self::load_tpch_data(&client, tpch_config).await?,
+                Benchmark::Tpch(tpch_config) => self.load_tpch_data(&client, tpch_config).await?,
                 _ => unimplemented!(),
             };
             File::create(done_fpath).await?;
@@ -103,9 +107,9 @@ impl PostgresDb {
     }
 
     /// Load the TPC-H data to the database that client is connected to
-    async fn load_tpch_data(client: &Client, tpch_config: &TpchConfig) -> anyhow::Result<()> {
+    async fn load_tpch_data(&self, client: &Client, tpch_config: &TpchConfig) -> anyhow::Result<()> {
         // set up TpchKit
-        let tpch_kit = TpchKit::build()?;
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
 
         // load the schema
         // we need to call make to ensure that the schema file exists
@@ -140,22 +144,22 @@ impl CardtestRunnerDBHelper for PostgresDb {
     }
 
     async fn eval_benchmark_estcards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
-        Self::load_benchmark_data(benchmark).await?;
+        self.load_benchmark_data(benchmark).await?;
         let dbname = benchmark.get_dbname();
         let client = Self::connect_to_db(&dbname).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
-            Benchmark::Tpch(tpch_config) => Self::eval_tpch_estcards(&client, tpch_config).await,
+            Benchmark::Tpch(tpch_config) => self.eval_tpch_estcards(&client, tpch_config).await,
         }
     }
 
     async fn eval_benchmark_truecards(&self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
-        Self::load_benchmark_data(benchmark).await?;
+        self.load_benchmark_data(benchmark).await?;
         let dbname = benchmark.get_dbname();
         let client = Self::connect_to_db(&dbname).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
-            Benchmark::Tpch(tpch_config) => Self::eval_tpch_truecards(&client, tpch_config).await,
+            Benchmark::Tpch(tpch_config) => self.eval_tpch_truecards(&client, tpch_config).await,
         }
     }
 }
@@ -163,10 +167,11 @@ impl CardtestRunnerDBHelper for PostgresDb {
 /// This impl has helpers for ```impl CardtestRunnerDBHelper for PostgresDb```
 impl PostgresDb {
     async fn eval_tpch_estcards(
+        &self,
         client: &Client,
         tpch_config: &TpchConfig,
     ) -> anyhow::Result<Vec<usize>> {
-        let tpch_kit = TpchKit::build()?;
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
         let mut estcards = vec![];
@@ -180,10 +185,11 @@ impl PostgresDb {
     }
 
     async fn eval_tpch_truecards(
+        &self,
         client: &Client,
         tpch_config: &TpchConfig,
     ) -> anyhow::Result<Vec<usize>> {
-        let tpch_kit = TpchKit::build()?;
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
         let mut truecards = vec![];
