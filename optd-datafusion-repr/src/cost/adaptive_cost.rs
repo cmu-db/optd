@@ -87,7 +87,7 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
 impl AdaptiveCostModel {
     pub fn new(decay: usize, runtime_row_cnt: RuntimeAdaptionStorage, stats: Stats) -> Self {
         Self {
-            runtime_row_cnt: runtime_row_cnt,
+            runtime_row_cnt,
             base_model: OptCostModel::new(stats),
             decay,
         }
