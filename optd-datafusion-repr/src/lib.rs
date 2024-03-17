@@ -9,6 +9,7 @@ use optd_core::{
     rel_node::RelNodeMetaMap,
     rules::RuleWrapper,
 };
+
 use plan_nodes::{OptRelNodeRef, OptRelNodeTyp};
 use properties::{
     column_ref::ColumnRefPropertyBuilder,
@@ -17,7 +18,7 @@ use properties::{
 use rules::{
     EliminateDuplicatedAggExprRule, EliminateDuplicatedSortExprRule, EliminateFilterRule,
     EliminateJoinRule, EliminateLimitRule, HashJoinRule, JoinAssocRule, JoinCommuteRule,
-    PhysicalConversionRule, ProjectionPullUpJoin,
+    PhysicalConversionRule, ProjectionPullUpJoin, SimplifyFilterRule,
 };
 
 pub use optd_core::rel_node::Value;
@@ -54,7 +55,14 @@ impl DatafusionOptimizer {
     pub fn default_rules() -> Vec<Arc<RuleWrapper<OptRelNodeTyp, CascadesOptimizer<OptRelNodeTyp>>>>
     {
         let rules = PhysicalConversionRule::all_conversions();
-        let mut rule_wrappers = Vec::new();
+        let mut rule_wrappers = vec![
+            RuleWrapper::new_heuristic(Arc::new(SimplifyFilterRule::new())),
+            RuleWrapper::new_heuristic(Arc::new(EliminateFilterRule::new())),
+            RuleWrapper::new_heuristic(Arc::new(EliminateJoinRule::new())),
+            RuleWrapper::new_heuristic(Arc::new(EliminateLimitRule::new())),
+            RuleWrapper::new_heuristic(Arc::new(EliminateDuplicatedSortExprRule::new())),
+            RuleWrapper::new_heuristic(Arc::new(EliminateDuplicatedAggExprRule::new())),
+        ];
         for rule in rules {
             rule_wrappers.push(RuleWrapper::new_cascades(rule));
         }
@@ -63,21 +71,6 @@ impl DatafusionOptimizer {
         rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinAssocRule::new())));
         rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
             ProjectionPullUpJoin::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            EliminateJoinRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            EliminateFilterRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            EliminateLimitRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            EliminateDuplicatedSortExprRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            EliminateDuplicatedAggExprRule::new(),
         )));
 
         rule_wrappers

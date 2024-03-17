@@ -26,8 +26,8 @@ pub use apply::{ApplyType, LogicalApply};
 pub use empty_relation::{LogicalEmptyRelation, PhysicalEmptyRelation};
 pub use expr::{
     BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
-    DataTypeExpr, ExprList, FuncExpr, FuncType, InListExpr, LikeExpr, SortOrderExpr, SortOrderType,
-    UnOpExpr, UnOpType,
+    DataTypeExpr, ExprList, FuncExpr, FuncType, InListExpr, LikeExpr, LogOpExpr, LogOpType,
+    SortOrderExpr, SortOrderType, UnOpExpr, UnOpType,
 };
 pub use filter::{LogicalFilter, PhysicalFilter};
 pub use join::{JoinType, LogicalJoin, PhysicalHashJoin, PhysicalNestedLoopJoin};
@@ -69,6 +69,7 @@ pub enum OptRelNodeTyp {
     ColumnRef,
     UnOp(UnOpType),
     BinOp(BinOpType),
+    LogOp(LogOpType),
     Func(FuncType),
     SortOrder(SortOrderType),
     Between,
@@ -110,6 +111,7 @@ impl OptRelNodeTyp {
                 | Self::ColumnRef
                 | Self::UnOp(_)
                 | Self::BinOp(_)
+                | Self::LogOp(_)
                 | Self::Func(_)
                 | Self::SortOrder(_)
                 | Self::Between
@@ -258,7 +260,7 @@ impl OptRelNode for PlanNode {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Expr(OptRelNodeRef);
 
 impl Expr {
@@ -369,6 +371,9 @@ pub fn explain(rel_node: OptRelNodeRef, meta_map: Option<&RelNodeMetaMap>) -> Pr
             .unwrap()
             .dispatch_explain(meta_map),
         OptRelNodeTyp::SortOrder(_) => SortOrderExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::LogOp(_) => LogOpExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(meta_map),
         OptRelNodeTyp::PhysicalEmptyRelation => PhysicalEmptyRelation::from_rel_node(rel_node)

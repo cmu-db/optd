@@ -67,6 +67,10 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 // Concatentate the children properties.
                 Self::concat_children_properties(children)
             }
+            OptRelNodeTyp::LogOp(_) => {
+                // Concatentate the children properties.
+                Self::concat_children_properties(children)
+            }
             OptRelNodeTyp::Projection => children[1]
                 .iter()
                 .map(|p| match p {

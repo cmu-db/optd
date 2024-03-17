@@ -74,6 +74,16 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
                     ],
                 }
             }
+            OptRelNodeTyp::LogOp(_) => Schema {
+                fields: vec![
+                    Field {
+                        name: "unnamed".to_string(),
+                        typ: ConstantType::Any,
+                        nullable: true
+                    };
+                    children.len()
+                ],
+            },
             _ => Schema { fields: vec![] },
         }
     }

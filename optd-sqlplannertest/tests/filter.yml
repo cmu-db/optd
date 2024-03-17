@@ -1,0 +1,49 @@
+- sql: |
+    create table t1(t1v1 int, t1v2 int);
+    create table t2(t2v1 int, t2v3 int);
+    insert into t1 values (0, 0), (1, 1), (2, 2);
+    insert into t2 values (0, 200), (1, 201), (2, 202);
+  tasks:
+    - execute
+- sql: |
+    select * from t1 where false;
+  desc: Test EliminateFilterRule (false filter to empty relation)
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select * from t1 where true;
+  desc: Test EliminateFilterRule (replace true filter with child)
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select * from t1, t2 where t1v1 = t2v1 and false;
+  desc: Test SimplifyFilterRule and EliminateFilterRule (false filter to empty relation)
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select * from t1, t2 where t1v1 = t2v1 and t1v1 = t2v3 and true;
+  desc: Test SimplifyFilterRule (skip true filter for and)
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select * from t1, t2 where t1v1 = t2v1 or t1v1 = t2v3 and true;
+  desc: Test SimplifyFilterRule (skip true filter for and)
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select * from t1, t2 where t1v1 = t2v1 or t1v1 = t2v3 or true;
+  desc: Test SimplifyFilterRule, EliminateFilter (repace true filter for or)
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select * from t1, t2 where t1v1 = t2v1 or t1v1 = t2v1 and t1v1 = t2v1;
+  desc: Test SimplifyFilterRule (remove duplicates)
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute

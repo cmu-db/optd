@@ -364,69 +364,72 @@ PhysicalLimit { skip: 0, fetch: 100 }
     │   └── SortOrder { order: Asc }
     │       └── #3
     └── PhysicalProjection { exprs: [ #5, #2, #8, #0, #1, #3, #4, #6 ] }
-        └── PhysicalNestedLoopJoin
-            ├── join_type: Inner
-            ├── cond:And
-            │   ├── Eq
-            │   │   ├── #0
-            │   │   └── #10
-            │   └── Eq
-            │       ├── #7
-            │       └── #9
-            ├── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5, #6, #7, #8 ] }
-            │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #9 ], right_keys: [ #0 ] }
-            │       ├── PhysicalProjection { exprs: [ #0, #1, #2, #3, #5, #6, #7, #8, #10, #11 ] }
-            │       │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #4 ], right_keys: [ #0 ] }
-            │       │       ├── PhysicalProjection { exprs: [ #0, #1, #5, #6, #7, #8, #9, #10, #3 ] }
-            │       │       │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
-            │       │       │       ├── PhysicalProjection { exprs: [ #0, #1, #3, #4 ] }
-            │       │       │       │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-            │       │       │       │       ├── PhysicalProjection { exprs: [ #0, #1 ] }
-            │       │       │       │       │   └── PhysicalFilter
-            │       │       │       │       │       ├── cond:And
-            │       │       │       │       │       │   ├── Eq
-            │       │       │       │       │       │   │   ├── #3
-            │       │       │       │       │       │   │   └── 4
-            │       │       │       │       │       │   └── Like { expr: #2, pattern: "%TIN", negated: false, case_insensitive: false }
-            │       │       │       │       │       └── PhysicalProjection { exprs: [ #0, #2, #4, #5 ] }
-            │       │       │       │       │           └── PhysicalScan { table: part }
-            │       │       │       │       └── PhysicalProjection { exprs: [ #0, #1, #3 ] }
-            │       │       │       │           └── PhysicalScan { table: partsupp }
-            │       │       │       └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5, #6 ] }
-            │       │       │           └── PhysicalScan { table: supplier }
-            │       │       └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
-            │       │           └── PhysicalScan { table: nation }
-            │       └── PhysicalProjection { exprs: [ #0 ] }
-            │           └── PhysicalFilter
-            │               ├── cond:Eq
-            │               │   ├── #1
-            │               │   └── "AFRICA"
-            │               └── PhysicalProjection { exprs: [ #0, #1 ] }
-            │                   └── PhysicalScan { table: region }
-            └── PhysicalProjection { exprs: [ #1, #0 ] }
-                └── PhysicalAgg
-                    ├── aggrs:Agg(Min)
-                    │   └── [ #1 ]
-                    ├── groups: [ #0 ]
-                    └── PhysicalProjection { exprs: [ #0, #1 ] }
-                        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
-                            ├── PhysicalProjection { exprs: [ #0, #1, #4 ] }
-                            │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
-                            │       ├── PhysicalProjection { exprs: [ #0, #2, #4 ] }
-                            │       │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-                            │       │       ├── PhysicalProjection { exprs: [ #0, #1, #3 ] }
-                            │       │       │   └── PhysicalScan { table: partsupp }
-                            │       │       └── PhysicalProjection { exprs: [ #0, #3 ] }
-                            │       │           └── PhysicalScan { table: supplier }
-                            │       └── PhysicalProjection { exprs: [ #0, #2 ] }
-                            │           └── PhysicalScan { table: nation }
-                            └── PhysicalProjection { exprs: [ #0 ] }
-                                └── PhysicalFilter
-                                    ├── cond:Eq
-                                    │   ├── #1
-                                    │   └── "AFRICA"
-                                    └── PhysicalProjection { exprs: [ #0, #1 ] }
-                                        └── PhysicalScan { table: region }
+        └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5, #6, #7, #8, #11, #12 ] }
+            └── PhysicalProjection { exprs: [ #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #0, #11, #12 ] }
+                └── PhysicalProjection { exprs: [ #0, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12, #13 ] }
+                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #9 ] }
+                        ├── PhysicalFilter
+                        │   ├── cond:Eq
+                        │   │   ├── #1
+                        │   │   └── "AFRICA"
+                        │   └── PhysicalProjection { exprs: [ #0, #1 ] }
+                        │       └── PhysicalScan { table: region }
+                        └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #5, #6, #7, #8, #10, #11, #12, #13 ] }
+                            └── PhysicalProjection { exprs: [ #3, #4, #5, #6, #7, #8, #9, #10, #11, #0, #1, #2, #12, #13 ] }
+                                └── PhysicalProjection { exprs: [ #0, #1, #2, #4, #5, #6, #7, #8, #9, #10, #11, #12, #13, #14 ] }
+                                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #4 ] }
+                                        ├── PhysicalScan { table: nation }
+                                        └── PhysicalProjection { exprs: [ #0, #1, #5, #6, #7, #8, #9, #10, #3, #11, #12 ] }
+                                            └── PhysicalProjection { exprs: [ #7, #8, #9, #10, #0, #1, #2, #3, #4, #5, #6, #11, #12 ] }
+                                                └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12 ] }
+                                                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #2 ] }
+                                                        ├── PhysicalScan { table: supplier }
+                                                        └── PhysicalProjection { exprs: [ #0, #1, #3, #4, #5, #6 ] }
+                                                            └── PhysicalProjection { exprs: [ #0, #1, #4, #5, #6, #7, #8 ] }
+                                                                └── PhysicalNestedLoopJoin
+                                                                    ├── join_type: Inner
+                                                                    ├── cond:And
+                                                                    │   ├── Eq
+                                                                    │   │   ├── #0
+                                                                    │   │   └── #8
+                                                                    │   └── Eq
+                                                                    │       ├── #6
+                                                                    │       └── #7
+                                                                    ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+                                                                    │   ├── PhysicalFilter
+                                                                    │   │   ├── cond:And
+                                                                    │   │   │   ├── Eq
+                                                                    │   │   │   │   ├── #3
+                                                                    │   │   │   │   └── 4
+                                                                    │   │   │   └── Like { expr: #2, pattern: "%TIN", negated: false, case_insensitive: false }
+                                                                    │   │   └── PhysicalProjection { exprs: [ #0, #2, #4, #5 ] }
+                                                                    │   │       └── PhysicalScan { table: part }
+                                                                    │   └── PhysicalProjection { exprs: [ #0, #1, #3 ] }
+                                                                    │       └── PhysicalScan { table: partsupp }
+                                                                    └── PhysicalProjection { exprs: [ #1, #0 ] }
+                                                                        └── PhysicalAgg
+                                                                            ├── aggrs:Agg(Min)
+                                                                            │   └── [ #1 ]
+                                                                            ├── groups: [ #0 ]
+                                                                            └── PhysicalProjection { exprs: [ #0, #1 ] }
+                                                                                └── PhysicalProjection { exprs: [ #0, #1, #4, #5 ] }
+                                                                                    └── PhysicalProjection { exprs: [ #0, #2, #4, #5, #6, #7 ] }
+                                                                                        └── PhysicalProjection { exprs: [ #0, #1, #3, #5, #6, #7, #8, #9 ] }
+                                                                                            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
+                                                                                                ├── PhysicalScan { table: partsupp }
+                                                                                                └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
+                                                                                                    ├── PhysicalProjection { exprs: [ #0, #3 ] }
+                                                                                                    │   └── PhysicalScan { table: supplier }
+                                                                                                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
+                                                                                                        ├── PhysicalProjection { exprs: [ #0, #2 ] }
+                                                                                                        │   └── PhysicalScan { table: nation }
+                                                                                                        └── PhysicalProjection { exprs: [ #0 ] }
+                                                                                                            └── PhysicalFilter
+                                                                                                                ├── cond:Eq
+                                                                                                                │   ├── #1
+                                                                                                                │   └── "AFRICA"
+                                                                                                                └── PhysicalProjection { exprs: [ #0, #1 ] }
+                                                                                                                    └── PhysicalScan { table: region }
 */
 
 -- TPC-H Q3
@@ -585,37 +588,30 @@ LogicalSort
         ├── groups: [ #41 ]
         └── LogicalFilter
             ├── cond:And
-            │   ├── And
-            │   │   ├── And
-            │   │   │   ├── And
-            │   │   │   │   ├── And
-            │   │   │   │   │   ├── And
-            │   │   │   │   │   │   ├── And
-            │   │   │   │   │   │   │   ├── And
-            │   │   │   │   │   │   │   │   ├── Eq
-            │   │   │   │   │   │   │   │   │   ├── #0
-            │   │   │   │   │   │   │   │   │   └── #9
-            │   │   │   │   │   │   │   │   └── Eq
-            │   │   │   │   │   │   │   │       ├── #17
-            │   │   │   │   │   │   │   │       └── #8
-            │   │   │   │   │   │   │   └── Eq
-            │   │   │   │   │   │   │       ├── #19
-            │   │   │   │   │   │   │       └── #33
-            │   │   │   │   │   │   └── Eq
-            │   │   │   │   │   │       ├── #3
-            │   │   │   │   │   │       └── #36
-            │   │   │   │   │   └── Eq
-            │   │   │   │   │       ├── #36
-            │   │   │   │   │       └── #40
-            │   │   │   │   └── Eq
-            │   │   │   │       ├── #42
-            │   │   │   │       └── #44
-            │   │   │   └── Eq
-            │   │   │       ├── #45
-            │   │   │       └── "Asia"
-            │   │   └── Geq
-            │   │       ├── #12
-            │   │       └── Cast { cast_to: Date32, expr: "2023-01-01" }
+            │   ├── Eq
+            │   │   ├── #0
+            │   │   └── #9
+            │   ├── Eq
+            │   │   ├── #17
+            │   │   └── #8
+            │   ├── Eq
+            │   │   ├── #19
+            │   │   └── #33
+            │   ├── Eq
+            │   │   ├── #3
+            │   │   └── #36
+            │   ├── Eq
+            │   │   ├── #36
+            │   │   └── #40
+            │   ├── Eq
+            │   │   ├── #42
+            │   │   └── #44
+            │   ├── Eq
+            │   │   ├── #45
+            │   │   └── "Asia"
+            │   ├── Geq
+            │   │   ├── #12
+            │   │   └── Cast { cast_to: Date32, expr: "2023-01-01" }
             │   └── Lt
             │       ├── #12
             │       └── Cast { cast_to: Date32, expr: "2024-01-01" }
@@ -644,37 +640,30 @@ PhysicalSort
         ├── groups: [ #41 ]
         └── PhysicalFilter
             ├── cond:And
-            │   ├── And
-            │   │   ├── And
-            │   │   │   ├── And
-            │   │   │   │   ├── And
-            │   │   │   │   │   ├── And
-            │   │   │   │   │   │   ├── And
-            │   │   │   │   │   │   │   ├── And
-            │   │   │   │   │   │   │   │   ├── Eq
-            │   │   │   │   │   │   │   │   │   ├── #0
-            │   │   │   │   │   │   │   │   │   └── #9
-            │   │   │   │   │   │   │   │   └── Eq
-            │   │   │   │   │   │   │   │       ├── #17
-            │   │   │   │   │   │   │   │       └── #8
-            │   │   │   │   │   │   │   └── Eq
-            │   │   │   │   │   │   │       ├── #19
-            │   │   │   │   │   │   │       └── #33
-            │   │   │   │   │   │   └── Eq
-            │   │   │   │   │   │       ├── #3
-            │   │   │   │   │   │       └── #36
-            │   │   │   │   │   └── Eq
-            │   │   │   │   │       ├── #36
-            │   │   │   │   │       └── #40
-            │   │   │   │   └── Eq
-            │   │   │   │       ├── #42
-            │   │   │   │       └── #44
-            │   │   │   └── Eq
-            │   │   │       ├── #45
-            │   │   │       └── "Asia"
-            │   │   └── Geq
-            │   │       ├── #12
-            │   │       └── Cast { cast_to: Date32, expr: "2023-01-01" }
+            │   ├── Eq
+            │   │   ├── #0
+            │   │   └── #9
+            │   ├── Eq
+            │   │   ├── #17
+            │   │   └── #8
+            │   ├── Eq
+            │   │   ├── #19
+            │   │   └── #33
+            │   ├── Eq
+            │   │   ├── #3
+            │   │   └── #36
+            │   ├── Eq
+            │   │   ├── #36
+            │   │   └── #40
+            │   ├── Eq
+            │   │   ├── #42
+            │   │   └── #44
+            │   ├── Eq
+            │   │   ├── #45
+            │   │   └── "Asia"
+            │   ├── Geq
+            │   │   ├── #12
+            │   │   └── Cast { cast_to: Date32, expr: "2023-01-01" }
             │   └── Lt
             │       ├── #12
             │       └── Cast { cast_to: Date32, expr: "2024-01-01" }
@@ -712,15 +701,13 @@ LogicalProjection { exprs: [ #0 ] }
     ├── groups: []
     └── LogicalFilter
         ├── cond:And
-        │   ├── And
-        │   │   ├── And
-        │   │   │   ├── Geq
-        │   │   │   │   ├── #10
-        │   │   │   │   └── Cast { cast_to: Date32, expr: "2023-01-01" }
-        │   │   │   └── Lt
-        │   │   │       ├── #10
-        │   │   │       └── Cast { cast_to: Date32, expr: "2024-01-01" }
-        │   │   └── Between { expr: Cast { cast_to: Decimal128(30, 15), expr: #6 }, lower: Cast { cast_to: Decimal128(30, 15), expr: 0.05 }, upper: Cast { cast_to: Decimal128(30, 15), expr: 0.07 } }
+        │   ├── Geq
+        │   │   ├── #10
+        │   │   └── Cast { cast_to: Date32, expr: "2023-01-01" }
+        │   ├── Lt
+        │   │   ├── #10
+        │   │   └── Cast { cast_to: Date32, expr: "2024-01-01" }
+        │   ├── Between { expr: Cast { cast_to: Decimal128(30, 15), expr: #6 }, lower: Cast { cast_to: Decimal128(30, 15), expr: 0.05 }, upper: Cast { cast_to: Decimal128(30, 15), expr: 0.07 } }
         │   └── Lt
         │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
         │       └── Cast { cast_to: Decimal128(22, 2), expr: 24 }
@@ -734,15 +721,13 @@ PhysicalProjection { exprs: [ #0 ] }
     ├── groups: []
     └── PhysicalFilter
         ├── cond:And
-        │   ├── And
-        │   │   ├── And
-        │   │   │   ├── Geq
-        │   │   │   │   ├── #10
-        │   │   │   │   └── Cast { cast_to: Date32, expr: "2023-01-01" }
-        │   │   │   └── Lt
-        │   │   │       ├── #10
-        │   │   │       └── Cast { cast_to: Date32, expr: "2024-01-01" }
-        │   │   └── Between { expr: Cast { cast_to: Decimal128(30, 15), expr: #6 }, lower: Cast { cast_to: Decimal128(30, 15), expr: 0.05 }, upper: Cast { cast_to: Decimal128(30, 15), expr: 0.07 } }
+        │   ├── Geq
+        │   │   ├── #10
+        │   │   └── Cast { cast_to: Date32, expr: "2023-01-01" }
+        │   ├── Lt
+        │   │   ├── #10
+        │   │   └── Cast { cast_to: Date32, expr: "2024-01-01" }
+        │   ├── Between { expr: Cast { cast_to: Decimal128(30, 15), expr: #6 }, lower: Cast { cast_to: Decimal128(30, 15), expr: 0.05 }, upper: Cast { cast_to: Decimal128(30, 15), expr: 0.07 } }
         │   └── Lt
         │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
         │       └── Cast { cast_to: Decimal128(22, 2), expr: 24 }
@@ -817,41 +802,36 @@ LogicalSort
             │           └── #13
             └── LogicalFilter
                 ├── cond:And
-                │   ├── And
+                │   ├── Eq
+                │   │   ├── #0
+                │   │   └── #9
+                │   ├── Eq
+                │   │   ├── #23
+                │   │   └── #7
+                │   ├── Eq
+                │   │   ├── #32
+                │   │   └── #24
+                │   ├── Eq
+                │   │   ├── #3
+                │   │   └── #40
+                │   ├── Eq
+                │   │   ├── #35
+                │   │   └── #44
+                │   ├── Or
                 │   │   ├── And
-                │   │   │   ├── And
-                │   │   │   │   ├── And
-                │   │   │   │   │   ├── And
-                │   │   │   │   │   │   ├── Eq
-                │   │   │   │   │   │   │   ├── #0
-                │   │   │   │   │   │   │   └── #9
-                │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │       ├── #23
-                │   │   │   │   │   │       └── #7
-                │   │   │   │   │   └── Eq
-                │   │   │   │   │       ├── #32
-                │   │   │   │   │       └── #24
-                │   │   │   │   └── Eq
-                │   │   │   │       ├── #3
-                │   │   │   │       └── #40
+                │   │   │   ├── Eq
+                │   │   │   │   ├── #41
+                │   │   │   │   └── "FRANCE"
                 │   │   │   └── Eq
-                │   │   │       ├── #35
-                │   │   │       └── #44
-                │   │   └── Or
-                │   │       ├── And
-                │   │       │   ├── Eq
-                │   │       │   │   ├── #41
-                │   │       │   │   └── "FRANCE"
-                │   │       │   └── Eq
-                │   │       │       ├── #45
-                │   │       │       └── "GERMANY"
-                │   │       └── And
-                │   │           ├── Eq
-                │   │           │   ├── #41
-                │   │           │   └── "GERMANY"
-                │   │           └── Eq
-                │   │               ├── #45
-                │   │               └── "FRANCE"
+                │   │   │       ├── #45
+                │   │   │       └── "GERMANY"
+                │   │   └── And
+                │   │       ├── Eq
+                │   │       │   ├── #41
+                │   │       │   └── "GERMANY"
+                │   │       └── Eq
+                │   │           ├── #45
+                │   │           └── "FRANCE"
                 │   └── Between { expr: #17, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } }
                 └── LogicalJoin { join_type: Cross, cond: true }
                     ├── LogicalJoin { join_type: Cross, cond: true }
@@ -890,41 +870,36 @@ PhysicalSort
             │           └── #13
             └── PhysicalFilter
                 ├── cond:And
-                │   ├── And
+                │   ├── Eq
+                │   │   ├── #0
+                │   │   └── #9
+                │   ├── Eq
+                │   │   ├── #23
+                │   │   └── #7
+                │   ├── Eq
+                │   │   ├── #32
+                │   │   └── #24
+                │   ├── Eq
+                │   │   ├── #3
+                │   │   └── #40
+                │   ├── Eq
+                │   │   ├── #35
+                │   │   └── #44
+                │   ├── Or
                 │   │   ├── And
-                │   │   │   ├── And
-                │   │   │   │   ├── And
-                │   │   │   │   │   ├── And
-                │   │   │   │   │   │   ├── Eq
-                │   │   │   │   │   │   │   ├── #0
-                │   │   │   │   │   │   │   └── #9
-                │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │       ├── #23
-                │   │   │   │   │   │       └── #7
-                │   │   │   │   │   └── Eq
-                │   │   │   │   │       ├── #32
-                │   │   │   │   │       └── #24
-                │   │   │   │   └── Eq
-                │   │   │   │       ├── #3
-                │   │   │   │       └── #40
+                │   │   │   ├── Eq
+                │   │   │   │   ├── #41
+                │   │   │   │   └── "FRANCE"
                 │   │   │   └── Eq
-                │   │   │       ├── #35
-                │   │   │       └── #44
-                │   │   └── Or
-                │   │       ├── And
-                │   │       │   ├── Eq
-                │   │       │   │   ├── #41
-                │   │       │   │   └── "FRANCE"
-                │   │       │   └── Eq
-                │   │       │       ├── #45
-                │   │       │       └── "GERMANY"
-                │   │       └── And
-                │   │           ├── Eq
-                │   │           │   ├── #41
-                │   │           │   └── "GERMANY"
-                │   │           └── Eq
-                │   │               ├── #45
-                │   │               └── "FRANCE"
+                │   │   │       ├── #45
+                │   │   │       └── "GERMANY"
+                │   │   └── And
+                │   │       ├── Eq
+                │   │       │   ├── #41
+                │   │       │   └── "GERMANY"
+                │   │       └── Eq
+                │   │           ├── #45
+                │   │           └── "FRANCE"
                 │   └── Between { expr: #17, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } }
                 └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
                     ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
@@ -1013,39 +988,31 @@ LogicalSort
             │   └── #54
             └── LogicalFilter
                 ├── cond:And
-                │   ├── And
-                │   │   ├── And
-                │   │   │   ├── And
-                │   │   │   │   ├── And
-                │   │   │   │   │   ├── And
-                │   │   │   │   │   │   ├── And
-                │   │   │   │   │   │   │   ├── And
-                │   │   │   │   │   │   │   │   ├── And
-                │   │   │   │   │   │   │   │   │   ├── Eq
-                │   │   │   │   │   │   │   │   │   │   ├── #0
-                │   │   │   │   │   │   │   │   │   │   └── #17
-                │   │   │   │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │   │   │   │       ├── #9
-                │   │   │   │   │   │   │   │   │       └── #18
-                │   │   │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │   │   │       ├── #16
-                │   │   │   │   │   │   │   │       └── #32
-                │   │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │   │       ├── #33
-                │   │   │   │   │   │   │       └── #41
-                │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │       ├── #44
-                │   │   │   │   │   │       └── #49
-                │   │   │   │   │   └── Eq
-                │   │   │   │   │       ├── #51
-                │   │   │   │   │       └── #57
-                │   │   │   │   └── Eq
-                │   │   │   │       ├── #58
-                │   │   │   │       └── "AMERICA"
-                │   │   │   └── Eq
-                │   │   │       ├── #12
-                │   │   │       └── #53
-                │   │   └── Between { expr: #36, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } }
+                │   ├── Eq
+                │   │   ├── #0
+                │   │   └── #17
+                │   ├── Eq
+                │   │   ├── #9
+                │   │   └── #18
+                │   ├── Eq
+                │   │   ├── #16
+                │   │   └── #32
+                │   ├── Eq
+                │   │   ├── #33
+                │   │   └── #41
+                │   ├── Eq
+                │   │   ├── #44
+                │   │   └── #49
+                │   ├── Eq
+                │   │   ├── #51
+                │   │   └── #57
+                │   ├── Eq
+                │   │   ├── #58
+                │   │   └── "AMERICA"
+                │   ├── Eq
+                │   │   ├── #12
+                │   │   └── #53
+                │   ├── Between { expr: #36, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } }
                 │   └── Eq
                 │       ├── #4
                 │       └── "ECONOMY ANODIZED STEEL"
@@ -1098,39 +1065,31 @@ PhysicalSort
             │   └── #54
             └── PhysicalFilter
                 ├── cond:And
-                │   ├── And
-                │   │   ├── And
-                │   │   │   ├── And
-                │   │   │   │   ├── And
-                │   │   │   │   │   ├── And
-                │   │   │   │   │   │   ├── And
-                │   │   │   │   │   │   │   ├── And
-                │   │   │   │   │   │   │   │   ├── And
-                │   │   │   │   │   │   │   │   │   ├── Eq
-                │   │   │   │   │   │   │   │   │   │   ├── #0
-                │   │   │   │   │   │   │   │   │   │   └── #17
-                │   │   │   │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │   │   │   │       ├── #9
-                │   │   │   │   │   │   │   │   │       └── #18
-                │   │   │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │   │   │       ├── #16
-                │   │   │   │   │   │   │   │       └── #32
-                │   │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │   │       ├── #33
-                │   │   │   │   │   │   │       └── #41
-                │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │       ├── #44
-                │   │   │   │   │   │       └── #49
-                │   │   │   │   │   └── Eq
-                │   │   │   │   │       ├── #51
-                │   │   │   │   │       └── #57
-                │   │   │   │   └── Eq
-                │   │   │   │       ├── #58
-                │   │   │   │       └── "AMERICA"
-                │   │   │   └── Eq
-                │   │   │       ├── #12
-                │   │   │       └── #53
-                │   │   └── Between { expr: #36, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } }
+                │   ├── Eq
+                │   │   ├── #0
+                │   │   └── #17
+                │   ├── Eq
+                │   │   ├── #9
+                │   │   └── #18
+                │   ├── Eq
+                │   │   ├── #16
+                │   │   └── #32
+                │   ├── Eq
+                │   │   ├── #33
+                │   │   └── #41
+                │   ├── Eq
+                │   │   ├── #44
+                │   │   └── #49
+                │   ├── Eq
+                │   │   ├── #51
+                │   │   └── #57
+                │   ├── Eq
+                │   │   ├── #58
+                │   │   └── "AMERICA"
+                │   ├── Eq
+                │   │   ├── #12
+                │   │   └── #53
+                │   ├── Between { expr: #36, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } }
                 │   └── Eq
                 │       ├── #4
                 │       └── "ECONOMY ANODIZED STEEL"
@@ -1213,29 +1172,24 @@ LogicalSort
             │           └── #20
             └── LogicalFilter
                 ├── cond:And
-                │   ├── And
-                │   │   ├── And
-                │   │   │   ├── And
-                │   │   │   │   ├── And
-                │   │   │   │   │   ├── And
-                │   │   │   │   │   │   ├── Eq
-                │   │   │   │   │   │   │   ├── #9
-                │   │   │   │   │   │   │   └── #18
-                │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │       ├── #33
-                │   │   │   │   │   │       └── #18
-                │   │   │   │   │   └── Eq
-                │   │   │   │   │       ├── #32
-                │   │   │   │   │       └── #17
-                │   │   │   │   └── Eq
-                │   │   │   │       ├── #0
-                │   │   │   │       └── #17
-                │   │   │   └── Eq
-                │   │   │       ├── #37
-                │   │   │       └── #16
-                │   │   └── Eq
-                │   │       ├── #12
-                │   │       └── #46
+                │   ├── Eq
+                │   │   ├── #9
+                │   │   └── #18
+                │   ├── Eq
+                │   │   ├── #33
+                │   │   └── #18
+                │   ├── Eq
+                │   │   ├── #32
+                │   │   └── #17
+                │   ├── Eq
+                │   │   ├── #0
+                │   │   └── #17
+                │   ├── Eq
+                │   │   ├── #37
+                │   │   └── #16
+                │   ├── Eq
+                │   │   ├── #12
+                │   │   └── #46
                 │   └── Like { expr: #1, pattern: "%green%", negated: false, case_insensitive: false }
                 └── LogicalJoin { join_type: Cross, cond: true }
                     ├── LogicalJoin { join_type: Cross, cond: true }
@@ -1275,29 +1229,24 @@ PhysicalSort
             │           └── #20
             └── PhysicalFilter
                 ├── cond:And
-                │   ├── And
-                │   │   ├── And
-                │   │   │   ├── And
-                │   │   │   │   ├── And
-                │   │   │   │   │   ├── And
-                │   │   │   │   │   │   ├── Eq
-                │   │   │   │   │   │   │   ├── #9
-                │   │   │   │   │   │   │   └── #18
-                │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │       ├── #33
-                │   │   │   │   │   │       └── #18
-                │   │   │   │   │   └── Eq
-                │   │   │   │   │       ├── #32
-                │   │   │   │   │       └── #17
-                │   │   │   │   └── Eq
-                │   │   │   │       ├── #0
-                │   │   │   │       └── #17
-                │   │   │   └── Eq
-                │   │   │       ├── #37
-                │   │   │       └── #16
-                │   │   └── Eq
-                │   │       ├── #12
-                │   │       └── #46
+                │   ├── Eq
+                │   │   ├── #9
+                │   │   └── #18
+                │   ├── Eq
+                │   │   ├── #33
+                │   │   └── #18
+                │   ├── Eq
+                │   │   ├── #32
+                │   │   └── #17
+                │   ├── Eq
+                │   │   ├── #0
+                │   │   └── #17
+                │   ├── Eq
+                │   │   ├── #37
+                │   │   └── #16
+                │   ├── Eq
+                │   │   ├── #12
+                │   │   └── #46
                 │   └── Like { expr: #1, pattern: "%green%", negated: false, case_insensitive: false }
                 └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
                     ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
@@ -1374,29 +1323,24 @@ LogicalSort
             │           └── #20
             └── LogicalFilter
                 ├── cond:And
-                │   ├── And
-                │   │   ├── And
-                │   │   │   ├── And
-                │   │   │   │   ├── And
-                │   │   │   │   │   ├── And
-                │   │   │   │   │   │   ├── Eq
-                │   │   │   │   │   │   │   ├── #9
-                │   │   │   │   │   │   │   └── #18
-                │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │       ├── #33
-                │   │   │   │   │   │       └── #18
-                │   │   │   │   │   └── Eq
-                │   │   │   │   │       ├── #32
-                │   │   │   │   │       └── #17
-                │   │   │   │   └── Eq
-                │   │   │   │       ├── #0
-                │   │   │   │       └── #17
-                │   │   │   └── Eq
-                │   │   │       ├── #37
-                │   │   │       └── #16
-                │   │   └── Eq
-                │   │       ├── #12
-                │   │       └── #46
+                │   ├── Eq
+                │   │   ├── #9
+                │   │   └── #18
+                │   ├── Eq
+                │   │   ├── #33
+                │   │   └── #18
+                │   ├── Eq
+                │   │   ├── #32
+                │   │   └── #17
+                │   ├── Eq
+                │   │   ├── #0
+                │   │   └── #17
+                │   ├── Eq
+                │   │   ├── #37
+                │   │   └── #16
+                │   ├── Eq
+                │   │   ├── #12
+                │   │   └── #46
                 │   └── Like { expr: #1, pattern: "%green%", negated: false, case_insensitive: false }
                 └── LogicalJoin { join_type: Cross, cond: true }
                     ├── LogicalJoin { join_type: Cross, cond: true }
@@ -1436,29 +1380,24 @@ PhysicalSort
             │           └── #20
             └── PhysicalFilter
                 ├── cond:And
-                │   ├── And
-                │   │   ├── And
-                │   │   │   ├── And
-                │   │   │   │   ├── And
-                │   │   │   │   │   ├── And
-                │   │   │   │   │   │   ├── Eq
-                │   │   │   │   │   │   │   ├── #9
-                │   │   │   │   │   │   │   └── #18
-                │   │   │   │   │   │   └── Eq
-                │   │   │   │   │   │       ├── #33
-                │   │   │   │   │   │       └── #18
-                │   │   │   │   │   └── Eq
-                │   │   │   │   │       ├── #32
-                │   │   │   │   │       └── #17
-                │   │   │   │   └── Eq
-                │   │   │   │       ├── #0
-                │   │   │   │       └── #17
-                │   │   │   └── Eq
-                │   │   │       ├── #37
-                │   │   │       └── #16
-                │   │   └── Eq
-                │   │       ├── #12
-                │   │       └── #46
+                │   ├── Eq
+                │   │   ├── #9
+                │   │   └── #18
+                │   ├── Eq
+                │   │   ├── #33
+                │   │   └── #18
+                │   ├── Eq
+                │   │   ├── #32
+                │   │   └── #17
+                │   ├── Eq
+                │   │   ├── #0
+                │   │   └── #17
+                │   ├── Eq
+                │   │   ├── #37
+                │   │   └── #16
+                │   ├── Eq
+                │   │   ├── #12
+                │   │   └── #46
                 │   └── Like { expr: #1, pattern: "%green%", negated: false, case_insensitive: false }
                 └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
                     ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
@@ -1523,27 +1462,23 @@ LogicalLimit { skip: 0, fetch: 20 }
             ├── groups: [ #0, #1, #5, #4, #34, #2, #7 ]
             └── LogicalFilter
                 ├── cond:And
-                │   ├── And
-                │   │   ├── And
-                │   │   │   ├── And
-                │   │   │   │   ├── And
-                │   │   │   │   │   ├── Eq
-                │   │   │   │   │   │   ├── #0
-                │   │   │   │   │   │   └── #9
-                │   │   │   │   │   └── Eq
-                │   │   │   │   │       ├── #17
-                │   │   │   │   │       └── #8
-                │   │   │   │   └── Geq
-                │   │   │   │       ├── #12
-                │   │   │   │       └── Cast { cast_to: Date32, expr: "1993-07-01" }
-                │   │   │   └── Lt
-                │   │   │       ├── #12
-                │   │   │       └── Add
-                │   │   │           ├── Cast { cast_to: Date32, expr: "1993-07-01" }
-                │   │   │           └── INTERVAL_MONTH_DAY_NANO (3, 0, 0)
-                │   │   └── Eq
-                │   │       ├── #25
-                │   │       └── "R"
+                │   ├── Eq
+                │   │   ├── #0
+                │   │   └── #9
+                │   ├── Eq
+                │   │   ├── #17
+                │   │   └── #8
+                │   ├── Geq
+                │   │   ├── #12
+                │   │   └── Cast { cast_to: Date32, expr: "1993-07-01" }
+                │   ├── Lt
+                │   │   ├── #12
+                │   │   └── Add
+                │   │       ├── Cast { cast_to: Date32, expr: "1993-07-01" }
+                │   │       └── INTERVAL_MONTH_DAY_NANO (3, 0, 0)
+                │   ├── Eq
+                │   │   ├── #25
+                │   │   └── "R"
                 │   └── Eq
                 │       ├── #3
                 │       └── #33
@@ -1569,27 +1504,23 @@ PhysicalLimit { skip: 0, fetch: 20 }
             ├── groups: [ #0, #1, #5, #4, #34, #2, #7 ]
             └── PhysicalFilter
                 ├── cond:And
-                │   ├── And
-                │   │   ├── And
-                │   │   │   ├── And
-                │   │   │   │   ├── And
-                │   │   │   │   │   ├── Eq
-                │   │   │   │   │   │   ├── #0
-                │   │   │   │   │   │   └── #9
-                │   │   │   │   │   └── Eq
-                │   │   │   │   │       ├── #17
-                │   │   │   │   │       └── #8
-                │   │   │   │   └── Geq
-                │   │   │   │       ├── #12
-                │   │   │   │       └── Cast { cast_to: Date32, expr: "1993-07-01" }
-                │   │   │   └── Lt
-                │   │   │       ├── #12
-                │   │   │       └── Add
-                │   │   │           ├── Cast { cast_to: Date32, expr: "1993-07-01" }
-                │   │   │           └── INTERVAL_MONTH_DAY_NANO (3, 0, 0)
-                │   │   └── Eq
-                │   │       ├── #25
-                │   │       └── "R"
+                │   ├── Eq
+                │   │   ├── #0
+                │   │   └── #9
+                │   ├── Eq
+                │   │   ├── #17
+                │   │   └── #8
+                │   ├── Geq
+                │   │   ├── #12
+                │   │   └── Cast { cast_to: Date32, expr: "1993-07-01" }
+                │   ├── Lt
+                │   │   ├── #12
+                │   │   └── Add
+                │   │       ├── Cast { cast_to: Date32, expr: "1993-07-01" }
+                │   │       └── INTERVAL_MONTH_DAY_NANO (3, 0, 0)
+                │   ├── Eq
+                │   │   ├── #25
+                │   │   └── "R"
                 │   └── Eq
                 │       ├── #3
                 │       └── #33
@@ -1660,23 +1591,19 @@ LogicalSort
         ├── groups: [ #23 ]
         └── LogicalFilter
             ├── cond:And
-            │   ├── And
-            │   │   ├── And
-            │   │   │   ├── And
-            │   │   │   │   ├── And
-            │   │   │   │   │   ├── Eq
-            │   │   │   │   │   │   ├── #0
-            │   │   │   │   │   │   └── #9
-            │   │   │   │   │   └── InList { expr: #23, list: [ "MAIL", "SHIP" ], negated: false }
-            │   │   │   │   └── Lt
-            │   │   │   │       ├── #20
-            │   │   │   │       └── #21
-            │   │   │   └── Lt
-            │   │   │       ├── #19
-            │   │   │       └── #20
-            │   │   └── Geq
-            │   │       ├── #21
-            │   │       └── Cast { cast_to: Date32, expr: "1994-01-01" }
+            │   ├── Eq
+            │   │   ├── #0
+            │   │   └── #9
+            │   ├── InList { expr: #23, list: [ "MAIL", "SHIP" ], negated: false }
+            │   ├── Lt
+            │   │   ├── #20
+            │   │   └── #21
+            │   ├── Lt
+            │   │   ├── #19
+            │   │   └── #20
+            │   ├── Geq
+            │   │   ├── #21
+            │   │   └── Cast { cast_to: Date32, expr: "1994-01-01" }
             │   └── Lt
             │       ├── #21
             │       └── Cast { cast_to: Date32, expr: "1995-01-01" }
@@ -1716,23 +1643,19 @@ PhysicalSort
         ├── groups: [ #23 ]
         └── PhysicalFilter
             ├── cond:And
-            │   ├── And
-            │   │   ├── And
-            │   │   │   ├── And
-            │   │   │   │   ├── And
-            │   │   │   │   │   ├── Eq
-            │   │   │   │   │   │   ├── #0
-            │   │   │   │   │   │   └── #9
-            │   │   │   │   │   └── InList { expr: #23, list: [ "MAIL", "SHIP" ], negated: false }
-            │   │   │   │   └── Lt
-            │   │   │   │       ├── #20
-            │   │   │   │       └── #21
-            │   │   │   └── Lt
-            │   │   │       ├── #19
-            │   │   │       └── #20
-            │   │   └── Geq
-            │   │       ├── #21
-            │   │       └── Cast { cast_to: Date32, expr: "1994-01-01" }
+            │   ├── Eq
+            │   │   ├── #0
+            │   │   └── #9
+            │   ├── InList { expr: #23, list: [ "MAIL", "SHIP" ], negated: false }
+            │   ├── Lt
+            │   │   ├── #20
+            │   │   └── #21
+            │   ├── Lt
+            │   │   ├── #19
+            │   │   └── #20
+            │   ├── Geq
+            │   │   ├── #21
+            │   │   └── Cast { cast_to: Date32, expr: "1994-01-01" }
             │   └── Lt
             │       ├── #21
             │       └── Cast { cast_to: Date32, expr: "1995-01-01" }
@@ -1782,13 +1705,12 @@ LogicalProjection
     ├── groups: []
     └── LogicalFilter
         ├── cond:And
-        │   ├── And
-        │   │   ├── Eq
-        │   │   │   ├── #1
-        │   │   │   └── #16
-        │   │   └── Geq
-        │   │       ├── #10
-        │   │       └── Cast { cast_to: Date32, expr: "1995-09-01" }
+        │   ├── Eq
+        │   │   ├── #1
+        │   │   └── #16
+        │   ├── Geq
+        │   │   ├── #10
+        │   │   └── Cast { cast_to: Date32, expr: "1995-09-01" }
         │   └── Lt
         │       ├── #10
         │       └── Add
@@ -1824,13 +1746,12 @@ PhysicalProjection
     ├── groups: []
     └── PhysicalFilter
         ├── cond:And
-        │   ├── And
-        │   │   ├── Eq
-        │   │   │   ├── #1
-        │   │   │   └── #16
-        │   │   └── Geq
-        │   │       ├── #10
-        │   │       └── Cast { cast_to: Date32, expr: "1995-09-01" }
+        │   ├── Eq
+        │   │   ├── #1
+        │   │   └── #16
+        │   ├── Geq
+        │   │   ├── #10
+        │   │   └── Cast { cast_to: Date32, expr: "1995-09-01" }
         │   └── Lt
         │       ├── #10
         │       └── Add
@@ -2154,79 +2075,60 @@ LogicalProjection { exprs: [ #0 ] }
     ├── groups: []
     └── LogicalFilter
         ├── cond:Or
-        │   ├── Or
-        │   │   ├── And
-        │   │   │   ├── And
-        │   │   │   │   ├── And
-        │   │   │   │   │   ├── And
-        │   │   │   │   │   │   ├── And
-        │   │   │   │   │   │   │   ├── And
-        │   │   │   │   │   │   │   │   ├── And
-        │   │   │   │   │   │   │   │   │   ├── Eq
-        │   │   │   │   │   │   │   │   │   │   ├── #16
-        │   │   │   │   │   │   │   │   │   │   └── #1
-        │   │   │   │   │   │   │   │   │   └── Eq
-        │   │   │   │   │   │   │   │   │       ├── #19
-        │   │   │   │   │   │   │   │   │       └── "Brand#12"
-        │   │   │   │   │   │   │   │   └── InList { expr: #22, list: [ "SM CASE", "SM BOX", "SM PACK", "SM PKG" ], negated: false }
-        │   │   │   │   │   │   │   └── Geq
-        │   │   │   │   │   │   │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │   │   │   │   │   │       └── Cast { cast_to: Decimal128(22, 2), expr: 1 }
-        │   │   │   │   │   │   └── Leq
-        │   │   │   │   │   │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │   │   │   │   │       └── Cast { cast_to: Decimal128(22, 2), expr: 11 }
-        │   │   │   │   │   └── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 5 }
-        │   │   │   │   └── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
-        │   │   │   └── Eq
-        │   │   │       ├── #13
-        │   │   │       └── "DELIVER IN PERSON"
-        │   │   └── And
-        │   │       ├── And
-        │   │       │   ├── And
-        │   │       │   │   ├── And
-        │   │       │   │   │   ├── And
-        │   │       │   │   │   │   ├── And
-        │   │       │   │   │   │   │   ├── And
-        │   │       │   │   │   │   │   │   ├── Eq
-        │   │       │   │   │   │   │   │   │   ├── #16
-        │   │       │   │   │   │   │   │   │   └── #1
-        │   │       │   │   │   │   │   │   └── Eq
-        │   │       │   │   │   │   │   │       ├── #19
-        │   │       │   │   │   │   │   │       └── "Brand#23"
-        │   │       │   │   │   │   │   └── InList { expr: #22, list: [ "MED BAG", "MED BOX", "MED PKG", "MED PACK" ], negated: false }
-        │   │       │   │   │   │   └── Geq
-        │   │       │   │   │   │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │       │   │   │   │       └── Cast { cast_to: Decimal128(22, 2), expr: 10 }
-        │   │       │   │   │   └── Leq
-        │   │       │   │   │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │       │   │   │       └── Cast { cast_to: Decimal128(22, 2), expr: 20 }
-        │   │       │   │   └── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 10 }
-        │   │       │   └── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
-        │   │       └── Eq
-        │   │           ├── #13
-        │   │           └── "DELIVER IN PERSON"
+        │   ├── And
+        │   │   ├── Eq
+        │   │   │   ├── #16
+        │   │   │   └── #1
+        │   │   ├── Eq
+        │   │   │   ├── #19
+        │   │   │   └── "Brand#12"
+        │   │   ├── InList { expr: #22, list: [ "SM CASE", "SM BOX", "SM PACK", "SM PKG" ], negated: false }
+        │   │   ├── Geq
+        │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 1 }
+        │   │   ├── Leq
+        │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 11 }
+        │   │   ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 5 }
+        │   │   ├── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
+        │   │   └── Eq
+        │   │       ├── #13
+        │   │       └── "DELIVER IN PERSON"
+        │   ├── And
+        │   │   ├── Eq
+        │   │   │   ├── #16
+        │   │   │   └── #1
+        │   │   ├── Eq
+        │   │   │   ├── #19
+        │   │   │   └── "Brand#23"
+        │   │   ├── InList { expr: #22, list: [ "MED BAG", "MED BOX", "MED PKG", "MED PACK" ], negated: false }
+        │   │   ├── Geq
+        │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 10 }
+        │   │   ├── Leq
+        │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 20 }
+        │   │   ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 10 }
+        │   │   ├── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
+        │   │   └── Eq
+        │   │       ├── #13
+        │   │       └── "DELIVER IN PERSON"
         │   └── And
-        │       ├── And
-        │       │   ├── And
-        │       │   │   ├── And
-        │       │   │   │   ├── And
-        │       │   │   │   │   ├── And
-        │       │   │   │   │   │   ├── And
-        │       │   │   │   │   │   │   ├── Eq
-        │       │   │   │   │   │   │   │   ├── #16
-        │       │   │   │   │   │   │   │   └── #1
-        │       │   │   │   │   │   │   └── Eq
-        │       │   │   │   │   │   │       ├── #19
-        │       │   │   │   │   │   │       └── "Brand#34"
-        │       │   │   │   │   │   └── InList { expr: #22, list: [ "LG CASE", "LG BOX", "LG PACK", "LG PKG" ], negated: false }
-        │       │   │   │   │   └── Geq
-        │       │   │   │   │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │       │   │   │   │       └── Cast { cast_to: Decimal128(22, 2), expr: 20 }
-        │       │   │   │   └── Leq
-        │       │   │   │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │       │   │   │       └── Cast { cast_to: Decimal128(22, 2), expr: 30 }
-        │       │   │   └── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 15 }
-        │       │   └── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
+        │       ├── Eq
+        │       │   ├── #16
+        │       │   └── #1
+        │       ├── Eq
+        │       │   ├── #19
+        │       │   └── "Brand#34"
+        │       ├── InList { expr: #22, list: [ "LG CASE", "LG BOX", "LG PACK", "LG PKG" ], negated: false }
+        │       ├── Geq
+        │       │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │       │   └── Cast { cast_to: Decimal128(22, 2), expr: 20 }
+        │       ├── Leq
+        │       │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │       │   └── Cast { cast_to: Decimal128(22, 2), expr: 30 }
+        │       ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 15 }
+        │       ├── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
         │       └── Eq
         │           ├── #13
         │           └── "DELIVER IN PERSON"
@@ -2244,79 +2146,60 @@ PhysicalProjection { exprs: [ #0 ] }
     ├── groups: []
     └── PhysicalFilter
         ├── cond:Or
-        │   ├── Or
-        │   │   ├── And
-        │   │   │   ├── And
-        │   │   │   │   ├── And
-        │   │   │   │   │   ├── And
-        │   │   │   │   │   │   ├── And
-        │   │   │   │   │   │   │   ├── And
-        │   │   │   │   │   │   │   │   ├── And
-        │   │   │   │   │   │   │   │   │   ├── Eq
-        │   │   │   │   │   │   │   │   │   │   ├── #16
-        │   │   │   │   │   │   │   │   │   │   └── #1
-        │   │   │   │   │   │   │   │   │   └── Eq
-        │   │   │   │   │   │   │   │   │       ├── #19
-        │   │   │   │   │   │   │   │   │       └── "Brand#12"
-        │   │   │   │   │   │   │   │   └── InList { expr: #22, list: [ "SM CASE", "SM BOX", "SM PACK", "SM PKG" ], negated: false }
-        │   │   │   │   │   │   │   └── Geq
-        │   │   │   │   │   │   │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │   │   │   │   │   │       └── Cast { cast_to: Decimal128(22, 2), expr: 1 }
-        │   │   │   │   │   │   └── Leq
-        │   │   │   │   │   │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │   │   │   │   │       └── Cast { cast_to: Decimal128(22, 2), expr: 11 }
-        │   │   │   │   │   └── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 5 }
-        │   │   │   │   └── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
-        │   │   │   └── Eq
-        │   │   │       ├── #13
-        │   │   │       └── "DELIVER IN PERSON"
-        │   │   └── And
-        │   │       ├── And
-        │   │       │   ├── And
-        │   │       │   │   ├── And
-        │   │       │   │   │   ├── And
-        │   │       │   │   │   │   ├── And
-        │   │       │   │   │   │   │   ├── And
-        │   │       │   │   │   │   │   │   ├── Eq
-        │   │       │   │   │   │   │   │   │   ├── #16
-        │   │       │   │   │   │   │   │   │   └── #1
-        │   │       │   │   │   │   │   │   └── Eq
-        │   │       │   │   │   │   │   │       ├── #19
-        │   │       │   │   │   │   │   │       └── "Brand#23"
-        │   │       │   │   │   │   │   └── InList { expr: #22, list: [ "MED BAG", "MED BOX", "MED PKG", "MED PACK" ], negated: false }
-        │   │       │   │   │   │   └── Geq
-        │   │       │   │   │   │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │       │   │   │   │       └── Cast { cast_to: Decimal128(22, 2), expr: 10 }
-        │   │       │   │   │   └── Leq
-        │   │       │   │   │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │       │   │   │       └── Cast { cast_to: Decimal128(22, 2), expr: 20 }
-        │   │       │   │   └── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 10 }
-        │   │       │   └── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
-        │   │       └── Eq
-        │   │           ├── #13
-        │   │           └── "DELIVER IN PERSON"
+        │   ├── And
+        │   │   ├── Eq
+        │   │   │   ├── #16
+        │   │   │   └── #1
+        │   │   ├── Eq
+        │   │   │   ├── #19
+        │   │   │   └── "Brand#12"
+        │   │   ├── InList { expr: #22, list: [ "SM CASE", "SM BOX", "SM PACK", "SM PKG" ], negated: false }
+        │   │   ├── Geq
+        │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 1 }
+        │   │   ├── Leq
+        │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 11 }
+        │   │   ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 5 }
+        │   │   ├── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
+        │   │   └── Eq
+        │   │       ├── #13
+        │   │       └── "DELIVER IN PERSON"
+        │   ├── And
+        │   │   ├── Eq
+        │   │   │   ├── #16
+        │   │   │   └── #1
+        │   │   ├── Eq
+        │   │   │   ├── #19
+        │   │   │   └── "Brand#23"
+        │   │   ├── InList { expr: #22, list: [ "MED BAG", "MED BOX", "MED PKG", "MED PACK" ], negated: false }
+        │   │   ├── Geq
+        │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 10 }
+        │   │   ├── Leq
+        │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 20 }
+        │   │   ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 10 }
+        │   │   ├── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
+        │   │   └── Eq
+        │   │       ├── #13
+        │   │       └── "DELIVER IN PERSON"
         │   └── And
-        │       ├── And
-        │       │   ├── And
-        │       │   │   ├── And
-        │       │   │   │   ├── And
-        │       │   │   │   │   ├── And
-        │       │   │   │   │   │   ├── And
-        │       │   │   │   │   │   │   ├── Eq
-        │       │   │   │   │   │   │   │   ├── #16
-        │       │   │   │   │   │   │   │   └── #1
-        │       │   │   │   │   │   │   └── Eq
-        │       │   │   │   │   │   │       ├── #19
-        │       │   │   │   │   │   │       └── "Brand#34"
-        │       │   │   │   │   │   └── InList { expr: #22, list: [ "LG CASE", "LG BOX", "LG PACK", "LG PKG" ], negated: false }
-        │       │   │   │   │   └── Geq
-        │       │   │   │   │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │       │   │   │   │       └── Cast { cast_to: Decimal128(22, 2), expr: 20 }
-        │       │   │   │   └── Leq
-        │       │   │   │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │       │   │   │       └── Cast { cast_to: Decimal128(22, 2), expr: 30 }
-        │       │   │   └── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 15 }
-        │       │   └── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
+        │       ├── Eq
+        │       │   ├── #16
+        │       │   └── #1
+        │       ├── Eq
+        │       │   ├── #19
+        │       │   └── "Brand#34"
+        │       ├── InList { expr: #22, list: [ "LG CASE", "LG BOX", "LG PACK", "LG PKG" ], negated: false }
+        │       ├── Geq
+        │       │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │       │   └── Cast { cast_to: Decimal128(22, 2), expr: 20 }
+        │       ├── Leq
+        │       │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
+        │       │   └── Cast { cast_to: Decimal128(22, 2), expr: 30 }
+        │       ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 15 }
+        │       ├── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
         │       └── Eq
         │           ├── #13
         │           └── "DELIVER IN PERSON"

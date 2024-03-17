@@ -344,10 +344,6 @@ pub enum BinOpType {
     Lt,
     Geq,
     Leq,
-
-    // logical
-    And,
-    Or,
 }
 
 impl Display for BinOpType {
@@ -369,10 +365,6 @@ impl BinOpType {
             self,
             Self::Eq | Self::Neq | Self::Gt | Self::Lt | Self::Geq | Self::Leq
         )
-    }
-
-    pub fn is_logical(&self) -> bool {
-        matches!(self, Self::And | Self::Or)
     }
 }
 
@@ -568,6 +560,83 @@ impl OptRelNode for SortOrderExpr {
             "SortOrder",
             vec![("order", self.order().to_string().into())],
             vec![self.child().explain(meta_map)],
+        )
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum LogOpType {
+    And,
+    Or,
+}
+
+impl Display for LogOpType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LogOpExpr(pub Expr);
+
+impl LogOpExpr {
+    pub fn new(op_type: LogOpType, expr_list: ExprList) -> Self {
+        LogOpExpr(Expr(
+            RelNode {
+                typ: OptRelNodeTyp::LogOp(op_type),
+                children: expr_list
+                    .to_vec()
+                    .into_iter()
+                    .map(|x| x.into_rel_node())
+                    .collect(),
+                data: None,
+            }
+            .into(),
+        ))
+    }
+
+    pub fn children(&self) -> Vec<Expr> {
+        self.0
+             .0
+            .children
+            .iter()
+            .map(|x| Expr::from_rel_node(x.clone()).unwrap())
+            .collect()
+    }
+
+    pub fn child(&self, idx: usize) -> Expr {
+        Expr::from_rel_node(self.0.child(idx)).unwrap()
+    }
+
+    pub fn op_type(&self) -> LogOpType {
+        if let OptRelNodeTyp::LogOp(op_type) = self.clone().into_rel_node().typ {
+            op_type
+        } else {
+            panic!("not a log op")
+        }
+    }
+}
+
+impl OptRelNode for LogOpExpr {
+    fn into_rel_node(self) -> OptRelNodeRef {
+        self.0.into_rel_node()
+    }
+
+    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
+        if !matches!(rel_node.typ, OptRelNodeTyp::LogOp(_)) {
+            return None;
+        }
+        Expr::from_rel_node(rel_node).map(Self)
+    }
+
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
+        Pretty::simple_record(
+            self.op_type().to_string(),
+            vec![],
+            self.children()
+                .iter()
+                .map(|x| x.explain(meta_map))
+                .collect(),
         )
     }
 }

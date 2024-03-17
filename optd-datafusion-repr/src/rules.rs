@@ -1,7 +1,7 @@
 // mod filter_join;
 mod eliminate_duplicated_expr;
-mod eliminate_filter;
 mod eliminate_limit;
+mod filter;
 mod joins;
 mod macros;
 mod physical;
@@ -10,8 +10,8 @@ mod physical;
 pub use eliminate_duplicated_expr::{
     EliminateDuplicatedAggExprRule, EliminateDuplicatedSortExprRule,
 };
-pub use eliminate_filter::EliminateFilterRule;
 pub use eliminate_limit::EliminateLimitRule;
+pub use filter::{EliminateFilterRule, SimplifyFilterRule};
 pub use joins::{
     EliminateJoinRule, HashJoinRule, JoinAssocRule, JoinCommuteRule, ProjectionPullUpJoin,
 };
