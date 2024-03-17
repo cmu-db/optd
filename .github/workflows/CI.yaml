@@ -46,10 +46,12 @@ jobs:
     #     with:
     #       command: clippy
     #       args: --workspace --all-targets --all-features --locked -- -D warnings
-      - name: Postgres
+      - name: Set up pgdata
         run: |
-          apt install postgresql postgresql-contrib
-          systemctl start postgresql
+          mkdir ~/pgdata
+          cd ~/pgdata
+          initdb
+          cd -
     #   - name: Test
     #     uses: actions-rs/cargo@v1
     #     with:
