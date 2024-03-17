@@ -42,6 +42,9 @@ mod tests {
             "0.01",
             "--seed",
             "15721",
+            "--query-ids",
+            "1",
+            "2",
         ]);
         if debug_print {
             cmd.env("RUST_LOG", "debug");

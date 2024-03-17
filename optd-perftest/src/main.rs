@@ -1,4 +1,5 @@
 use optd_perftest::shell;
+use optd_perftest::cardtest;
 use optd_perftest::tpch::{TpchConfig, TPCH_KIT_POSTGRES};
 use std::fs;
 
@@ -26,7 +27,7 @@ enum Commands {
         #[clap(default_value = "15721")]
         seed: i32,
         #[arg(long)]
-        #[clap(value_delimiter = ' ', num_args = 1..)]
+        #[clap(value_delimiter = ',', num_args = 1..)]
         query_ids: Vec<u32>,
     },
 }
@@ -53,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
                 seed,
                 query_ids,
             };
-            optd_perftest::cardtest(&workspace_dpath, tpch_config).await
+            cardtest::cardtest(&workspace_dpath, tpch_config).await
         }
     }
 }

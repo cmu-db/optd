@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::path::Path;
+
+use crate::{benchmark::Benchmark, datafusion_db_cardtest::DatafusionDb, tpch::TpchConfig};
+use crate::postgres_db::PostgresDb;
 
 use anyhow::{self};
 use async_trait::async_trait;
-
-use crate::benchmark::Benchmark;
 
 /// This struct performs cardinality testing across one or more databases.
 /// Another design would be for the CardtestRunnerDBHelper trait to expose a function
@@ -85,4 +87,21 @@ pub trait CardtestRunnerDBHelper {
         &mut self,
         benchmark: &Benchmark,
     ) -> anyhow::Result<Vec<usize>>;
+}
+
+pub async fn cardtest<P: AsRef<Path> + Clone>(
+    workspace_dpath: P,
+    tpch_config: TpchConfig,
+) -> anyhow::Result<()> {
+    let pg_db = PostgresDb::new(workspace_dpath.clone());
+    let df_db = DatafusionDb::new(workspace_dpath).await?;
+    let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db), Box::new(df_db)];
+
+    let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
+    let mut cardtest_runner = CardtestRunner::new(databases).await?;
+    let qerrors = cardtest_runner
+        .eval_benchmark_qerrors_alldbs(&tpch_benchmark)
+        .await?;
+    println!("qerrors: {:?}", qerrors);
+    Ok(())
 }
