@@ -20,7 +20,7 @@ jobs:
         image: postgres:15
         env:
           POSTGRES_USER: postgres
-          POSTGRES_DB: optd
+          POSTGRES_DB: postgres
         ports:
           - 5432:5432
         options: >-
@@ -31,23 +31,23 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-    #   - uses: actions-rs/toolchain@v1
-    #     with:
-    #       profile: minimal
-    #       components: rustfmt, clippy
-    #   - name: Check code format
-    #     uses: actions-rs/cargo@v1
-    #     with:
-    #       command: fmt
-    #       args: --all -- --check
-    #   - name: Clippy
-    #     uses: actions-rs/cargo@v1
-    #     with:
-    #       command: clippy
-    #       args: --workspace --all-targets --all-features --locked -- -D warnings
-    #   - name: Test
-    #     uses: actions-rs/cargo@v1
-    #     with:
-    #       command: test
-    #       args: --no-fail-fast --workspace --all-features --locked
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          components: rustfmt, clippy
+      - name: Check code format
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+      - name: Clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --no-fail-fast --workspace --all-features --locked
       
