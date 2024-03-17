@@ -2,7 +2,7 @@
 mod tests {
     use assert_cmd::prelude::CommandCargoExt;
     use optd_perftest::shell;
-    use std::{fs, process::Command};
+    use std::{fs, process::{Command, Stdio}};
 
     const WORKSPACE: &str = "optd_perftest_integration_workspace";
 
@@ -17,7 +17,7 @@ mod tests {
 
         // run command twice
         for i in 1..=2 {
-            let mut cmd = create_cardtest_run_cmd();
+            let mut cmd = create_cardtest_run_cmd(true);
             let output = cmd.output().unwrap();
             assert!(
                 output.status.success(),
@@ -31,9 +31,9 @@ mod tests {
         fs::remove_dir_all(&workspace_dpath).unwrap();
     }
 
-    fn create_cardtest_run_cmd() -> Command {
+    fn create_cardtest_run_cmd(debug_print: bool) -> Command {
         let mut cmd = Command::cargo_bin("optd-perftest").unwrap();
-        cmd.current_dir(".."); // all paths in `test.sql` assume we're in the base dir of the repo
+        cmd.current_dir("..");
         cmd.args([
             "--workspace",
             WORKSPACE,
@@ -43,6 +43,11 @@ mod tests {
             "--seed",
             "15721",
         ]);
+        if debug_print {
+            cmd.env("RUST_LOG", "debug");
+            cmd.stdout(Stdio::inherit());
+            cmd.stderr(Stdio::inherit());
+        }
         cmd
     }
 }
