@@ -36,7 +36,7 @@ impl PostgresDb {
     /// Create a connection to a Postgres database
     async fn connect_to_db(dbname: &str) -> anyhow::Result<Client> {
         let (client, connection) =
-            tokio_postgres::connect(&format!("host=localhost dbname={}", dbname), NoTls).await?;
+            tokio_postgres::connect(&format!("host=localhost user=postgres dbname={}", dbname), NoTls).await?;
         tokio::spawn(async move {
             if let Err(e) = connection.await {
                 eprintln!("connection error: {}", e);

@@ -19,9 +19,8 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_USER: myuser
-          POSTGRES_PASSWORD: mypassword
-          POSTGRES_DB: mytestdb
+          POSTGRES_USER: postgres
+          POSTGRES_DB: optd
         ports:
           - 5432:5432
         options: >-
@@ -46,12 +45,6 @@ jobs:
     #     with:
     #       command: clippy
     #       args: --workspace --all-targets --all-features --locked -- -D warnings
-      - name: Set up pgdata
-        run: |
-          mkdir ~/pgdata
-          cd ~/pgdata
-          initdb
-          cd -
     #   - name: Test
     #     uses: actions-rs/cargo@v1
     #     with:
