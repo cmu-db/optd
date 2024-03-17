@@ -13,6 +13,7 @@ struct Cli {
         help = "The directory where artifacts required for performance testing (such as pgdata or TPC-H queries) are generated. See comment of parse_pathstr() to see what paths are allowed (TLDR: absolute and relative both ok)."
     )]
     workspace: String,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -23,14 +24,26 @@ enum Commands {
         #[arg(long)]
         #[clap(default_value = "0.01")]
         scale_factor: f64,
+
         #[arg(long)]
         #[clap(default_value = "15721")]
         seed: i32,
+
         #[arg(long)]
         #[clap(value_delimiter = ',', num_args = 1..)]
         // this is the current list of all queries that work in perftest
         #[clap(default_value = "2,3,5,7,8,9,10,12,14,17")]
         query_ids: Vec<u32>,
+
+        #[arg(long)]
+        #[clap(default_value = "default_user")]
+        #[clap(help = "The name of a user with superuser privileges")]
+        pguser: String,
+
+        #[arg(long)]
+        #[clap(default_value = "password")]
+        #[clap(help = "The name of a user with superuser privileges")]
+        pgpassword: String,
     },
 }
 
@@ -49,6 +62,8 @@ async fn main() -> anyhow::Result<()> {
             scale_factor,
             seed,
             query_ids,
+            pguser,
+            pgpassword,
         } => {
             let tpch_config = TpchConfig {
                 database: String::from(TPCH_KIT_POSTGRES),
@@ -56,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
                 seed,
                 query_ids,
             };
-            cardtest::cardtest(&workspace_dpath, tpch_config).await
+            cardtest::cardtest(&workspace_dpath, &pguser, &pgpassword, tpch_config).await
         }
     }
 }

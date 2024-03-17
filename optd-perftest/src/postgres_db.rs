@@ -19,6 +19,8 @@ const DEFAULT_DBNAME: &str = "postgres";
 
 pub struct PostgresDb {
     workspace_dpath: PathBuf,
+    pguser: String,
+    pgpassword: String,
 }
 
 /// Conventions I keep for methods of this class:
@@ -27,16 +29,24 @@ pub struct PostgresDb {
 ///   - Stop and start functions should be separate
 ///   - Setup should be done in build() unless it requires more information (like benchmark)
 impl PostgresDb {
-    pub fn new<P: AsRef<Path>>(workspace_dpath: P) -> Self {
+    pub fn new<P: AsRef<Path>>(workspace_dpath: P, pguser: &str, pgpassword: &str) -> Self {
         Self {
             workspace_dpath: PathBuf::from(workspace_dpath.as_ref()),
+            pguser: String::from(pguser),
+            pgpassword: String::from(pgpassword),
         }
     }
 
     /// Create a connection to a Postgres database
-    async fn connect_to_db(dbname: &str) -> anyhow::Result<Client> {
-        let (client, connection) =
-            tokio_postgres::connect(&format!("host=localhost user=postgres dbname={}", dbname), NoTls).await?;
+    async fn connect_to_db(&self, dbname: &str) -> anyhow::Result<Client> {
+        let (client, connection) = tokio_postgres::connect(
+            &format!(
+                "host=localhost user={} password={} dbname={}",
+                self.pguser, self.pgpassword, dbname
+            ),
+            NoTls,
+        )
+        .await?;
         tokio::spawn(async move {
             if let Err(e) = connection.await {
                 eprintln!("connection error: {}", e);
@@ -71,7 +81,7 @@ impl PostgresDb {
     async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
         let dbname = benchmark.get_dbname();
         // since we don't know whether dbname exists at this point, we have to connect to the default database
-        let default_db_client = Self::connect_to_db(DEFAULT_DBNAME).await?;
+        let default_db_client = self.connect_to_db(DEFAULT_DBNAME).await?;
         let pgdata_dpath_str = Self::get_pgdata_dpath_str(&default_db_client).await?;
         let pgdata_dpath = PathBuf::from(pgdata_dpath_str);
         let done_fname = format!("{}_done", dbname);
@@ -98,7 +108,7 @@ impl PostgresDb {
                 .await?;
             drop(default_db_client);
             // now that we've created `dbname`, we can connect to that
-            let client = Self::connect_to_db(&dbname).await?;
+            let client = self.connect_to_db(&dbname).await?;
             match benchmark {
                 Benchmark::Tpch(tpch_config) => self.load_tpch_data(&client, tpch_config).await?,
                 _ => unimplemented!(),
@@ -158,7 +168,7 @@ impl CardtestRunnerDBHelper for PostgresDb {
     ) -> anyhow::Result<Vec<usize>> {
         self.load_benchmark_data(benchmark).await?;
         let dbname = benchmark.get_dbname();
-        let client = Self::connect_to_db(&dbname).await?;
+        let client = self.connect_to_db(&dbname).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
             Benchmark::Tpch(tpch_config) => self.eval_tpch_estcards(&client, tpch_config).await,
@@ -171,7 +181,7 @@ impl CardtestRunnerDBHelper for PostgresDb {
     ) -> anyhow::Result<Vec<usize>> {
         self.load_benchmark_data(benchmark).await?;
         let dbname = benchmark.get_dbname();
-        let client = Self::connect_to_db(&dbname).await?;
+        let client = self.connect_to_db(&dbname).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
             Benchmark::Tpch(tpch_config) => self.eval_tpch_truecards(&client, tpch_config).await,

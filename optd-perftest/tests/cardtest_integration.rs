@@ -20,7 +20,7 @@ mod tests {
 
         // run command twice
         for i in 1..=2 {
-            let mut cmd = create_cardtest_run_cmd(true);
+            let mut cmd = create_cardtest_run_cmd(false);
             let output = cmd.output().unwrap();
             assert!(
                 output.status.success(),
@@ -44,6 +44,10 @@ mod tests {
             // make sure scale factor is low so the test runs fast
             "--scale-factor",
             "0.01",
+            "--pguser",
+            "test_user",
+            "--pgpassword",
+            "password",
             // for all other args, whatever the default is is fine
         ]);
         if debug_print {

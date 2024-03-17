@@ -91,9 +91,11 @@ pub trait CardtestRunnerDBHelper {
 
 pub async fn cardtest<P: AsRef<Path> + Clone>(
     workspace_dpath: P,
+    pguser: &str,
+    pgpassword: &str,
     tpch_config: TpchConfig,
 ) -> anyhow::Result<()> {
-    let pg_db = PostgresDb::new(workspace_dpath.clone());
+    let pg_db = PostgresDb::new(workspace_dpath.clone(), pguser, pgpassword);
     let df_db = DatafusionDb::new(workspace_dpath).await?;
     let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db), Box::new(df_db)];
 
