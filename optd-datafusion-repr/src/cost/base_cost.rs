@@ -28,10 +28,10 @@ fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     cost
 }
 
-pub type Stats = HashMap<String, PerTableStats>;
+pub type BaseTableStats = HashMap<String, PerTableStats>;
 
 pub struct OptCostModel {
-    per_table_stats_map: Stats,
+    per_table_stats_map: BaseTableStats,
 }
 
 pub struct PerTableStats {
@@ -266,7 +266,7 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
 }
 
 impl OptCostModel {
-    pub fn new(per_table_stats_map: Stats) -> Self {
+    pub fn new(per_table_stats_map: BaseTableStats) -> Self {
         Self {
             per_table_stats_map,
         }

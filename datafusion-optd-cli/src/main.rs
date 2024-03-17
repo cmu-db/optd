@@ -30,7 +30,7 @@ use datafusion_optd_cli::{
 };
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
-use optd_datafusion_repr::cost::Stats;
+use optd_datafusion_repr::cost::BaseTableStats;
 use optd_datafusion_repr::DatafusionOptimizer;
 use std::collections::HashMap;
 use std::env;
@@ -206,7 +206,7 @@ pub async fn main() -> Result<()> {
         // use optd-bridge query planner
         let optimizer = DatafusionOptimizer::new_physical(
             Arc::new(DatafusionCatalog::new(state.catalog_list())),
-            Stats::default(),
+            BaseTableStats::default(),
             args.enable_adaptive,
         );
         state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));

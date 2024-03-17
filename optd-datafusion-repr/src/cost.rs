@@ -4,7 +4,7 @@ mod stats;
 
 pub use adaptive_cost::{AdaptiveCostModel, RuntimeAdaptionStorage, DEFAULT_DECAY};
 pub use base_cost::{
-    OptCostModel, PerColumnStats, PerTableStats, Stats, COMPUTE_COST, IO_COST, ROW_COUNT,
+    BaseTableStats, OptCostModel, PerColumnStats, PerTableStats, COMPUTE_COST, IO_COST, ROW_COUNT,
 };
 
 pub trait WithRuntimeStatistics {

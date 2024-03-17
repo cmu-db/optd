@@ -22,7 +22,7 @@ use datafusion::{
 use datafusion_optd_cli::helper::unescape_input;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
-use optd_datafusion_repr::{cost::Stats, DatafusionOptimizer};
+use optd_datafusion_repr::{cost::BaseTableStats, DatafusionOptimizer};
 use regex::Regex;
 
 pub struct DatafusionDb {
@@ -84,7 +84,7 @@ impl DatafusionDb {
                 SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
             let optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical(
                 Arc::new(DatafusionCatalog::new(state.catalog_list())),
-                Stats::default(),
+                BaseTableStats::default(),
                 true,
             );
             state = state.with_physical_optimizer_rules(vec![]);

@@ -10,7 +10,7 @@ use optd_core::{
     rel_node::{RelNode, Value},
 };
 
-use super::base_cost::Stats;
+use super::base_cost::BaseTableStats;
 
 pub type RuntimeAdaptionStorage = Arc<Mutex<RuntimeAdaptionStorageInner>>;
 
@@ -85,7 +85,7 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
 }
 
 impl AdaptiveCostModel {
-    pub fn new(decay: usize, stats: Stats) -> Self {
+    pub fn new(decay: usize, stats: BaseTableStats) -> Self {
         Self {
             runtime_row_cnt: RuntimeAdaptionStorage::default(),
             base_model: OptCostModel::new(stats),
