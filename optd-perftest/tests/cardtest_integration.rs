@@ -2,7 +2,10 @@
 mod tests {
     use assert_cmd::prelude::CommandCargoExt;
     use optd_perftest::shell;
-    use std::{fs, process::{Command, Stdio}};
+    use std::{
+        fs,
+        process::{Command, Stdio},
+    };
 
     const WORKSPACE: &str = "optd_perftest_integration_workspace";
 

@@ -1,5 +1,5 @@
-use optd_perftest::shell;
 use optd_perftest::cardtest;
+use optd_perftest::shell;
 use optd_perftest::tpch::{TpchConfig, TPCH_KIT_POSTGRES};
 use std::fs;
 
