@@ -234,9 +234,9 @@ impl PostgresDb {
     /// Extract the row count from a line of an EXPLAIN output
     fn extract_row_count(explain_line: &str) -> Option<usize> {
         lazy_static! {
-            static ref ROW_CNT_RE: Regex = Regex::new(r"row_cnt=(\d+\.\d+)").unwrap();
+            static ref ROWS_RE: Regex = Regex::new(r"rows=(\d+)").unwrap();
         }
-        if let Some(caps) = ROW_CNT_RE.captures(explain_line) {
+        if let Some(caps) = ROWS_RE.captures(explain_line) {
             if let Some(matched) = caps.get(1) {
                 let rows_str = matched.as_str();
                 match rows_str.parse::<usize>() {
