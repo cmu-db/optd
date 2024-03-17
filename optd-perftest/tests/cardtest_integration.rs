@@ -4,12 +4,11 @@ mod tests {
     use assert_cmd::prelude::CommandCargoExt;
     use std::{fs, process::Command};
 
-    const WORKSPACE: &str = "../optd_perftest_integration_workspace";
+    const WORKSPACE: &str = "optd_perftest_integration_workspace";
 
-    /// We run it twice to test clean slate behavior and behavior with a cache
-    /// Note that Postgres must _not_ be running for this test to run properly.
-    /// It is difficult (and possibly destructive) to programmatically close Postgres,
-    ///   so I chose not to do it. The user must do this manually.
+    /// Make sure Postgres is running before this test is run
+    /// The reason I don't start Postgres automatically is because everyone has a different
+    ///   preferred way of starting it (in Docker container, with Mac app, custom build, etc.)
     #[test]
     fn cli_run_cardtest_twice() {
         // perform cleanup (clear workspace)
