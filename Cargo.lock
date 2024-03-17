@@ -2714,6 +2714,7 @@ name = "optd-perftest"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_cmd",
  "async-trait",
  "clap 4.5.2",
  "datafusion",
