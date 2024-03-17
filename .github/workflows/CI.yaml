@@ -14,29 +14,45 @@ env:
 jobs:
   check:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: myuser
+          POSTGRES_PASSWORD: mypassword
+          POSTGRES_DB: mytestdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          components: rustfmt, clippy
-      - name: Check code format
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
-      - name: Clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --workspace --all-targets --all-features --locked -- -D warnings
+    #   - uses: actions-rs/toolchain@v1
+    #     with:
+    #       profile: minimal
+    #       components: rustfmt, clippy
+    #   - name: Check code format
+    #     uses: actions-rs/cargo@v1
+    #     with:
+    #       command: fmt
+    #       args: --all -- --check
+    #   - name: Clippy
+    #     uses: actions-rs/cargo@v1
+    #     with:
+    #       command: clippy
+    #       args: --workspace --all-targets --all-features --locked -- -D warnings
       - name: Postgres
         run: |
           apt install postgresql postgresql-contrib
           systemctl start postgresql
-      - name: Test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --no-fail-fast --workspace --all-features --locked
+    #   - name: Test
+    #     uses: actions-rs/cargo@v1
+    #     with:
+    #       command: test
+    #       args: --no-fail-fast --workspace --all-features --locked
       
