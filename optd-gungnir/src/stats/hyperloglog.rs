@@ -49,6 +49,12 @@ impl_byte_serializable_for_numeric!(i128, i64, i32, i16, i8);
 impl_byte_serializable_for_numeric!(usize, isize);
 impl_byte_serializable_for_numeric!(f64, f32);
 
+impl ByteSerializable for &[u8] {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_vec()
+    }
+}
+
 // Self-contained implementation of the HyperLogLog data structure.
 impl<T> HyperLogLog<T>
 where
