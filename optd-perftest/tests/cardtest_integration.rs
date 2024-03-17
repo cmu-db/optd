@@ -38,13 +38,10 @@ mod tests {
             "--workspace",
             WORKSPACE,
             "cardtest",
+            // make sure scale factor is low so the test runs fast
             "--scale-factor",
             "0.01",
-            "--seed",
-            "15721",
-            "--query-ids",
-            "1",
-            "2",
+            // for all other args, whatever the default is is fine
         ]);
         if debug_print {
             cmd.env("RUST_LOG", "debug");

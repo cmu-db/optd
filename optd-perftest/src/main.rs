@@ -28,6 +28,8 @@ enum Commands {
         seed: i32,
         #[arg(long)]
         #[clap(value_delimiter = ',', num_args = 1..)]
+        // this is the current list of all queries that work in perftest
+        #[clap(default_value = "2,3,5,7,8,9,10,12,14,17")]
         query_ids: Vec<u32>,
     },
 }
