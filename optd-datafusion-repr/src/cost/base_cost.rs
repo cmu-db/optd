@@ -6,12 +6,16 @@ use crate::{
     plan_nodes::{OptRelNodeRef, OptRelNodeTyp},
     properties::column_ref::ColumnRef,
 };
+use arrow_schema::{ArrowError, DataType};
+use datafusion::arrow::array::{RecordBatch, RecordBatchIterator, RecordBatchReader};
 use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
     cost::{Cost, CostModel},
     rel_node::{RelNode, RelNodeTyp, Value},
 };
+use optd_gungnir::stats::hyperloglog::{HyperLogLog, DEFAULT_PRECISION};
+use optd_gungnir::stats::tdigest::{TDigest, DEFAULT_COMPRESSION};
 
 fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     model: &C,
@@ -37,6 +41,77 @@ pub struct PerTableStats {
     per_column_stats_vec: Vec<PerColumnStats>,
 }
 
+impl PerTableStats {
+    pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
+        batch_iter: RecordBatchIterator<I>,
+    ) -> anyhow::Result<Self> {
+        let schema = batch_iter.schema();
+        let col_types = schema
+            .fields()
+            .iter()
+            .map(|f| f.data_type().clone())
+            .collect_vec();
+        let col_cnt = col_types.len();
+
+        let mut row_cnt = 0;
+        // let mut mcvs = vec![MockMostCommonValues::empty(); col_cnt];
+        let mut hlls = vec![HyperLogLog::new(DEFAULT_PRECISION); col_cnt];
+        let mut null_cnt = vec![0; col_cnt];
+        let mut distr = col_types
+            .iter()
+            .map(|data_type| {
+                if Self::is_distr_supported(&data_type) {
+                    Some(TDigest::new(DEFAULT_COMPRESSION))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        for batch in batch_iter {
+            let batch = batch?;
+            row_cnt += batch.num_rows();
+
+            // Enumerate the columns.
+            for (i, col) in batch.columns().iter().enumerate() {
+                // Update null cnt.
+                null_cnt[i] += col.null_count();
+
+                // Update distribution.
+
+                // Update mcv.
+
+                // TODO: Update N-distinct.
+            }
+        }
+
+        // TODO: Assemble the per-column stats.
+        let per_column_stats_vec = Vec::with_capacity(col_cnt);
+
+        Ok(Self {
+            row_cnt,
+            per_column_stats_vec,
+        })
+    }
+
+    fn is_distr_supported(data_type: &DataType) -> bool {
+        matches!(
+            data_type,
+            DataType::Boolean
+                | DataType::Int8
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::UInt8
+                | DataType::UInt16
+                | DataType::UInt32
+                | DataType::UInt64
+                | DataType::Float32
+                | DataType::Float64
+        )
+    }
+}
+
 pub struct PerColumnStats {
     // even if nulls are the most common, they cannot appear in mcvs
     mcvs: Box<dyn MostCommonValues>,
@@ -51,7 +126,7 @@ pub struct PerColumnStats {
 
     // distribution _does not_ include the values in mcvs
     // distribution _does not_ include nulls
-    distr: Box<dyn Distribution>,
+    distr: Option<Box<dyn Distribution>>,
 }
 
 pub trait MostCommonValues: 'static + Send + Sync {
@@ -566,7 +641,7 @@ impl PerColumnStats {
         mcvs: Box<dyn MostCommonValues>,
         ndistinct: i32,
         null_frac: f64,
-        distr: Box<dyn Distribution>,
+        distr: Option<Box<dyn Distribution>>,
     ) -> Self {
         Self {
             mcvs,
@@ -717,7 +792,7 @@ mod tests {
             Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.3)])),
             0,
             0.0,
-            Box::new(MockDistribution::empty()),
+            Some(Box::new(MockDistribution::empty())),
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(1)), col_ref(0));
