@@ -30,6 +30,10 @@ jobs:
         with:
           command: clippy
           args: --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Postgres
+        run: |
+          apt install postgresql postgresql-contrib
+          systemctl start postgresql
       - name: Test
         uses: actions-rs/cargo@v1
         with:
