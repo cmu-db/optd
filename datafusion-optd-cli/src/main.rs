@@ -30,7 +30,7 @@ use datafusion_optd_cli::{
 };
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
-use optd_datafusion_repr::cost::{AdaptiveCostModel, RuntimeAdaptionStorage, Stats, DEFAULT_DECAY};
+use optd_datafusion_repr::cost::Stats;
 use optd_datafusion_repr::DatafusionOptimizer;
 use std::collections::HashMap;
 use std::env;
@@ -204,13 +204,9 @@ pub async fn main() -> Result<()> {
             state = state.with_physical_optimizer_rules(vec![]);
         }
         // use optd-bridge query planner
-        let runtime_statistics = RuntimeAdaptionStorage::default();
-        let cost_model =
-            AdaptiveCostModel::new(DEFAULT_DECAY, runtime_statistics.clone(), Stats::default());
         let optimizer = DatafusionOptimizer::new_physical(
             Arc::new(DatafusionCatalog::new(state.catalog_list())),
-            Box::new(cost_model),
-            runtime_statistics,
+            Stats::default(),
             args.enable_adaptive,
         );
         state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));

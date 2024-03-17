@@ -10,7 +10,7 @@ use datafusion_optd_cli::{
 };
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
-use optd_datafusion_repr::cost::{AdaptiveCostModel, RuntimeAdaptionStorage, Stats, DEFAULT_DECAY};
+use optd_datafusion_repr::cost::Stats;
 use optd_datafusion_repr::DatafusionOptimizer;
 use rand::{thread_rng, Rng};
 use std::sync::Arc;
@@ -28,13 +28,9 @@ async fn main() -> Result<()> {
         let runtime_env = RuntimeEnv::new(rn_config.clone())?;
         let mut state =
             SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
-        let runtime_statistics = RuntimeAdaptionStorage::default();
-        let cost_model =
-            AdaptiveCostModel::new(DEFAULT_DECAY, runtime_statistics.clone(), Stats::default());
         let mut optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical(
             Arc::new(DatafusionCatalog::new(state.catalog_list())),
-            Box::new(cost_model),
-            runtime_statistics,
+            Stats::default(),
             true,
         );
         optimizer.optd_optimizer_mut().prop.partial_explore_iter = None;
