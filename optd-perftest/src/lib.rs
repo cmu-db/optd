@@ -1,12 +1,8 @@
 use std::path::Path;
 
+use crate::{benchmark::Benchmark, datafusion_db_cardtest::DatafusionDb, tpch::TpchConfig};
 use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
 use postgres_db::PostgresDb;
-use crate::{
-    benchmark::Benchmark,
-    datafusion_db_cardtest::DatafusionDb,
-    tpch::TpchConfig,
-};
 
 mod benchmark;
 mod cardtest;

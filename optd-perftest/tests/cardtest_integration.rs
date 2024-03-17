@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use optd_perftest::shell;
     use assert_cmd::prelude::CommandCargoExt;
+    use optd_perftest::shell;
     use std::{fs, process::Command};
 
     const WORKSPACE: &str = "optd_perftest_integration_workspace";

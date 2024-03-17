@@ -1,6 +1,6 @@
-use std::fs;
 use optd_perftest::shell;
 use optd_perftest::tpch::{TpchConfig, TPCH_KIT_POSTGRES};
+use std::fs;
 
 use clap::{Parser, Subcommand};
 
