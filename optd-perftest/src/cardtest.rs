@@ -101,8 +101,8 @@ pub async fn cardtest<P: AsRef<Path> + Clone>(
 
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
     let mut cardtest_runner = CardtestRunner::new(databases).await?;
-    let qerrors = cardtest_runner
+    let qerrors_alldbs = cardtest_runner
         .eval_benchmark_qerrors_alldbs(&tpch_benchmark)
         .await?;
-    Ok(qerrors)
+    Ok(qerrors_alldbs)
 }
