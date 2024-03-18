@@ -1,5 +1,5 @@
 #!/bin/bash
-if [[ "$(hostname)" == "MacBook-Pro-20" ]] && [[ "$(whoami)" == "patrickwang" ]]; then
+if [[ "$(whoami)" == "patrickwang" ]]; then
     # a sketchy way to kill "orphaned" postgres processes (i.e. processes whose pgdata dir has already been deleted)
     # use this script to avoid having to manually do "ps aux" and "kill [pid]" every time cardtest_integration (or something similar) fails
     # the "main" process has bin/postgres in it

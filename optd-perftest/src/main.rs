@@ -71,7 +71,11 @@ async fn main() -> anyhow::Result<()> {
                 seed,
                 query_ids,
             };
-            cardtest::cardtest(&workspace_dpath, &pguser, &pgpassword, tpch_config).await
+            let qerrors =
+                cardtest::cardtest(&workspace_dpath, &pguser, &pgpassword, tpch_config).await?;
+            println!("qerrors={:?}", qerrors);
         }
     }
+
+    Ok(())
 }

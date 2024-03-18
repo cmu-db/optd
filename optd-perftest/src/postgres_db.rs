@@ -4,14 +4,17 @@ use crate::{
     tpch::{TpchConfig, TpchKit},
 };
 use async_trait::async_trait;
+use futures::Sink;
 use lazy_static::lazy_static;
 use regex::Regex;
 
 use std::{
     fs,
+    io::Cursor,
     path::{Path, PathBuf},
 };
 use tokio::fs::File;
+use tokio::io::AsyncReadExt;
 use tokio_postgres::{Client, NoTls};
 
 /// This dbname is assumed to always exist
@@ -139,19 +142,37 @@ impl PostgresDb {
         // load the tables
         tpch_kit.gen_tables(tpch_config)?;
         for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config)? {
-            let tbl_fpath_str = &tbl_fpath.to_str().unwrap();
-            let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
-            client
-                .query(
-                    &format!(
-                        "COPY {} FROM '{}' WITH (FORMAT csv, DELIMITER '|')",
-                        tbl_name, tbl_fpath_str
-                    ),
-                    &[],
-                )
-                .await?;
+            Self::copy_from_stdin(client, tbl_fpath).await?;
         }
 
+        Ok(())
+    }
+
+    /// Load a file into Postgres by sending the bytes through the network
+    /// Unlike COPY ... FROM, COPY ... FROM STDIN works even if the Postgres process is on another machine or container
+    async fn copy_from_stdin<P: AsRef<Path>>(
+        client: &tokio_postgres::Client,
+        tbl_fpath: P,
+    ) -> anyhow::Result<()> {
+        let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
+        let mut file = File::open(&tbl_fpath).await?;
+        let mut data = Vec::new();
+        // Read the entire file asynchronously into a Vec<u8>
+        file.read_to_end(&mut data).await?;
+        let cursor = Cursor::new(data);
+
+        // Prepare the COPY FROM STDIN statement
+        let stmt = client
+            .prepare(&format!(
+                "COPY {} FROM STDIN WITH (FORMAT csv, DELIMITER '|')",
+                tbl_name
+            ))
+            .await?;
+
+        let sink = client.copy_in(&stmt).await?;
+        futures::pin_mut!(sink);
+        sink.as_mut().start_send(cursor)?;
+        sink.finish().await?;
         Ok(())
     }
 }

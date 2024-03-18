@@ -94,7 +94,7 @@ pub async fn cardtest<P: AsRef<Path> + Clone>(
     pguser: &str,
     pgpassword: &str,
     tpch_config: TpchConfig,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<HashMap<String, Vec<f64>>> {
     let pg_db = PostgresDb::new(workspace_dpath.clone(), pguser, pgpassword);
     let df_db = DatafusionDb::new(workspace_dpath).await?;
     let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db), Box::new(df_db)];
@@ -104,6 +104,5 @@ pub async fn cardtest<P: AsRef<Path> + Clone>(
     let qerrors = cardtest_runner
         .eval_benchmark_qerrors_alldbs(&tpch_benchmark)
         .await?;
-    println!("qerrors: {:?}", qerrors);
-    Ok(())
+    Ok(qerrors)
 }

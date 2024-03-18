@@ -2721,6 +2721,7 @@ dependencies = [
  "datafusion-optd-cli",
  "env_logger 0.11.2",
  "futures",
+ "futures-util",
  "lazy_static",
  "log",
  "optd-datafusion-bridge",
@@ -2729,6 +2730,7 @@ dependencies = [
  "shlex",
  "tokio",
  "tokio-postgres",
+ "tokio-util",
 ]
 
 [[package]]
