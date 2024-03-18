@@ -260,7 +260,7 @@ impl DatafusionDb {
         &self,
         tpch_kit: &TpchKit,
         tpch_config: &TpchConfig,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<BaseTableStats> {
         // To get the schema of each table.
         let ctx = Self::new_session_ctx().await?;
         let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
@@ -272,7 +272,7 @@ impl DatafusionDb {
         for ddl in ddls {
             Self::execute(&ctx, ddl).await?;
         }
-
+        let mut base_table_stats = BaseTableStats::default();
         for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap() {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
             let schema = ctx
@@ -285,15 +285,20 @@ impl DatafusionDb {
                 .unwrap()
                 .schema();
             // Load the .tbl file into record batches using arrow.
-            let tbl_file = fs::File::open(tbl_fpath)?;
-            let csv_reader = ReaderBuilder::new(schema)
+            let tbl_file = fs::File::open(&tbl_fpath)?;
+            let csv_reader = ReaderBuilder::new(schema.clone())
                 .has_header(false)
+                .with_delimiter(b'|')
                 .build(tbl_file)
                 .unwrap();
             let batch_iter = RecordBatchIterator::new(csv_reader, schema);
-            let table_stats = PerTableStats::from_record_batches(batch_iter);
+            base_table_stats.insert(
+                tbl_name.to_string(),
+                PerTableStats::from_record_batches(batch_iter)?,
+            );
+            log::debug!("statistics generated for table: {}", tbl_name);
         }
-        Ok(())
+        Ok(base_table_stats)
     }
 }
 

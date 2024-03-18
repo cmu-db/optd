@@ -7,7 +7,10 @@ use crate::{
     properties::column_ref::ColumnRef,
 };
 use arrow_schema::{ArrowError, DataType};
-use datafusion::arrow::array::{BooleanArray, RecordBatch, RecordBatchIterator, RecordBatchReader};
+use datafusion::arrow::array::{
+    Array, BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array, Int8Array,
+    RecordBatch, RecordBatchIterator, RecordBatchReader, UInt16Array, UInt32Array, UInt8Array,
+};
 use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
@@ -77,6 +80,51 @@ pub struct PerTableStats {
     per_column_stats_vec: Vec<Option<PerColumnStats>>,
 }
 
+macro_rules! define_generate_stats {
+    (
+        $({ $data_type:path, $array_type:path }), *
+    ) => {
+        fn generate_stats(
+            col: &Arc<dyn Array>,
+            col_type: &DataType,
+            col_idx: usize,
+            distr: &mut [Option<TDigest>],
+            hlls: &mut [HyperLogLog],
+        ) {
+            match col_type {
+                $(
+                    $data_type => {
+                        let array = col.as_any().downcast_ref::<$array_type>().unwrap();
+                        let values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+
+                        // Update distribution.
+                        distr[col_idx] = {
+                            let mut f64_values = values.iter().map(|x| f64::from(*x)).collect::<Vec<_>>();
+                            Some(distr[col_idx].take().unwrap().merge_values(&mut f64_values))
+                        };
+
+                        // Update hll.
+                        hlls[col_idx].aggregate(&values);
+                    },
+                )*
+                _ => unreachable!(),
+            }
+        }
+    };
+}
+
+define_generate_stats!(
+    { DataType::Boolean, BooleanArray },
+    { DataType::Int8, Int8Array },
+    { DataType::Int16, Int16Array },
+    { DataType::Int32, Int32Array },
+    { DataType::UInt8, UInt8Array },
+    { DataType::UInt16, UInt16Array },
+    { DataType::UInt32, UInt32Array },
+    { DataType::Float32, Float32Array },
+    { DataType::Float64, Float64Array }
+);
+
 impl PerTableStats {
     pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
         batch_iter: RecordBatchIterator<I>,
@@ -124,25 +172,7 @@ impl PerTableStats {
                     // Update null cnt.
                     null_cnt[i] += col.null_count();
 
-                    match col_type {
-                        DataType::Boolean => {
-                            let array = col.as_any().downcast_ref::<BooleanArray>().unwrap();
-                            let values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
-
-                            // Update distribution.
-                            distr[i] = {
-                                let mut f64_values =
-                                    values.iter().map(|x| f64::from(*x)).collect::<Vec<_>>();
-                                Some(distr[i].take().unwrap().merge_values(&mut f64_values))
-                            };
-
-                            // Update hll.
-                            hlls[i].aggregate(&values);
-
-                            // TODO: Update mcvs.
-                        }
-                        _ => unreachable!(),
-                    }
+                    generate_stats(col, col_type, i, &mut distr, &mut hlls);
                 }
             }
         }
@@ -174,11 +204,9 @@ impl PerTableStats {
                 | DataType::Int8
                 | DataType::Int16
                 | DataType::Int32
-                | DataType::Int64
                 | DataType::UInt8
                 | DataType::UInt16
                 | DataType::UInt32
-                | DataType::UInt64
                 | DataType::Float32
                 | DataType::Float64
         )
