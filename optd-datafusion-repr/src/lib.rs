@@ -3,7 +3,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
-use cost::{AdaptiveCostModel, RuntimeAdaptionStorage};
+use cost::{AdaptiveCostModel, BaseTableStats, RuntimeAdaptionStorage, DEFAULT_DECAY};
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId, OptimizerProperties},
     rel_node::RelNodeMetaMap,
@@ -76,10 +76,14 @@ impl DatafusionOptimizer {
         rule_wrappers
     }
 
-    /// Create an optimizer for testing purpose: adaptive disabled + partial explore (otherwise it's too slow).
-    pub fn new_physical(catalog: Arc<dyn Catalog>) -> Self {
+    /// Create an optimizer with partial explore (otherwise it's too slow).
+    pub fn new_physical(
+        catalog: Arc<dyn Catalog>,
+        stats: BaseTableStats,
+        enable_adaptive: bool,
+    ) -> Self {
         let rules = Self::default_rules();
-        let cost_model = AdaptiveCostModel::new(50);
+        let cost_model = AdaptiveCostModel::new(DEFAULT_DECAY, stats);
         Self {
             runtime_statistics: cost_model.get_runtime_map(),
             optimizer: CascadesOptimizer::new_with_prop(
@@ -94,29 +98,7 @@ impl DatafusionOptimizer {
                     partial_explore_space: Some(1 << 10),
                 },
             ),
-            enable_adaptive: false,
-        }
-    }
-
-    /// Create an optimizer with default settings: adaptive + partial explore.
-    pub fn new_physical_adaptive(catalog: Arc<dyn Catalog>) -> Self {
-        let rules = Self::default_rules();
-        let cost_model = AdaptiveCostModel::new(50);
-        Self {
-            runtime_statistics: cost_model.get_runtime_map(),
-            optimizer: CascadesOptimizer::new_with_prop(
-                rules,
-                Box::new(cost_model),
-                vec![
-                    Box::new(SchemaPropertyBuilder::new(catalog.clone())),
-                    Box::new(ColumnRefPropertyBuilder::new(catalog)),
-                ],
-                OptimizerProperties {
-                    partial_explore_iter: Some(1 << 20),
-                    partial_explore_space: Some(1 << 10),
-                },
-            ),
-            enable_adaptive: true,
+            enable_adaptive,
         }
     }
 
@@ -142,7 +124,7 @@ impl DatafusionOptimizer {
             RuleWrapper::new_heuristic(Arc::new(EliminateFilterRule::new())),
         );
 
-        let cost_model = AdaptiveCostModel::new(1000); // very large decay
+        let cost_model = AdaptiveCostModel::new(1000, BaseTableStats::default()); // very large decay
         let runtime_statistics = cost_model.get_runtime_map();
         let optimizer = CascadesOptimizer::new(
             rule_wrappers,
