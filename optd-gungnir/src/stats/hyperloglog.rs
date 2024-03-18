@@ -32,6 +32,13 @@ impl ByteSerializable for String {
     }
 }
 
+// Serialize common data types for hashing (bool).
+impl ByteSerializable for bool {
+    fn to_bytes(&self) -> Vec<u8> {
+        (*self as u8).to_bytes()
+    }
+}
+
 // Serialize common data types for hashing (numeric).
 macro_rules! impl_byte_serializable_for_numeric {
         ($($type:ty),*) => {

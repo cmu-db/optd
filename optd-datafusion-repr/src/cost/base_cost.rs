@@ -7,7 +7,7 @@ use crate::{
     properties::column_ref::ColumnRef,
 };
 use arrow_schema::{ArrowError, DataType};
-use datafusion::arrow::array::{RecordBatch, RecordBatchIterator, RecordBatchReader};
+use datafusion::arrow::array::{BooleanArray, RecordBatch, RecordBatchIterator, RecordBatchReader};
 use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
@@ -79,17 +79,44 @@ impl PerTableStats {
                 // Update null cnt.
                 null_cnt[i] += col.null_count();
 
-                // Update distribution.
+                match col_types[i] {
+                    DataType::Boolean => {
+                        let array = col.as_any().downcast_ref::<BooleanArray>().unwrap();
+                        let values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
 
-                // Update mcv.
+                        // Update distribution.
+                        if Self::is_distr_supported(&col_types[i]) {
+                            distr[i] = {
+                                let mut f64_values =
+                                    values.iter().map(|x| f64::from(*x)).collect::<Vec<_>>();
+                                Some(distr[i].as_mut().unwrap().merge_values(&mut f64_values))
+                            };
+                        }
 
-                // TODO: Update N-distinct.
+                        // Update hll.
+                        if Self::is_ndistinct_supported(&col_types[i]) {
+                            hlls[i].aggregate(&values);
+                        }
+
+                        // TODO: Update mcvs.
+                    }
+                    _ => unimplemented!("Unsupported data type: {:?}", col_types[i]),
+                }
             }
         }
 
         // TODO: Assemble the per-column stats.
         let per_column_stats_vec = Vec::with_capacity(col_cnt);
-
+        for i in 0..col_cnt {
+            per_column_stats_vec.push(PerColumnStats {
+                mcvs: Box::new(),
+                ndistinct: hlls[i].n_distinct(),
+                null_frac: null_cnt[i] as f64 / row_cnt as f64,
+                distr: distr[i]
+                    .take()
+                    .map(|x| Box::new(x) as Box<dyn Distribution>),
+            });
+        }
         Ok(Self {
             row_cnt,
             per_column_stats_vec,
@@ -110,6 +137,24 @@ impl PerTableStats {
                 | DataType::UInt64
                 | DataType::Float32
                 | DataType::Float64
+        )
+    }
+
+    fn is_ndistinct_supported(data_type: &DataType) -> bool {
+        matches!(
+            data_type,
+            DataType::Boolean
+                | DataType::Int8
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::UInt8
+                | DataType::UInt16
+                | DataType::UInt32
+                | DataType::UInt64
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Utf8
         )
     }
 }
@@ -821,7 +866,7 @@ mod tests {
             ])),
             5,
             0.0,
-            Box::new(MockDistribution::empty()),
+            Some(Box::new(MockDistribution::empty())),
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
@@ -848,7 +893,7 @@ mod tests {
             ])),
             5,
             0.03,
-            Box::new(MockDistribution::empty()),
+            Some(Box::new(MockDistribution::empty())),
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
@@ -873,7 +918,7 @@ mod tests {
             Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.3)])),
             0,
             0.0,
-            Box::new(MockDistribution::empty()),
+            Some(Box::new(MockDistribution::empty())),
         ));
         let expr_tree = bin_op(BinOpType::Neq, col_ref(0), cnst(Value::Int32(1)));
         let expr_tree_rev = bin_op(BinOpType::Neq, cnst(Value::Int32(1)), col_ref(0));
@@ -897,7 +942,10 @@ mod tests {
             Box::new(MockMostCommonValues::empty()),
             10,
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            Some(Box::new(MockDistribution::new(vec![(
+                Value::Int32(15),
+                0.7,
+            )]))),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
@@ -921,7 +969,10 @@ mod tests {
             Box::new(MockMostCommonValues::empty()),
             10,
             0.1,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            Some(Box::new(MockDistribution::new(vec![(
+                Value::Int32(15),
+                0.7,
+            )]))),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
@@ -954,7 +1005,10 @@ mod tests {
             }),
             10,
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            Some(Box::new(MockDistribution::new(vec![(
+                Value::Int32(15),
+                0.7,
+            )]))),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
@@ -983,7 +1037,10 @@ mod tests {
             ])),
             10,
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            Some(Box::new(MockDistribution::new(vec![(
+                Value::Int32(15),
+                0.7,
+            )]))),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
@@ -1007,7 +1064,10 @@ mod tests {
             Box::new(MockMostCommonValues::empty()),
             10,
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            Some(Box::new(MockDistribution::new(vec![(
+                Value::Int32(15),
+                0.7,
+            )]))),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
@@ -1031,7 +1091,10 @@ mod tests {
             Box::new(MockMostCommonValues::empty()),
             9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
             0.1,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            Some(Box::new(MockDistribution::new(vec![(
+                Value::Int32(15),
+                0.7,
+            )]))),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
@@ -1064,7 +1127,10 @@ mod tests {
             }),
             11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            Some(Box::new(MockDistribution::new(vec![(
+                Value::Int32(15),
+                0.7,
+            )]))),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
@@ -1097,7 +1163,10 @@ mod tests {
             }),
             11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            Some(Box::new(MockDistribution::new(vec![(
+                Value::Int32(15),
+                0.7,
+            )]))),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
@@ -1123,7 +1192,10 @@ mod tests {
             Box::new(MockMostCommonValues::empty()),
             10,
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            Some(Box::new(MockDistribution::new(vec![(
+                Value::Int32(15),
+                0.7,
+            )]))),
         ));
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
@@ -1147,7 +1219,10 @@ mod tests {
             Box::new(MockMostCommonValues::empty()),
             10,
             0.1,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            Some(Box::new(MockDistribution::new(vec![(
+                Value::Int32(15),
+                0.7,
+            )]))),
         ));
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
@@ -1173,7 +1248,10 @@ mod tests {
             Box::new(MockMostCommonValues::empty()),
             10,
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            Some(Box::new(MockDistribution::new(vec![(
+                Value::Int32(15),
+                0.7,
+            )]))),
         ));
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
@@ -1197,7 +1275,10 @@ mod tests {
             Box::new(MockMostCommonValues::empty()),
             9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
             0.1,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            Some(Box::new(MockDistribution::new(vec![(
+                Value::Int32(15),
+                0.7,
+            )]))),
         ));
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
@@ -1230,7 +1311,7 @@ mod tests {
             }),
             0,
             0.0,
-            Box::new(MockDistribution::empty()),
+            Some(Box::new(MockDistribution::empty())),
         ));
         let eq1 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
         let eq5 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(5)));
@@ -1270,7 +1351,7 @@ mod tests {
             }),
             0,
             0.0,
-            Box::new(MockDistribution::empty()),
+            Some(Box::new(MockDistribution::empty())),
         ));
         let eq1 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
         let eq5 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(5)));
@@ -1302,7 +1383,7 @@ mod tests {
             Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.3)])),
             0,
             0.0,
-            Box::new(MockDistribution::empty()),
+            Some(Box::new(MockDistribution::empty())),
         ));
         let expr_tree = un_op(
             UnOpType::Not,
@@ -1324,7 +1405,7 @@ mod tests {
             Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.3)])),
             0,
             0.1,
-            Box::new(MockDistribution::empty()),
+            Some(Box::new(MockDistribution::empty())),
         ));
         let expr_tree = un_op(
             UnOpType::Not,
