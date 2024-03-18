@@ -8,8 +8,9 @@ use crate::{
 };
 use arrow_schema::{ArrowError, DataType};
 use datafusion::arrow::array::{
-    Array, BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array, Int8Array,
-    RecordBatch, RecordBatchIterator, RecordBatchReader, UInt16Array, UInt32Array, UInt8Array,
+    Array, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array, Int32Array,
+    Int8Array, RecordBatch, RecordBatchIterator, RecordBatchReader, UInt16Array, UInt32Array,
+    UInt8Array,
 };
 use itertools::Itertools;
 use optd_core::{
@@ -122,7 +123,8 @@ define_generate_stats!(
     { DataType::UInt16, UInt16Array },
     { DataType::UInt32, UInt32Array },
     { DataType::Float32, Float32Array },
-    { DataType::Float64, Float64Array }
+    { DataType::Float64, Float64Array },
+    { DataType::Date32, Date32Array }
 );
 
 impl PerTableStats {
