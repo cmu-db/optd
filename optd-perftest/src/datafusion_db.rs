@@ -67,17 +67,21 @@ impl DatafusionDb {
     pub async fn new<P: AsRef<Path>>(workspace_dpath: P) -> anyhow::Result<Self> {
         Ok(DatafusionDb {
             workspace_dpath: workspace_dpath.as_ref().to_path_buf(),
-            ctx: Self::new_session_ctx().await?,
+            ctx: Self::new_session_ctx(None).await?,
         })
     }
 
-    /// Reset data and metadata.
-    async fn clear_state(&mut self) -> anyhow::Result<()> {
-        self.ctx = Self::new_session_ctx().await?;
+    /// Reset [`SessionContext`] to a clean state. But initializa the optimizer
+    /// with pre-generated statistics.
+    ///
+    /// A more ideal way to generate statistics would be to use the `ANALYZE`
+    /// command in SQL, but DataFusion does not support that yet.
+    async fn clear_state(&mut self, stats: Option<BaseTableStats>) -> anyhow::Result<()> {
+        self.ctx = Self::new_session_ctx(stats).await?;
         Ok(())
     }
 
-    async fn new_session_ctx() -> anyhow::Result<SessionContext> {
+    async fn new_session_ctx(stats: Option<BaseTableStats>) -> anyhow::Result<SessionContext> {
         let session_config = SessionConfig::from_env()?.with_information_schema(true);
         let rn_config = RuntimeConfig::new();
         let runtime_env = RuntimeEnv::new(rn_config.clone())?;
@@ -86,7 +90,7 @@ impl DatafusionDb {
                 SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
             let optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical(
                 Arc::new(DatafusionCatalog::new(state.catalog_list())),
-                BaseTableStats::default(),
+                stats.unwrap_or(BaseTableStats::default()),
                 true,
             );
             state = state.with_physical_optimizer_rules(vec![]);
@@ -197,10 +201,13 @@ impl DatafusionDb {
     }
 
     async fn load_tpch_data(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
-        self.clear_state().await?;
-
+        // Geenrate the tables.
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_config)?;
+
+        // Generate the stats.
+        let stats = self.load_tpch_stats(&tpch_kit, tpch_config).await?;
+        self.clear_state(Some(stats)).await?;
 
         // Create the tables.
         let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
@@ -252,7 +259,6 @@ impl DatafusionDb {
             .await?;
         }
 
-        self.load_tpch_stats(&tpch_kit, tpch_config).await?;
         Ok(())
     }
 
@@ -262,7 +268,7 @@ impl DatafusionDb {
         tpch_config: &TpchConfig,
     ) -> anyhow::Result<BaseTableStats> {
         // To get the schema of each table.
-        let ctx = Self::new_session_ctx().await?;
+        let ctx = Self::new_session_ctx(None).await?;
         let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
         let ddls = ddls
             .split(';')
