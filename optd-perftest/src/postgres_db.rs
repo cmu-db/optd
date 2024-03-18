@@ -81,9 +81,19 @@ impl PostgresDb {
         let done_fpath = pgdata_dones_dpath.join(done_fname);
         // determine whether we should load the data
         let should_load = if benchmark.is_readonly() {
-            // we use the existence of done_fpath to indicate that loading was finished rather than
-            // whether dbname exists as it's possible for dbname to be created by only partially loaded
-            !done_fpath.exists()
+            // if the db doesn't even exist then we clearly need to load it
+            if !Self::get_does_db_exist(&default_db_client, &dbname).await? {
+                // there may be a done_fpath left over from before. we need to make sure to delete it since it's
+                // now known to be inaccurate
+                if done_fpath.exists() {
+                    fs::remove_file(&done_fpath)?;
+                }
+                true
+            } else {
+                // if the db does exist, we use done_fpath to determine if we need to load it since it's possible
+                // for the db to be created but only partially loaded
+                !done_fpath.exists()
+            }
         } else {
             true
         };
