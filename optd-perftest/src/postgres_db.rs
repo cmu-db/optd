@@ -1,6 +1,6 @@
 use crate::{
     benchmark::Benchmark,
-    cardtest::CardtestRunnerDBHelper,
+    cardtest::CardtestRunnerDBMSHelper,
     tpch::{TpchConfig, TpchKit},
 };
 use async_trait::async_trait;
@@ -72,7 +72,7 @@ impl PostgresDb {
     async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
         let dbname = benchmark.get_dbname();
         // since we don't know whether dbname exists at this point, we have to connect to the default database
-        let default_db_client = self.connect_to_db(DEFAULT_DBNAME).await?;
+        let defaultdb_client = self.connect_to_db(DEFAULT_DBNAME).await?;
         let pgdata_dones_dpath = self.workspace_dpath.join("pgdata_dones");
         if !pgdata_dones_dpath.exists() {
             fs::create_dir(&pgdata_dones_dpath)?;
@@ -82,7 +82,7 @@ impl PostgresDb {
         // determine whether we should load the data
         let should_load = if benchmark.is_readonly() {
             // if the db doesn't even exist then we clearly need to load it
-            if !Self::get_does_db_exist(&default_db_client, &dbname).await? {
+            if !Self::get_does_db_exist(&defaultdb_client, &dbname).await? {
                 // there may be a done_fpath left over from before. we need to make sure to delete it since it's
                 // now known to be inaccurate
                 if done_fpath.exists() {
@@ -100,16 +100,16 @@ impl PostgresDb {
         if should_load {
             log::debug!("[start] loading benchmark data");
             // it's possible for the db to exist or not after we have determined we should load the data
-            let does_db_exist = Self::get_does_db_exist(&default_db_client, &dbname).await?;
+            let does_db_exist = Self::get_does_db_exist(&defaultdb_client, &dbname).await?;
             if does_db_exist {
-                default_db_client
+                defaultdb_client
                     .query(&format!("DROP DATABASE {}", dbname), &[])
                     .await?;
             }
-            default_db_client
+            defaultdb_client
                 .query(&format!("CREATE DATABASE {}", dbname), &[])
                 .await?;
-            drop(default_db_client);
+            drop(defaultdb_client);
             // now that we've created `dbname`, we can connect to that
             let client = self.connect_to_db(&dbname).await?;
             match benchmark {
@@ -178,7 +178,7 @@ impl PostgresDb {
 }
 
 #[async_trait]
-impl CardtestRunnerDBHelper for PostgresDb {
+impl CardtestRunnerDBMSHelper for PostgresDb {
     fn get_name(&self) -> &str {
         "Postgres"
     }
@@ -210,7 +210,7 @@ impl CardtestRunnerDBHelper for PostgresDb {
     }
 }
 
-/// This impl has helpers for ```impl CardtestRunnerDBHelper for PostgresDb```
+/// This impl has helpers for ```impl CardtestRunnerDBMSHelper for PostgresDb```
 impl PostgresDb {
     async fn eval_tpch_estcards(
         &self,

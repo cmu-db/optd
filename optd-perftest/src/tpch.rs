@@ -14,7 +14,7 @@ const NUM_TPCH_QUERIES: usize = 22;
 
 #[derive(Clone, Debug)]
 pub struct TpchConfig {
-    pub database: String,
+    pub dbms: String,
     pub scale_factor: f64,
     pub seed: i32,
     pub query_ids: Vec<u32>,
@@ -115,16 +115,16 @@ impl TpchKit {
         Ok(())
     }
 
-    pub fn make(&self, database: &str) -> io::Result<()> {
+    pub fn make(&self, dbms: &str) -> io::Result<()> {
         env::set_current_dir(&self.dbgen_dpath)?;
         log::debug!("[start] building dbgen");
         // we need to call "make clean" because we might have called make earlier with
-        //   a different database
+        //   a different dbms
         shell::run_command_with_status_check("make clean")?;
         shell::run_command_with_status_check(&format!(
             "make MACHINE={} DATABASE={}",
             TpchKit::get_machine(),
-            database
+            dbms
         ))?;
         log::debug!("[end] building dbgen");
         Ok(())
@@ -144,7 +144,7 @@ impl TpchKit {
         let this_genned_tables_dpath = self.get_this_genned_tables_dpath(tpch_config);
         let done_fpath = this_genned_tables_dpath.join("dbgen_done");
         if !done_fpath.exists() {
-            self.make(&tpch_config.database)?;
+            self.make(&tpch_config.dbms)?;
             shell::make_into_empty_dir(&this_genned_tables_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
@@ -166,7 +166,7 @@ impl TpchKit {
         let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_config);
         let done_fpath = this_genned_queries_dpath.join("qgen_done");
         if !done_fpath.exists() {
-            self.make(&tpch_config.database)?;
+            self.make(&tpch_config.dbms)?;
             shell::make_into_empty_dir(&this_genned_queries_dpath)?;
             env::set_current_dir(&self.dbgen_dpath)?;
             log::debug!("[start] generating queries for {}", tpch_config);
@@ -195,7 +195,7 @@ impl TpchKit {
     fn get_this_genned_tables_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
         let dname = format!(
             "db{}_sf{}_sd{}",
-            tpch_config.database, tpch_config.scale_factor, tpch_config.seed
+            tpch_config.dbms, tpch_config.scale_factor, tpch_config.seed
         );
         self.genned_tables_dpath.join(dname)
     }
@@ -204,7 +204,7 @@ impl TpchKit {
     fn get_this_genned_queries_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
         let dname = format!(
             "db{}_sf{}_sd{}",
-            tpch_config.database, tpch_config.scale_factor, tpch_config.seed
+            tpch_config.dbms, tpch_config.scale_factor, tpch_config.seed
         );
         self.genned_queries_dpath.join(dname)
     }
@@ -236,7 +236,7 @@ impl TpchKit {
     }
 
     /// Get an iterator through all generated .sql files _in order_ of a given config
-    /// It's important to iterate _in order_ due to the interface of CardtestRunnerDBHelper
+    /// It's important to iterate _in order_ due to the interface of CardtestRunnerDBMSHelper
     pub fn get_sql_fpath_ordered_iter(
         &self,
         tpch_config: &TpchConfig,

@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
             pgpassword,
         } => {
             let tpch_config = TpchConfig {
-                database: String::from(TPCH_KIT_POSTGRES),
+                dbms: String::from(TPCH_KIT_POSTGRES),
                 scale_factor,
                 seed,
                 query_ids,
@@ -75,15 +75,15 @@ async fn main() -> anyhow::Result<()> {
                 cardtest::cardtest(&workspace_dpath, &pguser, &pgpassword, tpch_config).await?;
             println!(" Q-errors");
             println!("----------");
-            for (database, qerrors) in &qerrors_alldbs {
+            for (dbms, qerrors) in &qerrors_alldbs {
                 if qerrors.len() > 0 {
                     let mean_qerror = qerrors.iter().sum::<f64>() / qerrors.len() as f64;
                     let min_qerror = qerrors.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
                     let median_qerror = statistical::median(qerrors);
                     let max_qerror = qerrors.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-                    print!("{} | mean={} | min={} | median={} | max={}", database, mean_qerror, min_qerror, median_qerror, max_qerror);
+                    print!("{} | mean={} | min={} | median={} | max={}", dbms, mean_qerror, min_qerror, median_qerror, max_qerror);
                 } else {
-                    print!("{} | N/A", database);
+                    print!("{} | N/A", dbms);
                 }
                 println!();
             }          

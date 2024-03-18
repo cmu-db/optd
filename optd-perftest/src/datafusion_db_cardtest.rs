@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     benchmark::Benchmark,
-    cardtest::CardtestRunnerDBHelper,
+    cardtest::CardtestRunnerDBMSHelper,
     tpch::{TpchConfig, TpchKit},
 };
 use async_trait::async_trait;
@@ -31,7 +31,7 @@ pub struct DatafusionDb {
 }
 
 #[async_trait]
-impl CardtestRunnerDBHelper for DatafusionDb {
+impl CardtestRunnerDBMSHelper for DatafusionDb {
     fn get_name(&self) -> &str {
         "DataFusion"
     }
