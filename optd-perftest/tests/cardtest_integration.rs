@@ -20,7 +20,7 @@ mod tests {
 
         // run command twice
         for i in 1..=2 {
-            let mut cmd = create_cardtest_run_cmd(false);
+            let mut cmd = create_cardtest_run_cmd(true);
             let output = cmd.output().unwrap();
             assert!(
                 output.status.success(),
@@ -52,6 +52,7 @@ mod tests {
         ]);
         if debug_print {
             cmd.env("RUST_LOG", "debug");
+            cmd.env("RUST_BACKTRACE", "1");
             cmd.stdout(Stdio::inherit());
             cmd.stderr(Stdio::inherit());
         }
