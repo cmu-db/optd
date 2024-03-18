@@ -69,26 +69,16 @@ impl PostgresDb {
         Ok(!result.is_empty())
     }
 
-    // Retrieves the location of pgdata
-    async fn get_pgdata_dpath_str(client: &Client) -> anyhow::Result<String> {
-        let row = client
-            .query_one(
-                "SELECT setting FROM pg_settings WHERE name = 'data_directory'",
-                &[],
-            )
-            .await?;
-        let pgdata_location: String = row.get("setting");
-        Ok(pgdata_location)
-    }
-
     async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
         let dbname = benchmark.get_dbname();
         // since we don't know whether dbname exists at this point, we have to connect to the default database
         let default_db_client = self.connect_to_db(DEFAULT_DBNAME).await?;
-        let pgdata_dpath_str = Self::get_pgdata_dpath_str(&default_db_client).await?;
-        let pgdata_dpath = PathBuf::from(pgdata_dpath_str);
+        let pgdata_dones_dpath = self.workspace_dpath.join("pgdata_dones");
+        if !pgdata_dones_dpath.exists() {
+            fs::create_dir(&pgdata_dones_dpath)?;
+        }
         let done_fname = format!("{}_done", dbname);
-        let done_fpath = pgdata_dpath.join(done_fname);
+        let done_fpath = pgdata_dones_dpath.join(done_fname);
         // determine whether we should load the data
         let should_load = if benchmark.is_readonly() {
             // we use the existence of done_fpath to indicate that loading was finished rather than
@@ -154,25 +144,25 @@ impl PostgresDb {
         client: &tokio_postgres::Client,
         tbl_fpath: P,
     ) -> anyhow::Result<()> {
-        let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
+        // read file
         let mut file = File::open(&tbl_fpath).await?;
         let mut data = Vec::new();
-        // Read the entire file asynchronously into a Vec<u8>
         file.read_to_end(&mut data).await?;
         let cursor = Cursor::new(data);
 
-        // Prepare the COPY FROM STDIN statement
+        // run copy from statement
+        let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
         let stmt = client
             .prepare(&format!(
                 "COPY {} FROM STDIN WITH (FORMAT csv, DELIMITER '|')",
                 tbl_name
             ))
             .await?;
-
         let sink = client.copy_in(&stmt).await?;
         futures::pin_mut!(sink);
         sink.as_mut().start_send(cursor)?;
         sink.finish().await?;
+
         Ok(())
     }
 }
