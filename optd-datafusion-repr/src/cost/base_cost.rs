@@ -8,9 +8,9 @@ use crate::{
 };
 use arrow_schema::{ArrowError, DataType};
 use datafusion::arrow::array::{
-    Array, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array, Int32Array,
-    Int8Array, RecordBatch, RecordBatchIterator, RecordBatchReader, UInt16Array, UInt32Array,
-    UInt8Array,
+    Array, BooleanArray, Date32Array, Decimal128Array, Float32Array, Float64Array, Int16Array,
+    Int32Array, Int8Array, RecordBatch, RecordBatchIterator, RecordBatchReader, UInt16Array,
+    UInt32Array, UInt8Array,
 };
 use itertools::Itertools;
 use optd_core::{
@@ -81,52 +81,6 @@ pub struct PerTableStats {
     per_column_stats_vec: Vec<Option<PerColumnStats>>,
 }
 
-macro_rules! define_generate_stats {
-    (
-        $({ $data_type:path, $array_type:path }), *
-    ) => {
-        fn generate_stats(
-            col: &Arc<dyn Array>,
-            col_type: &DataType,
-            col_idx: usize,
-            distr: &mut [Option<TDigest>],
-            hlls: &mut [HyperLogLog],
-        ) {
-            match col_type {
-                $(
-                    $data_type => {
-                        let array = col.as_any().downcast_ref::<$array_type>().unwrap();
-                        let values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
-
-                        // Update distribution.
-                        distr[col_idx] = {
-                            let mut f64_values = values.iter().map(|x| f64::from(*x)).collect::<Vec<_>>();
-                            Some(distr[col_idx].take().unwrap().merge_values(&mut f64_values))
-                        };
-
-                        // Update hll.
-                        hlls[col_idx].aggregate(&values);
-                    },
-                )*
-                _ => unreachable!(),
-            }
-        }
-    };
-}
-
-define_generate_stats!(
-    { DataType::Boolean, BooleanArray },
-    { DataType::Int8, Int8Array },
-    { DataType::Int16, Int16Array },
-    { DataType::Int32, Int32Array },
-    { DataType::UInt8, UInt8Array },
-    { DataType::UInt16, UInt16Array },
-    { DataType::UInt32, UInt32Array },
-    { DataType::Float32, Float32Array },
-    { DataType::Float64, Float64Array },
-    { DataType::Date32, Date32Array }
-);
-
 impl PerTableStats {
     pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
         batch_iter: RecordBatchIterator<I>,
@@ -174,7 +128,7 @@ impl PerTableStats {
                     // Update null cnt.
                     null_cnt[i] += col.null_count();
 
-                    generate_stats(col, col_type, i, &mut distr, &mut hlls);
+                    Self::generate_stats(col, col_type, &mut distr[i], &mut hlls[i]);
                 }
             }
         }
@@ -212,6 +166,82 @@ impl PerTableStats {
                 | DataType::Float32
                 | DataType::Float64
         )
+    }
+
+    /// Generate statistics for a column.
+    fn generate_stats(
+        col: &Arc<dyn Array>,
+        col_type: &DataType,
+        distr: &mut Option<TDigest>,
+        hll: &mut HyperLogLog,
+    ) {
+        macro_rules! generate_stats_for_col {
+            ({ $col:expr, $distr:expr, $hll:expr, $array_type:path, $to_f64:ident }) => {{
+                let array = $col.as_any().downcast_ref::<$array_type>().unwrap();
+                // Filter out `None` values.
+                let values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+
+                // Update distribution.
+                *$distr = {
+                    let mut f64_values = values.iter().map(|x| $to_f64(*x)).collect::<Vec<_>>();
+                    Some($distr.take().unwrap().merge_values(&mut f64_values))
+                };
+
+                // Update hll.
+                $hll.aggregate(&values);
+            }};
+        }
+
+        /// Convert a value to f64 with no out of range or precision loss.
+        fn to_f64_safe<T: Into<f64>>(val: T) -> f64 {
+            val.into()
+        }
+
+        /// Convert i128 to f64 with possible precision loss.
+        ///
+        /// Note: optd represents decimal with the significand as f64 (see `ConstantExpr::decimal`).
+        /// For instance 0.04 of type `Decimal128(15, 2)` is just 4.0, the type information
+        /// is discarded. Therefore we must use the significand to generate the statistics.
+        fn i128_to_f64(val: i128) -> f64 {
+            val as f64
+        }
+
+        match col_type {
+            DataType::Boolean => {
+                generate_stats_for_col!({ col, distr, hll, BooleanArray, to_f64_safe })
+            }
+            DataType::Int8 => {
+                generate_stats_for_col!({ col, distr, hll, Int8Array, to_f64_safe })
+            }
+            DataType::Int16 => {
+                generate_stats_for_col!({ col, distr, hll, Int16Array, to_f64_safe })
+            }
+            DataType::Int32 => {
+                generate_stats_for_col!({ col, distr, hll, Int32Array, to_f64_safe })
+            }
+            DataType::UInt8 => {
+                generate_stats_for_col!({ col, distr, hll, UInt8Array, to_f64_safe })
+            }
+            DataType::UInt16 => {
+                generate_stats_for_col!({ col, distr, hll, UInt16Array, to_f64_safe })
+            }
+            DataType::UInt32 => {
+                generate_stats_for_col!({ col, distr, hll, UInt32Array, to_f64_safe })
+            }
+            DataType::Float32 => {
+                generate_stats_for_col!({ col, distr, hll, Float32Array, to_f64_safe })
+            }
+            DataType::Float64 => {
+                generate_stats_for_col!({ col, distr, hll, Float64Array, to_f64_safe })
+            }
+            DataType::Date32 => {
+                generate_stats_for_col!({ col, distr, hll, Date32Array, to_f64_safe })
+            }
+            DataType::Decimal128(_, _) => {
+                generate_stats_for_col!({ col, distr, hll, Decimal128Array, i128_to_f64 })
+            }
+            _ => unreachable!(),
+        }
     }
 }
 
