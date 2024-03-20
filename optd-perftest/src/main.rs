@@ -75,9 +75,9 @@ async fn cardtest<P: AsRef<Path> + Clone>(
     workspace_dpath: P,
     tpch_config: TpchConfig,
 ) -> anyhow::Result<()> {
-    // let pg_db = PostgresDb::new(workspace_dpath.clone());
+    let pg_db = PostgresDb::new(workspace_dpath.clone());
     let df_db = DatafusionDb::new(workspace_dpath).await?;
-    let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(df_db)];
+    let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db), Box::new(df_db)];
 
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
     let mut cardtest_runner = CardtestRunner::new(databases).await?;

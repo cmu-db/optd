@@ -18,8 +18,8 @@ use optd_core::{
     cost::{Cost, CostModel},
     rel_node::{RelNode, RelNodeTyp, Value},
 };
-use optd_gungnir::stats::hyperloglog::{HyperLogLog, DEFAULT_PRECISION};
-use optd_gungnir::stats::tdigest::{TDigest, DEFAULT_COMPRESSION};
+use optd_gungnir::stats::hyperloglog::{self, HyperLogLog};
+use optd_gungnir::stats::tdigest::{self, TDigest};
 
 fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     model: &C,
@@ -108,13 +108,13 @@ impl PerTableStats {
             .iter()
             .map(|col_type| {
                 if Self::is_type_supported(col_type) {
-                    Some(TDigest::new(DEFAULT_COMPRESSION))
+                    Some(TDigest::new(tdigest::DEFAULT_COMPRESSION))
                 } else {
                     None
                 }
             })
             .collect_vec();
-        let mut hlls = vec![HyperLogLog::new(DEFAULT_PRECISION); col_cnt];
+        let mut hlls = vec![HyperLogLog::new(hyperloglog::DEFAULT_PRECISION); col_cnt];
         let mut null_cnt = vec![0; col_cnt];
 
         for batch in batch_iter {
@@ -128,7 +128,7 @@ impl PerTableStats {
                     // Update null cnt.
                     null_cnt[i] += col.null_count();
 
-                    Self::generate_stats(col, col_type, &mut distr[i], &mut hlls[i]);
+                    Self::generate_stats_for_column(col, col_type, &mut distr[i], &mut hlls[i]);
                 }
             }
         }
@@ -169,7 +169,7 @@ impl PerTableStats {
     }
 
     /// Generate statistics for a column.
-    fn generate_stats(
+    fn generate_stats_for_column(
         col: &Arc<dyn Array>,
         col_type: &DataType,
         distr: &mut Option<TDigest>,
