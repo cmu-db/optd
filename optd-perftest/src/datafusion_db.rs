@@ -90,7 +90,7 @@ impl DatafusionDb {
                 SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
             let optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical(
                 Arc::new(DatafusionCatalog::new(state.catalog_list())),
-                stats.unwrap_or(BaseTableStats::default()),
+                stats.unwrap_or_default(),
                 true,
             );
             state = state.with_physical_optimizer_rules(vec![]);
