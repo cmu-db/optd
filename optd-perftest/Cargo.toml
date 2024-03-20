@@ -37,3 +37,8 @@ clap = { version = "4.5", features = [
 log = "0.4"
 env_logger = "0.11"
 lazy_static = "1.4.0"
+tokio-util = "0.7"
+futures-util = "0.3"
+
+[dev_dependencies]
+assert_cmd = "2.0"

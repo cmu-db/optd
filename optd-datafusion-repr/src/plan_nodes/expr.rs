@@ -3,6 +3,7 @@ use std::{fmt::Display, sync::Arc};
 use arrow_schema::DataType;
 use itertools::Itertools;
 use pretty_xmlish::Pretty;
+use serde::{Deserialize, Serialize};
 
 use optd_core::rel_node::{RelNode, RelNodeMetaMap, Value};
 
@@ -65,7 +66,7 @@ impl OptRelNode for ExprList {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum ConstantType {
     Bool,
     Utf8String,
@@ -84,12 +85,9 @@ pub enum ConstantType {
     Any,
 }
 
-#[derive(Clone, Debug)]
-pub struct ConstantExpr(pub Expr);
-
-impl ConstantExpr {
-    pub fn new(value: Value) -> Self {
-        let typ = match &value {
+impl ConstantType {
+    pub fn get_data_type_from_value(value: &Value) -> Self {
+        match value {
             Value::Bool(_) => ConstantType::Bool,
             Value::String(_) => ConstantType::Utf8String,
             Value::UInt8(_) => ConstantType::UInt8,
@@ -102,7 +100,16 @@ impl ConstantExpr {
             Value::Int64(_) => ConstantType::Int64,
             Value::Float(_) => ConstantType::Float64,
             _ => unimplemented!(),
-        };
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ConstantExpr(pub Expr);
+
+impl ConstantExpr {
+    pub fn new(value: Value) -> Self {
+        let typ = ConstantType::get_data_type_from_value(&value);
         Self::new_with_type(value, typ)
     }
 

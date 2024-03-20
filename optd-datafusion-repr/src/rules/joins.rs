@@ -13,7 +13,7 @@ use crate::plan_nodes::{
     LogicalEmptyRelation, LogicalJoin, LogicalProjection, OptRelNode, OptRelNodeTyp,
     PhysicalHashJoin, PlanNode,
 };
-use crate::properties::schema::SchemaPropertyBuilder;
+use crate::properties::schema::{Schema, SchemaPropertyBuilder};
 
 // A join B -> B join A
 define_rule!(
@@ -109,7 +109,17 @@ fn apply_eliminate_join(
                 } else {
                     // No need to handle schema here, as all exprs in the same group
                     // will have same logical properties
-                    let node = LogicalEmptyRelation::new(false);
+                    let mut left_fields = optimizer
+                        .get_property::<SchemaPropertyBuilder>(Arc::new(left.clone()), 0)
+                        .fields;
+                    let right_fields = optimizer
+                        .get_property::<SchemaPropertyBuilder>(Arc::new(right.clone()), 0)
+                        .fields;
+                    left_fields.extend(right_fields);
+                    let new_schema = Schema {
+                        fields: left_fields,
+                    };
+                    let node = LogicalEmptyRelation::new(false, new_schema);
                     return vec![node.into_rel_node().as_ref().clone()];
                 }
             }

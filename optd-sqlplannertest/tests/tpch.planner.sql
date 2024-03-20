@@ -1863,55 +1863,55 @@ PhysicalSort
 ├── exprs:SortOrder { order: Asc }
 │   └── #0
 └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4 ] }
-    └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #5 ] }
-        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-            ├── PhysicalProjection { exprs: [ #0, #1, #2, #4 ] }
-            │   └── PhysicalScan { table: supplier }
-            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-                ├── PhysicalProjection { exprs: [ #0, #1 ] }
-                │   └── PhysicalAgg
-                │       ├── aggrs:Agg(Sum)
-                │       │   └── Mul
-                │       │       ├── #1
-                │       │       └── Sub
-                │       │           ├── 1
-                │       │           └── #2
-                │       ├── groups: [ #0 ]
-                │       └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
-                │           └── PhysicalFilter
-                │               ├── cond:And
-                │               │   ├── Geq
-                │               │   │   ├── #3
-                │               │   │   └── 8401
-                │               │   └── Lt
-                │               │       ├── #3
-                │               │       └── 8491
-                │               └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
-                │                   └── PhysicalScan { table: lineitem }
+    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #4 ], right_keys: [ #0 ] }
+        ├── PhysicalProjection { exprs: [ #0, #1, #2, #3, #5 ] }
+        │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+        │       ├── PhysicalProjection { exprs: [ #0, #1, #2, #4 ] }
+        │       │   └── PhysicalScan { table: supplier }
+        │       └── PhysicalProjection { exprs: [ #0, #1 ] }
+        │           └── PhysicalAgg
+        │               ├── aggrs:Agg(Sum)
+        │               │   └── Mul
+        │               │       ├── #1
+        │               │       └── Sub
+        │               │           ├── 1
+        │               │           └── #2
+        │               ├── groups: [ #0 ]
+        │               └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+        │                   └── PhysicalFilter
+        │                       ├── cond:And
+        │                       │   ├── Geq
+        │                       │   │   ├── #3
+        │                       │   │   └── 8401
+        │                       │   └── Lt
+        │                       │       ├── #3
+        │                       │       └── 8491
+        │                       └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
+        │                           └── PhysicalScan { table: lineitem }
+        └── PhysicalAgg
+            ├── aggrs:Agg(Max)
+            │   └── [ #0 ]
+            ├── groups: []
+            └── PhysicalProjection { exprs: [ #1 ] }
                 └── PhysicalAgg
-                    ├── aggrs:Agg(Max)
-                    │   └── [ #0 ]
-                    ├── groups: []
-                    └── PhysicalProjection { exprs: [ #1 ] }
-                        └── PhysicalAgg
-                            ├── aggrs:Agg(Sum)
-                            │   └── Mul
-                            │       ├── #1
-                            │       └── Sub
-                            │           ├── 1
-                            │           └── #2
-                            ├── groups: [ #0 ]
-                            └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
-                                └── PhysicalFilter
-                                    ├── cond:And
-                                    │   ├── Geq
-                                    │   │   ├── #3
-                                    │   │   └── 8401
-                                    │   └── Lt
-                                    │       ├── #3
-                                    │       └── 8491
-                                    └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
-                                        └── PhysicalScan { table: lineitem }
+                    ├── aggrs:Agg(Sum)
+                    │   └── Mul
+                    │       ├── #1
+                    │       └── Sub
+                    │           ├── 1
+                    │           └── #2
+                    ├── groups: [ #0 ]
+                    └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+                        └── PhysicalFilter
+                            ├── cond:And
+                            │   ├── Geq
+                            │   │   ├── #3
+                            │   │   └── 8401
+                            │   └── Lt
+                            │       ├── #3
+                            │       └── 8491
+                            └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
+                                └── PhysicalScan { table: lineitem }
 */
 
 -- TPC-H Q17

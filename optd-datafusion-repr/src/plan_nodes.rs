@@ -23,7 +23,7 @@ use optd_core::{
 
 pub use agg::{LogicalAgg, PhysicalAgg};
 pub use apply::{ApplyType, LogicalApply};
-pub use empty_relation::{LogicalEmptyRelation, PhysicalEmptyRelation};
+pub use empty_relation::{EmptyRelationData, LogicalEmptyRelation, PhysicalEmptyRelation};
 pub use expr::{
     BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
     DataTypeExpr, ExprList, FuncExpr, FuncType, InListExpr, LikeExpr, LogOpExpr, LogOpType,

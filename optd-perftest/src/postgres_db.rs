@@ -4,14 +4,17 @@ use crate::{
     tpch::{TpchConfig, TpchKit},
 };
 use async_trait::async_trait;
+use futures::Sink;
 use lazy_static::lazy_static;
 use regex::Regex;
 
 use std::{
     fs,
+    io::Cursor,
     path::{Path, PathBuf},
 };
 use tokio::fs::File;
+use tokio::io::AsyncReadExt;
 use tokio_postgres::{Client, NoTls};
 
 /// This dbname is assumed to always exist
@@ -19,6 +22,8 @@ const DEFAULT_DBNAME: &str = "postgres";
 
 pub struct PostgresDb {
     workspace_dpath: PathBuf,
+    pguser: String,
+    pgpassword: String,
 }
 
 /// Conventions I keep for methods of this class:
@@ -27,16 +32,24 @@ pub struct PostgresDb {
 ///   - Stop and start functions should be separate
 ///   - Setup should be done in build() unless it requires more information (like benchmark)
 impl PostgresDb {
-    pub fn new<P: AsRef<Path>>(workspace_dpath: P) -> Self {
+    pub fn new<P: AsRef<Path>>(workspace_dpath: P, pguser: &str, pgpassword: &str) -> Self {
         Self {
             workspace_dpath: PathBuf::from(workspace_dpath.as_ref()),
+            pguser: String::from(pguser),
+            pgpassword: String::from(pgpassword),
         }
     }
 
     /// Create a connection to a Postgres database
-    async fn connect_to_db(dbname: &str) -> anyhow::Result<Client> {
-        let (client, connection) =
-            tokio_postgres::connect(&format!("host=localhost dbname={}", dbname), NoTls).await?;
+    async fn connect_to_db(&self, dbname: &str) -> anyhow::Result<Client> {
+        let (client, connection) = tokio_postgres::connect(
+            &format!(
+                "host=localhost user={} password={} dbname={}",
+                self.pguser, self.pgpassword, dbname
+            ),
+            NoTls,
+        )
+        .await?;
         tokio::spawn(async move {
             if let Err(e) = connection.await {
                 eprintln!("connection error: {}", e);
@@ -56,26 +69,16 @@ impl PostgresDb {
         Ok(!result.is_empty())
     }
 
-    // Retrieves the location of pgdata
-    async fn get_pgdata_dpath_str(client: &Client) -> anyhow::Result<String> {
-        let row = client
-            .query_one(
-                "SELECT setting FROM pg_settings WHERE name = 'data_directory'",
-                &[],
-            )
-            .await?;
-        let pgdata_location: String = row.get("setting");
-        Ok(pgdata_location)
-    }
-
     async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
         let dbname = benchmark.get_dbname();
         // since we don't know whether dbname exists at this point, we have to connect to the default database
-        let default_db_client = Self::connect_to_db(DEFAULT_DBNAME).await?;
-        let pgdata_dpath_str = Self::get_pgdata_dpath_str(&default_db_client).await?;
-        let pgdata_dpath = PathBuf::from(pgdata_dpath_str);
+        let default_db_client = self.connect_to_db(DEFAULT_DBNAME).await?;
+        let pgdata_dones_dpath = self.workspace_dpath.join("pgdata_dones");
+        if !pgdata_dones_dpath.exists() {
+            fs::create_dir(&pgdata_dones_dpath)?;
+        }
         let done_fname = format!("{}_done", dbname);
-        let done_fpath = pgdata_dpath.join(done_fname);
+        let done_fpath = pgdata_dones_dpath.join(done_fname);
         // determine whether we should load the data
         let should_load = if benchmark.is_readonly() {
             // we use the existence of done_fpath to indicate that loading was finished rather than
@@ -98,7 +101,7 @@ impl PostgresDb {
                 .await?;
             drop(default_db_client);
             // now that we've created `dbname`, we can connect to that
-            let client = Self::connect_to_db(&dbname).await?;
+            let client = self.connect_to_db(&dbname).await?;
             match benchmark {
                 Benchmark::Tpch(tpch_config) => self.load_tpch_data(&client, tpch_config).await?,
                 _ => unimplemented!(),
@@ -129,18 +132,36 @@ impl PostgresDb {
         // load the tables
         tpch_kit.gen_tables(tpch_config)?;
         for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config)? {
-            let tbl_fpath_str = &tbl_fpath.to_str().unwrap();
-            let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
-            client
-                .query(
-                    &format!(
-                        "COPY {} FROM '{}' WITH (FORMAT csv, DELIMITER '|')",
-                        tbl_name, tbl_fpath_str
-                    ),
-                    &[],
-                )
-                .await?;
+            Self::copy_from_stdin(client, tbl_fpath).await?;
         }
+
+        Ok(())
+    }
+
+    /// Load a file into Postgres by sending the bytes through the network
+    /// Unlike COPY ... FROM, COPY ... FROM STDIN works even if the Postgres process is on another machine or container
+    async fn copy_from_stdin<P: AsRef<Path>>(
+        client: &tokio_postgres::Client,
+        tbl_fpath: P,
+    ) -> anyhow::Result<()> {
+        // read file
+        let mut file = File::open(&tbl_fpath).await?;
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).await?;
+        let cursor = Cursor::new(data);
+
+        // run copy from statement
+        let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
+        let stmt = client
+            .prepare(&format!(
+                "COPY {} FROM STDIN WITH (FORMAT csv, DELIMITER '|')",
+                tbl_name
+            ))
+            .await?;
+        let sink = client.copy_in(&stmt).await?;
+        futures::pin_mut!(sink);
+        sink.as_mut().start_send(cursor)?;
+        sink.finish().await?;
 
         Ok(())
     }
@@ -158,7 +179,7 @@ impl CardtestRunnerDBHelper for PostgresDb {
     ) -> anyhow::Result<Vec<usize>> {
         self.load_benchmark_data(benchmark).await?;
         let dbname = benchmark.get_dbname();
-        let client = Self::connect_to_db(&dbname).await?;
+        let client = self.connect_to_db(&dbname).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
             Benchmark::Tpch(tpch_config) => self.eval_tpch_estcards(&client, tpch_config).await,
@@ -171,7 +192,7 @@ impl CardtestRunnerDBHelper for PostgresDb {
     ) -> anyhow::Result<Vec<usize>> {
         self.load_benchmark_data(benchmark).await?;
         let dbname = benchmark.get_dbname();
-        let client = Self::connect_to_db(&dbname).await?;
+        let client = self.connect_to_db(&dbname).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
             Benchmark::Tpch(tpch_config) => self.eval_tpch_truecards(&client, tpch_config).await,
@@ -234,9 +255,9 @@ impl PostgresDb {
     /// Extract the row count from a line of an EXPLAIN output
     fn extract_row_count(explain_line: &str) -> Option<usize> {
         lazy_static! {
-            static ref ROW_CNT_RE: Regex = Regex::new(r"row_cnt=(\d+\.\d+)").unwrap();
+            static ref ROWS_RE: Regex = Regex::new(r"rows=(\d+)").unwrap();
         }
-        if let Some(caps) = ROW_CNT_RE.captures(explain_line) {
+        if let Some(caps) = ROWS_RE.captures(explain_line) {
             if let Some(matched) = caps.get(1) {
                 let rows_str = matched.as_str();
                 match rows_str.parse::<usize>() {

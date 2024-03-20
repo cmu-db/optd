@@ -1,16 +1,18 @@
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use optd_core::property::PropertyBuilder;
 
-use crate::plan_nodes::{ConstantType, OptRelNodeTyp};
+use super::DEFAULT_NAME;
+use crate::plan_nodes::{ConstantType, EmptyRelationData, OptRelNodeTyp};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Field {
     pub name: String,
     pub typ: ConstantType,
     pub nullable: bool,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Schema {
     pub fields: Vec<Field>,
 }
@@ -61,23 +63,33 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
                 schema.fields.extend(schema2.fields);
                 schema
             }
-            OptRelNodeTyp::List => {
-                // TODO: calculate real is_nullable for aggregations
+            OptRelNodeTyp::EmptyRelation => {
+                let data = data.unwrap().as_slice();
+                let empty_relation_data: EmptyRelationData =
+                    bincode::deserialize(data.as_ref()).unwrap();
+                empty_relation_data.schema
+            }
+            OptRelNodeTyp::ColumnRef => {
+                let data_typ = ConstantType::get_data_type_from_value(&data.unwrap());
                 Schema {
-                    fields: vec![
-                        Field {
-                            name: "unnamed".to_string(),
-                            typ: ConstantType::Any,
-                            nullable: true
-                        };
-                        children.len()
-                    ],
+                    fields: vec![Field {
+                        name: DEFAULT_NAME.to_string(),
+                        typ: data_typ,
+                        nullable: true,
+                    }],
                 }
+            }
+            OptRelNodeTyp::List => {
+                let mut fields = vec![];
+                for child in children {
+                    fields.extend(child.fields.clone());
+                }
+                Schema { fields }
             }
             OptRelNodeTyp::LogOp(_) => Schema {
                 fields: vec![
                     Field {
-                        name: "unnamed".to_string(),
+                        name: DEFAULT_NAME.to_string(),
                         typ: ConstantType::Any,
                         nullable: true
                     };

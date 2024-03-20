@@ -1,30 +1,19 @@
-use std::{fs, path::Path};
+use optd_perftest::cardtest;
+use optd_perftest::shell;
+use optd_perftest::tpch::{TpchConfig, TPCH_KIT_POSTGRES};
+use std::fs;
 
-use cardtest::{CardtestRunner, CardtestRunnerDBHelper};
 use clap::{Parser, Subcommand};
-use postgres_db::PostgresDb;
-
-use crate::{
-    benchmark::Benchmark,
-    datafusion_db::DatafusionDb,
-    tpch::{TpchConfig, TPCH_KIT_POSTGRES},
-};
-
-mod benchmark;
-mod cardtest;
-mod datafusion_db;
-mod postgres_db;
-mod shell;
-mod tpch;
 
 #[derive(Parser)]
 struct Cli {
     #[arg(long)]
-    #[clap(default_value = "../optd_perftest_workspace")]
+    #[clap(default_value = "optd_perftest_workspace")]
     #[clap(
         help = "The directory where artifacts required for performance testing (such as pgdata or TPC-H queries) are generated. See comment of parse_pathstr() to see what paths are allowed (TLDR: absolute and relative both ok)."
     )]
     workspace: String,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -35,12 +24,26 @@ enum Commands {
         #[arg(long)]
         #[clap(default_value = "0.01")]
         scale_factor: f64,
+
         #[arg(long)]
         #[clap(default_value = "15721")]
         seed: i32,
+
         #[arg(long)]
-        #[clap(value_delimiter = ' ', num_args = 1..)]
+        #[clap(value_delimiter = ',', num_args = 1..)]
+        // this is the current list of all queries that work in perftest
+        #[clap(default_value = "2,3,5,7,8,9,10,12,14,17")]
         query_ids: Vec<u32>,
+
+        #[arg(long)]
+        #[clap(default_value = "default_user")]
+        #[clap(help = "The name of a user with superuser privileges")]
+        pguser: String,
+
+        #[arg(long)]
+        #[clap(default_value = "password")]
+        #[clap(help = "The name of a user with superuser privileges")]
+        pgpassword: String,
     },
 }
 
@@ -59,6 +62,8 @@ async fn main() -> anyhow::Result<()> {
             scale_factor,
             seed,
             query_ids,
+            pguser,
+            pgpassword,
         } => {
             let tpch_config = TpchConfig {
                 database: String::from(TPCH_KIT_POSTGRES),
@@ -66,24 +71,11 @@ async fn main() -> anyhow::Result<()> {
                 seed,
                 query_ids,
             };
-            cardtest(&workspace_dpath, tpch_config).await
+            let qerrors =
+                cardtest::cardtest(&workspace_dpath, &pguser, &pgpassword, tpch_config).await?;
+            println!("qerrors={:?}", qerrors);
         }
     }
-}
 
-async fn cardtest<P: AsRef<Path> + Clone>(
-    workspace_dpath: P,
-    tpch_config: TpchConfig,
-) -> anyhow::Result<()> {
-    let pg_db = PostgresDb::new(workspace_dpath.clone());
-    let df_db = DatafusionDb::new(workspace_dpath).await?;
-    let databases: Vec<Box<dyn CardtestRunnerDBHelper>> = vec![Box::new(pg_db), Box::new(df_db)];
-
-    let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
-    let mut cardtest_runner = CardtestRunner::new(databases).await?;
-    let qerrors = cardtest_runner
-        .eval_benchmark_qerrors_alldbs(&tpch_benchmark)
-        .await?;
-    println!("qerrors: {:?}", qerrors);
     Ok(())
 }

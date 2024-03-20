@@ -12,6 +12,7 @@ use optd_datafusion_repr::plan_nodes::{
     LogicalEmptyRelation, LogicalFilter, LogicalJoin, LogicalLimit, LogicalProjection, LogicalScan,
     LogicalSort, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
 };
+use optd_datafusion_repr::properties::schema::Schema as OPTDSchema;
 
 use crate::OptdPlanContext;
 
@@ -366,7 +367,12 @@ impl OptdPlanContext<'_> {
         &mut self,
         node: &logical_plan::EmptyRelation,
     ) -> Result<LogicalEmptyRelation> {
-        Ok(LogicalEmptyRelation::new(node.produce_one_row))
+        // empty_relation from datafusion always have an empty schema
+        let empty_schema = OPTDSchema { fields: vec![] };
+        Ok(LogicalEmptyRelation::new(
+            node.produce_one_row,
+            empty_schema,
+        ))
     }
 
     fn conv_into_optd_limit(&mut self, node: &logical_plan::Limit) -> Result<LogicalLimit> {
