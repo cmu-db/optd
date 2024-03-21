@@ -76,17 +76,26 @@ async fn main() -> anyhow::Result<()> {
             println!(" Q-errors");
             println!("----------");
             for (dbms, qerrors) in &qerrors_alldbs {
-                if qerrors.len() > 0 {
+                if !qerrors.is_empty() {
                     let mean_qerror = qerrors.iter().sum::<f64>() / qerrors.len() as f64;
-                    let min_qerror = qerrors.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+                    let min_qerror = qerrors
+                        .iter()
+                        .min_by(|a, b| a.partial_cmp(b).unwrap())
+                        .unwrap();
                     let median_qerror = statistical::median(qerrors);
-                    let max_qerror = qerrors.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-                    print!("{} | mean={} | min={} | median={} | max={}", dbms, mean_qerror, min_qerror, median_qerror, max_qerror);
+                    let max_qerror = qerrors
+                        .iter()
+                        .max_by(|a, b| a.partial_cmp(b).unwrap())
+                        .unwrap();
+                    print!(
+                        "{} | mean={} | min={} | median={} | max={}",
+                        dbms, mean_qerror, min_qerror, median_qerror, max_qerror
+                    );
                 } else {
                     print!("{} | N/A", dbms);
                 }
                 println!();
-            }          
+            }
         }
     }
 
