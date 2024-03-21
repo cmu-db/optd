@@ -40,6 +40,7 @@ lazy_static = "1.4.0"
 tokio-util = "0.7"
 futures-util = "0.3"
 statistical = "1.0"
+prettytable-rs = "0.10"
 
 [dev_dependencies]
 assert_cmd = "2.0"

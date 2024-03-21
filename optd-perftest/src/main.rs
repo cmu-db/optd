@@ -1,8 +1,8 @@
 use optd_perftest::cardtest;
 use optd_perftest::shell;
 use optd_perftest::tpch::{TpchConfig, TPCH_KIT_POSTGRES};
-use std::fs;
-
+use std::{fs, iter};
+use prettytable::{Table, Row, Cell, format};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -73,8 +73,9 @@ async fn main() -> anyhow::Result<()> {
             };
             let qerrors_alldbs =
                 cardtest::cardtest(&workspace_dpath, &pguser, &pgpassword, tpch_config).await?;
-            println!("  Aggregate Q-Error Comparison");
-            println!("================================");
+            println!(" Aggregate Q-Error Comparison");
+            let mut agg_qerror_table = Table::new();
+            agg_qerror_table.set_titles(prettytable::row!["DBMS", "Median", "# Infinite", "Mean", "Min", "Max"]);
             for (dbms, qerrors) in &qerrors_alldbs {
                 if !qerrors.is_empty() {
                     let finite_qerrors: Vec<f64> = qerrors
@@ -94,27 +95,29 @@ async fn main() -> anyhow::Result<()> {
                         .iter()
                         .max_by(|a, b| a.partial_cmp(b).unwrap())
                         .unwrap();
-                    print!(
-                        "{} | median={} | ninf={} | mean={} | min={} | max={}",
-                        dbms, median_qerror, ninf_qerrors, mean_qerror, min_qerror, max_qerror
-                    );
+                    agg_qerror_table.add_row(prettytable::row![dbms, median_qerror, ninf_qerrors, mean_qerror, min_qerror, max_qerror]);
                 } else {
-                    print!("{} | no queries", dbms);
+                    agg_qerror_table.add_row(prettytable::row![dbms, "N/A", "N/A", "N/A", "N/A", "N/A"]);
                 }
-                println!();
             }
-            println!();
+            agg_qerror_table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
+            agg_qerror_table.printstd();
 
-            println!("  Per-Query Q-Error Comparison");
-            println!("================================");
+            let mut per_query_qerror_table = Table::new();
+            println!(" Per-Query Q-Error Comparison");
+            let title_cells = iter::once(Cell::new("Query #")).chain(qerrors_alldbs.iter().map(|(dbms, _)| Cell::new(dbms))).collect();
+            per_query_qerror_table.set_titles(Row::new(title_cells));
             for (i, query_id) in query_ids.iter().enumerate() {
-                print!("query {}", query_id);
-                for (dbms, qerrors) in &qerrors_alldbs {
+                let mut row_cells = vec![];
+                row_cells.push(prettytable::cell!(query_id));
+                for (_, qerrors) in &qerrors_alldbs {
                     let qerror = qerrors.get(i).unwrap();
-                    print!(" | {}={}", dbms, qerror);
+                    row_cells.push(prettytable::cell!(qerror));
                 }
-                println!();
+                per_query_qerror_table.add_row(Row::new(row_cells));
             }
+            per_query_qerror_table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
+            per_query_qerror_table.printstd();
         }
     }
 
