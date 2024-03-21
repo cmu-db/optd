@@ -8,6 +8,8 @@
 use crate::stats::murmur2::murmur_hash;
 use std::cmp::max;
 
+pub const DEFAULT_PRECISION: u8 = 12;
+
 /// Trait to transform any object into a stream of bytes.
 pub trait ByteSerializable {
     fn to_bytes(&self) -> Vec<u8>;
@@ -15,6 +17,7 @@ pub trait ByteSerializable {
 
 /// The HyperLogLog (HLL) structure to provide a statistical estimate of NDistinct.
 /// For safety reasons, HLLs can only count elements of the same ByteSerializable type.
+#[derive(Clone)]
 pub struct HyperLogLog {
     registers: Vec<u8>, // The buckets to estimate HLL on (i.e. upper p bits).
     precision: u8,      // The precision (p) of our HLL; 4 <= p <= 16.
@@ -26,6 +29,13 @@ pub struct HyperLogLog {
 impl ByteSerializable for String {
     fn to_bytes(&self) -> Vec<u8> {
         self.as_bytes().to_vec()
+    }
+}
+
+// Serialize common data types for hashing (bool).
+impl ByteSerializable for bool {
+    fn to_bytes(&self) -> Vec<u8> {
+        (*self as u8).to_bytes()
     }
 }
 

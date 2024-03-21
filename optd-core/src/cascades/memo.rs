@@ -117,8 +117,6 @@ impl<T: RelNodeTyp> Memo<T> {
         if group_a == group_b {
             return group_a;
         }
-        self.merged_groups
-            .insert(group_a.as_group_id(), group_b.as_group_id());
 
         // Copy all expressions from group a to group b
         let group_a_exprs = self.get_all_exprs_in_group(group_a.as_group_id());
@@ -126,6 +124,9 @@ impl<T: RelNodeTyp> Memo<T> {
             let expr_node = self.expr_id_to_expr_node.get(&expr_id).unwrap();
             self.add_expr_to_group(expr_id, group_b, expr_node.as_ref().clone());
         }
+
+        self.merged_groups
+            .insert(group_a.as_group_id(), group_b.as_group_id());
 
         // Remove all expressions from group a (so we don't accidentally access it)
         self.clear_exprs_in_group(group_a);

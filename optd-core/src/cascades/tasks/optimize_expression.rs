@@ -55,7 +55,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeExpressionTask {
             }
             // Skip transformation rules when budget is used
             if optimizer.ctx.budget_used && !rule.is_impl_rule() {
-                break;
+                continue;
             }
             if top_matches(rule.matcher(), expr.typ.clone(), expr.data.clone()) {
                 tasks.push(

@@ -47,3 +47,33 @@
   tasks:
     - explain:logical_optd,physical_optd
     - execute
+- sql: |
+    select * from t1 inner join t2 on t1v1 = t2v1 and false;
+  desc: Test SimplifyJoinCondRule and EliminateJoinRule (false filter to empty relation)
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select * from t1 inner join t2 on t1v1 = t2v1 and t1v1 = t2v3 and true;
+  desc: Test SimplifyJoinCondRule (skip true filter for and)
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select * from t1 inner join t2 on t1v1 = t2v1 or t1v1 = t2v3 and true;
+  desc: Test SimplifyJoinCondRule (skip true filter for and)
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select * from t1 inner join t2 on t1v1 = t2v1 or t1v1 = t2v3 or true;
+  desc: Test SimplifyJoinCondRule, EliminateFilter (repace true filter for or)
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select * from t1 inner join t2 on t1v1 = t2v1 or t1v1 = t2v1 and t1v1 = t2v1;
+  desc: Test SimplifyJoinCondRule (remove duplicates)
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute

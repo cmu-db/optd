@@ -16,6 +16,7 @@ datafusion = { version = "32.0.0", features = [
 ] }
 optd-datafusion-repr = { path = "../optd-datafusion-repr" }
 optd-datafusion-bridge = { path = "../optd-datafusion-bridge" }
+optd-gungnir = { path = "../optd-gungnir" }
 datafusion-optd-cli = { path = "../datafusion-optd-cli" }
 futures = "0.3"
 anyhow = { version = "1", features = ["backtrace"] }

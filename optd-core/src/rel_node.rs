@@ -151,6 +151,13 @@ impl Value {
             _ => panic!("Value is not a string"),
         }
     }
+
+    pub fn as_slice(&self) -> Arc<[u8]> {
+        match self {
+            Value::Serialized(i) => i.clone(),
+            _ => panic!("Value is not a serialized"),
+        }
+    }
 }
 
 /// A RelNode is consisted of a plan node type and some children.

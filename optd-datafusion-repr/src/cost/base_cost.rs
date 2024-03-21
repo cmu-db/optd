@@ -6,12 +6,20 @@ use crate::{
     plan_nodes::{OptRelNodeRef, OptRelNodeTyp},
     properties::column_ref::ColumnRef,
 };
+use arrow_schema::{ArrowError, DataType};
+use datafusion::arrow::array::{
+    Array, BooleanArray, Date32Array, Decimal128Array, Float32Array, Float64Array, Int16Array,
+    Int32Array, Int8Array, RecordBatch, RecordBatchIterator, RecordBatchReader, UInt16Array,
+    UInt32Array, UInt8Array,
+};
 use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
     cost::{Cost, CostModel},
     rel_node::{RelNode, RelNodeTyp, Value},
 };
+use optd_gungnir::stats::hyperloglog::{self, HyperLogLog};
+use optd_gungnir::stats::tdigest::{self, TDigest};
 
 fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     model: &C,
@@ -34,9 +42,207 @@ pub struct OptCostModel {
     per_table_stats_map: BaseTableStats,
 }
 
+struct MockMostCommonValues {
+    mcvs: HashMap<Value, f64>,
+}
+
+impl MockMostCommonValues {
+    pub fn empty() -> Self {
+        MockMostCommonValues {
+            mcvs: HashMap::new(),
+        }
+    }
+}
+
+impl MostCommonValues for MockMostCommonValues {
+    fn freq(&self, value: &Value) -> Option<f64> {
+        self.mcvs.get(value).copied()
+    }
+
+    fn total_freq(&self) -> f64 {
+        self.mcvs.values().sum()
+    }
+
+    fn freq_over_pred(&self, pred: Box<dyn Fn(&Value) -> bool>) -> f64 {
+        self.mcvs
+            .iter()
+            .filter(|(val, _)| pred(val))
+            .map(|(_, freq)| freq)
+            .sum()
+    }
+
+    fn cnt(&self) -> usize {
+        self.mcvs.len()
+    }
+}
+
 pub struct PerTableStats {
     row_cnt: usize,
-    per_column_stats_vec: Vec<PerColumnStats>,
+    per_column_stats_vec: Vec<Option<PerColumnStats>>,
+}
+
+impl PerTableStats {
+    pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
+        batch_iter: RecordBatchIterator<I>,
+    ) -> anyhow::Result<Self> {
+        let schema = batch_iter.schema();
+        let col_types = schema
+            .fields()
+            .iter()
+            .map(|f| f.data_type().clone())
+            .collect_vec();
+        let col_cnt = col_types.len();
+
+        let mut row_cnt = 0;
+        let mut mcvs = col_types
+            .iter()
+            .map(|col_type| {
+                if Self::is_type_supported(col_type) {
+                    Some(MockMostCommonValues::empty())
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+        let mut distr = col_types
+            .iter()
+            .map(|col_type| {
+                if Self::is_type_supported(col_type) {
+                    Some(TDigest::new(tdigest::DEFAULT_COMPRESSION))
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+        let mut hlls = vec![HyperLogLog::new(hyperloglog::DEFAULT_PRECISION); col_cnt];
+        let mut null_cnt = vec![0; col_cnt];
+
+        for batch in batch_iter {
+            let batch = batch?;
+            row_cnt += batch.num_rows();
+
+            // Enumerate the columns.
+            for (i, col) in batch.columns().iter().enumerate() {
+                let col_type = &col_types[i];
+                if Self::is_type_supported(col_type) {
+                    // Update null cnt.
+                    null_cnt[i] += col.null_count();
+
+                    Self::generate_stats_for_column(col, col_type, &mut distr[i], &mut hlls[i]);
+                }
+            }
+        }
+
+        // Assemble the per-column stats.
+        let mut per_column_stats_vec = Vec::with_capacity(col_cnt);
+        for i in 0..col_cnt {
+            per_column_stats_vec.push(if Self::is_type_supported(&col_types[i]) {
+                Some(PerColumnStats {
+                    mcvs: Box::new(mcvs[i].take().unwrap()) as Box<dyn MostCommonValues>,
+                    ndistinct: hlls[i].n_distinct(),
+                    null_frac: null_cnt[i] as f64 / row_cnt as f64,
+                    distr: Box::new(distr[i].take().unwrap()) as Box<dyn Distribution>,
+                })
+            } else {
+                None
+            });
+        }
+        Ok(Self {
+            row_cnt,
+            per_column_stats_vec,
+        })
+    }
+
+    fn is_type_supported(data_type: &DataType) -> bool {
+        matches!(
+            data_type,
+            DataType::Boolean
+                | DataType::Int8
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::UInt8
+                | DataType::UInt16
+                | DataType::UInt32
+                | DataType::Float32
+                | DataType::Float64
+        )
+    }
+
+    /// Generate statistics for a column.
+    fn generate_stats_for_column(
+        col: &Arc<dyn Array>,
+        col_type: &DataType,
+        distr: &mut Option<TDigest>,
+        hll: &mut HyperLogLog,
+    ) {
+        macro_rules! generate_stats_for_col {
+            ({ $col:expr, $distr:expr, $hll:expr, $array_type:path, $to_f64:ident }) => {{
+                let array = $col.as_any().downcast_ref::<$array_type>().unwrap();
+                // Filter out `None` values.
+                let values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+
+                // Update distribution.
+                *$distr = {
+                    let mut f64_values = values.iter().map(|x| $to_f64(*x)).collect::<Vec<_>>();
+                    Some($distr.take().unwrap().merge_values(&mut f64_values))
+                };
+
+                // Update hll.
+                $hll.aggregate(&values);
+            }};
+        }
+
+        /// Convert a value to f64 with no out of range or precision loss.
+        fn to_f64_safe<T: Into<f64>>(val: T) -> f64 {
+            val.into()
+        }
+
+        /// Convert i128 to f64 with possible precision loss.
+        ///
+        /// Note: optd represents decimal with the significand as f64 (see `ConstantExpr::decimal`).
+        /// For instance 0.04 of type `Decimal128(15, 2)` is just 4.0, the type information
+        /// is discarded. Therefore we must use the significand to generate the statistics.
+        fn i128_to_f64(val: i128) -> f64 {
+            val as f64
+        }
+
+        match col_type {
+            DataType::Boolean => {
+                generate_stats_for_col!({ col, distr, hll, BooleanArray, to_f64_safe })
+            }
+            DataType::Int8 => {
+                generate_stats_for_col!({ col, distr, hll, Int8Array, to_f64_safe })
+            }
+            DataType::Int16 => {
+                generate_stats_for_col!({ col, distr, hll, Int16Array, to_f64_safe })
+            }
+            DataType::Int32 => {
+                generate_stats_for_col!({ col, distr, hll, Int32Array, to_f64_safe })
+            }
+            DataType::UInt8 => {
+                generate_stats_for_col!({ col, distr, hll, UInt8Array, to_f64_safe })
+            }
+            DataType::UInt16 => {
+                generate_stats_for_col!({ col, distr, hll, UInt16Array, to_f64_safe })
+            }
+            DataType::UInt32 => {
+                generate_stats_for_col!({ col, distr, hll, UInt32Array, to_f64_safe })
+            }
+            DataType::Float32 => {
+                generate_stats_for_col!({ col, distr, hll, Float32Array, to_f64_safe })
+            }
+            DataType::Float64 => {
+                generate_stats_for_col!({ col, distr, hll, Float64Array, to_f64_safe })
+            }
+            DataType::Date32 => {
+                generate_stats_for_col!({ col, distr, hll, Date32Array, to_f64_safe })
+            }
+            DataType::Decimal128(_, _) => {
+                generate_stats_for_col!({ col, distr, hll, Decimal128Array, i128_to_f64 })
+            }
+            _ => unreachable!(),
+        }
+    }
 }
 
 pub struct PerColumnStats {
@@ -45,7 +251,7 @@ pub struct PerColumnStats {
 
     // ndistinct _does_ include the values in mcvs
     // ndistinct _does not_ include nulls
-    ndistinct: i32,
+    ndistinct: u64,
 
     // postgres uses null_frac instead of something like "num_nulls" so we'll follow suit
     // my guess for why they use null_frac is because we only ever use the fraction of nulls, not the #
@@ -445,7 +651,8 @@ impl OptCostModel {
         is_eq: bool,
     ) -> Option<f64> {
         if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
-            if let Some(per_column_stats) = per_table_stats.per_column_stats_vec.get(col_idx) {
+            if let Some(Some(per_column_stats)) = per_table_stats.per_column_stats_vec.get(col_idx)
+            {
                 let eq_freq = if let Some(freq) = per_column_stats.mcvs.freq(value) {
                     freq
                 } else {
@@ -484,7 +691,8 @@ impl OptCostModel {
         is_col_eq_val: bool,
     ) -> Option<f64> {
         if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
-            if let Some(per_column_stats) = per_table_stats.per_column_stats_vec.get(col_idx) {
+            if let Some(Some(per_column_stats)) = per_table_stats.per_column_stats_vec.get(col_idx)
+            {
                 // because distr does not include the values in MCVs, we need to compute the CDFs there as well
                 // because nulls return false in any comparison, they are never included when computing range selectivity
                 let distr_leq_freq = per_column_stats.distr.cdf(value);
@@ -555,7 +763,7 @@ impl OptCostModel {
 }
 
 impl PerTableStats {
-    pub fn new(row_cnt: usize, per_column_stats_vec: Vec<PerColumnStats>) -> Self {
+    pub fn new(row_cnt: usize, per_column_stats_vec: Vec<Option<PerColumnStats>>) -> Self {
         Self {
             row_cnt,
             per_column_stats_vec,
@@ -566,7 +774,7 @@ impl PerTableStats {
 impl PerColumnStats {
     pub fn new(
         mcvs: Box<dyn MostCommonValues>,
-        ndistinct: i32,
+        ndistinct: u64,
         null_frac: f64,
         distr: Box<dyn Distribution>,
     ) -> Self {
@@ -612,7 +820,7 @@ mod tests {
             }
         }
 
-        fn empty() -> Self {
+        pub fn empty() -> Self {
             MockMostCommonValues::new(vec![])
         }
     }
@@ -664,7 +872,7 @@ mod tests {
         OptCostModel::new(
             vec![(
                 String::from(TABLE1_NAME),
-                PerTableStats::new(100, vec![per_column_stats]),
+                PerTableStats::new(100, vec![Some(per_column_stats)]),
             )]
             .into_iter()
             .collect(),

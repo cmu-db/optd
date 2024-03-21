@@ -1,10 +1,15 @@
 use pretty_xmlish::Pretty;
 
+use bincode;
 use optd_core::rel_node::{RelNode, RelNodeMetaMap, Value};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::explain::Insertable;
 
 use super::{replace_typ, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
+
+use crate::properties::schema::Schema;
 
 #[derive(Clone, Debug)]
 pub struct LogicalEmptyRelation(pub PlanNode);
@@ -29,25 +34,49 @@ impl OptRelNode for LogicalEmptyRelation {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EmptyRelationData {
+    pub produce_one_row: bool,
+    pub schema: Schema,
+}
+
 impl LogicalEmptyRelation {
-    pub fn new(produce_one_row: bool) -> LogicalEmptyRelation {
+    pub fn new(produce_one_row: bool, schema: Schema) -> LogicalEmptyRelation {
+        let data = EmptyRelationData {
+            produce_one_row,
+            schema,
+        };
+        let serialized_data: Arc<[u8]> = bincode::serialize(&data).unwrap().into_iter().collect();
         LogicalEmptyRelation(PlanNode(
             RelNode {
                 typ: OptRelNodeTyp::EmptyRelation,
                 children: vec![],
-                data: Some(Value::Bool(produce_one_row)),
+                data: Some(Value::Serialized(serialized_data)),
             }
             .into(),
         ))
     }
 
-    pub fn produce_one_row(&self) -> bool {
-        self.clone()
+    fn get_data(&self) -> EmptyRelationData {
+        let serialized_data = self
+            .clone()
             .into_rel_node()
             .data
             .as_ref()
             .unwrap()
-            .as_bool()
+            .as_slice();
+
+        bincode::deserialize(serialized_data.as_ref()).unwrap()
+    }
+
+    pub fn empty_relation_schema(&self) -> Schema {
+        let data = self.get_data();
+        data.schema
+    }
+
+    pub fn produce_one_row(&self) -> bool {
+        let data = self.get_data();
+        data.produce_one_row
     }
 }
 
@@ -80,12 +109,25 @@ impl PhysicalEmptyRelation {
         Self(node)
     }
 
-    pub fn produce_one_row(&self) -> bool {
-        self.clone()
+    fn get_data(&self) -> EmptyRelationData {
+        let serialized_data = self
+            .clone()
             .into_rel_node()
             .data
             .as_ref()
             .unwrap()
-            .as_bool()
+            .as_slice();
+
+        bincode::deserialize(serialized_data.as_ref()).unwrap()
+    }
+
+    pub fn produce_one_row(&self) -> bool {
+        let data = self.get_data();
+        data.produce_one_row
+    }
+
+    pub fn empty_relation_schema(&self) -> Schema {
+        let data = self.get_data();
+        data.schema
     }
 }

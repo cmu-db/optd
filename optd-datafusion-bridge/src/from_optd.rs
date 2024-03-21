@@ -548,10 +548,6 @@ impl OptdPlanContext<'_> {
         node: PlanNode,
         meta: &RelNodeMetaMap,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let mut schema = OptdSchema { fields: vec![] };
-        if node.typ() == OptRelNodeTyp::PhysicalEmptyRelation {
-            schema = node.schema(self.optimizer.unwrap().optd_optimizer());
-        }
         let rel_node = node.into_rel_node();
 
         let group_id = meta
@@ -599,6 +595,7 @@ impl OptdPlanContext<'_> {
             }
             OptRelNodeTyp::PhysicalEmptyRelation => {
                 let physical_node = PhysicalEmptyRelation::from_rel_node(rel_node).unwrap();
+                let schema = physical_node.empty_relation_schema();
                 let datafusion_schema: Schema = from_optd_schema(schema);
                 Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
                     physical_node.produce_one_row(),

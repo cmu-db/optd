@@ -183,3 +183,140 @@ PhysicalProjection { exprs: [ #0, #1, #2, #3 ] }
 2 2 2 202
 */
 
+-- Test SimplifyJoinCondRule and EliminateJoinRule (false filter to empty relation)
+select * from t1 inner join t2 on t1v1 = t2v1 and false;
+
+/*
+LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
+└── LogicalJoin
+    ├── join_type: Inner
+    ├── cond:And
+    │   ├── Eq
+    │   │   ├── #0
+    │   │   └── #2
+    │   └── false
+    ├── LogicalScan { table: t1 }
+    └── LogicalScan { table: t2 }
+PhysicalProjection { exprs: [ #0, #1, #2, #3 ] }
+└── PhysicalEmptyRelation { produce_one_row: false }
+*/
+
+-- Test SimplifyJoinCondRule (skip true filter for and)
+select * from t1 inner join t2 on t1v1 = t2v1 and t1v1 = t2v3 and true;
+
+/*
+LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
+└── LogicalJoin
+    ├── join_type: Inner
+    ├── cond:And
+    │   ├── Eq
+    │   │   ├── #0
+    │   │   └── #2
+    │   ├── Eq
+    │   │   ├── #0
+    │   │   └── #3
+    │   └── true
+    ├── LogicalScan { table: t1 }
+    └── LogicalScan { table: t2 }
+PhysicalProjection { exprs: [ #0, #1, #2, #3 ] }
+└── PhysicalHashJoin { join_type: Inner, left_keys: [ #0, #0 ], right_keys: [ #0, #1 ] }
+    ├── PhysicalScan { table: t1 }
+    └── PhysicalScan { table: t2 }
+*/
+
+-- Test SimplifyJoinCondRule (skip true filter for and)
+select * from t1 inner join t2 on t1v1 = t2v1 or t1v1 = t2v3 and true;
+
+/*
+LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
+└── LogicalJoin
+    ├── join_type: Inner
+    ├── cond:Or
+    │   ├── Eq
+    │   │   ├── #0
+    │   │   └── #2
+    │   └── And
+    │       ├── Eq
+    │       │   ├── #0
+    │       │   └── #3
+    │       └── true
+    ├── LogicalScan { table: t1 }
+    └── LogicalScan { table: t2 }
+PhysicalProjection { exprs: [ #0, #1, #2, #3 ] }
+└── PhysicalNestedLoopJoin
+    ├── join_type: Inner
+    ├── cond:Or
+    │   ├── Eq
+    │   │   ├── #0
+    │   │   └── #2
+    │   └── Eq
+    │       ├── #0
+    │       └── #3
+    ├── PhysicalScan { table: t1 }
+    └── PhysicalScan { table: t2 }
+0 0 0 200
+1 1 1 201
+2 2 2 202
+*/
+
+-- Test SimplifyJoinCondRule, EliminateFilter (repace true filter for or)
+select * from t1 inner join t2 on t1v1 = t2v1 or t1v1 = t2v3 or true;
+
+/*
+LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
+└── LogicalJoin
+    ├── join_type: Inner
+    ├── cond:Or
+    │   ├── Eq
+    │   │   ├── #0
+    │   │   └── #2
+    │   ├── Eq
+    │   │   ├── #0
+    │   │   └── #3
+    │   └── true
+    ├── LogicalScan { table: t1 }
+    └── LogicalScan { table: t2 }
+PhysicalProjection { exprs: [ #0, #1, #2, #3 ] }
+└── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+    ├── PhysicalScan { table: t1 }
+    └── PhysicalScan { table: t2 }
+0 0 0 200
+0 0 1 201
+0 0 2 202
+1 1 0 200
+1 1 1 201
+1 1 2 202
+2 2 0 200
+2 2 1 201
+2 2 2 202
+*/
+
+-- Test SimplifyJoinCondRule (remove duplicates)
+select * from t1 inner join t2 on t1v1 = t2v1 or t1v1 = t2v1 and t1v1 = t2v1;
+
+/*
+LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
+└── LogicalJoin
+    ├── join_type: Inner
+    ├── cond:Or
+    │   ├── Eq
+    │   │   ├── #0
+    │   │   └── #2
+    │   └── And
+    │       ├── Eq
+    │       │   ├── #0
+    │       │   └── #2
+    │       └── Eq
+    │           ├── #0
+    │           └── #2
+    ├── LogicalScan { table: t1 }
+    └── LogicalScan { table: t2 }
+PhysicalProjection { exprs: [ #0, #1, #2, #3 ] }
+└── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+    ├── PhysicalScan { table: t1 }
+    └── PhysicalScan { table: t2 }
+0 0 0 200
+1 1 1 201
+2 2 2 202
+*/
+

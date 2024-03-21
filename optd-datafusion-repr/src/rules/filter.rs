@@ -1,15 +1,15 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use super::macros::define_rule;
 use crate::plan_nodes::{
-    ConstantExpr, ConstantType, Expr, ExprList, LogOpExpr, LogOpType, LogicalEmptyRelation,
-    OptRelNode, OptRelNodeTyp,
+    ConstantExpr, ConstantType, Expr, ExprList, JoinType, LogOpExpr, LogOpType,
+    LogicalEmptyRelation, LogicalJoin, OptRelNode, OptRelNodeTyp, PlanNode,
 };
+use crate::properties::schema::SchemaPropertyBuilder;
 use crate::OptRelNodeRef;
 use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
-
-use super::macros::define_rule;
 
 define_rule!(
     SimplifyFilterRule,
@@ -120,6 +120,38 @@ fn apply_simplify_filter(
     }
 }
 
+// Same as SimplifyFilterRule, but for innerJoin conditions
+define_rule!(
+    SimplifyJoinCondRule,
+    apply_simplify_join_cond,
+    (Join(JoinType::Inner), left, right, [cond])
+);
+
+fn apply_simplify_join_cond(
+    _optimizer: &impl Optimizer<OptRelNodeTyp>,
+    SimplifyJoinCondRulePicks { left, right, cond }: SimplifyJoinCondRulePicks,
+) -> Vec<RelNode<OptRelNodeTyp>> {
+    match cond.typ {
+        OptRelNodeTyp::LogOp(_) => {
+            let mut changed = false;
+            let new_log_expr = simplify_log_expr(Arc::new(cond), &mut changed);
+            if changed {
+                let join_node = LogicalJoin::new(
+                    PlanNode::from_group(left.into()),
+                    PlanNode::from_group(right.into()),
+                    Expr::from_rel_node(new_log_expr).unwrap(),
+                    JoinType::Inner,
+                );
+                return vec![join_node.into_rel_node().as_ref().clone()];
+            }
+            vec![]
+        }
+        _ => {
+            vec![]
+        }
+    }
+}
+
 define_rule!(
     EliminateFilterRule,
     apply_eliminate_filter,
@@ -130,7 +162,7 @@ define_rule!(
 ///     - Filter node w/ false pred -> EmptyRelation
 ///     - Filter node w/ true pred  -> Eliminate from the tree
 fn apply_eliminate_filter(
-    _optimizer: &impl Optimizer<OptRelNodeTyp>,
+    optimizer: &impl Optimizer<OptRelNodeTyp>,
     EliminateFilterRulePicks { child, cond }: EliminateFilterRulePicks,
 ) -> Vec<RelNode<OptRelNodeTyp>> {
     if let OptRelNodeTyp::Constant(ConstantType::Bool) = cond.typ {
@@ -142,7 +174,9 @@ fn apply_eliminate_filter(
             } else {
                 // If the condition is false, replace this node with the empty relation,
                 // since it will never yield tuples.
-                let node = LogicalEmptyRelation::new(false);
+                let schema =
+                    optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(child.clone()), 0);
+                let node = LogicalEmptyRelation::new(false, schema);
                 return vec![node.into_rel_node().as_ref().clone()];
             }
         }

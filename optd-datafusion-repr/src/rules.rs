@@ -11,7 +11,7 @@ pub use eliminate_duplicated_expr::{
     EliminateDuplicatedAggExprRule, EliminateDuplicatedSortExprRule,
 };
 pub use eliminate_limit::EliminateLimitRule;
-pub use filter::{EliminateFilterRule, SimplifyFilterRule};
+pub use filter::{EliminateFilterRule, SimplifyFilterRule, SimplifyJoinCondRule};
 pub use joins::{
     EliminateJoinRule, HashJoinRule, JoinAssocRule, JoinCommuteRule, ProjectionPullUpJoin,
 };

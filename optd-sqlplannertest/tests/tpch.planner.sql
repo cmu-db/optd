@@ -364,72 +364,61 @@ PhysicalLimit { skip: 0, fetch: 100 }
     │   └── SortOrder { order: Asc }
     │       └── #3
     └── PhysicalProjection { exprs: [ #5, #2, #8, #0, #1, #3, #4, #6 ] }
-        └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5, #6, #7, #8, #11, #12 ] }
-            └── PhysicalProjection { exprs: [ #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #0, #11, #12 ] }
-                └── PhysicalProjection { exprs: [ #0, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12, #13 ] }
-                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #9 ] }
-                        ├── PhysicalFilter
-                        │   ├── cond:Eq
-                        │   │   ├── #1
-                        │   │   └── "AFRICA"
-                        │   └── PhysicalProjection { exprs: [ #0, #1 ] }
-                        │       └── PhysicalScan { table: region }
-                        └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #5, #6, #7, #8, #10, #11, #12, #13 ] }
-                            └── PhysicalProjection { exprs: [ #3, #4, #5, #6, #7, #8, #9, #10, #11, #0, #1, #2, #12, #13 ] }
-                                └── PhysicalProjection { exprs: [ #0, #1, #2, #4, #5, #6, #7, #8, #9, #10, #11, #12, #13, #14 ] }
-                                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #4 ] }
-                                        ├── PhysicalScan { table: nation }
-                                        └── PhysicalProjection { exprs: [ #0, #1, #5, #6, #7, #8, #9, #10, #3, #11, #12 ] }
-                                            └── PhysicalProjection { exprs: [ #7, #8, #9, #10, #0, #1, #2, #3, #4, #5, #6, #11, #12 ] }
-                                                └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12 ] }
-                                                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #2 ] }
-                                                        ├── PhysicalScan { table: supplier }
-                                                        └── PhysicalProjection { exprs: [ #0, #1, #3, #4, #5, #6 ] }
-                                                            └── PhysicalProjection { exprs: [ #0, #1, #4, #5, #6, #7, #8 ] }
-                                                                └── PhysicalNestedLoopJoin
-                                                                    ├── join_type: Inner
-                                                                    ├── cond:And
-                                                                    │   ├── Eq
-                                                                    │   │   ├── #0
-                                                                    │   │   └── #8
-                                                                    │   └── Eq
-                                                                    │       ├── #6
-                                                                    │       └── #7
-                                                                    ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-                                                                    │   ├── PhysicalFilter
-                                                                    │   │   ├── cond:And
-                                                                    │   │   │   ├── Eq
-                                                                    │   │   │   │   ├── #3
-                                                                    │   │   │   │   └── 4
-                                                                    │   │   │   └── Like { expr: #2, pattern: "%TIN", negated: false, case_insensitive: false }
-                                                                    │   │   └── PhysicalProjection { exprs: [ #0, #2, #4, #5 ] }
-                                                                    │   │       └── PhysicalScan { table: part }
-                                                                    │   └── PhysicalProjection { exprs: [ #0, #1, #3 ] }
-                                                                    │       └── PhysicalScan { table: partsupp }
-                                                                    └── PhysicalProjection { exprs: [ #1, #0 ] }
-                                                                        └── PhysicalAgg
-                                                                            ├── aggrs:Agg(Min)
-                                                                            │   └── [ #1 ]
-                                                                            ├── groups: [ #0 ]
-                                                                            └── PhysicalProjection { exprs: [ #0, #1 ] }
-                                                                                └── PhysicalProjection { exprs: [ #0, #1, #4, #5 ] }
-                                                                                    └── PhysicalProjection { exprs: [ #0, #2, #4, #5, #6, #7 ] }
-                                                                                        └── PhysicalProjection { exprs: [ #0, #1, #3, #5, #6, #7, #8, #9 ] }
-                                                                                            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-                                                                                                ├── PhysicalScan { table: partsupp }
-                                                                                                └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-                                                                                                    ├── PhysicalProjection { exprs: [ #0, #3 ] }
-                                                                                                    │   └── PhysicalScan { table: supplier }
-                                                                                                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-                                                                                                        ├── PhysicalProjection { exprs: [ #0, #2 ] }
-                                                                                                        │   └── PhysicalScan { table: nation }
-                                                                                                        └── PhysicalProjection { exprs: [ #0 ] }
-                                                                                                            └── PhysicalFilter
-                                                                                                                ├── cond:Eq
-                                                                                                                │   ├── #1
-                                                                                                                │   └── "AFRICA"
-                                                                                                                └── PhysicalProjection { exprs: [ #0, #1 ] }
-                                                                                                                    └── PhysicalScan { table: region }
+        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0, #7 ], right_keys: [ #1, #0 ] }
+            ├── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5, #6, #7, #8 ] }
+            │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #9 ], right_keys: [ #0 ] }
+            │       ├── PhysicalProjection { exprs: [ #0, #1, #2, #3, #5, #6, #7, #8, #10, #11 ] }
+            │       │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #4 ], right_keys: [ #0 ] }
+            │       │       ├── PhysicalProjection { exprs: [ #0, #1, #5, #6, #7, #8, #9, #10, #3 ] }
+            │       │       │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
+            │       │       │       ├── PhysicalProjection { exprs: [ #0, #1, #3, #4 ] }
+            │       │       │       │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+            │       │       │       │       ├── PhysicalProjection { exprs: [ #0, #1 ] }
+            │       │       │       │       │   └── PhysicalFilter
+            │       │       │       │       │       ├── cond:And
+            │       │       │       │       │       │   ├── Eq
+            │       │       │       │       │       │   │   ├── #3
+            │       │       │       │       │       │   │   └── 4
+            │       │       │       │       │       │   └── Like { expr: #2, pattern: "%TIN", negated: false, case_insensitive: false }
+            │       │       │       │       │       └── PhysicalProjection { exprs: [ #0, #2, #4, #5 ] }
+            │       │       │       │       │           └── PhysicalScan { table: part }
+            │       │       │       │       └── PhysicalProjection { exprs: [ #0, #1, #3 ] }
+            │       │       │       │           └── PhysicalScan { table: partsupp }
+            │       │       │       └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5, #6 ] }
+            │       │       │           └── PhysicalScan { table: supplier }
+            │       │       └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+            │       │           └── PhysicalScan { table: nation }
+            │       └── PhysicalProjection { exprs: [ #0 ] }
+            │           └── PhysicalFilter
+            │               ├── cond:Eq
+            │               │   ├── #1
+            │               │   └── "AFRICA"
+            │               └── PhysicalProjection { exprs: [ #0, #1 ] }
+            │                   └── PhysicalScan { table: region }
+            └── PhysicalProjection { exprs: [ #1, #0 ] }
+                └── PhysicalAgg
+                    ├── aggrs:Agg(Min)
+                    │   └── [ #1 ]
+                    ├── groups: [ #0 ]
+                    └── PhysicalProjection { exprs: [ #0, #1 ] }
+                        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
+                            ├── PhysicalProjection { exprs: [ #0, #1, #4 ] }
+                            │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
+                            │       ├── PhysicalProjection { exprs: [ #0, #2, #4 ] }
+                            │       │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
+                            │       │       ├── PhysicalProjection { exprs: [ #0, #1, #3 ] }
+                            │       │       │   └── PhysicalScan { table: partsupp }
+                            │       │       └── PhysicalProjection { exprs: [ #0, #3 ] }
+                            │       │           └── PhysicalScan { table: supplier }
+                            │       └── PhysicalProjection { exprs: [ #0, #2 ] }
+                            │           └── PhysicalScan { table: nation }
+                            └── PhysicalProjection { exprs: [ #0 ] }
+                                └── PhysicalFilter
+                                    ├── cond:Eq
+                                    │   ├── #1
+                                    │   └── "AFRICA"
+                                    └── PhysicalProjection { exprs: [ #0, #1 ] }
+                                        └── PhysicalScan { table: region }
 */
 
 -- TPC-H Q3
@@ -1863,55 +1852,55 @@ PhysicalSort
 ├── exprs:SortOrder { order: Asc }
 │   └── #0
 └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4 ] }
-    └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #5 ] }
-        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-            ├── PhysicalProjection { exprs: [ #0, #1, #2, #4 ] }
-            │   └── PhysicalScan { table: supplier }
-            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-                ├── PhysicalProjection { exprs: [ #0, #1 ] }
-                │   └── PhysicalAgg
-                │       ├── aggrs:Agg(Sum)
-                │       │   └── Mul
-                │       │       ├── #1
-                │       │       └── Sub
-                │       │           ├── 1
-                │       │           └── #2
-                │       ├── groups: [ #0 ]
-                │       └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
-                │           └── PhysicalFilter
-                │               ├── cond:And
-                │               │   ├── Geq
-                │               │   │   ├── #3
-                │               │   │   └── 8401
-                │               │   └── Lt
-                │               │       ├── #3
-                │               │       └── 8491
-                │               └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
-                │                   └── PhysicalScan { table: lineitem }
+    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #4 ], right_keys: [ #0 ] }
+        ├── PhysicalProjection { exprs: [ #0, #1, #2, #3, #5 ] }
+        │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+        │       ├── PhysicalProjection { exprs: [ #0, #1, #2, #4 ] }
+        │       │   └── PhysicalScan { table: supplier }
+        │       └── PhysicalProjection { exprs: [ #0, #1 ] }
+        │           └── PhysicalAgg
+        │               ├── aggrs:Agg(Sum)
+        │               │   └── Mul
+        │               │       ├── #1
+        │               │       └── Sub
+        │               │           ├── 1
+        │               │           └── #2
+        │               ├── groups: [ #0 ]
+        │               └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+        │                   └── PhysicalFilter
+        │                       ├── cond:And
+        │                       │   ├── Geq
+        │                       │   │   ├── #3
+        │                       │   │   └── 8401
+        │                       │   └── Lt
+        │                       │       ├── #3
+        │                       │       └── 8491
+        │                       └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
+        │                           └── PhysicalScan { table: lineitem }
+        └── PhysicalAgg
+            ├── aggrs:Agg(Max)
+            │   └── [ #0 ]
+            ├── groups: []
+            └── PhysicalProjection { exprs: [ #1 ] }
                 └── PhysicalAgg
-                    ├── aggrs:Agg(Max)
-                    │   └── [ #0 ]
-                    ├── groups: []
-                    └── PhysicalProjection { exprs: [ #1 ] }
-                        └── PhysicalAgg
-                            ├── aggrs:Agg(Sum)
-                            │   └── Mul
-                            │       ├── #1
-                            │       └── Sub
-                            │           ├── 1
-                            │           └── #2
-                            ├── groups: [ #0 ]
-                            └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
-                                └── PhysicalFilter
-                                    ├── cond:And
-                                    │   ├── Geq
-                                    │   │   ├── #3
-                                    │   │   └── 8401
-                                    │   └── Lt
-                                    │       ├── #3
-                                    │       └── 8491
-                                    └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
-                                        └── PhysicalScan { table: lineitem }
+                    ├── aggrs:Agg(Sum)
+                    │   └── Mul
+                    │       ├── #1
+                    │       └── Sub
+                    │           ├── 1
+                    │           └── #2
+                    ├── groups: [ #0 ]
+                    └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+                        └── PhysicalFilter
+                            ├── cond:And
+                            │   ├── Geq
+                            │   │   ├── #3
+                            │   │   └── 8401
+                            │   └── Lt
+                            │       ├── #3
+                            │       └── 8491
+                            └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
+                                └── PhysicalScan { table: lineitem }
 */
 
 -- TPC-H Q17
@@ -1948,9 +1937,13 @@ LogicalProjection
     └── LogicalProjection { exprs: [ #1 ] }
         └── LogicalJoin
             ├── join_type: Inner
-            ├── cond:Eq
-            │   ├── #2
-            │   └── #4
+            ├── cond:And
+            │   ├── Eq
+            │   │   ├── #2
+            │   │   └── #4
+            │   └── Lt
+            │       ├── Cast { cast_to: Decimal128(30, 15), expr: #0 }
+            │       └── #3
             ├── LogicalProjection { exprs: [ #1, #2, #3 ] }
             │   └── LogicalJoin
             │       ├── join_type: Inner
@@ -1997,7 +1990,15 @@ PhysicalProjection
     │   └── [ #0 ]
     ├── groups: []
     └── PhysicalProjection { exprs: [ #1 ] }
-        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #1 ] }
+        └── PhysicalNestedLoopJoin
+            ├── join_type: Inner
+            ├── cond:And
+            │   ├── Eq
+            │   │   ├── #2
+            │   │   └── #0
+            │   └── Lt
+            │       ├── Cast { cast_to: Decimal128(30, 15), expr: #0 }
+            │       └── #3
             ├── PhysicalProjection { exprs: [ #1, #2, #3 ] }
             │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
             │       ├── PhysicalProjection { exprs: [ #1, #4, #5 ] }

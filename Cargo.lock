@@ -802,6 +802,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2757,6 +2766,7 @@ dependencies = [
  "arrow-schema",
  "assert_approx_eq",
  "async-trait",
+ "bincode",
  "camelpaste",
  "datafusion",
  "datafusion-expr",
@@ -2767,6 +2777,7 @@ dependencies = [
  "optd-gungnir",
  "ordered-float 4.2.0",
  "pretty-xmlish",
+ "serde",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2797,6 +2808,7 @@ dependencies = [
  "log",
  "optd-datafusion-bridge",
  "optd-datafusion-repr",
+ "optd-gungnir",
  "regex",
  "shlex",
  "statistical",

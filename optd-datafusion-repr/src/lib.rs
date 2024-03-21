@@ -18,7 +18,7 @@ use properties::{
 use rules::{
     EliminateDuplicatedAggExprRule, EliminateDuplicatedSortExprRule, EliminateFilterRule,
     EliminateJoinRule, EliminateLimitRule, HashJoinRule, JoinAssocRule, JoinCommuteRule,
-    PhysicalConversionRule, ProjectionPullUpJoin, SimplifyFilterRule,
+    PhysicalConversionRule, ProjectionPullUpJoin, SimplifyFilterRule, SimplifyJoinCondRule,
 };
 
 pub use optd_core::rel_node::Value;
@@ -57,6 +57,7 @@ impl DatafusionOptimizer {
         let rules = PhysicalConversionRule::all_conversions();
         let mut rule_wrappers = vec![
             RuleWrapper::new_heuristic(Arc::new(SimplifyFilterRule::new())),
+            RuleWrapper::new_heuristic(Arc::new(SimplifyJoinCondRule::new())),
             RuleWrapper::new_heuristic(Arc::new(EliminateFilterRule::new())),
             RuleWrapper::new_heuristic(Arc::new(EliminateJoinRule::new())),
             RuleWrapper::new_heuristic(Arc::new(EliminateLimitRule::new())),
@@ -66,8 +67,8 @@ impl DatafusionOptimizer {
         for rule in rules {
             rule_wrappers.push(RuleWrapper::new_cascades(rule));
         }
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(HashJoinRule::new())));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinCommuteRule::new())));
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(HashJoinRule::new()))); // 17
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinCommuteRule::new()))); // 18
         rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinAssocRule::new())));
         rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
             ProjectionPullUpJoin::new(),
