@@ -194,8 +194,8 @@ impl TpchKit {
     ///   directory names must be different.
     fn get_this_genned_tables_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
         let dname = format!(
-            "db{}_sf{}_sd{}",
-            tpch_config.dbms, tpch_config.scale_factor, tpch_config.seed
+            "db{}_sf{}",
+            tpch_config.dbms, tpch_config.scale_factor,
         );
         self.genned_tables_dpath.join(dname)
     }

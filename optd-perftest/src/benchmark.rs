@@ -26,7 +26,7 @@ impl Benchmark {
         let dbname = match self {
             Self::Test => String::from("test"),
             Self::Tpch(tpch_config) => {
-                format!("tpch_sf{}_sd{}", tpch_config.scale_factor, tpch_config.seed)
+                format!("tpch_sf{}", tpch_config.scale_factor)
             }
         };
         // since Postgres names cannot contain periods
