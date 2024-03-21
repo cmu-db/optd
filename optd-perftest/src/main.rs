@@ -69,12 +69,12 @@ async fn main() -> anyhow::Result<()> {
                 dbms: String::from(TPCH_KIT_POSTGRES),
                 scale_factor,
                 seed,
-                query_ids,
+                query_ids: query_ids.clone(),
             };
             let qerrors_alldbs =
                 cardtest::cardtest(&workspace_dpath, &pguser, &pgpassword, tpch_config).await?;
-            println!(" Q-errors");
-            println!("----------");
+            println!("  Aggregate Q-Error Comparison");
+            println!("================================");
             for (dbms, qerrors) in &qerrors_alldbs {
                 if !qerrors.is_empty() {
                     let finite_qerrors: Vec<f64> = qerrors.clone().into_iter().filter(|&qerror| qerror.is_finite()).collect();
@@ -90,11 +90,23 @@ async fn main() -> anyhow::Result<()> {
                         .max_by(|a, b| a.partial_cmp(b).unwrap())
                         .unwrap();
                     print!(
-                        "{} | median={} | ninf={} | mean={} | min={} | max={} | qerrors={:?}",
-                        dbms, median_qerror, ninf_qerrors, mean_qerror, min_qerror, max_qerror, qerrors
+                        "{} | median={} | ninf={} | mean={} | min={} | max={}",
+                        dbms, median_qerror, ninf_qerrors, mean_qerror, min_qerror, max_qerror
                     );
                 } else {
-                    print!("{} | N/A", dbms);
+                    print!("{} | no queries", dbms);
+                }
+                println!();
+            }
+            println!();
+
+            println!("  Per-Query Q-Error Comparison");
+            println!("================================");
+            for (i, query_id) in query_ids.iter().enumerate() {
+                print!("query {}", query_id);
+                for (dbms, qerrors) in &qerrors_alldbs {
+                    let qerror = qerrors.get(i).unwrap();
+                    print!(" | {}={}", dbms, qerror);
                 }
                 println!();
             }

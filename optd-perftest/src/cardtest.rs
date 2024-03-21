@@ -52,7 +52,6 @@ impl CardtestRunner {
             estcard as f64 / truecard as f64,
             truecard as f64 / estcard as f64,
         );
-        println!("estcard={}, truecard={}, qerror={}", estcard, truecard, qerror);
         qerror
     }
 }
