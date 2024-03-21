@@ -47,6 +47,11 @@ enum Commands {
     },
 }
 
+// q-errors are always >= 1.0 so two decimal points is enough
+fn fmt_qerror(qerror: f64) -> String {
+    format!("{:.2}", qerror)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -73,12 +78,13 @@ async fn main() -> anyhow::Result<()> {
             };
             let qerrors_alldbs =
                 cardtest::cardtest(&workspace_dpath, &pguser, &pgpassword, tpch_config).await?;
+            println!();
             println!(" Aggregate Q-Error Comparison");
             let mut agg_qerror_table = Table::new();
             agg_qerror_table.set_titles(prettytable::row![
                 "DBMS",
                 "Median",
-                "# Infinite",
+                "# Inf",
                 "Mean",
                 "Min",
                 "Max"
@@ -104,11 +110,11 @@ async fn main() -> anyhow::Result<()> {
                         .unwrap();
                     agg_qerror_table.add_row(prettytable::row![
                         dbms,
-                        median_qerror,
+                        fmt_qerror(median_qerror),
                         ninf_qerrors,
-                        mean_qerror,
-                        min_qerror,
-                        max_qerror
+                        fmt_qerror(mean_qerror),
+                        fmt_qerror(*min_qerror),
+                        fmt_qerror(*max_qerror),
                     ]);
                 } else {
                     agg_qerror_table
@@ -119,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
             agg_qerror_table.printstd();
 
             let mut per_query_qerror_table = Table::new();
+            println!();
             println!(" Per-Query Q-Error Comparison");
             let title_cells = iter::once(Cell::new("Query #"))
                 .chain(qerrors_alldbs.keys().map(|dbms| Cell::new(dbms)))
@@ -129,7 +136,7 @@ async fn main() -> anyhow::Result<()> {
                 row_cells.push(prettytable::cell!(query_id));
                 for qerrors in qerrors_alldbs.values() {
                     let qerror = qerrors.get(i).unwrap();
-                    row_cells.push(prettytable::cell!(qerror));
+                    row_cells.push(prettytable::cell!(fmt_qerror(*qerror)));
                 }
                 per_query_qerror_table.add_row(Row::new(row_cells));
             }
