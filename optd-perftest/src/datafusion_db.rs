@@ -170,11 +170,19 @@ impl DatafusionDb {
         Ok(num_rows)
     }
 
+    fn log_explain(&self, explains: &Vec<Vec<String>>) {
+        // row_cnt is exclusively in physical_plan after optd
+        let physical_plan_after_optd_lines = explains.iter().find(|explain| explain.get(0).unwrap() == "physical_plan after optd").unwrap();
+        let explain_str = physical_plan_after_optd_lines.join("\n");
+        log::info!("{} {}", self.get_name(), explain_str);
+    }
+
     async fn eval_query_estcard(&self, sql: &str) -> anyhow::Result<usize> {
         lazy_static! {
             static ref ROW_CNT_RE: Regex = Regex::new(r"row_cnt=(\d+\.\d+)").unwrap();
         }
         let explains = Self::execute(&self.ctx, &format!("explain verbose {}", sql)).await?;
+        self.log_explain(&explains);
         // Find first occurrence of row_cnt=... in the output.
         let row_cnt = explains
             .iter()
