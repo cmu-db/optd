@@ -48,11 +48,10 @@ impl CardtestRunner {
     }
 
     fn calc_qerror(estcard: usize, truecard: usize) -> f64 {
-        let qerror = f64::max(
+        f64::max(
             estcard as f64 / truecard as f64,
             truecard as f64 / estcard as f64,
-        );
-        qerror
+        )
     }
 }
 
