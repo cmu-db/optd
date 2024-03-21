@@ -32,14 +32,17 @@ impl CardtestRunner {
     ) -> anyhow::Result<HashMap<String, Vec<f64>>> {
         let mut qerrors_alldbs = HashMap::new();
 
+        // postgres runs faster and is less buggy so we use their true cardinalities
+        // in the future, it's probably a good idea to get the truecards of datafusion to ensure that they match
+        let pg_dbms = self.dbmss.iter_mut().find(|dbms| dbms.get_name() == "Postgres").unwrap();
+        let pg_truecards = pg_dbms.eval_benchmark_truecards(benchmark).await?;
+
         for dbms in &mut self.dbmss {
             let estcards = dbms.eval_benchmark_estcards(benchmark).await?;
-            let truecards = dbms.eval_benchmark_truecards(benchmark).await?;
-            assert!(truecards.len() == estcards.len());
             let qerrors = estcards
                 .into_iter()
-                .zip(truecards.into_iter())
-                .map(|(estcard, truecard)| CardtestRunner::calc_qerror(estcard, truecard))
+                .zip(pg_truecards.iter())
+                .map(|(estcard, truecard)| CardtestRunner::calc_qerror(estcard, *truecard))
                 .collect();
             qerrors_alldbs.insert(String::from(dbms.get_name()), qerrors);
         }
@@ -95,9 +98,9 @@ pub async fn cardtest<P: AsRef<Path> + Clone>(
     pgpassword: &str,
     tpch_config: TpchConfig,
 ) -> anyhow::Result<HashMap<String, Vec<f64>>> {
-    let pg_db = PostgresDb::new(workspace_dpath.clone(), pguser, pgpassword);
-    let df_db = DatafusionDb::new(workspace_dpath).await?;
-    let dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>> = vec![Box::new(pg_db), Box::new(df_db)];
+    let pg_dbms = PostgresDb::new(workspace_dpath.clone(), pguser, pgpassword);
+    let df_dbms = DatafusionDb::new(workspace_dpath).await?;
+    let dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>> = vec![Box::new(pg_dbms), Box::new(df_dbms)];
 
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
     let mut cardtest_runner = CardtestRunner::new(dbmss).await?;
