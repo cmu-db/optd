@@ -4,6 +4,13 @@ use anyhow;
 use serde_json;
 
 /// A cache that gets persisted to disk for the true cardinalities of queries on a DBMS
+/// It's difficult to share the same cache (i.e. having a three-level hash map of DBMS -> db -> sql ->
+///   truecard) between multiple DBMSs because then multiple different Rust objects could be writing to
+///   the same cache file.
+/// It's possible to have one cache per database per DBMS instead of one per DBMS, but it just felt
+///   cleaner to me to tie the lifetime of the cache with the lifetime of the DBMS object. If you
+///   did one cache per database per DBMS, those caches would still be tied to the lifetime of the
+///   DBMS object.
 /// Note that only the dbms_cache field gets persisted
 pub struct DBMSTruecardCache {
     workspace_dpath: PathBuf,
