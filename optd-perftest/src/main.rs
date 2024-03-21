@@ -1,9 +1,9 @@
+use clap::{Parser, Subcommand};
 use optd_perftest::cardtest;
 use optd_perftest::shell;
 use optd_perftest::tpch::{TpchConfig, TPCH_KIT_POSTGRES};
+use prettytable::{format, Cell, Row, Table};
 use std::{fs, iter};
-use prettytable::{Table, Row, Cell, format};
-use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 struct Cli {
@@ -75,7 +75,14 @@ async fn main() -> anyhow::Result<()> {
                 cardtest::cardtest(&workspace_dpath, &pguser, &pgpassword, tpch_config).await?;
             println!(" Aggregate Q-Error Comparison");
             let mut agg_qerror_table = Table::new();
-            agg_qerror_table.set_titles(prettytable::row!["DBMS", "Median", "# Infinite", "Mean", "Min", "Max"]);
+            agg_qerror_table.set_titles(prettytable::row![
+                "DBMS",
+                "Median",
+                "# Infinite",
+                "Mean",
+                "Min",
+                "Max"
+            ]);
             for (dbms, qerrors) in &qerrors_alldbs {
                 if !qerrors.is_empty() {
                     let finite_qerrors: Vec<f64> = qerrors
@@ -95,9 +102,17 @@ async fn main() -> anyhow::Result<()> {
                         .iter()
                         .max_by(|a, b| a.partial_cmp(b).unwrap())
                         .unwrap();
-                    agg_qerror_table.add_row(prettytable::row![dbms, median_qerror, ninf_qerrors, mean_qerror, min_qerror, max_qerror]);
+                    agg_qerror_table.add_row(prettytable::row![
+                        dbms,
+                        median_qerror,
+                        ninf_qerrors,
+                        mean_qerror,
+                        min_qerror,
+                        max_qerror
+                    ]);
                 } else {
-                    agg_qerror_table.add_row(prettytable::row![dbms, "N/A", "N/A", "N/A", "N/A", "N/A"]);
+                    agg_qerror_table
+                        .add_row(prettytable::row![dbms, "N/A", "N/A", "N/A", "N/A", "N/A"]);
                 }
             }
             agg_qerror_table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
@@ -105,7 +120,9 @@ async fn main() -> anyhow::Result<()> {
 
             let mut per_query_qerror_table = Table::new();
             println!(" Per-Query Q-Error Comparison");
-            let title_cells = iter::once(Cell::new("Query #")).chain(qerrors_alldbs.iter().map(|(dbms, _)| Cell::new(dbms))).collect();
+            let title_cells = iter::once(Cell::new("Query #"))
+                .chain(qerrors_alldbs.iter().map(|(dbms, _)| Cell::new(dbms)))
+                .collect();
             per_query_qerror_table.set_titles(Row::new(title_cells));
             for (i, query_id) in query_ids.iter().enumerate() {
                 let mut row_cells = vec![];

@@ -172,7 +172,10 @@ impl DatafusionDb {
 
     fn log_explain(&self, explains: &Vec<Vec<String>>) {
         // row_cnt is exclusively in physical_plan after optd
-        let physical_plan_after_optd_lines = explains.iter().find(|explain| explain.get(0).unwrap() == "physical_plan after optd").unwrap();
+        let physical_plan_after_optd_lines = explains
+            .iter()
+            .find(|explain| explain.get(0).unwrap() == "physical_plan after optd")
+            .unwrap();
         let explain_str = physical_plan_after_optd_lines.join("\n");
         log::info!("{} {}", self.get_name(), explain_str);
     }
