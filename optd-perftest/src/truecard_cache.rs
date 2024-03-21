@@ -1,13 +1,73 @@
+use std::{collections::HashMap, fs::{self, File}, path::{Path, PathBuf}};
+
+use anyhow;
+use serde_json;
+
 /// A cache that gets persisted to disk for the true cardinalities of queries on a DBMS
-struct TruecardCache {
+/// Note that only the dbms_cache field gets persisted
+pub struct DBMSTruecardCache {
+    workspace_dpath: PathBuf,
     // The DBMS the queries of this cache were executed on
     dbms_name: String,
-    // The cache from dbname -> sql -> cardinality
+    // The cache from dbname -> sql -> true cardinality
     // Note that dbname is the database _within_ the DBMS that sql was executed on
-    cache: HashMap<String, HashMap<String, usize>>,
+    dbms_cache: HashMap<String, HashMap<String, usize>>,
 }
 
-// TODO(phw2): write function that takes in a Benchmark and creates a new entry in the cache
-impl TruecardCache {
-    
+impl DBMSTruecardCache {
+    fn get_ser_fpath<P: AsRef<Path>>(workspace_dpath: P, dbms_name: &str) -> PathBuf {
+        workspace_dpath.as_ref().join("truecard_caches").join(dbms_name)
+    }
+
+    pub fn build<P: AsRef<Path>>(workspace_dpath: P, dbms_name: &str) -> anyhow::Result<Self> {
+        let ser_fpath = Self::get_ser_fpath(&workspace_dpath, dbms_name);
+        let dbms_cache = if ser_fpath.exists() {
+            let file = File::open(ser_fpath)?;
+            serde_json::from_reader(file)?
+        } else {
+            HashMap::new()
+        };
+
+        Ok(Self {
+            workspace_dpath: PathBuf::from(workspace_dpath.as_ref()),
+            dbms_name: String::from(dbms_name),
+            dbms_cache,
+        })
+    }
+
+    pub fn insert_truecard(&mut self, dbname: &str, sql: &str, truecard: usize) {
+        let db_cache = match self.dbms_cache.get_mut(dbname) {
+            Some(db_cache) => db_cache,
+            None => {
+                self.dbms_cache.insert(String::from(dbname), HashMap::new());
+                self.dbms_cache.get_mut(dbname).unwrap()
+            }
+        };
+        db_cache.insert(String::from(sql), truecard);
+    }
+
+    pub fn get_truecard(&self, dbname: &str, sql: &str) -> Option<usize> {
+        match self.dbms_cache.get(dbname) {
+            Some(db_cache) => match db_cache.get(sql) {
+                Some(truecard) => Some(*truecard),
+                None => None,
+            },
+            None => None,
+        }
+    }
+
+    pub fn save(&self) -> anyhow::Result<()> {
+        let ser_fpath = Self::get_ser_fpath(&self.workspace_dpath, &self.dbms_name);
+        fs::create_dir_all(ser_fpath.parent().unwrap())?;
+        // this will create a new file or truncate the file if it already exists
+        let file = File::create(ser_fpath)?;
+        serde_json::to_writer(file, &self.dbms_cache)?;
+        Ok(())
+    }
+}
+
+impl Drop for DBMSTruecardCache {
+    fn drop(&mut self) {
+        self.save().unwrap();
+    }
 }

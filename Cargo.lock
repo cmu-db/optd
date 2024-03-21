@@ -2828,6 +2828,7 @@ dependencies = [
  "optd-gungnir",
  "prettytable-rs",
  "regex",
+ "serde_json",
  "shlex",
  "statistical",
  "tokio",

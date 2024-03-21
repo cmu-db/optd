@@ -2,6 +2,7 @@ use crate::{
     benchmark::Benchmark,
     cardtest::CardtestRunnerDBMSHelper,
     tpch::{TpchConfig, TpchKit},
+    truecard_cache::DBMSTruecardCache,
 };
 use async_trait::async_trait;
 use futures::Sink;
@@ -17,13 +18,17 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio_postgres::{Client, NoTls, Row};
 
+/// The name of the Postgres DBMS (as opposed to the DataFusion DBMS for instance)
+pub const POSTGRES_DBMS_NAME: &str = "Postgres";
+
 /// This dbname is assumed to always exist
 const DEFAULT_DBNAME: &str = "postgres";
 
-pub struct PostgresDb {
+pub struct PostgresDBMS {
     workspace_dpath: PathBuf,
     pguser: String,
     pgpassword: String,
+    truecard_cache: DBMSTruecardCache,
 }
 
 /// Conventions I keep for methods of this class:
@@ -31,13 +36,17 @@ pub struct PostgresDb {
 ///       - For instance, this is why "createdb" is _not_ a function
 ///   - Stop and start functions should be separate
 ///   - Setup should be done in build() unless it requires more information (like benchmark)
-impl PostgresDb {
-    pub fn new<P: AsRef<Path>>(workspace_dpath: P, pguser: &str, pgpassword: &str) -> Self {
-        Self {
-            workspace_dpath: PathBuf::from(workspace_dpath.as_ref()),
+impl PostgresDBMS {
+    pub fn build<P: AsRef<Path>>(workspace_dpath: P, pguser: &str, pgpassword: &str) -> anyhow::Result<Self> {
+        let workspace_dpath = PathBuf::from(workspace_dpath.as_ref());
+        let truecard_cache = DBMSTruecardCache::build(&workspace_dpath, POSTGRES_DBMS_NAME)?;
+        let pg_dbms = Self {
+            workspace_dpath,
             pguser: String::from(pguser),
             pgpassword: String::from(pgpassword),
-        }
+            truecard_cache,
+        };
+        Ok(pg_dbms)
     }
 
     /// Create a connection to a Postgres database
@@ -183,9 +192,9 @@ impl PostgresDb {
 }
 
 #[async_trait]
-impl CardtestRunnerDBMSHelper for PostgresDb {
+impl CardtestRunnerDBMSHelper for PostgresDBMS {
     fn get_name(&self) -> &str {
-        "Postgres"
+        POSTGRES_DBMS_NAME
     }
 
     async fn eval_benchmark_estcards(
@@ -210,13 +219,13 @@ impl CardtestRunnerDBMSHelper for PostgresDb {
         let client = self.connect_to_db(&dbname).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
-            Benchmark::Tpch(tpch_config) => self.eval_tpch_truecards(&client, tpch_config).await,
+            Benchmark::Tpch(tpch_config) => self.eval_tpch_truecards(&client, tpch_config, &dbname).await,
         }
     }
 }
 
-/// This impl has helpers for ```impl CardtestRunnerDBMSHelper for PostgresDb```
-impl PostgresDb {
+/// This impl has helpers for ```impl CardtestRunnerDBMSHelper for PostgresDBMS```
+impl PostgresDBMS {
     async fn eval_tpch_estcards(
         &self,
         client: &Client,
@@ -236,9 +245,10 @@ impl PostgresDb {
     }
 
     async fn eval_tpch_truecards(
-        &self,
+        &mut self,
         client: &Client,
         tpch_config: &TpchConfig,
+        dbname: &str, // used by truecard_cache
     ) -> anyhow::Result<Vec<usize>> {
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
@@ -246,7 +256,14 @@ impl PostgresDb {
         let mut truecards = vec![];
         for sql_fpath in tpch_kit.get_sql_fpath_ordered_iter(tpch_config)? {
             let sql = fs::read_to_string(sql_fpath)?;
-            let truecard = self.eval_query_truecard(client, &sql).await?;
+            let truecard = match self.truecard_cache.get_truecard(dbname, &sql) {
+                Some(truecard) => truecard,
+                None => {
+                    let truecard = self.eval_query_truecard(client, &sql).await?;
+                    self.truecard_cache.insert_truecard(dbname, &sql, truecard);
+                    truecard
+                }
+            };
             truecards.push(truecard);
         }
 
@@ -264,7 +281,7 @@ impl PostgresDb {
         self.log_explain(&explain_rows);
         // the first line contains the explain of the root node
         let first_explain_line: &str = explain_rows.first().unwrap().get(0);
-        let estcard = PostgresDb::extract_row_count(first_explain_line).unwrap();
+        let estcard = PostgresDBMS::extract_row_count(first_explain_line).unwrap();
         Ok(estcard)
     }
 

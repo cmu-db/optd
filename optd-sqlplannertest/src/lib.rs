@@ -22,17 +22,17 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 
 #[derive(Default)]
-pub struct DatafusionDb {
+pub struct DatafusionDBMS {
     ctx: SessionContext,
     /// Context enabling datafusion's logical optimizer.
     with_logical_ctx: SessionContext,
 }
 
-impl DatafusionDb {
+impl DatafusionDBMS {
     pub async fn new() -> Result<Self> {
-        let ctx = DatafusionDb::new_session_ctx(false, None).await?;
+        let ctx = DatafusionDBMS::new_session_ctx(false, None).await?;
         let with_logical_ctx =
-            DatafusionDb::new_session_ctx(true, Some(ctx.state().catalog_list().clone())).await?;
+            DatafusionDBMS::new_session_ctx(true, Some(ctx.state().catalog_list().clone())).await?;
         Ok(Self {
             ctx,
             with_logical_ctx,
@@ -223,7 +223,7 @@ impl DatafusionDb {
 }
 
 #[async_trait]
-impl sqlplannertest::PlannerTestRunner for DatafusionDb {
+impl sqlplannertest::PlannerTestRunner for DatafusionDBMS {
     async fn run(&mut self, test_case: &sqlplannertest::ParsedTestCase) -> Result<String> {
         for before in &test_case.before_sql {
             self.execute(before, true)

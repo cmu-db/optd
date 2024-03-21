@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::postgres_db::PostgresDb;
-use crate::{benchmark::Benchmark, datafusion_db::DatafusionDb, tpch::TpchConfig};
+use crate::postgres_dbms::{PostgresDBMS, POSTGRES_DBMS_NAME};
+use crate::{benchmark::Benchmark, datafusion_dbms::DatafusionDBMS, tpch::TpchConfig};
 
 use anyhow::{self};
 use async_trait::async_trait;
@@ -34,7 +34,7 @@ impl CardtestRunner {
 
         // postgres runs faster and is less buggy so we use their true cardinalities
         // in the future, it's probably a good idea to get the truecards of datafusion to ensure that they match
-        let pg_dbms = self.dbmss.iter_mut().find(|dbms| dbms.get_name() == "Postgres").unwrap();
+        let pg_dbms = self.dbmss.iter_mut().find(|dbms| dbms.get_name() == POSTGRES_DBMS_NAME).unwrap();
         let pg_truecards = pg_dbms.eval_benchmark_truecards(benchmark).await?;
 
         for dbms in &mut self.dbmss {
@@ -98,8 +98,8 @@ pub async fn cardtest<P: AsRef<Path> + Clone>(
     pgpassword: &str,
     tpch_config: TpchConfig,
 ) -> anyhow::Result<HashMap<String, Vec<f64>>> {
-    let pg_dbms = PostgresDb::new(workspace_dpath.clone(), pguser, pgpassword);
-    let df_dbms = DatafusionDb::new(workspace_dpath).await?;
+    let pg_dbms = PostgresDBMS::build(workspace_dpath.clone(), pguser, pgpassword)?;
+    let df_dbms = DatafusionDBMS::new(workspace_dpath).await?;
     let dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>> = vec![Box::new(pg_dbms), Box::new(df_dbms)];
 
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());

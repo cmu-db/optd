@@ -49,7 +49,7 @@ pub struct TpchKit {
     pub schema_fpath: PathBuf,
 }
 
-/// I keep the same conventions for these methods as I do for PostgresDb
+/// I keep the same conventions for these methods as I do for PostgresDBMS
 impl TpchKit {
     pub fn build<P: AsRef<Path>>(workspace_dpath: P) -> io::Result<Self> {
         log::debug!("[start] building TpchKit");

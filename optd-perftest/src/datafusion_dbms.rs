@@ -29,13 +29,13 @@ use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::{cost::BaseTableStats, cost::PerTableStats, DatafusionOptimizer};
 use regex::Regex;
 
-pub struct DatafusionDb {
+pub struct DatafusionDBMS {
     workspace_dpath: PathBuf,
     ctx: SessionContext,
 }
 
 #[async_trait]
-impl CardtestRunnerDBMSHelper for DatafusionDb {
+impl CardtestRunnerDBMSHelper for DatafusionDBMS {
     fn get_name(&self) -> &str {
         "DataFusion"
     }
@@ -63,9 +63,9 @@ impl CardtestRunnerDBMSHelper for DatafusionDb {
     }
 }
 
-impl DatafusionDb {
+impl DatafusionDBMS {
     pub async fn new<P: AsRef<Path>>(workspace_dpath: P) -> anyhow::Result<Self> {
-        Ok(DatafusionDb {
+        Ok(DatafusionDBMS {
             workspace_dpath: workspace_dpath.as_ref().to_path_buf(),
             ctx: Self::new_session_ctx(None).await?,
         })
@@ -319,4 +319,4 @@ impl DatafusionDb {
     }
 }
 
-unsafe impl Send for DatafusionDb {}
+unsafe impl Send for DatafusionDBMS {}
