@@ -248,7 +248,7 @@ impl PostgresDb {
         Ok(truecards)
     }
 
-    fn log_explain(&self, explain_rows: &Vec<Row>) {
+    fn log_explain(&self, explain_rows: &[Row]) {
         let explain_lines: Vec<&str> = explain_rows.iter().map(|row| row.get(0)).collect();
         let explain_str = explain_lines.join("\n");
         log::info!("{} {}", self.get_name(), explain_str);

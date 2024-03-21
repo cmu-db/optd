@@ -121,13 +121,13 @@ async fn main() -> anyhow::Result<()> {
             let mut per_query_qerror_table = Table::new();
             println!(" Per-Query Q-Error Comparison");
             let title_cells = iter::once(Cell::new("Query #"))
-                .chain(qerrors_alldbs.iter().map(|(dbms, _)| Cell::new(dbms)))
+                .chain(qerrors_alldbs.keys().map(|dbms| Cell::new(dbms)))
                 .collect();
             per_query_qerror_table.set_titles(Row::new(title_cells));
             for (i, query_id) in query_ids.iter().enumerate() {
                 let mut row_cells = vec![];
                 row_cells.push(prettytable::cell!(query_id));
-                for (_, qerrors) in &qerrors_alldbs {
+                for qerrors in qerrors_alldbs.values() {
                     let qerror = qerrors.get(i).unwrap();
                     row_cells.push(prettytable::cell!(qerror));
                 }
