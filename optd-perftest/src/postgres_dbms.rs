@@ -37,7 +37,11 @@ pub struct PostgresDBMS {
 ///   - Stop and start functions should be separate
 ///   - Setup should be done in build() unless it requires more information (like benchmark)
 impl PostgresDBMS {
-    pub fn build<P: AsRef<Path>>(workspace_dpath: P, pguser: &str, pgpassword: &str) -> anyhow::Result<Self> {
+    pub fn build<P: AsRef<Path>>(
+        workspace_dpath: P,
+        pguser: &str,
+        pgpassword: &str,
+    ) -> anyhow::Result<Self> {
         let workspace_dpath = PathBuf::from(workspace_dpath.as_ref());
         let truecard_cache = DBMSTruecardCache::build(&workspace_dpath, POSTGRES_DBMS_NAME)?;
         let pg_dbms = Self {
@@ -219,7 +223,10 @@ impl CardtestRunnerDBMSHelper for PostgresDBMS {
         let client = self.connect_to_db(&dbname).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
-            Benchmark::Tpch(tpch_config) => self.eval_tpch_truecards(&client, tpch_config, &dbname).await,
+            Benchmark::Tpch(tpch_config) => {
+                self.eval_tpch_truecards(&client, tpch_config, &dbname)
+                    .await
+            }
         }
     }
 }

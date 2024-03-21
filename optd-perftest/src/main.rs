@@ -82,12 +82,7 @@ async fn main() -> anyhow::Result<()> {
             println!(" Aggregate Q-Error Comparison");
             let mut agg_qerror_table = Table::new();
             agg_qerror_table.set_titles(prettytable::row![
-                "DBMS",
-                "Median",
-                "# Inf",
-                "Mean",
-                "Min",
-                "Max"
+                "DBMS", "Median", "# Inf", "Mean", "Min", "Max"
             ]);
             for (dbms, qerrors) in &qerrors_alldbs {
                 if !qerrors.is_empty() {

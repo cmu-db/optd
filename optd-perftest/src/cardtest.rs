@@ -34,7 +34,11 @@ impl CardtestRunner {
 
         // postgres runs faster and is less buggy so we use their true cardinalities
         // in the future, it's probably a good idea to get the truecards of datafusion to ensure that they match
-        let pg_dbms = self.dbmss.iter_mut().find(|dbms| dbms.get_name() == POSTGRES_DBMS_NAME).unwrap();
+        let pg_dbms = self
+            .dbmss
+            .iter_mut()
+            .find(|dbms| dbms.get_name() == POSTGRES_DBMS_NAME)
+            .unwrap();
         let pg_truecards = pg_dbms.eval_benchmark_truecards(benchmark).await?;
 
         for dbms in &mut self.dbmss {

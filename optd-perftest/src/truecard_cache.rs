@@ -1,4 +1,8 @@
-use std::{collections::HashMap, fs::{self, File}, path::{Path, PathBuf}};
+use std::{
+    collections::HashMap,
+    fs::{self, File},
+    path::{Path, PathBuf},
+};
 
 use anyhow;
 use serde_json;
@@ -23,7 +27,10 @@ pub struct DBMSTruecardCache {
 
 impl DBMSTruecardCache {
     fn get_ser_fpath<P: AsRef<Path>>(workspace_dpath: P, dbms_name: &str) -> PathBuf {
-        workspace_dpath.as_ref().join("truecard_caches").join(dbms_name)
+        workspace_dpath
+            .as_ref()
+            .join("truecard_caches")
+            .join(dbms_name)
     }
 
     pub fn build<P: AsRef<Path>>(workspace_dpath: P, dbms_name: &str) -> anyhow::Result<Self> {
