@@ -4,9 +4,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow;
-use serde_json;
-
 /// A cache that gets persisted to disk for the true cardinalities of queries on a DBMS
 /// It's difficult to share the same cache (i.e. having a three-level hash map of DBMS -> db -> sql ->
 ///   truecard) between multiple DBMSs because then multiple different Rust objects could be writing to
@@ -62,10 +59,7 @@ impl DBMSTruecardCache {
 
     pub fn get_truecard(&self, dbname: &str, sql: &str) -> Option<usize> {
         match self.dbms_cache.get(dbname) {
-            Some(db_cache) => match db_cache.get(sql) {
-                Some(truecard) => Some(*truecard),
-                None => None,
-            },
+            Some(db_cache) => db_cache.get(sql).copied(),
             None => None,
         }
     }
