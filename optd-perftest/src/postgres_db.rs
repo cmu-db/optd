@@ -145,6 +145,11 @@ impl PostgresDb {
             Self::copy_from_stdin(client, tbl_fpath).await?;
         }
 
+        // create stats
+        // you need to do VACUUM FULL ANALYZE and not just ANALYZE to make sure the stats are created in a deterministic way
+        // this is standard practice for ostgres benchmarking
+        client.query("VACUUM FULL ANALYZE", &[]).await?;
+
         Ok(())
     }
 

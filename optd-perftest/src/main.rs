@@ -99,12 +99,12 @@ async fn main() -> anyhow::Result<()> {
                     let ninf_qerrors = qerrors.len() - finite_qerrors.len();
                     let mean_qerror =
                         finite_qerrors.iter().sum::<f64>() / finite_qerrors.len() as f64;
-                    let min_qerror = finite_qerrors
+                    let min_qerror = qerrors
                         .iter()
                         .min_by(|a, b| a.partial_cmp(b).unwrap())
                         .unwrap();
                     let median_qerror = statistical::median(qerrors);
-                    let max_qerror = finite_qerrors
+                    let max_qerror = qerrors
                         .iter()
                         .max_by(|a, b| a.partial_cmp(b).unwrap())
                         .unwrap();
