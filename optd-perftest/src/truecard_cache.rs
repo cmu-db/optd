@@ -58,10 +58,10 @@ impl DBMSTruecardCache {
     }
 
     pub fn get_truecard(&self, dbname: &str, sql: &str) -> Option<usize> {
-        match self.dbms_cache.get(dbname) {
-            Some(db_cache) => db_cache.get(sql).copied(),
-            None => None,
-        }
+        self.dbms_cache
+            .get(dbname)
+            .map(|db_cache| db_cache.get(sql).copied())
+            .flatten()
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
