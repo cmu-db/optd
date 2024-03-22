@@ -192,9 +192,24 @@ impl DatafusionDBMS {
     /// Build the stats that optd's cost model uses.
     async fn load_benchmark_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
-            Benchmark::Tpch(tpch_config) => self.load_tpch_stats(tpch_config).await,
+            Benchmark::Tpch(tpch_config) => {
+                self.load_tpch_stats(tpch_config).await
+            },
             _ => unimplemented!(),
         }
+    }
+
+    async fn create_tpch_tables(&mut self, tpch_kit: &TpchKit) -> anyhow::Result<()> {
+        let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
+        let ddls = ddls
+            .split(';')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>();
+        for ddl in ddls {
+            Self::execute(&self.ctx, ddl).await?;
+        }
+        Ok(())
     }
 
     async fn _load_tpch_data_no_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
@@ -205,15 +220,7 @@ impl DatafusionDBMS {
         tpch_kit.gen_tables(tpch_config)?;
 
         // Create the tables.
-        let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
-        let ddls = ddls
-            .split(';')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>();
-        for ddl in ddls {
-            Self::execute(&self.ctx, ddl).await?;
-        }
+        self.create_tpch_tables(&tpch_kit).await?;
 
         // Load the data by creating an external table first and copying the data to real tables.
         let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap();
@@ -309,6 +316,9 @@ impl DatafusionDBMS {
         }
 
         self.clear_state(Some(base_table_stats)).await?;
+
+        // Create the tables. This must be done after creating stats.
+        self.create_tpch_tables(&tpch_kit).await?;
 
         let duration = start.elapsed();
         println!("datafusion load_tpch_stats duration: {:?}", duration);

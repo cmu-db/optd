@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::postgres_dbms::PostgresDBMS;
-use crate::truecard::{self, TruecardGetter};
+use crate::truecard::TruecardGetter;
 use crate::{benchmark::Benchmark, datafusion_dbms::DatafusionDBMS, tpch::TpchConfig};
 
 use anyhow::{self};
@@ -16,7 +16,6 @@ use async_trait::async_trait;
 pub struct CardtestRunner {
     pub dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>>,
     truecard_getter: Box<dyn TruecardGetter>,
-    workspace_dpath: PathBuf,
 }
 
 pub struct Cardinfo {
@@ -26,9 +25,8 @@ pub struct Cardinfo {
 }
 
 impl CardtestRunner {
-    pub async fn new<P: AsRef<Path>>(dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>>, truecard_getter: Box<dyn TruecardGetter>, workspace_dpath: P) -> anyhow::Result<Self> {
-        let workspace_dpath = PathBuf::from(workspace_dpath.as_ref());
-        Ok(CardtestRunner { dbmss, truecard_getter, workspace_dpath })
+    pub async fn new(dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>>, truecard_getter: Box<dyn TruecardGetter>) -> anyhow::Result<Self> {
+        Ok(CardtestRunner { dbmss, truecard_getter })
     }
 
     /// Get the Q-error of a query using the cost models of all DBMSs being tested
@@ -88,7 +86,8 @@ pub trait CardtestRunnerDBMSHelper {
     // get_name() has &self so that we're able to do Box<dyn CardtestRunnerDBMSHelper>
     fn get_name(&self) -> &str;
 
-    // The order of queries has to be the same between all databases
+    // The order of queries in the returned vector has to be the same between all databases,
+    //   and it has to be the same as the order returned by TruecardGetter.
     async fn eval_benchmark_estcards(
         &mut self,
         benchmark: &Benchmark,
@@ -107,7 +106,7 @@ pub async fn cardtest<P: AsRef<Path>>(
     let dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>> = vec![pg_dbms, df_dbms];
 
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
-    let mut cardtest_runner = CardtestRunner::new(dbmss, truecard_getter, &workspace_dpath).await?;
+    let mut cardtest_runner = CardtestRunner::new(dbmss, truecard_getter).await?;
     let cardinfos_alldbs = cardtest_runner
         .eval_benchmark_cardinfos_alldbs(&tpch_benchmark)
         .await?;
