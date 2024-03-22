@@ -104,7 +104,7 @@ pub async fn cardtest<P: AsRef<Path>>(
     let pg_dbms = Box::new(PostgresDBMS::build(&workspace_dpath, pguser, pgpassword)?);
     let truecard_getter = pg_dbms.clone();
     let df_dbms = Box::new(DatafusionDBMS::new(&workspace_dpath).await?);
-    let dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>> = vec![pg_dbms]; // vec![pg_dbms, df_dbms];
+    let dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>> = vec![pg_dbms, df_dbms];
 
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
     let mut cardtest_runner = CardtestRunner::new(dbmss, truecard_getter, &workspace_dpath).await?;

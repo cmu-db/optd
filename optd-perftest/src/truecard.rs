@@ -15,7 +15,6 @@ pub trait TruecardGetter {
 }
 
 /// A cache that gets persisted to disk for the true cardinalities of all queries of all benchmarks
-#[derive(Serialize, Deserialize)]
 pub struct TruecardCache {
     truecard_cache_fpath: PathBuf,
     cache: HashMap<String, HashMap<u32, usize>>,
@@ -58,7 +57,7 @@ impl TruecardCache {
         fs::create_dir_all(self.truecard_cache_fpath.parent().unwrap())?;
         // this will create a new file or truncate the file if it already exists
         let file = File::create(&self.truecard_cache_fpath)?;
-        serde_json::to_writer(file, &self)?;
+        serde_json::to_writer(file, &self.cache)?;
         Ok(())
     }
 }

@@ -182,9 +182,9 @@ impl DatafusionDBMS {
     /// Unlike Postgres, where both data and stats are used by the same program, for this class the
     ///   data is used by DataFusion while the stats are used by optd. That is why there are two
     ///   separate functions to load them.
-    async fn load_benchmark_data_no_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
+    async fn _load_benchmark_data_no_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
-            Benchmark::Tpch(tpch_config) => self.load_tpch_data_no_stats(tpch_config).await,
+            Benchmark::Tpch(tpch_config) => self._load_tpch_data_no_stats(tpch_config).await,
             _ => unimplemented!(),
         }
     }
@@ -197,7 +197,7 @@ impl DatafusionDBMS {
         }
     }
 
-    async fn load_tpch_data_no_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
+    async fn _load_tpch_data_no_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
         let start = Instant::now();
 
         // Generate the tables.
