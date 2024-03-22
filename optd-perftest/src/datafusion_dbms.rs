@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::Arc, time::Instant,
 };
 
 use crate::{
@@ -137,6 +137,8 @@ impl DatafusionDBMS {
     }
 
     async fn eval_tpch_estcards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
+        let start = Instant::now();
+
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
@@ -147,10 +149,15 @@ impl DatafusionDBMS {
             estcards.push(estcard);
         }
 
+        let duration = start.elapsed();
+        println!("datafusion eval_tpch_estcards duration: {:?}", duration);
+
         Ok(estcards)
     }
 
     async fn eval_tpch_truecards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
+        let start = Instant::now();
+
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
@@ -160,6 +167,9 @@ impl DatafusionDBMS {
             let estcard = self.eval_query_truecard(&sql).await?;
             truecards.push(estcard);
         }
+
+        let duration = start.elapsed();
+        println!("datafusion eval_tpch_truecards duration: {:?}", duration);
 
         Ok(truecards)
     }
@@ -212,7 +222,9 @@ impl DatafusionDBMS {
     }
 
     async fn load_tpch_data(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
-        // Geenrate the tables.
+        let start = Instant::now();
+
+        // Generate the tables.
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_config)?;
 
@@ -269,6 +281,9 @@ impl DatafusionDBMS {
             )
             .await?;
         }
+
+        let duration = start.elapsed();
+        println!("datafusion load_tpch_data duration: {:?}", duration);
 
         Ok(())
     }

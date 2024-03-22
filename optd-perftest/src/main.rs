@@ -1,10 +1,9 @@
 use clap::{Parser, Subcommand};
 use optd_perftest::cardtest;
-use optd_perftest::cardtest::CardInfo;
 use optd_perftest::shell;
 use optd_perftest::tpch::{TpchConfig, TPCH_KIT_POSTGRES};
-use prettytable::{format, Cell, Row, Table};
-use std::{fs, iter};
+use prettytable::{format, Table};
+use std::fs;
 
 #[derive(Parser)]
 struct Cli {
@@ -77,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
                 seed,
                 query_ids: query_ids.clone(),
             };
-            let card_info_alldbs =
+            let cardinfo_alldbs =
                 cardtest::cardtest(&workspace_dpath, &pguser, &pgpassword, tpch_config).await?;
             println!();
             println!(" Aggregate Q-Error Comparison");
@@ -85,9 +84,9 @@ async fn main() -> anyhow::Result<()> {
             agg_qerror_table.set_titles(prettytable::row![
                 "DBMS", "Median", "# Inf", "Mean", "Min", "Max"
             ]);
-            for (dbms, card_infos) in &card_info_alldbs {
-                if !card_infos.is_empty() {
-                    let qerrors: Vec<f64> = card_infos.iter().map(|card_info| card_info.qerror).collect();
+            for (dbms, cardinfos) in &cardinfo_alldbs {
+                if !cardinfos.is_empty() {
+                    let qerrors: Vec<f64> = cardinfos.iter().map(|cardinfo| cardinfo.qerror).collect();
                     let finite_qerrors: Vec<f64> = qerrors
                         .clone()
                         .into_iter()
@@ -126,14 +125,14 @@ async fn main() -> anyhow::Result<()> {
             println!(" ===========================");
             for (i, query_id) in query_ids.iter().enumerate() {
                 println!(" Query {}", query_id);
-                let mut this_query_card_info_table = Table::new();
-                this_query_card_info_table.set_titles(prettytable::row!["DBMS", "Q-Error", "Est. Card.", "True Card."]);
-                for (dbms, card_infos) in &card_info_alldbs {
-                    let this_query_card_info = card_infos.get(i).unwrap();
-                    this_query_card_info_table.add_row(prettytable::row![dbms, this_query_card_info.qerror, this_query_card_info.estcard, this_query_card_info.truecard]);
+                let mut this_query_cardinfo_table = Table::new();
+                this_query_cardinfo_table.set_titles(prettytable::row!["DBMS", "Q-Error", "Est. Card.", "True Card."]);
+                for (dbms, cardinfos) in &cardinfo_alldbs {
+                    let this_query_cardinfo = cardinfos.get(i).unwrap();
+                    this_query_cardinfo_table.add_row(prettytable::row![dbms, this_query_cardinfo.qerror, this_query_cardinfo.estcard, this_query_cardinfo.truecard]);
                 }
-                this_query_card_info_table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
-                this_query_card_info_table.printstd();
+                this_query_cardinfo_table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
+                this_query_cardinfo_table.printstd();
             }
         }
     }

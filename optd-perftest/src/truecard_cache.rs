@@ -27,7 +27,7 @@ impl DBMSTruecardCache {
         workspace_dpath
             .as_ref()
             .join("truecard_caches")
-            .join(dbms_name)
+            .join(format!("{}.json", dbms_name))
     }
 
     pub fn build<P: AsRef<Path>>(workspace_dpath: P, dbms_name: &str) -> anyhow::Result<Self> {
