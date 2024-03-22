@@ -1,11 +1,11 @@
-/// Plan nodes with data fields must implement a method `explain_data`. An example:
+/// Plan nodes with data fields must implement `ExplainData` trait. An example:
 ///
 /// ```rust
 /// #[derive(Clone, Debug)]
 /// struct PhysicalDummy(PlanNode);
 ///
-/// impl PhysicalDummy {
-///     pub fn explain_data(data: &Value) -> Vec<(&'static str, Pretty<'static>)> {
+/// impl ExplainData for PhysicalDummy {
+///     fn explain_data(data: &Value) -> Vec<(&'static str, Pretty<'static>)> {
 ///         if let Value::Int32(i) = data {
 ///             vec![("primitive_data", i.to_string().into())]
 ///         } else {
@@ -149,8 +149,8 @@ mod test {
         #[derive(Clone, Debug)]
         struct PhysicalComplexDummy(PlanNode);
 
-        impl PhysicalComplexDummy {
-            pub fn explain_data(data: &Value) -> Vec<(&'static str, Pretty<'static>)> {
+        impl ExplainData for PhysicalComplexDummy {
+            fn explain_data(data: &Value) -> Vec<(&'static str, Pretty<'static>)> {
                 if let Value::Serialized(serialized_data) = data {
                     let data: ComplexData = bincode::deserialize(serialized_data).unwrap();
                     vec![
