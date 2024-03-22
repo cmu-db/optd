@@ -160,7 +160,7 @@ impl PostgresDBMS {
 
         // create stats
         // you need to do VACUUM FULL ANALYZE and not just ANALYZE to make sure the stats are created in a deterministic way
-        // this is standard practice for ostgres benchmarking
+        // this is standard practice for postgres benchmarking
         client.query("VACUUM FULL ANALYZE", &[]).await?;
 
         Ok(())
