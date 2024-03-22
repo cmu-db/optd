@@ -196,7 +196,10 @@ impl DatafusionDBMS {
     }
 
     /// Build the stats that optd's cost model uses.
-    async fn get_benchmark_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<BaseTableStats> {
+    async fn get_benchmark_stats(
+        &mut self,
+        benchmark: &Benchmark,
+    ) -> anyhow::Result<BaseTableStats> {
         match benchmark {
             Benchmark::Tpch(tpch_config) => self.get_tpch_stats(tpch_config).await,
             _ => unimplemented!(),

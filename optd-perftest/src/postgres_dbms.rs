@@ -1,5 +1,9 @@
 use crate::{
-    benchmark::Benchmark, cardtest::CardtestRunnerDBMSHelper, shell, tpch::{TpchConfig, TpchKit}, truecard::{TruecardCache, TruecardGetter}
+    benchmark::Benchmark,
+    cardtest::CardtestRunnerDBMSHelper,
+    shell,
+    tpch::{TpchConfig, TpchKit},
+    truecard::{TruecardCache, TruecardGetter},
 };
 use async_trait::async_trait;
 use futures::Sink;
