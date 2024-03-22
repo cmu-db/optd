@@ -49,6 +49,8 @@ pub struct TpchKit {
     genned_tables_dpath: PathBuf,
     genned_queries_dpath: PathBuf,
     pub schema_fpath: PathBuf,
+    pub constraints_fpath: PathBuf,
+    pub indexes_fpath: PathBuf,
 }
 
 /// I keep the same conventions for these methods as I do for PostgresDBMS
@@ -74,6 +76,8 @@ impl TpchKit {
             fs::create_dir(&genned_queries_dpath)?;
         }
         let schema_fpath = dbgen_dpath.join("dss.ddl");
+        let constraints_fpath = dbgen_dpath.join("constraints.sql");
+        let indexes_fpath = dbgen_dpath.join("indexes.sql");
 
         // create Self
         let kit = TpchKit {
@@ -85,6 +89,8 @@ impl TpchKit {
             genned_tables_dpath,
             genned_queries_dpath,
             schema_fpath,
+            constraints_fpath,
+            indexes_fpath,
         };
 
         // set envvars (DSS_PATH can change so we don't set it now)

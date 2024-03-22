@@ -1,7 +1,6 @@
 use crate::{
     benchmark::Benchmark,
     cardtest::CardtestRunnerDBMSHelper,
-    shell,
     tpch::{TpchConfig, TpchKit},
     truecard::{TruecardCache, TruecardGetter},
 };
@@ -12,7 +11,7 @@ use regex::Regex;
 
 use std::{
     fs,
-    io::{self, Cursor},
+    io::Cursor,
     path::{Path, PathBuf},
     time::Instant,
 };
@@ -33,12 +32,6 @@ pub struct PostgresDBMS {
     workspace_dpath: PathBuf,
     pguser: String,
     pgpassword: String,
-}
-
-fn get_tpch_constraints_fpath() -> io::Result<PathBuf> {
-    let optd_root = shell::get_optd_root()?;
-    let tpch_fpath = optd_root.join("optd-perftest/src/tpch_constraints.sql");
-    Ok(tpch_fpath)
 }
 
 impl PostgresDBMS {
@@ -163,9 +156,11 @@ impl PostgresDBMS {
             Self::copy_from_stdin(client, tbl_fpath).await?;
         }
 
-        // load the constraints
-        let tpch_constraints_fpath = get_tpch_constraints_fpath().unwrap();
-        let sql = fs::read_to_string(tpch_constraints_fpath.to_str().unwrap())?;
+        // load the constraints and indexes
+        // TODO: constraints are currently broken
+        // let sql = fs::read_to_string(tpch_kit.constraints_fpath.to_str().unwrap())?;
+        // client.batch_execute(&sql).await?;
+        let sql = fs::read_to_string(tpch_kit.indexes_fpath.to_str().unwrap())?;
         client.batch_execute(&sql).await?;
 
         // create stats
