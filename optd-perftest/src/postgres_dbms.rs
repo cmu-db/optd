@@ -1,7 +1,6 @@
 use crate::{
     benchmark::Benchmark,
     cardtest::CardtestRunnerDBMSHelper,
-    shell,
     tpch::{TpchConfig, TpchKit},
     truecard::{TruecardCache, TruecardGetter},
 };
@@ -12,7 +11,7 @@ use regex::Regex;
 
 use std::{
     fs,
-    io::{self, Cursor},
+    io::Cursor,
     path::{Path, PathBuf},
     time::Instant,
 };
