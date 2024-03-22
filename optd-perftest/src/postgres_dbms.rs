@@ -1,8 +1,5 @@
 use crate::{
-    benchmark::Benchmark,
-    cardtest::CardtestRunnerDBMSHelper,
-    tpch::{TpchConfig, TpchKit},
-    truecard::{TruecardCache, TruecardGetter},
+    benchmark::Benchmark, cardtest::CardtestRunnerDBMSHelper, shell, tpch::{TpchConfig, TpchKit}, truecard::{TruecardCache, TruecardGetter}
 };
 use async_trait::async_trait;
 use futures::Sink;
@@ -11,7 +8,7 @@ use regex::Regex;
 
 use std::{
     fs,
-    io::Cursor,
+    io::{self, Cursor},
     path::{Path, PathBuf},
     time::Instant,
 };
@@ -32,6 +29,13 @@ pub struct PostgresDBMS {
     workspace_dpath: PathBuf,
     pguser: String,
     pgpassword: String,
+}
+
+fn get_tpch_constraints_fpath() -> io::Result<PathBuf> {
+    let optd_root = shell::get_optd_root()?;
+    println!("optd_root={:?}", optd_root);
+    let tpch_fpath = optd_root.join("optd-perftest/src/tpch_constraints.sql");
+    Ok(tpch_fpath)
 }
 
 impl PostgresDBMS {
@@ -155,6 +159,12 @@ impl PostgresDBMS {
         for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config)? {
             Self::copy_from_stdin(client, tbl_fpath).await?;
         }
+
+        // load the constraints
+        let tpch_constraints_fpath = get_tpch_constraints_fpath().unwrap();
+        println!("tpch_constraints_fpath={:?}", tpch_constraints_fpath);
+        let sql = fs::read_to_string(tpch_constraints_fpath.to_str().unwrap())?;
+        client.batch_execute(&sql).await?;
 
         // create stats
         // you need to do VACUUM FULL ANALYZE and not just ANALYZE to make sure the stats are created in a deterministic way

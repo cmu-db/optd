@@ -110,24 +110,23 @@ impl TpchKit {
         } else {
             log::debug!("[skip] cloning tpch-kit repo");
         }
-        env::set_current_dir(&self.tpch_kit_repo_dpath)?;
         log::debug!("[start] pulling latest tpch-kit repo");
-        shell::run_command_with_status_check("git pull")?;
+        shell::run_command_with_status_check_in_dir("git pull", Some(&self.tpch_kit_repo_dpath))?;
         log::debug!("[end] pulling latest tpch-kit repo");
+        // make sure to do this so that get_optd_root() doesn't break
         Ok(())
     }
 
     pub fn make(&self, dbms: &str) -> io::Result<()> {
-        env::set_current_dir(&self.dbgen_dpath)?;
         log::debug!("[start] building dbgen");
         // we need to call "make clean" because we might have called make earlier with
         //   a different dbms
-        shell::run_command_with_status_check("make clean")?;
-        shell::run_command_with_status_check(&format!(
+        shell::run_command_with_status_check_in_dir("make clean", Some(&self.dbgen_dpath))?;
+        shell::run_command_with_status_check_in_dir(&format!(
             "make MACHINE={} DATABASE={}",
             TpchKit::get_machine(),
             dbms
-        ))?;
+        ), Some(&self.dbgen_dpath))?;
         log::debug!("[end] building dbgen");
         Ok(())
     }
