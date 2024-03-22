@@ -10,7 +10,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 use std::{
-    collections::HashMap, fs, io::Cursor, path::{Path, PathBuf}, time::Instant
+    fs, io::Cursor, path::{Path, PathBuf}, time::Instant
 };
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
@@ -22,6 +22,9 @@ pub const POSTGRES_DBMS_NAME: &str = "Postgres";
 /// This dbname is assumed to always exist
 const DEFAULT_DBNAME: &str = "postgres";
 
+/// Conceptually, this struct represents a "thing that creates connections to Postgres"
+/// Thus, it's ok to have multiple copies of this struct at once
+#[derive(Clone)]
 pub struct PostgresDBMS {
     workspace_dpath: PathBuf,
     pguser: String,

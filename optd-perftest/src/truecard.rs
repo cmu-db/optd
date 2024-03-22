@@ -25,7 +25,7 @@ impl TruecardCache {
     pub fn build<P: AsRef<Path>>(truecard_cache_fpath: P) -> anyhow::Result<Self> {
         let truecard_cache_fpath = PathBuf::from(truecard_cache_fpath.as_ref());
         let cache = if truecard_cache_fpath.exists() {
-            let file = File::open(truecard_cache_fpath)?;
+            let file = File::open(&truecard_cache_fpath)?;
             serde_json::from_reader(file)?
         } else {
             HashMap::new()
@@ -57,7 +57,7 @@ impl TruecardCache {
     pub fn save(&self) -> anyhow::Result<()> {
         fs::create_dir_all(self.truecard_cache_fpath.parent().unwrap())?;
         // this will create a new file or truncate the file if it already exists
-        let file = File::create(self.truecard_cache_fpath)?;
+        let file = File::create(&self.truecard_cache_fpath)?;
         serde_json::to_writer(file, &self)?;
         Ok(())
     }
