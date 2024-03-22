@@ -16,6 +16,12 @@ pub struct CardtestRunner {
     pub dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>>,
 }
 
+pub struct CardInfo {
+    pub qerror: f64,
+    pub estcard: usize,
+    pub truecard: usize,
+}
+
 impl CardtestRunner {
     pub async fn new(dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>>) -> anyhow::Result<Self> {
         Ok(CardtestRunner { dbmss })
@@ -26,11 +32,11 @@ impl CardtestRunner {
     /// One detail not specified in the paper is that Q-error is based on the ratio of true and estimated cardinality
     ///   of the entire query, not of a subtree of the query. This detail is specified in Section 7.1 of
     ///   [Yang 2020](https://arxiv.org/pdf/2006.08109.pdf)
-    pub async fn eval_benchmark_qerrors_alldbs(
+    pub async fn eval_benchmark_card_infos_alldbs(
         &mut self,
         benchmark: &Benchmark,
-    ) -> anyhow::Result<HashMap<String, Vec<f64>>> {
-        let mut qerrors_alldbs = HashMap::new();
+    ) -> anyhow::Result<HashMap<String, Vec<CardInfo>>> {
+        let mut card_infos_alldbs = HashMap::new();
 
         // postgres runs faster and is less buggy so we use their true cardinalities
         // in the future, it's probably a good idea to get the truecards of datafusion to ensure that they match
@@ -43,15 +49,21 @@ impl CardtestRunner {
 
         for dbms in &mut self.dbmss {
             let estcards = dbms.eval_benchmark_estcards(benchmark).await?;
-            let qerrors = estcards
+            let card_infos = estcards
                 .into_iter()
                 .zip(pg_truecards.iter())
-                .map(|(estcard, truecard)| CardtestRunner::calc_qerror(estcard, *truecard))
+                .map(|(estcard, &truecard)| {
+                    CardInfo {
+                        qerror: CardtestRunner::calc_qerror(estcard, truecard),
+                        estcard,
+                        truecard
+                    }
+                })
                 .collect();
-            qerrors_alldbs.insert(String::from(dbms.get_name()), qerrors);
+            card_infos_alldbs.insert(String::from(dbms.get_name()), card_infos);
         }
 
-        Ok(qerrors_alldbs)
+        Ok(card_infos_alldbs)
     }
 
     fn calc_qerror(estcard: usize, truecard: usize) -> f64 {
@@ -101,15 +113,15 @@ pub async fn cardtest<P: AsRef<Path> + Clone>(
     pguser: &str,
     pgpassword: &str,
     tpch_config: TpchConfig,
-) -> anyhow::Result<HashMap<String, Vec<f64>>> {
+) -> anyhow::Result<HashMap<String, Vec<CardInfo>>> {
     let pg_dbms = PostgresDBMS::build(workspace_dpath.clone(), pguser, pgpassword)?;
     let df_dbms = DatafusionDBMS::new(workspace_dpath).await?;
     let dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>> = vec![Box::new(pg_dbms), Box::new(df_dbms)];
 
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
     let mut cardtest_runner = CardtestRunner::new(dbmss).await?;
-    let qerrors_alldbs = cardtest_runner
-        .eval_benchmark_qerrors_alldbs(&tpch_benchmark)
+    let card_infos_alldbs = cardtest_runner
+        .eval_benchmark_card_infos_alldbs(&tpch_benchmark)
         .await?;
-    Ok(qerrors_alldbs)
+    Ok(card_infos_alldbs)
 }
