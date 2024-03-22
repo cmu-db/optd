@@ -122,11 +122,10 @@ impl TpchKit {
         // we need to call "make clean" because we might have called make earlier with
         //   a different dbms
         shell::run_command_with_status_check_in_dir("make clean", Some(&self.dbgen_dpath))?;
-        shell::run_command_with_status_check_in_dir(&format!(
-            "make MACHINE={} DATABASE={}",
-            TpchKit::get_machine(),
-            dbms
-        ), Some(&self.dbgen_dpath))?;
+        shell::run_command_with_status_check_in_dir(
+            &format!("make MACHINE={} DATABASE={}", TpchKit::get_machine(), dbms),
+            Some(&self.dbgen_dpath),
+        )?;
         log::debug!("[end] building dbgen");
         Ok(())
     }
@@ -149,10 +148,10 @@ impl TpchKit {
             shell::make_into_empty_dir(&this_genned_tables_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
             log::debug!("[start] generating tables for {}", tpch_config);
-            shell::run_command_with_status_check_in_dir(&format!(
-                "./dbgen -s{}",
-                tpch_config.scale_factor
-            ), Some(&self.dbgen_dpath))?;
+            shell::run_command_with_status_check_in_dir(
+                &format!("./dbgen -s{}", tpch_config.scale_factor),
+                Some(&self.dbgen_dpath),
+            )?;
             File::create(done_fpath)?;
             log::debug!("[end] generating tables for {}", tpch_config);
         } else {
@@ -171,10 +170,13 @@ impl TpchKit {
             log::debug!("[start] generating queries for {}", tpch_config);
             // we don't use -d in qgen because -r controls the substitution values we use
             for query_i in 1..=NUM_TPCH_QUERIES {
-                let output = shell::run_command_with_status_check_in_dir(&format!(
-                    "./qgen -s{} -r{} {}",
-                    tpch_config.scale_factor, tpch_config.seed, query_i
-                ), Some(&self.dbgen_dpath))?;
+                let output = shell::run_command_with_status_check_in_dir(
+                    &format!(
+                        "./qgen -s{} -r{} {}",
+                        tpch_config.scale_factor, tpch_config.seed, query_i
+                    ),
+                    Some(&self.dbgen_dpath),
+                )?;
                 let this_genned_queries_fpath =
                     this_genned_queries_dpath.join(format!("{}.sql", query_i));
                 fs::write(&this_genned_queries_fpath, output.stdout)?;

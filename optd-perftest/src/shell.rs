@@ -10,7 +10,10 @@ pub fn run_command_with_status_check(cmd_str: &str) -> io::Result<Output> {
 }
 
 /// Runs a command in a directory, exiting the program immediately if the command fails
-pub fn run_command_with_status_check_in_dir<P: AsRef<Path>>(cmd_str: &str, in_path: Option<P>) -> io::Result<Output> {
+pub fn run_command_with_status_check_in_dir<P: AsRef<Path>>(
+    cmd_str: &str,
+    in_path: Option<P>,
+) -> io::Result<Output> {
     // use shlex::split() instead of split_whitespace() to handle cases like quotes and escape chars
     let mut cmd_components: Vec<String> = shlex::split(cmd_str).unwrap();
     let cmd_name = cmd_components.remove(0);
@@ -55,7 +58,11 @@ where
 pub fn get_optd_root() -> io::Result<PathBuf> {
     let url_output = run_command_with_status_check("git config --get remote.origin.url")?;
     let url_string = str::from_utf8(&url_output.stdout).unwrap().trim();
-    assert!(url_string.contains("cmu-db/optd.git"), "You are in the repo with url_string={}. This was not recognized as the optd repo.", url_string);
+    assert!(
+        url_string.contains("cmu-db/optd.git"),
+        "You are in the repo with url_string={}. This was not recognized as the optd repo.",
+        url_string
+    );
     let toplevel_output = run_command_with_status_check("git rev-parse --show-toplevel")?;
     let toplevel_str = str::from_utf8(&toplevel_output.stdout).unwrap().trim();
     let toplevel_dpath = PathBuf::from(toplevel_str);
