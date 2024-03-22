@@ -1,8 +1,10 @@
 /// Plan nodes with data fields must implement `ExplainData` trait. An example:
 ///
-/// ```rust
+/// ```ignore
 /// #[derive(Clone, Debug)]
 /// struct PhysicalDummy(PlanNode);
+///
+/// // Implement `OptRelNode` using `define_plan_node!`...
 ///
 /// impl ExplainData for PhysicalDummy {
 ///     fn explain_data(data: &Value) -> Vec<(&'static str, Pretty<'static>)> {
