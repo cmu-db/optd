@@ -23,7 +23,7 @@ pub struct DBMSTruecardCache {
 }
 
 impl DBMSTruecardCache {
-    fn get_ser_fpath<P: AsRef<Path>>(workspace_dpath: P, dbms_name: &str) -> PathBuf {
+    fn get_serialized_fpath<P: AsRef<Path>>(workspace_dpath: P, dbms_name: &str) -> PathBuf {
         workspace_dpath
             .as_ref()
             .join("truecard_caches")
@@ -31,9 +31,9 @@ impl DBMSTruecardCache {
     }
 
     pub fn build<P: AsRef<Path>>(workspace_dpath: P, dbms_name: &str) -> anyhow::Result<Self> {
-        let ser_fpath = Self::get_ser_fpath(&workspace_dpath, dbms_name);
-        let dbms_cache = if ser_fpath.exists() {
-            let file = File::open(ser_fpath)?;
+        let serialized_fpath = Self::get_serialized_fpath(&workspace_dpath, dbms_name);
+        let dbms_cache = if serialized_fpath.exists() {
+            let file = File::open(serialized_fpath)?;
             serde_json::from_reader(file)?
         } else {
             HashMap::new()
@@ -65,10 +65,10 @@ impl DBMSTruecardCache {
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
-        let ser_fpath = Self::get_ser_fpath(&self.workspace_dpath, &self.dbms_name);
-        fs::create_dir_all(ser_fpath.parent().unwrap())?;
+        let serialized_fpath = Self::get_serialized_fpath(&self.workspace_dpath, &self.dbms_name);
+        fs::create_dir_all(serialized_fpath.parent().unwrap())?;
         // this will create a new file or truncate the file if it already exists
-        let file = File::create(ser_fpath)?;
+        let file = File::create(serialized_fpath)?;
         serde_json::to_writer(file, &self.dbms_cache)?;
         Ok(())
     }
