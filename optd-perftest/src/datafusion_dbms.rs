@@ -45,7 +45,11 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
         &mut self,
         benchmark: &Benchmark,
     ) -> anyhow::Result<Vec<usize>> {
-        self.load_benchmark_stats(benchmark).await?;
+        let base_table_stats = self.get_benchmark_stats(benchmark).await?;
+        self.clear_state(Some(base_table_stats)).await?;
+        // Create the tables. This must be done after clear_state because that clears everything
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
+        self.create_tpch_tables(&tpch_kit).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
             Benchmark::Tpch(tpch_config) => self.eval_tpch_estcards(tpch_config).await,
@@ -183,17 +187,18 @@ impl DatafusionDBMS {
     /// Unlike Postgres, where both data and stats are used by the same program, for this class the
     ///   data is used by DataFusion while the stats are used by optd. That is why there are two
     ///   separate functions to load them.
-    async fn _load_benchmark_data_no_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
+    #[allow(dead_code)]
+    async fn load_benchmark_data_no_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
-            Benchmark::Tpch(tpch_config) => self._load_tpch_data_no_stats(tpch_config).await,
+            Benchmark::Tpch(tpch_config) => self.load_tpch_data_no_stats(tpch_config).await,
             _ => unimplemented!(),
         }
     }
 
     /// Build the stats that optd's cost model uses.
-    async fn load_benchmark_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
+    async fn get_benchmark_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<BaseTableStats> {
         match benchmark {
-            Benchmark::Tpch(tpch_config) => self.load_tpch_stats(tpch_config).await,
+            Benchmark::Tpch(tpch_config) => self.get_tpch_stats(tpch_config).await,
             _ => unimplemented!(),
         }
     }
@@ -211,7 +216,8 @@ impl DatafusionDBMS {
         Ok(())
     }
 
-    async fn _load_tpch_data_no_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
+    #[allow(dead_code)]
+    async fn load_tpch_data_no_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
         let start = Instant::now();
 
         // Generate the tables.
@@ -266,7 +272,7 @@ impl DatafusionDBMS {
         Ok(())
     }
 
-    async fn load_tpch_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
+    async fn get_tpch_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<BaseTableStats> {
         let start = Instant::now();
 
         // Generate the tables
@@ -310,16 +316,9 @@ impl DatafusionDBMS {
             );
             log::debug!("statistics generated for table: {}", tbl_name);
         }
-
-        self.clear_state(Some(base_table_stats)).await?;
-
-        // Create the tables. This must be done after creating stats.
-        self.create_tpch_tables(&tpch_kit).await?;
-
         let duration = start.elapsed();
         println!("datafusion load_tpch_stats duration: {:?}", duration);
-
-        Ok(())
+        Ok(base_table_stats)
     }
 }
 
