@@ -1,19 +1,23 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use crate::postgres_dbms::{PostgresDBMS, POSTGRES_DBMS_NAME};
+use crate::postgres_dbms::PostgresDBMS;
+use crate::truecard::{self, TruecardGetter};
 use crate::{benchmark::Benchmark, datafusion_dbms::DatafusionDBMS, tpch::TpchConfig};
 
 use anyhow::{self};
 use async_trait::async_trait;
 
-/// This struct performs cardinality testing across one or more dbmss.
+/// This struct performs cardinality testing across one or more DBMSs.
 /// Another design would be for the CardtestRunnerDBMSHelper trait to expose a function
 ///   to evaluate the Q-error. However, I chose not to do this design for reasons
 ///   described in the comments of the CardtestRunnerDBMSHelper trait. This is why
-///   you would use CardtestRunner even for computing the Q-error of a single dbms.
+///   you would use CardtestRunner even for computing the Q-error of a single DBMS.
 pub struct CardtestRunner {
-    pub dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>>,
+    pub dbmss: Vec<Arc<dyn CardtestRunnerDBMSHelper>>,
+    truecard_getter: Arc<dyn TruecardGetter>,
+    workspace_dpath: PathBuf,
 }
 
 pub struct Cardinfo {
@@ -23,11 +27,12 @@ pub struct Cardinfo {
 }
 
 impl CardtestRunner {
-    pub async fn new(dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>>) -> anyhow::Result<Self> {
-        Ok(CardtestRunner { dbmss })
+    pub async fn new<P: AsRef<Path>>(dbmss: Vec<Arc<dyn CardtestRunnerDBMSHelper>>, truecard_getter: Arc<dyn TruecardGetter>, workspace_dpath: P) -> anyhow::Result<Self> {
+        let workspace_dpath = PathBuf::from(workspace_dpath.as_ref());
+        Ok(CardtestRunner { dbmss, truecard_getter, workspace_dpath })
     }
 
-    /// Get the Q-error of a query using the cost models of all dbmss being tested
+    /// Get the Q-error of a query using the cost models of all DBMSs being tested
     /// Q-error is defined in [Leis 2015](https://15721.courses.cs.cmu.edu/spring2024/papers/16-costmodels/p204-leis.pdf)
     /// One detail not specified in the paper is that Q-error is based on the ratio of true and estimated cardinality
     ///   of the entire query, not of a subtree of the query. This detail is specified in Section 7.1 of
@@ -37,21 +42,13 @@ impl CardtestRunner {
         benchmark: &Benchmark,
     ) -> anyhow::Result<HashMap<String, Vec<Cardinfo>>> {
         let mut cardinfos_alldbs = HashMap::new();
-
-        // postgres runs faster and is less buggy so we use their true cardinalities
-        // in the future, it's probably a good idea to get the truecards of datafusion to ensure that they match
-        let pg_dbms = self
-            .dbmss
-            .iter_mut()
-            .find(|dbms| dbms.get_name() == POSTGRES_DBMS_NAME)
-            .unwrap();
-        let pg_truecards = pg_dbms.eval_benchmark_truecards(benchmark).await?;
+        let truecards = self.truecard_getter.get_benchmark_truecards(benchmark).await?;
 
         for dbms in &mut self.dbmss {
             let estcards = dbms.eval_benchmark_estcards(benchmark).await?;
             let cardinfos = estcards
                 .into_iter()
-                .zip(pg_truecards.iter())
+                .zip(truecards.iter())
                 .map(|(estcard, &truecard)| {
                     Cardinfo {
                         qerror: CardtestRunner::calc_qerror(estcard, truecard),
@@ -74,22 +71,17 @@ impl CardtestRunner {
     }
 }
 
-/// This trait defines helper functions to enable cardinality testing on a dbms
-/// The reason a "get qerror" function is not exposed is to allow for greater
-///   flexibility. If we exposed "get qerror" for each dbms, we would need to
-///   get the true and estimated cardinalities for _each_ dbms. However, we
-///   can now choose to only get the true cardinalities of _one_ dbms to
-///   improve performance or even cache the true cardinalities. Additionally, if
-///   we do want to get the true cardinalities of all dbmss, we can compare
-///   them against each other to ensure they're all equal. All these options are
-///   possible when exposing "get true card" and "get est card" instead of a
-///   single "get qerror". If you want to compute the Q-error of a single
-///   dbms, just create a CardtestRunner with a single dbms as input.
-/// When exposing a "get true card" and "get est card" interface, you could
-///   ostensibly do it on the granularity of a single SQL string or on the
-///   granularity of an entire benchmark. I chose the latter for a simple reason:
-///   different dbmss might have different SQL strings for the same conceptual
-///   query (see how qgen in tpch-kit takes in dbms as an input).
+/// This trait defines helper functions to enable cardinality testing on a DBMS
+/// The reason "get true card" is not a function here is because we don't need to call
+///   "get true card" for all DBMSs we are testing, since they'll all return the same
+///   answer. We also cache true cardinalities instead of executing queries every time
+///   since executing OLAP queries could take minutes to hours. Due to both of these
+///   factors, we conceptually view getting the true cardinality as a completely separate
+///   problem from getting the estimated cardinalities of each DBMS.
+/// When exposing a "get est card" interface, you could do it on the granularity of
+///   a single SQL string or on the granularity of an entire benchmark. I chose the
+///   latter for a simple reason: different DBMSs might have different SQL strings
+///   for the same conceptual query (see how qgen in tpch-kit takes in DBMS as an input).
 /// When more performance tests are implemented, you would probably want to extract
 ///   get_name() into a generic "DBMS" trait.
 #[async_trait]
@@ -97,29 +89,26 @@ pub trait CardtestRunnerDBMSHelper {
     // get_name() has &self so that we're able to do Box<dyn CardtestRunnerDBMSHelper>
     fn get_name(&self) -> &str;
 
-    // The order of queries has to be the same between these two functions.
+    // The order of queries has to be the same between all databases
     async fn eval_benchmark_estcards(
-        &mut self,
-        benchmark: &Benchmark,
-    ) -> anyhow::Result<Vec<usize>>;
-    async fn eval_benchmark_truecards(
         &mut self,
         benchmark: &Benchmark,
     ) -> anyhow::Result<Vec<usize>>;
 }
 
-pub async fn cardtest<P: AsRef<Path> + Clone>(
+pub async fn cardtest<P: AsRef<Path>>(
     workspace_dpath: P,
     pguser: &str,
     pgpassword: &str,
     tpch_config: TpchConfig,
 ) -> anyhow::Result<HashMap<String, Vec<Cardinfo>>> {
-    let pg_dbms = PostgresDBMS::build(workspace_dpath.clone(), pguser, pgpassword)?;
-    let df_dbms = DatafusionDBMS::new(workspace_dpath).await?;
-    let dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>> = vec![Box::new(pg_dbms), Box::new(df_dbms)];
+    let pg_dbms = Arc::new(PostgresDBMS::build(&workspace_dpath, pguser, pgpassword)?);
+    let truecard_getter = pg_dbms.clone();
+    let df_dbms = Arc::new(DatafusionDBMS::new(&workspace_dpath).await?);
+    let dbmss: Vec<Arc<dyn CardtestRunnerDBMSHelper>> = vec![pg_dbms, df_dbms];
 
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
-    let mut cardtest_runner = CardtestRunner::new(dbmss).await?;
+    let mut cardtest_runner = CardtestRunner::new(dbmss, truecard_getter, &workspace_dpath).await?;
     let cardinfos_alldbs = cardtest_runner
         .eval_benchmark_cardinfos_alldbs(&tpch_benchmark)
         .await?;

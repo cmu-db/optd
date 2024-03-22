@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::shell;
 /// A wrapper around tpch-kit (https://github.com/gregrahn/tpch-kit)
 use std::env;
@@ -12,7 +14,7 @@ const TPCH_KIT_REPO_URL: &str = "https://github.com/wangpatrick57/tpch-kit.git";
 pub const TPCH_KIT_POSTGRES: &str = "POSTGRESQL";
 const NUM_TPCH_QUERIES: usize = 22;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TpchConfig {
     pub dbms: String,
     pub scale_factor: f64,
@@ -237,13 +239,13 @@ impl TpchKit {
     pub fn get_sql_fpath_ordered_iter(
         &self,
         tpch_config: &TpchConfig,
-    ) -> io::Result<impl Iterator<Item = PathBuf>> {
+    ) -> io::Result<impl Iterator<Item = (u32, PathBuf)>> {
         let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_config);
         let sql_fpath_ordered_iter = tpch_config
             .query_ids
             .clone()
             .into_iter()
-            .map(move |query_i| this_genned_queries_dpath.join(format!("{}.sql", query_i)));
+            .map(move |query_id| (query_id, this_genned_queries_dpath.join(format!("{}.sql", query_id))));
         Ok(sql_fpath_ordered_iter)
     }
 }

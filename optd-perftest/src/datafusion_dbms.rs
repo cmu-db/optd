@@ -44,21 +44,10 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
         &mut self,
         benchmark: &Benchmark,
     ) -> anyhow::Result<Vec<usize>> {
-        self.load_benchmark_data(benchmark).await?;
+        self.load_benchmark_stats(benchmark).await?;
         match benchmark {
             Benchmark::Test => unimplemented!(),
             Benchmark::Tpch(tpch_config) => self.eval_tpch_estcards(tpch_config).await,
-        }
-    }
-
-    async fn eval_benchmark_truecards(
-        &mut self,
-        benchmark: &Benchmark,
-    ) -> anyhow::Result<Vec<usize>> {
-        self.load_benchmark_data(benchmark).await?;
-        match benchmark {
-            Benchmark::Test => unimplemented!(),
-            Benchmark::Tpch(tpch_config) => self.eval_tpch_truecards(tpch_config).await,
         }
     }
 }
@@ -155,31 +144,6 @@ impl DatafusionDBMS {
         Ok(estcards)
     }
 
-    async fn eval_tpch_truecards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
-        let start = Instant::now();
-
-        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
-        tpch_kit.gen_queries(tpch_config)?;
-
-        let mut truecards = vec![];
-        for sql_fpath in tpch_kit.get_sql_fpath_ordered_iter(tpch_config)? {
-            let sql = fs::read_to_string(sql_fpath)?;
-            let estcard = self.eval_query_truecard(&sql).await?;
-            truecards.push(estcard);
-        }
-
-        let duration = start.elapsed();
-        println!("datafusion eval_tpch_truecards duration: {:?}", duration);
-
-        Ok(truecards)
-    }
-
-    async fn eval_query_truecard(&self, sql: &str) -> anyhow::Result<usize> {
-        let rows = Self::execute(&self.ctx, sql).await?;
-        let num_rows = rows.len();
-        Ok(num_rows)
-    }
-
     fn log_explain(&self, explains: &[Vec<String>]) {
         // row_cnt is exclusively in physical_plan after optd
         let physical_plan_after_optd_lines = explains
@@ -214,23 +178,31 @@ impl DatafusionDBMS {
         Ok(row_cnt)
     }
 
-    async fn load_benchmark_data(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
+    /// Load the data into DataFusion without building the stats used by optd.
+    /// Unlike Postgres, where both data and stats are used by the same program, for this class the
+    ///   data is used by DataFusion while the stats are used by optd. That is why there are two
+    ///   separate functions to load them.
+    async fn load_benchmark_data_no_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
-            Benchmark::Tpch(tpch_config) => self.load_tpch_data(tpch_config).await,
+            Benchmark::Tpch(tpch_config) => self.load_tpch_data_no_stats(tpch_config).await,
             _ => unimplemented!(),
         }
     }
 
-    async fn load_tpch_data(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
+    /// Build the stats that optd's cost model uses.
+    async fn load_benchmark_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
+        match benchmark {
+            Benchmark::Tpch(tpch_config) => self.load_tpch_stats(tpch_config).await,
+            _ => unimplemented!(),
+        }
+    }
+
+    async fn load_tpch_data_no_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
         let start = Instant::now();
 
         // Generate the tables.
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_config)?;
-
-        // Generate the stats.
-        let stats = self.load_tpch_stats(&tpch_kit, tpch_config).await?;
-        self.clear_state(Some(stats)).await?;
 
         // Create the tables.
         let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
@@ -289,10 +261,15 @@ impl DatafusionDBMS {
     }
 
     async fn load_tpch_stats(
-        &self,
-        tpch_kit: &TpchKit,
+        &mut self,
         tpch_config: &TpchConfig,
-    ) -> anyhow::Result<BaseTableStats> {
+    ) -> anyhow::Result<()> {
+        let start = Instant::now();
+
+        // Generate the tables
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
+        tpch_kit.gen_tables(tpch_config)?;
+
         // To get the schema of each table.
         let ctx = Self::new_session_ctx(None).await?;
         let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
@@ -330,7 +307,13 @@ impl DatafusionDBMS {
             );
             log::debug!("statistics generated for table: {}", tbl_name);
         }
-        Ok(base_table_stats)
+
+        self.clear_state(Some(base_table_stats)).await?;
+
+        let duration = start.elapsed();
+        println!("datafusion load_tpch_stats duration: {:?}", duration);
+
+        Ok(())
     }
 }
 
