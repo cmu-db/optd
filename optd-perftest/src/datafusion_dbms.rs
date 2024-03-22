@@ -1,7 +1,8 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::Arc, time::Instant,
+    sync::Arc,
+    time::Instant,
 };
 
 use crate::{
@@ -192,9 +193,7 @@ impl DatafusionDBMS {
     /// Build the stats that optd's cost model uses.
     async fn load_benchmark_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
-            Benchmark::Tpch(tpch_config) => {
-                self.load_tpch_stats(tpch_config).await
-            },
+            Benchmark::Tpch(tpch_config) => self.load_tpch_stats(tpch_config).await,
             _ => unimplemented!(),
         }
     }
@@ -267,10 +266,7 @@ impl DatafusionDBMS {
         Ok(())
     }
 
-    async fn load_tpch_stats(
-        &mut self,
-        tpch_config: &TpchConfig,
-    ) -> anyhow::Result<()> {
+    async fn load_tpch_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
         let start = Instant::now();
 
         // Generate the tables

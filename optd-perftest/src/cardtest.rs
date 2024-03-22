@@ -25,8 +25,14 @@ pub struct Cardinfo {
 }
 
 impl CardtestRunner {
-    pub async fn new(dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>>, truecard_getter: Box<dyn TruecardGetter>) -> anyhow::Result<Self> {
-        Ok(CardtestRunner { dbmss, truecard_getter })
+    pub async fn new(
+        dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>>,
+        truecard_getter: Box<dyn TruecardGetter>,
+    ) -> anyhow::Result<Self> {
+        Ok(CardtestRunner {
+            dbmss,
+            truecard_getter,
+        })
     }
 
     /// Get the Q-error of a query using the cost models of all DBMSs being tested
@@ -39,19 +45,20 @@ impl CardtestRunner {
         benchmark: &Benchmark,
     ) -> anyhow::Result<HashMap<String, Vec<Cardinfo>>> {
         let mut cardinfos_alldbs = HashMap::new();
-        let truecards = self.truecard_getter.get_benchmark_truecards(benchmark).await?;
+        let truecards = self
+            .truecard_getter
+            .get_benchmark_truecards(benchmark)
+            .await?;
 
         for dbms in &mut self.dbmss {
             let estcards = dbms.eval_benchmark_estcards(benchmark).await?;
             let cardinfos = estcards
                 .into_iter()
                 .zip(truecards.iter())
-                .map(|(estcard, &truecard)| {
-                    Cardinfo {
-                        qerror: CardtestRunner::calc_qerror(estcard, truecard),
-                        estcard,
-                        truecard
-                    }
+                .map(|(estcard, &truecard)| Cardinfo {
+                    qerror: CardtestRunner::calc_qerror(estcard, truecard),
+                    estcard,
+                    truecard,
                 })
                 .collect();
             cardinfos_alldbs.insert(String::from(dbms.get_name()), cardinfos);

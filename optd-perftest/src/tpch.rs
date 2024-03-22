@@ -241,11 +241,17 @@ impl TpchKit {
         tpch_config: &TpchConfig,
     ) -> io::Result<impl Iterator<Item = (u32, PathBuf)>> {
         let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_config);
-        let sql_fpath_ordered_iter = tpch_config
-            .query_ids
-            .clone()
-            .into_iter()
-            .map(move |query_id| (query_id, this_genned_queries_dpath.join(format!("{}.sql", query_id))));
+        let sql_fpath_ordered_iter =
+            tpch_config
+                .query_ids
+                .clone()
+                .into_iter()
+                .map(move |query_id| {
+                    (
+                        query_id,
+                        this_genned_queries_dpath.join(format!("{}.sql", query_id)),
+                    )
+                });
         Ok(sql_fpath_ordered_iter)
     }
 }

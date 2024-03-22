@@ -86,7 +86,8 @@ async fn main() -> anyhow::Result<()> {
             ]);
             for (dbms, cardinfos) in &cardinfo_alldbs {
                 if !cardinfos.is_empty() {
-                    let qerrors: Vec<f64> = cardinfos.iter().map(|cardinfo| cardinfo.qerror).collect();
+                    let qerrors: Vec<f64> =
+                        cardinfos.iter().map(|cardinfo| cardinfo.qerror).collect();
                     let finite_qerrors: Vec<f64> = qerrors
                         .clone()
                         .into_iter()
@@ -126,10 +127,20 @@ async fn main() -> anyhow::Result<()> {
             for (i, query_id) in query_ids.iter().enumerate() {
                 println!(" Query {}", query_id);
                 let mut this_query_cardinfo_table = Table::new();
-                this_query_cardinfo_table.set_titles(prettytable::row!["DBMS", "Q-Error", "Est. Card.", "True Card."]);
+                this_query_cardinfo_table.set_titles(prettytable::row![
+                    "DBMS",
+                    "Q-Error",
+                    "Est. Card.",
+                    "True Card."
+                ]);
                 for (dbms, cardinfos) in &cardinfo_alldbs {
                     let this_query_cardinfo = cardinfos.get(i).unwrap();
-                    this_query_cardinfo_table.add_row(prettytable::row![dbms, this_query_cardinfo.qerror, this_query_cardinfo.estcard, this_query_cardinfo.truecard]);
+                    this_query_cardinfo_table.add_row(prettytable::row![
+                        dbms,
+                        this_query_cardinfo.qerror,
+                        this_query_cardinfo.estcard,
+                        this_query_cardinfo.truecard
+                    ]);
                 }
                 this_query_cardinfo_table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
                 this_query_cardinfo_table.printstd();

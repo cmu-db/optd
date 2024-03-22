@@ -10,7 +10,10 @@ use crate::benchmark::Benchmark;
 
 #[async_trait]
 pub trait TruecardGetter {
-    async fn get_benchmark_truecards(&mut self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>>;
+    async fn get_benchmark_truecards(
+        &mut self,
+        benchmark: &Benchmark,
+    ) -> anyhow::Result<Vec<usize>>;
 }
 
 /// A cache that gets persisted to disk for the true cardinalities of all queries of all benchmarks

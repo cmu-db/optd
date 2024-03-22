@@ -2,7 +2,7 @@ use crate::{
     benchmark::Benchmark,
     cardtest::CardtestRunnerDBMSHelper,
     tpch::{TpchConfig, TpchKit},
-    truecard::{TruecardGetter, TruecardCache},
+    truecard::{TruecardCache, TruecardGetter},
 };
 use async_trait::async_trait;
 use futures::Sink;
@@ -10,7 +10,10 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 use std::{
-    fs, io::Cursor, path::{Path, PathBuf}, time::Instant
+    fs,
+    io::Cursor,
+    path::{Path, PathBuf},
+    time::Instant,
 };
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
@@ -137,7 +140,7 @@ impl PostgresDBMS {
         tpch_config: &TpchConfig,
     ) -> anyhow::Result<()> {
         let start = Instant::now();
-        
+
         // set up TpchKit
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
 
@@ -306,7 +309,10 @@ impl CardtestRunnerDBMSHelper for PostgresDBMS {
 
 #[async_trait]
 impl TruecardGetter for PostgresDBMS {
-    async fn get_benchmark_truecards(&mut self, benchmark: &Benchmark) -> anyhow::Result<Vec<usize>> {
+    async fn get_benchmark_truecards(
+        &mut self,
+        benchmark: &Benchmark,
+    ) -> anyhow::Result<Vec<usize>> {
         // load truecards from saved file
         let truecard_cache_fpath = self.workspace_dpath.join("truecard_cache.json");
         let mut truecard_cache = TruecardCache::build(truecard_cache_fpath)?;
@@ -322,7 +328,8 @@ impl TruecardGetter for PostgresDBMS {
         match benchmark {
             Benchmark::Test => unimplemented!(),
             Benchmark::Tpch(tpch_config) => {
-                self.eval_tpch_truecards(&client, tpch_config, &dbname, &mut truecard_cache).await
+                self.eval_tpch_truecards(&client, tpch_config, &dbname, &mut truecard_cache)
+                    .await
             }
         }
         // note that truecard_cache will save itself when it goes out of scope
