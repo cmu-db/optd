@@ -39,6 +39,8 @@ enum Commands {
         #[clap(long)]
         #[clap(action)]
         #[clap(help = "Whether to use the cached optd stats/cache generated stats")]
+        // this is an option that is not enabled by default so that the user doesn't
+        // accidentally use a stale version of the stats
         use_optd_stats_cache: bool,
 
         #[clap(long)]
