@@ -20,6 +20,7 @@ use optd_core::{
 };
 use optd_gungnir::stats::hyperloglog::{self, HyperLogLog};
 use optd_gungnir::stats::tdigest::{self, TDigest};
+use serde::{Deserialize, Serialize};
 
 fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     model: &C,
@@ -50,6 +51,7 @@ pub struct OptCostModel<M: MostCommonValues, D: Distribution> {
     per_table_stats_map: BaseTableStats<M, D>,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct MockMostCommonValues {
     mcvs: HashMap<Value, f64>,
 }
@@ -84,6 +86,7 @@ impl MostCommonValues for MockMostCommonValues {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct PerTableStats<M: MostCommonValues, D: Distribution> {
     row_cnt: usize,
     per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>,
@@ -253,6 +256,7 @@ impl StandardPerTableStats {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct PerColumnStats<M: MostCommonValues, D: Distribution> {
     // even if nulls are the most common, they cannot appear in mcvs
     mcvs: M,

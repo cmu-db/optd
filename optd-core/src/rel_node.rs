@@ -51,7 +51,7 @@ impl<'de> Deserialize<'de> for SerializableOrderedF64 {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Value {
     UInt8(u8),
     UInt16(u16),

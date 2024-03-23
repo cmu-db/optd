@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    fs::{self, File},
     path::{Path, PathBuf},
     sync::Arc,
     time::Instant,
@@ -293,9 +293,8 @@ impl DatafusionDBMS {
             .join("datafusion_stats_caches")
             .join(format!("{}.json", benchmark_fname));
         if stats_cache_fpath.exists() {
-            unimplemented!()
-            // let file = File::open(&stats_cache_fpath)?;
-            // Ok(serde_json::from_reader(file)?)
+            let file = File::open(&stats_cache_fpath)?;
+            Ok(serde_json::from_reader(file)?)
         } else {
             let start = Instant::now();
 
@@ -341,9 +340,9 @@ impl DatafusionDBMS {
                 log::debug!("statistics generated for table: {}", tbl_name);
             }
 
-            // fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
-            // let file = File::create(&stats_cache_fpath)?;
-            // serde_json::to_writer(file, &base_table_stats)?;
+            fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
+            let file = File::create(&stats_cache_fpath)?;
+            serde_json::to_writer(file, &base_table_stats)?;
 
             let duration = start.elapsed();
             println!("datafusion load_tpch_stats duration: {:?}", duration);
