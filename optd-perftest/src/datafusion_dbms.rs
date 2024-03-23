@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    fs::{self, File},
     path::{Path, PathBuf},
     sync::Arc,
     time::Instant,
@@ -201,7 +201,10 @@ impl DatafusionDBMS {
         benchmark: &Benchmark,
     ) -> anyhow::Result<BaseTableStats> {
         match benchmark {
-            Benchmark::Tpch(tpch_config) => self.get_tpch_stats(tpch_config).await,
+            Benchmark::Tpch(tpch_config) => {
+                let benchmark_fname = benchmark.get_fname();
+                self.get_tpch_stats(tpch_config, benchmark_fname).await
+            },
             _ => unimplemented!(),
         }
     }
@@ -275,53 +278,66 @@ impl DatafusionDBMS {
         Ok(())
     }
 
-    async fn get_tpch_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<BaseTableStats> {
-        let start = Instant::now();
+    async fn get_tpch_stats(&mut self, tpch_config: &TpchConfig, benchmark_fname: String) -> anyhow::Result<BaseTableStats> {
+        let stats_cache_fpath = self.workspace_dpath.join("datafusion_stats_caches").join(format!("{}.json", benchmark_fname));
+        if stats_cache_fpath.exists() {
+            let file = File::open(&stats_cache_fpath)?;
+            Ok(serde_json::from_reader(file)?)
+        } else {
+            let start = Instant::now();
 
-        // Generate the tables
-        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
-        tpch_kit.gen_tables(tpch_config)?;
+            // Generate the tables
+            let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
+            tpch_kit.gen_tables(tpch_config)?;
 
-        // To get the schema of each table.
-        let ctx = Self::new_session_ctx(None).await?;
-        let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
-        let ddls = ddls
-            .split(';')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>();
-        for ddl in ddls {
-            Self::execute(&ctx, ddl).await?;
+            // To get the schema of each table.
+            let ctx = Self::new_session_ctx(None).await?;
+            let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
+            let ddls = ddls
+                .split(';')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>();
+            for ddl in ddls {
+                Self::execute(&ctx, ddl).await?;
+            }
+            let mut base_table_stats = BaseTableStats::default();
+            for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap() {
+                let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
+                let schema = ctx
+                    .catalog("datafusion")
+                    .unwrap()
+                    .schema("public")
+                    .unwrap()
+                    .table(tbl_name)
+                    .await
+                    .unwrap()
+                    .schema();
+                // Load the .tbl file into record batches using arrow.
+                let tbl_file = fs::File::open(&tbl_fpath)?;
+                let csv_reader = ReaderBuilder::new(schema.clone())
+                    .has_header(false)
+                    .with_delimiter(b'|')
+                    .build(tbl_file)
+                    .unwrap();
+                let batch_iter = RecordBatchIterator::new(csv_reader, schema);
+                base_table_stats.insert(
+                    tbl_name.to_string(),
+                    PerTableStats::from_record_batches(batch_iter)?,
+                );
+                log::debug!("statistics generated for table: {}", tbl_name);
+            }
+
+            fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
+            let file = File::create(&stats_cache_fpath)?;
+            serde_json::to_writer(file, &base_table_stats)?;
+
+            let duration = start.elapsed();
+            println!("datafusion load_tpch_stats duration: {:?}", duration);
+            Ok(base_table_stats)
         }
-        let mut base_table_stats = BaseTableStats::default();
-        for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap() {
-            let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
-            let schema = ctx
-                .catalog("datafusion")
-                .unwrap()
-                .schema("public")
-                .unwrap()
-                .table(tbl_name)
-                .await
-                .unwrap()
-                .schema();
-            // Load the .tbl file into record batches using arrow.
-            let tbl_file = fs::File::open(&tbl_fpath)?;
-            let csv_reader = ReaderBuilder::new(schema.clone())
-                .has_header(false)
-                .with_delimiter(b'|')
-                .build(tbl_file)
-                .unwrap();
-            let batch_iter = RecordBatchIterator::new(csv_reader, schema);
-            base_table_stats.insert(
-                tbl_name.to_string(),
-                PerTableStats::from_record_batches(batch_iter)?,
-            );
-            log::debug!("statistics generated for table: {}", tbl_name);
-        }
-        let duration = start.elapsed();
-        println!("datafusion load_tpch_stats duration: {:?}", duration);
-        Ok(base_table_stats)
+
+        
     }
 }
 
