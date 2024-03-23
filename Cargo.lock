@@ -2753,6 +2753,7 @@ dependencies = [
  "num-traits",
  "ordered-float 4.2.0",
  "pretty-xmlish",
+ "serde",
  "tracing",
  "tracing-subscriber",
 ]
