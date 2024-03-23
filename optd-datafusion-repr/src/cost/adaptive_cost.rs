@@ -10,10 +10,13 @@ use optd_core::{
     rel_node::{RelNode, Value},
 };
 
-use super::base_cost::{BaseTableStats, Distribution, MostCommonValues, StandardDistribution, StandardMostCommonValues};
+use super::base_cost::{
+    BaseTableStats, Distribution, MostCommonValues, StandardDistribution, StandardMostCommonValues,
+};
 
 pub type RuntimeAdaptionStorage = Arc<Mutex<RuntimeAdaptionStorageInner>>;
-pub type StandardAdaptiveCostModel = AdaptiveCostModel<StandardMostCommonValues, StandardDistribution>;
+pub type StandardAdaptiveCostModel =
+    AdaptiveCostModel<StandardMostCommonValues, StandardDistribution>;
 
 #[derive(Default, Debug)]
 pub struct RuntimeAdaptionStorageInner {

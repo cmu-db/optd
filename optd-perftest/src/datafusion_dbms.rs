@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, File},
+    fs,
     path::{Path, PathBuf},
     sync::Arc,
     time::Instant,
@@ -27,7 +27,10 @@ use datafusion::{
 use datafusion_optd_cli::helper::unescape_input;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
-use optd_datafusion_repr::{cost::{base_cost::StandardBaseTableStats, BaseTableStats, PerTableStats}, DatafusionOptimizer};
+use optd_datafusion_repr::{
+    cost::{base_cost::StandardBaseTableStats, BaseTableStats, PerTableStats},
+    DatafusionOptimizer,
+};
 use regex::Regex;
 
 pub struct DatafusionDBMS {
@@ -75,7 +78,9 @@ impl DatafusionDBMS {
         Ok(())
     }
 
-    async fn new_session_ctx(stats: Option<StandardBaseTableStats>) -> anyhow::Result<SessionContext> {
+    async fn new_session_ctx(
+        stats: Option<StandardBaseTableStats>,
+    ) -> anyhow::Result<SessionContext> {
         let session_config = SessionConfig::from_env()?.with_information_schema(true);
         let rn_config = RuntimeConfig::new();
         let runtime_env = RuntimeEnv::new(rn_config.clone())?;
@@ -288,8 +293,9 @@ impl DatafusionDBMS {
             .join("datafusion_stats_caches")
             .join(format!("{}.json", benchmark_fname));
         if stats_cache_fpath.exists() {
-            let file = File::open(&stats_cache_fpath)?;
-            Ok(serde_json::from_reader(file)?)
+            unimplemented!()
+            // let file = File::open(&stats_cache_fpath)?;
+            // Ok(serde_json::from_reader(file)?)
         } else {
             let start = Instant::now();
 
@@ -335,9 +341,9 @@ impl DatafusionDBMS {
                 log::debug!("statistics generated for table: {}", tbl_name);
             }
 
-            fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
-            let file = File::create(&stats_cache_fpath)?;
-            serde_json::to_writer(file, &base_table_stats)?;
+            // fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
+            // let file = File::create(&stats_cache_fpath)?;
+            // serde_json::to_writer(file, &base_table_stats)?;
 
             let duration = start.elapsed();
             println!("datafusion load_tpch_stats duration: {:?}", duration);
