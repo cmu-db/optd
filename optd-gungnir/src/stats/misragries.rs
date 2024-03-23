@@ -111,7 +111,7 @@ mod tests {
         misra_gries.aggregate(&data);
 
         for key in misra_gries.most_frequent_keys() {
-            assert!(data.contains(&key));
+            assert!(data.contains(key));
         }
     }
 
@@ -125,7 +125,7 @@ mod tests {
         misra_gries.aggregate(&data_dup);
 
         for key in misra_gries.most_frequent_keys() {
-            assert!(data.contains(&key));
+            assert!(data.contains(key));
         }
     }
 
