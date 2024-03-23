@@ -1,5 +1,5 @@
-mod adaptive_cost;
-mod base_cost;
+pub mod adaptive_cost;
+pub mod base_cost;
 mod stats;
 
 pub use adaptive_cost::{AdaptiveCostModel, RuntimeAdaptionStorage, DEFAULT_DECAY};

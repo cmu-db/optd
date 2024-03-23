@@ -27,7 +27,7 @@ use datafusion::{
 use datafusion_optd_cli::helper::unescape_input;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
-use optd_datafusion_repr::{cost::BaseTableStats, cost::PerTableStats, DatafusionOptimizer};
+use optd_datafusion_repr::{cost::{base_cost::StandardBaseTableStats, BaseTableStats, PerTableStats}, DatafusionOptimizer};
 use regex::Regex;
 
 pub struct DatafusionDBMS {
@@ -70,12 +70,12 @@ impl DatafusionDBMS {
     ///
     /// A more ideal way to generate statistics would be to use the `ANALYZE`
     /// command in SQL, but DataFusion does not support that yet.
-    async fn clear_state(&mut self, stats: Option<BaseTableStats>) -> anyhow::Result<()> {
+    async fn clear_state(&mut self, stats: Option<StandardBaseTableStats>) -> anyhow::Result<()> {
         self.ctx = Self::new_session_ctx(stats).await?;
         Ok(())
     }
 
-    async fn new_session_ctx(stats: Option<BaseTableStats>) -> anyhow::Result<SessionContext> {
+    async fn new_session_ctx(stats: Option<StandardBaseTableStats>) -> anyhow::Result<SessionContext> {
         let session_config = SessionConfig::from_env()?.with_information_schema(true);
         let rn_config = RuntimeConfig::new();
         let runtime_env = RuntimeEnv::new(rn_config.clone())?;
@@ -199,12 +199,12 @@ impl DatafusionDBMS {
     async fn get_benchmark_stats(
         &mut self,
         benchmark: &Benchmark,
-    ) -> anyhow::Result<BaseTableStats> {
+    ) -> anyhow::Result<StandardBaseTableStats> {
         match benchmark {
             Benchmark::Tpch(tpch_config) => {
                 let benchmark_fname = benchmark.get_fname();
                 self.get_tpch_stats(tpch_config, benchmark_fname).await
-            },
+            }
             _ => unimplemented!(),
         }
     }
@@ -278,8 +278,15 @@ impl DatafusionDBMS {
         Ok(())
     }
 
-    async fn get_tpch_stats(&mut self, tpch_config: &TpchConfig, benchmark_fname: String) -> anyhow::Result<BaseTableStats> {
-        let stats_cache_fpath = self.workspace_dpath.join("datafusion_stats_caches").join(format!("{}.json", benchmark_fname));
+    async fn get_tpch_stats(
+        &mut self,
+        tpch_config: &TpchConfig,
+        benchmark_fname: String,
+    ) -> anyhow::Result<StandardBaseTableStats> {
+        let stats_cache_fpath = self
+            .workspace_dpath
+            .join("datafusion_stats_caches")
+            .join(format!("{}.json", benchmark_fname));
         if stats_cache_fpath.exists() {
             let file = File::open(&stats_cache_fpath)?;
             Ok(serde_json::from_reader(file)?)
@@ -336,8 +343,6 @@ impl DatafusionDBMS {
             println!("datafusion load_tpch_stats duration: {:?}", duration);
             Ok(base_table_stats)
         }
-
-        
     }
 }
 
