@@ -55,17 +55,20 @@ where
 // Start of unit testing section.
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    use crossbeam::thread;
     use rand::seq::SliceRandom;
     use rand::{rngs::StdRng, SeedableRng};
 
     use super::MCV;
 
-    #[test]
-    fn aggregate() {
-        let to_track = vec![0, 1, 2, 3];
-        let mut mcv = MCV::<i32>::new(&to_track);
-
+    // Generates hardcoded frequencies and returns them,
+    // along with a flattened randomized array containing those frequencies.
+    fn generate_frequencies() -> (HashMap<i32, i32>, Vec<i32>) {
         let mut frequencies = std::collections::HashMap::new();
+
         frequencies.insert(0, 2);
         frequencies.insert(1, 4);
         frequencies.insert(2, 9);
@@ -73,17 +76,27 @@ mod tests {
         frequencies.insert(4, 50);
         frequencies.insert(5, 6);
 
-        let mut array = Vec::new();
+        let mut flattened = Vec::new();
         for (key, &value) in &frequencies {
             for _ in 0..value {
-                array.push(*key);
+                flattened.push(*key);
             }
         }
 
         let mut rng = StdRng::seed_from_u64(0);
-        array.shuffle(&mut rng);
+        flattened.shuffle(&mut rng);
 
-        mcv.aggregate(&array);
+        (frequencies, flattened)
+    }
+
+    #[test]
+    fn aggregate() {
+        let to_track = vec![0, 1, 2, 3];
+        let mut mcv = MCV::<i32>::new(&to_track);
+
+        let (frequencies, flattened) = generate_frequencies();
+
+        mcv.aggregate(&flattened);
 
         let mcv_freq = mcv.frequencies();
         assert_eq!(mcv_freq.len(), to_track.len());
@@ -91,6 +104,53 @@ mod tests {
         to_track.iter().for_each(|item| {
             assert!(mcv_freq.contains_key(item));
             assert_eq!(mcv_freq.get(item), frequencies.get(item));
+        });
+    }
+
+    #[test]
+    fn merge() {
+        let to_track = vec![0, 1, 2, 3];
+        let n_jobs = 16;
+
+        let total_frequencies = Arc::new(Mutex::new(HashMap::<i32, i32>::new()));
+        let result_mcv = Arc::new(Mutex::new(MCV::<i32>::new(&to_track)));
+        thread::scope(|s| {
+            for _ in 0..n_jobs {
+                s.spawn(|_| {
+                    let mut local_mcv = MCV::<i32>::new(&to_track);
+
+                    let (local_frequencies, flattened) = generate_frequencies();
+                    let mut total_frequencies = total_frequencies.lock().unwrap();
+                    for (&key, &value) in &local_frequencies {
+                        *total_frequencies.entry(key).or_insert(0) += value;
+                    }
+
+                    local_mcv.aggregate(&flattened);
+
+                    let mcv_local_freq = local_mcv.frequencies();
+                    assert_eq!(mcv_local_freq.len(), to_track.len());
+
+                    to_track.iter().for_each(|item| {
+                        assert!(mcv_local_freq.contains_key(item));
+                        assert_eq!(mcv_local_freq.get(item), local_frequencies.get(item));
+                    });
+
+                    let mut result = result_mcv.lock().unwrap();
+                    result.merge(&local_mcv);
+                });
+            }
+        })
+        .unwrap();
+
+        let mcv = result_mcv.lock().unwrap();
+        let mcv_freq = mcv.frequencies();
+
+        to_track.iter().for_each(|item| {
+            assert!(mcv_freq.contains_key(item));
+            assert_eq!(
+                mcv_freq.get(item),
+                total_frequencies.lock().unwrap().get(item)
+            );
         });
     }
 }
