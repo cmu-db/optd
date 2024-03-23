@@ -156,6 +156,13 @@ impl PostgresDBMS {
             Self::copy_from_stdin(client, tbl_fpath).await?;
         }
 
+        // load the constraints and indexes
+        // TODO: constraints are currently broken
+        // let sql = fs::read_to_string(tpch_kit.constraints_fpath.to_str().unwrap())?;
+        // client.batch_execute(&sql).await?;
+        let sql = fs::read_to_string(tpch_kit.indexes_fpath.to_str().unwrap())?;
+        client.batch_execute(&sql).await?;
+
         // create stats
         // you need to do VACUUM FULL ANALYZE and not just ANALYZE to make sure the stats are created in a deterministic way
         // this is standard practice for postgres benchmarking
@@ -240,6 +247,8 @@ impl PostgresDBMS {
         dbname: &str, // used by truecard_cache
         truecard_cache: &mut TruecardCache,
     ) -> anyhow::Result<Vec<usize>> {
+        let start = Instant::now();
+
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
@@ -256,6 +265,9 @@ impl PostgresDBMS {
             };
             truecards.push(truecard);
         }
+
+        let duration = start.elapsed();
+        println!("postgres eval_tpch_truecards duration: {:?}", duration);
 
         Ok(truecards)
     }

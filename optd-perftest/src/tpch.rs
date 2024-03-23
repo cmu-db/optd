@@ -49,6 +49,8 @@ pub struct TpchKit {
     genned_tables_dpath: PathBuf,
     genned_queries_dpath: PathBuf,
     pub schema_fpath: PathBuf,
+    pub constraints_fpath: PathBuf,
+    pub indexes_fpath: PathBuf,
 }
 
 /// I keep the same conventions for these methods as I do for PostgresDBMS
@@ -74,6 +76,8 @@ impl TpchKit {
             fs::create_dir(&genned_queries_dpath)?;
         }
         let schema_fpath = dbgen_dpath.join("dss.ddl");
+        let constraints_fpath = dbgen_dpath.join("constraints.sql");
+        let indexes_fpath = dbgen_dpath.join("indexes.sql");
 
         // create Self
         let kit = TpchKit {
@@ -85,6 +89,8 @@ impl TpchKit {
             genned_tables_dpath,
             genned_queries_dpath,
             schema_fpath,
+            constraints_fpath,
+            indexes_fpath,
         };
 
         // set envvars (DSS_PATH can change so we don't set it now)
@@ -110,24 +116,22 @@ impl TpchKit {
         } else {
             log::debug!("[skip] cloning tpch-kit repo");
         }
-        env::set_current_dir(&self.tpch_kit_repo_dpath)?;
         log::debug!("[start] pulling latest tpch-kit repo");
-        shell::run_command_with_status_check("git pull")?;
+        shell::run_command_with_status_check_in_dir("git pull", Some(&self.tpch_kit_repo_dpath))?;
         log::debug!("[end] pulling latest tpch-kit repo");
+        // make sure to do this so that get_optd_root() doesn't break
         Ok(())
     }
 
     pub fn make(&self, dbms: &str) -> io::Result<()> {
-        env::set_current_dir(&self.dbgen_dpath)?;
         log::debug!("[start] building dbgen");
         // we need to call "make clean" because we might have called make earlier with
         //   a different dbms
-        shell::run_command_with_status_check("make clean")?;
-        shell::run_command_with_status_check(&format!(
-            "make MACHINE={} DATABASE={}",
-            TpchKit::get_machine(),
-            dbms
-        ))?;
+        shell::run_command_with_status_check_in_dir("make clean", Some(&self.dbgen_dpath))?;
+        shell::run_command_with_status_check_in_dir(
+            &format!("make MACHINE={} DATABASE={}", TpchKit::get_machine(), dbms),
+            Some(&self.dbgen_dpath),
+        )?;
         log::debug!("[end] building dbgen");
         Ok(())
     }
@@ -148,13 +152,12 @@ impl TpchKit {
         if !done_fpath.exists() {
             self.make(&tpch_config.dbms)?;
             shell::make_into_empty_dir(&this_genned_tables_dpath)?;
-            env::set_current_dir(&self.dbgen_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
             log::debug!("[start] generating tables for {}", tpch_config);
-            shell::run_command_with_status_check(&format!(
-                "./dbgen -s{}",
-                tpch_config.scale_factor
-            ))?;
+            shell::run_command_with_status_check_in_dir(
+                &format!("./dbgen -s{}", tpch_config.scale_factor),
+                Some(&self.dbgen_dpath),
+            )?;
             File::create(done_fpath)?;
             log::debug!("[end] generating tables for {}", tpch_config);
         } else {
@@ -170,14 +173,16 @@ impl TpchKit {
         if !done_fpath.exists() {
             self.make(&tpch_config.dbms)?;
             shell::make_into_empty_dir(&this_genned_queries_dpath)?;
-            env::set_current_dir(&self.dbgen_dpath)?;
             log::debug!("[start] generating queries for {}", tpch_config);
             // we don't use -d in qgen because -r controls the substitution values we use
             for query_i in 1..=NUM_TPCH_QUERIES {
-                let output = shell::run_command_with_status_check(&format!(
-                    "./qgen -s{} -r{} {}",
-                    tpch_config.scale_factor, tpch_config.seed, query_i
-                ))?;
+                let output = shell::run_command_with_status_check_in_dir(
+                    &format!(
+                        "./qgen -s{} -r{} {}",
+                        tpch_config.scale_factor, tpch_config.seed, query_i
+                    ),
+                    Some(&self.dbgen_dpath),
+                )?;
                 let this_genned_queries_fpath =
                     this_genned_queries_dpath.join(format!("{}.sql", query_i));
                 fs::write(&this_genned_queries_fpath, output.stdout)?;
