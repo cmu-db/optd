@@ -6,7 +6,10 @@
 use itertools::Itertools;
 use std::f64::consts::PI;
 
+pub const DEFAULT_COMPRESSION: f64 = 200.0;
+
 /// The TDigest structure for the statistical aggregator to query quantiles.
+#[derive(Clone)]
 pub struct TDigest {
     /// A sorted array of Centroids, according to their mean.
     centroids: Vec<Centroid>,

@@ -4,16 +4,38 @@ use datafusion::{
     logical_expr::{self, logical_plan, LogicalPlan, Operator},
     scalar::ScalarValue,
 };
-use datafusion_expr::Expr as DFExpr;
 use optd_core::rel_node::RelNode;
 use optd_datafusion_repr::plan_nodes::{
     BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList,
-    FuncExpr, FuncType, InListExpr, JoinType, LikeExpr, LogicalAgg, LogicalEmptyRelation,
-    LogicalFilter, LogicalJoin, LogicalLimit, LogicalProjection, LogicalScan, LogicalSort,
-    OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
+    FuncExpr, FuncType, InListExpr, JoinType, LikeExpr, LogOpExpr, LogOpType, LogicalAgg,
+    LogicalEmptyRelation, LogicalFilter, LogicalJoin, LogicalLimit, LogicalProjection, LogicalScan,
+    LogicalSort, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
 };
+use optd_datafusion_repr::properties::schema::Schema as OPTDSchema;
 
 use crate::OptdPlanContext;
+
+// flatten_nested_logical is a helper function to flatten nested logical operators with same op type
+// eg. (a AND (b AND c)) => ExprList([a, b, c])
+//    (a OR (b OR c)) => ExprList([a, b, c])
+// It assume the children of the input expr_list are already flattened
+//  and can only be used in bottom up manner
+fn flatten_nested_logical(op: LogOpType, expr_list: ExprList) -> ExprList {
+    // conv_into_optd_expr is building the children bottom up so there is no need to
+    // call flatten_nested_logical recursively
+    let mut new_expr_list = Vec::new();
+    for child in expr_list.to_vec() {
+        if let OptRelNodeTyp::LogOp(child_op) = child.typ() {
+            if child_op == op {
+                let child_log_op_expr = LogOpExpr::from_rel_node(child.into_rel_node()).unwrap();
+                new_expr_list.extend(child_log_op_expr.children().to_vec());
+                continue;
+            }
+        }
+        new_expr_list.push(child.clone());
+    }
+    ExprList::new(new_expr_list)
+}
 
 impl OptdPlanContext<'_> {
     fn conv_into_optd_table_scan(&mut self, node: &logical_plan::TableScan) -> Result<PlanNode> {
@@ -47,6 +69,22 @@ impl OptdPlanContext<'_> {
             Expr::BinaryExpr(node) => {
                 let left = self.conv_into_optd_expr(node.left.as_ref(), context)?;
                 let right = self.conv_into_optd_expr(node.right.as_ref(), context)?;
+                match node.op {
+                    Operator::And => {
+                        let op = LogOpType::And;
+                        let expr_list = ExprList::new(vec![left, right]);
+                        let expr_list = flatten_nested_logical(op, expr_list);
+                        return Ok(LogOpExpr::new(op, expr_list).into_expr());
+                    }
+                    Operator::Or => {
+                        let op = LogOpType::Or;
+                        let expr_list = ExprList::new(vec![left, right]);
+                        let expr_list = flatten_nested_logical(op, expr_list);
+                        return Ok(LogOpExpr::new(op, expr_list).into_expr());
+                    }
+                    _ => {}
+                }
+
                 let op = match node.op {
                     Operator::Eq => BinOpType::Eq,
                     Operator::NotEq => BinOpType::Neq,
@@ -54,8 +92,6 @@ impl OptdPlanContext<'_> {
                     Operator::Lt => BinOpType::Lt,
                     Operator::GtEq => BinOpType::Geq,
                     Operator::Gt => BinOpType::Gt,
-                    Operator::And => BinOpType::And,
-                    Operator::Or => BinOpType::Or,
                     Operator::Plus => BinOpType::Add,
                     Operator::Minus => BinOpType::Sub,
                     Operator::Multiply => BinOpType::Mul,
@@ -277,47 +313,31 @@ impl OptdPlanContext<'_> {
             let expr = BinOpExpr::new(left, right, op).into_expr();
             log_ops.push(expr);
         }
+        if node.filter.is_some() {
+            let filter =
+                self.conv_into_optd_expr(node.filter.as_ref().unwrap(), node.schema.as_ref())?;
+            log_ops.push(filter);
+        }
 
         if log_ops.is_empty() {
-            // optd currently only supports
-            // 1. normal equal condition join
-            //    select * from a join b on a.id = b.id
-            // 2. join on false/true
-            //    select * from a join b on false/true
-            // 3. join on other literals or other filters are not supported
-            //  instead of converting them to a join on true, we bail out
-
-            match node.filter {
-                Some(DFExpr::Literal(ScalarValue::Boolean(Some(val)))) => Ok(LogicalJoin::new(
-                    left,
-                    right,
-                    ConstantExpr::bool(val).into_expr(),
-                    join_type,
-                )),
-                None => Ok(LogicalJoin::new(
-                    left,
-                    right,
-                    ConstantExpr::bool(true).into_expr(),
-                    join_type,
-                )),
-                _ => bail!("unsupported join filter: {:?}", node.filter),
-            }
+            Ok(LogicalJoin::new(
+                left,
+                right,
+                ConstantExpr::bool(true).into_expr(),
+                join_type,
+            ))
         } else if log_ops.len() == 1 {
             Ok(LogicalJoin::new(left, right, log_ops.remove(0), join_type))
         } else {
-            // Build a left-deep tree from log_ops
-            // I wanted to pop from the left instead of the right to maintain the order, even if it's slower
-            // you can obv change log_ops to a Deque to avoid this issue but I didn't bother since I don't wanna
-            // do premature optimization
-            let left_nonlog_op = log_ops.remove(0);
-            let right_nonlog_op = log_ops.remove(0);
-            let mut cond =
-                BinOpExpr::new(left_nonlog_op, right_nonlog_op, BinOpType::And).into_expr();
-            while !log_ops.is_empty() {
-                cond = BinOpExpr::new(cond, log_ops.remove(0), BinOpType::And).into_expr();
-            }
-
-            Ok(LogicalJoin::new(left, right, cond, join_type))
+            let expr_list = ExprList::new(log_ops);
+            // the expr from filter is already flattened in conv_into_optd_expr
+            let expr_list = flatten_nested_logical(LogOpType::And, expr_list);
+            Ok(LogicalJoin::new(
+                left,
+                right,
+                LogOpExpr::new(LogOpType::And, expr_list).into_expr(),
+                join_type,
+            ))
         }
     }
 
@@ -336,7 +356,12 @@ impl OptdPlanContext<'_> {
         &mut self,
         node: &logical_plan::EmptyRelation,
     ) -> Result<LogicalEmptyRelation> {
-        Ok(LogicalEmptyRelation::new(node.produce_one_row))
+        // empty_relation from datafusion always have an empty schema
+        let empty_schema = OPTDSchema { fields: vec![] };
+        Ok(LogicalEmptyRelation::new(
+            node.produce_one_row,
+            empty_schema,
+        ))
     }
 
     fn conv_into_optd_limit(&mut self, node: &logical_plan::Limit) -> Result<LogicalLimit> {

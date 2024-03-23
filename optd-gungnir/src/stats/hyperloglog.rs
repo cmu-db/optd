@@ -6,7 +6,9 @@
 //! number of collisions and eliminate the need for a large range correction estimator.
 
 use crate::stats::murmur2::murmur_hash;
-use std::{cmp::max, marker::PhantomData};
+use std::cmp::max;
+
+pub const DEFAULT_PRECISION: u8 = 12;
 
 /// Trait to transform any object into a stream of bytes.
 pub trait ByteSerializable {
@@ -15,19 +17,25 @@ pub trait ByteSerializable {
 
 /// The HyperLogLog (HLL) structure to provide a statistical estimate of NDistinct.
 /// For safety reasons, HLLs can only count elements of the same ByteSerializable type.
-pub struct HyperLogLog<T: ByteSerializable> {
+#[derive(Clone)]
+pub struct HyperLogLog {
     registers: Vec<u8>, // The buckets to estimate HLL on (i.e. upper p bits).
     precision: u8,      // The precision (p) of our HLL; 4 <= p <= 16.
     m: usize,           // The number of HLL buckets; 2^p.
     alpha: f64,         // The normal HLL multiplier factor.
-
-    hll_type: PhantomData<T>, // A marker to the data type of our HLL (to silent warnings).
 }
 
 // Serialize common data types for hashing (String).
 impl ByteSerializable for String {
     fn to_bytes(&self) -> Vec<u8> {
         self.as_bytes().to_vec()
+    }
+}
+
+// Serialize common data types for hashing (bool).
+impl ByteSerializable for bool {
+    fn to_bytes(&self) -> Vec<u8> {
+        (*self as u8).to_bytes()
     }
 }
 
@@ -50,10 +58,7 @@ impl_byte_serializable_for_numeric!(usize, isize);
 impl_byte_serializable_for_numeric!(f64, f32);
 
 // Self-contained implementation of the HyperLogLog data structure.
-impl<T> HyperLogLog<T>
-where
-    T: ByteSerializable,
-{
+impl HyperLogLog {
     /// Creates and initializes a new empty HyperLogLog.
     pub fn new(precision: u8) -> Self {
         assert!((4..=16).contains(&precision));
@@ -61,18 +66,19 @@ where
         let m = 1 << precision;
         let alpha = compute_alpha(m);
 
-        HyperLogLog::<T> {
+        HyperLogLog {
             registers: vec![0; m],
             precision,
             m,
             alpha,
-
-            hll_type: PhantomData,
         }
     }
 
     /// Digests an array of ByteSerializable data into the HLL.
-    pub fn aggregate(&mut self, data: &[T]) {
+    pub fn aggregate<T>(&mut self, data: &[T])
+    where
+        T: ByteSerializable,
+    {
         for d in data {
             let hash = murmur_hash(&d.to_bytes(), 0); // TODO: We ignore DoS attacks (seed).
             let mask = (1 << (self.precision)) - 1;
@@ -84,7 +90,7 @@ where
     /// Merges two HLLs together and returns a new one.
     /// Particularly useful for parallel execution.
     /// NOTE: Takes ownership of self and other.
-    pub fn merge(self, other: HyperLogLog<T>) -> Self {
+    pub fn merge(self, other: HyperLogLog) -> Self {
         assert!(self.precision == other.precision);
 
         let merged_registers = self
@@ -94,13 +100,11 @@ where
             .map(|(x, y)| x.max(y))
             .collect();
 
-        HyperLogLog::<T> {
+        HyperLogLog {
             registers: merged_registers,
             precision: self.precision,
             m: self.m,
             alpha: self.alpha,
-
-            hll_type: PhantomData,
         }
     }
 
@@ -158,7 +162,7 @@ mod tests {
 
     #[test]
     fn hll_small_strings() {
-        let mut hll = HyperLogLog::<String>::new(12);
+        let mut hll = HyperLogLog::new(12);
 
         let data = vec!["a".to_string(), "b".to_string()];
         hll.aggregate(&data);
@@ -167,7 +171,7 @@ mod tests {
 
     #[test]
     fn hll_small_u64() {
-        let mut hll = HyperLogLog::<u64>::new(12);
+        let mut hll = HyperLogLog::new(12);
 
         let data = vec![1, 2];
         hll.aggregate(&data);
@@ -203,7 +207,7 @@ mod tests {
     #[test]
     fn hll_big() {
         let precision = 12;
-        let mut hll = HyperLogLog::<String>::new(precision);
+        let mut hll = HyperLogLog::new(precision);
         let n_distinct = 100000;
         let relative_error = 0.05; // We allow a 5% relatative error rate.
 
@@ -224,14 +228,12 @@ mod tests {
         let n_jobs = 16;
         let relative_error = 0.05; // We allow a 5% relatative error rate.
 
-        let result_hll = Arc::new(Mutex::new(Option::Some(HyperLogLog::<String>::new(
-            precision,
-        ))));
+        let result_hll = Arc::new(Mutex::new(Option::Some(HyperLogLog::new(precision))));
         let job_id = AtomicUsize::new(0);
         thread::scope(|s| {
             for _ in 0..n_jobs {
                 s.spawn(|_| {
-                    let mut local_hll = HyperLogLog::<String>::new(precision);
+                    let mut local_hll = HyperLogLog::new(precision);
                     let curr_job_id = job_id.fetch_add(1, Ordering::SeqCst);
 
                     let strings = generate_random_strings(n_distinct, 100, curr_job_id);

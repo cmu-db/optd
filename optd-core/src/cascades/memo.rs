@@ -11,7 +11,7 @@ use std::any::Any;
 use crate::{
     cost::Cost,
     property::PropertyBuilderAny,
-    rel_node::{RelNode, RelNodeRef, RelNodeTyp, Value},
+    rel_node::{RelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp, Value},
 };
 
 use super::optimizer::{ExprId, GroupId};
@@ -117,8 +117,6 @@ impl<T: RelNodeTyp> Memo<T> {
         if group_a == group_b {
             return group_a;
         }
-        self.merged_groups
-            .insert(group_a.as_group_id(), group_b.as_group_id());
 
         // Copy all expressions from group a to group b
         let group_a_exprs = self.get_all_exprs_in_group(group_a.as_group_id());
@@ -126,6 +124,9 @@ impl<T: RelNodeTyp> Memo<T> {
             let expr_node = self.expr_id_to_expr_node.get(&expr_id).unwrap();
             self.add_expr_to_group(expr_id, group_b, expr_node.as_ref().clone());
         }
+
+        self.merged_groups
+            .insert(group_a.as_group_id(), group_b.as_group_id());
 
         // Remove all expressions from group a (so we don't accidentally access it)
         self.clear_exprs_in_group(group_a);
@@ -246,6 +247,61 @@ impl<T: RelNodeTyp> Memo<T> {
         };
         group.group_exprs.insert(expr_id);
         self.groups.insert(group_id, group);
+    }
+
+    // return true: replace success, the expr_id is replaced by the new rel_node
+    // return false: replace failed as the new rel node already exists in other groups,
+    //             the old expr_id should be marked as all rules are fired for it
+    pub fn replace_group_expr(
+        &mut self,
+        expr_id: ExprId,
+        replace_group_id: GroupId,
+        rel_node: RelNodeRef<T>,
+    ) -> bool {
+        let replace_group_id = self.get_reduced_group_id(replace_group_id);
+
+        if let Entry::Occupied(mut entry) = self.groups.entry(replace_group_id) {
+            let group = entry.get_mut();
+            if !group.group_exprs.contains(&expr_id) {
+                unreachable!("expr not found in group in replace_group_expr");
+            }
+
+            let children_group_ids = rel_node
+                .children
+                .iter()
+                .map(|child| {
+                    if let Some(group) = child.typ.extract_group() {
+                        group
+                    } else {
+                        self.add_new_group_expr(child.clone(), None).0
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let memo_node = RelMemoNode {
+                typ: rel_node.typ.clone(),
+                children: children_group_ids,
+                data: rel_node.data.clone(),
+            };
+
+            // if the new expr already in the memo table, merge the group and remove old expr
+            if let Some(&expr_id) = self.expr_node_to_expr_id.get(&memo_node) {
+                let group_id = self.get_group_id_of_expr_id(expr_id);
+                let group_id = self.get_reduced_group_id(group_id);
+                self.merge_group_inner(replace_group_id, group_id);
+
+                // TODO: instead of remove this expr from the old group,
+                // we mark the expr as all rules have been fired to make it a dead end
+                return false;
+            }
+
+            self.expr_id_to_expr_node
+                .insert(expr_id, memo_node.clone().into());
+            self.expr_node_to_expr_id.insert(memo_node.clone(), expr_id);
+
+            return true;
+        }
+        unreachable!("group not found in replace_group_expr");
     }
 
     fn add_new_group_expr_inner(
@@ -443,7 +499,7 @@ impl<T: RelNodeTyp> Memo<T> {
     pub fn get_best_group_binding(
         &self,
         group_id: GroupId,
-        on_produce: &mut impl FnMut(RelNodeRef<T>, GroupId) -> RelNodeRef<T>,
+        meta: &mut Option<RelNodeMetaMap>,
     ) -> Result<RelNodeRef<T>> {
         let info = self.get_group_info(group_id);
         if let Some(winner) = info.winner {
@@ -452,14 +508,21 @@ impl<T: RelNodeTyp> Memo<T> {
                 let expr = self.get_expr_memoed(expr_id);
                 let mut children = Vec::with_capacity(expr.children.len());
                 for child in &expr.children {
-                    children.push(self.get_best_group_binding(*child, on_produce)?);
+                    children.push(self.get_best_group_binding(*child, meta)?);
                 }
                 let node = Arc::new(RelNode {
                     typ: expr.typ.clone(),
                     children,
                     data: expr.data.clone(),
                 });
-                return Ok(on_produce(node, group_id));
+
+                if let Some(meta) = meta {
+                    meta.insert(
+                        node.as_ref() as *const _ as usize,
+                        RelNodeMeta::new(group_id, winner.cost),
+                    );
+                }
+                return Ok(node);
             }
         }
         bail!("no best group binding for group {}", group_id)

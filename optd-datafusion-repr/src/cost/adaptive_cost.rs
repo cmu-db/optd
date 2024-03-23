@@ -10,6 +10,8 @@ use optd_core::{
     rel_node::{RelNode, Value},
 };
 
+use super::base_cost::BaseTableStats;
+
 pub type RuntimeAdaptionStorage = Arc<Mutex<RuntimeAdaptionStorageInner>>;
 
 #[derive(Default, Debug)]
@@ -17,6 +19,8 @@ pub struct RuntimeAdaptionStorageInner {
     pub history: HashMap<GroupId, (usize, usize)>,
     pub iter_cnt: usize,
 }
+
+pub const DEFAULT_DECAY: usize = 50;
 
 pub struct AdaptiveCostModel {
     runtime_row_cnt: RuntimeAdaptionStorage,
@@ -47,15 +51,13 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
     ) -> Cost {
         if let OptRelNodeTyp::PhysicalScan = node {
             let guard = self.runtime_row_cnt.lock().unwrap();
-            if let Some((runtime_row_cnt, iter)) = guard.history.get(&context.unwrap().group_id) {
+            if let Some((runtime_row_cnt, iter)) =
+                guard.history.get(&context.as_ref().unwrap().group_id)
+            {
                 if *iter + self.decay >= guard.iter_cnt {
                     let runtime_row_cnt = (*runtime_row_cnt).max(1) as f64;
                     return OptCostModel::cost(runtime_row_cnt, 0.0, runtime_row_cnt);
-                } else {
-                    return OptCostModel::cost(1.0, 0.0, 1.0);
                 }
-            } else {
-                return OptCostModel::cost(1.0, 0.0, 1.0);
             }
         }
         let (mut row_cnt, compute_cost, io_cost) = OptCostModel::cost_tuple(
@@ -81,10 +83,10 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
 }
 
 impl AdaptiveCostModel {
-    pub fn new(decay: usize) -> Self {
+    pub fn new(decay: usize, stats: BaseTableStats) -> Self {
         Self {
-            runtime_row_cnt: Arc::new(Mutex::new(RuntimeAdaptionStorageInner::default())),
-            base_model: OptCostModel::new(HashMap::new()),
+            runtime_row_cnt: RuntimeAdaptionStorage::default(),
+            base_model: OptCostModel::new(stats),
             decay,
         }
     }

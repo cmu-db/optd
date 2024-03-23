@@ -2,6 +2,7 @@
 //! the internal representation of the plan nodes.
 
 use std::{
+    collections::HashMap,
     fmt::{Debug, Display},
     hash::Hash,
     sync::Arc,
@@ -9,7 +10,7 @@ use std::{
 
 use ordered_float::OrderedFloat;
 
-use crate::cascades::GroupId;
+use crate::{cascades::GroupId, cost::Cost};
 
 pub type RelNodeRef<T> = Arc<RelNode<T>>;
 
@@ -150,6 +151,13 @@ impl Value {
             _ => panic!("Value is not a string"),
         }
     }
+
+    pub fn as_slice(&self) -> Arc<[u8]> {
+        match self {
+            Value::Serialized(i) => i.clone(),
+            _ => panic!("Value is not a serialized"),
+        }
+    }
 }
 
 /// A RelNode is consisted of a plan node type and some children.
@@ -201,3 +209,21 @@ impl<T: RelNodeTyp> RelNode<T> {
         }
     }
 }
+
+/// Metadata for a rel node.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RelNodeMeta {
+    /// The group (id) of the `RelNode`
+    pub group_id: GroupId,
+    /// Cost of the `RelNode`
+    pub cost: Cost,
+}
+
+impl RelNodeMeta {
+    pub fn new(group_id: GroupId, cost: Cost) -> Self {
+        RelNodeMeta { group_id, cost }
+    }
+}
+
+/// A hash table storing `RelNode` (memory address, metadata) pairs.
+pub type RelNodeMetaMap = HashMap<usize, RelNodeMeta>;

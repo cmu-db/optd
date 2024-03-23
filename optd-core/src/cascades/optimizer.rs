@@ -10,8 +10,8 @@ use crate::{
     cost::CostModel,
     optimizer::Optimizer,
     property::{PropertyBuilder, PropertyBuilderAny},
-    rel_node::{RelNodeRef, RelNodeTyp},
-    rules::Rule,
+    rel_node::{RelNodeMetaMap, RelNodeRef, RelNodeTyp},
+    rules::RuleWrapper,
 };
 
 use super::{
@@ -42,7 +42,7 @@ pub struct CascadesOptimizer<T: RelNodeTyp> {
     pub(super) tasks: VecDeque<Box<dyn Task<T>>>,
     explored_group: HashSet<GroupId>,
     fired_rules: HashMap<ExprId, HashSet<RuleId>>,
-    rules: Arc<[Arc<dyn Rule<T, Self>>]>,
+    rules: Arc<[Arc<RuleWrapper<T, Self>>]>,
     disabled_rules: HashSet<usize>,
     cost: Arc<dyn CostModel<T>>,
     property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
@@ -79,7 +79,7 @@ impl Display for ExprId {
 
 impl<T: RelNodeTyp> CascadesOptimizer<T> {
     pub fn new(
-        rules: Vec<Arc<dyn Rule<T, Self>>>,
+        rules: Vec<Arc<RuleWrapper<T, Self>>>,
         cost: Box<dyn CostModel<T>>,
         property_builders: Vec<Box<dyn PropertyBuilderAny<T>>>,
     ) -> Self {
@@ -87,7 +87,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
     }
 
     pub fn new_with_prop(
-        rules: Vec<Arc<dyn Rule<T, Self>>>,
+        rules: Vec<Arc<RuleWrapper<T, Self>>>,
         cost: Box<dyn CostModel<T>>,
         property_builders: Vec<Box<dyn PropertyBuilderAny<T>>>,
         prop: OptimizerProperties,
@@ -113,7 +113,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.cost.clone()
     }
 
-    pub(super) fn rules(&self) -> Arc<[Arc<dyn Rule<T, Self>>]> {
+    pub(super) fn rules(&self) -> Arc<[Arc<RuleWrapper<T, Self>>]> {
         self.rules.clone()
     }
 
@@ -209,13 +209,13 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         Ok(group_id)
     }
 
-    /// Get the group binding.
+    /// Gets the group binding.
     pub fn step_get_optimize_rel(
         &self,
         group_id: GroupId,
-        mut on_produce: impl FnMut(RelNodeRef<T>, GroupId) -> RelNodeRef<T>,
+        meta: &mut Option<RelNodeMetaMap>,
     ) -> Result<RelNodeRef<T>> {
-        self.memo.get_best_group_binding(group_id, &mut on_produce)
+        self.memo.get_best_group_binding(group_id, meta)
     }
 
     fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
@@ -256,7 +256,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
     fn optimize_inner(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
         let (group_id, _) = self.add_group_expr(root_rel, None);
         self.fire_optimize_tasks(group_id)?;
-        self.memo.get_best_group_binding(group_id, &mut |x, _| x)
+        self.memo.get_best_group_binding(group_id, &mut None)
     }
 
     pub fn resolve_group_id(&self, root_rel: RelNodeRef<T>) -> GroupId {
@@ -281,6 +281,28 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         group_id: Option<GroupId>,
     ) -> (GroupId, ExprId) {
         self.memo.add_new_group_expr(expr, group_id)
+    }
+
+    pub(super) fn replace_group_expr(
+        &mut self,
+        expr: RelNodeRef<T>,
+        group_id: GroupId,
+        expr_id: ExprId,
+    ) {
+        let replaced = self.memo.replace_group_expr(expr_id, group_id, expr);
+        if replaced {
+            // the old expr is replaced, so we clear the fired rules for old expr
+            self.fired_rules
+                .entry(expr_id)
+                .and_modify(|fired_rules| fired_rules.clear());
+            return;
+        }
+        // new expr merged with old expr, we mark old expr as a dead end
+        self.fired_rules.entry(expr_id).and_modify(|fired_rules| {
+            for i in 0..self.rules.len() {
+                fired_rules.insert(i);
+            }
+        });
     }
 
     pub(super) fn get_group_info(&self, group_id: GroupId) -> GroupInfo {

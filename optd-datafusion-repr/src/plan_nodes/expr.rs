@@ -3,8 +3,9 @@ use std::{fmt::Display, sync::Arc};
 use arrow_schema::DataType;
 use itertools::Itertools;
 use pretty_xmlish::Pretty;
+use serde::{Deserialize, Serialize};
 
-use optd_core::rel_node::{RelNode, Value};
+use optd_core::rel_node::{RelNode, RelNodeMetaMap, Value};
 
 use super::{Expr, OptRelNode, OptRelNodeRef, OptRelNodeTyp};
 
@@ -56,16 +57,16 @@ impl OptRelNode for ExprList {
         Some(ExprList(rel_node))
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::Array(
             (0..self.len())
-                .map(|x| self.child(x).explain())
+                .map(|x| self.child(x).explain(meta_map))
                 .collect_vec(),
         )
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum ConstantType {
     Bool,
     Utf8String,
@@ -84,12 +85,9 @@ pub enum ConstantType {
     Any,
 }
 
-#[derive(Clone, Debug)]
-pub struct ConstantExpr(pub Expr);
-
-impl ConstantExpr {
-    pub fn new(value: Value) -> Self {
-        let typ = match &value {
+impl ConstantType {
+    pub fn get_data_type_from_value(value: &Value) -> Self {
+        match value {
             Value::Bool(_) => ConstantType::Bool,
             Value::String(_) => ConstantType::Utf8String,
             Value::UInt8(_) => ConstantType::UInt8,
@@ -102,7 +100,16 @@ impl ConstantExpr {
             Value::Int64(_) => ConstantType::Int64,
             Value::Float(_) => ConstantType::Float64,
             _ => unimplemented!(),
-        };
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ConstantExpr(pub Expr);
+
+impl ConstantExpr {
+    pub fn new(value: Value) -> Self {
+        let typ = ConstantType::get_data_type_from_value(&value);
         Self::new_with_type(value, typ)
     }
 
@@ -202,7 +209,7 @@ impl OptRelNode for ConstantExpr {
         None
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, _meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         if self.constant_type() == ConstantType::IntervalMonthDateNano {
             let value = self.value().as_i128();
             let month = (value >> 96) as u32;
@@ -258,7 +265,7 @@ impl OptRelNode for ColumnRefExpr {
         Expr::from_rel_node(rel_node).map(Self)
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, _meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::display(&format!("#{}", self.index()))
     }
 }
@@ -315,11 +322,11 @@ impl OptRelNode for UnOpExpr {
         Expr::from_rel_node(rel_node).map(Self)
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::simple_record(
             self.op_type().to_string(),
             vec![],
-            vec![self.child().explain()],
+            vec![self.child().explain(meta_map)],
         )
     }
 }
@@ -344,10 +351,6 @@ pub enum BinOpType {
     Lt,
     Geq,
     Leq,
-
-    // logical
-    And,
-    Or,
 }
 
 impl Display for BinOpType {
@@ -369,10 +372,6 @@ impl BinOpType {
             self,
             Self::Eq | Self::Neq | Self::Gt | Self::Lt | Self::Geq | Self::Leq
         )
-    }
-
-    pub fn is_logical(&self) -> bool {
-        matches!(self, Self::And | Self::Or)
     }
 }
 
@@ -420,11 +419,14 @@ impl OptRelNode for BinOpExpr {
         Expr::from_rel_node(rel_node).map(Self)
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::simple_record(
             self.op_type().to_string(),
             vec![],
-            vec![self.left_child().explain(), self.right_child().explain()],
+            vec![
+                self.left_child().explain(meta_map),
+                self.right_child().explain(meta_map),
+            ],
         )
     }
 }
@@ -499,11 +501,11 @@ impl OptRelNode for FuncExpr {
         Expr::from_rel_node(rel_node).map(Self)
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::simple_record(
             self.func().to_string(),
             vec![],
-            vec![self.children().explain()],
+            vec![self.children().explain(meta_map)],
         )
     }
 }
@@ -560,11 +562,88 @@ impl OptRelNode for SortOrderExpr {
         Expr::from_rel_node(rel_node).map(Self)
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::simple_record(
             "SortOrder",
             vec![("order", self.order().to_string().into())],
-            vec![self.child().explain()],
+            vec![self.child().explain(meta_map)],
+        )
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum LogOpType {
+    And,
+    Or,
+}
+
+impl Display for LogOpType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LogOpExpr(pub Expr);
+
+impl LogOpExpr {
+    pub fn new(op_type: LogOpType, expr_list: ExprList) -> Self {
+        LogOpExpr(Expr(
+            RelNode {
+                typ: OptRelNodeTyp::LogOp(op_type),
+                children: expr_list
+                    .to_vec()
+                    .into_iter()
+                    .map(|x| x.into_rel_node())
+                    .collect(),
+                data: None,
+            }
+            .into(),
+        ))
+    }
+
+    pub fn children(&self) -> Vec<Expr> {
+        self.0
+             .0
+            .children
+            .iter()
+            .map(|x| Expr::from_rel_node(x.clone()).unwrap())
+            .collect()
+    }
+
+    pub fn child(&self, idx: usize) -> Expr {
+        Expr::from_rel_node(self.0.child(idx)).unwrap()
+    }
+
+    pub fn op_type(&self) -> LogOpType {
+        if let OptRelNodeTyp::LogOp(op_type) = self.clone().into_rel_node().typ {
+            op_type
+        } else {
+            panic!("not a log op")
+        }
+    }
+}
+
+impl OptRelNode for LogOpExpr {
+    fn into_rel_node(self) -> OptRelNodeRef {
+        self.0.into_rel_node()
+    }
+
+    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
+        if !matches!(rel_node.typ, OptRelNodeTyp::LogOp(_)) {
+            return None;
+        }
+        Expr::from_rel_node(rel_node).map(Self)
+    }
+
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
+        Pretty::simple_record(
+            self.op_type().to_string(),
+            vec![],
+            self.children()
+                .iter()
+                .map(|x| x.explain(meta_map))
+                .collect(),
         )
     }
 }
@@ -613,13 +692,13 @@ impl OptRelNode for BetweenExpr {
         Expr::from_rel_node(rel_node).map(Self)
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::simple_record(
             "Between",
             vec![
-                ("expr", self.child().explain()),
-                ("lower", self.lower().explain()),
-                ("upper", self.upper().explain()),
+                ("expr", self.child().explain(meta_map)),
+                ("lower", self.lower().explain(meta_map)),
+                ("upper", self.upper().explain(meta_map)),
             ],
             vec![],
         )
@@ -662,7 +741,7 @@ impl OptRelNode for DataTypeExpr {
         Expr::from_rel_node(rel_node).map(Self)
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, _meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::display(&self.data_type().to_string())
     }
 }
@@ -708,12 +787,12 @@ impl OptRelNode for CastExpr {
         Expr::from_rel_node(rel_node).map(Self)
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::simple_record(
             "Cast",
             vec![
                 ("cast_to", format!("{}", self.cast_to()).into()),
-                ("expr", self.child().explain()),
+                ("expr", self.child().explain(meta_map)),
             ],
             vec![],
         )
@@ -774,12 +853,12 @@ impl OptRelNode for LikeExpr {
         Expr::from_rel_node(rel_node).map(Self)
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::simple_record(
             "Like",
             vec![
-                ("expr", self.child().explain()),
-                ("pattern", self.pattern().explain()),
+                ("expr", self.child().explain(meta_map)),
+                ("pattern", self.pattern().explain(meta_map)),
                 ("negated", self.negated().to_string().into()),
                 (
                     "case_insensitive",
@@ -832,12 +911,12 @@ impl OptRelNode for InListExpr {
         Expr::from_rel_node(rel_node).map(Self)
     }
 
-    fn dispatch_explain(&self) -> Pretty<'static> {
+    fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::simple_record(
             "InList",
             vec![
-                ("expr", self.child().explain()),
-                ("list", self.list().explain()),
+                ("expr", self.child().explain(meta_map)),
+                ("list", self.list().explain(meta_map)),
                 ("negated", self.negated().to_string().into()),
             ],
             vec![],

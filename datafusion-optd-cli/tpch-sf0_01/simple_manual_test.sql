@@ -10,4 +10,4 @@ CREATE TABLE NATION  (
 CREATE EXTERNAL TABLE nation_tbl STORED AS CSV DELIMITER '|' LOCATION 'datafusion-optd-cli/tpch-sf0_01/nation.tbl';
 insert into nation select column_1, column_2, column_3, column_4 from nation_tbl;
 
-SELECT * FROM nation where nation.n_nationkey = 1;
+SELECT * FROM nation where nation.n_nationkey = 1 OR nation.n_nationkey = 2 OR nation.n_nationkey = 5;

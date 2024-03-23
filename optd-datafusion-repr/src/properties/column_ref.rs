@@ -2,9 +2,10 @@ use std::{ops::Deref, sync::Arc};
 
 use optd_core::property::PropertyBuilder;
 
-use crate::plan_nodes::OptRelNodeTyp;
+use crate::plan_nodes::{EmptyRelationData, OptRelNodeTyp};
 
 use super::schema::Catalog;
+use super::DEFAULT_NAME;
 
 #[derive(Clone, Debug)]
 pub enum ColumnRef {
@@ -55,6 +56,19 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                     })
                     .collect()
             }
+            OptRelNodeTyp::EmptyRelation => {
+                let data = data.unwrap().as_slice();
+                let empty_relation_data: EmptyRelationData =
+                    bincode::deserialize(data.as_ref()).unwrap();
+                let schema = empty_relation_data.schema;
+                let column_cnt = schema.fields.len();
+                (0..column_cnt)
+                    .map(|i| ColumnRef::BaseTableColumnRef {
+                        table: DEFAULT_NAME.to_string(),
+                        col_idx: i,
+                    })
+                    .collect()
+            }
             OptRelNodeTyp::ColumnRef => {
                 let col_ref_idx = data.unwrap().as_u64();
                 // this is always safe since col_ref_idx was initially a usize in ColumnRefExpr::new()
@@ -64,6 +78,10 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 }]
             }
             OptRelNodeTyp::List => {
+                // Concatentate the children properties.
+                Self::concat_children_properties(children)
+            }
+            OptRelNodeTyp::LogOp(_) => {
                 // Concatentate the children properties.
                 Self::concat_children_properties(children)
             }
@@ -110,7 +128,6 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
             | OptRelNodeTyp::BinOp(_)
             | OptRelNodeTyp::DataType(_)
             | OptRelNodeTyp::Between
-            | OptRelNodeTyp::EmptyRelation
             | OptRelNodeTyp::Like
             | OptRelNodeTyp::InList => {
                 vec![ColumnRef::Derived]

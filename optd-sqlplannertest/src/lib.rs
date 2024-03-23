@@ -7,9 +7,12 @@ use datafusion::sql::parser::DFParser;
 use datafusion::sql::sqlparser::dialect::GenericDialect;
 use datafusion_optd_cli::helper::unescape_input;
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
+use optd_datafusion_repr::cost::BaseTableStats;
 use optd_datafusion_repr::DatafusionOptimizer;
+use regex::Regex;
 use std::sync::Arc;
 
 #[global_allocator]
@@ -19,17 +22,17 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 
 #[derive(Default)]
-pub struct DatafusionDb {
+pub struct DatafusionDBMS {
     ctx: SessionContext,
     /// Context enabling datafusion's logical optimizer.
     with_logical_ctx: SessionContext,
 }
 
-impl DatafusionDb {
+impl DatafusionDBMS {
     pub async fn new() -> Result<Self> {
-        let ctx = DatafusionDb::new_session_ctx(false, None).await?;
+        let ctx = DatafusionDBMS::new_session_ctx(false, None).await?;
         let with_logical_ctx =
-            DatafusionDb::new_session_ctx(true, Some(ctx.state().catalog_list().clone())).await?;
+            DatafusionDBMS::new_session_ctx(true, Some(ctx.state().catalog_list().clone())).await?;
         Ok(Self {
             ctx,
             with_logical_ctx,
@@ -59,9 +62,11 @@ impl DatafusionDb {
             } else {
                 SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env))
             };
-            let optimizer = DatafusionOptimizer::new_physical(Arc::new(DatafusionCatalog::new(
-                state.catalog_list(),
-            )));
+            let optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical(
+                Arc::new(DatafusionCatalog::new(state.catalog_list())),
+                BaseTableStats::default(),
+                false,
+            );
             if !with_logical {
                 // clean up optimizer rules so that we can plug in our own optimizer
                 state = state.with_optimizer_rules(vec![]);
@@ -118,8 +123,9 @@ impl DatafusionDb {
     }
 
     /// Executes the `execute` task.
-    async fn task_execute(&mut self, r: &mut String, sql: &str, with_logical: bool) -> Result<()> {
+    async fn task_execute(&mut self, r: &mut String, sql: &str, flags: &[String]) -> Result<()> {
         use std::fmt::Write;
+        let with_logical = flags.contains(&"with_logical".to_string());
         let result = self.execute(sql, with_logical).await?;
         writeln!(r, "{}", result.into_iter().map(|x| x.join(" ")).join("\n"))?;
         writeln!(r)?;
@@ -132,18 +138,19 @@ impl DatafusionDb {
         r: &mut String,
         sql: &str,
         task: &str,
-        with_logical: bool,
+        flags: &[String],
     ) -> Result<()> {
         use std::fmt::Write;
 
-        let result = self
-            .execute(&format!("explain {}", &sql), with_logical)
-            .await?;
-        let subtask_start_pos = if with_logical {
-            "explain_with_logical:".len()
+        let with_logical = flags.contains(&"with_logical".to_string());
+        let verbose = flags.contains(&"verbose".to_string());
+        let explain_sql = if verbose {
+            format!("explain verbose {}", &sql)
         } else {
-            "explain:".len()
+            format!("explain {}", &sql)
         };
+        let result = self.execute(&explain_sql, with_logical).await?;
+        let subtask_start_pos = task.find(':').unwrap() + 1;
         for subtask in task[subtask_start_pos..].split(',') {
             let subtask = subtask.trim();
             if subtask == "logical_datafusion" {
@@ -216,7 +223,7 @@ impl DatafusionDb {
 }
 
 #[async_trait]
-impl sqlplannertest::PlannerTestRunner for DatafusionDb {
+impl sqlplannertest::PlannerTestRunner for DatafusionDBMS {
     async fn run(&mut self, test_case: &sqlplannertest::ParsedTestCase) -> Result<String> {
         for before in &test_case.before_sql {
             self.execute(before, true)
@@ -227,16 +234,33 @@ impl sqlplannertest::PlannerTestRunner for DatafusionDb {
         let mut result = String::new();
         let r = &mut result;
         for task in &test_case.tasks {
-            if task == "execute" {
-                self.task_execute(r, &test_case.sql, false).await?;
-            } else if task == "execute_with_logical" {
-                self.task_execute(r, &test_case.sql, true).await?;
-            } else if task.starts_with("explain:") {
-                self.task_explain(r, &test_case.sql, task, false).await?;
-            } else if task.starts_with("explain_with_logical:") {
-                self.task_explain(r, &test_case.sql, task, true).await?;
+            let flags = extract_flags(task)?;
+            if task.starts_with("execute") {
+                self.task_execute(r, &test_case.sql, &flags).await?;
+            } else if task.starts_with("explain") {
+                self.task_explain(r, &test_case.sql, task, &flags).await?;
             }
         }
         Ok(result)
+    }
+}
+
+lazy_static! {
+    static ref FLAGS_REGEX: Regex = Regex::new(r"\[(.*)\]").unwrap();
+}
+
+/// Extract the flags from a task. The flags are specified in square brackets.
+/// For example, the flags for the task `explain[with_logical, verbose]` are `["with_logical", "verbose"]`.
+fn extract_flags(task: &str) -> Result<Vec<String>> {
+    if let Some(captures) = FLAGS_REGEX.captures(task) {
+        Ok(captures
+            .get(1)
+            .unwrap()
+            .as_str()
+            .split(',')
+            .map(|x| x.trim().to_string())
+            .collect())
+    } else {
+        Ok(vec![])
     }
 }
