@@ -59,7 +59,7 @@ pub fn get_optd_root() -> io::Result<PathBuf> {
     let url_output = run_command_with_status_check("git config --get remote.origin.url")?;
     let url_string = str::from_utf8(&url_output.stdout).unwrap().trim();
     assert!(
-        url_string.contains("cmu-db/optd.git"),
+        url_string.contains("cmu-db/optd"),
         "You are in the repo with url_string={}. This was not recognized as the optd repo.",
         url_string
     );
