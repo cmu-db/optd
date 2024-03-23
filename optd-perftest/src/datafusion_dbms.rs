@@ -35,6 +35,7 @@ use regex::Regex;
 
 pub struct DatafusionDBMS {
     workspace_dpath: PathBuf,
+    use_stats_cache: bool,
     ctx: SessionContext,
 }
 
@@ -61,9 +62,13 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
 }
 
 impl DatafusionDBMS {
-    pub async fn new<P: AsRef<Path>>(workspace_dpath: P) -> anyhow::Result<Self> {
+    pub async fn new<P: AsRef<Path>>(
+        workspace_dpath: P,
+        use_stats_cache: bool,
+    ) -> anyhow::Result<Self> {
         Ok(DatafusionDBMS {
             workspace_dpath: workspace_dpath.as_ref().to_path_buf(),
+            use_stats_cache,
             ctx: Self::new_session_ctx(None).await?,
         })
     }
@@ -292,7 +297,7 @@ impl DatafusionDBMS {
             .workspace_dpath
             .join("datafusion_stats_caches")
             .join(format!("{}.json", benchmark_fname));
-        if stats_cache_fpath.exists() {
+        if self.use_stats_cache && stats_cache_fpath.exists() {
             let file = File::open(&stats_cache_fpath)?;
             Ok(serde_json::from_reader(file)?)
         } else {
@@ -340,9 +345,11 @@ impl DatafusionDBMS {
                 log::debug!("statistics generated for table: {}", tbl_name);
             }
 
-            fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
-            let file = File::create(&stats_cache_fpath)?;
-            serde_json::to_writer(file, &base_table_stats)?;
+            if self.use_stats_cache {
+                fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
+                let file = File::create(&stats_cache_fpath)?;
+                serde_json::to_writer(file, &base_table_stats)?;
+            }
 
             let duration = start.elapsed();
             println!("datafusion load_tpch_stats duration: {:?}", duration);
