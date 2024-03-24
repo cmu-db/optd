@@ -18,7 +18,7 @@ use std::sync::Arc;
 use arrow_schema::DataType;
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId},
-    rel_node::{RelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp},
+    rel_node::{RelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp, Value},
 };
 
 pub use agg::{LogicalAgg, PhysicalAgg};
@@ -206,6 +206,10 @@ pub trait OptRelNode: 'static + Clone {
         };
         e
     }
+}
+
+pub trait ExplainData: OptRelNode {
+    fn explain_data(data: &Value) -> Vec<(&'static str, Pretty<'static>)>;
 }
 
 #[derive(Clone, Debug)]

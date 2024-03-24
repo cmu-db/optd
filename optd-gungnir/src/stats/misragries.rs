@@ -104,7 +104,7 @@ mod tests {
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
-    fn aggregate_full_size() {
+    fn aggregate_simple() {
         let data = vec![0, 1, 2, 3];
         let mut misra_gries = MisraGries::<i32>::new(data.len() as u16);
 
@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_half_size() {
+    fn aggregate_double() {
         let data = vec![0, 1, 2, 3];
         let data_dup = [data.as_slice(), data.as_slice()].concat();
 
