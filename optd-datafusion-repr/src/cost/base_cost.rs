@@ -18,6 +18,7 @@ use optd_core::{
     cost::{Cost, CostModel},
     rel_node::{RelNode, RelNodeTyp, Value},
 };
+use optd_gungnir::stats::counter::Counter;
 use optd_gungnir::stats::hyperloglog::{self, HyperLogLog};
 use optd_gungnir::stats::tdigest::{self, TDigest};
 
@@ -42,40 +43,6 @@ pub struct OptCostModel {
     per_table_stats_map: BaseTableStats,
 }
 
-struct MockMostCommonValues {
-    mcvs: HashMap<Value, f64>,
-}
-
-impl MockMostCommonValues {
-    pub fn empty() -> Self {
-        MockMostCommonValues {
-            mcvs: HashMap::new(),
-        }
-    }
-}
-
-impl MostCommonValues for MockMostCommonValues {
-    fn freq(&self, value: &Value) -> Option<f64> {
-        self.mcvs.get(value).copied()
-    }
-
-    fn total_freq(&self) -> f64 {
-        self.mcvs.values().sum()
-    }
-
-    fn freq_over_pred(&self, pred: Box<dyn Fn(&Value) -> bool>) -> f64 {
-        self.mcvs
-            .iter()
-            .filter(|(val, _)| pred(val))
-            .map(|(_, freq)| freq)
-            .sum()
-    }
-
-    fn cnt(&self) -> usize {
-        self.mcvs.len()
-    }
-}
-
 pub struct PerTableStats {
     row_cnt: usize,
     per_column_stats_vec: Vec<Option<PerColumnStats>>,
@@ -98,7 +65,7 @@ impl PerTableStats {
             .iter()
             .map(|col_type| {
                 if Self::is_type_supported(col_type) {
-                    Some(MockMostCommonValues::empty())
+                    Some(Counter::<Value>::new(&vec![]))
                 } else {
                     None
                 }

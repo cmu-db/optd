@@ -1,54 +1,63 @@
-//! A hash-based MCV implementation that will track exact frequencies for
+//! A hash-based Counter implementation that will track exact frequencies for
 //! an array of prespecified elements.
 
 use std::{collections::HashMap, hash::Hash};
 
-/// The MCV structure to track exact frequencies of fixed elements.
-pub struct MCV<T: PartialEq + Eq + Hash + Clone> {
-    frequencies: HashMap<T, i32>, // The exact frequencies of an element T.
+/// The Counter structure to track exact frequencies of fixed elements.
+pub struct Counter<T: PartialEq + Eq + Hash + Clone> {
+    counts: HashMap<T, i32>, // The exact counts of an element T.
+    total_count: i32,        // The total number of elements.
 }
 
-// Self-contained implementation of the MCV data structure.
-impl<T> MCV<T>
+// Self-contained implementation of the Counter data structure.
+impl<T> Counter<T>
 where
     T: PartialEq + Eq + Hash + Clone,
 {
-    /// Creates and initializes a new empty MCV with the frequency map sized
+    /// Creates and initializes a new empty Counter with the frequency map sized
     /// based on the number of unique elements in `to_track`.
     pub fn new(to_track: &[T]) -> Self {
-        let mut frequencies: HashMap<T, i32> = HashMap::with_capacity(to_track.len());
+        let mut counts: HashMap<T, i32> = HashMap::with_capacity(to_track.len());
         for item in to_track {
-            frequencies.insert(item.clone(), 0);
+            counts.insert(item.clone(), 0);
         }
 
-        MCV::<T> { frequencies }
+        Counter::<T> {
+            counts,
+            total_count: 0,
+        }
     }
 
-    // Inserts an element in the MCV if it is being tracked.
+    // Inserts an element in the Counter if it is being tracked.
     pub fn insert_element(&mut self, elem: T, occ: i32) {
-        if let Some(frequency) = self.frequencies.get_mut(&elem) {
+        if let Some(frequency) = self.counts.get_mut(&elem) {
             *frequency += occ;
         }
     }
 
-    /// Digests an array of data into the MCV structure.
+    /// Digests an array of data into the Counter structure.
     pub fn aggregate(&mut self, data: &[T]) {
         data.iter()
             .for_each(|key| self.insert_element(key.clone(), 1));
+        self.total_count += data.len() as i32;
     }
 
-    /// Merges another MCV into the current one.
+    /// Merges another Counter into the current one.
     /// Particularly useful for parallel execution.
-    pub fn merge(&mut self, other: &MCV<T>) {
+    pub fn merge(&mut self, other: &Counter<T>) {
         other
-            .frequencies
+            .counts
             .iter()
             .for_each(|(key, occ)| self.insert_element(key.clone(), *occ));
+        self.total_count += other.total_count;
     }
 
     /// Returns the frequencies of the most common values.
-    pub fn frequencies(&self) -> &HashMap<T, i32> {
-        &self.frequencies
+    pub fn frequencies(&self) -> HashMap<T, f64> {
+        self.counts
+            .iter()
+            .map(|(key, &value)| (key.clone(), value as f64 / self.total_count as f64))
+            .collect()
     }
 }
 
@@ -62,7 +71,7 @@ mod tests {
     use rand::seq::SliceRandom;
     use rand::{rngs::StdRng, SeedableRng};
 
-    use super::MCV;
+    use super::Counter;
 
     // Generates hardcoded frequencies and returns them,
     // along with a flattened randomized array containing those frequencies.
@@ -92,7 +101,7 @@ mod tests {
     #[test]
     fn aggregate() {
         let to_track = vec![0, 1, 2, 3];
-        let mut mcv = MCV::<i32>::new(&to_track);
+        let mut mcv = Counter::<i32>::new(&to_track);
 
         let (frequencies, flattened) = generate_frequencies();
 
@@ -103,7 +112,13 @@ mod tests {
 
         to_track.iter().for_each(|item| {
             assert!(mcv_freq.contains_key(item));
-            assert_eq!(mcv_freq.get(item), frequencies.get(item));
+            assert_eq!(
+                mcv_freq.get(item),
+                frequencies
+                    .get(item)
+                    .map(|e| (*e as f64 / flattened.len() as f64))
+                    .as_ref()
+            );
         });
     }
 
@@ -113,16 +128,19 @@ mod tests {
         let n_jobs = 16;
 
         let total_frequencies = Arc::new(Mutex::new(HashMap::<i32, i32>::new()));
-        let result_mcv = Arc::new(Mutex::new(MCV::<i32>::new(&to_track)));
+        let total_count = Arc::new(Mutex::new(0));
+        let result_mcv = Arc::new(Mutex::new(Counter::<i32>::new(&to_track)));
         thread::scope(|s| {
             for _ in 0..n_jobs {
                 s.spawn(|_| {
-                    let mut local_mcv = MCV::<i32>::new(&to_track);
+                    let mut local_mcv = Counter::<i32>::new(&to_track);
 
                     let (local_frequencies, flattened) = generate_frequencies();
                     let mut total_frequencies = total_frequencies.lock().unwrap();
+                    let mut total_count = total_count.lock().unwrap();
                     for (&key, &value) in &local_frequencies {
                         *total_frequencies.entry(key).or_insert(0) += value;
+                        *total_count += value;
                     }
 
                     local_mcv.aggregate(&flattened);
@@ -132,7 +150,13 @@ mod tests {
 
                     to_track.iter().for_each(|item| {
                         assert!(mcv_local_freq.contains_key(item));
-                        assert_eq!(mcv_local_freq.get(item), local_frequencies.get(item));
+                        assert_eq!(
+                            mcv_local_freq.get(item),
+                            local_frequencies
+                                .get(item)
+                                .map(|e| (*e as f64 / flattened.len() as f64))
+                                .as_ref()
+                        );
                     });
 
                     let mut result = result_mcv.lock().unwrap();
@@ -143,13 +167,20 @@ mod tests {
         .unwrap();
 
         let mcv = result_mcv.lock().unwrap();
+        let total_count = total_count.lock().unwrap();
         let mcv_freq = mcv.frequencies();
 
+        assert_eq!(*total_count, mcv.total_count);
         to_track.iter().for_each(|item| {
             assert!(mcv_freq.contains_key(item));
             assert_eq!(
                 mcv_freq.get(item),
-                total_frequencies.lock().unwrap().get(item)
+                total_frequencies
+                    .lock()
+                    .unwrap()
+                    .get(item)
+                    .map(|e| (*e as f64 / *total_count as f64))
+                    .as_ref()
             );
         });
     }

@@ -1,7 +1,7 @@
 use optd_core::rel_node::Value;
-use optd_gungnir::stats::tdigest::TDigest;
+use optd_gungnir::stats::{counter::Counter, tdigest::TDigest};
 
-use super::base_cost::Distribution;
+use super::base_cost::{Distribution, MostCommonValues};
 
 impl Distribution for TDigest {
     fn cdf(&self, value: &Value) -> f64 {
@@ -14,5 +14,27 @@ impl Distribution for TDigest {
             Value::Float(i) => self.cdf(**i),
             _ => panic!("Value is not a number"),
         }
+    }
+}
+
+impl MostCommonValues for Counter<Value> {
+    fn freq(&self, value: &Value) -> Option<f64> {
+        self.frequencies().get(value).copied()
+    }
+
+    fn total_freq(&self) -> f64 {
+        self.frequencies().values().sum()
+    }
+
+    fn freq_over_pred(&self, pred: Box<dyn Fn(&Value) -> bool>) -> f64 {
+        self.frequencies()
+            .iter()
+            .filter(|(val, _)| pred(val))
+            .map(|(_, freq)| freq)
+            .sum()
+    }
+
+    fn cnt(&self) -> usize {
+        self.frequencies().len()
     }
 }
