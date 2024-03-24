@@ -28,14 +28,14 @@ use datafusion_optd_cli::helper::unescape_input;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::{
-    cost::{base_cost::StandardBaseTableStats, BaseTableStats, PerTableStats},
+    cost::{base_cost::DataFusionBaseTableStats, BaseTableStats, PerTableStats},
     DatafusionOptimizer,
 };
 use regex::Regex;
 
 pub struct DatafusionDBMS {
     workspace_dpath: PathBuf,
-    use_stats_cache: bool,
+    use_cached_stats: bool,
     ctx: SessionContext,
 }
 
@@ -64,11 +64,11 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
 impl DatafusionDBMS {
     pub async fn new<P: AsRef<Path>>(
         workspace_dpath: P,
-        use_stats_cache: bool,
+        use_cached_stats: bool,
     ) -> anyhow::Result<Self> {
         Ok(DatafusionDBMS {
             workspace_dpath: workspace_dpath.as_ref().to_path_buf(),
-            use_stats_cache,
+            use_cached_stats,
             ctx: Self::new_session_ctx(None).await?,
         })
     }
@@ -78,13 +78,13 @@ impl DatafusionDBMS {
     ///
     /// A more ideal way to generate statistics would be to use the `ANALYZE`
     /// command in SQL, but DataFusion does not support that yet.
-    async fn clear_state(&mut self, stats: Option<StandardBaseTableStats>) -> anyhow::Result<()> {
+    async fn clear_state(&mut self, stats: Option<DataFusionBaseTableStats>) -> anyhow::Result<()> {
         self.ctx = Self::new_session_ctx(stats).await?;
         Ok(())
     }
 
     async fn new_session_ctx(
-        stats: Option<StandardBaseTableStats>,
+        stats: Option<DataFusionBaseTableStats>,
     ) -> anyhow::Result<SessionContext> {
         let session_config = SessionConfig::from_env()?.with_information_schema(true);
         let rn_config = RuntimeConfig::new();
@@ -209,13 +209,29 @@ impl DatafusionDBMS {
     async fn get_benchmark_stats(
         &mut self,
         benchmark: &Benchmark,
-    ) -> anyhow::Result<StandardBaseTableStats> {
-        match benchmark {
-            Benchmark::Tpch(tpch_config) => {
-                let benchmark_fname = benchmark.get_fname();
-                self.get_tpch_stats(tpch_config, benchmark_fname).await
-            }
-            _ => unimplemented!(),
+    ) -> anyhow::Result<DataFusionBaseTableStats> {
+        let benchmark_fname = benchmark.get_fname();
+        let stats_cache_fpath = self
+            .workspace_dpath
+            .join("datafusion_stats_caches")
+            .join(format!("{}.json", benchmark_fname));
+        if self.use_cached_stats && stats_cache_fpath.exists() {
+            let file = File::open(&stats_cache_fpath)?;
+            Ok(serde_json::from_reader(file)?)
+        } else {
+            let base_table_stats = match benchmark {
+                Benchmark::Tpch(tpch_config) => self.get_tpch_stats(tpch_config).await?,
+                _ => unimplemented!(),
+            };
+
+            // regardless of whether self.use_cached_stats is true or false, we want to update the cache
+            // this way, even if we choose not to read from the cache, the cache still always has the
+            // most up to date version of the stats
+            fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
+            let file = File::create(&stats_cache_fpath)?;
+            serde_json::to_writer(file, &base_table_stats)?;
+
+            Ok(base_table_stats)
         }
     }
 
@@ -291,70 +307,53 @@ impl DatafusionDBMS {
     async fn get_tpch_stats(
         &mut self,
         tpch_config: &TpchConfig,
-        benchmark_fname: String,
-    ) -> anyhow::Result<StandardBaseTableStats> {
-        let stats_cache_fpath = self
-            .workspace_dpath
-            .join("datafusion_stats_caches")
-            .join(format!("{}.json", benchmark_fname));
-        if self.use_stats_cache && stats_cache_fpath.exists() {
-            let file = File::open(&stats_cache_fpath)?;
-            Ok(serde_json::from_reader(file)?)
-        } else {
-            let start = Instant::now();
+    ) -> anyhow::Result<DataFusionBaseTableStats> {
+        let start = Instant::now();
 
-            // Generate the tables
-            let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
-            tpch_kit.gen_tables(tpch_config)?;
+        // Generate the tables
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
+        tpch_kit.gen_tables(tpch_config)?;
 
-            // To get the schema of each table.
-            let ctx = Self::new_session_ctx(None).await?;
-            let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
-            let ddls = ddls
-                .split(';')
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>();
-            for ddl in ddls {
-                Self::execute(&ctx, ddl).await?;
-            }
-            let mut base_table_stats = BaseTableStats::default();
-            for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap() {
-                let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
-                let schema = ctx
-                    .catalog("datafusion")
-                    .unwrap()
-                    .schema("public")
-                    .unwrap()
-                    .table(tbl_name)
-                    .await
-                    .unwrap()
-                    .schema();
-                // Load the .tbl file into record batches using arrow.
-                let tbl_file = fs::File::open(&tbl_fpath)?;
-                let csv_reader = ReaderBuilder::new(schema.clone())
-                    .has_header(false)
-                    .with_delimiter(b'|')
-                    .build(tbl_file)
-                    .unwrap();
-                let batch_iter = RecordBatchIterator::new(csv_reader, schema);
-                base_table_stats.insert(
-                    tbl_name.to_string(),
-                    PerTableStats::from_record_batches(batch_iter)?,
-                );
-                log::debug!("statistics generated for table: {}", tbl_name);
-            }
-
-            if self.use_stats_cache {
-                fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
-                let file = File::create(&stats_cache_fpath)?;
-                serde_json::to_writer(file, &base_table_stats)?;
-            }
-
-            let duration = start.elapsed();
-            println!("datafusion load_tpch_stats duration: {:?}", duration);
-            Ok(base_table_stats)
+        // To get the schema of each table.
+        let ctx = Self::new_session_ctx(None).await?;
+        let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
+        let ddls = ddls
+            .split(';')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>();
+        for ddl in ddls {
+            Self::execute(&ctx, ddl).await?;
         }
+        let mut base_table_stats = BaseTableStats::default();
+        for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap() {
+            let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
+            let schema = ctx
+                .catalog("datafusion")
+                .unwrap()
+                .schema("public")
+                .unwrap()
+                .table(tbl_name)
+                .await
+                .unwrap()
+                .schema();
+            // Load the .tbl file into record batches using arrow.
+            let tbl_file = fs::File::open(&tbl_fpath)?;
+            let csv_reader = ReaderBuilder::new(schema.clone())
+                .has_header(false)
+                .with_delimiter(b'|')
+                .build(tbl_file)
+                .unwrap();
+            let batch_iter = RecordBatchIterator::new(csv_reader, schema);
+            base_table_stats.insert(
+                tbl_name.to_string(),
+                PerTableStats::from_record_batches(batch_iter)?,
+            );
+        }
+
+        let duration = start.elapsed();
+        println!("datafusion load_tpch_stats duration: {:?}", duration);
+        Ok(base_table_stats)
     }
 }
 

@@ -44,7 +44,7 @@ mod tests {
             // make sure scale factor is low so the test runs fast
             "--scale-factor",
             "0.01",
-            "--use-optd-stats-cache",
+            "--use-optd-cached-stats",
             "--pguser",
             "test_user",
             "--pgpassword",

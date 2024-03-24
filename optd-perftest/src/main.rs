@@ -40,8 +40,10 @@ enum Commands {
         #[clap(action)]
         #[clap(help = "Whether to use the cached optd stats/cache generated stats")]
         // this is an option that is not enabled by default so that the user doesn't
-        // accidentally use a stale version of the stats
-        use_optd_stats_cache: bool,
+        //   accidentally use a stale version of the stats
+        // regardless of whether this is true or false, we still _write_ to the cache
+        //   so that the cache always has the latest version of the stats
+        use_optd_cached_stats: bool,
 
         #[clap(long)]
         #[clap(default_value = "default_user")]
@@ -75,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
             scale_factor,
             seed,
             query_ids,
-            use_optd_stats_cache,
+            use_optd_cached_stats,
             pguser,
             pgpassword,
         } => {
@@ -87,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
             };
             let cardinfo_alldbs = cardtest::cardtest(
                 &workspace_dpath,
-                use_optd_stats_cache,
+                use_optd_cached_stats,
                 &pguser,
                 &pgpassword,
                 tpch_config,

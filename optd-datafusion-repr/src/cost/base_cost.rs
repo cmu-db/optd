@@ -41,11 +41,14 @@ pub type BaseTableStats<M, D> = HashMap<String, PerTableStats<M, D>>;
 
 // The "standard" concrete types that optd currently uses
 // All of optd (except unit tests) must use the same types
-pub type StandardMostCommonValues = MockMostCommonValues;
-pub type StandardDistribution = TDigest;
-pub type StandardBaseTableStats = BaseTableStats<StandardMostCommonValues, StandardDistribution>;
-pub type StandardPerTableStats = PerTableStats<StandardMostCommonValues, StandardDistribution>;
-pub type StandardPerColumnStats = PerColumnStats<StandardMostCommonValues, StandardDistribution>;
+pub type DataFusionMostCommonValues = MockMostCommonValues;
+pub type DataFusionDistribution = TDigest;
+pub type DataFusionBaseTableStats =
+    BaseTableStats<DataFusionMostCommonValues, DataFusionDistribution>;
+pub type DataFusionPerTableStats =
+    PerTableStats<DataFusionMostCommonValues, DataFusionDistribution>;
+pub type DataFusionPerColumnStats =
+    PerColumnStats<DataFusionMostCommonValues, DataFusionDistribution>;
 
 pub struct OptCostModel<M: MostCommonValues, D: Distribution> {
     per_table_stats_map: BaseTableStats<M, D>,
@@ -92,7 +95,7 @@ pub struct PerTableStats<M: MostCommonValues, D: Distribution> {
     per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>,
 }
 
-impl StandardPerTableStats {
+impl DataFusionPerTableStats {
     pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
         batch_iter: RecordBatchIterator<I>,
     ) -> anyhow::Result<Self> {

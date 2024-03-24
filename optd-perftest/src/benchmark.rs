@@ -37,8 +37,8 @@ impl Benchmark {
         dbname.to_lowercase()
     }
 
-    /// Use this when you need a file name. The rules for file names are different from the rules
-    ///   for database names, so this is a different function
+    /// Use this when you need a unique file name. The rules for file names are different from the
+    ///   rules for database names, so this is a different function
     pub fn get_fname(&self) -> String {
         match self {
             Self::Test => String::from("test"),

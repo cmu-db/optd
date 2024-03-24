@@ -11,12 +11,13 @@ use optd_core::{
 };
 
 use super::base_cost::{
-    BaseTableStats, Distribution, MostCommonValues, StandardDistribution, StandardMostCommonValues,
+    BaseTableStats, DataFusionDistribution, DataFusionMostCommonValues, Distribution,
+    MostCommonValues,
 };
 
 pub type RuntimeAdaptionStorage = Arc<Mutex<RuntimeAdaptionStorageInner>>;
-pub type StandardAdaptiveCostModel =
-    AdaptiveCostModel<StandardMostCommonValues, StandardDistribution>;
+pub type DataFusionAdaptiveCostModel =
+    AdaptiveCostModel<DataFusionMostCommonValues, DataFusionDistribution>;
 
 #[derive(Default, Debug)]
 pub struct RuntimeAdaptionStorageInner {
