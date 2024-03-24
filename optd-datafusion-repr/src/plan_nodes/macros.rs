@@ -5,6 +5,7 @@ macro_rules! define_plan_node {
         [ $({ $child_id:literal, $child_name:ident : $child_meta_typ:ty }),* ] ,
         [ $({ $attr_id:literal, $attr_name:ident : $attr_meta_typ:ty }),* ]
         $(, { $inner_name:ident : $inner_typ:ty })?
+        $(, $data_name:ident)?
     ) => {
         impl OptRelNode for $struct_name {
             fn into_rel_node(self) -> OptRelNodeRef {
@@ -44,8 +45,16 @@ macro_rules! define_plan_node {
             pub fn new(
                 $($child_name : $child_meta_typ,)*
                 $($attr_name : $attr_meta_typ),*
+                $(, $data_name : Value)?
                 $(, $inner_name : $inner_typ)?
             ) -> $struct_name {
+                #[allow(unused_mut, unused)]
+                let mut data = None;
+                $(
+                    data = Some($data_name);
+                )?
+
+
                 $struct_name($meta_typ(
                     optd_core::rel_node::RelNode {
                         typ: OptRelNodeTyp::$variant $( ($inner_name) )?,
@@ -53,7 +62,7 @@ macro_rules! define_plan_node {
                             $($child_name.into_rel_node(),)*
                             $($attr_name.into_rel_node()),*
                         ],
-                        data: None,
+                        data
                     }
                     .into(),
                 ))

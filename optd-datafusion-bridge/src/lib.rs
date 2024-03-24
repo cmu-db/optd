@@ -136,7 +136,9 @@ fn get_join_order(rel_node: OptRelNodeRef) -> Option<JoinOrder> {
         OptRelNodeTyp::PhysicalScan => {
             let scan =
                 optd_datafusion_repr::plan_nodes::PhysicalScan::from_rel_node(rel_node).unwrap();
-            Some(JoinOrder::Table(scan.table().to_string()))
+            Some(JoinOrder::Table(
+                scan.into_rel_node().data.as_ref().unwrap().to_string(),
+            ))
         }
         _ => {
             for child in &rel_node.children {

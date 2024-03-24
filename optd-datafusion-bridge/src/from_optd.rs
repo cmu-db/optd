@@ -73,9 +73,38 @@ impl OptdPlanContext<'_> {
         &mut self,
         node: PhysicalScan,
     ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
-        let source = self.tables.get(node.table().as_ref()).unwrap();
+        let table = node.clone().into_rel_node().data.as_ref().unwrap().as_str();
+        let source = self.tables.get(table.as_ref()).unwrap();
         let provider = source_as_provider(source)?;
-        let plan = provider.scan(self.session_state, None, &[], None).await?;
+
+        let proj_expr_list = node
+            .projections()
+            .to_vec()
+            .into_iter()
+            .map(|expr| {
+                ConstantExpr::from_rel_node(expr.into_rel_node())
+                    .unwrap()
+                    .value()
+                    .as_u64() as usize
+            })
+            .collect();
+
+        assert!(node.fetch().typ() == OptRelNodeTyp::Constant(ConstantType::UInt64));
+        let fetch = ConstantExpr::from_rel_node(node.fetch().into_rel_node())
+            .unwrap()
+            .value()
+            .as_u64();
+        let fetch_opt: Option<usize> = if fetch == u64::MAX {
+            None
+        } else {
+            Some(fetch.try_into().unwrap())
+        };
+
+        // TODO: Filter expr can't be converted easily to this Expr type
+
+        let plan = provider
+            .scan(self.session_state, Some(&proj_expr_list), &[], fetch_opt)
+            .await?;
         Ok(plan)
     }
 
