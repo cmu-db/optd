@@ -43,7 +43,7 @@ enum Commands {
         //   accidentally use a stale version of the stats
         // regardless of whether this is true or false, we still _write_ to the cache
         //   so that the cache always has the latest version of the stats
-        use_optd_cached_stats: bool,
+        use_cached_optd_stats: bool,
 
         #[clap(long)]
         #[clap(default_value = "default_user")]
@@ -77,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
             scale_factor,
             seed,
             query_ids,
-            use_optd_cached_stats,
+            use_cached_optd_stats,
             pguser,
             pgpassword,
         } => {
@@ -89,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
             };
             let cardinfo_alldbs = cardtest::cardtest(
                 &workspace_dpath,
-                use_optd_cached_stats,
+                use_cached_optd_stats,
                 &pguser,
                 &pgpassword,
                 tpch_config,
