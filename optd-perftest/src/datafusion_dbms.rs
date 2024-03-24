@@ -2,7 +2,6 @@ use std::{
     fs::{self, File},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
 };
 
 use crate::{

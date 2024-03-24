@@ -13,7 +13,6 @@ use std::{
     fs,
     io::Cursor,
     path::{Path, PathBuf},
-    time::Instant,
 };
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
