@@ -139,8 +139,6 @@ impl PostgresDBMS {
         client: &Client,
         tpch_config: &TpchConfig,
     ) -> anyhow::Result<()> {
-        let start = Instant::now();
-
         // set up TpchKit
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
 
@@ -167,9 +165,6 @@ impl PostgresDBMS {
         // you need to do VACUUM FULL ANALYZE and not just ANALYZE to make sure the stats are created in a deterministic way
         // this is standard practice for postgres benchmarking
         client.query("VACUUM FULL ANALYZE", &[]).await?;
-
-        let duration = start.elapsed();
-        println!("postgres load_tpch_data duration: {:?}", duration);
 
         Ok(())
     }
@@ -207,8 +202,6 @@ impl PostgresDBMS {
         client: &Client,
         tpch_config: &TpchConfig,
     ) -> anyhow::Result<Vec<usize>> {
-        let start = Instant::now();
-
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
@@ -218,9 +211,6 @@ impl PostgresDBMS {
             let estcard = self.eval_query_estcard(client, &sql).await?;
             estcards.push(estcard);
         }
-
-        let duration = start.elapsed();
-        println!("postgres eval_tpch_estcards duration: {:?}", duration);
 
         Ok(estcards)
     }
@@ -247,8 +237,6 @@ impl PostgresDBMS {
         dbname: &str, // used by truecard_cache
         truecard_cache: &mut TruecardCache,
     ) -> anyhow::Result<Vec<usize>> {
-        let start = Instant::now();
-
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
@@ -265,9 +253,6 @@ impl PostgresDBMS {
             };
             truecards.push(truecard);
         }
-
-        let duration = start.elapsed();
-        println!("postgres eval_tpch_truecards duration: {:?}", duration);
 
         Ok(truecards)
     }

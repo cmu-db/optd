@@ -141,8 +141,6 @@ impl DatafusionDBMS {
     }
 
     async fn eval_tpch_estcards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
-        let start = Instant::now();
-
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
@@ -152,9 +150,6 @@ impl DatafusionDBMS {
             let estcard = self.eval_query_estcard(&sql).await?;
             estcards.push(estcard);
         }
-
-        let duration = start.elapsed();
-        println!("datafusion eval_tpch_estcards duration: {:?}", duration);
 
         Ok(estcards)
     }
@@ -250,8 +245,6 @@ impl DatafusionDBMS {
 
     #[allow(dead_code)]
     async fn load_tpch_data_no_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
-        let start = Instant::now();
-
         // Generate the tables.
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_config)?;
@@ -298,9 +291,6 @@ impl DatafusionDBMS {
             .await?;
         }
 
-        let duration = start.elapsed();
-        println!("datafusion load_tpch_data duration: {:?}", duration);
-
         Ok(())
     }
 
@@ -308,8 +298,6 @@ impl DatafusionDBMS {
         &mut self,
         tpch_config: &TpchConfig,
     ) -> anyhow::Result<DataFusionBaseTableStats> {
-        let start = Instant::now();
-
         // Generate the tables
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_config)?;
@@ -351,8 +339,6 @@ impl DatafusionDBMS {
             );
         }
 
-        let duration = start.elapsed();
-        println!("datafusion load_tpch_stats duration: {:?}", duration);
         Ok(base_table_stats)
     }
 }
