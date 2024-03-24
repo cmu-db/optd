@@ -208,8 +208,10 @@ pub trait OptRelNode: 'static + Clone {
     }
 }
 
-pub trait ExplainData: OptRelNode {
-    fn explain_data(data: &Value) -> Vec<(&'static str, Pretty<'static>)>;
+pub trait ExplainData<T>: OptRelNode {
+    fn data_to_value(data: &T) -> Value;
+    fn value_to_data(value: &Value) -> T;
+    fn explain_data(data: &T) -> Vec<(&'static str, Pretty<'static>)>;
 }
 
 #[derive(Clone, Debug)]
