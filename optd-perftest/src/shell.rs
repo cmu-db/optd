@@ -5,11 +5,26 @@ use std::{fs, io};
 
 /// Runs a command, exiting the program immediately if the command fails
 pub fn run_command_with_status_check(cmd_str: &str) -> io::Result<Output> {
+    // we need to bind it to some arbitrary type that implements AsRef<Path>. I just chose &Path
+    run_command_with_status_check_in_dir::<&Path>(cmd_str, None)
+}
+
+/// Runs a command in a directory, exiting the program immediately if the command fails
+pub fn run_command_with_status_check_in_dir<P: AsRef<Path>>(
+    cmd_str: &str,
+    in_path: Option<P>,
+) -> io::Result<Output> {
     // use shlex::split() instead of split_whitespace() to handle cases like quotes and escape chars
     let mut cmd_components: Vec<String> = shlex::split(cmd_str).unwrap();
-    let cmd = cmd_components.remove(0);
+    let cmd_name = cmd_components.remove(0);
     let args = cmd_components;
-    let output = Command::new(cmd).args(args).output()?;
+    let mut cmd = Command::new(cmd_name);
+    cmd.args(args);
+    if let Some(in_path) = in_path {
+        cmd.current_dir(in_path);
+    }
+    let output = cmd.output()?;
+
     if output.status.success() {
         Ok(output)
     } else {
@@ -41,10 +56,17 @@ where
 
 /// Get the path of the root "optd" repo directory
 pub fn get_optd_root() -> io::Result<PathBuf> {
-    let output = run_command_with_status_check("git rev-parse --show-toplevel")?;
-    let path = str::from_utf8(&output.stdout).unwrap().trim();
-    let path = PathBuf::from(path);
-    Ok(path)
+    let url_output = run_command_with_status_check("git config --get remote.origin.url")?;
+    let url_string = str::from_utf8(&url_output.stdout).unwrap().trim();
+    assert!(
+        url_string.contains("cmu-db/optd"),
+        "You are in the repo with url_string={}. This was not recognized as the optd repo.",
+        url_string
+    );
+    let toplevel_output = run_command_with_status_check("git rev-parse --show-toplevel")?;
+    let toplevel_str = str::from_utf8(&toplevel_output.stdout).unwrap().trim();
+    let toplevel_dpath = PathBuf::from(toplevel_str);
+    Ok(toplevel_dpath)
 }
 
 /// Can be an absolute path or a relative path. Regardless of where this CLI is run, relative paths are evaluated relative to the optd repo root.
