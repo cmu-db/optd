@@ -1,11 +1,3 @@
-/// Plan nodes with data fields must implement `ExplainData` trait.
-///
-/// The generated `dispatch_explain` method delegates explaining data to
-/// rel node implementations of `ExplainData` trait instead of just debug
-/// printing it, because for complex data type (struct), derived debug printing
-/// displays struct name which should be hidden from the user. It also wraps
-/// the fields in braces, unlike the rest of the fields as children.
-
 macro_rules! define_plan_node {
     (
         $struct_name:ident : $meta_typ:tt,
@@ -39,7 +31,7 @@ macro_rules! define_plan_node {
                 if let Some(meta_map) = meta_map {
                     fields = fields.with_meta(self.0.get_meta(meta_map));
                 };
-                define_plan_node!(@expand_data_fields self, $struct_name, fields $(, $data_name)?);
+                define_plan_node!(@expand_data_fields self, $struct_name, fields $(, $data_typ)?);
 
                 pretty_xmlish::Pretty::simple_record(
                     stringify!($struct_name),
@@ -61,7 +53,7 @@ macro_rules! define_plan_node {
                 #[allow(unused_mut, unused)]
                 let mut data = None;
                 $(
-                    data = Some($struct_name::data_to_value(&$data_name));
+                    data = Some($data_name.into());
                 )*
                 $struct_name($meta_typ(
                     optd_core::rel_node::RelNode {
@@ -103,9 +95,9 @@ macro_rules! define_plan_node {
     // Dummy branch that does nothing when data is `None`.
     (@expand_data_fields $self:ident, $struct_name:ident, $fields:ident) => {};
     // Expand explain fields with data.
-    (@expand_data_fields $self:ident, $struct_name:ident, $fields:ident, $data_name:ident) => {
+    (@expand_data_fields $self:ident, $struct_name:ident, $fields:ident, $data_typ:ty) => {
         let value = $self.0 .0.data.as_ref().unwrap();
-        $fields.extend($struct_name::explain_data(&$struct_name::value_to_data(&value)));
+        $fields.extend($struct_name::explain_data(&value.into()));
     };
 }
 
@@ -141,6 +133,31 @@ mod test {
         #[derive(Clone, Debug)]
         struct PhysicalComplexDummy(PlanNode);
 
+        impl From<ComplexData> for Value {
+            fn from(data: ComplexData) -> Self {
+                Value::Serialized(bincode::serialize(&data).unwrap().into_iter().collect())
+            }
+        }
+
+        impl From<&Value> for ComplexData {
+            fn from(value: &Value) -> Self {
+                if let Value::Serialized(serialized_data) = value {
+                    bincode::deserialize(serialized_data).unwrap()
+                } else {
+                    unreachable!()
+                }
+            }
+        }
+
+        impl ExplainData<ComplexData> for PhysicalComplexDummy {
+            fn explain_data(data: &ComplexData) -> Vec<(&'static str, Pretty<'static>)> {
+                vec![
+                    ("a", data.a.to_string().into()),
+                    ("b", data.b.to_string().into()),
+                ]
+            }
+        }
+
         define_plan_node!(
             PhysicalComplexDummy: PlanNode,
             PhysicalScan, [
@@ -149,27 +166,6 @@ mod test {
             ],
             complex_data: ComplexData
         );
-
-        impl ExplainData<ComplexData> for PhysicalComplexDummy {
-            fn data_to_value(data: &ComplexData) -> Value {
-                Value::Serialized(bincode::serialize(data).unwrap().into_iter().collect())
-            }
-
-            fn value_to_data(value: &Value) -> ComplexData {
-                if let Value::Serialized(serialized_data) = value {
-                    bincode::deserialize(serialized_data).unwrap()
-                } else {
-                    unreachable!()
-                }
-            }
-
-            fn explain_data(data: &ComplexData) -> Vec<(&'static str, Pretty<'static>)> {
-                vec![
-                    ("a", data.a.to_string().into()),
-                    ("b", data.b.to_string().into()),
-                ]
-            }
-        }
 
         let node = PhysicalComplexDummy::new(
             LogicalScan::new("a".to_string()).0,
