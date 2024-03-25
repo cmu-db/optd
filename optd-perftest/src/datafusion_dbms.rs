@@ -1,8 +1,7 @@
 use std::{
-    fs,
+    fs::{self, File},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
 };
 
 use crate::{
@@ -27,11 +26,15 @@ use datafusion::{
 use datafusion_optd_cli::helper::unescape_input;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
-use optd_datafusion_repr::{cost::BaseTableStats, cost::PerTableStats, DatafusionOptimizer};
+use optd_datafusion_repr::{
+    cost::{base_cost::DataFusionBaseTableStats, BaseTableStats, PerTableStats},
+    DatafusionOptimizer,
+};
 use regex::Regex;
 
 pub struct DatafusionDBMS {
     workspace_dpath: PathBuf,
+    use_cached_stats: bool,
     ctx: SessionContext,
 }
 
@@ -58,9 +61,13 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
 }
 
 impl DatafusionDBMS {
-    pub async fn new<P: AsRef<Path>>(workspace_dpath: P) -> anyhow::Result<Self> {
+    pub async fn new<P: AsRef<Path>>(
+        workspace_dpath: P,
+        use_cached_stats: bool,
+    ) -> anyhow::Result<Self> {
         Ok(DatafusionDBMS {
             workspace_dpath: workspace_dpath.as_ref().to_path_buf(),
+            use_cached_stats,
             ctx: Self::new_session_ctx(None).await?,
         })
     }
@@ -70,12 +77,14 @@ impl DatafusionDBMS {
     ///
     /// A more ideal way to generate statistics would be to use the `ANALYZE`
     /// command in SQL, but DataFusion does not support that yet.
-    async fn clear_state(&mut self, stats: Option<BaseTableStats>) -> anyhow::Result<()> {
+    async fn clear_state(&mut self, stats: Option<DataFusionBaseTableStats>) -> anyhow::Result<()> {
         self.ctx = Self::new_session_ctx(stats).await?;
         Ok(())
     }
 
-    async fn new_session_ctx(stats: Option<BaseTableStats>) -> anyhow::Result<SessionContext> {
+    async fn new_session_ctx(
+        stats: Option<DataFusionBaseTableStats>,
+    ) -> anyhow::Result<SessionContext> {
         let session_config = SessionConfig::from_env()?.with_information_schema(true);
         let rn_config = RuntimeConfig::new();
         let runtime_env = RuntimeEnv::new(rn_config.clone())?;
@@ -131,8 +140,6 @@ impl DatafusionDBMS {
     }
 
     async fn eval_tpch_estcards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
-        let start = Instant::now();
-
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_config)?;
 
@@ -142,9 +149,6 @@ impl DatafusionDBMS {
             let estcard = self.eval_query_estcard(&sql).await?;
             estcards.push(estcard);
         }
-
-        let duration = start.elapsed();
-        println!("datafusion eval_tpch_estcards duration: {:?}", duration);
 
         Ok(estcards)
     }
@@ -199,10 +203,29 @@ impl DatafusionDBMS {
     async fn get_benchmark_stats(
         &mut self,
         benchmark: &Benchmark,
-    ) -> anyhow::Result<BaseTableStats> {
-        match benchmark {
-            Benchmark::Tpch(tpch_config) => self.get_tpch_stats(tpch_config).await,
-            _ => unimplemented!(),
+    ) -> anyhow::Result<DataFusionBaseTableStats> {
+        let benchmark_fname = benchmark.get_fname();
+        let stats_cache_fpath = self
+            .workspace_dpath
+            .join("datafusion_stats_caches")
+            .join(format!("{}.json", benchmark_fname));
+        if self.use_cached_stats && stats_cache_fpath.exists() {
+            let file = File::open(&stats_cache_fpath)?;
+            Ok(serde_json::from_reader(file)?)
+        } else {
+            let base_table_stats = match benchmark {
+                Benchmark::Tpch(tpch_config) => self.get_tpch_stats(tpch_config).await?,
+                _ => unimplemented!(),
+            };
+
+            // regardless of whether self.use_cached_stats is true or false, we want to update the cache
+            // this way, even if we choose not to read from the cache, the cache still always has the
+            // most up to date version of the stats
+            fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
+            let file = File::create(&stats_cache_fpath)?;
+            serde_json::to_writer(file, &base_table_stats)?;
+
+            Ok(base_table_stats)
         }
     }
 
@@ -221,8 +244,6 @@ impl DatafusionDBMS {
 
     #[allow(dead_code)]
     async fn load_tpch_data_no_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
-        let start = Instant::now();
-
         // Generate the tables.
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_config)?;
@@ -269,15 +290,13 @@ impl DatafusionDBMS {
             .await?;
         }
 
-        let duration = start.elapsed();
-        println!("datafusion load_tpch_data duration: {:?}", duration);
-
         Ok(())
     }
 
-    async fn get_tpch_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<BaseTableStats> {
-        let start = Instant::now();
-
+    async fn get_tpch_stats(
+        &mut self,
+        tpch_config: &TpchConfig,
+    ) -> anyhow::Result<DataFusionBaseTableStats> {
         // Generate the tables
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_config)?;
@@ -317,10 +336,8 @@ impl DatafusionDBMS {
                 tbl_name.to_string(),
                 PerTableStats::from_record_batches(batch_iter)?,
             );
-            log::debug!("statistics generated for table: {}", tbl_name);
         }
-        let duration = start.elapsed();
-        println!("datafusion load_tpch_stats duration: {:?}", duration);
+
         Ok(base_table_stats)
     }
 }

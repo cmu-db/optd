@@ -3,7 +3,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
-use cost::{AdaptiveCostModel, BaseTableStats, RuntimeAdaptionStorage, DEFAULT_DECAY};
+use cost::{
+    adaptive_cost::DataFusionAdaptiveCostModel, base_cost::DataFusionBaseTableStats,
+    AdaptiveCostModel, BaseTableStats, RuntimeAdaptionStorage, DEFAULT_DECAY,
+};
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId, OptimizerProperties},
     rel_node::RelNodeMetaMap,
@@ -80,7 +83,7 @@ impl DatafusionOptimizer {
     /// Create an optimizer with partial explore (otherwise it's too slow).
     pub fn new_physical(
         catalog: Arc<dyn Catalog>,
-        stats: BaseTableStats,
+        stats: DataFusionBaseTableStats,
         enable_adaptive: bool,
     ) -> Self {
         let rules = Self::default_rules();
@@ -125,7 +128,7 @@ impl DatafusionOptimizer {
             RuleWrapper::new_heuristic(Arc::new(EliminateFilterRule::new())),
         );
 
-        let cost_model = AdaptiveCostModel::new(1000, BaseTableStats::default()); // very large decay
+        let cost_model = DataFusionAdaptiveCostModel::new(1000, BaseTableStats::default()); // very large decay
         let runtime_statistics = cost_model.get_runtime_map();
         let optimizer = CascadesOptimizer::new(
             rule_wrappers,

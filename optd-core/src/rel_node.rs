@@ -9,6 +9,7 @@ use std::{
 };
 
 use ordered_float::OrderedFloat;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{cascades::GroupId, cost::Cost};
 
@@ -27,6 +28,30 @@ pub trait RelNodeTyp:
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SerializableOrderedF64(pub OrderedFloat<f64>);
+
+impl Serialize for SerializableOrderedF64 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Directly serialize the inner f64 value of the OrderedFloat
+        self.0 .0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SerializableOrderedF64 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Deserialize an f64 and wrap it in an OrderedFloat
+        let float = f64::deserialize(deserializer)?;
+        Ok(SerializableOrderedF64(OrderedFloat(float)))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Value {
     UInt8(u8),
     UInt16(u16),
@@ -37,7 +62,7 @@ pub enum Value {
     Int32(i32),
     Int64(i64),
     Int128(i128),
-    Float(OrderedFloat<f64>),
+    Float(SerializableOrderedF64),
     String(Arc<str>),
     Bool(bool),
     Date32(i32),
@@ -57,7 +82,7 @@ impl std::fmt::Display for Value {
             Self::Int32(x) => write!(f, "{x}"),
             Self::Int64(x) => write!(f, "{x}"),
             Self::Int128(x) => write!(f, "{x}"),
-            Self::Float(x) => write!(f, "{x}"),
+            Self::Float(x) => write!(f, "{}", x.0),
             Self::String(x) => write!(f, "\"{x}\""),
             Self::Bool(x) => write!(f, "{x}"),
             Self::Date32(x) => write!(f, "{x}"),
@@ -133,7 +158,7 @@ impl Value {
 
     pub fn as_f64(&self) -> f64 {
         match self {
-            Value::Float(i) => **i,
+            Value::Float(i) => *i.0,
             _ => panic!("Value is not an f64"),
         }
     }

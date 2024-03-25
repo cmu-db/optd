@@ -7,7 +7,7 @@ use std::fs;
 
 #[derive(Parser)]
 struct Cli {
-    #[arg(long)]
+    #[clap(long)]
     #[clap(default_value = "optd_perftest_workspace")]
     #[clap(
         help = "The directory where artifacts required for performance testing (such as pgdata or TPC-H queries) are generated. See comment of parse_pathstr() to see what paths are allowed (TLDR: absolute and relative both ok)."
@@ -21,26 +21,36 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Cardtest {
-        #[arg(long)]
+        #[clap(long)]
         #[clap(default_value = "0.01")]
         scale_factor: f64,
 
-        #[arg(long)]
+        #[clap(long)]
         #[clap(default_value = "15721")]
         seed: i32,
 
-        #[arg(long)]
+        #[clap(long)]
         #[clap(value_delimiter = ',', num_args = 1..)]
         // this is the current list of all queries that work in perftest
         #[clap(default_value = "2,3,5,6,7,8,9,10,11,12,13,14,17")]
+        #[clap(help = "The queries to get the Q-error of")]
         query_ids: Vec<u32>,
 
-        #[arg(long)]
+        #[clap(long)]
+        #[clap(action)]
+        #[clap(help = "Whether to use the cached optd stats/cache generated stats")]
+        // this is an option that is not enabled by default so that the user doesn't
+        //   accidentally use a stale version of the stats
+        // regardless of whether this is true or false, we still _write_ to the cache
+        //   so that the cache always has the latest version of the stats
+        use_cached_optd_stats: bool,
+
+        #[clap(long)]
         #[clap(default_value = "default_user")]
         #[clap(help = "The name of a user with superuser privileges")]
         pguser: String,
 
-        #[arg(long)]
+        #[clap(long)]
         #[clap(default_value = "password")]
         #[clap(help = "The name of a user with superuser privileges")]
         pgpassword: String,
@@ -67,6 +77,7 @@ async fn main() -> anyhow::Result<()> {
             scale_factor,
             seed,
             query_ids,
+            use_cached_optd_stats,
             pguser,
             pgpassword,
         } => {
@@ -76,8 +87,14 @@ async fn main() -> anyhow::Result<()> {
                 seed,
                 query_ids: query_ids.clone(),
             };
-            let cardinfo_alldbs =
-                cardtest::cardtest(&workspace_dpath, &pguser, &pgpassword, tpch_config).await?;
+            let cardinfo_alldbs = cardtest::cardtest(
+                &workspace_dpath,
+                use_cached_optd_stats,
+                &pguser,
+                &pgpassword,
+                tpch_config,
+            )
+            .await?;
             println!();
             println!(" Aggregate Q-Error Comparison");
             let mut agg_qerror_table = Table::new();
