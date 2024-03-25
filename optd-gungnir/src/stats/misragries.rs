@@ -9,6 +9,8 @@ use std::{cmp::min, collections::HashMap, hash::Hash};
 
 use itertools::Itertools;
 
+pub const DEFAULT_K_TO_TRACK: u16 = 100;
+
 /// The Misra-Gries structure to approximate the k most frequent elements in
 /// a stream of N elements. It will always identify elements with frequency
 /// f >= (n/k), and include additional leftovers.
