@@ -1,4 +1,11 @@
 /// Plan nodes with data fields must implement `ExplainData` trait.
+///
+/// The generated `dispatch_explain` method delegates explaining data to
+/// rel node implementations of `ExplainData` trait instead of just debug
+/// printing it, because for complex data type (struct), derived debug printing
+/// displays struct name which should be hidden from the user. It also wraps
+/// the fields in braces, unlike the rest of the fields as children.
+
 macro_rules! define_plan_node {
     (
         $struct_name:ident : $meta_typ:tt,
@@ -32,7 +39,7 @@ macro_rules! define_plan_node {
                 if let Some(meta_map) = meta_map {
                     fields = fields.with_meta(self.0.get_meta(meta_map));
                 };
-                define_plan_node!(@expand_fields self, $struct_name, fields $(, $data_name)?);
+                define_plan_node!(@expand_data_fields self, $struct_name, fields $(, $data_name)?);
 
                 pretty_xmlish::Pretty::simple_record(
                     stringify!($struct_name),
@@ -94,9 +101,9 @@ macro_rules! define_plan_node {
         }
     };
     // Dummy branch that does nothing when data is `None`.
-    (@expand_fields $self:ident, $struct_name:ident, $fields:ident) => {};
+    (@expand_data_fields $self:ident, $struct_name:ident, $fields:ident) => {};
     // Expand explain fields with data.
-    (@expand_fields $self:ident, $struct_name:ident, $fields:ident, $data_name:ident) => {
+    (@expand_data_fields $self:ident, $struct_name:ident, $fields:ident, $data_name:ident) => {
         let value = $self.0 .0.data.as_ref().unwrap();
         $fields.extend($struct_name::explain_data(&$struct_name::value_to_data(&value)));
     };
