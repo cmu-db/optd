@@ -162,6 +162,7 @@ impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
                 Ok(node)
             }
             ApplyOrder::TopDown => {
+                self.infer_properties(root_rel.clone());
                 let root_rel = self.apply_rules(root_rel)?;
                 let optimized_children = self.optimize_inputs(&root_rel.children)?;
                 let node: Arc<RelNode<T>> = RelNode {
