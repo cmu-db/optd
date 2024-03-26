@@ -1,6 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::plan_nodes::{BinOpType, ColumnRefExpr, LogOpType, OptRelNode, UnOpType};
+use crate::plan_nodes::{
+    BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, LogOpType, OptRelNode, UnOpType,
+};
 use crate::properties::column_ref::{ColumnRefPropertyBuilder, GroupColumnRefs};
 use crate::{
     plan_nodes::{OptRelNodeRef, OptRelNodeTyp},
@@ -392,8 +394,39 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
             OptRelNodeTyp::PhysicalEmptyRelation => Self::cost(0.5, 0.01, 0.0),
             OptRelNodeTyp::PhysicalLimit => {
                 let (row_cnt, compute_cost, _) = Self::cost_tuple(&children[0]);
-                let selectivity = 0.001;
-                Self::cost((row_cnt * selectivity).max(1.0), compute_cost, 0.0)
+                let row_cnt = if let Some(context) = context {
+                    if let Some(optimizer) = optimizer {
+                        let mut fetch_expr =
+                            optimizer.get_all_group_bindings(context.children_group_ids[2], false);
+                        assert!(
+                            fetch_expr.len() == 1,
+                            "fetch expression should be the only expr in the group"
+                        );
+                        let fetch_expr = fetch_expr.pop().unwrap();
+                        assert!(
+                            matches!(
+                                fetch_expr.typ,
+                                OptRelNodeTyp::Constant(ConstantType::UInt64)
+                            ),
+                            "fetch type can only be UInt64"
+                        );
+                        let fetch = ConstantExpr::from_rel_node(fetch_expr)
+                            .unwrap()
+                            .value()
+                            .as_u64();
+                        // u64::MAX represents None
+                        if fetch == u64::MAX {
+                            row_cnt
+                        } else {
+                            row_cnt.min(fetch as f64)
+                        }
+                    } else {
+                        (row_cnt * INVALID_SELECTIVITY).max(1.0)
+                    }
+                } else {
+                    (row_cnt * INVALID_SELECTIVITY).max(1.0)
+                };
+                Self::cost(row_cnt, compute_cost, 0.0)
             }
             OptRelNodeTyp::PhysicalFilter => {
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
