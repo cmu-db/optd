@@ -9,8 +9,11 @@ use cost::{
 };
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId, OptimizerProperties},
+    heuristics::{ApplyOrder, HeuristicsOptimizer},
+    optimizer::Optimizer,
+    property::PropertyBuilderAny,
     rel_node::RelNodeMetaMap,
-    rules::RuleWrapper,
+    rules::{Rule, RuleWrapper},
 };
 
 use plan_nodes::{OptRelNodeRef, OptRelNodeTyp};
@@ -33,9 +36,11 @@ pub mod properties;
 pub mod rules;
 
 pub struct DatafusionOptimizer {
-    optimizer: CascadesOptimizer<OptRelNodeTyp>,
+    hueristic_optimizer: HeuristicsOptimizer<OptRelNodeTyp>,
+    cascades_optimizer: CascadesOptimizer<OptRelNodeTyp>,
     pub runtime_statistics: RuntimeAdaptionStorage,
     enable_adaptive: bool,
+    enable_heuristic: bool,
 }
 
 impl DatafusionOptimizer {
@@ -47,26 +52,43 @@ impl DatafusionOptimizer {
         self.enable_adaptive
     }
 
-    pub fn optd_optimizer(&self) -> &CascadesOptimizer<OptRelNodeTyp> {
-        &self.optimizer
+    pub fn enable_heuristic(&mut self, enable: bool) {
+        self.enable_heuristic = enable;
+    }
+
+    pub fn is_heuristic_enabled(&self) -> bool {
+        self.enable_heuristic
+    }
+
+    pub fn optd_cascades_optimizer(&self) -> &CascadesOptimizer<OptRelNodeTyp> {
+        &self.cascades_optimizer
+    }
+
+    pub fn optd_hueristic_optimizer(&self) -> &HeuristicsOptimizer<OptRelNodeTyp> {
+        &self.hueristic_optimizer
     }
 
     pub fn optd_optimizer_mut(&mut self) -> &mut CascadesOptimizer<OptRelNodeTyp> {
-        &mut self.optimizer
+        &mut self.cascades_optimizer
     }
 
-    pub fn default_rules() -> Vec<Arc<RuleWrapper<OptRelNodeTyp, CascadesOptimizer<OptRelNodeTyp>>>>
-    {
+    pub fn default_heuristic_rules(
+    ) -> Vec<Arc<dyn Rule<OptRelNodeTyp, HeuristicsOptimizer<OptRelNodeTyp>>>> {
+        vec![
+            Arc::new(SimplifyFilterRule::new()),
+            Arc::new(SimplifyJoinCondRule::new()),
+            Arc::new(EliminateFilterRule::new()),
+            Arc::new(EliminateJoinRule::new()),
+            Arc::new(EliminateLimitRule::new()),
+            Arc::new(EliminateDuplicatedSortExprRule::new()),
+            Arc::new(EliminateDuplicatedAggExprRule::new()),
+        ]
+    }
+
+    pub fn default_cascades_rules(
+    ) -> Vec<Arc<RuleWrapper<OptRelNodeTyp, CascadesOptimizer<OptRelNodeTyp>>>> {
         let rules = PhysicalConversionRule::all_conversions();
-        let mut rule_wrappers = vec![
-            RuleWrapper::new_heuristic(Arc::new(SimplifyFilterRule::new())),
-            RuleWrapper::new_heuristic(Arc::new(SimplifyJoinCondRule::new())),
-            RuleWrapper::new_heuristic(Arc::new(EliminateFilterRule::new())),
-            RuleWrapper::new_heuristic(Arc::new(EliminateJoinRule::new())),
-            RuleWrapper::new_heuristic(Arc::new(EliminateLimitRule::new())),
-            RuleWrapper::new_heuristic(Arc::new(EliminateDuplicatedSortExprRule::new())),
-            RuleWrapper::new_heuristic(Arc::new(EliminateDuplicatedAggExprRule::new())),
-        ];
+        let mut rule_wrappers = vec![];
         for rule in rules {
             rule_wrappers.push(RuleWrapper::new_cascades(rule));
         }
@@ -86,23 +108,34 @@ impl DatafusionOptimizer {
         stats: DataFusionBaseTableStats,
         enable_adaptive: bool,
     ) -> Self {
-        let rules = Self::default_rules();
+        let cascades_rules = Self::default_cascades_rules();
+        let heuristic_rules = Self::default_heuristic_rules();
+        let property_builders: Arc<[Box<dyn PropertyBuilderAny<OptRelNodeTyp>>]> = Arc::new([
+            Box::new(SchemaPropertyBuilder::new(catalog.clone())),
+            Box::new(ColumnRefPropertyBuilder::new(catalog.clone())),
+        ]);
         let cost_model = AdaptiveCostModel::new(DEFAULT_DECAY, stats);
         Self {
             runtime_statistics: cost_model.get_runtime_map(),
-            optimizer: CascadesOptimizer::new_with_prop(
-                rules,
+            cascades_optimizer: CascadesOptimizer::new_with_prop(
+                cascades_rules,
                 Box::new(cost_model),
                 vec![
                     Box::new(SchemaPropertyBuilder::new(catalog.clone())),
-                    Box::new(ColumnRefPropertyBuilder::new(catalog)),
+                    Box::new(ColumnRefPropertyBuilder::new(catalog.clone())),
                 ],
                 OptimizerProperties {
                     partial_explore_iter: Some(1 << 20),
                     partial_explore_space: Some(1 << 10),
                 },
             ),
+            hueristic_optimizer: HeuristicsOptimizer::new_with_rules(
+                heuristic_rules,
+                ApplyOrder::BottomUp,
+                property_builders.clone(),
+            ),
             enable_adaptive,
+            enable_heuristic: true,
         }
     }
 
@@ -140,31 +173,45 @@ impl DatafusionOptimizer {
         );
         Self {
             runtime_statistics,
-            optimizer,
+            cascades_optimizer: optimizer,
             enable_adaptive: true,
+            enable_heuristic: false,
+            hueristic_optimizer: HeuristicsOptimizer::new_with_rules(
+                vec![],
+                ApplyOrder::BottomUp,
+                Arc::new([]),
+            ),
         }
     }
 
-    pub fn optimize(
+    pub fn heuristic_optimize(&mut self, root_rel: OptRelNodeRef) -> OptRelNodeRef {
+        self.hueristic_optimizer
+            .optimize(root_rel)
+            .expect("heuristics returns error")
+    }
+
+    pub fn cascades_optimize(
         &mut self,
         root_rel: OptRelNodeRef,
     ) -> Result<(GroupId, OptRelNodeRef, RelNodeMetaMap)> {
         if self.enable_adaptive {
             self.runtime_statistics.lock().unwrap().iter_cnt += 1;
-            self.optimizer.step_clear_winner();
+            self.cascades_optimizer.step_clear_winner();
         } else {
-            self.optimizer.step_clear();
+            self.cascades_optimizer.step_clear();
         }
 
-        let group_id = self.optimizer.step_optimize_rel(root_rel)?;
+        let group_id = self.cascades_optimizer.step_optimize_rel(root_rel)?;
 
         let mut meta = Some(HashMap::new());
-        let optimized_rel = self.optimizer.step_get_optimize_rel(group_id, &mut meta)?;
+        let optimized_rel = self
+            .cascades_optimizer
+            .step_get_optimize_rel(group_id, &mut meta)?;
 
         Ok((group_id, optimized_rel, meta.unwrap()))
     }
 
     pub fn dump(&self, group_id: Option<GroupId>) {
-        self.optimizer.dump(group_id)
+        self.cascades_optimizer.dump(group_id)
     }
 }

@@ -92,6 +92,7 @@ pub fn main() {
             Arc::new(HashJoinRule::new()),
         ],
         optd_core::heuristics::ApplyOrder::BottomUp,
+        Arc::new([]),
     );
     let node = optimizer.optimize(fnal.0.into_rel_node()).unwrap();
     println!(
