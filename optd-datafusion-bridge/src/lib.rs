@@ -233,6 +233,16 @@ impl OptdQueryPlanner {
 
         if optimizer.is_heuristic_enabled() {
             optd_rel = optimizer.heuristic_optimize(optd_rel);
+            if let Some(explains) = &mut explains {
+                explains.push(StringifiedPlan::new(
+                    PlanType::OptimizedLogicalPlan {
+                        optimizer_name: "optd-heuristic".to_string(),
+                    },
+                    PlanNode::from_rel_node(optd_rel.clone())
+                        .unwrap()
+                        .explain_to_string(None),
+                ))
+            }
         }
 
         let (group_id, optimized_rel, meta) = optimizer.cascades_optimize(optd_rel)?;
