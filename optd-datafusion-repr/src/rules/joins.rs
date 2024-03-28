@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::vec;
 
-use itertools::Itertools;
 use optd_core::optimizer::Optimizer;
 use optd_core::rel_node::RelNode;
 use optd_core::rules::{Rule, RuleMatcher};
@@ -26,46 +25,21 @@ fn apply_join_commute(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     JoinCommuteRulePicks { left, right, cond }: JoinCommuteRulePicks,
 ) -> Vec<RelNode<OptRelNodeTyp>> {
-    fn rewrite_column_refs(expr: Expr, left_size: usize, right_size: usize) -> Expr {
-        let expr = expr.into_rel_node();
-        if let Some(expr) = ColumnRefExpr::from_rel_node(expr.clone()) {
-            let index = expr.index();
-            if index < left_size {
-                return ColumnRefExpr::new(index + right_size).into_expr();
-            } else {
-                return ColumnRefExpr::new(index - left_size).into_expr();
-            }
-        }
-        let children = expr.children.clone();
-        let children = children
-            .into_iter()
-            .map(|x| {
-                rewrite_column_refs(Expr::from_rel_node(x).unwrap(), left_size, right_size)
-                    .into_rel_node()
-            })
-            .collect_vec();
-        Expr::from_rel_node(
-            RelNode {
-                typ: expr.typ.clone(),
-                children,
-                data: expr.data.clone(),
-            }
-            .into(),
-        )
-        .unwrap()
-    }
-
     let left_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(left.clone()), 0);
     let right_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(right.clone()), 0);
-    let cond = rewrite_column_refs(
-        Expr::from_rel_node(cond.into()).unwrap(),
-        left_schema.len(),
-        right_schema.len(),
-    );
+    let cond = Expr::from_rel_node(cond.into())
+        .unwrap()
+        .rewrite_column_refs(&|idx| {
+            Some(if idx < left_schema.len() {
+                idx + right_schema.len()
+            } else {
+                idx - left_schema.len()
+            })
+        });
     let node = LogicalJoin::new(
         PlanNode::from_group(right.into()),
         PlanNode::from_group(left.into()),
-        cond,
+        cond.unwrap(),
         JoinType::Inner,
     );
     let mut proj_expr = Vec::with_capacity(left_schema.len() + right_schema.len());
@@ -88,7 +62,6 @@ define_rule!(
 
 /// Eliminate logical join with constant predicates
 /// True predicates becomes CrossJoin (not yet implemented)
-/// False predicates become EmptyRelation (not yet implemented)
 #[allow(unused_variables)]
 fn apply_eliminate_join(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
@@ -150,43 +123,22 @@ fn apply_join_assoc(
         cond2,
     }: JoinAssocRulePicks,
 ) -> Vec<RelNode<OptRelNodeTyp>> {
-    fn rewrite_column_refs(expr: Expr, a_size: usize) -> Option<Expr> {
-        let expr = expr.into_rel_node();
-        if let Some(expr) = ColumnRefExpr::from_rel_node(expr.clone()) {
-            let index = expr.index();
-            if index < a_size {
-                return None;
-            } else {
-                return Some(ColumnRefExpr::new(index - a_size).into_expr());
-            }
-        }
-        let children = expr.children.clone();
-        let children = children
-            .into_iter()
-            .map(|x| rewrite_column_refs(Expr::from_rel_node(x).unwrap(), a_size))
-            .collect::<Option<Vec<_>>>()?;
-        Some(
-            Expr::from_rel_node(
-                RelNode {
-                    typ: expr.typ.clone(),
-                    children: children
-                        .into_iter()
-                        .map(|x| x.into_rel_node())
-                        .collect_vec(),
-                    data: expr.data.clone(),
-                }
-                .into(),
-            )
-            .unwrap(),
-        )
-    }
     let a_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(a.clone()), 0);
     let _b_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(b.clone()), 0);
     let _c_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(c.clone()), 0);
+
     let cond2 = Expr::from_rel_node(cond2.into()).unwrap();
-    let Some(cond2) = rewrite_column_refs(cond2, a_schema.len()) else {
+
+    let Some(cond2) = cond2.rewrite_column_refs(&|idx| {
+        if idx < a_schema.len() {
+            None
+        } else {
+            Some(idx - a_schema.len())
+        }
+    }) else {
         return vec![];
     };
+
     let node = RelNode {
         typ: OptRelNodeTyp::Join(JoinType::Inner),
         children: vec![
@@ -370,35 +322,6 @@ define_rule!(
     )
 );
 
-struct ProjectionMapping {
-    forward: Vec<usize>,
-    _backward: Vec<Option<usize>>,
-}
-
-impl ProjectionMapping {
-    pub fn build(mapping: Vec<usize>) -> Option<Self> {
-        let mut backward = vec![];
-        for (i, &x) in mapping.iter().enumerate() {
-            if x >= backward.len() {
-                backward.resize(x + 1, None);
-            }
-            backward[x] = Some(i);
-        }
-        Some(Self {
-            forward: mapping,
-            _backward: backward,
-        })
-    }
-
-    pub fn projection_col_refers_to(&self, col: usize) -> usize {
-        self.forward[col]
-    }
-
-    pub fn _original_col_maps_to(&self, col: usize) -> Option<usize> {
-        self._backward[col]
-    }
-}
-
 fn apply_projection_pull_up_join(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     ProjectionPullUpJoinPicks {
@@ -408,72 +331,19 @@ fn apply_projection_pull_up_join(
         cond,
     }: ProjectionPullUpJoinPicks,
 ) -> Vec<RelNode<OptRelNodeTyp>> {
-    let list = ExprList::from_rel_node(Arc::new(list)).unwrap();
-
-    fn compute_column_mapping(list: ExprList) -> Option<ProjectionMapping> {
-        let mut mapping = vec![];
-        for expr in list.to_vec() {
-            let col_expr = ColumnRefExpr::from_rel_node(expr.into_rel_node())?;
-            mapping.push(col_expr.index());
-        }
-        ProjectionMapping::build(mapping)
-    }
-
-    let Some(mapping) = compute_column_mapping(list.clone()) else {
-        return vec![];
-    };
-
-    fn rewrite_condition(
-        cond: Expr,
-        mapping: &ProjectionMapping,
-        left_schema_size: usize,
-        projection_schema_size: usize,
-    ) -> Expr {
-        if cond.typ() == OptRelNodeTyp::ColumnRef {
-            let col = ColumnRefExpr::from_rel_node(cond.into_rel_node()).unwrap();
-            let idx = col.index();
-            if idx < projection_schema_size {
-                let col = mapping.projection_col_refers_to(col.index());
-                return ColumnRefExpr::new(col).into_expr();
-            } else {
-                let col = col.index();
-                return ColumnRefExpr::new(col - projection_schema_size + left_schema_size)
-                    .into_expr();
-            }
-        }
-        let expr = cond.into_rel_node();
-        let mut children = Vec::with_capacity(expr.children.len());
-        for child in &expr.children {
-            children.push(
-                rewrite_condition(
-                    Expr::from_rel_node(child.clone()).unwrap(),
-                    mapping,
-                    left_schema_size,
-                    projection_schema_size,
-                )
-                .into_rel_node(),
-            );
-        }
-
-        Expr::from_rel_node(
-            RelNode {
-                typ: expr.typ.clone(),
-                children,
-                data: expr.data.clone(),
-            }
-            .into(),
-        )
-        .unwrap()
-    }
-
     let left = Arc::new(left.clone());
     let right = Arc::new(right.clone());
 
+    let list = ExprList::from_rel_node(Arc::new(list)).unwrap();
+
+    let projection = LogicalProjection::new(PlanNode::from_group(left.clone()), list.clone());
+
+    let Some(mapping) = LogicalProjection::compute_column_mapping(&projection.exprs()) else {
+        return vec![];
+    };
+
     // TODO(chi): support capture projection node.
-    let projection =
-        LogicalProjection::new(PlanNode::from_group(left.clone()), list.clone()).into_rel_node();
     let left_schema = optimizer.get_property::<SchemaPropertyBuilder>(left.clone(), 0);
-    let projection_schema = optimizer.get_property::<SchemaPropertyBuilder>(projection.clone(), 0);
     let right_schema = optimizer.get_property::<SchemaPropertyBuilder>(right.clone(), 0);
     let mut new_projection_exprs = list.to_vec();
     for i in 0..right_schema.len() {
@@ -484,11 +354,9 @@ fn apply_projection_pull_up_join(
         LogicalJoin::new(
             PlanNode::from_group(left),
             PlanNode::from_group(right),
-            rewrite_condition(
+            mapping.rewrite_condition(
                 Expr::from_rel_node(Arc::new(cond)).unwrap(),
-                &mapping,
                 left_schema.len(),
-                projection_schema.len(),
             ),
             JoinType::Inner,
         )

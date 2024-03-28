@@ -62,3 +62,20 @@ define_plan_node!(
         { 3, right_keys: ExprList }
     ], { join_type: JoinType }
 );
+
+impl LogicalJoin {
+    /// Takes in left/right schema sizes, and maps an index to be as if it were
+    /// pushed down to the left or right side of a join accordingly.
+    pub fn map_through_join(
+        index: usize,
+        left_schema_size: usize,
+        right_schema_size: usize,
+    ) -> usize {
+        assert!(index < left_schema_size + right_schema_size);
+        if index < left_schema_size {
+            index
+        } else {
+            index - left_schema_size
+        }
+    }
+}

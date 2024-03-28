@@ -15,28 +15,6 @@ use optd_datafusion_repr::properties::schema::Schema as OPTDSchema;
 
 use crate::OptdPlanContext;
 
-// flatten_nested_logical is a helper function to flatten nested logical operators with same op type
-// eg. (a AND (b AND c)) => ExprList([a, b, c])
-//    (a OR (b OR c)) => ExprList([a, b, c])
-// It assume the children of the input expr_list are already flattened
-//  and can only be used in bottom up manner
-fn flatten_nested_logical(op: LogOpType, expr_list: ExprList) -> ExprList {
-    // conv_into_optd_expr is building the children bottom up so there is no need to
-    // call flatten_nested_logical recursively
-    let mut new_expr_list = Vec::new();
-    for child in expr_list.to_vec() {
-        if let OptRelNodeTyp::LogOp(child_op) = child.typ() {
-            if child_op == op {
-                let child_log_op_expr = LogOpExpr::from_rel_node(child.into_rel_node()).unwrap();
-                new_expr_list.extend(child_log_op_expr.children().to_vec());
-                continue;
-            }
-        }
-        new_expr_list.push(child.clone());
-    }
-    ExprList::new(new_expr_list)
-}
-
 impl OptdPlanContext<'_> {
     fn conv_into_optd_table_scan(&mut self, node: &logical_plan::TableScan) -> Result<PlanNode> {
         let table_name = node.table_name.to_string();
@@ -73,14 +51,16 @@ impl OptdPlanContext<'_> {
                     Operator::And => {
                         let op = LogOpType::And;
                         let expr_list = ExprList::new(vec![left, right]);
-                        let expr_list = flatten_nested_logical(op, expr_list);
-                        return Ok(LogOpExpr::new(op, expr_list).into_expr());
+                        return Ok(
+                            LogOpExpr::new_flattened_nested_logical(op, expr_list).into_expr()
+                        );
                     }
                     Operator::Or => {
                         let op = LogOpType::Or;
                         let expr_list = ExprList::new(vec![left, right]);
-                        let expr_list = flatten_nested_logical(op, expr_list);
-                        return Ok(LogOpExpr::new(op, expr_list).into_expr());
+                        return Ok(
+                            LogOpExpr::new_flattened_nested_logical(op, expr_list).into_expr()
+                        );
                     }
                     _ => {}
                 }
@@ -331,13 +311,8 @@ impl OptdPlanContext<'_> {
         } else {
             let expr_list = ExprList::new(log_ops);
             // the expr from filter is already flattened in conv_into_optd_expr
-            let expr_list = flatten_nested_logical(LogOpType::And, expr_list);
-            Ok(LogicalJoin::new(
-                left,
-                right,
-                LogOpExpr::new(LogOpType::And, expr_list).into_expr(),
-                join_type,
-            ))
+            let log_op = LogOpExpr::new_flattened_nested_logical(LogOpType::And, expr_list);
+            Ok(LogicalJoin::new(left, right, log_op.into_expr(), join_type))
         }
     }
 
