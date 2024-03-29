@@ -492,7 +492,7 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                 Self::cost(row_cnt, row_cnt * row_cnt.ln_1p().max(1.0), 0.0)
             }
             OptRelNodeTyp::PhysicalAgg => {
-                let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
+                let row_cnt = 1.0;
                 let (_, compute_cost_1, _) = Self::cost_tuple(&children[1]);
                 let (_, compute_cost_2, _) = Self::cost_tuple(&children[2]);
                 Self::cost(row_cnt, row_cnt * (compute_cost_1 + compute_cost_2), 0.0)
