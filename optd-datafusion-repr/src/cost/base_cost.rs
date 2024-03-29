@@ -566,7 +566,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                         column_refs,
                     )
                 } else if bin_op_typ.is_numerical() {
-                    INVALID_SELECTIVITY
+                    assert!("the selectivity of operations that return numerical values is undefined")
                 } else {
                     unreachable!("all BinOpTypes should be true for at least one is_*() function")
                 }
