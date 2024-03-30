@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::plan_nodes::{
-    BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, LogOpType, OptRelNode, UnOpType,
+    BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, ExprList, LogOpType, OptRelNode, UnOpType,
 };
 use crate::properties::column_ref::{ColumnRefPropertyBuilder, GroupColumnRefs};
 use crate::{
@@ -323,6 +323,8 @@ const DEFAULT_EQ_SEL: f64 = 0.005;
 const DEFAULT_INEQ_SEL: f64 = 0.3333333333333333;
 // Default selectivity estimate for pattern-match operators such as LIKE
 const DEFAULT_MATCH_SEL: f64 = 0.005;
+// Default n-distinct estimate for derived columns or columns lacking statistics
+const DEFAULT_N_DISTINCT: u64 = 1;
 
 const INVALID_SEL: f64 = 0.01;
 
@@ -499,10 +501,15 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                 Self::cost(row_cnt, row_cnt * row_cnt.ln_1p().max(1.0), 0.0)
             }
             OptRelNodeTyp::PhysicalAgg => {
-                let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
+                let row_cnt = self.get_agg_row_cnt(context, optimizer);
+                let child_row_cnt = Self::row_cnt(&children[0]);
                 let (_, compute_cost_1, _) = Self::cost_tuple(&children[1]);
                 let (_, compute_cost_2, _) = Self::cost_tuple(&children[2]);
-                Self::cost(row_cnt, row_cnt * (compute_cost_1 + compute_cost_2), 0.0)
+                Self::cost(
+                    row_cnt,
+                    child_row_cnt * (compute_cost_1 + compute_cost_2),
+                    0.0,
+                )
             }
             OptRelNodeTyp::List => {
                 let compute_cost = children
@@ -541,6 +548,65 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     pub fn new(per_table_stats_map: BaseTableStats<M, D>) -> Self {
         Self {
             per_table_stats_map,
+        }
+    }
+
+    fn get_agg_row_cnt(
+        &self,
+        context: Option<RelNodeContext>,
+        optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
+    ) -> f64 {
+        match context {
+            Some(context) => {
+                if let Some(optimizer) = optimizer {
+                    let group_by_id = context.children_group_ids[2];
+                    let mut group_by_exprs: Vec<Arc<RelNode<OptRelNodeTyp>>> =
+                        optimizer.get_all_group_bindings(group_by_id, false);
+                    assert!(
+                        group_by_exprs.len() == 1,
+                        "ExprList expression should be the only expression in the GROUP BY group"
+                    );
+                    let group_by = group_by_exprs.pop().unwrap();
+                    let group_by = ExprList::from_rel_node(group_by).unwrap();
+                    if group_by.is_empty() {
+                        1.0
+                    } else {
+                        // Multiply the n-distinct of all the group by columns.
+                        // TODO: improve with multi-dimensional n-distinct
+                        let base_table_col_refs = optimizer
+                            .get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
+                        base_table_col_refs
+                            .iter()
+                            .take(group_by.len())
+                            .map(|col_ref| match col_ref {
+                                ColumnRef::BaseTableColumnRef { table, col_idx } => {
+                                    let table_stats = self
+                                        .per_table_stats_map
+                                        .get(table);
+                                    let column_stats = table_stats.map(
+                                        |table_stats| {
+                                            table_stats.per_column_stats_vec
+                                        .get(*col_idx).unwrap()
+                                        }
+                                    );
+                                        
+                                    if let Some(Some(column_stats)) = column_stats {
+                                        column_stats.ndistinct
+                                    } else {
+                                        // The column type is not supported or stats are missing.
+                                        DEFAULT_N_DISTINCT
+                                    }
+                                }
+                                ColumnRef::Derived => DEFAULT_N_DISTINCT,
+                                _ => panic!("GROUP BY base table column ref must either be derived or base table"),
+                            })
+                            .product::<u64>() as f64
+                    }
+                } else {
+                    panic!("compute_cost() should not be called if optimizer is None")
+                }
+            }
+            None => panic!("compute_cost() should not be called if context is None"),
         }
     }
 

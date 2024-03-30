@@ -4,7 +4,7 @@ use std::sync::Arc;
 use optd_core::property::PropertyBuilder;
 
 use super::DEFAULT_NAME;
-use crate::plan_nodes::{ConstantType, EmptyRelationData, OptRelNodeTyp};
+use crate::plan_nodes::{ConstantType, EmptyRelationData, FuncType, OptRelNodeTyp};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Field {
@@ -95,6 +95,19 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
                     };
                     children.len()
                 ],
+            },
+            OptRelNodeTyp::Agg => {
+                let mut schema = children[1].clone();
+                let schema2 = children[2].clone();
+                schema.fields.extend(schema2.fields);
+                schema
+            }
+            OptRelNodeTyp::Func(FuncType::Agg(_)) => Schema {
+                fields: vec![Field {
+                    name: DEFAULT_NAME.to_string(),
+                    typ: ConstantType::Any,
+                    nullable: true,
+                }],
             },
             _ => Schema { fields: vec![] },
         }
