@@ -72,7 +72,7 @@ impl DatafusionDBMS {
         })
     }
 
-    /// Reset [`SessionContext`] to a clean state. But initializa the optimizer
+    /// Reset [`SessionContext`] to a clean state. But initialize the optimizer
     /// with pre-generated statistics.
     ///
     /// A more ideal way to generate statistics would be to use the `ANALYZE`

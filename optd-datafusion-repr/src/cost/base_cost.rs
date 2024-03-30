@@ -324,6 +324,8 @@ const DEFAULT_INEQ_SEL: f64 = 0.3333333333333333;
 // Default selectivity estimate for pattern-match operators such as LIKE
 const DEFAULT_MATCH_SEL: f64 = 0.005;
 
+const INVALID_SEL: f64 = 0.01;
+
 impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
         cost[ROW_COUNT]
@@ -593,11 +595,11 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             }
             OptRelNodeTyp::Func(_) => todo!("check bool type or else panic"),
             OptRelNodeTyp::SortOrder(sort_order_typ) => panic!("the selectivity of sort order expressions is undefined"),
-            OptRelNodeTyp::Between => todo!("implement"),
+            OptRelNodeTyp::Between => INVALID_SEL,
             OptRelNodeTyp::Cast => todo!("check bool type or else panic"),
             OptRelNodeTyp::Like => DEFAULT_MATCH_SEL,
-            OptRelNodeTyp::DataType(data_typ) => todo!("what is this"),
-            OptRelNodeTyp::InList => todo!("what is this"),
+            OptRelNodeTyp::DataType(data_typ) => panic!("the selectivity of a data type is not defined"),
+            OptRelNodeTyp::InList => INVALID_SEL,
             _ => unreachable!("all expression OptRelNodeTyp were enumerated. this should be unreachable"),
         }
     }
@@ -640,7 +642,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
 
         // handle the different cases of column nodes
         if col_ref_nodes.is_empty() {
-            todo!("handle when both nodes are not column refs")
+            INVALID_SEL
         } else if col_ref_nodes.len() == 1 {
             let col_ref_node = col_ref_nodes
                 .pop()
@@ -698,6 +700,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                         }
                     },
                     OptRelNodeTyp::BinOp(_) => Self::get_default_comparison_op_selectivity(comp_bin_op_typ),
+                    OptRelNodeTyp::Cast => INVALID_SEL,
                     _ => unimplemented!("unhandled case of comparing a column ref node to {}", non_col_ref_node.as_ref().typ),
                 }
             } else {
