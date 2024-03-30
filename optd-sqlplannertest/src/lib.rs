@@ -140,6 +140,7 @@ impl DatafusionDBMS {
         task: &str,
         flags: &[String],
     ) -> Result<()> {
+        println!("task_explain(): called on sql={}", sql);
         use std::fmt::Write;
 
         let with_logical = flags.contains(&"with_logical".to_string());

@@ -605,12 +605,12 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     /// Comparison operators are the base case for recursion in get_filter_selectivity()
     fn get_comparison_op_selectivity(
         &self,
-        bin_op_typ: BinOpType,
+        comp_bin_op_typ: BinOpType,
         left: OptRelNodeRef,
         right: OptRelNodeRef,
         column_refs: &GroupColumnRefs,
     ) -> f64 {
-        assert!(bin_op_typ.is_comparison());
+        assert!(comp_bin_op_typ.is_comparison());
 
         // it's more convenient to refer to the children based on whether they're column nodes or not
         // rather than by left/right
@@ -652,57 +652,61 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     .pop()
                     .expect("non_col_ref_nodes should have a value since col_ref_nodes.len() == 1");
 
-                if let OptRelNodeTyp::Constant(_) = non_col_ref_node.as_ref().typ {
-                    let value = non_col_ref_node
+                match non_col_ref_node.as_ref().typ {
+                    OptRelNodeTyp::Constant(_) => {
+                        let value = non_col_ref_node
                         .as_ref()
                         .data
                         .as_ref()
                         .expect("constants should have data");
-                    match bin_op_typ {
-                        BinOpType::Eq => {
-                            self.get_column_equality_selectivity(table, *col_idx, value, true)
+                        match comp_bin_op_typ {
+                            BinOpType::Eq => {
+                                self.get_column_equality_selectivity(table, *col_idx, value, true)
+                            }
+                            BinOpType::Neq => {
+                                self.get_column_equality_selectivity(table, *col_idx, value, false)
+                            }
+                            BinOpType::Lt => self.get_column_range_selectivity(
+                                table,
+                                *col_idx,
+                                value,
+                                is_left_col_ref,
+                                false,
+                            ),
+                            BinOpType::Leq => self.get_column_range_selectivity(
+                                table,
+                                *col_idx,
+                                value,
+                                is_left_col_ref,
+                                true,
+                            ),
+                            BinOpType::Gt => self.get_column_range_selectivity(
+                                table,
+                                *col_idx,
+                                value,
+                                !is_left_col_ref,
+                                false,
+                            ),
+                            BinOpType::Geq => self.get_column_range_selectivity(
+                                table,
+                                *col_idx,
+                                value,
+                                !is_left_col_ref,
+                                true,
+                            ),
+                            _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
                         }
-                        BinOpType::Neq => {
-                            self.get_column_equality_selectivity(table, *col_idx, value, false)
-                        }
-                        BinOpType::Lt => self.get_column_range_selectivity(
-                            table,
-                            *col_idx,
-                            value,
-                            is_left_col_ref,
-                            false,
-                        ),
-                        BinOpType::Leq => self.get_column_range_selectivity(
-                            table,
-                            *col_idx,
-                            value,
-                            is_left_col_ref,
-                            true,
-                        ),
-                        BinOpType::Gt => self.get_column_range_selectivity(
-                            table,
-                            *col_idx,
-                            value,
-                            !is_left_col_ref,
-                            false,
-                        ),
-                        BinOpType::Geq => self.get_column_range_selectivity(
-                            table,
-                            *col_idx,
-                            value,
-                            !is_left_col_ref,
-                            true,
-                        ),
-                        _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
-                    }
-                } else {
-                    todo!("handle comparing a column ref node to a non-constant non-column node")
+                    },
+                    // this code is a little confusing. comp_bin_op_typ refers to the type of the comparison op,
+                    // not the type of the binop we just matched
+                    OptRelNodeTyp::BinOp(_) => Self::get_default_comparison_op_selectivity(comp_bin_op_typ),
+                    _ => unimplemented!("unhandled case of comparing a column ref node to another node"),
                 }
             } else {
                 unimplemented!("non base table column refs need to be implemented")
             }
         } else if col_ref_nodes.len() == 2 {
-            Self::get_default_comparison_op_selectivity(bin_op_typ)
+            Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
         } else {
             unreachable!("we could have at most pushed left and right into col_ref_nodes")
         }
@@ -711,9 +715,9 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     /// The default selectivity of a comparison expression
     /// Used when one side of the comparison is a column while the other side is something too
     ///   complex/impossible to evaluate (subquery, UDF, another column, we have no stats, etc.)
-    fn get_default_comparison_op_selectivity(bin_op_typ: BinOpType) -> f64 {
-        assert!(bin_op_typ.is_comparison());
-        match bin_op_typ {
+    fn get_default_comparison_op_selectivity(comp_bin_op_typ: BinOpType) -> f64 {
+        assert!(comp_bin_op_typ.is_comparison());
+        match comp_bin_op_typ {
             BinOpType::Eq => DEFAULT_EQ_SEL,
             BinOpType::Neq => 1.0 - DEFAULT_EQ_SEL,
             BinOpType::Lt | BinOpType::Leq | BinOpType::Gt | BinOpType::Geq => DEFAULT_INEQ_SEL,
