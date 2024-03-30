@@ -702,7 +702,12 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 unimplemented!("non base table column refs need to be implemented")
             }
         } else if col_ref_nodes.len() == 2 {
-            todo!("handle when both nodes are column refs")
+            match bin_op_typ {
+                BinOpType::Eq => DEFAULT_EQ_SEL,
+                BinOpType::Neq => 1.0 - DEFAULT_EQ_SEL,
+                BinOpType::Lt | BinOpType::Leq | BinOpType::Gt | BinOpType::Geq => DEFAULT_INEQ_SEL,
+                _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
+            }
         } else {
             unreachable!("we could have at most pushed left and right into col_ref_nodes")
         }
