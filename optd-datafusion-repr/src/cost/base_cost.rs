@@ -5,7 +5,7 @@ use crate::plan_nodes::{
 };
 use crate::properties::column_ref::{ColumnRefPropertyBuilder, GroupColumnRefs};
 use crate::{
-    plan_nodes::{OptRelNodeRef, OptRelNodeTyp},
+    plan_nodes::{OptRelNodeRef, OptRelNodeTyp, JoinType},
     properties::column_ref::ColumnRef,
 };
 use arrow_schema::{ArrowError, DataType};
@@ -323,8 +323,11 @@ const DEFAULT_EQ_SEL: f64 = 0.005;
 const DEFAULT_INEQ_SEL: f64 = 0.3333333333333333;
 // Default selectivity estimate for pattern-match operators such as LIKE
 const DEFAULT_MATCH_SEL: f64 = 0.005;
+// Default selectivity if we have no information
+const DEFAULT_UNK_SEL: f64 = 0.005;
 
-const INVALID_SEL: f64 = 0.01;
+// A placeholder for todo!() for codepaths which are accessed by plannertest
+const TODO_SEL: f64 = 0.01;
 
 impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
@@ -428,10 +431,10 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                             row_cnt.min(fetch as f64)
                         }
                     } else {
-                        panic!("compute_cost() should not be called if optimizer is None")
+                        (row_cnt * DEFAULT_UNK_SEL).max(1.0)
                     }
                 } else {
-                    panic!("compute_cost() should not be called if context is None")
+                    (row_cnt * DEFAULT_UNK_SEL).max(1.0)
                 };
                 Self::cost(row_cnt, compute_cost, 0.0)
             }
@@ -456,10 +459,10 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                                 panic!("encountered a PhysicalFilter without an expression")
                             }
                         } else {
-                            panic!("compute_cost() should not be called if optimizer is None")
+                            DEFAULT_UNK_SEL
                         }
                     }
-                    None => panic!("compute_cost() should not be called if context is None"),
+                    None => DEFAULT_UNK_SEL,
                 };
 
                 Self::cost(
@@ -468,11 +471,32 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                     0.0,
                 )
             }
-            OptRelNodeTyp::PhysicalNestedLoopJoin(_) => {
+            OptRelNodeTyp::PhysicalNestedLoopJoin(join_typ) => {
                 let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
                 let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
                 let (_, compute_cost, _) = Self::cost_tuple(&children[2]);
-                let selectivity = 0.01;
+                let selectivity = match context {
+                    Some(context) => {
+                        if let Some(optimizer) = optimizer {
+                            let column_refs = optimizer
+                            .get_property_by_group::<ColumnRefPropertyBuilder>(
+                                context.group_id,
+                                1,
+                            );
+                            let expr_group_id = context.children_group_ids[2];
+                            let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
+                            // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
+                            if let Some(expr_tree) = expr_trees.first() {
+                                self.get_join_selectivity(*join_typ, Arc::clone(expr_tree), &column_refs)
+                            } else {
+                                panic!("encountered a join without an expression")
+                            }
+                        } else {
+                            DEFAULT_UNK_SEL
+                        }
+                    }
+                    None => DEFAULT_UNK_SEL,
+                };
                 Self::cost(
                     (row_cnt_1 * row_cnt_2 * selectivity).max(1.0),
                     row_cnt_1 * row_cnt_2 * compute_cost + row_cnt_1,
@@ -580,7 +604,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 let right_child = expr_tree.child(1);
 
                 if bin_op_typ.is_comparison() {
-                    self.get_comparison_op_selectivity(
+                    self.get_filter_comp_op_selectivity(
                         *bin_op_typ,
                         left_child,
                         right_child,
@@ -595,19 +619,50 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 }
             }
             OptRelNodeTyp::LogOp(log_op_typ) => {
-                self.get_log_op_selectivity(*log_op_typ, &expr_tree.children, column_refs)
+                self.get_filter_log_op_selectivity(*log_op_typ, &expr_tree.children, column_refs)
             }
             OptRelNodeTyp::Func(_) => todo!("check bool type or else panic"),
             OptRelNodeTyp::SortOrder(_) => {
                 panic!("the selectivity of sort order expressions is undefined")
             }
-            OptRelNodeTyp::Between => INVALID_SEL,
+            OptRelNodeTyp::Between => TODO_SEL,
             OptRelNodeTyp::Cast => todo!("check bool type or else panic"),
             OptRelNodeTyp::Like => DEFAULT_MATCH_SEL,
             OptRelNodeTyp::DataType(_) => {
                 panic!("the selectivity of a data type is not defined")
             }
-            OptRelNodeTyp::InList => INVALID_SEL,
+            OptRelNodeTyp::InList => TODO_SEL,
+            _ => unreachable!(
+                "all expression OptRelNodeTyp were enumerated. this should be unreachable"
+            ),
+        }
+    }
+
+    /// The expr_tree input must be a "mixed expression tree", just like with get_filter_selectivity()
+    fn get_join_selectivity(
+        &self,
+        join_typ: JoinType,
+        expr_tree: OptRelNodeRef,
+        column_refs: &GroupColumnRefs,
+    ) -> f64 {
+        assert!(expr_tree.typ.is_expression());
+        match &expr_tree.typ {
+            OptRelNodeTyp::Constant(_) => TODO_SEL,
+            OptRelNodeTyp::ColumnRef => todo!("check bool type or else panic"),
+            OptRelNodeTyp::UnOp(_) => todo!(),
+            OptRelNodeTyp::BinOp(_) => TODO_SEL,
+            OptRelNodeTyp::LogOp(_) => TODO_SEL,
+            OptRelNodeTyp::Func(_) => todo!("check bool type or else panic"),
+            OptRelNodeTyp::SortOrder(_) => {
+                panic!("the selectivity of sort order expressions is undefined")
+            }
+            OptRelNodeTyp::Between => todo!(),
+            OptRelNodeTyp::Cast => todo!("check bool type or else panic"),
+            OptRelNodeTyp::Like => todo!(),
+            OptRelNodeTyp::DataType(_) => {
+                panic!("the selectivity of a data type is not defined")
+            }
+            OptRelNodeTyp::InList => todo!(),
             _ => unreachable!(
                 "all expression OptRelNodeTyp were enumerated. this should be unreachable"
             ),
@@ -615,7 +670,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     }
 
     /// Comparison operators are the base case for recursion in get_filter_selectivity()
-    fn get_comparison_op_selectivity(
+    fn get_filter_comp_op_selectivity(
         &self,
         comp_bin_op_typ: BinOpType,
         left: OptRelNodeRef,
@@ -652,7 +707,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
 
         // handle the different cases of column nodes
         if col_ref_nodes.is_empty() {
-            INVALID_SEL
+            TODO_SEL
         } else if col_ref_nodes.len() == 1 {
             let col_ref_node = col_ref_nodes
                 .pop()
@@ -712,7 +767,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     OptRelNodeTyp::BinOp(_) => {
                         Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
                     }
-                    OptRelNodeTyp::Cast => INVALID_SEL,
+                    OptRelNodeTyp::Cast => TODO_SEL,
                     _ => unimplemented!(
                         "unhandled case of comparing a column ref node to {}",
                         non_col_ref_node.as_ref().typ
@@ -852,7 +907,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         }
     }
 
-    fn get_log_op_selectivity(
+    fn get_filter_log_op_selectivity(
         &self,
         log_op_typ: LogOpType,
         children: &[OptRelNodeRef],
