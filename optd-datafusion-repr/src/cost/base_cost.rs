@@ -323,11 +323,12 @@ const DEFAULT_EQ_SEL: f64 = 0.005;
 const DEFAULT_INEQ_SEL: f64 = 0.3333333333333333;
 // Default selectivity estimate for pattern-match operators such as LIKE
 const DEFAULT_MATCH_SEL: f64 = 0.005;
+const DEFAULT_NUM_DISTINCT: u64 = 200;
 // Default selectivity if we have no information
 const DEFAULT_UNK_SEL: f64 = 0.005;
 
-// A placeholder for todo!() for codepaths which are accessed by plannertest
-const TODO_SEL: f64 = 0.01;
+// A placeholder for unimplemented!() for codepaths which are accessed by plannertest
+const UNIMPLEMENTED_SEL: f64 = 0.01;
 
 impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
@@ -585,7 +586,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         assert!(expr_tree.typ.is_expression());
         match &expr_tree.typ {
             OptRelNodeTyp::Constant(_) => Self::get_constant_selectivity(expr_tree),
-            OptRelNodeTyp::ColumnRef => todo!("check bool type or else panic"),
+            OptRelNodeTyp::ColumnRef => unimplemented!("check bool type or else panic"),
             OptRelNodeTyp::UnOp(un_op_typ) => {
                 assert!(expr_tree.children.len() == 1);
                 let child = expr_tree.child(0);
@@ -621,17 +622,17 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             OptRelNodeTyp::LogOp(log_op_typ) => {
                 self.get_filter_log_op_selectivity(*log_op_typ, &expr_tree.children, column_refs)
             }
-            OptRelNodeTyp::Func(_) => todo!("check bool type or else panic"),
+            OptRelNodeTyp::Func(_) => unimplemented!("check bool type or else panic"),
             OptRelNodeTyp::SortOrder(_) => {
                 panic!("the selectivity of sort order expressions is undefined")
             }
-            OptRelNodeTyp::Between => TODO_SEL,
-            OptRelNodeTyp::Cast => todo!("check bool type or else panic"),
+            OptRelNodeTyp::Between => UNIMPLEMENTED_SEL,
+            OptRelNodeTyp::Cast => unimplemented!("check bool type or else panic"),
             OptRelNodeTyp::Like => DEFAULT_MATCH_SEL,
             OptRelNodeTyp::DataType(_) => {
                 panic!("the selectivity of a data type is not defined")
             }
-            OptRelNodeTyp::InList => TODO_SEL,
+            OptRelNodeTyp::InList => UNIMPLEMENTED_SEL,
             _ => unreachable!(
                 "all expression OptRelNodeTyp were enumerated. this should be unreachable"
             ),
@@ -648,21 +649,43 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         assert!(expr_tree.typ.is_expression());
         match &expr_tree.typ {
             OptRelNodeTyp::Constant(_) => Self::get_constant_selectivity(expr_tree),
-            OptRelNodeTyp::ColumnRef => todo!("check bool type or else panic"),
-            OptRelNodeTyp::UnOp(_) => todo!(),
-            OptRelNodeTyp::BinOp(_) => TODO_SEL,
-            OptRelNodeTyp::LogOp(_) => TODO_SEL,
-            OptRelNodeTyp::Func(_) => todo!("check bool type or else panic"),
+            OptRelNodeTyp::ColumnRef => unimplemented!("check bool type or else panic"),
+            OptRelNodeTyp::UnOp(_) => unimplemented!(),
+            OptRelNodeTyp::BinOp(bin_op_typ) => {
+                assert!(expr_tree.children.len() == 2);
+                let left_child = expr_tree.child(0);
+                let right_child = expr_tree.child(1);
+
+                if bin_op_typ.is_comparison() {
+                    self.get_join_comp_op_selectivity(
+                        join_typ,
+                        *bin_op_typ,
+                        left_child,
+                        right_child,
+                        column_refs,
+                    )
+                } else if bin_op_typ.is_numerical() {
+                    panic!(
+                        "the selectivity of operations that return numerical values is undefined"
+                    )
+                } else {
+                    unreachable!("all BinOpTypes should be true for at least one is_*() function")
+                }
+            },
+            OptRelNodeTyp::LogOp(log_op_typ) => {
+                self.get_join_log_op_selectivity(join_typ, *log_op_typ, &expr_tree.children, column_refs)
+            },
+            OptRelNodeTyp::Func(_) => unimplemented!("check bool type or else panic"),
             OptRelNodeTyp::SortOrder(_) => {
                 panic!("the selectivity of sort order expressions is undefined")
             }
-            OptRelNodeTyp::Between => todo!(),
-            OptRelNodeTyp::Cast => todo!("check bool type or else panic"),
-            OptRelNodeTyp::Like => todo!(),
+            OptRelNodeTyp::Between => unimplemented!(),
+            OptRelNodeTyp::Cast => unimplemented!("check bool type or else panic"),
+            OptRelNodeTyp::Like => unimplemented!(),
             OptRelNodeTyp::DataType(_) => {
                 panic!("the selectivity of a data type is not defined")
             }
-            OptRelNodeTyp::InList => todo!(),
+            OptRelNodeTyp::InList => unimplemented!(),
             _ => unreachable!(
                 "all expression OptRelNodeTyp were enumerated. this should be unreachable"
             ),
@@ -679,44 +702,21 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     ) -> f64 {
         assert!(comp_bin_op_typ.is_comparison());
 
-        // it's more convenient to refer to the children based on whether they're column nodes or not
-        // rather than by left/right
-        let mut col_ref_nodes = vec![];
-        let mut non_col_ref_nodes = vec![];
-        let is_left_col_ref;
         // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
-        // We always want to use "col_ref_node" and "non_col_ref_node" instead of "left" or "right"
-        if left.as_ref().typ == OptRelNodeTyp::ColumnRef {
-            is_left_col_ref = true;
-            col_ref_nodes.push(
-                ColumnRefExpr::from_rel_node(left)
-                    .expect("we already checked that the type is ColumnRef"),
-            );
-        } else {
-            is_left_col_ref = false;
-            non_col_ref_nodes.push(left);
-        }
-        if right.as_ref().typ == OptRelNodeTyp::ColumnRef {
-            col_ref_nodes.push(
-                ColumnRefExpr::from_rel_node(right)
-                    .expect("we already checked that the type is ColumnRef"),
-            );
-        } else {
-            non_col_ref_nodes.push(right);
-        }
+        let (col_ref_nodes, non_col_ref_nodes, is_left_col_ref) = Self::get_semantic_nodes(left, right);
 
         // handle the different cases of column nodes
         if col_ref_nodes.is_empty() {
-            TODO_SEL
+            UNIMPLEMENTED_SEL
         } else if col_ref_nodes.len() == 1 {
             let col_ref_node = col_ref_nodes
-                .pop()
+                .first()
                 .expect("we just checked that col_ref_nodes.len() == 1");
             let col_ref_idx = col_ref_node.index();
 
             if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
                 let non_col_ref_node = non_col_ref_nodes
-                    .pop()
+                    .first()
                     .expect("non_col_ref_nodes should have a value since col_ref_nodes.len() == 1");
 
                 match non_col_ref_node.as_ref().typ {
@@ -767,7 +767,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     OptRelNodeTyp::BinOp(_) => {
                         Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
                     }
-                    OptRelNodeTyp::Cast => TODO_SEL,
+                    OptRelNodeTyp::Cast => UNIMPLEMENTED_SEL,
                     _ => unimplemented!(
                         "unhandled case of comparing a column ref node to {}",
                         non_col_ref_node.as_ref().typ
@@ -781,6 +781,94 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         } else {
             unreachable!("we could have at most pushed left and right into col_ref_nodes")
         }
+    }
+
+    /// Comparison operators are the base case for recursion in get_join_selectivity()
+    fn get_join_comp_op_selectivity(
+        &self,
+        join_typ: JoinType,
+        comp_bin_op_typ: BinOpType,
+        left: OptRelNodeRef,
+        right: OptRelNodeRef,
+        column_refs: &GroupColumnRefs,
+    ) -> f64 {
+        assert!(comp_bin_op_typ.is_comparison());
+
+        // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
+        let (col_ref_nodes, _, _) = Self::get_semantic_nodes(left, right);
+
+        // handle the different cases of column nodes
+        if col_ref_nodes.is_empty() {
+            unimplemented!()
+        } else if col_ref_nodes.len() == 1 {
+            unimplemented!()
+        } else if col_ref_nodes.len() == 2 {
+            match join_typ {
+                JoinType::Inner => {
+                    // the statistics objects of the referenced columns
+                    let col_ref_stats_list = col_ref_nodes.iter().map(|col_ref_node| {
+                        let col_ref_idx = col_ref_node.index();
+                        if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
+                            if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
+                                if let Some(Some(per_column_stats)) = per_table_stats.per_column_stats_vec.get(*col_idx)
+                                {
+                                    Some(per_column_stats)
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    });
+                    let ndistincts = col_ref_stats_list.map(|col_ref_stats| {
+                        if let Some(col_ref_stats) = col_ref_stats {
+                            col_ref_stats.ndistinct
+                        } else {
+                            DEFAULT_NUM_DISTINCT
+                        }
+                    });
+                    // using reduce(f64::min) is the idiomatic workaround to the fact that f64 does not implement Ord due to NaN
+                    let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_nodes.len() == 2");
+                    assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
+                    selectivity
+                }
+                _ => unimplemented!()
+            }
+        } else {
+            unreachable!("we could have at most pushed left and right into col_ref_nodes")
+        }
+    }
+
+    /// Convert the left and right child nodes of some operation to what they semantically are
+    /// This is convenient to avoid repeating the same logic just with "left" and "right" swapped
+    fn get_semantic_nodes(left: OptRelNodeRef, right: OptRelNodeRef) -> (Vec<ColumnRefExpr>, Vec<OptRelNodeRef>, bool) {
+        let mut col_ref_nodes = vec![];
+        let mut non_col_ref_nodes = vec![];
+        let is_left_col_ref;
+        // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
+        // We always want to use "col_ref_node" and "non_col_ref_node" instead of "left" or "right"
+        if left.as_ref().typ == OptRelNodeTyp::ColumnRef {
+            is_left_col_ref = true;
+            col_ref_nodes.push(
+                ColumnRefExpr::from_rel_node(left)
+                    .expect("we already checked that the type is ColumnRef"),
+            );
+        } else {
+            is_left_col_ref = false;
+            non_col_ref_nodes.push(left);
+        }
+        if right.as_ref().typ == OptRelNodeTyp::ColumnRef {
+            col_ref_nodes.push(
+                ColumnRefExpr::from_rel_node(right)
+                    .expect("we already checked that the type is ColumnRef"),
+            );
+        } else {
+            non_col_ref_nodes.push(right);
+        }
+        (col_ref_nodes, non_col_ref_nodes, is_left_col_ref)
     }
 
     /// The default selectivity of a comparison expression
@@ -949,6 +1037,24 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         }
     }
 
+    fn get_join_log_op_selectivity(
+        &self,
+        join_typ: JoinType,
+        log_op_typ: LogOpType,
+        children: &[OptRelNodeRef],
+        column_refs: &GroupColumnRefs,
+    ) -> f64 {
+        let children_sel = children
+            .iter()
+            .map(|expr| self.get_join_selectivity(join_typ, expr.clone(), column_refs));
+
+        match log_op_typ {
+            LogOpType::And => children_sel.product(),
+            // the formula is 1.0 - the probability of _none_ of the events happening
+            LogOpType::Or => 1.0 - children_sel.fold(1.0, |acc, sel| acc * (1.0 - sel)),
+        }
+    }
+
     pub fn get_row_cnt(&self, table: &str) -> Option<usize> {
         self.per_table_stats_map
             .get(table)
@@ -1045,7 +1151,7 @@ mod tests {
 
     const TABLE1_NAME: &str = "t1";
 
-    // one column is sufficient for all filter selectivity predicates
+    // one column is sufficient for all filter selectivity tests
     fn create_one_column_cost_model(
         per_column_stats: TestPerColumnStats,
     ) -> OptCostModel<TestMostCommonValues, TestDistribution> {
@@ -1053,6 +1159,21 @@ mod tests {
             vec![(
                 String::from(TABLE1_NAME),
                 PerTableStats::new(100, vec![Some(per_column_stats)]),
+            )]
+            .into_iter()
+            .collect(),
+        )
+    }
+
+    // two columns is sufficient for all join selectivity tests
+    fn create_two_column_cost_model(
+        per_column_stats1: TestPerColumnStats,
+        per_column_stats2: TestPerColumnStats,
+    ) -> OptCostModel<TestMostCommonValues, TestDistribution> {
+        OptCostModel::new(
+            vec![(
+                String::from(TABLE1_NAME),
+                PerTableStats::new(100, vec![Some(per_column_stats1), Some(per_column_stats2)]),
             )]
             .into_iter()
             .collect(),
@@ -1394,6 +1515,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
+        // TODO(phw2): make column_refs a function
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1673,5 +1795,31 @@ mod tests {
         let cost_model = create_one_column_cost_model(get_empty_per_col_stats());
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, cnst(Value::Bool(true)), &vec![]), 1.0);
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, cnst(Value::Bool(false)), &vec![]), 0.0);
+    }
+
+    #[test]
+    fn test_joinsel_colref_eq_colref_no_mcvs_no_nulls() {
+        let cost_model = create_two_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            5,
+            0.0,
+            TestDistribution::empty(),
+        ), TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            3,
+            0.0,
+            TestDistribution::empty(),
+        ));
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
+        let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }, ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 1,
+        }];
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree, &column_refs), 0.2);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev, &column_refs), 0.2);
     }
 }
