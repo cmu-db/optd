@@ -315,9 +315,11 @@ pub trait Distribution: 'static + Send + Sync {
 pub const ROW_COUNT: usize = 1;
 pub const COMPUTE_COST: usize = 2;
 pub const IO_COST: usize = 3;
-// used to indicate a combination of unimplemented!(), unreachable!(), or panic!()
+// Used to indicate a combination of unimplemented!(), unreachable!(), or panic!()
 // TODO: a future PR will remove this and get the code working for all of TPC-H
 const INVALID_SELECTIVITY: f64 = 0.001;
+// From experimentation with Postgres, they use this selectivity for like operators.
+const LIKE_MAGIC_SELECTIVITY: f64 = 0.000025;
 
 impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
@@ -552,28 +554,9 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         column_refs: &GroupColumnRefs,
     ) -> f64 {
         assert!(expr_tree.typ.is_expression());
-        match expr_tree.typ {
-            OptRelNodeTyp::BinOp(bin_op_typ) => {
-                assert!(expr_tree.children.len() == 2);
-                let left_child = expr_tree.child(0);
-                let right_child = expr_tree.child(1);
-
-                if bin_op_typ.is_comparison() {
-                    self.get_comparison_op_selectivity(
-                        bin_op_typ,
-                        left_child,
-                        right_child,
-                        column_refs,
-                    )
-                } else if bin_op_typ.is_numerical() {
-                    assert!("the selectivity of operations that return numerical values is undefined")
-                } else {
-                    unreachable!("all BinOpTypes should be true for at least one is_*() function")
-                }
-            }
-            OptRelNodeTyp::LogOp(log_op_typ) => {
-                self.get_log_op_selectivity(log_op_typ, &expr_tree.children, column_refs)
-            }
+        match &expr_tree.typ {
+            OptRelNodeTyp::Constant(_) => todo!("check bool type or else panic"),
+            OptRelNodeTyp::ColumnRef => todo!("check bool type or else panic"),
             OptRelNodeTyp::UnOp(un_op_typ) => {
                 assert!(expr_tree.children.len() == 1);
                 let child = expr_tree.child(0);
@@ -581,10 +564,38 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     // not doesn't care about nulls so there's no complex logic. it just reverses the selectivity
                     // for instance, != _will not_ include nulls but "NOT ==" _will_ include nulls
                     UnOpType::Not => 1.0 - self.get_filter_selectivity(child, column_refs),
-                    _ => INVALID_SELECTIVITY,
+                    UnOpType::Neg => panic!("the selectivity of operations that return numerical values is undefined"),
                 }
             }
-            _ => INVALID_SELECTIVITY,
+            OptRelNodeTyp::BinOp(bin_op_typ) => {
+                assert!(expr_tree.children.len() == 2);
+                let left_child = expr_tree.child(0);
+                let right_child = expr_tree.child(1);
+
+                if bin_op_typ.is_comparison() {
+                    self.get_comparison_op_selectivity(
+                        *bin_op_typ,
+                        left_child,
+                        right_child,
+                        column_refs,
+                    )
+                } else if bin_op_typ.is_numerical() {
+                    panic!("the selectivity of operations that return numerical values is undefined")
+                } else {
+                    unreachable!("all BinOpTypes should be true for at least one is_*() function")
+                }
+            }
+            OptRelNodeTyp::LogOp(log_op_typ) => {
+                self.get_log_op_selectivity(*log_op_typ, &expr_tree.children, column_refs)
+            }
+            OptRelNodeTyp::Func(_) => todo!("check bool type or else panic"),
+            OptRelNodeTyp::SortOrder(sort_order_typ) => panic!("the selectivity of sort order expressions is undefined"),
+            OptRelNodeTyp::Between => todo!("implement"),
+            OptRelNodeTyp::Cast => todo!("check bool type or else panic"),
+            OptRelNodeTyp::Like => LIKE_MAGIC_SELECTIVITY,
+            OptRelNodeTyp::DataType(data_typ) => todo!("what is this"),
+            OptRelNodeTyp::InList => todo!("what is this"),
+            _ => unreachable!("all expression OptRelNodeTyp were enumerated. this should be unreachable"),
         }
     }
 
