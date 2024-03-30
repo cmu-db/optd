@@ -584,7 +584,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     ) -> f64 {
         assert!(expr_tree.typ.is_expression());
         match &expr_tree.typ {
-            OptRelNodeTyp::Constant(_) => todo!("check bool type or else panic"),
+            OptRelNodeTyp::Constant(_) => Self::get_constant_selectivity(expr_tree),
             OptRelNodeTyp::ColumnRef => todo!("check bool type or else panic"),
             OptRelNodeTyp::UnOp(un_op_typ) => {
                 assert!(expr_tree.children.len() == 1);
@@ -647,7 +647,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     ) -> f64 {
         assert!(expr_tree.typ.is_expression());
         match &expr_tree.typ {
-            OptRelNodeTyp::Constant(_) => TODO_SEL,
+            OptRelNodeTyp::Constant(_) => Self::get_constant_selectivity(expr_tree),
             OptRelNodeTyp::ColumnRef => todo!("check bool type or else panic"),
             OptRelNodeTyp::UnOp(_) => todo!(),
             OptRelNodeTyp::BinOp(_) => TODO_SEL,
@@ -795,6 +795,31 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             _ => unreachable!(
                 "all comparison BinOpTypes were enumerated. this should be unreachable"
             ),
+        }
+    }
+
+    fn get_constant_selectivity(const_node: OptRelNodeRef) -> f64 {
+        if let OptRelNodeTyp::Constant(const_typ) = const_node.typ {
+            if matches!(const_typ, ConstantType::Bool) {
+                let value = const_node
+                    .as_ref()
+                    .data
+                    .as_ref()
+                    .expect("constants should have data");
+                if let Value::Bool(bool_value) = value {
+                    if *bool_value {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    unreachable!("if the typ is ConstantType::Bool, the value should be a Value::Bool")
+                }
+            } else {
+                panic!("selectivity is not defined on constants which are not bools")
+            }
+        } else {
+            panic!("get_constant_selectivity must be called on a constant")
         }
     }
 
@@ -950,8 +975,7 @@ mod tests {
 
     use crate::{
         plan_nodes::{
-            BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, LogOpExpr,
-            LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
+            BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, JoinType, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType
         },
         properties::column_ref::ColumnRef,
     };
@@ -1077,8 +1101,27 @@ mod tests {
         .into_rel_node()
     }
 
+    /// The reason this isn't an associated function of PerColumnStats is because that would require
+    ///   adding an empty() function to the trait definitions of MostCommonValues and Distribution,
+    ///   which I wanted to avoid
+    fn get_empty_per_col_stats() -> TestPerColumnStats {
+        TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            0,
+            0.0,
+            TestDistribution::empty(),
+        )
+    }
+
     #[test]
-    fn test_colref_eq_constint_in_mcv() {
+    fn test_filtersel_const() {
+        let cost_model = create_one_column_cost_model(get_empty_per_col_stats());
+        assert_approx_eq::assert_approx_eq!(cost_model.get_filter_selectivity(cnst(Value::Bool(true)), &vec![]), 1.0);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_filter_selectivity(cnst(Value::Bool(false)), &vec![]), 0.0);
+    }
+
+    #[test]
+    fn test_filtersel_colref_eq_constint_in_mcv() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
@@ -1102,7 +1145,7 @@ mod tests {
     }
 
     #[test]
-    fn test_colref_eq_constint_not_in_mcv_no_nulls() {
+    fn test_filtersel_colref_eq_constint_not_in_mcv_no_nulls() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)]),
             5,
@@ -1126,7 +1169,7 @@ mod tests {
     }
 
     #[test]
-    fn test_colref_eq_constint_not_in_mcv_with_nulls() {
+    fn test_filtersel_colref_eq_constint_not_in_mcv_with_nulls() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)]),
             5,
@@ -1151,7 +1194,7 @@ mod tests {
 
     /// I only have one test for NEQ since I'll assume that it uses the same underlying logic as EQ
     #[test]
-    fn test_colref_neq_constint_in_mcv() {
+    fn test_filtersel_colref_neq_constint_in_mcv() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
@@ -1175,7 +1218,7 @@ mod tests {
     }
 
     #[test]
-    fn test_colref_leq_constint_no_mcvs_in_range() {
+    fn test_filtersel_colref_leq_constint_no_mcvs_in_range() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             10,
@@ -1199,7 +1242,7 @@ mod tests {
     }
 
     #[test]
-    fn test_colref_leq_constint_no_mcvs_in_range_with_nulls() {
+    fn test_filtersel_colref_leq_constint_no_mcvs_in_range_with_nulls() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             10,
@@ -1223,7 +1266,7 @@ mod tests {
     }
 
     #[test]
-    fn test_colref_leq_constint_with_mcvs_in_range_not_at_border() {
+    fn test_filtersel_colref_leq_constint_with_mcvs_in_range_not_at_border() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
@@ -1256,7 +1299,7 @@ mod tests {
     }
 
     #[test]
-    fn test_colref_leq_constint_with_mcv_at_border() {
+    fn test_filtersel_colref_leq_constint_with_mcv_at_border() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::new(vec![
                 (Value::Int32(6), 0.05),
@@ -1285,7 +1328,7 @@ mod tests {
     }
 
     #[test]
-    fn test_colref_lt_constint_no_mcvs_in_range() {
+    fn test_filtersel_colref_lt_constint_no_mcvs_in_range() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             10,
@@ -1309,7 +1352,7 @@ mod tests {
     }
 
     #[test]
-    fn test_colref_lt_constint_no_mcvs_in_range_with_nulls() {
+    fn test_filtersel_colref_lt_constint_no_mcvs_in_range_with_nulls() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
@@ -1333,7 +1376,7 @@ mod tests {
     }
 
     #[test]
-    fn test_colref_lt_constint_with_mcvs_in_range_not_at_border() {
+    fn test_filtersel_colref_lt_constint_with_mcvs_in_range_not_at_border() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
@@ -1366,7 +1409,7 @@ mod tests {
     }
 
     #[test]
-    fn test_colref_lt_constint_with_mcv_at_border() {
+    fn test_filtersel_colref_lt_constint_with_mcv_at_border() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
@@ -1401,7 +1444,7 @@ mod tests {
     /// I have fewer tests for GT since I'll assume that it uses the same underlying logic as LEQ
     /// The only interesting thing to test is that if there are nulls, those aren't included in GT
     #[test]
-    fn test_colref_gt_constint_no_nulls() {
+    fn test_filtersel_colref_gt_constint_no_nulls() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             10,
@@ -1425,7 +1468,7 @@ mod tests {
     }
 
     #[test]
-    fn test_colref_gt_constint_with_nulls() {
+    fn test_filtersel_colref_gt_constint_with_nulls() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             10,
@@ -1451,7 +1494,7 @@ mod tests {
 
     /// As with above, I have one test without nulls and one test with nulls
     #[test]
-    fn test_colref_geq_constint_no_nulls() {
+    fn test_filtersel_colref_geq_constint_no_nulls() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             10,
@@ -1475,7 +1518,7 @@ mod tests {
     }
 
     #[test]
-    fn test_colref_geq_constint_with_nulls() {
+    fn test_filtersel_colref_geq_constint_with_nulls() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
@@ -1500,7 +1543,7 @@ mod tests {
     }
 
     #[test]
-    fn test_and() {
+    fn test_filtersel_and() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
@@ -1540,7 +1583,7 @@ mod tests {
     }
 
     #[test]
-    fn test_or() {
+    fn test_filtersel_or() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
@@ -1580,7 +1623,7 @@ mod tests {
     }
 
     #[test]
-    fn test_not_no_nulls() {
+    fn test_filtersel_not_no_nulls() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
@@ -1602,7 +1645,7 @@ mod tests {
     }
 
     #[test]
-    fn test_not_with_nulls() {
+    fn test_filtersel_not_with_nulls() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
@@ -1623,5 +1666,12 @@ mod tests {
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.7
         );
+    }
+
+    #[test]
+    fn test_joinsel_const() {
+        let cost_model = create_one_column_cost_model(get_empty_per_col_stats());
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, cnst(Value::Bool(true)), &vec![]), 1.0);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, cnst(Value::Bool(false)), &vec![]), 0.0);
     }
 }
