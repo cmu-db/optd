@@ -589,7 +589,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                                         .get(*col_idx).unwrap()
                                         }
                                     );
-                                        
+
                                     if let Some(Some(column_stats)) = column_stats {
                                         column_stats.ndistinct
                                     } else {
