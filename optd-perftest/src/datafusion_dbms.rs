@@ -34,7 +34,7 @@ use regex::Regex;
 
 pub struct DatafusionDBMS {
     workspace_dpath: PathBuf,
-    use_cached_stats: bool,
+    no_cached_stats: bool,
     ctx: SessionContext,
 }
 
@@ -63,11 +63,11 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
 impl DatafusionDBMS {
     pub async fn new<P: AsRef<Path>>(
         workspace_dpath: P,
-        use_cached_stats: bool,
+        no_cached_stats: bool,
     ) -> anyhow::Result<Self> {
         Ok(DatafusionDBMS {
             workspace_dpath: workspace_dpath.as_ref().to_path_buf(),
-            use_cached_stats,
+            no_cached_stats,
             ctx: Self::new_session_ctx(None).await?,
         })
     }
@@ -209,7 +209,7 @@ impl DatafusionDBMS {
             .workspace_dpath
             .join("datafusion_stats_caches")
             .join(format!("{}.json", benchmark_fname));
-        if self.use_cached_stats && stats_cache_fpath.exists() {
+        if !self.no_cached_stats && stats_cache_fpath.exists() {
             let file = File::open(&stats_cache_fpath)?;
             Ok(serde_json::from_reader(file)?)
         } else {
@@ -218,7 +218,7 @@ impl DatafusionDBMS {
                 _ => unimplemented!(),
             };
 
-            // regardless of whether self.use_cached_stats is true or false, we want to update the cache
+            // regardless of whether self.no_cached_stats is true or false, we want to update the cache
             // this way, even if we choose not to read from the cache, the cache still always has the
             // most up to date version of the stats
             fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;

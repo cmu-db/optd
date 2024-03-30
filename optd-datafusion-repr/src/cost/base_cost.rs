@@ -315,11 +315,14 @@ pub trait Distribution: 'static + Send + Sync {
 pub const ROW_COUNT: usize = 1;
 pub const COMPUTE_COST: usize = 2;
 pub const IO_COST: usize = 3;
-// Used to indicate a combination of unimplemented!(), unreachable!(), or panic!()
-// TODO: a future PR will remove this and get the code working for all of TPC-H
-const INVALID_SELECTIVITY: f64 = 0.001;
-// From experimentation with Postgres, they use this selectivity for like operators.
-const LIKE_MAGIC_SELECTIVITY: f64 = 0.000025;
+
+// Default statistics. All are from selfuncs.h in Postgres unless specified otherwise
+// Default selectivity estimate for equalities such as "A = b"
+const DEFAULT_EQ_SEL: f64 = 0.005;
+// Default selectivity estimate for inequalities such as "A < b"
+const DEFAULT_INEQ_SEL: f64 = 0.3333333333333333;
+// Default selectivity estimate for pattern-match operators such as LIKE
+const DEFAULT_MATCH_SEL: f64 = 0.005;
 
 impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
@@ -423,10 +426,10 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                             row_cnt.min(fetch as f64)
                         }
                     } else {
-                        (row_cnt * INVALID_SELECTIVITY).max(1.0)
+                        panic!("compute_cost() should not be called if optimizer is None")
                     }
                 } else {
-                    (row_cnt * INVALID_SELECTIVITY).max(1.0)
+                    panic!("compute_cost() should not be called if context is None")
                 };
                 Self::cost(row_cnt, compute_cost, 0.0)
             }
@@ -448,13 +451,13 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                             if let Some(expr_tree) = expr_trees.first() {
                                 self.get_filter_selectivity(Arc::clone(expr_tree), &column_refs)
                             } else {
-                                INVALID_SELECTIVITY
+                                panic!("encountered a PhysicalFilter without an expression")
                             }
                         } else {
-                            INVALID_SELECTIVITY
+                            panic!("compute_cost() should not be called if optimizer is None")
                         }
                     }
-                    None => INVALID_SELECTIVITY,
+                    None => panic!("compute_cost() should not be called if context is None"),
                 };
 
                 Self::cost(
@@ -592,7 +595,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             OptRelNodeTyp::SortOrder(sort_order_typ) => panic!("the selectivity of sort order expressions is undefined"),
             OptRelNodeTyp::Between => todo!("implement"),
             OptRelNodeTyp::Cast => todo!("check bool type or else panic"),
-            OptRelNodeTyp::Like => LIKE_MAGIC_SELECTIVITY,
+            OptRelNodeTyp::Like => DEFAULT_MATCH_SEL,
             OptRelNodeTyp::DataType(data_typ) => todo!("what is this"),
             OptRelNodeTyp::InList => todo!("what is this"),
             _ => unreachable!("all expression OptRelNodeTyp were enumerated. this should be unreachable"),
@@ -609,7 +612,8 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     ) -> f64 {
         assert!(bin_op_typ.is_comparison());
 
-        // the # of column refs determines how we handle the logic
+        // it's more convenient to refer to the children based on whether they're column nodes or not
+        // rather than by left/right
         let mut col_ref_nodes = vec![];
         let mut non_col_ref_nodes = vec![];
         let is_left_col_ref;
@@ -634,8 +638,9 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             non_col_ref_nodes.push(right);
         }
 
+        // handle the different cases of column nodes
         if col_ref_nodes.is_empty() {
-            INVALID_SELECTIVITY
+            todo!("handle when both nodes are not column refs")
         } else if col_ref_nodes.len() == 1 {
             let col_ref_node = col_ref_nodes
                 .pop()
@@ -653,7 +658,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                         .data
                         .as_ref()
                         .expect("constants should have data");
-                    match match bin_op_typ {
+                    match bin_op_typ {
                         BinOpType::Eq => {
                             self.get_column_equality_selectivity(table, *col_idx, value, true)
                         }
@@ -688,30 +693,26 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                             !is_left_col_ref,
                             true,
                         ),
-                        _ => None,
-                    } {
-                        Some(sel) => sel,
-                        None => INVALID_SELECTIVITY,
+                        _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
                     }
                 } else {
-                    INVALID_SELECTIVITY
+                    todo!("handle comparing a column ref node to a non-constant non-column node")
                 }
             } else {
-                INVALID_SELECTIVITY
+                unimplemented!("non base table column refs need to be implemented")
             }
         } else if col_ref_nodes.len() == 2 {
-            INVALID_SELECTIVITY
+            todo!("handle when both nodes are column refs")
         } else {
-            unreachable!("We could have at most pushed left and right into col_ref_nodes")
+            unreachable!("we could have at most pushed left and right into col_ref_nodes")
         }
     }
 
     /// Get the selectivity of an expression of the form "column equals value" (or "value equals column")
-    /// Computes selectivity based off of statistics
+    /// Will handle the case of statistics missing
     /// Equality predicates are handled entirely differently from range predicates so this is its own function
     /// Also, get_column_equality_selectivity is a subroutine when computing range selectivity, which is another
     ///     reason for separating these into two functions
-    /// If it is unable to find the statistics, it returns None
     /// is_eq means whether it's == or !=
     fn get_column_equality_selectivity(
         &self,
@@ -719,7 +720,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         col_idx: usize,
         value: &Value,
         is_eq: bool,
-    ) -> Option<f64> {
+    ) -> f64 {
         if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
             if let Some(Some(per_column_stats)) = per_table_stats.per_column_stats_vec.get(col_idx)
             {
@@ -733,16 +734,24 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
                     (non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64)
                 };
-                Some(if is_eq {
+                if is_eq {
                     eq_freq
                 } else {
                     1.0 - eq_freq - per_column_stats.null_frac
-                })
+                }
             } else {
-                None
+                if is_eq {
+                    DEFAULT_EQ_SEL
+                } else {
+                    1.0 - DEFAULT_EQ_SEL
+                }
             }
         } else {
-            None
+            if is_eq {
+                DEFAULT_EQ_SEL
+            } else {
+                1.0 - DEFAULT_EQ_SEL
+            }
         }
     }
 
@@ -759,7 +768,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         value: &Value,
         is_col_lt_val: bool,
         is_col_eq_val: bool,
-    ) -> Option<f64> {
+    ) -> f64 {
         if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
             if let Some(Some(per_column_stats)) = per_table_stats.per_column_stats_vec.get(col_idx)
             {
@@ -776,11 +785,10 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
                 let total_lt_freq = total_leq_freq
                     - self
-                        .get_column_equality_selectivity(table, col_idx, value, true)
-                        .expect("we already know that table and col_idx exist");
+                        .get_column_equality_selectivity(table, col_idx, value, true);
 
                 // use either total_leq_freq or total_lt_freq to get the selectivity
-                Some(if is_col_lt_val {
+                if is_col_lt_val {
                     if is_col_eq_val {
                         // this branch means <=
                         total_leq_freq
@@ -799,12 +807,12 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                         // this branch means >. same logic as above
                         1.0 - total_leq_freq - per_column_stats.null_frac
                     }
-                })
+                }
             } else {
-                None
+                DEFAULT_INEQ_SEL
             }
         } else {
-            None
+            DEFAULT_INEQ_SEL
         }
     }
 

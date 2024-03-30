@@ -103,14 +103,14 @@ pub trait CardtestRunnerDBMSHelper {
 
 pub async fn cardtest<P: AsRef<Path>>(
     workspace_dpath: P,
-    use_cached_optd_stats: bool,
+    no_cached_optd_stats: bool,
     pguser: &str,
     pgpassword: &str,
     tpch_config: TpchConfig,
 ) -> anyhow::Result<HashMap<String, Vec<Cardinfo>>> {
     let pg_dbms = Box::new(PostgresDBMS::build(&workspace_dpath, pguser, pgpassword)?);
     let truecard_getter = pg_dbms.clone();
-    let df_dbms = Box::new(DatafusionDBMS::new(&workspace_dpath, use_cached_optd_stats).await?);
+    let df_dbms = Box::new(DatafusionDBMS::new(&workspace_dpath, no_cached_optd_stats).await?);
     let dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>> = vec![pg_dbms, df_dbms];
 
     let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
