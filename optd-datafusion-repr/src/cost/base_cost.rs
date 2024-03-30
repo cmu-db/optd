@@ -569,7 +569,9 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     // not doesn't care about nulls so there's no complex logic. it just reverses the selectivity
                     // for instance, != _will not_ include nulls but "NOT ==" _will_ include nulls
                     UnOpType::Not => 1.0 - self.get_filter_selectivity(child, column_refs),
-                    UnOpType::Neg => panic!("the selectivity of operations that return numerical values is undefined"),
+                    UnOpType::Neg => panic!(
+                        "the selectivity of operations that return numerical values is undefined"
+                    ),
                 }
             }
             OptRelNodeTyp::BinOp(bin_op_typ) => {
@@ -585,7 +587,9 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                         column_refs,
                     )
                 } else if bin_op_typ.is_numerical() {
-                    panic!("the selectivity of operations that return numerical values is undefined")
+                    panic!(
+                        "the selectivity of operations that return numerical values is undefined"
+                    )
                 } else {
                     unreachable!("all BinOpTypes should be true for at least one is_*() function")
                 }
@@ -594,13 +598,19 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 self.get_log_op_selectivity(*log_op_typ, &expr_tree.children, column_refs)
             }
             OptRelNodeTyp::Func(_) => todo!("check bool type or else panic"),
-            OptRelNodeTyp::SortOrder(sort_order_typ) => panic!("the selectivity of sort order expressions is undefined"),
+            OptRelNodeTyp::SortOrder(_) => {
+                panic!("the selectivity of sort order expressions is undefined")
+            }
             OptRelNodeTyp::Between => INVALID_SEL,
             OptRelNodeTyp::Cast => todo!("check bool type or else panic"),
             OptRelNodeTyp::Like => DEFAULT_MATCH_SEL,
-            OptRelNodeTyp::DataType(data_typ) => panic!("the selectivity of a data type is not defined"),
+            OptRelNodeTyp::DataType(_) => {
+                panic!("the selectivity of a data type is not defined")
+            }
             OptRelNodeTyp::InList => INVALID_SEL,
-            _ => unreachable!("all expression OptRelNodeTyp were enumerated. this should be unreachable"),
+            _ => unreachable!(
+                "all expression OptRelNodeTyp were enumerated. this should be unreachable"
+            ),
         }
     }
 
@@ -657,10 +667,10 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 match non_col_ref_node.as_ref().typ {
                     OptRelNodeTyp::Constant(_) => {
                         let value = non_col_ref_node
-                        .as_ref()
-                        .data
-                        .as_ref()
-                        .expect("constants should have data");
+                            .as_ref()
+                            .data
+                            .as_ref()
+                            .expect("constants should have data");
                         match comp_bin_op_typ {
                             BinOpType::Eq => {
                                 self.get_column_equality_selectivity(table, *col_idx, value, true)
@@ -698,10 +708,15 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                             ),
                             _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
                         }
-                    },
-                    OptRelNodeTyp::BinOp(_) => Self::get_default_comparison_op_selectivity(comp_bin_op_typ),
+                    }
+                    OptRelNodeTyp::BinOp(_) => {
+                        Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
+                    }
                     OptRelNodeTyp::Cast => INVALID_SEL,
-                    _ => unimplemented!("unhandled case of comparing a column ref node to {}", non_col_ref_node.as_ref().typ),
+                    _ => unimplemented!(
+                        "unhandled case of comparing a column ref node to {}",
+                        non_col_ref_node.as_ref().typ
+                    ),
                 }
             } else {
                 unimplemented!("non base table column refs need to be implemented")
@@ -722,7 +737,9 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             BinOpType::Eq => DEFAULT_EQ_SEL,
             BinOpType::Neq => 1.0 - DEFAULT_EQ_SEL,
             BinOpType::Lt | BinOpType::Leq | BinOpType::Gt | BinOpType::Geq => DEFAULT_INEQ_SEL,
-            _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
+            _ => unreachable!(
+                "all comparison BinOpTypes were enumerated. this should be unreachable"
+            ),
         }
     }
 
@@ -758,6 +775,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     1.0 - eq_freq - per_column_stats.null_frac
                 }
             } else {
+                #[allow(clippy::collapsible_else_if)]
                 if is_eq {
                     DEFAULT_EQ_SEL
                 } else {
@@ -765,6 +783,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 }
             }
         } else {
+            #[allow(clippy::collapsible_else_if)]
             if is_eq {
                 DEFAULT_EQ_SEL
             } else {
@@ -802,8 +821,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 // depending on whether value is in mcvs or not, we use different logic to turn total_leq_cdf into total_lt_cdf
                 // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
                 let total_lt_freq = total_leq_freq
-                    - self
-                        .get_column_equality_selectivity(table, col_idx, value, true);
+                    - self.get_column_equality_selectivity(table, col_idx, value, true);
 
                 // use either total_leq_freq or total_lt_freq to get the selectivity
                 if is_col_lt_val {
