@@ -697,10 +697,8 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                             _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
                         }
                     },
-                    // this code is a little confusing. comp_bin_op_typ refers to the type of the comparison op,
-                    // not the type of the binop we just matched
                     OptRelNodeTyp::BinOp(_) => Self::get_default_comparison_op_selectivity(comp_bin_op_typ),
-                    _ => unimplemented!("unhandled case of comparing a column ref node to another node"),
+                    _ => unimplemented!("unhandled case of comparing a column ref node to {}", non_col_ref_node.as_ref().typ),
                 }
             } else {
                 unimplemented!("non base table column refs need to be implemented")
