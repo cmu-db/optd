@@ -702,14 +702,22 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 unimplemented!("non base table column refs need to be implemented")
             }
         } else if col_ref_nodes.len() == 2 {
-            match bin_op_typ {
-                BinOpType::Eq => DEFAULT_EQ_SEL,
-                BinOpType::Neq => 1.0 - DEFAULT_EQ_SEL,
-                BinOpType::Lt | BinOpType::Leq | BinOpType::Gt | BinOpType::Geq => DEFAULT_INEQ_SEL,
-                _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
-            }
+            Self::get_default_comparison_op_selectivity(bin_op_typ)
         } else {
             unreachable!("we could have at most pushed left and right into col_ref_nodes")
+        }
+    }
+
+    /// The default selectivity of a comparison expression
+    /// Used when one side of the comparison is a column while the other side is something too
+    ///   complex/impossible to evaluate (subquery, UDF, another column, we have no stats, etc.)
+    fn get_default_comparison_op_selectivity(bin_op_typ: BinOpType) -> f64 {
+        assert!(bin_op_typ.is_comparison());
+        match bin_op_typ {
+            BinOpType::Eq => DEFAULT_EQ_SEL,
+            BinOpType::Neq => 1.0 - DEFAULT_EQ_SEL,
+            BinOpType::Lt | BinOpType::Leq | BinOpType::Gt | BinOpType::Geq => DEFAULT_INEQ_SEL,
+            _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
         }
     }
 
