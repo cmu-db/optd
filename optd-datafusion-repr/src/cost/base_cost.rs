@@ -323,6 +323,8 @@ const DEFAULT_EQ_SEL: f64 = 0.005;
 const DEFAULT_INEQ_SEL: f64 = 0.3333333333333333;
 // Default selectivity estimate for pattern-match operators such as LIKE
 const DEFAULT_MATCH_SEL: f64 = 0.005;
+// Default selectivity if we have no information
+const DEFAULT_UNK_SEL: f64 = 0.005;
 // Default n-distinct estimate for derived columns or columns lacking statistics
 const DEFAULT_N_DISTINCT: u64 = 200;
 
@@ -403,37 +405,33 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
             OptRelNodeTyp::PhysicalEmptyRelation => Self::cost(0.5, 0.01, 0.0),
             OptRelNodeTyp::PhysicalLimit => {
                 let (row_cnt, compute_cost, _) = Self::cost_tuple(&children[0]);
-                let row_cnt = if let Some(context) = context {
-                    if let Some(optimizer) = optimizer {
-                        let mut fetch_expr =
-                            optimizer.get_all_group_bindings(context.children_group_ids[2], false);
-                        assert!(
-                            fetch_expr.len() == 1,
-                            "fetch expression should be the only expr in the group"
-                        );
-                        let fetch_expr = fetch_expr.pop().unwrap();
-                        assert!(
-                            matches!(
-                                fetch_expr.typ,
-                                OptRelNodeTyp::Constant(ConstantType::UInt64)
-                            ),
-                            "fetch type can only be UInt64"
-                        );
-                        let fetch = ConstantExpr::from_rel_node(fetch_expr)
-                            .unwrap()
-                            .value()
-                            .as_u64();
-                        // u64::MAX represents None
-                        if fetch == u64::MAX {
-                            row_cnt
-                        } else {
-                            row_cnt.min(fetch as f64)
-                        }
+                let row_cnt = if let (Some(context), Some(optimizer)) = (context, optimizer) {
+                    let mut fetch_expr =
+                        optimizer.get_all_group_bindings(context.children_group_ids[2], false);
+                    assert!(
+                        fetch_expr.len() == 1,
+                        "fetch expression should be the only expr in the group"
+                    );
+                    let fetch_expr = fetch_expr.pop().unwrap();
+                    assert!(
+                        matches!(
+                            fetch_expr.typ,
+                            OptRelNodeTyp::Constant(ConstantType::UInt64)
+                        ),
+                        "fetch type can only be UInt64"
+                    );
+                    let fetch = ConstantExpr::from_rel_node(fetch_expr)
+                        .unwrap()
+                        .value()
+                        .as_u64();
+                    // u64::MAX represents None
+                    if fetch == u64::MAX {
+                        row_cnt
                     } else {
-                        panic!("compute_cost() should not be called if optimizer is None")
+                        row_cnt.min(fetch as f64)
                     }
                 } else {
-                    panic!("compute_cost() should not be called if context is None")
+                    (row_cnt * DEFAULT_UNK_SEL).max(1.0)
                 };
                 Self::cost(row_cnt, compute_cost, 0.0)
             }
@@ -501,8 +499,8 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                 Self::cost(row_cnt, row_cnt * row_cnt.ln_1p().max(1.0), 0.0)
             }
             OptRelNodeTyp::PhysicalAgg => {
-                let row_cnt = self.get_agg_row_cnt(context, optimizer);
                 let child_row_cnt = Self::row_cnt(&children[0]);
+                let row_cnt = self.get_agg_row_cnt(context, optimizer, child_row_cnt);
                 let (_, compute_cost_1, _) = Self::cost_tuple(&children[1]);
                 let (_, compute_cost_2, _) = Self::cost_tuple(&children[2]);
                 Self::cost(
@@ -555,58 +553,51 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         &self,
         context: Option<RelNodeContext>,
         optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
+        child_row_cnt: f64,
     ) -> f64 {
-        match context {
-            Some(context) => {
-                if let Some(optimizer) = optimizer {
-                    let group_by_id = context.children_group_ids[2];
-                    let mut group_by_exprs: Vec<Arc<RelNode<OptRelNodeTyp>>> =
-                        optimizer.get_all_group_bindings(group_by_id, false);
-                    assert!(
-                        group_by_exprs.len() == 1,
-                        "ExprList expression should be the only expression in the GROUP BY group"
-                    );
-                    let group_by = group_by_exprs.pop().unwrap();
-                    let group_by = ExprList::from_rel_node(group_by).unwrap();
-                    if group_by.is_empty() {
-                        1.0
-                    } else {
-                        // Multiply the n-distinct of all the group by columns.
-                        // TODO: improve with multi-dimensional n-distinct
-                        let base_table_col_refs = optimizer
-                            .get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
-                        base_table_col_refs
-                            .iter()
-                            .take(group_by.len())
-                            .map(|col_ref| match col_ref {
-                                ColumnRef::BaseTableColumnRef { table, col_idx } => {
-                                    let table_stats = self
-                                        .per_table_stats_map
-                                        .get(table);
-                                    let column_stats = table_stats.map(
-                                        |table_stats| {
-                                            table_stats.per_column_stats_vec
-                                        .get(*col_idx).unwrap()
-                                        }
-                                    );
+        if let (Some(context), Some(optimizer)) = (context, optimizer) {
+            let group_by_id = context.children_group_ids[2];
+            let mut group_by_exprs: Vec<Arc<RelNode<OptRelNodeTyp>>> =
+                optimizer.get_all_group_bindings(group_by_id, false);
+            assert!(
+                group_by_exprs.len() == 1,
+                "ExprList expression should be the only expression in the GROUP BY group"
+            );
+            let group_by = group_by_exprs.pop().unwrap();
+            let group_by = ExprList::from_rel_node(group_by).unwrap();
+            if group_by.is_empty() {
+                1.0
+            } else {
+                // Multiply the n-distinct of all the group by columns.
+                // TODO: improve with multi-dimensional n-distinct
+                let base_table_col_refs = optimizer
+                    .get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
+                base_table_col_refs
+                    .iter()
+                    .take(group_by.len())
+                    .map(|col_ref| match col_ref {
+                        ColumnRef::BaseTableColumnRef { table, col_idx } => {
+                            let table_stats = self.per_table_stats_map.get(table);
+                            let column_stats = table_stats.map(|table_stats| {
+                                table_stats.per_column_stats_vec.get(*col_idx).unwrap()
+                            });
 
-                                    if let Some(Some(column_stats)) = column_stats {
-                                        column_stats.ndistinct
-                                    } else {
-                                        // The column type is not supported or stats are missing.
-                                        DEFAULT_N_DISTINCT
-                                    }
-                                }
-                                ColumnRef::Derived => DEFAULT_N_DISTINCT,
-                                _ => panic!("GROUP BY base table column ref must either be derived or base table"),
-                            })
-                            .product::<u64>() as f64
-                    }
-                } else {
-                    panic!("compute_cost() should not be called if optimizer is None")
-                }
+                            if let Some(Some(column_stats)) = column_stats {
+                                column_stats.ndistinct
+                            } else {
+                                // The column type is not supported or stats are missing.
+                                DEFAULT_N_DISTINCT
+                            }
+                        }
+                        ColumnRef::Derived => DEFAULT_N_DISTINCT,
+                        _ => panic!(
+                            "GROUP BY base table column ref must either be derived or base table"
+                        ),
+                    })
+                    .product::<u64>() as f64
             }
-            None => panic!("compute_cost() should not be called if context is None"),
+        } else {
+            (row_cnt * DEFAULT_UNK_SEL).max(1.0)
         }
     }
 
