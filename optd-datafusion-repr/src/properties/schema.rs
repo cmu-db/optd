@@ -12,6 +12,18 @@ pub struct Field {
     pub typ: ConstantType,
     pub nullable: bool,
 }
+
+impl Field {
+    /// Generate a field that is only a place holder whose members are never used.
+    fn placeholder() -> Self {
+        Self {
+            name: DEFAULT_NAME.to_string(),
+            typ: ConstantType::Any,
+            nullable: true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Schema {
     pub fields: Vec<Field>,
@@ -69,16 +81,9 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
                     bincode::deserialize(data.as_ref()).unwrap();
                 empty_relation_data.schema
             }
-            OptRelNodeTyp::ColumnRef => {
-                let data_typ = ConstantType::get_data_type_from_value(&data.unwrap());
-                Schema {
-                    fields: vec![Field {
-                        name: DEFAULT_NAME.to_string(),
-                        typ: data_typ,
-                        nullable: true,
-                    }],
-                }
-            }
+            OptRelNodeTyp::ColumnRef => Schema {
+                fields: vec![Field::placeholder()],
+            },
             OptRelNodeTyp::List => {
                 let mut fields = vec![];
                 for child in children {
@@ -87,27 +92,18 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
                 Schema { fields }
             }
             OptRelNodeTyp::LogOp(_) => Schema {
-                fields: vec![
-                    Field {
-                        name: DEFAULT_NAME.to_string(),
-                        typ: ConstantType::Any,
-                        nullable: true
-                    };
-                    children.len()
-                ],
+                fields: vec![Field::placeholder(); children.len()],
             },
             OptRelNodeTyp::Agg => {
-                let mut schema = children[1].clone();
-                let schema2 = children[2].clone();
-                schema.fields.extend(schema2.fields);
-                schema
+                let mut group_by_schema = children[1].clone();
+                let agg_schema = children[2].clone();
+                group_by_schema.fields.extend(agg_schema.fields);
+                group_by_schema
             }
             OptRelNodeTyp::Func(FuncType::Agg(_)) => Schema {
-                fields: vec![Field {
-                    name: DEFAULT_NAME.to_string(),
-                    typ: ConstantType::Any,
-                    nullable: true,
-                }],
+                // TODO: this is just a place holder now.
+                // The real type should be the column type.
+                fields: vec![Field::placeholder()],
             },
             _ => Schema { fields: vec![] },
         }
