@@ -723,6 +723,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         }
     }
 
+    /// The core logic of join selectivity which assumes we've already separated the expression into the on conditions and the filters
     fn get_join_selectivity_core(
         &self,
         join_typ: JoinType,
@@ -1809,7 +1810,7 @@ mod tests {
     fn test_get_join_selectivity(cost_model: &TestOptCostModel, reverse_tables: bool, join_typ: JoinType, expr_tree: OptRelNodeRef, column_refs: &GroupColumnRefs) -> f64 {
         let table1_row_cnt = cost_model.per_table_stats_map[TABLE1_NAME].row_cnt as f64;
         let table2_row_cnt = cost_model.per_table_stats_map[TABLE2_NAME].row_cnt as f64;
-        if reverse_tables {
+        if !reverse_tables {
             cost_model.get_join_selectivity(join_typ, expr_tree, column_refs, table1_row_cnt, table2_row_cnt)
         } else {
             cost_model.get_join_selectivity(join_typ, expr_tree, column_refs, table2_row_cnt, table1_row_cnt)
@@ -1960,7 +1961,7 @@ mod tests {
     // We don't test joinsel or with oncond because if there is an oncond (on condition), the top-level operator must be an AND
 
     /// I made this helper function to avoid copying all eight lines over and over
-    fn assert_joinsel_outer_selectivity(cost_model: &TestOptCostModel, expr_tree: OptRelNodeRef, expr_tree_rev: OptRelNodeRef, column_refs: &GroupColumnRefs, expected_table1_outer_sel: f64, expected_table2_outer_sel: f64) {
+    fn assert_joinsel_outer_selectivities(cost_model: &TestOptCostModel, expr_tree: OptRelNodeRef, expr_tree_rev: OptRelNodeRef, column_refs: &GroupColumnRefs, expected_table1_outer_sel: f64, expected_table2_outer_sel: f64) {
         // all table 1 outer combinations
         assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::LeftOuter, expr_tree.clone(), &column_refs), expected_table1_outer_sel);
         assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::LeftOuter, expr_tree_rev.clone(), &column_refs), expected_table1_outer_sel);
@@ -1999,7 +2000,12 @@ mod tests {
             table: String::from(TABLE2_NAME),
             col_idx: 0,
         }];
-        assert_joinsel_outer_selectivity(&cost_model, expr_tree, expr_tree_rev, &column_refs, 0.25, 0.2);
+        // sanity check the expected inner sel
+        let expected_inner_sel = 0.2;
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree.clone(), &column_refs), expected_inner_sel);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree_rev.clone(), &column_refs), expected_inner_sel);
+        // check the outer sels
+        assert_joinsel_outer_selectivities(&cost_model, expr_tree, expr_tree_rev, &column_refs, 0.25, 0.2);
     }
 
     /// Non-unique oncond means the column is not unique in either table
@@ -2032,7 +2038,7 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree.clone(), &column_refs), expected_inner_sel);
         assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree_rev.clone(), &column_refs), expected_inner_sel);
         // check the outer sels
-        assert_joinsel_outer_selectivity(&cost_model, expr_tree, expr_tree_rev, &column_refs, 0.2, 0.2);
+        assert_joinsel_outer_selectivities(&cost_model, expr_tree, expr_tree_rev, &column_refs, 0.2, 0.2);
     }
 
     /// Non-unique oncond means the column is not unique in either table
@@ -2066,7 +2072,7 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree.clone(), &column_refs), expected_inner_sel);
         assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree_rev.clone(), &column_refs), expected_inner_sel);
         // check the outer sels
-        assert_joinsel_outer_selectivity(&cost_model, expr_tree, expr_tree_rev, &column_refs, 0.25, 0.1);
+        assert_joinsel_outer_selectivities(&cost_model, expr_tree, expr_tree_rev, &column_refs, 0.25, 0.1);
     }
 
     /// Unique oncond means an oncondition on columns which are unique in both tables
@@ -2106,7 +2112,7 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree.clone(), &column_refs), expected_inner_sel);
         assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree_inner_rev.clone(), &column_refs), expected_inner_sel);
         // check the outer sels
-        assert_joinsel_outer_selectivity(&cost_model, expr_tree, expr_tree_inner_rev, &column_refs, 0.25, 0.02);
+        assert_joinsel_outer_selectivities(&cost_model, expr_tree, expr_tree_inner_rev, &column_refs, 0.25, 0.02);
     }
 
     // I didn't test any non-unique cases with filter. The non-unique tests without filter should cover that
