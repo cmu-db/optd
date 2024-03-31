@@ -810,6 +810,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 right_row_cnt,
             )
         } else {
+            #[allow(clippy::collapsible_else_if)]
             if let Some(on_col_ref_pair) = Self::get_on_col_ref_pair(expr_tree.clone(), column_refs)
             {
                 self.get_join_selectivity_core(
@@ -889,11 +890,11 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     /// Note that the selectivity of the on conditions does not depend on join type. Join type is accounted for separately in get_join_selectivity_core()
     fn get_join_on_selectivity(
         &self,
-        on_col_ref_pairs: &Vec<(ColumnRefExpr, ColumnRefExpr)>,
+        on_col_ref_pairs: &[(ColumnRefExpr, ColumnRefExpr)],
         column_refs: &GroupColumnRefs,
     ) -> f64 {
         // multiply the selectivities of all individual conditions together
-        on_col_ref_pairs.into_iter().map(|on_col_ref_pair| {
+        on_col_ref_pairs.iter().map(|on_col_ref_pair| {
             // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
             let ndistincts = vec![&on_col_ref_pair.0, &on_col_ref_pair.1].into_iter().map(|on_col_ref_expr| {
                 match self.get_per_column_stats_from_col_ref(&column_refs[on_col_ref_expr.index()]) {
@@ -2232,82 +2233,82 @@ mod tests {
         // all table 1 outer combinations
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(
-                &cost_model,
+                cost_model,
                 false,
                 JoinType::LeftOuter,
                 expr_tree.clone(),
-                &column_refs
+                column_refs
             ),
             expected_table1_outer_sel
         );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(
-                &cost_model,
+                cost_model,
                 false,
                 JoinType::LeftOuter,
                 expr_tree_rev.clone(),
-                &column_refs
+                column_refs
             ),
             expected_table1_outer_sel
         );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(
-                &cost_model,
+                cost_model,
                 true,
                 JoinType::RightOuter,
                 expr_tree.clone(),
-                &column_refs
+                column_refs
             ),
             expected_table1_outer_sel
         );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(
-                &cost_model,
+                cost_model,
                 true,
                 JoinType::RightOuter,
                 expr_tree_rev.clone(),
-                &column_refs
+                column_refs
             ),
             expected_table1_outer_sel
         );
         // all table 2 outer combinations
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(
-                &cost_model,
+                cost_model,
                 true,
                 JoinType::LeftOuter,
                 expr_tree.clone(),
-                &column_refs
+                column_refs
             ),
             expected_table2_outer_sel
         );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(
-                &cost_model,
+                cost_model,
                 true,
                 JoinType::LeftOuter,
                 expr_tree_rev.clone(),
-                &column_refs
+                column_refs
             ),
             expected_table2_outer_sel
         );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(
-                &cost_model,
+                cost_model,
                 false,
                 JoinType::RightOuter,
                 expr_tree.clone(),
-                &column_refs
+                column_refs
             ),
             expected_table2_outer_sel
         );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(
-                &cost_model,
+                cost_model,
                 false,
                 JoinType::RightOuter,
                 expr_tree_rev.clone(),
-                &column_refs
+                column_refs
             ),
             expected_table2_outer_sel
         );
