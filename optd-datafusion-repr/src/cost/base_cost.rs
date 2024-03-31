@@ -588,7 +588,6 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         expr_tree: OptRelNodeRef,
         column_refs: &GroupColumnRefs,
     ) -> f64 {
-        println!("expr_tree={:?}", expr_tree);
         assert!(expr_tree.typ.is_expression());
         match &expr_tree.typ {
             OptRelNodeTyp::Constant(_) => Self::get_constant_selectivity(expr_tree),
@@ -1161,18 +1160,28 @@ mod tests {
         )
     }
 
-    // two columns is sufficient for all join selectivity tests
+    /// Two columns is sufficient for all join selectivity tests
     fn create_two_table_cost_model(
         tbl1_per_column_stats: TestPerColumnStats,
         tbl2_per_column_stats: TestPerColumnStats,
     ) -> OptCostModel<TestMostCommonValues, TestDistribution> {
+        create_two_table_cost_model_custom_row_cnts(tbl1_per_column_stats, tbl2_per_column_stats, 100, 100)
+    }
+
+    /// We need custom row counts because some join algorithms rely on the row cnt
+    fn create_two_table_cost_model_custom_row_cnts(
+        tbl1_per_column_stats: TestPerColumnStats,
+        tbl2_per_column_stats: TestPerColumnStats,
+        tbl1_row_cnt: usize,
+        tbl2_row_cnt: usize,
+    ) -> OptCostModel<TestMostCommonValues, TestDistribution> {
         OptCostModel::new(
             vec![(
                 String::from(TABLE1_NAME),
-                PerTableStats::new(100, vec![Some(tbl1_per_column_stats)]),
+                PerTableStats::new(tbl1_row_cnt, vec![Some(tbl1_per_column_stats)]),
             ), (
                 String::from(TABLE2_NAME),
-                PerTableStats::new(100, vec![Some(tbl2_per_column_stats)]),
+                PerTableStats::new(tbl2_row_cnt, vec![Some(tbl2_per_column_stats)]),
             )]
             .into_iter()
             .collect(),
@@ -1790,14 +1799,14 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_const() {
+    fn test_joinsel_inner_const() {
         let cost_model = create_one_column_cost_model(get_empty_per_col_stats());
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, cnst(Value::Bool(true)), &vec![]), 1.0);
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, cnst(Value::Bool(false)), &vec![]), 0.0);
     }
 
     #[test]
-    fn test_joinsel_oncond() {
+    fn test_joinsel_inner_oncond() {
         let cost_model = create_two_table_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             5,
@@ -1823,7 +1832,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_and_of_onconds() {
+    fn test_joinsel_inner_and_of_onconds() {
         let cost_model = create_two_table_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             5,
@@ -1851,7 +1860,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_and_of_oncond_and_filter() {
+    fn test_joinsel_inner_and_of_oncond_and_filter() {
         let cost_model = create_two_table_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             5,
@@ -1879,7 +1888,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_and_of_filters() {
+    fn test_joinsel_inner_and_of_filters() {
         let cost_model = create_two_table_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             5,
@@ -1907,7 +1916,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_colref_eq_colref_same_table_not_oncond() {
+    fn test_joinsel_inner_colref_eq_colref_same_table_is_not_oncond() {
         let cost_model = create_two_table_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             5,
@@ -1931,4 +1940,33 @@ mod tests {
     }
 
     // We don't test joinsel or with oncond because if there is an oncond (on condition), the top-level operator must be an AND
+
+    #[test]
+    fn test_joinsel_outer_oncond() {
+        let cost_model = create_two_table_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            5,
+            0.0,
+            TestDistribution::empty(),
+        ), TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            4,
+            0.0,
+            TestDistribution::empty(),
+        ));
+        // since we're talking about left and right outer joins, the order actually matters now
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
+        let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }, ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE2_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree.clone(), &column_refs), DEFAULT_EQ_SEL);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree_rev.clone(), &column_refs), DEFAULT_EQ_SEL);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree_rev.clone(), &column_refs), DEFAULT_EQ_SEL);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree.clone(), &column_refs), DEFAULT_EQ_SEL);
+    }
 }
