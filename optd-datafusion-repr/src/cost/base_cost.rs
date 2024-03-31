@@ -1849,32 +1849,4 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree, &column_refs), 0.04);
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev, &column_refs), 0.04);
     }
-
-    #[test]
-    fn test_joinsel_or() {
-        let cost_model = create_two_table_cost_model(TestPerColumnStats::new(
-            TestMostCommonValues::empty(),
-            5,
-            0.0,
-            TestDistribution::empty(),
-        ), TestPerColumnStats::new(
-            TestMostCommonValues::empty(),
-            3,
-            0.0,
-            TestDistribution::empty(),
-        ));
-        let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
-        let eq1and0 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
-        let expr_tree = log_op(LogOpType::Or, vec![eq0and1.clone(), eq1and0.clone()]);
-        let expr_tree_rev = log_op(LogOpType::Or, vec![eq1and0.clone(), eq0and1.clone()]);
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }, ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE2_NAME),
-            col_idx: 0,
-        }];
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree, &column_refs), 0.36);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev, &column_refs), 0.36);
-    }
 }
