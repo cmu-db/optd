@@ -534,15 +534,19 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                                 );
                             let left_keys_group_id = context.children_group_ids[2];
                             let right_keys_group_id = context.children_group_ids[3];
-                            let left_keys_list = optimizer.get_all_group_bindings(left_keys_group_id, false);
-                            let right_keys_list = optimizer.get_all_group_bindings(right_keys_group_id, false);
+                            let left_keys_list =
+                                optimizer.get_all_group_bindings(left_keys_group_id, false);
+                            let right_keys_list =
+                                optimizer.get_all_group_bindings(right_keys_group_id, false);
                             // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
                             let left_keys = left_keys_list.first().expect("left keys missing");
                             let right_keys = right_keys_list.first().expect("right keys missing");
                             self.get_join_selectivity_from_keys(
                                 *join_typ,
-                                ExprList::from_rel_node(left_keys.clone()).expect("left_keys should be an ExprList"),
-                                ExprList::from_rel_node(right_keys.clone()).expect("right_keys should be an ExprList"),
+                                ExprList::from_rel_node(left_keys.clone())
+                                    .expect("left_keys should be an ExprList"),
+                                ExprList::from_rel_node(right_keys.clone())
+                                    .expect("right_keys should be an ExprList"),
                                 &column_refs,
                                 row_cnt_1,
                                 row_cnt_2,
@@ -857,13 +861,38 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     }
 
     /// A wrapper to convert the join keys to the format expected by get_join_selectivity_core()
-    fn get_join_selectivity_from_keys(&self, join_typ: JoinType, left_keys: ExprList, right_keys: ExprList, column_refs: &GroupColumnRefs, left_row_cnt: f64, right_row_cnt: f64) -> f64 {
+    fn get_join_selectivity_from_keys(
+        &self,
+        join_typ: JoinType,
+        left_keys: ExprList,
+        right_keys: ExprList,
+        column_refs: &GroupColumnRefs,
+        left_row_cnt: f64,
+        right_row_cnt: f64,
+    ) -> f64 {
         assert!(left_keys.len() == right_keys.len());
         // I assume that the keys are already in the right order s.t. the ith key of left_keys corresponds with the ith key of right_keys
-        let on_col_ref_pairs = left_keys.to_vec().into_iter().zip(right_keys.to_vec().into_iter()).map(|(left_key, right_key)| {
-            (ColumnRefExpr::from_rel_node(left_key.into_rel_node()).expect("keys should be ColumnRefExprs"), ColumnRefExpr::from_rel_node(right_key.into_rel_node()).expect("keys should be ColumnRefExprs"))
-        }).collect_vec();
-        self.get_join_selectivity_core(join_typ, on_col_ref_pairs, None, column_refs, left_row_cnt, right_row_cnt)
+        let on_col_ref_pairs = left_keys
+            .to_vec()
+            .into_iter()
+            .zip(right_keys.to_vec())
+            .map(|(left_key, right_key)| {
+                (
+                    ColumnRefExpr::from_rel_node(left_key.into_rel_node())
+                        .expect("keys should be ColumnRefExprs"),
+                    ColumnRefExpr::from_rel_node(right_key.into_rel_node())
+                        .expect("keys should be ColumnRefExprs"),
+                )
+            })
+            .collect_vec();
+        self.get_join_selectivity_core(
+            join_typ,
+            on_col_ref_pairs,
+            None,
+            column_refs,
+            left_row_cnt,
+            right_row_cnt,
+        )
     }
 
     /// The core logic of join selectivity which assumes we've already separated the expression into the on conditions and the filters
