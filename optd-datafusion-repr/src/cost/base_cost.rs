@@ -14,6 +14,7 @@ use datafusion::arrow::array::{
     Int32Array, Int8Array, RecordBatch, RecordBatchIterator, RecordBatchReader, UInt16Array,
     UInt32Array, UInt8Array,
 };
+use datafusion_expr::col;
 use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
@@ -711,11 +712,15 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     ExprList::new(filter_expr_trees),
                 ).into_rel_node())
             };
+            println!("on_col_ref_pairs={:?}, filter_expr_tree={:?}", on_col_ref_pairs, filter_expr_tree);
             self.get_join_selectivity_core(join_typ, on_col_ref_pairs, filter_expr_tree, column_refs)
         } else {
+            println!("b, expr_tree={:?}, column_refs={:?}", expr_tree, column_refs);
             if let Some(on_col_ref_pair) = Self::get_on_col_ref_pair(expr_tree.clone(), column_refs) {
+                println!("c");
                 self.get_join_selectivity_core(join_typ, vec![on_col_ref_pair], None, column_refs)
             } else {
+                println!("d");
                 self.get_join_selectivity_core(join_typ, vec![], Some(expr_tree), column_refs)
             }
         }
@@ -1139,7 +1144,8 @@ mod tests {
         }
     }
 
-    const TABLE1_NAME: &str = "t1";
+    const TABLE1_NAME: &str = "table1";
+    const TABLE2_NAME: &str = "table2";
 
     // one column is sufficient for all filter selectivity tests
     fn create_one_column_cost_model(
@@ -1156,14 +1162,17 @@ mod tests {
     }
 
     // two columns is sufficient for all join selectivity tests
-    fn create_two_column_cost_model(
-        per_column_stats0: TestPerColumnStats,
-        per_column_stats1: TestPerColumnStats,
+    fn create_two_table_cost_model(
+        tbl1_per_column_stats: TestPerColumnStats,
+        tbl2_per_column_stats: TestPerColumnStats,
     ) -> OptCostModel<TestMostCommonValues, TestDistribution> {
         OptCostModel::new(
             vec![(
                 String::from(TABLE1_NAME),
-                PerTableStats::new(100, vec![Some(per_column_stats0), Some(per_column_stats1)]),
+                PerTableStats::new(100, vec![Some(tbl1_per_column_stats)]),
+            ), (
+                String::from(TABLE2_NAME),
+                PerTableStats::new(100, vec![Some(tbl2_per_column_stats)]),
             )]
             .into_iter()
             .collect(),
@@ -1789,7 +1798,7 @@ mod tests {
 
     #[test]
     fn test_joinsel_colref_eq_colref_no_nulls() {
-        let cost_model = create_two_column_cost_model(TestPerColumnStats::new(
+        let cost_model = create_two_table_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             5,
             0.0,
@@ -1806,8 +1815,8 @@ mod tests {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
         }, ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 1,
+            table: String::from(TABLE2_NAME),
+            col_idx: 0,
         }];
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree, &column_refs), 0.2);
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev, &column_refs), 0.2);
@@ -1815,7 +1824,7 @@ mod tests {
 
     #[test]
     fn test_joinsel_and() {
-        let cost_model = create_two_column_cost_model(TestPerColumnStats::new(
+        let cost_model = create_two_table_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             5,
             0.0,
@@ -1834,8 +1843,8 @@ mod tests {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
         }, ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 1,
+            table: String::from(TABLE2_NAME),
+            col_idx: 0,
         }];
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree, &column_refs), 0.04);
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev, &column_refs), 0.04);
@@ -1843,7 +1852,7 @@ mod tests {
 
     #[test]
     fn test_joinsel_or() {
-        let cost_model = create_two_column_cost_model(TestPerColumnStats::new(
+        let cost_model = create_two_table_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             5,
             0.0,
@@ -1862,8 +1871,8 @@ mod tests {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
         }, ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 1,
+            table: String::from(TABLE2_NAME),
+            col_idx: 0,
         }];
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree, &column_refs), 0.36);
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev, &column_refs), 0.36);
