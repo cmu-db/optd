@@ -1,3 +1,4 @@
+use std::hash::Hasher;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::plan_nodes::{
@@ -21,7 +22,8 @@ use optd_core::{
     rel_node::{RelNode, RelNodeTyp, Value},
 };
 use optd_gungnir::stats::counter::Counter;
-use optd_gungnir::stats::hyperloglog::{self, HyperLogLog};
+use optd_gungnir::stats::hyperloglog::{self, ByteSerializable, HyperLogLog};
+use optd_gungnir::stats::misragries::MisraGries;
 use optd_gungnir::stats::tdigest::{self, TDigest};
 use optd_gungnir::utils::arith_encoder;
 use serde::{Deserialize, Serialize};
@@ -99,6 +101,59 @@ pub struct PerTableStats<M: MostCommonValues, D: Distribution> {
     per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct F64Wrap(f64);
+
+impl PartialEq for F64Wrap {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
+    }
+}
+
+impl Eq for F64Wrap {}
+
+impl std::hash::Hash for F64Wrap {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.to_bits().hash(state);
+    }
+}
+
+impl ByteSerializable for F64Wrap {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.0.to_le_bytes().to_vec()
+    }
+}
+
+enum MG<'a> {
+    Boolean(MisraGries<bool>),
+    Int8(MisraGries<i8>),
+    Int16(MisraGries<i16>),
+    Int32(MisraGries<i32>),
+    UInt8(MisraGries<u8>),
+    UInt16(MisraGries<u16>),
+    UInt32(MisraGries<u32>),
+    Float32(MisraGries<F64Wrap>),
+    Float64(MisraGries<F64Wrap>),
+    Date32(MisraGries<i32>),
+    Decimal128(MisraGries<i128>),
+    Utf8(MisraGries<&'a str>),
+}
+
+enum Cnt {
+    Boolean(Counter<bool>),
+    Int8(Counter<i8>),
+    Int16(Counter<i16>),
+    Int32(Counter<i32>),
+    UInt8(Counter<u8>),
+    UInt16(Counter<u16>),
+    UInt32(Counter<u32>),
+    Float32(Counter<F64Wrap>),
+    Float64(Counter<F64Wrap>),
+    Date32(Counter<i32>),
+    Decimal128(Counter<i128>),
+    // Utf8(Counter<&str>),
+}
+
 impl DataFusionPerTableStats {
     pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
         batch_iter: RecordBatchIterator<I>,
@@ -135,6 +190,7 @@ impl DataFusionPerTableStats {
         let mut hlls = vec![HyperLogLog::new(hyperloglog::DEFAULT_PRECISION); col_cnt];
         let mut null_cnt = vec![0; col_cnt];
 
+        // First pass: HLL + MG + null_cnt
         for batch in batch_iter {
             let batch = batch?;
             row_cnt += batch.num_rows();
@@ -146,7 +202,7 @@ impl DataFusionPerTableStats {
                     // Update null cnt.
                     null_cnt[i] += col.null_count();
 
-                    Self::generate_stats_for_column(col, col_type, &mut distr[i], &mut hlls[i]);
+                    Self::generate_stats_for_column(col, col_type, &mut distr[i]);
                 }
             }
         }
@@ -187,15 +243,112 @@ impl DataFusionPerTableStats {
         )
     }
 
+    /// Generate partial statistics for a column.
+    fn generate_partial_stats_for_column(
+        col: &Arc<dyn Array>,
+        col_type: &DataType,
+        mg: &mut MG,
+        hll: &mut HyperLogLog,
+    ) {
+        macro_rules! generate_partial_stats_for_col {
+            ({ $col:expr, $mg:expr, $hll:expr, $array_type:path}) => {{
+                let array = $col.as_any().downcast_ref::<$array_type>().unwrap();
+                // Filter out `None` values.
+                let values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+
+                // Update mg.
+                $mg.aggregate(&values);
+
+                // Update hll.
+                $hll.aggregate(&values);
+            }};
+        }
+
+        match col_type {
+            DataType::Boolean => match mg {
+                MG::Boolean(mg) => generate_partial_stats_for_col!({ col, mg, hll, BooleanArray }),
+                _ => unreachable!(),
+            },
+            DataType::Int8 => match mg {
+                MG::Int8(mg) => generate_partial_stats_for_col!({ col, mg, hll, Int8Array }),
+                _ => unreachable!(),
+            },
+            DataType::Int16 => match mg {
+                MG::Int16(mg) => generate_partial_stats_for_col!({ col, mg, hll, Int16Array }),
+                _ => unreachable!(),
+            },
+            DataType::Int32 => match mg {
+                MG::Int32(mg) => generate_partial_stats_for_col!({ col, mg, hll, Int32Array }),
+                _ => unreachable!(),
+            },
+            DataType::UInt8 => match mg {
+                MG::UInt8(mg) => generate_partial_stats_for_col!({ col, mg, hll, UInt8Array }),
+                _ => unreachable!(),
+            },
+            DataType::UInt16 => match mg {
+                MG::UInt16(mg) => generate_partial_stats_for_col!({ col, mg, hll, UInt16Array }),
+                _ => unreachable!(),
+            },
+            DataType::UInt32 => match mg {
+                MG::UInt32(mg) => generate_partial_stats_for_col!({ col, mg, hll, UInt32Array }),
+                _ => unreachable!(),
+            },
+            DataType::Float32 => match mg {
+                MG::Float32(mg) => {
+                    let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                    let values = array
+                        .iter()
+                        .filter_map(|x| x)
+                        .map(|x| F64Wrap(x.into()))
+                        .collect::<Vec<_>>();
+
+                    mg.aggregate(&values);
+                    hll.aggregate(&values);
+                }
+                _ => unreachable!(),
+            },
+            DataType::Float64 => match mg {
+                MG::Float64(mg) => {
+                    let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                    let values = array
+                        .iter()
+                        .filter_map(|x| x)
+                        .map(|x| F64Wrap(x.into()))
+                        .collect::<Vec<_>>();
+
+                    mg.aggregate(&values);
+                    hll.aggregate(&values);
+                }
+                _ => unreachable!(),
+            },
+            DataType::Date32 => match mg {
+                MG::Date32(mg) => generate_partial_stats_for_col!({ col, mg, hll, Date32Array }),
+                _ => unreachable!(),
+            },
+            DataType::Decimal128(_, _) => match mg {
+                MG::Decimal128(mg) => {
+                    generate_partial_stats_for_col!({ col, mg, hll, Decimal128Array })
+                }
+                _ => unreachable!(),
+            },
+            DataType::Utf8 => {
+                match mg {
+                    MG::Utf8(mg) => generate_partial_stats_for_col!({ col, mg, hll, StringArray }),
+                    _ => unreachable!(),
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
     /// Generate statistics for a column.
     fn generate_stats_for_column(
         col: &Arc<dyn Array>,
         col_type: &DataType,
         distr: &mut Option<TDigest>,
-        hll: &mut HyperLogLog,
     ) {
         macro_rules! generate_stats_for_col {
-            ({ $col:expr, $distr:expr, $hll:expr, $array_type:path, $to_f64:ident }) => {{
+            ({ $col:expr, $distr:expr, $array_type:path, $to_f64:ident }) => {{
                 let array = $col.as_any().downcast_ref::<$array_type>().unwrap();
                 // Filter out `None` values.
                 let values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
@@ -205,9 +358,6 @@ impl DataFusionPerTableStats {
                     let mut f64_values = values.iter().map(|x| $to_f64(*x)).collect::<Vec<_>>();
                     Some($distr.take().unwrap().merge_values(&mut f64_values))
                 };
-
-                // Update hll.
-                $hll.aggregate(&values);
             }};
         }
 
@@ -231,40 +381,40 @@ impl DataFusionPerTableStats {
 
         match col_type {
             DataType::Boolean => {
-                generate_stats_for_col!({ col, distr, hll, BooleanArray, to_f64_safe })
+                generate_stats_for_col!({ col, distr, BooleanArray, to_f64_safe })
             }
             DataType::Int8 => {
-                generate_stats_for_col!({ col, distr, hll, Int8Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, Int8Array, to_f64_safe })
             }
             DataType::Int16 => {
-                generate_stats_for_col!({ col, distr, hll, Int16Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, Int16Array, to_f64_safe })
             }
             DataType::Int32 => {
-                generate_stats_for_col!({ col, distr, hll, Int32Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, Int32Array, to_f64_safe })
             }
             DataType::UInt8 => {
-                generate_stats_for_col!({ col, distr, hll, UInt8Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, UInt8Array, to_f64_safe })
             }
             DataType::UInt16 => {
-                generate_stats_for_col!({ col, distr, hll, UInt16Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, UInt16Array, to_f64_safe })
             }
             DataType::UInt32 => {
-                generate_stats_for_col!({ col, distr, hll, UInt32Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, UInt32Array, to_f64_safe })
             }
             DataType::Float32 => {
-                generate_stats_for_col!({ col, distr, hll, Float32Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, Float32Array, to_f64_safe })
             }
             DataType::Float64 => {
-                generate_stats_for_col!({ col, distr, hll, Float64Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, Float64Array, to_f64_safe })
             }
             DataType::Date32 => {
-                generate_stats_for_col!({ col, distr, hll, Date32Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, Date32Array, to_f64_safe })
             }
             DataType::Decimal128(_, _) => {
-                generate_stats_for_col!({ col, distr, hll, Decimal128Array, i128_to_f64 })
+                generate_stats_for_col!({ col, distr, Decimal128Array, i128_to_f64 })
             }
             DataType::Utf8 => {
-                generate_stats_for_col!({ col, distr, hll, StringArray, str_to_f64 })
+                generate_stats_for_col!({ col, distr, StringArray, str_to_f64 })
             }
             _ => unreachable!(),
         }
