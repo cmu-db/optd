@@ -94,6 +94,11 @@ impl MostCommonValues for MockMostCommonValues {
 #[derive(Serialize, Deserialize)]
 pub struct PerTableStats<M: MostCommonValues, D: Distribution> {
     row_cnt: usize,
+    // This is a Vec of Options instead of just a Vec because some columns may not have stats
+    //   due to their type being non-comparable.
+    // Further, I chose to represent it as a Vec of Options instead of a HashMap because a Vec
+    //   of Options clearly differentiates between two different failure modes: "out-of-bounds
+    //   access" and "column has no stats".
     per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>,
 }
 
