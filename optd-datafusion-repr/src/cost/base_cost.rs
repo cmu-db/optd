@@ -23,7 +23,7 @@ use optd_core::{
 };
 use optd_gungnir::stats::counter::Counter;
 use optd_gungnir::stats::hyperloglog::{self, ByteSerializable, HyperLogLog};
-use optd_gungnir::stats::misragries::MisraGries;
+use optd_gungnir::stats::misragries::{MisraGries, DEFAULT_K_TO_TRACK};
 use optd_gungnir::stats::tdigest::{self, TDigest};
 use optd_gungnir::utils::arith_encoder;
 use serde::{Deserialize, Serialize};
@@ -151,7 +151,7 @@ enum Cnt {
     Float64(Counter<F64Wrap>),
     Date32(Counter<i32>),
     Decimal128(Counter<i128>),
-    // Utf8(Counter<&str>),
+    //Utf8(Counter<&str>),
 }
 
 impl DataFusionPerTableStats {
@@ -167,30 +167,30 @@ impl DataFusionPerTableStats {
         let col_cnt = col_types.len();
 
         let mut row_cnt = 0;
-        let mut mcvs = col_types
-            .iter()
-            .map(|col_type| {
-                if Self::is_type_supported(col_type) {
-                    Some(MockMostCommonValues::empty())
-                } else {
-                    None
-                }
-            })
-            .collect_vec();
-        let mut distr = col_types
-            .iter()
-            .map(|col_type| {
-                if Self::is_type_supported(col_type) {
-                    Some(TDigest::new(tdigest::DEFAULT_COMPRESSION))
-                } else {
-                    None
-                }
-            })
-            .collect_vec();
+
         let mut hlls = vec![HyperLogLog::new(hyperloglog::DEFAULT_PRECISION); col_cnt];
+        let mut mg = Vec::<Option<MG>>::with_capacity(col_cnt);
+        for col_type in &col_types {
+            let elem = match col_type {
+                DataType::Boolean => Some(MG::Boolean(MisraGries::new(DEFAULT_K_TO_TRACK))),
+                DataType::Int8 => Some(MG::Int8(MisraGries::new(DEFAULT_K_TO_TRACK))),
+                DataType::Int16 => Some(MG::Int16(MisraGries::new(DEFAULT_K_TO_TRACK))),
+                DataType::Int32 => Some(MG::Int32(MisraGries::new(DEFAULT_K_TO_TRACK))),
+                DataType::UInt8 => Some(MG::UInt8(MisraGries::new(DEFAULT_K_TO_TRACK))),
+                DataType::UInt16 => Some(MG::UInt16(MisraGries::new(DEFAULT_K_TO_TRACK))),
+                DataType::UInt32 => Some(MG::UInt32(MisraGries::new(DEFAULT_K_TO_TRACK))),
+                DataType::Float32 => Some(MG::Float32(MisraGries::new(DEFAULT_K_TO_TRACK))),
+                DataType::Float64 => Some(MG::Float64(MisraGries::new(DEFAULT_K_TO_TRACK))),
+                DataType::Date32 => Some(MG::Date32(MisraGries::new(DEFAULT_K_TO_TRACK))),
+                DataType::Utf8 => Some(MG::Utf8(MisraGries::new(DEFAULT_K_TO_TRACK))),
+                _ => None,
+            };
+            mg.push(elem)
+        }
+
         let mut null_cnt = vec![0; col_cnt];
 
-        // First pass: HLL + MG + null_cnt
+        // First pass: HLL + MG + null_cnt + row_cnt
         for batch in batch_iter {
             let batch = batch?;
             row_cnt += batch.num_rows();
@@ -202,14 +202,30 @@ impl DataFusionPerTableStats {
                     // Update null cnt.
                     null_cnt[i] += col.null_count();
 
-                    Self::generate_stats_for_column(col, col_type, &mut distr[i]);
+                    Self::generate_partial_stats_for_column(
+                        col,
+                        col_type,
+                        &mut mg[i].as_mut().unwrap(),
+                        &mut hlls[i],
+                    );
                 }
             }
         }
 
-        // Assemble the per-column stats.
+        /*let mut cnt = Vec::<Option<Cnt>>::with_capacity(col_cnt);
+        let mut distr = col_types
+            .iter()
+            .map(|col_type| {
+                if Self::is_type_supported(col_type) {
+                    Some(TDigest::new(tdigest::DEFAULT_COMPRESSION))
+                } else {
+                    None
+                }
+            })
+            .collect_vec();*/
+
         let mut per_column_stats_vec = Vec::with_capacity(col_cnt);
-        for i in 0..col_cnt {
+        /*for i in 0..col_cnt {
             per_column_stats_vec.push(if Self::is_type_supported(&col_types[i]) {
                 Some(PerColumnStats::new(
                     mcvs[i].take().unwrap(),
@@ -220,7 +236,8 @@ impl DataFusionPerTableStats {
             } else {
                 None
             });
-        }
+        }*/
+
         Ok(Self {
             row_cnt,
             per_column_stats_vec,
@@ -244,10 +261,10 @@ impl DataFusionPerTableStats {
     }
 
     /// Generate partial statistics for a column.
-    fn generate_partial_stats_for_column(
-        col: &Arc<dyn Array>,
+    fn generate_partial_stats_for_column<'a>(
+        col: &'a Arc<dyn Array>,
         col_type: &DataType,
-        mg: &mut MG,
+        mg: &mut MG<'a>,
         hll: &mut HyperLogLog,
     ) {
         macro_rules! generate_partial_stats_for_col {
@@ -331,12 +348,10 @@ impl DataFusionPerTableStats {
                 }
                 _ => unreachable!(),
             },
-            DataType::Utf8 => {
-                match mg {
-                    MG::Utf8(mg) => generate_partial_stats_for_col!({ col, mg, hll, StringArray }),
-                    _ => unreachable!(),
-                }
-            }
+            DataType::Utf8 => match mg {
+                MG::Utf8(mg) => generate_partial_stats_for_col!({ col, mg, hll, StringArray }),
+                _ => unreachable!(),
+            },
             _ => unreachable!(),
         }
     }
@@ -346,6 +361,7 @@ impl DataFusionPerTableStats {
         col: &Arc<dyn Array>,
         col_type: &DataType,
         distr: &mut Option<TDigest>,
+        mcv: &mut Cnt,
     ) {
         macro_rules! generate_stats_for_col {
             ({ $col:expr, $distr:expr, $array_type:path, $to_f64:ident }) => {{
