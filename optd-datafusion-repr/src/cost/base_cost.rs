@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::plan_nodes::{
-    BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, LogOpType, OptRelNode, UnOpType,
+    BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, ExprList, LogOpExpr, LogOpType, OptRelNode, UnOpType
 };
 use crate::properties::column_ref::{ColumnRefPropertyBuilder, GroupColumnRefs};
 use crate::{
@@ -637,63 +637,84 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         }
     }
 
+    /// Check if an expr_tree is a join condition, returning the join on col ref pair if it is
+    /// The reason the check and the info are in the same function is because their code is almost identical
+    fn get_on_col_ref_pair(expr_tree: OptRelNodeRef, column_refs: &GroupColumnRefs) -> Option<(ColumnRefExpr, ColumnRefExpr)> {
+        // We perform three checks to see if a child_expr_tree is an on_col_ref_pair
+        // 1. Check that it's equality
+        if expr_tree.typ == OptRelNodeTyp::BinOp(BinOpType::Eq) {
+            let left_child = expr_tree.child(0);
+            let right_child = expr_tree.child(1);
+            // 2. Check that both sides are column refs
+            if left_child.typ == OptRelNodeTyp::ColumnRef && right_child.typ == OptRelNodeTyp::ColumnRef {
+                // 3. Check that both sides don't belong to the same table (if we don't know, that means they don't belong)
+                let left_col_ref_expr = ColumnRefExpr::from_rel_node(left_child).expect("we already checked that the type is ColumnRef");
+                let right_col_ref_expr = ColumnRefExpr::from_rel_node(right_child).expect("we already checked that the type is ColumnRef");
+                let left_col_ref = &column_refs[left_col_ref_expr.index()];
+                let right_col_ref = &column_refs[right_col_ref_expr.index()];
+                let is_same_table = if let ColumnRef::BaseTableColumnRef { table: left_table, .. } = left_col_ref {
+                    if let ColumnRef::BaseTableColumnRef { table: right_table, .. } = right_col_ref {
+                        left_table == right_table
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !is_same_table {
+                    Some((left_col_ref_expr, right_col_ref_expr))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
     /// The expr_tree input must be a "mixed expression tree", just like with get_filter_selectivity()
-    /// The "wrapper" is here to separate the equality conditions from the filter conditions before calling
-    ///   the "main" get_join_selectivity() function.
-    fn get_join_selectivity_wrapper(
+    /// This is a "wrapper" to separate the equality conditions from the filter conditions before calling
+    ///   the "main" get_join_selectivity_core() function.
+    fn get_join_selectivity(
         &self,
         join_typ: JoinType,
         expr_tree: OptRelNodeRef,
         column_refs: &GroupColumnRefs,
     ) -> f64 {
-        println!("get_join_selectivity(): called on expr_tree={}", expr_tree);
         assert!(expr_tree.typ.is_expression());
-        match &expr_tree.typ {
-            OptRelNodeTyp::Constant(_) => Self::get_constant_selectivity(expr_tree),
-            OptRelNodeTyp::ColumnRef => unimplemented!("check bool type or else panic"),
-            OptRelNodeTyp::UnOp(_) => unimplemented!(),
-            OptRelNodeTyp::BinOp(bin_op_typ) => {
-                assert!(expr_tree.children.len() == 2);
-                let left_child = expr_tree.child(0);
-                let right_child = expr_tree.child(1);
-
-                if bin_op_typ.is_comparison() {
-                    self.get_join_comp_op_selectivity(
-                        join_typ,
-                        *bin_op_typ,
-                        left_child,
-                        right_child,
-                        column_refs,
-                    )
-                } else if bin_op_typ.is_numerical() {
-                    panic!(
-                        "the selectivity of operations that return numerical values is undefined"
-                    )
+        if expr_tree.typ == OptRelNodeTyp::LogOp(LogOpType::And) {
+            let mut on_col_ref_pairs = vec![];
+            let mut filter_expr_trees = vec![];
+            for child_expr_tree in &expr_tree.children {
+                if let Some(on_col_ref_pair) = Self::get_on_col_ref_pair(child_expr_tree.clone(), column_refs) {
+                    on_col_ref_pairs.push(on_col_ref_pair)
                 } else {
-                    unreachable!("all BinOpTypes should be true for at least one is_*() function")
+                    let child_expr = Expr::from_rel_node(child_expr_tree.clone()).expect("everything that is a direct child of an And node must be an expression");
+                    filter_expr_trees.push(child_expr);
                 }
-            },
-            OptRelNodeTyp::LogOp(log_op_typ) => {
-                self.get_join_log_op_selectivity(join_typ, *log_op_typ, &expr_tree.children, column_refs)
-            },
-            OptRelNodeTyp::Func(_) => unimplemented!("check bool type or else panic"),
-            OptRelNodeTyp::SortOrder(_) => {
-                panic!("the selectivity of sort order expressions is undefined")
             }
-            OptRelNodeTyp::Between => unimplemented!(),
-            OptRelNodeTyp::Cast => unimplemented!("check bool type or else panic"),
-            OptRelNodeTyp::Like => unimplemented!(),
-            OptRelNodeTyp::DataType(_) => {
-                panic!("the selectivity of a data type is not defined")
+            assert!(on_col_ref_pairs.len() + filter_expr_trees.len() == expr_tree.children.len());
+            let filter_expr_tree = if filter_expr_trees.is_empty() {
+                None
+            } else {
+                Some(LogOpExpr::new(
+                    LogOpType::And,
+                    ExprList::new(filter_expr_trees),
+                ).into_rel_node())
+            };
+            self.get_join_selectivity_core(join_typ, on_col_ref_pairs, filter_expr_tree, column_refs)
+        } else {
+            if let Some(on_col_ref_pair) = Self::get_on_col_ref_pair(expr_tree.clone(), column_refs) {
+                self.get_join_selectivity_core(join_typ, vec![on_col_ref_pair], None, column_refs)
+            } else {
+                self.get_join_selectivity_core(join_typ, vec![], Some(expr_tree), column_refs)
             }
-            OptRelNodeTyp::InList => unimplemented!(),
-            _ => unreachable!(
-                "all expression OptRelNodeTyp were enumerated. this should be unreachable"
-            ),
         }
     }
 
-    fn get_join_selectivity(
+    fn get_join_selectivity_core(
         &self,
         join_typ: JoinType,
         on_col_ref_pairs: Vec<(ColumnRefExpr, ColumnRefExpr)>,
@@ -1028,24 +1049,6 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         }
     }
 
-    fn get_join_log_op_selectivity(
-        &self,
-        join_typ: JoinType,
-        log_op_typ: LogOpType,
-        children: &[OptRelNodeRef],
-        column_refs: &GroupColumnRefs,
-    ) -> f64 {
-        let children_sel = children
-            .iter()
-            .map(|expr| self.get_join_selectivity(join_typ, expr.clone(), column_refs));
-
-        match log_op_typ {
-            LogOpType::And => children_sel.product(),
-            // the formula is 1.0 - the probability of _none_ of the events happening
-            LogOpType::Or => 1.0 - children_sel.fold(1.0, |acc, sel| acc * (1.0 - sel)),
-        }
-    }
-
     pub fn get_row_cnt(&self, table: &str) -> Option<usize> {
         self.per_table_stats_map
             .get(table)
@@ -1149,7 +1152,7 @@ mod tests {
         OptCostModel::new(
             vec![(
                 String::from(TABLE1_NAME),
-                PerTableStats::new(100, vec![Some(per_column_stats)]),
+                PerTableStats::new(100, vec![(0, per_column_stats)].into_iter().collect()),
             )]
             .into_iter()
             .collect(),
@@ -1158,13 +1161,13 @@ mod tests {
 
     // two columns is sufficient for all join selectivity tests
     fn create_two_column_cost_model(
+        per_column_stats0: TestPerColumnStats,
         per_column_stats1: TestPerColumnStats,
-        per_column_stats2: TestPerColumnStats,
     ) -> OptCostModel<TestMostCommonValues, TestDistribution> {
         OptCostModel::new(
             vec![(
                 String::from(TABLE1_NAME),
-                PerTableStats::new(100, vec![Some(per_column_stats1), Some(per_column_stats2)]),
+                PerTableStats::new(100, vec![(0, per_column_stats0), (1, per_column_stats1)].into_iter().collect()),
             )]
             .into_iter()
             .collect(),
@@ -1789,7 +1792,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_colref_eq_colref_no_mcvs_no_nulls() {
+    fn test_joinsel_colref_eq_colref_no_nulls() {
         let cost_model = create_two_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             5,
