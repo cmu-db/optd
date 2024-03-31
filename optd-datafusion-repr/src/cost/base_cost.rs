@@ -1797,7 +1797,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_colref_eq_colref_no_nulls() {
+    fn test_joinsel_oncond() {
         let cost_model = create_two_table_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             5,
@@ -1823,7 +1823,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_and() {
+    fn test_joinsel_and_with_oncond() {
         let cost_model = create_two_table_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             5,
@@ -1849,4 +1849,6 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree, &column_refs), 0.04);
         assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev, &column_refs), 0.04);
     }
+
+    // We don't test joinsel or with oncond because if there is an oncond (on condition), the top-level operator must be an AND
 }
