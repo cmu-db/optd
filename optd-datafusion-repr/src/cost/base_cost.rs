@@ -725,13 +725,13 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         }
     }
 
-    /// Check if an expr_tree is a join condition, returning the join on col ref pair if it is
-    /// The reason the check and the info are in the same function is because their code is almost identical
+    /// Check if an expr_tree is a join condition, returning the join on col ref pair if it is.
+    /// The reason the check and the info are in the same function is because their code is almost identical.
+    /// It only picks out equality conditions between two column refs on different tables
     fn get_on_col_ref_pair(
         expr_tree: OptRelNodeRef,
         column_refs: &GroupColumnRefs,
     ) -> Option<(ColumnRefExpr, ColumnRefExpr)> {
-        // We perform three checks to see if a child_expr_tree is an on_col_ref_pair
         // 1. Check that it's equality
         if expr_tree.typ == OptRelNodeTyp::BinOp(BinOpType::Eq) {
             let left_child = expr_tree.child(0);
@@ -747,18 +747,13 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     .expect("we already checked that the type is ColumnRef");
                 let left_col_ref = &column_refs[left_col_ref_expr.index()];
                 let right_col_ref = &column_refs[right_col_ref_expr.index()];
-                let is_same_table = if let ColumnRef::BaseTableColumnRef {
+                let is_same_table = if let (ColumnRef::BaseTableColumnRef {
                     table: left_table, ..
-                } = left_col_ref
+                }, ColumnRef::BaseTableColumnRef {
+                    table: right_table, ..
+                }) = (left_col_ref, right_col_ref)
                 {
-                    if let ColumnRef::BaseTableColumnRef {
-                        table: right_table, ..
-                    } = right_col_ref
-                    {
-                        left_table == right_table
-                    } else {
-                        false
-                    }
+                    left_table == right_table
                 } else {
                     false
                 };
@@ -947,7 +942,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     None => DEFAULT_NUM_DISTINCT,
                 }
             });
-            // using reduce(f64::min) is the idiomatic workaround to the fact that f64 does not implement Ord due to NaN
+            // using reduce(f64::min) is the idiomatic workaround to min() because f64 does not implement Ord due to NaN
             let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
             assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
             selectivity
