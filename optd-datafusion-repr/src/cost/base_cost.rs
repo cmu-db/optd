@@ -11,8 +11,8 @@ use crate::{
 use arrow_schema::{ArrowError, DataType};
 use datafusion::arrow::array::{
     Array, BooleanArray, Date32Array, Decimal128Array, Float32Array, Float64Array, Int16Array,
-    Int32Array, Int8Array, RecordBatch, RecordBatchIterator, RecordBatchReader, UInt16Array,
-    UInt32Array, UInt8Array,
+    Int32Array, Int8Array, RecordBatch, RecordBatchIterator, RecordBatchReader, StringArray,
+    UInt16Array, UInt32Array, UInt8Array,
 };
 use itertools::Itertools;
 use optd_core::{
@@ -22,6 +22,7 @@ use optd_core::{
 };
 use optd_gungnir::stats::hyperloglog::{self, HyperLogLog};
 use optd_gungnir::stats::tdigest::{self, TDigest};
+use optd_gungnir::utils::arith_encoder;
 use serde::{Deserialize, Serialize};
 
 fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
@@ -181,6 +182,7 @@ impl DataFusionPerTableStats {
                 | DataType::UInt32
                 | DataType::Float32
                 | DataType::Float64
+                | DataType::Utf8
         )
     }
 
@@ -222,6 +224,10 @@ impl DataFusionPerTableStats {
             val as f64
         }
 
+        fn str_to_f64(string: &str) -> f64 {
+            arith_encoder::encode(string)
+        }
+
         match col_type {
             DataType::Boolean => {
                 generate_stats_for_col!({ col, distr, hll, BooleanArray, to_f64_safe })
@@ -255,6 +261,9 @@ impl DataFusionPerTableStats {
             }
             DataType::Decimal128(_, _) => {
                 generate_stats_for_col!({ col, distr, hll, Decimal128Array, i128_to_f64 })
+            }
+            DataType::Utf8 => {
+                generate_stats_for_col!({ col, distr, hll, StringArray, str_to_f64 })
             }
             _ => unreachable!(),
         }
@@ -583,18 +592,18 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                             });
 
                             if let Some(Some(column_stats)) = column_stats {
-                                column_stats.ndistinct
+                                column_stats.ndistinct as f64
                             } else {
                                 // The column type is not supported or stats are missing.
-                                DEFAULT_N_DISTINCT
+                                DEFAULT_N_DISTINCT as f64
                             }
                         }
-                        ColumnRef::Derived => DEFAULT_N_DISTINCT,
+                        ColumnRef::Derived => DEFAULT_N_DISTINCT as f64,
                         _ => panic!(
                             "GROUP BY base table column ref must either be derived or base table"
                         ),
                     })
-                    .product::<u64>() as f64
+                    .product()
             }
         } else {
             (child_row_cnt * DEFAULT_UNK_SEL).max(1.0)
