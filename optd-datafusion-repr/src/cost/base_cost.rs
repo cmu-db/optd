@@ -225,7 +225,9 @@ impl DataFusionPerTableStats {
         }
 
         fn str_to_f64(string: &str) -> f64 {
-            arith_encoder::encode(string)
+            let encoding = arith_encoder::encode(string);
+            println!("string={}, encoding={}", string, encoding);
+            encoding
         }
 
         match col_type {
