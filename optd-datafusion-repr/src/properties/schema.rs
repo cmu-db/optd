@@ -81,9 +81,16 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
                     bincode::deserialize(data.as_ref()).unwrap();
                 empty_relation_data.schema
             }
-            OptRelNodeTyp::ColumnRef => Schema {
-                fields: vec![Field::placeholder()],
-            },
+            OptRelNodeTyp::ColumnRef => {
+                let data_typ = ConstantType::get_data_type_from_value(&data.unwrap());
+                Schema {
+                    fields: vec![Field {
+                        name: DEFAULT_NAME.to_string(),
+                        typ: data_typ,
+                        nullable: true,
+                    }],
+                }
+            }
             OptRelNodeTyp::List => {
                 let mut fields = vec![];
                 for child in children {
