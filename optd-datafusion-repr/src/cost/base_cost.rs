@@ -47,7 +47,7 @@ pub type BaseTableStats<M, D> = HashMap<String, PerTableStats<M, D>>;
 
 // The "standard" concrete types that optd currently uses
 // All of optd (except unit tests) must use the same types
-pub type DataFusionMostCommonValues = MockMostCommonValues;
+pub type DataFusionMostCommonValues = Counter<Value>;
 pub type DataFusionDistribution = TDigest;
 pub type DataFusionBaseTableStats =
     BaseTableStats<DataFusionMostCommonValues, DataFusionDistribution>;
@@ -58,41 +58,6 @@ pub type DataFusionPerColumnStats =
 
 pub struct OptCostModel<M: MostCommonValues, D: Distribution> {
     per_table_stats_map: BaseTableStats<M, D>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct MockMostCommonValues {
-    mcvs: HashMap<Value, f64>,
-}
-
-impl MockMostCommonValues {
-    pub fn empty() -> Self {
-        MockMostCommonValues {
-            mcvs: HashMap::new(),
-        }
-    }
-}
-
-impl MostCommonValues for MockMostCommonValues {
-    fn freq(&self, value: &Value) -> Option<f64> {
-        self.mcvs.get(value).copied()
-    }
-
-    fn total_freq(&self) -> f64 {
-        self.mcvs.values().sum()
-    }
-
-    fn freq_over_pred(&self, pred: Box<dyn Fn(&Value) -> bool>) -> f64 {
-        self.mcvs
-            .iter()
-            .filter(|(val, _)| pred(val))
-            .map(|(_, freq)| freq)
-            .sum()
-    }
-
-    fn cnt(&self) -> usize {
-        self.mcvs.len()
-    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -124,7 +89,7 @@ impl ByteSerializable for F64Wrap {
     }
 }
 
-enum MG<'a> {
+enum MG {
     Boolean(MisraGries<bool>),
     Int8(MisraGries<i8>),
     Int16(MisraGries<i16>),
@@ -135,8 +100,7 @@ enum MG<'a> {
     Float32(MisraGries<F64Wrap>),
     Float64(MisraGries<F64Wrap>),
     Date32(MisraGries<i32>),
-    Decimal128(MisraGries<i128>),
-    Utf8(MisraGries<&'a str>),
+    Utf8(MisraGries<String>),
 }
 
 enum Cnt {
@@ -150,8 +114,7 @@ enum Cnt {
     Float32(Counter<F64Wrap>),
     Float64(Counter<F64Wrap>),
     Date32(Counter<i32>),
-    Decimal128(Counter<i128>),
-    //Utf8(Counter<&str>),
+    Utf8(Counter<String>),
 }
 
 impl DataFusionPerTableStats {
@@ -171,7 +134,7 @@ impl DataFusionPerTableStats {
         let mut hlls = vec![HyperLogLog::new(hyperloglog::DEFAULT_PRECISION); col_cnt];
         let mut mg = Vec::<Option<MG>>::with_capacity(col_cnt);
         for col_type in &col_types {
-            let elem = match col_type {
+            let mg_elem = match col_type {
                 DataType::Boolean => Some(MG::Boolean(MisraGries::new(DEFAULT_K_TO_TRACK))),
                 DataType::Int8 => Some(MG::Int8(MisraGries::new(DEFAULT_K_TO_TRACK))),
                 DataType::Int16 => Some(MG::Int16(MisraGries::new(DEFAULT_K_TO_TRACK))),
@@ -185,7 +148,7 @@ impl DataFusionPerTableStats {
                 DataType::Utf8 => Some(MG::Utf8(MisraGries::new(DEFAULT_K_TO_TRACK))),
                 _ => None,
             };
-            mg.push(elem)
+            mg.push(mg_elem);
         }
 
         let mut null_cnt = vec![0; col_cnt];
@@ -212,7 +175,108 @@ impl DataFusionPerTableStats {
             }
         }
 
-        /*let mut cnt = Vec::<Option<Cnt>>::with_capacity(col_cnt);
+        let mut cnt = Vec::<Option<Cnt>>::with_capacity(col_cnt);
+        for (idx, col_type) in col_types.iter().enumerate() {
+            let elem = match col_type {
+                DataType::Boolean => match &mg[idx] {
+                    Some(MG::Boolean(mg)) => {
+                        let bla: Vec<bool> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
+                        Some(Cnt::Boolean(Counter::new(&bla)))
+                    }
+                    _ => unreachable!(),
+                },
+
+                DataType::Int8 => match &mg[idx] {
+                    Some(MG::Int8(mg)) => {
+                        let bla: Vec<i8> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
+                        Some(Cnt::Int8(Counter::new(&bla)))
+                    }
+                    _ => unreachable!(),
+                },
+
+                DataType::Int16 => match &mg[idx] {
+                    Some(MG::Int16(mg)) => {
+                        let bla: Vec<i16> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
+                        Some(Cnt::Int16(Counter::new(&bla)))
+                    }
+                    _ => unreachable!(),
+                },
+
+                DataType::Int32 => match &mg[idx] {
+                    Some(MG::Int32(mg)) => {
+                        let bla: Vec<i32> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
+                        Some(Cnt::Int32(Counter::new(&bla)))
+                    }
+                    _ => unreachable!(),
+                },
+
+                DataType::UInt8 => match &mg[idx] {
+                    Some(MG::UInt8(mg)) => {
+                        let bla: Vec<u8> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
+                        Some(Cnt::UInt8(Counter::new(&bla)))
+                    }
+                    _ => unreachable!(),
+                },
+
+                DataType::UInt16 => match &mg[idx] {
+                    Some(MG::UInt16(mg)) => {
+                        let bla: Vec<u16> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
+                        Some(Cnt::UInt16(Counter::new(&bla)))
+                    }
+                    _ => unreachable!(),
+                },
+
+                DataType::UInt32 => match &mg[idx] {
+                    Some(MG::UInt32(mg)) => {
+                        let bla: Vec<u32> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
+                        Some(Cnt::UInt32(Counter::new(&bla)))
+                    }
+                    _ => unreachable!(),
+                },
+
+                DataType::Float32 => match &mg[idx] {
+                    Some(MG::Float32(mg)) => {
+                        let bla: Vec<F64Wrap> =
+                            mg.most_frequent_keys().iter().map(|&&x| x).collect();
+                        Some(Cnt::Float32(Counter::new(&bla)))
+                    }
+                    _ => unreachable!(),
+                },
+
+                DataType::Float64 => match &mg[idx] {
+                    Some(MG::Float64(mg)) => {
+                        let bla: Vec<F64Wrap> =
+                            mg.most_frequent_keys().iter().map(|&&x| x).collect();
+                        Some(Cnt::Float64(Counter::new(&bla)))
+                    }
+                    _ => unreachable!(),
+                },
+
+                DataType::Date32 => match &mg[idx] {
+                    Some(MG::Date32(mg)) => {
+                        let bla: Vec<i32> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
+                        Some(Cnt::Date32(Counter::new(&bla)))
+                    }
+                    _ => unreachable!(),
+                },
+
+                DataType::Utf8 => match &mg[idx] {
+                    Some(MG::Utf8(mg)) => {
+                        let bla: Vec<String> = mg
+                            .most_frequent_keys()
+                            .into_iter()
+                            .map(|s| s.clone())
+                            .collect();
+                        Some(Cnt::Utf8(Counter::new(&bla)))
+                    }
+                    _ => unreachable!(),
+                },
+                _ => None,
+            };
+
+            cnt.push(elem);
+        }
+
         let mut distr = col_types
             .iter()
             .map(|col_type| {
@@ -222,13 +286,27 @@ impl DataFusionPerTableStats {
                     None
                 }
             })
-            .collect_vec();*/
+            .collect_vec();
+
+        // TODO(Alexis): Second scan here.
 
         let mut per_column_stats_vec = Vec::with_capacity(col_cnt);
-        /*for i in 0..col_cnt {
+        for i in 0..col_cnt {
             per_column_stats_vec.push(if Self::is_type_supported(&col_types[i]) {
                 Some(PerColumnStats::new(
-                    mcvs[i].take().unwrap(),
+                    match cnt[i].take().unwrap() {
+                        Cnt::Boolean(_) => todo!(),
+                        Cnt::Int8(_) => todo!(),
+                        Cnt::Int16(_) => todo!(),
+                        Cnt::Int32(_) => todo!(),
+                        Cnt::UInt8(_) => todo!(),
+                        Cnt::UInt16(_) => todo!(),
+                        Cnt::UInt32(_) => todo!(),
+                        Cnt::Float32(_) => todo!(),
+                        Cnt::Float64(_) => todo!(),
+                        Cnt::Date32(_) => todo!(),
+                        Cnt::Utf8(_) => todo!(),
+                    },
                     hlls[i].n_distinct(),
                     null_cnt[i] as f64 / row_cnt as f64,
                     distr[i].take().unwrap(),
@@ -236,7 +314,7 @@ impl DataFusionPerTableStats {
             } else {
                 None
             });
-        }*/
+        }
 
         Ok(Self {
             row_cnt,
@@ -261,10 +339,10 @@ impl DataFusionPerTableStats {
     }
 
     /// Generate partial statistics for a column.
-    fn generate_partial_stats_for_column<'a>(
-        col: &'a Arc<dyn Array>,
+    fn generate_partial_stats_for_column(
+        col: &Arc<dyn Array>,
         col_type: &DataType,
-        mg: &mut MG<'a>,
+        mg: &mut MG,
         hll: &mut HyperLogLog,
     ) {
         macro_rules! generate_partial_stats_for_col {
@@ -342,14 +420,19 @@ impl DataFusionPerTableStats {
                 MG::Date32(mg) => generate_partial_stats_for_col!({ col, mg, hll, Date32Array }),
                 _ => unreachable!(),
             },
-            DataType::Decimal128(_, _) => match mg {
-                MG::Decimal128(mg) => {
-                    generate_partial_stats_for_col!({ col, mg, hll, Decimal128Array })
-                }
-                _ => unreachable!(),
-            },
+         
             DataType::Utf8 => match mg {
-                MG::Utf8(mg) => generate_partial_stats_for_col!({ col, mg, hll, StringArray }),
+                MG::Utf8(mg) => {
+                    let array = col.as_any().downcast_ref::<StringArray>().unwrap();
+                    let values = array
+                        .iter()
+                        .filter_map(|x| x)
+                        .map(|x| x.to_string())
+                        .collect::<Vec<_>>();
+
+                    mg.aggregate(&values);
+                    hll.aggregate(&values);
+                }
                 _ => unreachable!(),
             },
             _ => unreachable!(),
