@@ -456,10 +456,7 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                 let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
                 let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
                     let column_refs = optimizer
-                        .get_property_by_group::<ColumnRefPropertyBuilder>(
-                            context.group_id,
-                            1,
-                        );
+                        .get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
                     let expr_group_id = context.children_group_ids[1];
                     let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
                     // there may be more than one expression tree in a group (you can see this trivially as you can just swap the order of two subtrees for commutative operators)
@@ -481,10 +478,7 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                 let (_, compute_cost, _) = Self::cost_tuple(&children[2]);
                 let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
                     let column_refs = optimizer
-                        .get_property_by_group::<ColumnRefPropertyBuilder>(
-                            context.group_id,
-                            1,
-                        );
+                        .get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
                     let expr_group_id = context.children_group_ids[2];
                     let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
                     // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
@@ -515,10 +509,7 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                 let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
                 let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
                     let column_refs = optimizer
-                        .get_property_by_group::<ColumnRefPropertyBuilder>(
-                            context.group_id,
-                            1,
-                        );
+                        .get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
                     let left_keys_group_id = context.children_group_ids[2];
                     let right_keys_group_id = context.children_group_ids[3];
                     let left_keys_list =
@@ -747,11 +738,14 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     .expect("we already checked that the type is ColumnRef");
                 let left_col_ref = &column_refs[left_col_ref_expr.index()];
                 let right_col_ref = &column_refs[right_col_ref_expr.index()];
-                let is_same_table = if let (ColumnRef::BaseTableColumnRef {
-                    table: left_table, ..
-                }, ColumnRef::BaseTableColumnRef {
-                    table: right_table, ..
-                }) = (left_col_ref, right_col_ref)
+                let is_same_table = if let (
+                    ColumnRef::BaseTableColumnRef {
+                        table: left_table, ..
+                    },
+                    ColumnRef::BaseTableColumnRef {
+                        table: right_table, ..
+                    },
+                ) = (left_col_ref, right_col_ref)
                 {
                     left_table == right_table
                 } else {
