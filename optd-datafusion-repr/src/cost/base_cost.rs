@@ -466,11 +466,8 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                             let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
                             // there may be more than one expression tree in a group (you can see this trivially as you can just swap the order of two subtrees for commutative operators)
                             // however, we just take an arbitrary expression tree from the group to compute selectivity
-                            if let Some(expr_tree) = expr_trees.first() {
-                                self.get_filter_selectivity(Arc::clone(expr_tree), &column_refs)
-                            } else {
-                                panic!("encountered a PhysicalFilter without an expression")
-                            }
+                            let expr_tree = expr_trees.first().expect("expression missing");
+                            self.get_filter_selectivity(expr_tree.clone(), &column_refs)
                         } else {
                             DEFAULT_UNK_SEL
                         }
@@ -499,17 +496,14 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                             let expr_group_id = context.children_group_ids[2];
                             let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
                             // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
-                            if let Some(expr_tree) = expr_trees.first() {
-                                self.get_join_selectivity(
-                                    *join_typ,
-                                    Arc::clone(expr_tree),
-                                    &column_refs,
-                                    row_cnt_1,
-                                    row_cnt_2,
-                                )
-                            } else {
-                                panic!("encountered a join without an expression")
-                            }
+                            let expr_tree = expr_trees.first().expect("expression missing");
+                            self.get_join_selectivity_from_expr_tree(
+                                *join_typ,
+                                expr_tree.clone(),
+                                &column_refs,
+                                row_cnt_1,
+                                row_cnt_2,
+                            )
                         } else {
                             DEFAULT_UNK_SEL
                         }
@@ -527,10 +521,38 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                 let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
                 Self::cost(row_cnt, compute_cost * row_cnt, 0.0)
             }
-            OptRelNodeTyp::PhysicalHashJoin(_) => {
+            OptRelNodeTyp::PhysicalHashJoin(join_typ) => {
                 let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
                 let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
-                let selectivity = DEFAULT_UNK_SEL;
+                let selectivity = match context {
+                    Some(context) => {
+                        if let Some(optimizer) = optimizer {
+                            let column_refs = optimizer
+                                .get_property_by_group::<ColumnRefPropertyBuilder>(
+                                    context.group_id,
+                                    1,
+                                );
+                            let left_keys_group_id = context.children_group_ids[2];
+                            let right_keys_group_id = context.children_group_ids[3];
+                            let left_keys_list = optimizer.get_all_group_bindings(left_keys_group_id, false);
+                            let right_keys_list = optimizer.get_all_group_bindings(right_keys_group_id, false);
+                            // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
+                            let left_keys = left_keys_list.first().expect("left keys missing");
+                            let right_keys = right_keys_list.first().expect("right keys missing");
+                            self.get_join_selectivity_from_keys(
+                                *join_typ,
+                                ExprList::from_rel_node(left_keys.clone()).expect("left_keys should be an ExprList"),
+                                ExprList::from_rel_node(right_keys.clone()).expect("right_keys should be an ExprList"),
+                                &column_refs,
+                                row_cnt_1,
+                                row_cnt_2,
+                            )
+                        } else {
+                            DEFAULT_UNK_SEL
+                        }
+                    }
+                    None => DEFAULT_UNK_SEL,
+                };
                 Self::cost(
                     (row_cnt_1 * row_cnt_2 * selectivity).max(1.0),
                     row_cnt_1 * 2.0 + row_cnt_2,
@@ -768,7 +790,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     /// The expr_tree input must be a "mixed expression tree", just like with get_filter_selectivity()
     /// This is a "wrapper" to separate the equality conditions from the filter conditions before calling
     ///   the "main" get_join_selectivity_core() function.
-    fn get_join_selectivity(
+    fn get_join_selectivity_from_expr_tree(
         &self,
         join_typ: JoinType,
         expr_tree: OptRelNodeRef,
@@ -832,6 +854,16 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 )
             }
         }
+    }
+
+    /// A wrapper to convert the join keys to the format expected by get_join_selectivity_core()
+    fn get_join_selectivity_from_keys(&self, join_typ: JoinType, left_keys: ExprList, right_keys: ExprList, column_refs: &GroupColumnRefs, left_row_cnt: f64, right_row_cnt: f64) -> f64 {
+        assert!(left_keys.len() == right_keys.len());
+        // I assume that the keys are already in the right order s.t. the ith key of left_keys corresponds with the ith key of right_keys
+        let on_col_ref_pairs = left_keys.to_vec().into_iter().zip(right_keys.to_vec().into_iter()).map(|(left_key, right_key)| {
+            (ColumnRefExpr::from_rel_node(left_key.into_rel_node()).expect("keys should be ColumnRefExprs"), ColumnRefExpr::from_rel_node(right_key.into_rel_node()).expect("keys should be ColumnRefExprs"))
+        }).collect_vec();
+        self.get_join_selectivity_core(join_typ, on_col_ref_pairs, None, column_refs, left_row_cnt, right_row_cnt)
     }
 
     /// The core logic of join selectivity which assumes we've already separated the expression into the on conditions and the filters
@@ -1950,7 +1982,7 @@ mod tests {
         );
     }
 
-    /// A wrapper around get_join_selectivity that extracts the table row counts from the cost model
+    /// A wrapper around get_join_selectivity_from_expr_tree that extracts the table row counts from the cost model
     fn test_get_join_selectivity(
         cost_model: &TestOptCostModel,
         reverse_tables: bool,
@@ -1961,7 +1993,7 @@ mod tests {
         let table1_row_cnt = cost_model.per_table_stats_map[TABLE1_NAME].row_cnt as f64;
         let table2_row_cnt = cost_model.per_table_stats_map[TABLE2_NAME].row_cnt as f64;
         if !reverse_tables {
-            cost_model.get_join_selectivity(
+            cost_model.get_join_selectivity_from_expr_tree(
                 join_typ,
                 expr_tree,
                 column_refs,
@@ -1969,7 +2001,7 @@ mod tests {
                 table2_row_cnt,
             )
         } else {
-            cost_model.get_join_selectivity(
+            cost_model.get_join_selectivity_from_expr_tree(
                 join_typ,
                 expr_tree,
                 column_refs,
@@ -1983,7 +2015,7 @@ mod tests {
     fn test_joinsel_inner_const() {
         let cost_model = create_one_column_cost_model(get_empty_per_col_stats());
         assert_approx_eq::assert_approx_eq!(
-            cost_model.get_join_selectivity(
+            cost_model.get_join_selectivity_from_expr_tree(
                 JoinType::Inner,
                 cnst(Value::Bool(true)),
                 &vec![],
@@ -1993,7 +2025,7 @@ mod tests {
             1.0
         );
         assert_approx_eq::assert_approx_eq!(
-            cost_model.get_join_selectivity(
+            cost_model.get_join_selectivity_from_expr_tree(
                 JoinType::Inner,
                 cnst(Value::Bool(false)),
                 &vec![],
