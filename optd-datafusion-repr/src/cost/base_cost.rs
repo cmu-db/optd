@@ -94,7 +94,7 @@ impl MostCommonValues for MockMostCommonValues {
 #[derive(Serialize, Deserialize)]
 pub struct PerTableStats<M: MostCommonValues, D: Distribution> {
     row_cnt: usize,
-    per_column_stats_map: HashMap<usize, PerColumnStats<M, D>>,
+    per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>,
 }
 
 impl DataFusionPerTableStats {
@@ -150,20 +150,22 @@ impl DataFusionPerTableStats {
         }
 
         // Assemble the per-column stats.
-        let mut per_column_stats_map = HashMap::with_capacity(col_cnt);
+        let mut per_column_stats_vec = Vec::with_capacity(col_cnt);
         for i in 0..col_cnt {
-            if Self::is_type_supported(&col_types[i]) {
-                per_column_stats_map.insert(i, PerColumnStats::new(
+            per_column_stats_vec.push(if Self::is_type_supported(&col_types[i]) {
+                Some(PerColumnStats::new(
                     mcvs[i].take().unwrap(),
                     hlls[i].n_distinct(),
                     null_cnt[i] as f64 / row_cnt as f64,
                     distr[i].take().unwrap(),
-                ));
-            }
+                ))
+            } else {
+                None
+            });
         }
         Ok(Self {
             row_cnt,
-            per_column_stats_map,
+            per_column_stats_vec,
         })
     }
 
@@ -733,12 +735,16 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         join_on_selectivity * join_filter_selectivity
     }
 
-    fn get_per_col_stats(&self, col_ref: &ColumnRef) -> Option<&PerColumnStats<M, D>> {
+    fn get_per_column_stats_from_col_ref(&self, col_ref: &ColumnRef) -> Option<&PerColumnStats<M, D>> {
         if let ColumnRef::BaseTableColumnRef { table, col_idx } = col_ref {
-            self.per_table_stats_map.get(table).and_then(|per_table_stats| per_table_stats.per_column_stats_map.get(col_idx))
+            self.get_per_column_stats(table, *col_idx)
         } else {
             None
         }
+    }
+
+    fn get_per_column_stats(&self, table: &str, col_idx: usize) -> Option<&PerColumnStats<M, D>> {
+        self.per_table_stats_map.get(table).and_then(|per_table_stats| per_table_stats.per_column_stats_vec[col_idx].as_ref())
     }
 
     fn get_join_on_selectivity(
@@ -750,8 +756,8 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         // multiply the selectivities of all individual conditions together
         on_col_ref_pairs.into_iter().map(|on_col_ref_pair| {
             // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
-            let ndistincts = vec![on_col_ref_pair.0, on_col_ref_pair.1].into_iter().map(|on_col_ref| {
-                match self.get_per_col_stats(&column_refs[on_col_ref.index()]) {
+            let ndistincts = vec![on_col_ref_pair.0, on_col_ref_pair.1].into_iter().map(|on_col_ref_expr| {
+                match self.get_per_column_stats_from_col_ref(&column_refs[on_col_ref_expr.index()]) {
                     Some(per_col_stats) => per_col_stats.ndistinct,
                     None => DEFAULT_NUM_DISTINCT,
                 }
@@ -936,31 +942,21 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         value: &Value,
         is_eq: bool,
     ) -> f64 {
-        if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
-            if let Some(per_column_stats) = per_table_stats.per_column_stats_map.get(&col_idx)
-            {
-                let eq_freq = if let Some(freq) = per_column_stats.mcvs.freq(value) {
-                    freq
-                } else {
-                    let non_mcv_freq = 1.0 - per_column_stats.mcvs.total_freq();
-                    // always safe because usize is at least as large as i32
-                    let ndistinct_as_usize = per_column_stats.ndistinct as usize;
-                    let non_mcv_cnt = ndistinct_as_usize - per_column_stats.mcvs.cnt();
-                    // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
-                    (non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64)
-                };
-                if is_eq {
-                    eq_freq
-                } else {
-                    1.0 - eq_freq - per_column_stats.null_frac
-                }
+        if let Some(per_column_stats) = self.get_per_column_stats(table, col_idx) {
+            let eq_freq = if let Some(freq) = per_column_stats.mcvs.freq(value) {
+                freq
             } else {
-                #[allow(clippy::collapsible_else_if)]
-                if is_eq {
-                    DEFAULT_EQ_SEL
-                } else {
-                    1.0 - DEFAULT_EQ_SEL
-                }
+                let non_mcv_freq = 1.0 - per_column_stats.mcvs.total_freq();
+                // always safe because usize is at least as large as i32
+                let ndistinct_as_usize = per_column_stats.ndistinct as usize;
+                let non_mcv_cnt = ndistinct_as_usize - per_column_stats.mcvs.cnt();
+                // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
+                (non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64)
+            };
+            if is_eq {
+                eq_freq
+            } else {
+                1.0 - eq_freq - per_column_stats.null_frac
             }
         } else {
             #[allow(clippy::collapsible_else_if)]
@@ -986,46 +982,41 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         is_col_lt_val: bool,
         is_col_eq_val: bool,
     ) -> f64 {
-        if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
-            if let Some(per_column_stats) = per_table_stats.per_column_stats_map.get(&col_idx)
-            {
-                // because distr does not include the values in MCVs, we need to compute the CDFs there as well
-                // because nulls return false in any comparison, they are never included when computing range selectivity
-                let distr_leq_freq = per_column_stats.distr.cdf(value);
-                let value_clone = value.clone(); // clone the value so that we can move it into the closure to avoid lifetime issues
-                                                 // TODO: in a future PR, figure out how to make Values comparable. rn I just hardcoded as_i32() to work around this
-                let pred = Box::new(move |val: &Value| val.as_i32() <= value_clone.as_i32());
-                let mcvs_leq_freq = per_column_stats.mcvs.freq_over_pred(pred);
-                let total_leq_freq = distr_leq_freq + mcvs_leq_freq;
+        if let Some(per_column_stats) = self.get_per_column_stats(table, col_idx) {
+            // because distr does not include the values in MCVs, we need to compute the CDFs there as well
+            // because nulls return false in any comparison, they are never included when computing range selectivity
+            let distr_leq_freq = per_column_stats.distr.cdf(value);
+            let value_clone = value.clone(); // clone the value so that we can move it into the closure to avoid lifetime issues
+                                                // TODO: in a future PR, figure out how to make Values comparable. rn I just hardcoded as_i32() to work around this
+            let pred = Box::new(move |val: &Value| val.as_i32() <= value_clone.as_i32());
+            let mcvs_leq_freq = per_column_stats.mcvs.freq_over_pred(pred);
+            let total_leq_freq = distr_leq_freq + mcvs_leq_freq;
 
-                // depending on whether value is in mcvs or not, we use different logic to turn total_leq_cdf into total_lt_cdf
-                // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
-                let total_lt_freq = total_leq_freq
-                    - self.get_column_equality_selectivity(table, col_idx, value, true);
+            // depending on whether value is in mcvs or not, we use different logic to turn total_leq_cdf into total_lt_cdf
+            // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
+            let total_lt_freq = total_leq_freq
+                - self.get_column_equality_selectivity(table, col_idx, value, true);
 
-                // use either total_leq_freq or total_lt_freq to get the selectivity
-                if is_col_lt_val {
-                    if is_col_eq_val {
-                        // this branch means <=
-                        total_leq_freq
-                    } else {
-                        // this branch means <
-                        total_lt_freq
-                    }
+            // use either total_leq_freq or total_lt_freq to get the selectivity
+            if is_col_lt_val {
+                if is_col_eq_val {
+                    // this branch means <=
+                    total_leq_freq
                 } else {
-                    // clippy wants me to collapse this into an else if, but keeping two nested if else statements is clearer
-                    #[allow(clippy::collapsible_else_if)]
-                    if is_col_eq_val {
-                        // this branch means >=, which is 1 - < - null_frac
-                        // we need to subtract null_frac since that isn't included in >= either
-                        1.0 - total_lt_freq - per_column_stats.null_frac
-                    } else {
-                        // this branch means >. same logic as above
-                        1.0 - total_leq_freq - per_column_stats.null_frac
-                    }
+                    // this branch means <
+                    total_lt_freq
                 }
             } else {
-                DEFAULT_INEQ_SEL
+                // clippy wants me to collapse this into an else if, but keeping two nested if else statements is clearer
+                #[allow(clippy::collapsible_else_if)]
+                if is_col_eq_val {
+                    // this branch means >=, which is 1 - < - null_frac
+                    // we need to subtract null_frac since that isn't included in >= either
+                    1.0 - total_lt_freq - per_column_stats.null_frac
+                } else {
+                    // this branch means >. same logic as above
+                    1.0 - total_leq_freq - per_column_stats.null_frac
+                }
             }
         } else {
             DEFAULT_INEQ_SEL
@@ -1057,10 +1048,10 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
 }
 
 impl<M: MostCommonValues, D: Distribution> PerTableStats<M, D> {
-    pub fn new(row_cnt: usize, per_column_stats_map: HashMap<usize, PerColumnStats<M, D>>) -> Self {
+    pub fn new(row_cnt: usize, per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>) -> Self {
         Self {
             row_cnt,
-            per_column_stats_map,
+            per_column_stats_vec,
         }
     }
 }
@@ -1152,7 +1143,7 @@ mod tests {
         OptCostModel::new(
             vec![(
                 String::from(TABLE1_NAME),
-                PerTableStats::new(100, vec![(0, per_column_stats)].into_iter().collect()),
+                PerTableStats::new(100, vec![Some(per_column_stats)]),
             )]
             .into_iter()
             .collect(),
@@ -1167,7 +1158,7 @@ mod tests {
         OptCostModel::new(
             vec![(
                 String::from(TABLE1_NAME),
-                PerTableStats::new(100, vec![(0, per_column_stats0), (1, per_column_stats1)].into_iter().collect()),
+                PerTableStats::new(100, vec![Some(per_column_stats0), Some(per_column_stats1)]),
             )]
             .into_iter()
             .collect(),
