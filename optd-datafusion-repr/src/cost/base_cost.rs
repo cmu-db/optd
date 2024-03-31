@@ -1941,9 +1941,10 @@ mod tests {
 
     // We don't test joinsel or with oncond because if there is an oncond (on condition), the top-level operator must be an AND
 
+    /// Unique oncond means an oncondition on columns which are unique in both tables
     #[test]
-    fn test_joinsel_outer_oncond() {
-        let cost_model = create_two_table_cost_model(TestPerColumnStats::new(
+    fn test_joinsel_outer_unique_oncond() {
+        let cost_model = create_two_table_cost_model_custom_row_cnts(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             5,
             0.0,
@@ -1953,7 +1954,7 @@ mod tests {
             4,
             0.0,
             TestDistribution::empty(),
-        ));
+        ), 5, 4);
         // since we're talking about left and right outer joins, the order actually matters now
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
@@ -1964,9 +1965,125 @@ mod tests {
             table: String::from(TABLE2_NAME),
             col_idx: 0,
         }];
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree.clone(), &column_refs), DEFAULT_EQ_SEL);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree_rev.clone(), &column_refs), DEFAULT_EQ_SEL);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree_rev.clone(), &column_refs), DEFAULT_EQ_SEL);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree.clone(), &column_refs), DEFAULT_EQ_SEL);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree.clone(), &column_refs), 0.25);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree_rev.clone(), &column_refs), 0.25);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree_rev.clone(), &column_refs), 0.2);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree.clone(), &column_refs), 0.2);
+    }
+
+    /// Non-unique oncond means the column is not unique in either table
+    /// Inner always >= row count means that the inner join result is >= the row count of both tables
+    #[test]
+    fn test_joinsel_outer_nonunique_oncond_inner_always_geq_rowcnt() {
+        let cost_model = create_two_table_cost_model_custom_row_cnts(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            5,
+            0.0,
+            TestDistribution::empty(),
+        ), TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            4,
+            0.0,
+            TestDistribution::empty(),
+        ), 10, 8);
+        // since we're talking about left and right outer joins, the order actually matters now
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
+        let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }, ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE2_NAME),
+            col_idx: 0,
+        }];
+        // sanity check the expected inner sel
+        let expected_inner_sel = 0.2;
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree.clone(), &column_refs), expected_inner_sel);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev.clone(), &column_refs), expected_inner_sel);
+        // check the outer sels
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree.clone(), &column_refs), 0.2);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree_rev.clone(), &column_refs), 0.2);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree_rev.clone(), &column_refs), 0.2);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree.clone(), &column_refs), 0.2);
+    }
+
+    /// Non-unique oncond means the column is not unique in either table
+    /// Inner sometimes < row count means that the inner join result < the row count of at least one table.
+    ///   Note that without a join filter, it's impossible to be less than the row count of both tables
+    #[test]
+    fn test_joinsel_outer_nonunique_oncond_inner_sometimes_lt_rowcnt() {
+        let cost_model = create_two_table_cost_model_custom_row_cnts(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            10,
+            0.0,
+            TestDistribution::empty(),
+        ), TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            2,
+            0.0,
+            TestDistribution::empty(),
+        ), 20, 4);
+        // since we're talking about left and right outer joins, the order actually matters now
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
+        let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }, ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE2_NAME),
+            col_idx: 0,
+        }];
+        // sanity check the expected inner sel
+        let expected_inner_sel = 0.1;
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree.clone(), &column_refs), expected_inner_sel);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev.clone(), &column_refs), expected_inner_sel);
+        // check the outer sels
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree.clone(), &column_refs), 0.25);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree_rev.clone(), &column_refs), 0.25);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree_rev.clone(), &column_refs), 0.1);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree.clone(), &column_refs), 0.1);
+    }
+
+    /// Unique oncond means an oncondition on columns which are unique in both tables
+    /// Filter means we're adding a join filter
+    /// Inner sometimes < row count means that the inner join result < the row count of at least one table.
+    #[test]
+    fn test_joinsel_outer_unique_oncond_filter_inner_sometimes_lt_rowcnt() {
+        let cost_model = create_two_table_cost_model_custom_row_cnts(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            50,
+            0.0,
+            TestDistribution::new(vec![
+                (Value::Int32(128), 0.4)
+            ]),
+        ), TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            4,
+            0.0,
+            TestDistribution::empty(),
+        ), 50, 4);
+        // since we're talking about left and right outer joins, the order actually matters now
+        let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
+        let eq1and0 = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
+        let filter = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(128)));
+        let expr_tree = log_op(LogOpType::And, vec![eq0and1, filter.clone()]);
+        // inner rev means its the inner expr (the eq op) whose children are being reversed, as opposed to the and op
+        let expr_tree_inner_rev = log_op(LogOpType::And, vec![eq1and0, filter.clone()]);
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }, ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE2_NAME),
+            col_idx: 0,
+        }];
+        // sanity check the expected inner sel
+        let expected_inner_sel = 0.008;
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree.clone(), &column_refs), expected_inner_sel);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_inner_rev.clone(), &column_refs), expected_inner_sel);
+        // check the outer sels
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree.clone(), &column_refs), 0.25);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree_inner_rev.clone(), &column_refs), 0.25);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree_inner_rev.clone(), &column_refs), 0.02);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree.clone(), &column_refs), 0.02);
     }
 }
