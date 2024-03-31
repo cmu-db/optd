@@ -14,7 +14,6 @@ use datafusion::arrow::array::{
     Int32Array, Int8Array, RecordBatch, RecordBatchIterator, RecordBatchReader, UInt16Array,
     UInt32Array, UInt8Array,
 };
-use datafusion_expr::col;
 use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
@@ -763,20 +762,25 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         on_col_ref_pairs: Vec<(ColumnRefExpr, ColumnRefExpr)>,
         column_refs: &GroupColumnRefs
     ) -> f64 {
-        // multiply the selectivities of all individual conditions together
-        on_col_ref_pairs.into_iter().map(|on_col_ref_pair| {
-            // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
-            let ndistincts = vec![on_col_ref_pair.0, on_col_ref_pair.1].into_iter().map(|on_col_ref_expr| {
-                match self.get_per_column_stats_from_col_ref(&column_refs[on_col_ref_expr.index()]) {
-                    Some(per_col_stats) => per_col_stats.ndistinct,
-                    None => DEFAULT_NUM_DISTINCT,
-                }
-            });
-            // using reduce(f64::min) is the idiomatic workaround to the fact that f64 does not implement Ord due to NaN
-            let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_nodes.len() == 2");
-            assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
-            selectivity
-        }).product()
+        match join_typ {
+            JoinType::Inner => {
+                // multiply the selectivities of all individual conditions together
+                on_col_ref_pairs.into_iter().map(|on_col_ref_pair| {
+                    // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
+                    let ndistincts = vec![on_col_ref_pair.0, on_col_ref_pair.1].into_iter().map(|on_col_ref_expr| {
+                        match self.get_per_column_stats_from_col_ref(&column_refs[on_col_ref_expr.index()]) {
+                            Some(per_col_stats) => per_col_stats.ndistinct,
+                            None => DEFAULT_NUM_DISTINCT,
+                        }
+                    });
+                    // using reduce(f64::min) is the idiomatic workaround to the fact that f64 does not implement Ord due to NaN
+                    let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_nodes.len() == 2");
+                    assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
+                    selectivity
+                }).product()
+            }
+            _ => unimplemented!(),
+        }
     }
 
     /// Comparison operators are the base case for recursion in get_filter_selectivity()
