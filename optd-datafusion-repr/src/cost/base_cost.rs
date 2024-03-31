@@ -94,7 +94,7 @@ impl MostCommonValues for MockMostCommonValues {
 #[derive(Serialize, Deserialize)]
 pub struct PerTableStats<M: MostCommonValues, D: Distribution> {
     row_cnt: usize,
-    per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>,
+    per_column_stats_map: HashMap<usize, PerColumnStats<M, D>>,
 }
 
 impl DataFusionPerTableStats {
@@ -150,22 +150,20 @@ impl DataFusionPerTableStats {
         }
 
         // Assemble the per-column stats.
-        let mut per_column_stats_vec = Vec::with_capacity(col_cnt);
+        let mut per_column_stats_map = HashMap::with_capacity(col_cnt);
         for i in 0..col_cnt {
-            per_column_stats_vec.push(if Self::is_type_supported(&col_types[i]) {
-                Some(PerColumnStats::new(
+            if Self::is_type_supported(&col_types[i]) {
+                per_column_stats_map.insert(i, PerColumnStats::new(
                     mcvs[i].take().unwrap(),
                     hlls[i].n_distinct(),
                     null_cnt[i] as f64 / row_cnt as f64,
                     distr[i].take().unwrap(),
-                ))
-            } else {
-                None
-            });
+                ));
+            }
         }
         Ok(Self {
             row_cnt,
-            per_column_stats_vec,
+            per_column_stats_map,
         })
     }
 
@@ -640,12 +638,15 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     }
 
     /// The expr_tree input must be a "mixed expression tree", just like with get_filter_selectivity()
-    fn get_join_selectivity(
+    /// The "wrapper" is here to separate the equality conditions from the filter conditions before calling
+    ///   the "main" get_join_selectivity() function.
+    fn get_join_selectivity_wrapper(
         &self,
         join_typ: JoinType,
         expr_tree: OptRelNodeRef,
         column_refs: &GroupColumnRefs,
     ) -> f64 {
+        println!("get_join_selectivity(): called on expr_tree={}", expr_tree);
         assert!(expr_tree.typ.is_expression());
         match &expr_tree.typ {
             OptRelNodeTyp::Constant(_) => Self::get_constant_selectivity(expr_tree),
@@ -690,6 +691,55 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 "all expression OptRelNodeTyp were enumerated. this should be unreachable"
             ),
         }
+    }
+
+    fn get_join_selectivity(
+        &self,
+        join_typ: JoinType,
+        on_col_ref_pairs: Vec<(ColumnRefExpr, ColumnRefExpr)>,
+        filter_expr_tree: Option<OptRelNodeRef>,
+        column_refs: &GroupColumnRefs,
+    ) -> f64 {
+        let join_on_selectivity = self.get_join_on_selectivity(join_typ, on_col_ref_pairs, column_refs);
+        // Currently, there is no difference in how we handle a join filter and a select filter, so we use the same function
+        // One difference (that we *don't* care about right now) is that join filters can contain expressions from multiple
+        //   different tables. Currently, this doesn't affect the get_filter_selectivity() function, but this may change in
+        //   the future
+        let join_filter_selectivity = match filter_expr_tree {
+            Some(filter_expr_tree) => self.get_filter_selectivity(filter_expr_tree, column_refs),
+            None => 1.0,
+        };
+        join_on_selectivity * join_filter_selectivity
+    }
+
+    fn get_per_col_stats(&self, col_ref: &ColumnRef) -> Option<&PerColumnStats<M, D>> {
+        if let ColumnRef::BaseTableColumnRef { table, col_idx } = col_ref {
+            self.per_table_stats_map.get(table).and_then(|per_table_stats| per_table_stats.per_column_stats_map.get(col_idx))
+        } else {
+            None
+        }
+    }
+
+    fn get_join_on_selectivity(
+        &self,
+        join_typ: JoinType,
+        on_col_ref_pairs: Vec<(ColumnRefExpr, ColumnRefExpr)>,
+        column_refs: &GroupColumnRefs
+    ) -> f64 {
+        // multiply the selectivities of all individual conditions together
+        on_col_ref_pairs.into_iter().map(|on_col_ref_pair| {
+            // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
+            let ndistincts = vec![on_col_ref_pair.0, on_col_ref_pair.1].into_iter().map(|on_col_ref| {
+                match self.get_per_col_stats(&column_refs[on_col_ref.index()]) {
+                    Some(per_col_stats) => per_col_stats.ndistinct,
+                    None => DEFAULT_NUM_DISTINCT,
+                }
+            });
+            // using reduce(f64::min) is the idiomatic workaround to the fact that f64 does not implement Ord due to NaN
+            let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_nodes.len() == 2");
+            assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
+            selectivity
+        }).product()
     }
 
     /// Comparison operators are the base case for recursion in get_filter_selectivity()
@@ -783,65 +833,6 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         }
     }
 
-    /// Comparison operators are the base case for recursion in get_join_selectivity()
-    fn get_join_comp_op_selectivity(
-        &self,
-        join_typ: JoinType,
-        comp_bin_op_typ: BinOpType,
-        left: OptRelNodeRef,
-        right: OptRelNodeRef,
-        column_refs: &GroupColumnRefs,
-    ) -> f64 {
-        assert!(comp_bin_op_typ.is_comparison());
-
-        // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
-        let (col_ref_nodes, _, _) = Self::get_semantic_nodes(left, right);
-
-        // handle the different cases of column nodes
-        if col_ref_nodes.is_empty() {
-            unimplemented!()
-        } else if col_ref_nodes.len() == 1 {
-            unimplemented!()
-        } else if col_ref_nodes.len() == 2 {
-            match join_typ {
-                JoinType::Inner => {
-                    // the statistics objects of the referenced columns
-                    let col_ref_stats_list = col_ref_nodes.iter().map(|col_ref_node| {
-                        let col_ref_idx = col_ref_node.index();
-                        if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
-                            if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
-                                if let Some(Some(per_column_stats)) = per_table_stats.per_column_stats_vec.get(*col_idx)
-                                {
-                                    Some(per_column_stats)
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    });
-                    let ndistincts = col_ref_stats_list.map(|col_ref_stats| {
-                        if let Some(col_ref_stats) = col_ref_stats {
-                            col_ref_stats.ndistinct
-                        } else {
-                            DEFAULT_NUM_DISTINCT
-                        }
-                    });
-                    // using reduce(f64::min) is the idiomatic workaround to the fact that f64 does not implement Ord due to NaN
-                    let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_nodes.len() == 2");
-                    assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
-                    selectivity
-                }
-                _ => unimplemented!()
-            }
-        } else {
-            unreachable!("we could have at most pushed left and right into col_ref_nodes")
-        }
-    }
-
     /// Convert the left and right child nodes of some operation to what they semantically are
     /// This is convenient to avoid repeating the same logic just with "left" and "right" swapped
     fn get_semantic_nodes(left: OptRelNodeRef, right: OptRelNodeRef) -> (Vec<ColumnRefExpr>, Vec<OptRelNodeRef>, bool) {
@@ -925,7 +916,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         is_eq: bool,
     ) -> f64 {
         if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
-            if let Some(Some(per_column_stats)) = per_table_stats.per_column_stats_vec.get(col_idx)
+            if let Some(per_column_stats) = per_table_stats.per_column_stats_map.get(&col_idx)
             {
                 let eq_freq = if let Some(freq) = per_column_stats.mcvs.freq(value) {
                     freq
@@ -975,7 +966,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         is_col_eq_val: bool,
     ) -> f64 {
         if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
-            if let Some(Some(per_column_stats)) = per_table_stats.per_column_stats_vec.get(col_idx)
+            if let Some(per_column_stats) = per_table_stats.per_column_stats_map.get(&col_idx)
             {
                 // because distr does not include the values in MCVs, we need to compute the CDFs there as well
                 // because nulls return false in any comparison, they are never included when computing range selectivity
@@ -1063,10 +1054,10 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
 }
 
 impl<M: MostCommonValues, D: Distribution> PerTableStats<M, D> {
-    pub fn new(row_cnt: usize, per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>) -> Self {
+    pub fn new(row_cnt: usize, per_column_stats_map: HashMap<usize, PerColumnStats<M, D>>) -> Self {
         Self {
             row_cnt,
-            per_column_stats_vec,
+            per_column_stats_map,
         }
     }
 }
