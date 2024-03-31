@@ -597,7 +597,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     .product::<u64>() as f64
             }
         } else {
-            (row_cnt * DEFAULT_UNK_SEL).max(1.0)
+            (child_row_cnt * DEFAULT_UNK_SEL).max(1.0)
         }
     }
 
