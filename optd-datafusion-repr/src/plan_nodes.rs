@@ -39,6 +39,8 @@ pub use sort::{LogicalSort, PhysicalSort};
 
 use crate::properties::schema::{Schema, SchemaPropertyBuilder};
 
+/// OptRelNodeTyp FAQ:
+///   - The define_plan_node!() macro defines what the children of each join node are
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OptRelNodeTyp {
     Placeholder(GroupId),

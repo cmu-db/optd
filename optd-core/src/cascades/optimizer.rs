@@ -317,6 +317,10 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.memo.merge_group(group_a, group_b);
     }
 
+    /// Get the properties of a Cascades group
+    /// P is the type of the property you expect
+    /// idx is the idx of the property you want. The order of properties is defined
+    ///   by the property_builders parameter in CascadesOptimizer::new()
     pub fn get_property_by_group<P: PropertyBuilder<T>>(
         &self,
         group_id: GroupId,
