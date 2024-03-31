@@ -520,7 +520,7 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                 let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
                 Self::cost(row_cnt, compute_cost * row_cnt, 0.0)
             }
-            OptRelNodeTyp::PhysicalHashJoin(join_typ) => {
+            OptRelNodeTyp::PhysicalHashJoin(_) => {
                 let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
                 let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
                 let selectivity = DEFAULT_UNK_SEL;
@@ -797,7 +797,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         left_row_cnt: f64,
         right_row_cnt: f64,
     ) -> f64 {
-        let join_on_selectivity = self.get_join_on_selectivity(on_col_ref_pairs, column_refs);
+        let join_on_selectivity = self.get_join_on_selectivity(&on_col_ref_pairs, column_refs);
         // Currently, there is no difference in how we handle a join filter and a select filter, so we use the same function
         // One difference (that we *don't* care about right now) is that join filters can contain expressions from multiple
         //   different tables. Currently, this doesn't affect the get_filter_selectivity() function, but this may change in
@@ -811,7 +811,11 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             JoinType::Inner => inner_join_selectivity,
             JoinType::LeftOuter => f64::max(inner_join_selectivity, 1.0 / right_row_cnt),
             JoinType::RightOuter => f64::max(inner_join_selectivity, 1.0 / left_row_cnt),
-            _ => unimplemented!()
+            JoinType::Cross => {
+                assert!(on_col_ref_pairs.is_empty(), "Cross joins should not have on columns");
+                join_filter_selectivity
+            },
+            _ => unimplemented!("join_typ={} is not implemented", join_typ)
         }
     }
 
@@ -831,13 +835,13 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     /// Note that the selectivity of the on conditions does not depend on join type. Join type is accounted for separately in get_join_selectivity_core()
     fn get_join_on_selectivity(
         &self,
-        on_col_ref_pairs: Vec<(ColumnRefExpr, ColumnRefExpr)>,
+        on_col_ref_pairs: &Vec<(ColumnRefExpr, ColumnRefExpr)>,
         column_refs: &GroupColumnRefs
     ) -> f64 {
         // multiply the selectivities of all individual conditions together
         on_col_ref_pairs.into_iter().map(|on_col_ref_pair| {
             // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
-            let ndistincts = vec![on_col_ref_pair.0, on_col_ref_pair.1].into_iter().map(|on_col_ref_expr| {
+            let ndistincts = vec![&on_col_ref_pair.0, &on_col_ref_pair.1].into_iter().map(|on_col_ref_expr| {
                 match self.get_per_column_stats_from_col_ref(&column_refs[on_col_ref_expr.index()]) {
                     Some(per_col_stats) => per_col_stats.ndistinct,
                     None => DEFAULT_NUM_DISTINCT,
