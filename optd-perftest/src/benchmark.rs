@@ -37,6 +37,17 @@ impl Benchmark {
         dbname.to_lowercase()
     }
 
+    /// Use this when you need a unique file name. The rules for file names are different from the
+    ///   rules for database names, so this is a different function
+    pub fn get_fname(&self) -> String {
+        match self {
+            Self::Test => String::from("test"),
+            Self::Tpch(tpch_config) => {
+                format!("tpch_sf{}", tpch_config.scale_factor)
+            }
+        }
+    }
+
     /// An ID is just a unique string identifying the benchmark
     /// It's not always used in the same situations as get_dbname(), so it's a separate function
     pub fn get_id(&self) -> String {

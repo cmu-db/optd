@@ -4,12 +4,13 @@
 //! For more details, refer to: https://arxiv.org/pdf/1902.04023.pdf
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
 pub const DEFAULT_COMPRESSION: f64 = 200.0;
 
 /// The TDigest structure for the statistical aggregator to query quantiles.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TDigest {
     /// A sorted array of Centroids, according to their mean.
     centroids: Vec<Centroid>,
@@ -20,7 +21,7 @@ pub struct TDigest {
 }
 
 /// A Centroid is a cluster of aggregated data points.
-#[derive(PartialEq, PartialOrd, Clone)]
+#[derive(PartialEq, PartialOrd, Clone, Serialize, Deserialize)]
 struct Centroid {
     /// Mean of all aggregated points in this cluster.
     mean: f64,

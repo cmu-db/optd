@@ -2753,6 +2753,7 @@ dependencies = [
  "num-traits",
  "ordered-float 4.2.0",
  "pretty-xmlish",
+ "serde",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2807,6 +2808,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "rand 0.8.5",
+ "serde",
 ]
 
 [[package]]

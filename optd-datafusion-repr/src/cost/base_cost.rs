@@ -1,6 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::plan_nodes::{BinOpType, ColumnRefExpr, LogOpType, OptRelNode, UnOpType};
+use crate::plan_nodes::{
+    BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, ExprList, LogOpType, OptRelNode, UnOpType,
+};
 use crate::properties::column_ref::{ColumnRefPropertyBuilder, GroupColumnRefs};
 use crate::{
     plan_nodes::{OptRelNodeRef, OptRelNodeTyp},
@@ -9,8 +11,8 @@ use crate::{
 use arrow_schema::{ArrowError, DataType};
 use datafusion::arrow::array::{
     Array, BooleanArray, Date32Array, Decimal128Array, Float32Array, Float64Array, Int16Array,
-    Int32Array, Int8Array, RecordBatch, RecordBatchIterator, RecordBatchReader, UInt16Array,
-    UInt32Array, UInt8Array,
+    Int32Array, Int8Array, RecordBatch, RecordBatchIterator, RecordBatchReader, StringArray,
+    UInt16Array, UInt32Array, UInt8Array,
 };
 use itertools::Itertools;
 use optd_core::{
@@ -21,6 +23,8 @@ use optd_core::{
 use optd_gungnir::stats::counter::Counter;
 use optd_gungnir::stats::hyperloglog::{self, HyperLogLog};
 use optd_gungnir::stats::tdigest::{self, TDigest};
+use optd_gungnir::utils::arith_encoder;
+use serde::{Deserialize, Serialize};
 
 fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     model: &C,
@@ -37,18 +41,65 @@ fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     cost
 }
 
-pub type BaseTableStats = HashMap<String, PerTableStats>;
+pub type BaseTableStats<M, D> = HashMap<String, PerTableStats<M, D>>;
 
-pub struct OptCostModel {
-    per_table_stats_map: BaseTableStats,
+// The "standard" concrete types that optd currently uses
+// All of optd (except unit tests) must use the same types
+pub type DataFusionMostCommonValues = MockMostCommonValues;
+pub type DataFusionDistribution = TDigest;
+pub type DataFusionBaseTableStats =
+    BaseTableStats<DataFusionMostCommonValues, DataFusionDistribution>;
+pub type DataFusionPerTableStats =
+    PerTableStats<DataFusionMostCommonValues, DataFusionDistribution>;
+pub type DataFusionPerColumnStats =
+    PerColumnStats<DataFusionMostCommonValues, DataFusionDistribution>;
+
+pub struct OptCostModel<M: MostCommonValues, D: Distribution> {
+    per_table_stats_map: BaseTableStats<M, D>,
 }
 
-pub struct PerTableStats {
+#[derive(Serialize, Deserialize)]
+pub struct MockMostCommonValues {
+    mcvs: HashMap<Value, f64>,
+}
+
+impl MockMostCommonValues {
+    pub fn empty() -> Self {
+        MockMostCommonValues {
+            mcvs: HashMap::new(),
+        }
+    }
+}
+
+impl MostCommonValues for MockMostCommonValues {
+    fn freq(&self, value: &Value) -> Option<f64> {
+        self.mcvs.get(value).copied()
+    }
+
+    fn total_freq(&self) -> f64 {
+        self.mcvs.values().sum()
+    }
+
+    fn freq_over_pred(&self, pred: Box<dyn Fn(&Value) -> bool>) -> f64 {
+        self.mcvs
+            .iter()
+            .filter(|(val, _)| pred(val))
+            .map(|(_, freq)| freq)
+            .sum()
+    }
+
+    fn cnt(&self) -> usize {
+        self.mcvs.len()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PerTableStats<M: MostCommonValues, D: Distribution> {
     row_cnt: usize,
-    per_column_stats_vec: Vec<Option<PerColumnStats>>,
+    per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>,
 }
 
-impl PerTableStats {
+impl DataFusionPerTableStats {
     pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
         batch_iter: RecordBatchIterator<I>,
     ) -> anyhow::Result<Self> {
@@ -65,7 +116,7 @@ impl PerTableStats {
             .iter()
             .map(|col_type| {
                 if Self::is_type_supported(col_type) {
-                    Some(Counter::<Value>::new(&vec![]))
+                    Some(MockMostCommonValues::empty())
                 } else {
                     None
                 }
@@ -104,12 +155,12 @@ impl PerTableStats {
         let mut per_column_stats_vec = Vec::with_capacity(col_cnt);
         for i in 0..col_cnt {
             per_column_stats_vec.push(if Self::is_type_supported(&col_types[i]) {
-                Some(PerColumnStats {
-                    mcvs: Box::new(mcvs[i].take().unwrap()) as Box<dyn MostCommonValues>,
-                    ndistinct: hlls[i].n_distinct(),
-                    null_frac: null_cnt[i] as f64 / row_cnt as f64,
-                    distr: Box::new(distr[i].take().unwrap()) as Box<dyn Distribution>,
-                })
+                Some(PerColumnStats::new(
+                    mcvs[i].take().unwrap(),
+                    hlls[i].n_distinct(),
+                    null_cnt[i] as f64 / row_cnt as f64,
+                    distr[i].take().unwrap(),
+                ))
             } else {
                 None
             });
@@ -132,6 +183,7 @@ impl PerTableStats {
                 | DataType::UInt32
                 | DataType::Float32
                 | DataType::Float64
+                | DataType::Utf8
         )
     }
 
@@ -173,6 +225,10 @@ impl PerTableStats {
             val as f64
         }
 
+        fn str_to_f64(string: &str) -> f64 {
+            arith_encoder::encode(string)
+        }
+
         match col_type {
             DataType::Boolean => {
                 generate_stats_for_col!({ col, distr, hll, BooleanArray, to_f64_safe })
@@ -207,14 +263,18 @@ impl PerTableStats {
             DataType::Decimal128(_, _) => {
                 generate_stats_for_col!({ col, distr, hll, Decimal128Array, i128_to_f64 })
             }
+            DataType::Utf8 => {
+                generate_stats_for_col!({ col, distr, hll, StringArray, str_to_f64 })
+            }
             _ => unreachable!(),
         }
     }
 }
 
-pub struct PerColumnStats {
+#[derive(Serialize, Deserialize)]
+pub struct PerColumnStats<M: MostCommonValues, D: Distribution> {
     // even if nulls are the most common, they cannot appear in mcvs
-    mcvs: Box<dyn MostCommonValues>,
+    mcvs: M,
 
     // ndistinct _does_ include the values in mcvs
     // ndistinct _does not_ include nulls
@@ -226,7 +286,18 @@ pub struct PerColumnStats {
 
     // distribution _does not_ include the values in mcvs
     // distribution _does not_ include nulls
-    distr: Box<dyn Distribution>,
+    distr: D,
+}
+
+impl<M: MostCommonValues, D: Distribution> PerColumnStats<M, D> {
+    pub fn new(mcvs: M, ndistinct: u64, null_frac: f64, distr: D) -> Self {
+        Self {
+            mcvs,
+            ndistinct,
+            null_frac,
+            distr,
+        }
+    }
 }
 
 pub trait MostCommonValues: 'static + Send + Sync {
@@ -254,11 +325,22 @@ pub trait Distribution: 'static + Send + Sync {
 pub const ROW_COUNT: usize = 1;
 pub const COMPUTE_COST: usize = 2;
 pub const IO_COST: usize = 3;
-// used to indicate a combination of unimplemented!(), unreachable!(), or panic!()
-// TODO: a future PR will remove this and get the code working for all of TPC-H
-const INVALID_SELECTIVITY: f64 = 0.001;
 
-impl OptCostModel {
+// Default statistics. All are from selfuncs.h in Postgres unless specified otherwise
+// Default selectivity estimate for equalities such as "A = b"
+const DEFAULT_EQ_SEL: f64 = 0.005;
+// Default selectivity estimate for inequalities such as "A < b"
+const DEFAULT_INEQ_SEL: f64 = 0.3333333333333333;
+// Default selectivity estimate for pattern-match operators such as LIKE
+const DEFAULT_MATCH_SEL: f64 = 0.005;
+// Default selectivity if we have no information
+const DEFAULT_UNK_SEL: f64 = 0.005;
+// Default n-distinct estimate for derived columns or columns lacking statistics
+const DEFAULT_N_DISTINCT: u64 = 200;
+
+const INVALID_SEL: f64 = 0.01;
+
+impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
         cost[ROW_COUNT]
     }
@@ -290,7 +372,7 @@ impl OptCostModel {
     }
 }
 
-impl CostModel<OptRelNodeTyp> for OptCostModel {
+impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostModel<M, D> {
     fn explain(&self, cost: &Cost) -> String {
         format!(
             "weighted={},row_cnt={},compute={},io={}",
@@ -333,8 +415,35 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
             OptRelNodeTyp::PhysicalEmptyRelation => Self::cost(0.5, 0.01, 0.0),
             OptRelNodeTyp::PhysicalLimit => {
                 let (row_cnt, compute_cost, _) = Self::cost_tuple(&children[0]);
-                let selectivity = 0.001;
-                Self::cost((row_cnt * selectivity).max(1.0), compute_cost, 0.0)
+                let row_cnt = if let (Some(context), Some(optimizer)) = (context, optimizer) {
+                    let mut fetch_expr =
+                        optimizer.get_all_group_bindings(context.children_group_ids[2], false);
+                    assert!(
+                        fetch_expr.len() == 1,
+                        "fetch expression should be the only expr in the group"
+                    );
+                    let fetch_expr = fetch_expr.pop().unwrap();
+                    assert!(
+                        matches!(
+                            fetch_expr.typ,
+                            OptRelNodeTyp::Constant(ConstantType::UInt64)
+                        ),
+                        "fetch type can only be UInt64"
+                    );
+                    let fetch = ConstantExpr::from_rel_node(fetch_expr)
+                        .unwrap()
+                        .value()
+                        .as_u64();
+                    // u64::MAX represents None
+                    if fetch == u64::MAX {
+                        row_cnt
+                    } else {
+                        row_cnt.min(fetch as f64)
+                    }
+                } else {
+                    (row_cnt * DEFAULT_UNK_SEL).max(1.0)
+                };
+                Self::cost(row_cnt, compute_cost, 0.0)
             }
             OptRelNodeTyp::PhysicalFilter => {
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
@@ -354,13 +463,13 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                             if let Some(expr_tree) = expr_trees.first() {
                                 self.get_filter_selectivity(Arc::clone(expr_tree), &column_refs)
                             } else {
-                                INVALID_SELECTIVITY
+                                panic!("encountered a PhysicalFilter without an expression")
                             }
                         } else {
-                            INVALID_SELECTIVITY
+                            panic!("compute_cost() should not be called if optimizer is None")
                         }
                     }
-                    None => INVALID_SELECTIVITY,
+                    None => panic!("compute_cost() should not be called if context is None"),
                 };
 
                 Self::cost(
@@ -400,10 +509,15 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                 Self::cost(row_cnt, row_cnt * row_cnt.ln_1p().max(1.0), 0.0)
             }
             OptRelNodeTyp::PhysicalAgg => {
-                let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
+                let child_row_cnt = Self::row_cnt(&children[0]);
+                let row_cnt = self.get_agg_row_cnt(context, optimizer, child_row_cnt);
                 let (_, compute_cost_1, _) = Self::cost_tuple(&children[1]);
                 let (_, compute_cost_2, _) = Self::cost_tuple(&children[2]);
-                Self::cost(row_cnt, row_cnt * (compute_cost_1 + compute_cost_2), 0.0)
+                Self::cost(
+                    row_cnt,
+                    child_row_cnt * (compute_cost_1 + compute_cost_2),
+                    0.0,
+                )
             }
             OptRelNodeTyp::List => {
                 let compute_cost = children
@@ -438,10 +552,62 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
     }
 }
 
-impl OptCostModel {
-    pub fn new(per_table_stats_map: BaseTableStats) -> Self {
+impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
+    pub fn new(per_table_stats_map: BaseTableStats<M, D>) -> Self {
         Self {
             per_table_stats_map,
+        }
+    }
+
+    fn get_agg_row_cnt(
+        &self,
+        context: Option<RelNodeContext>,
+        optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
+        child_row_cnt: f64,
+    ) -> f64 {
+        if let (Some(context), Some(optimizer)) = (context, optimizer) {
+            let group_by_id = context.children_group_ids[2];
+            let mut group_by_exprs: Vec<Arc<RelNode<OptRelNodeTyp>>> =
+                optimizer.get_all_group_bindings(group_by_id, false);
+            assert!(
+                group_by_exprs.len() == 1,
+                "ExprList expression should be the only expression in the GROUP BY group"
+            );
+            let group_by = group_by_exprs.pop().unwrap();
+            let group_by = ExprList::from_rel_node(group_by).unwrap();
+            if group_by.is_empty() {
+                1.0
+            } else {
+                // Multiply the n-distinct of all the group by columns.
+                // TODO: improve with multi-dimensional n-distinct
+                let base_table_col_refs = optimizer
+                    .get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
+                base_table_col_refs
+                    .iter()
+                    .take(group_by.len())
+                    .map(|col_ref| match col_ref {
+                        ColumnRef::BaseTableColumnRef { table, col_idx } => {
+                            let table_stats = self.per_table_stats_map.get(table);
+                            let column_stats = table_stats.map(|table_stats| {
+                                table_stats.per_column_stats_vec.get(*col_idx).unwrap()
+                            });
+
+                            if let Some(Some(column_stats)) = column_stats {
+                                column_stats.ndistinct as f64
+                            } else {
+                                // The column type is not supported or stats are missing.
+                                DEFAULT_N_DISTINCT as f64
+                            }
+                        }
+                        ColumnRef::Derived => DEFAULT_N_DISTINCT as f64,
+                        _ => panic!(
+                            "GROUP BY base table column ref must either be derived or base table"
+                        ),
+                    })
+                    .product()
+            }
+        } else {
+            (child_row_cnt * DEFAULT_UNK_SEL).max(1.0)
         }
     }
 
@@ -460,28 +626,9 @@ impl OptCostModel {
         column_refs: &GroupColumnRefs,
     ) -> f64 {
         assert!(expr_tree.typ.is_expression());
-        match expr_tree.typ {
-            OptRelNodeTyp::BinOp(bin_op_typ) => {
-                assert!(expr_tree.children.len() == 2);
-                let left_child = expr_tree.child(0);
-                let right_child = expr_tree.child(1);
-
-                if bin_op_typ.is_comparison() {
-                    self.get_comparison_op_selectivity(
-                        bin_op_typ,
-                        left_child,
-                        right_child,
-                        column_refs,
-                    )
-                } else if bin_op_typ.is_numerical() {
-                    INVALID_SELECTIVITY
-                } else {
-                    unreachable!("all BinOpTypes should be true for at least one is_*() function")
-                }
-            }
-            OptRelNodeTyp::LogOp(log_op_typ) => {
-                self.get_log_op_selectivity(log_op_typ, &expr_tree.children, column_refs)
-            }
+        match &expr_tree.typ {
+            OptRelNodeTyp::Constant(_) => todo!("check bool type or else panic"),
+            OptRelNodeTyp::ColumnRef => todo!("check bool type or else panic"),
             OptRelNodeTyp::UnOp(un_op_typ) => {
                 assert!(expr_tree.children.len() == 1);
                 let child = expr_tree.child(0);
@@ -489,24 +636,63 @@ impl OptCostModel {
                     // not doesn't care about nulls so there's no complex logic. it just reverses the selectivity
                     // for instance, != _will not_ include nulls but "NOT ==" _will_ include nulls
                     UnOpType::Not => 1.0 - self.get_filter_selectivity(child, column_refs),
-                    _ => INVALID_SELECTIVITY,
+                    UnOpType::Neg => panic!(
+                        "the selectivity of operations that return numerical values is undefined"
+                    ),
                 }
             }
-            _ => INVALID_SELECTIVITY,
+            OptRelNodeTyp::BinOp(bin_op_typ) => {
+                assert!(expr_tree.children.len() == 2);
+                let left_child = expr_tree.child(0);
+                let right_child = expr_tree.child(1);
+
+                if bin_op_typ.is_comparison() {
+                    self.get_comparison_op_selectivity(
+                        *bin_op_typ,
+                        left_child,
+                        right_child,
+                        column_refs,
+                    )
+                } else if bin_op_typ.is_numerical() {
+                    panic!(
+                        "the selectivity of operations that return numerical values is undefined"
+                    )
+                } else {
+                    unreachable!("all BinOpTypes should be true for at least one is_*() function")
+                }
+            }
+            OptRelNodeTyp::LogOp(log_op_typ) => {
+                self.get_log_op_selectivity(*log_op_typ, &expr_tree.children, column_refs)
+            }
+            OptRelNodeTyp::Func(_) => todo!("check bool type or else panic"),
+            OptRelNodeTyp::SortOrder(_) => {
+                panic!("the selectivity of sort order expressions is undefined")
+            }
+            OptRelNodeTyp::Between => INVALID_SEL,
+            OptRelNodeTyp::Cast => todo!("check bool type or else panic"),
+            OptRelNodeTyp::Like => DEFAULT_MATCH_SEL,
+            OptRelNodeTyp::DataType(_) => {
+                panic!("the selectivity of a data type is not defined")
+            }
+            OptRelNodeTyp::InList => INVALID_SEL,
+            _ => unreachable!(
+                "all expression OptRelNodeTyp were enumerated. this should be unreachable"
+            ),
         }
     }
 
     /// Comparison operators are the base case for recursion in get_filter_selectivity()
     fn get_comparison_op_selectivity(
         &self,
-        bin_op_typ: BinOpType,
+        comp_bin_op_typ: BinOpType,
         left: OptRelNodeRef,
         right: OptRelNodeRef,
         column_refs: &GroupColumnRefs,
     ) -> f64 {
-        assert!(bin_op_typ.is_comparison());
+        assert!(comp_bin_op_typ.is_comparison());
 
-        // the # of column refs determines how we handle the logic
+        // it's more convenient to refer to the children based on whether they're column nodes or not
+        // rather than by left/right
         let mut col_ref_nodes = vec![];
         let mut non_col_ref_nodes = vec![];
         let is_left_col_ref;
@@ -531,8 +717,9 @@ impl OptCostModel {
             non_col_ref_nodes.push(right);
         }
 
+        // handle the different cases of column nodes
         if col_ref_nodes.is_empty() {
-            INVALID_SELECTIVITY
+            INVALID_SEL
         } else if col_ref_nodes.len() == 1 {
             let col_ref_node = col_ref_nodes
                 .pop()
@@ -544,71 +731,90 @@ impl OptCostModel {
                     .pop()
                     .expect("non_col_ref_nodes should have a value since col_ref_nodes.len() == 1");
 
-                if let OptRelNodeTyp::Constant(_) = non_col_ref_node.as_ref().typ {
-                    let value = non_col_ref_node
-                        .as_ref()
-                        .data
-                        .as_ref()
-                        .expect("constants should have data");
-                    match match bin_op_typ {
-                        BinOpType::Eq => {
-                            self.get_column_equality_selectivity(table, *col_idx, value, true)
+                match non_col_ref_node.as_ref().typ {
+                    OptRelNodeTyp::Constant(_) => {
+                        let value = non_col_ref_node
+                            .as_ref()
+                            .data
+                            .as_ref()
+                            .expect("constants should have data");
+                        match comp_bin_op_typ {
+                            BinOpType::Eq => {
+                                self.get_column_equality_selectivity(table, *col_idx, value, true)
+                            }
+                            BinOpType::Neq => {
+                                self.get_column_equality_selectivity(table, *col_idx, value, false)
+                            }
+                            BinOpType::Lt => self.get_column_range_selectivity(
+                                table,
+                                *col_idx,
+                                value,
+                                is_left_col_ref,
+                                false,
+                            ),
+                            BinOpType::Leq => self.get_column_range_selectivity(
+                                table,
+                                *col_idx,
+                                value,
+                                is_left_col_ref,
+                                true,
+                            ),
+                            BinOpType::Gt => self.get_column_range_selectivity(
+                                table,
+                                *col_idx,
+                                value,
+                                !is_left_col_ref,
+                                false,
+                            ),
+                            BinOpType::Geq => self.get_column_range_selectivity(
+                                table,
+                                *col_idx,
+                                value,
+                                !is_left_col_ref,
+                                true,
+                            ),
+                            _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
                         }
-                        BinOpType::Neq => {
-                            self.get_column_equality_selectivity(table, *col_idx, value, false)
-                        }
-                        BinOpType::Lt => self.get_column_range_selectivity(
-                            table,
-                            *col_idx,
-                            value,
-                            is_left_col_ref,
-                            false,
-                        ),
-                        BinOpType::Leq => self.get_column_range_selectivity(
-                            table,
-                            *col_idx,
-                            value,
-                            is_left_col_ref,
-                            true,
-                        ),
-                        BinOpType::Gt => self.get_column_range_selectivity(
-                            table,
-                            *col_idx,
-                            value,
-                            !is_left_col_ref,
-                            false,
-                        ),
-                        BinOpType::Geq => self.get_column_range_selectivity(
-                            table,
-                            *col_idx,
-                            value,
-                            !is_left_col_ref,
-                            true,
-                        ),
-                        _ => None,
-                    } {
-                        Some(sel) => sel,
-                        None => INVALID_SELECTIVITY,
                     }
-                } else {
-                    INVALID_SELECTIVITY
+                    OptRelNodeTyp::BinOp(_) => {
+                        Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
+                    }
+                    OptRelNodeTyp::Cast => INVALID_SEL,
+                    _ => unimplemented!(
+                        "unhandled case of comparing a column ref node to {}",
+                        non_col_ref_node.as_ref().typ
+                    ),
                 }
             } else {
-                INVALID_SELECTIVITY
+                unimplemented!("non base table column refs need to be implemented")
             }
         } else if col_ref_nodes.len() == 2 {
-            INVALID_SELECTIVITY
+            Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
         } else {
-            unreachable!("We could have at most pushed left and right into col_ref_nodes")
+            unreachable!("we could have at most pushed left and right into col_ref_nodes")
+        }
+    }
+
+    /// The default selectivity of a comparison expression
+    /// Used when one side of the comparison is a column while the other side is something too
+    ///   complex/impossible to evaluate (subquery, UDF, another column, we have no stats, etc.)
+    fn get_default_comparison_op_selectivity(comp_bin_op_typ: BinOpType) -> f64 {
+        assert!(comp_bin_op_typ.is_comparison());
+        match comp_bin_op_typ {
+            BinOpType::Eq => DEFAULT_EQ_SEL,
+            BinOpType::Neq => 1.0 - DEFAULT_EQ_SEL,
+            BinOpType::Lt | BinOpType::Leq | BinOpType::Gt | BinOpType::Geq => DEFAULT_INEQ_SEL,
+            _ => unreachable!(
+                "all comparison BinOpTypes were enumerated. this should be unreachable"
+            ),
         }
     }
 
     /// Get the selectivity of an expression of the form "column equals value" (or "value equals column")
-    /// Computes selectivity based off of statistics
+    /// Will handle the case of statistics missing
     /// Equality predicates are handled entirely differently from range predicates so this is its own function
     /// Also, get_column_equality_selectivity is a subroutine when computing range selectivity, which is another
     ///     reason for separating these into two functions
-    /// If it is unable to find the statistics, it returns None
     /// is_eq means whether it's == or !=
     fn get_column_equality_selectivity(
         &self,
@@ -616,7 +822,7 @@ impl OptCostModel {
         col_idx: usize,
         value: &Value,
         is_eq: bool,
-    ) -> Option<f64> {
+    ) -> f64 {
         if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
             if let Some(Some(per_column_stats)) = per_table_stats.per_column_stats_vec.get(col_idx)
             {
@@ -630,16 +836,26 @@ impl OptCostModel {
                     // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
                     (non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64)
                 };
-                Some(if is_eq {
+                if is_eq {
                     eq_freq
                 } else {
                     1.0 - eq_freq - per_column_stats.null_frac
-                })
+                }
             } else {
-                None
+                #[allow(clippy::collapsible_else_if)]
+                if is_eq {
+                    DEFAULT_EQ_SEL
+                } else {
+                    1.0 - DEFAULT_EQ_SEL
+                }
             }
         } else {
-            None
+            #[allow(clippy::collapsible_else_if)]
+            if is_eq {
+                DEFAULT_EQ_SEL
+            } else {
+                1.0 - DEFAULT_EQ_SEL
+            }
         }
     }
 
@@ -656,7 +872,7 @@ impl OptCostModel {
         value: &Value,
         is_col_lt_val: bool,
         is_col_eq_val: bool,
-    ) -> Option<f64> {
+    ) -> f64 {
         if let Some(per_table_stats) = self.per_table_stats_map.get(table) {
             if let Some(Some(per_column_stats)) = per_table_stats.per_column_stats_vec.get(col_idx)
             {
@@ -672,12 +888,10 @@ impl OptCostModel {
                 // depending on whether value is in mcvs or not, we use different logic to turn total_leq_cdf into total_lt_cdf
                 // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
                 let total_lt_freq = total_leq_freq
-                    - self
-                        .get_column_equality_selectivity(table, col_idx, value, true)
-                        .expect("we already know that table and col_idx exist");
+                    - self.get_column_equality_selectivity(table, col_idx, value, true);
 
                 // use either total_leq_freq or total_lt_freq to get the selectivity
-                Some(if is_col_lt_val {
+                if is_col_lt_val {
                     if is_col_eq_val {
                         // this branch means <=
                         total_leq_freq
@@ -696,12 +910,12 @@ impl OptCostModel {
                         // this branch means >. same logic as above
                         1.0 - total_leq_freq - per_column_stats.null_frac
                     }
-                })
+                }
             } else {
-                None
+                DEFAULT_INEQ_SEL
             }
         } else {
-            None
+            DEFAULT_INEQ_SEL
         }
     }
 
@@ -729,27 +943,11 @@ impl OptCostModel {
     }
 }
 
-impl PerTableStats {
-    pub fn new(row_cnt: usize, per_column_stats_vec: Vec<Option<PerColumnStats>>) -> Self {
+impl<M: MostCommonValues, D: Distribution> PerTableStats<M, D> {
+    pub fn new(row_cnt: usize, per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>) -> Self {
         Self {
             row_cnt,
             per_column_stats_vec,
-        }
-    }
-}
-
-impl PerColumnStats {
-    pub fn new(
-        mcvs: Box<dyn MostCommonValues>,
-        ndistinct: u64,
-        null_frac: f64,
-        distr: Box<dyn Distribution>,
-    ) -> Self {
-        Self {
-            mcvs,
-            ndistinct,
-            null_frac,
-            distr,
         }
     }
 }
@@ -771,16 +969,17 @@ mod tests {
     };
 
     use super::{Distribution, MostCommonValues, OptCostModel, PerColumnStats, PerTableStats};
+    type TestPerColumnStats = PerColumnStats<TestMostCommonValues, TestDistribution>;
 
-    struct MockMostCommonValues {
+    struct TestMostCommonValues {
         mcvs: HashMap<Value, f64>,
     }
 
-    struct MockDistribution {
+    struct TestDistribution {
         cdfs: HashMap<Value, f64>,
     }
 
-    impl MockMostCommonValues {
+    impl TestMostCommonValues {
         fn new(mcvs_vec: Vec<(Value, f64)>) -> Self {
             Self {
                 mcvs: mcvs_vec.into_iter().collect(),
@@ -788,11 +987,11 @@ mod tests {
         }
 
         pub fn empty() -> Self {
-            MockMostCommonValues::new(vec![])
+            TestMostCommonValues::new(vec![])
         }
     }
 
-    impl MostCommonValues for MockMostCommonValues {
+    impl MostCommonValues for TestMostCommonValues {
         fn freq(&self, value: &Value) -> Option<f64> {
             self.mcvs.get(value).copied()
         }
@@ -814,7 +1013,7 @@ mod tests {
         }
     }
 
-    impl MockDistribution {
+    impl TestDistribution {
         fn new(cdfs_vec: Vec<(Value, f64)>) -> Self {
             Self {
                 cdfs: cdfs_vec.into_iter().collect(),
@@ -822,11 +1021,11 @@ mod tests {
         }
 
         fn empty() -> Self {
-            MockDistribution::new(vec![])
+            TestDistribution::new(vec![])
         }
     }
 
-    impl Distribution for MockDistribution {
+    impl Distribution for TestDistribution {
         fn cdf(&self, value: &Value) -> f64 {
             *self.cdfs.get(value).unwrap_or(&0.0)
         }
@@ -835,7 +1034,9 @@ mod tests {
     const TABLE1_NAME: &str = "t1";
 
     // one column is sufficient for all filter selectivity predicates
-    fn create_one_column_cost_model(per_column_stats: PerColumnStats) -> OptCostModel {
+    fn create_one_column_cost_model(
+        per_column_stats: TestPerColumnStats,
+    ) -> OptCostModel<TestMostCommonValues, TestDistribution> {
         OptCostModel::new(
             vec![(
                 String::from(TABLE1_NAME),
@@ -890,11 +1091,11 @@ mod tests {
 
     #[test]
     fn test_colref_eq_constint_in_mcv() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.3)])),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
             0.0,
-            Box::new(MockDistribution::empty()),
+            TestDistribution::empty(),
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(1)), col_ref(0));
@@ -914,14 +1115,11 @@ mod tests {
 
     #[test]
     fn test_colref_eq_constint_not_in_mcv_no_nulls() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::new(vec![
-                (Value::Int32(1), 0.2),
-                (Value::Int32(3), 0.44),
-            ])),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)]),
             5,
             0.0,
-            Box::new(MockDistribution::empty()),
+            TestDistribution::empty(),
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
@@ -941,14 +1139,11 @@ mod tests {
 
     #[test]
     fn test_colref_eq_constint_not_in_mcv_with_nulls() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::new(vec![
-                (Value::Int32(1), 0.2),
-                (Value::Int32(3), 0.44),
-            ])),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)]),
             5,
             0.03,
-            Box::new(MockDistribution::empty()),
+            TestDistribution::empty(),
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
@@ -969,11 +1164,11 @@ mod tests {
     /// I only have one test for NEQ since I'll assume that it uses the same underlying logic as EQ
     #[test]
     fn test_colref_neq_constint_in_mcv() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.3)])),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
             0.0,
-            Box::new(MockDistribution::empty()),
+            TestDistribution::empty(),
         ));
         let expr_tree = bin_op(BinOpType::Neq, col_ref(0), cnst(Value::Int32(1)));
         let expr_tree_rev = bin_op(BinOpType::Neq, cnst(Value::Int32(1)), col_ref(0));
@@ -993,11 +1188,11 @@ mod tests {
 
     #[test]
     fn test_colref_leq_constint_no_mcvs_in_range() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::empty()),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
             10,
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
@@ -1017,11 +1212,11 @@ mod tests {
 
     #[test]
     fn test_colref_leq_constint_no_mcvs_in_range_with_nulls() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::empty()),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
             10,
             0.1,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
@@ -1041,8 +1236,8 @@ mod tests {
 
     #[test]
     fn test_colref_leq_constint_with_mcvs_in_range_not_at_border() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues {
                 mcvs: vec![
                     (Value::Int32(6), 0.05),
                     (Value::Int32(10), 0.1),
@@ -1051,10 +1246,10 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
-            }),
+            },
             10,
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
@@ -1074,16 +1269,16 @@ mod tests {
 
     #[test]
     fn test_colref_leq_constint_with_mcv_at_border() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::new(vec![
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![
                 (Value::Int32(6), 0.05),
                 (Value::Int32(10), 0.1),
                 (Value::Int32(15), 0.08),
                 (Value::Int32(25), 0.07),
-            ])),
+            ]),
             10,
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
@@ -1103,11 +1298,11 @@ mod tests {
 
     #[test]
     fn test_colref_lt_constint_no_mcvs_in_range() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::empty()),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
             10,
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
@@ -1127,11 +1322,11 @@ mod tests {
 
     #[test]
     fn test_colref_lt_constint_no_mcvs_in_range_with_nulls() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::empty()),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
             9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
             0.1,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
@@ -1151,8 +1346,8 @@ mod tests {
 
     #[test]
     fn test_colref_lt_constint_with_mcvs_in_range_not_at_border() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues {
                 mcvs: vec![
                     (Value::Int32(6), 0.05),
                     (Value::Int32(10), 0.1),
@@ -1161,10 +1356,10 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
-            }),
+            },
             11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
@@ -1184,8 +1379,8 @@ mod tests {
 
     #[test]
     fn test_colref_lt_constint_with_mcv_at_border() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues {
                 mcvs: vec![
                     (Value::Int32(6), 0.05),
                     (Value::Int32(10), 0.1),
@@ -1194,10 +1389,10 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
-            }),
+            },
             11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
@@ -1219,11 +1414,11 @@ mod tests {
     /// The only interesting thing to test is that if there are nulls, those aren't included in GT
     #[test]
     fn test_colref_gt_constint_no_nulls() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::empty()),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
             10,
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
@@ -1243,11 +1438,11 @@ mod tests {
 
     #[test]
     fn test_colref_gt_constint_with_nulls() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::empty()),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
             10,
             0.1,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
@@ -1269,11 +1464,11 @@ mod tests {
     /// As with above, I have one test without nulls and one test with nulls
     #[test]
     fn test_colref_geq_constint_no_nulls() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::empty()),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
             10,
             0.0,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
@@ -1293,11 +1488,11 @@ mod tests {
 
     #[test]
     fn test_colref_geq_constint_with_nulls() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::empty()),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
             9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
             0.1,
-            Box::new(MockDistribution::new(vec![(Value::Int32(15), 0.7)])),
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
@@ -1318,8 +1513,8 @@ mod tests {
 
     #[test]
     fn test_and() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues {
                 mcvs: vec![
                     (Value::Int32(1), 0.3),
                     (Value::Int32(5), 0.5),
@@ -1327,10 +1522,10 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
-            }),
+            },
             0,
             0.0,
-            Box::new(MockDistribution::empty()),
+            TestDistribution::empty(),
         ));
         let eq1 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
         let eq5 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(5)));
@@ -1358,8 +1553,8 @@ mod tests {
 
     #[test]
     fn test_or() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues {
                 mcvs: vec![
                     (Value::Int32(1), 0.3),
                     (Value::Int32(5), 0.5),
@@ -1367,10 +1562,10 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
-            }),
+            },
             0,
             0.0,
-            Box::new(MockDistribution::empty()),
+            TestDistribution::empty(),
         ));
         let eq1 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
         let eq5 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(5)));
@@ -1398,11 +1593,11 @@ mod tests {
 
     #[test]
     fn test_not_no_nulls() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.3)])),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
             0.0,
-            Box::new(MockDistribution::empty()),
+            TestDistribution::empty(),
         ));
         let expr_tree = un_op(
             UnOpType::Not,
@@ -1420,11 +1615,11 @@ mod tests {
 
     #[test]
     fn test_not_with_nulls() {
-        let cost_model = create_one_column_cost_model(PerColumnStats::new(
-            Box::new(MockMostCommonValues::new(vec![(Value::Int32(1), 0.3)])),
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
             0.1,
-            Box::new(MockDistribution::empty()),
+            TestDistribution::empty(),
         ));
         let expr_tree = un_op(
             UnOpType::Not,

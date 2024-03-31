@@ -5,7 +5,7 @@ use itertools::Itertools;
 use pretty_xmlish::Pretty;
 use serde::{Deserialize, Serialize};
 
-use optd_core::rel_node::{RelNode, RelNodeMetaMap, Value};
+use optd_core::rel_node::{RelNode, RelNodeMetaMap, SerializableOrderedF64, Value};
 
 use super::{Expr, OptRelNode, OptRelNodeRef, OptRelNodeTyp};
 
@@ -172,7 +172,10 @@ impl ConstantExpr {
     }
 
     pub fn float64(value: f64) -> Self {
-        Self::new_with_type(Value::Float(value.into()), ConstantType::Float64)
+        Self::new_with_type(
+            Value::Float(SerializableOrderedF64(value.into())),
+            ConstantType::Float64,
+        )
     }
 
     pub fn date(value: i64) -> Self {
@@ -180,7 +183,10 @@ impl ConstantExpr {
     }
 
     pub fn decimal(value: f64) -> Self {
-        Self::new_with_type(Value::Float(value.into()), ConstantType::Decimal)
+        Self::new_with_type(
+            Value::Float(SerializableOrderedF64(value.into())),
+            ConstantType::Decimal,
+        )
     }
 
     /// Gets the constant value.

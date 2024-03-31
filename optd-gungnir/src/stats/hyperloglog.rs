@@ -25,10 +25,17 @@ pub struct HyperLogLog {
     alpha: f64,         // The normal HLL multiplier factor.
 }
 
+// Serialize common data types for hashing (&str).
+impl ByteSerializable for &str {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.as_bytes().to_vec()
+    }
+}
+
 // Serialize common data types for hashing (String).
 impl ByteSerializable for String {
     fn to_bytes(&self) -> Vec<u8> {
-        self.as_bytes().to_vec()
+        self.as_str().to_bytes()
     }
 }
 

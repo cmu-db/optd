@@ -11,7 +11,7 @@ impl Distribution for TDigest {
             Value::Int32(i) => self.cdf(*i as f64),
             Value::Int64(i) => self.cdf(*i as f64),
             Value::Int128(i) => self.cdf(*i as f64),
-            Value::Float(i) => self.cdf(**i),
+            Value::Float(i) => self.cdf(*i.0),
             _ => panic!("Value is not a number"),
         }
     }

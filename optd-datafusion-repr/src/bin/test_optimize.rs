@@ -8,7 +8,7 @@ use optd_core::{
     rules::{Rule, RuleWrapper},
 };
 use optd_datafusion_repr::{
-    cost::{OptCostModel, PerTableStats},
+    cost::{base_cost::DataFusionPerTableStats, OptCostModel},
     plan_nodes::{
         BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, JoinType, LogicalFilter, LogicalJoin,
         LogicalScan, OptRelNode, OptRelNodeTyp, PlanNode,
@@ -45,7 +45,7 @@ pub fn main() {
         Box::new(OptCostModel::new(
             [("t1", 1000), ("t2", 100), ("t3", 10000)]
                 .into_iter()
-                .map(|(x, y)| (x.to_string(), PerTableStats::new(y, vec![])))
+                .map(|(x, y)| (x.to_string(), DataFusionPerTableStats::new(y, vec![])))
                 .collect(),
         )),
         vec![],
@@ -92,6 +92,7 @@ pub fn main() {
             Arc::new(HashJoinRule::new()),
         ],
         optd_core::heuristics::ApplyOrder::BottomUp,
+        Arc::new([]),
     );
     let node = optimizer.optimize(fnal.0.into_rel_node()).unwrap();
     println!(

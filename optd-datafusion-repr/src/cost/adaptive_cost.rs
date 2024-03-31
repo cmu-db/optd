@@ -10,9 +10,14 @@ use optd_core::{
     rel_node::{RelNode, Value},
 };
 
-use super::base_cost::BaseTableStats;
+use super::base_cost::{
+    BaseTableStats, DataFusionDistribution, DataFusionMostCommonValues, Distribution,
+    MostCommonValues,
+};
 
 pub type RuntimeAdaptionStorage = Arc<Mutex<RuntimeAdaptionStorageInner>>;
+pub type DataFusionAdaptiveCostModel =
+    AdaptiveCostModel<DataFusionMostCommonValues, DataFusionDistribution>;
 
 #[derive(Default, Debug)]
 pub struct RuntimeAdaptionStorageInner {
@@ -22,13 +27,13 @@ pub struct RuntimeAdaptionStorageInner {
 
 pub const DEFAULT_DECAY: usize = 50;
 
-pub struct AdaptiveCostModel {
+pub struct AdaptiveCostModel<M: MostCommonValues, D: Distribution> {
     runtime_row_cnt: RuntimeAdaptionStorage,
-    base_model: OptCostModel,
+    base_model: OptCostModel<M, D>,
     decay: usize,
 }
 
-impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
+impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for AdaptiveCostModel<M, D> {
     fn explain(&self, cost: &Cost) -> String {
         self.base_model.explain(cost)
     }
@@ -56,11 +61,11 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
             {
                 if *iter + self.decay >= guard.iter_cnt {
                     let runtime_row_cnt = (*runtime_row_cnt).max(1) as f64;
-                    return OptCostModel::cost(runtime_row_cnt, 0.0, runtime_row_cnt);
+                    return OptCostModel::<M, D>::cost(runtime_row_cnt, 0.0, runtime_row_cnt);
                 }
             }
         }
-        let (mut row_cnt, compute_cost, io_cost) = OptCostModel::cost_tuple(
+        let (mut row_cnt, compute_cost, io_cost) = OptCostModel::<M, D>::cost_tuple(
             &self
                 .base_model
                 .compute_cost(node, data, children, context.clone(), optimizer),
@@ -74,7 +79,7 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
                 }
             }
         }
-        OptCostModel::cost(row_cnt, compute_cost, io_cost)
+        OptCostModel::<M, D>::cost(row_cnt, compute_cost, io_cost)
     }
 
     fn compute_plan_node_cost(&self, node: &RelNode<OptRelNodeTyp>) -> Cost {
@@ -82,8 +87,8 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
     }
 }
 
-impl AdaptiveCostModel {
-    pub fn new(decay: usize, stats: BaseTableStats) -> Self {
+impl<M: MostCommonValues, D: Distribution> AdaptiveCostModel<M, D> {
+    pub fn new(decay: usize, stats: BaseTableStats<M, D>) -> Self {
         Self {
             runtime_row_cnt: RuntimeAdaptionStorage::default(),
             base_model: OptCostModel::new(stats),
