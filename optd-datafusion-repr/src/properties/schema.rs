@@ -4,7 +4,7 @@ use std::sync::Arc;
 use optd_core::property::PropertyBuilder;
 
 use super::DEFAULT_NAME;
-use crate::plan_nodes::{ConstantType, EmptyRelationData, OptRelNodeTyp};
+use crate::plan_nodes::{ConstantType, EmptyRelationData, FuncType, OptRelNodeTyp};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Field {
@@ -12,6 +12,18 @@ pub struct Field {
     pub typ: ConstantType,
     pub nullable: bool,
 }
+
+impl Field {
+    /// Generate a field that is only a place holder whose members are never used.
+    fn placeholder() -> Self {
+        Self {
+            name: DEFAULT_NAME.to_string(),
+            typ: ConstantType::Any,
+            nullable: true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Schema {
     pub fields: Vec<Field>,
@@ -87,14 +99,18 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
                 Schema { fields }
             }
             OptRelNodeTyp::LogOp(_) => Schema {
-                fields: vec![
-                    Field {
-                        name: DEFAULT_NAME.to_string(),
-                        typ: ConstantType::Any,
-                        nullable: true
-                    };
-                    children.len()
-                ],
+                fields: vec![Field::placeholder(); children.len()],
+            },
+            OptRelNodeTyp::Agg => {
+                let mut group_by_schema = children[1].clone();
+                let agg_schema = children[2].clone();
+                group_by_schema.fields.extend(agg_schema.fields);
+                group_by_schema
+            }
+            OptRelNodeTyp::Func(FuncType::Agg(_)) => Schema {
+                // TODO: this is just a place holder now.
+                // The real type should be the column type.
+                fields: vec![Field::placeholder()],
             },
             _ => Schema { fields: vec![] },
         }

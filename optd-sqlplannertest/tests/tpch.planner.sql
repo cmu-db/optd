@@ -1522,6 +1522,171 @@ PhysicalLimit { skip: 0, fetch: 20 }
                     └── PhysicalScan { table: nation }
 */
 
+-- TPC-H Q11
+select
+    ps_partkey,
+    sum(ps_supplycost * ps_availqty) as value
+from
+    partsupp,
+    supplier,
+    nation
+where
+    ps_suppkey = s_suppkey
+    and s_nationkey = n_nationkey
+    and n_name = 'CHINA'
+group by
+    ps_partkey having
+        sum(ps_supplycost * ps_availqty) > (
+            select
+                sum(ps_supplycost * ps_availqty) * 0.0001000000
+            from
+                partsupp,
+                supplier,
+                nation
+            where
+                ps_suppkey = s_suppkey
+                and s_nationkey = n_nationkey
+                and n_name = 'CHINA'
+        )
+order by
+    value desc;
+
+/*
+LogicalSort
+├── exprs:SortOrder { order: Desc }
+│   └── #1
+└── LogicalProjection { exprs: [ #0, #1 ] }
+    └── LogicalJoin
+        ├── join_type: Inner
+        ├── cond:Gt
+        │   ├── Cast { cast_to: Decimal128(38, 15), expr: #1 }
+        │   └── #2
+        ├── LogicalAgg
+        │   ├── exprs:Agg(Sum)
+        │   │   └── Mul
+        │   │       ├── #2
+        │   │       └── Cast { cast_to: Decimal128(10, 0), expr: #1 }
+        │   ├── groups: [ #0 ]
+        │   └── LogicalProjection { exprs: [ #0, #1, #2 ] }
+        │       └── LogicalJoin
+        │           ├── join_type: Inner
+        │           ├── cond:Eq
+        │           │   ├── #3
+        │           │   └── #4
+        │           ├── LogicalProjection { exprs: [ #0, #2, #3, #5 ] }
+        │           │   └── LogicalJoin
+        │           │       ├── join_type: Inner
+        │           │       ├── cond:Eq
+        │           │       │   ├── #1
+        │           │       │   └── #4
+        │           │       ├── LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
+        │           │       │   └── LogicalScan { table: partsupp }
+        │           │       └── LogicalProjection { exprs: [ #0, #3 ] }
+        │           │           └── LogicalScan { table: supplier }
+        │           └── LogicalProjection { exprs: [ #0 ] }
+        │               └── LogicalFilter
+        │                   ├── cond:Eq
+        │                   │   ├── #1
+        │                   │   └── "CHINA"
+        │                   └── LogicalProjection { exprs: [ #0, #1 ] }
+        │                       └── LogicalScan { table: nation }
+        └── LogicalProjection
+            ├── exprs:Cast
+            │   ├── cast_to: Decimal128(38, 15)
+            │   ├── expr:Mul
+            │   │   ├── Cast { cast_to: Float64, expr: #0 }
+            │   │   └── 0.0001
+
+            └── LogicalAgg
+                ├── exprs:Agg(Sum)
+                │   └── Mul
+                │       ├── #1
+                │       └── Cast { cast_to: Decimal128(10, 0), expr: #0 }
+                ├── groups: []
+                └── LogicalProjection { exprs: [ #0, #1 ] }
+                    └── LogicalJoin
+                        ├── join_type: Inner
+                        ├── cond:Eq
+                        │   ├── #2
+                        │   └── #3
+                        ├── LogicalProjection { exprs: [ #1, #2, #4 ] }
+                        │   └── LogicalJoin
+                        │       ├── join_type: Inner
+                        │       ├── cond:Eq
+                        │       │   ├── #0
+                        │       │   └── #3
+                        │       ├── LogicalProjection { exprs: [ #1, #2, #3 ] }
+                        │       │   └── LogicalScan { table: partsupp }
+                        │       └── LogicalProjection { exprs: [ #0, #3 ] }
+                        │           └── LogicalScan { table: supplier }
+                        └── LogicalProjection { exprs: [ #0 ] }
+                            └── LogicalFilter
+                                ├── cond:Eq
+                                │   ├── #1
+                                │   └── "CHINA"
+                                └── LogicalProjection { exprs: [ #0, #1 ] }
+                                    └── LogicalScan { table: nation }
+PhysicalSort
+├── exprs:SortOrder { order: Desc }
+│   └── #1
+└── PhysicalProjection { exprs: [ #0, #1 ] }
+    └── PhysicalProjection { exprs: [ #0, #1 ] }
+        └── PhysicalNestedLoopJoin
+            ├── join_type: Inner
+            ├── cond:Gt
+            │   ├── Cast { cast_to: Decimal128(38, 15), expr: #1 }
+            │   └── #0
+            ├── PhysicalProjection
+            │   ├── exprs:Cast
+            │   │   ├── cast_to: Decimal128(38, 15)
+            │   │   ├── expr:Mul
+            │   │   │   ├── Cast { cast_to: Float64, expr: #0 }
+            │   │   │   └── 0.0001
+
+            │   └── PhysicalAgg
+            │       ├── aggrs:Agg(Sum)
+            │       │   └── Mul
+            │       │       ├── #1
+            │       │       └── Cast { cast_to: Decimal128(10, 0), expr: #0 }
+            │       ├── groups: []
+            │       └── PhysicalProjection { exprs: [ #0, #1 ] }
+            │           └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
+            │               ├── PhysicalProjection { exprs: [ #1, #2, #4 ] }
+            │               │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+            │               │       ├── PhysicalProjection { exprs: [ #1, #2, #3 ] }
+            │               │       │   └── PhysicalScan { table: partsupp }
+            │               │       └── PhysicalProjection { exprs: [ #0, #3 ] }
+            │               │           └── PhysicalScan { table: supplier }
+            │               └── PhysicalProjection { exprs: [ #0 ] }
+            │                   └── PhysicalFilter
+            │                       ├── cond:Eq
+            │                       │   ├── #1
+            │                       │   └── "CHINA"
+            │                       └── PhysicalProjection { exprs: [ #0, #1 ] }
+            │                           └── PhysicalScan { table: nation }
+            └── PhysicalAgg
+                ├── aggrs:Agg(Sum)
+                │   └── Mul
+                │       ├── #2
+                │       └── Cast { cast_to: Decimal128(10, 0), expr: #1 }
+                ├── groups: [ #0 ]
+                └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #3 ], right_keys: [ #0 ] }
+                        ├── PhysicalProjection { exprs: [ #0, #2, #3, #5 ] }
+                        │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
+                        │       ├── PhysicalProjection { exprs: [ #0, #1, #2, #3 ] }
+                        │       │   └── PhysicalScan { table: partsupp }
+                        │       └── PhysicalProjection { exprs: [ #0, #3 ] }
+                        │           └── PhysicalScan { table: supplier }
+                        └── PhysicalProjection { exprs: [ #0 ] }
+                            └── PhysicalFilter
+                                ├── cond:Eq
+                                │   ├── #1
+                                │   └── "CHINA"
+                                └── PhysicalProjection { exprs: [ #0, #1 ] }
+                                    └── PhysicalScan { table: nation }
+*/
+
 -- TPC-H Q12
 SELECT
     l_shipmode,
@@ -1852,55 +2017,56 @@ PhysicalSort
 ├── exprs:SortOrder { order: Asc }
 │   └── #0
 └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4 ] }
-    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #4 ], right_keys: [ #0 ] }
-        ├── PhysicalProjection { exprs: [ #0, #1, #2, #3, #5 ] }
-        │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-        │       ├── PhysicalProjection { exprs: [ #0, #1, #2, #4 ] }
-        │       │   └── PhysicalScan { table: supplier }
-        │       └── PhysicalProjection { exprs: [ #0, #1 ] }
-        │           └── PhysicalAgg
-        │               ├── aggrs:Agg(Sum)
-        │               │   └── Mul
-        │               │       ├── #1
-        │               │       └── Sub
-        │               │           ├── 1
-        │               │           └── #2
-        │               ├── groups: [ #0 ]
-        │               └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
-        │                   └── PhysicalFilter
-        │                       ├── cond:And
-        │                       │   ├── Geq
-        │                       │   │   ├── #3
-        │                       │   │   └── 8401
-        │                       │   └── Lt
-        │                       │       ├── #3
-        │                       │       └── 8491
-        │                       └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
-        │                           └── PhysicalScan { table: lineitem }
-        └── PhysicalAgg
-            ├── aggrs:Agg(Max)
-            │   └── [ #0 ]
-            ├── groups: []
-            └── PhysicalProjection { exprs: [ #1 ] }
-                └── PhysicalAgg
-                    ├── aggrs:Agg(Sum)
-                    │   └── Mul
-                    │       ├── #1
-                    │       └── Sub
-                    │           ├── 1
-                    │           └── #2
-                    ├── groups: [ #0 ]
-                    └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
-                        └── PhysicalFilter
-                            ├── cond:And
-                            │   ├── Geq
-                            │   │   ├── #3
-                            │   │   └── 8401
-                            │   └── Lt
-                            │       ├── #3
-                            │       └── 8491
-                            └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
-                                └── PhysicalScan { table: lineitem }
+    └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #5, #6 ] }
+        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+            ├── PhysicalProjection { exprs: [ #0, #1, #2, #4 ] }
+            │   └── PhysicalScan { table: supplier }
+            └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+                └── PhysicalProjection { exprs: [ #1, #2, #0 ] }
+                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
+                        ├── PhysicalAgg
+                        │   ├── aggrs:Agg(Max)
+                        │   │   └── [ #0 ]
+                        │   ├── groups: []
+                        │   └── PhysicalProjection { exprs: [ #1 ] }
+                        │       └── PhysicalAgg
+                        │           ├── aggrs:Agg(Sum)
+                        │           │   └── Mul
+                        │           │       ├── #1
+                        │           │       └── Sub
+                        │           │           ├── 1
+                        │           │           └── #2
+                        │           ├── groups: [ #0 ]
+                        │           └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+                        │               └── PhysicalFilter
+                        │                   ├── cond:And
+                        │                   │   ├── Geq
+                        │                   │   │   ├── #3
+                        │                   │   │   └── 8401
+                        │                   │   └── Lt
+                        │                   │       ├── #3
+                        │                   │       └── 8491
+                        │                   └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
+                        │                       └── PhysicalScan { table: lineitem }
+                        └── PhysicalAgg
+                            ├── aggrs:Agg(Sum)
+                            │   └── Mul
+                            │       ├── #1
+                            │       └── Sub
+                            │           ├── 1
+                            │           └── #2
+                            ├── groups: [ #0 ]
+                            └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
+                                └── PhysicalFilter
+                                    ├── cond:And
+                                    │   ├── Geq
+                                    │   │   ├── #3
+                                    │   │   └── 8401
+                                    │   └── Lt
+                                    │       ├── #3
+                                    │       └── 8491
+                                    └── PhysicalProjection { exprs: [ #2, #5, #6, #10 ] }
+                                        └── PhysicalScan { table: lineitem }
 */
 
 -- TPC-H Q17
