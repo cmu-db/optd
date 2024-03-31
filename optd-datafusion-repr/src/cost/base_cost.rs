@@ -517,28 +517,7 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
             OptRelNodeTyp::PhysicalHashJoin(join_typ) => {
                 let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
                 let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
-                let selectivity = match context {
-                    Some(context) => {
-                        if let Some(optimizer) = optimizer {
-                            let column_refs = optimizer
-                            .get_property_by_group::<ColumnRefPropertyBuilder>(
-                                context.group_id,
-                                1,
-                            );
-                            let expr_group_id = context.children_group_ids[2];
-                            let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
-                            // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
-                            if let Some(expr_tree) = expr_trees.first() {
-                                self.get_join_selectivity(*join_typ, Arc::clone(expr_tree), &column_refs, row_cnt_1, row_cnt_2)
-                            } else {
-                                panic!("encountered a join without an expression")
-                            }
-                        } else {
-                            DEFAULT_UNK_SEL
-                        }
-                    }
-                    None => DEFAULT_UNK_SEL,
-                };
+                let selectivity = DEFAULT_UNK_SEL;
                 Self::cost(
                     (row_cnt_1 * row_cnt_2 * selectivity).max(1.0),
                     row_cnt_1 * 2.0 + row_cnt_2,
