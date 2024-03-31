@@ -588,6 +588,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         expr_tree: OptRelNodeRef,
         column_refs: &GroupColumnRefs,
     ) -> f64 {
+        println!("expr_tree={:?}", expr_tree);
         assert!(expr_tree.typ.is_expression());
         match &expr_tree.typ {
             OptRelNodeTyp::Constant(_) => Self::get_constant_selectivity(expr_tree),
@@ -711,15 +712,11 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     ExprList::new(filter_expr_trees),
                 ).into_rel_node())
             };
-            println!("on_col_ref_pairs={:?}, filter_expr_tree={:?}", on_col_ref_pairs, filter_expr_tree);
             self.get_join_selectivity_core(join_typ, on_col_ref_pairs, filter_expr_tree, column_refs)
         } else {
-            println!("b, expr_tree={:?}, column_refs={:?}", expr_tree, column_refs);
             if let Some(on_col_ref_pair) = Self::get_on_col_ref_pair(expr_tree.clone(), column_refs) {
-                println!("c");
                 self.get_join_selectivity_core(join_typ, vec![on_col_ref_pair], None, column_refs)
             } else {
-                println!("d");
                 self.get_join_selectivity_core(join_typ, vec![], Some(expr_tree), column_refs)
             }
         }
@@ -774,7 +771,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                         }
                     });
                     // using reduce(f64::min) is the idiomatic workaround to the fact that f64 does not implement Ord due to NaN
-                    let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_nodes.len() == 2");
+                    let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
                     assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
                     selectivity
                 }).product()
@@ -794,25 +791,25 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         assert!(comp_bin_op_typ.is_comparison());
 
         // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
-        let (col_ref_nodes, non_col_ref_nodes, is_left_col_ref) = Self::get_semantic_nodes(left, right);
+        let (col_ref_exprs, non_col_ref_exprs, is_left_col_ref) = Self::get_semantic_nodes(left, right);
 
         // handle the different cases of column nodes
-        if col_ref_nodes.is_empty() {
+        if col_ref_exprs.is_empty() {
             UNIMPLEMENTED_SEL
-        } else if col_ref_nodes.len() == 1 {
-            let col_ref_node = col_ref_nodes
+        } else if col_ref_exprs.len() == 1 {
+            let col_ref_expr = col_ref_exprs
                 .first()
-                .expect("we just checked that col_ref_nodes.len() == 1");
-            let col_ref_idx = col_ref_node.index();
+                .expect("we just checked that col_ref_exprs.len() == 1");
+            let col_ref_idx = col_ref_expr.index();
 
             if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
-                let non_col_ref_node = non_col_ref_nodes
+                let non_col_ref_expr = non_col_ref_exprs
                     .first()
-                    .expect("non_col_ref_nodes should have a value since col_ref_nodes.len() == 1");
+                    .expect("non_col_ref_exprs should have a value since col_ref_exprs.len() == 1");
 
-                match non_col_ref_node.as_ref().typ {
+                match non_col_ref_expr.as_ref().typ {
                     OptRelNodeTyp::Constant(_) => {
-                        let value = non_col_ref_node
+                        let value = non_col_ref_expr
                             .as_ref()
                             .data
                             .as_ref()
@@ -861,46 +858,46 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     OptRelNodeTyp::Cast => UNIMPLEMENTED_SEL,
                     _ => unimplemented!(
                         "unhandled case of comparing a column ref node to {}",
-                        non_col_ref_node.as_ref().typ
+                        non_col_ref_expr.as_ref().typ
                     ),
                 }
             } else {
-                unimplemented!("non base table column refs need to be implemented")
+                Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
             }
-        } else if col_ref_nodes.len() == 2 {
+        } else if col_ref_exprs.len() == 2 {
             Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
         } else {
-            unreachable!("we could have at most pushed left and right into col_ref_nodes")
+            unreachable!("we could have at most pushed left and right into col_ref_exprs")
         }
     }
 
     /// Convert the left and right child nodes of some operation to what they semantically are
     /// This is convenient to avoid repeating the same logic just with "left" and "right" swapped
     fn get_semantic_nodes(left: OptRelNodeRef, right: OptRelNodeRef) -> (Vec<ColumnRefExpr>, Vec<OptRelNodeRef>, bool) {
-        let mut col_ref_nodes = vec![];
-        let mut non_col_ref_nodes = vec![];
+        let mut col_ref_exprs = vec![];
+        let mut non_col_ref_exprs = vec![];
         let is_left_col_ref;
         // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
-        // We always want to use "col_ref_node" and "non_col_ref_node" instead of "left" or "right"
+        // We always want to use "col_ref_expr" and "non_col_ref_expr" instead of "left" or "right"
         if left.as_ref().typ == OptRelNodeTyp::ColumnRef {
             is_left_col_ref = true;
-            col_ref_nodes.push(
+            col_ref_exprs.push(
                 ColumnRefExpr::from_rel_node(left)
                     .expect("we already checked that the type is ColumnRef"),
             );
         } else {
             is_left_col_ref = false;
-            non_col_ref_nodes.push(left);
+            non_col_ref_exprs.push(left);
         }
         if right.as_ref().typ == OptRelNodeTyp::ColumnRef {
-            col_ref_nodes.push(
+            col_ref_exprs.push(
                 ColumnRefExpr::from_rel_node(right)
                     .expect("we already checked that the type is ColumnRef"),
             );
         } else {
-            non_col_ref_nodes.push(right);
+            non_col_ref_exprs.push(right);
         }
-        (col_ref_nodes, non_col_ref_nodes, is_left_col_ref)
+        (col_ref_exprs, non_col_ref_exprs, is_left_col_ref)
     }
 
     /// The default selectivity of a comparison expression
