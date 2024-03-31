@@ -493,7 +493,7 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                             let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
                             // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
                             if let Some(expr_tree) = expr_trees.first() {
-                                self.get_join_selectivity(*join_typ, Arc::clone(expr_tree), &column_refs)
+                                self.get_join_selectivity(*join_typ, Arc::clone(expr_tree), &column_refs, row_cnt_1, row_cnt_2)
                             } else {
                                 panic!("encountered a join without an expression")
                             }
@@ -689,6 +689,8 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         join_typ: JoinType,
         expr_tree: OptRelNodeRef,
         column_refs: &GroupColumnRefs,
+        left_row_cnt: f64,
+        right_row_cnt: f64,
     ) -> f64 {
         assert!(expr_tree.typ.is_expression());
         if expr_tree.typ == OptRelNodeTyp::LogOp(LogOpType::And) {
@@ -711,12 +713,12 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     ExprList::new(filter_expr_trees),
                 ).into_rel_node())
             };
-            self.get_join_selectivity_core(join_typ, on_col_ref_pairs, filter_expr_tree, column_refs)
+            self.get_join_selectivity_core(join_typ, on_col_ref_pairs, filter_expr_tree, column_refs, left_row_cnt, right_row_cnt)
         } else {
             if let Some(on_col_ref_pair) = Self::get_on_col_ref_pair(expr_tree.clone(), column_refs) {
-                self.get_join_selectivity_core(join_typ, vec![on_col_ref_pair], None, column_refs)
+                self.get_join_selectivity_core(join_typ, vec![on_col_ref_pair], None, column_refs, left_row_cnt, right_row_cnt)
             } else {
-                self.get_join_selectivity_core(join_typ, vec![], Some(expr_tree), column_refs)
+                self.get_join_selectivity_core(join_typ, vec![], Some(expr_tree), column_refs, left_row_cnt, right_row_cnt)
             }
         }
     }
@@ -727,8 +729,10 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         on_col_ref_pairs: Vec<(ColumnRefExpr, ColumnRefExpr)>,
         filter_expr_tree: Option<OptRelNodeRef>,
         column_refs: &GroupColumnRefs,
+        left_row_cnt: f64,
+        right_row_cnt: f64,
     ) -> f64 {
-        let join_on_selectivity = self.get_join_on_selectivity(join_typ, on_col_ref_pairs, column_refs);
+        let join_on_selectivity = self.get_join_on_selectivity(on_col_ref_pairs, column_refs);
         // Currently, there is no difference in how we handle a join filter and a select filter, so we use the same function
         // One difference (that we *don't* care about right now) is that join filters can contain expressions from multiple
         //   different tables. Currently, this doesn't affect the get_filter_selectivity() function, but this may change in
@@ -737,7 +741,13 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             Some(filter_expr_tree) => self.get_filter_selectivity(filter_expr_tree, column_refs),
             None => 1.0,
         };
-        join_on_selectivity * join_filter_selectivity
+        let inner_join_selectivity = join_on_selectivity * join_filter_selectivity;
+        match join_typ {
+            JoinType::Inner => inner_join_selectivity,
+            JoinType::LeftOuter => f64::max(inner_join_selectivity, 1.0 / right_row_cnt),
+            JoinType::RightOuter => f64::max(inner_join_selectivity, 1.0 / left_row_cnt),
+            _ => unimplemented!()
+        }
     }
 
     fn get_per_column_stats_from_col_ref(&self, col_ref: &ColumnRef) -> Option<&PerColumnStats<M, D>> {
@@ -752,31 +762,27 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         self.per_table_stats_map.get(table).and_then(|per_table_stats| per_table_stats.per_column_stats_vec[col_idx].as_ref())
     }
 
+    /// Get the selectivity of the on conditions
+    /// Note that the selectivity of the on conditions does not depend on join type. Join type is accounted for separately in get_join_selectivity_core()
     fn get_join_on_selectivity(
         &self,
-        join_typ: JoinType,
         on_col_ref_pairs: Vec<(ColumnRefExpr, ColumnRefExpr)>,
         column_refs: &GroupColumnRefs
     ) -> f64 {
-        match join_typ {
-            JoinType::Inner => {
-                // multiply the selectivities of all individual conditions together
-                on_col_ref_pairs.into_iter().map(|on_col_ref_pair| {
-                    // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
-                    let ndistincts = vec![on_col_ref_pair.0, on_col_ref_pair.1].into_iter().map(|on_col_ref_expr| {
-                        match self.get_per_column_stats_from_col_ref(&column_refs[on_col_ref_expr.index()]) {
-                            Some(per_col_stats) => per_col_stats.ndistinct,
-                            None => DEFAULT_NUM_DISTINCT,
-                        }
-                    });
-                    // using reduce(f64::min) is the idiomatic workaround to the fact that f64 does not implement Ord due to NaN
-                    let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
-                    assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
-                    selectivity
-                }).product()
-            }
-            _ => unimplemented!(),
-        }
+        // multiply the selectivities of all individual conditions together
+        on_col_ref_pairs.into_iter().map(|on_col_ref_pair| {
+            // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
+            let ndistincts = vec![on_col_ref_pair.0, on_col_ref_pair.1].into_iter().map(|on_col_ref_expr| {
+                match self.get_per_column_stats_from_col_ref(&column_refs[on_col_ref_expr.index()]) {
+                    Some(per_col_stats) => per_col_stats.ndistinct,
+                    None => DEFAULT_NUM_DISTINCT,
+                }
+            });
+            // using reduce(f64::min) is the idiomatic workaround to the fact that f64 does not implement Ord due to NaN
+            let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
+            assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
+            selectivity
+        }).product()
     }
 
     /// Comparison operators are the base case for recursion in get_filter_selectivity()
@@ -1077,11 +1083,12 @@ mod tests {
     use crate::{
         cost::base_cost::DEFAULT_EQ_SEL, plan_nodes::{
             BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, JoinType, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType
-        }, properties::column_ref::ColumnRef
+        }, properties::column_ref::{ColumnRef, GroupColumnRefs}
     };
 
     use super::{Distribution, MostCommonValues, OptCostModel, PerColumnStats, PerTableStats};
     type TestPerColumnStats = PerColumnStats<TestMostCommonValues, TestDistribution>;
+    type TestOptCostModel = OptCostModel<TestMostCommonValues, TestDistribution>;
 
     struct TestMostCommonValues {
         mcvs: HashMap<Value, f64>,
@@ -1149,7 +1156,7 @@ mod tests {
     // one column is sufficient for all filter selectivity tests
     fn create_one_column_cost_model(
         per_column_stats: TestPerColumnStats,
-    ) -> OptCostModel<TestMostCommonValues, TestDistribution> {
+    ) -> TestOptCostModel {
         OptCostModel::new(
             vec![(
                 String::from(TABLE1_NAME),
@@ -1164,7 +1171,7 @@ mod tests {
     fn create_two_table_cost_model(
         tbl1_per_column_stats: TestPerColumnStats,
         tbl2_per_column_stats: TestPerColumnStats,
-    ) -> OptCostModel<TestMostCommonValues, TestDistribution> {
+    ) -> TestOptCostModel {
         create_two_table_cost_model_custom_row_cnts(tbl1_per_column_stats, tbl2_per_column_stats, 100, 100)
     }
 
@@ -1174,7 +1181,7 @@ mod tests {
         tbl2_per_column_stats: TestPerColumnStats,
         tbl1_row_cnt: usize,
         tbl2_row_cnt: usize,
-    ) -> OptCostModel<TestMostCommonValues, TestDistribution> {
+    ) -> TestOptCostModel {
         OptCostModel::new(
             vec![(
                 String::from(TABLE1_NAME),
@@ -1798,11 +1805,22 @@ mod tests {
         );
     }
 
+    /// A wrapper around get_join_selectivity that extracts the table row counts from the cost model
+    fn test_get_join_selectivity(cost_model: &TestOptCostModel, reverse_tables: bool, join_typ: JoinType, expr_tree: OptRelNodeRef, column_refs: &GroupColumnRefs) -> f64 {
+        let table1_row_cnt = cost_model.per_table_stats_map[TABLE1_NAME].row_cnt as f64;
+        let table2_row_cnt = cost_model.per_table_stats_map[TABLE2_NAME].row_cnt as f64;
+        if reverse_tables {
+            cost_model.get_join_selectivity(join_typ, expr_tree, column_refs, table1_row_cnt, table2_row_cnt)
+        } else {
+            cost_model.get_join_selectivity(join_typ, expr_tree, column_refs, table2_row_cnt, table1_row_cnt)
+        }
+    }
+
     #[test]
     fn test_joinsel_inner_const() {
         let cost_model = create_one_column_cost_model(get_empty_per_col_stats());
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, cnst(Value::Bool(true)), &vec![]), 1.0);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, cnst(Value::Bool(false)), &vec![]), 0.0);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, cnst(Value::Bool(true)), &vec![], f64::NAN, f64::NAN), 1.0);
+        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, cnst(Value::Bool(false)), &vec![], f64::NAN, f64::NAN), 0.0);
     }
 
     #[test]
@@ -1827,8 +1845,8 @@ mod tests {
             table: String::from(TABLE2_NAME),
             col_idx: 0,
         }];
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree, &column_refs), 0.2);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev, &column_refs), 0.2);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs), 0.2);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree_rev, &column_refs), 0.2);
     }
 
     #[test]
@@ -1855,8 +1873,8 @@ mod tests {
             table: String::from(TABLE2_NAME),
             col_idx: 0,
         }];
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree, &column_refs), 0.04);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev, &column_refs), 0.04);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs), 0.04);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree_rev, &column_refs), 0.04);
     }
 
     #[test]
@@ -1883,8 +1901,8 @@ mod tests {
             table: String::from(TABLE2_NAME),
             col_idx: 0,
         }];
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree, &column_refs), 0.05);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev, &column_refs), 0.05);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs), 0.05);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree_rev, &column_refs), 0.05);
     }
 
     #[test]
@@ -1911,8 +1929,8 @@ mod tests {
             table: String::from(TABLE2_NAME),
             col_idx: 0,
         }];
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree, &column_refs), 0.2);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev, &column_refs), 0.2);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs), 0.2);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree_rev, &column_refs), 0.2);
     }
 
     #[test]
@@ -1936,12 +1954,28 @@ mod tests {
             table: String::from(TABLE2_NAME),
             col_idx: 0,
         }];
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree, &column_refs), DEFAULT_EQ_SEL);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs), DEFAULT_EQ_SEL);
     }
 
     // We don't test joinsel or with oncond because if there is an oncond (on condition), the top-level operator must be an AND
 
+    /// I made this helper function to avoid copying all eight lines over and over
+    fn assert_joinsel_outer_selectivity(cost_model: &TestOptCostModel, expr_tree: OptRelNodeRef, expr_tree_rev: OptRelNodeRef, column_refs: &GroupColumnRefs, expected_table1_outer_sel: f64, expected_table2_outer_sel: f64) {
+        // all table 1 outer combinations
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::LeftOuter, expr_tree.clone(), &column_refs), expected_table1_outer_sel);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::LeftOuter, expr_tree_rev.clone(), &column_refs), expected_table1_outer_sel);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, true, JoinType::RightOuter, expr_tree.clone(), &column_refs), expected_table1_outer_sel);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, true, JoinType::RightOuter, expr_tree_rev.clone(), &column_refs), expected_table1_outer_sel);
+        // all table 2 outer combinations
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, true, JoinType::LeftOuter, expr_tree.clone(), &column_refs), expected_table2_outer_sel);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, true, JoinType::LeftOuter, expr_tree_rev.clone(), &column_refs), expected_table2_outer_sel);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::RightOuter, expr_tree.clone(), &column_refs), expected_table2_outer_sel);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::RightOuter, expr_tree_rev.clone(), &column_refs), expected_table2_outer_sel);
+    }
+
     /// Unique oncond means an oncondition on columns which are unique in both tables
+    /// There's only one case if both columns are unique and have different row counts: the inner will be < 1 / row count
+    ///   of one table and = 1 / row count of another
     #[test]
     fn test_joinsel_outer_unique_oncond() {
         let cost_model = create_two_table_cost_model_custom_row_cnts(TestPerColumnStats::new(
@@ -1955,7 +1989,7 @@ mod tests {
             0.0,
             TestDistribution::empty(),
         ), 5, 4);
-        // since we're talking about left and right outer joins, the order actually matters now
+        // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
@@ -1965,14 +1999,11 @@ mod tests {
             table: String::from(TABLE2_NAME),
             col_idx: 0,
         }];
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree.clone(), &column_refs), 0.25);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree_rev.clone(), &column_refs), 0.25);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree_rev.clone(), &column_refs), 0.2);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree.clone(), &column_refs), 0.2);
+        assert_joinsel_outer_selectivity(&cost_model, expr_tree, expr_tree_rev, &column_refs, 0.25, 0.2);
     }
 
     /// Non-unique oncond means the column is not unique in either table
-    /// Inner always >= row count means that the inner join result is >= the row count of both tables
+    /// Inner always >= row count means that the inner join result is >= 1 / the row count of both tables
     #[test]
     fn test_joinsel_outer_nonunique_oncond_inner_always_geq_rowcnt() {
         let cost_model = create_two_table_cost_model_custom_row_cnts(TestPerColumnStats::new(
@@ -1986,7 +2017,7 @@ mod tests {
             0.0,
             TestDistribution::empty(),
         ), 10, 8);
-        // since we're talking about left and right outer joins, the order actually matters now
+        // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
@@ -1998,17 +2029,14 @@ mod tests {
         }];
         // sanity check the expected inner sel
         let expected_inner_sel = 0.2;
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree.clone(), &column_refs), expected_inner_sel);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev.clone(), &column_refs), expected_inner_sel);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree.clone(), &column_refs), expected_inner_sel);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree_rev.clone(), &column_refs), expected_inner_sel);
         // check the outer sels
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree.clone(), &column_refs), 0.2);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree_rev.clone(), &column_refs), 0.2);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree_rev.clone(), &column_refs), 0.2);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree.clone(), &column_refs), 0.2);
+        assert_joinsel_outer_selectivity(&cost_model, expr_tree, expr_tree_rev, &column_refs, 0.2, 0.2);
     }
 
     /// Non-unique oncond means the column is not unique in either table
-    /// Inner sometimes < row count means that the inner join result < the row count of at least one table.
+    /// Inner sometimes < row count means that the inner join result < 1 / the row count of exactly one table.
     ///   Note that without a join filter, it's impossible to be less than the row count of both tables
     #[test]
     fn test_joinsel_outer_nonunique_oncond_inner_sometimes_lt_rowcnt() {
@@ -2023,7 +2051,7 @@ mod tests {
             0.0,
             TestDistribution::empty(),
         ), 20, 4);
-        // since we're talking about left and right outer joins, the order actually matters now
+        // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
@@ -2035,20 +2063,17 @@ mod tests {
         }];
         // sanity check the expected inner sel
         let expected_inner_sel = 0.1;
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree.clone(), &column_refs), expected_inner_sel);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_rev.clone(), &column_refs), expected_inner_sel);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree.clone(), &column_refs), expected_inner_sel);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree_rev.clone(), &column_refs), expected_inner_sel);
         // check the outer sels
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree.clone(), &column_refs), 0.25);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree_rev.clone(), &column_refs), 0.25);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree_rev.clone(), &column_refs), 0.1);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree.clone(), &column_refs), 0.1);
+        assert_joinsel_outer_selectivity(&cost_model, expr_tree, expr_tree_rev, &column_refs, 0.25, 0.1);
     }
 
     /// Unique oncond means an oncondition on columns which are unique in both tables
     /// Filter means we're adding a join filter
-    /// Inner sometimes < row count means that the inner join result < the row count of at least one table.
+    /// There's only one case if both columns are unique and there's a filter: the inner will be < 1 / row count of both tables
     #[test]
-    fn test_joinsel_outer_unique_oncond_filter_inner_sometimes_lt_rowcnt() {
+    fn test_joinsel_outer_unique_oncond_filter() {
         let cost_model = create_two_table_cost_model_custom_row_cnts(TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             50,
@@ -2062,7 +2087,7 @@ mod tests {
             0.0,
             TestDistribution::empty(),
         ), 50, 4);
-        // since we're talking about left and right outer joins, the order actually matters now
+        // the left/right of the join refers to the tables, not the order of columns in the predicate
         let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let eq1and0 = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let filter = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(128)));
@@ -2078,12 +2103,11 @@ mod tests {
         }];
         // sanity check the expected inner sel
         let expected_inner_sel = 0.008;
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree.clone(), &column_refs), expected_inner_sel);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::Inner, expr_tree_inner_rev.clone(), &column_refs), expected_inner_sel);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree.clone(), &column_refs), expected_inner_sel);
+        assert_approx_eq::assert_approx_eq!(test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree_inner_rev.clone(), &column_refs), expected_inner_sel);
         // check the outer sels
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree.clone(), &column_refs), 0.25);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree_inner_rev.clone(), &column_refs), 0.25);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::LeftOuter, expr_tree_inner_rev.clone(), &column_refs), 0.02);
-        assert_approx_eq::assert_approx_eq!(cost_model.get_join_selectivity(JoinType::RightOuter, expr_tree.clone(), &column_refs), 0.02);
+        assert_joinsel_outer_selectivity(&cost_model, expr_tree, expr_tree_inner_rev, &column_refs, 0.25, 0.02);
     }
+
+    // I didn't test any non-unique cases with filter. The non-unique tests without filter should cover that
 }
