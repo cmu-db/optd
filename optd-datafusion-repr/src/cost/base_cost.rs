@@ -454,27 +454,21 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
             OptRelNodeTyp::PhysicalFilter => {
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
                 let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
-                let selectivity = match context {
-                    Some(context) => {
-                        if let Some(optimizer) = optimizer {
-                            let column_refs = optimizer
-                                .get_property_by_group::<ColumnRefPropertyBuilder>(
-                                    context.group_id,
-                                    1,
-                                );
-                            let expr_group_id = context.children_group_ids[1];
-                            let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
-                            // there may be more than one expression tree in a group (you can see this trivially as you can just swap the order of two subtrees for commutative operators)
-                            // however, we just take an arbitrary expression tree from the group to compute selectivity
-                            let expr_tree = expr_trees.first().expect("expression missing");
-                            self.get_filter_selectivity(expr_tree.clone(), &column_refs)
-                        } else {
-                            DEFAULT_UNK_SEL
-                        }
-                    }
-                    None => DEFAULT_UNK_SEL,
+                let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
+                    let column_refs = optimizer
+                        .get_property_by_group::<ColumnRefPropertyBuilder>(
+                            context.group_id,
+                            1,
+                        );
+                    let expr_group_id = context.children_group_ids[1];
+                    let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
+                    // there may be more than one expression tree in a group (you can see this trivially as you can just swap the order of two subtrees for commutative operators)
+                    // however, we just take an arbitrary expression tree from the group to compute selectivity
+                    let expr_tree = expr_trees.first().expect("expression missing");
+                    self.get_filter_selectivity(expr_tree.clone(), &column_refs)
+                } else {
+                    DEFAULT_UNK_SEL
                 };
-
                 Self::cost(
                     (row_cnt * selectivity).max(1.0),
                     row_cnt * compute_cost,
@@ -485,30 +479,25 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                 let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
                 let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
                 let (_, compute_cost, _) = Self::cost_tuple(&children[2]);
-                let selectivity = match context {
-                    Some(context) => {
-                        if let Some(optimizer) = optimizer {
-                            let column_refs = optimizer
-                                .get_property_by_group::<ColumnRefPropertyBuilder>(
-                                    context.group_id,
-                                    1,
-                                );
-                            let expr_group_id = context.children_group_ids[2];
-                            let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
-                            // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
-                            let expr_tree = expr_trees.first().expect("expression missing");
-                            self.get_join_selectivity_from_expr_tree(
-                                *join_typ,
-                                expr_tree.clone(),
-                                &column_refs,
-                                row_cnt_1,
-                                row_cnt_2,
-                            )
-                        } else {
-                            DEFAULT_UNK_SEL
-                        }
-                    }
-                    None => DEFAULT_UNK_SEL,
+                let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
+                    let column_refs = optimizer
+                        .get_property_by_group::<ColumnRefPropertyBuilder>(
+                            context.group_id,
+                            1,
+                        );
+                    let expr_group_id = context.children_group_ids[2];
+                    let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
+                    // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
+                    let expr_tree = expr_trees.first().expect("expression missing");
+                    self.get_join_selectivity_from_expr_tree(
+                        *join_typ,
+                        expr_tree.clone(),
+                        &column_refs,
+                        row_cnt_1,
+                        row_cnt_2,
+                    )
+                } else {
+                    DEFAULT_UNK_SEL
                 };
                 Self::cost(
                     (row_cnt_1 * row_cnt_2 * selectivity).max(1.0),
@@ -524,38 +513,33 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
             OptRelNodeTyp::PhysicalHashJoin(join_typ) => {
                 let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
                 let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
-                let selectivity = match context {
-                    Some(context) => {
-                        if let Some(optimizer) = optimizer {
-                            let column_refs = optimizer
-                                .get_property_by_group::<ColumnRefPropertyBuilder>(
-                                    context.group_id,
-                                    1,
-                                );
-                            let left_keys_group_id = context.children_group_ids[2];
-                            let right_keys_group_id = context.children_group_ids[3];
-                            let left_keys_list =
-                                optimizer.get_all_group_bindings(left_keys_group_id, false);
-                            let right_keys_list =
-                                optimizer.get_all_group_bindings(right_keys_group_id, false);
-                            // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
-                            let left_keys = left_keys_list.first().expect("left keys missing");
-                            let right_keys = right_keys_list.first().expect("right keys missing");
-                            self.get_join_selectivity_from_keys(
-                                *join_typ,
-                                ExprList::from_rel_node(left_keys.clone())
-                                    .expect("left_keys should be an ExprList"),
-                                ExprList::from_rel_node(right_keys.clone())
-                                    .expect("right_keys should be an ExprList"),
-                                &column_refs,
-                                row_cnt_1,
-                                row_cnt_2,
-                            )
-                        } else {
-                            DEFAULT_UNK_SEL
-                        }
-                    }
-                    None => DEFAULT_UNK_SEL,
+                let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
+                    let column_refs = optimizer
+                        .get_property_by_group::<ColumnRefPropertyBuilder>(
+                            context.group_id,
+                            1,
+                        );
+                    let left_keys_group_id = context.children_group_ids[2];
+                    let right_keys_group_id = context.children_group_ids[3];
+                    let left_keys_list =
+                        optimizer.get_all_group_bindings(left_keys_group_id, false);
+                    let right_keys_list =
+                        optimizer.get_all_group_bindings(right_keys_group_id, false);
+                    // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
+                    let left_keys = left_keys_list.first().expect("left keys missing");
+                    let right_keys = right_keys_list.first().expect("right keys missing");
+                    self.get_join_selectivity_from_keys(
+                        *join_typ,
+                        ExprList::from_rel_node(left_keys.clone())
+                            .expect("left_keys should be an ExprList"),
+                        ExprList::from_rel_node(right_keys.clone())
+                            .expect("right_keys should be an ExprList"),
+                        &column_refs,
+                        row_cnt_1,
+                        row_cnt_2,
+                    )
+                } else {
+                    DEFAULT_UNK_SEL
                 };
                 Self::cost(
                     (row_cnt_1 * row_cnt_2 * selectivity).max(1.0),
