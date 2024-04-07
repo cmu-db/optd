@@ -1,4 +1,3 @@
-use std::hash::Hasher;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::plan_nodes::{
@@ -11,21 +10,21 @@ use crate::{
 };
 use arrow_schema::{ArrowError, DataType};
 use datafusion::arrow::array::{
-    Array, BooleanArray, Date32Array, Decimal128Array, Float32Array, Float64Array, Int16Array,
-    Int32Array, Int8Array, RecordBatch, RecordBatchIterator, RecordBatchReader, StringArray,
-    UInt16Array, UInt32Array, UInt8Array,
+    Array, BooleanArray, Date32Array, Float32Array, Int16Array, Int32Array, Int8Array, RecordBatch, RecordBatchIterator, RecordBatchReader, StringArray, UInt16Array, UInt32Array, UInt8Array
 };
 use itertools::Itertools;
+use optd_core::rel_node::SerializableOrderedF64;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
     cost::{Cost, CostModel},
     rel_node::{RelNode, RelNodeTyp, Value},
 };
 use optd_gungnir::stats::counter::Counter;
-use optd_gungnir::stats::hyperloglog::{self, ByteSerializable, HyperLogLog};
+use optd_gungnir::stats::hyperloglog::{self, HyperLogLog};
 use optd_gungnir::stats::misragries::{MisraGries, DEFAULT_K_TO_TRACK};
 use optd_gungnir::stats::tdigest::{self, TDigest};
 use optd_gungnir::utils::arith_encoder;
+use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
 fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
@@ -66,62 +65,12 @@ pub struct PerTableStats<M: MostCommonValues, D: Distribution> {
     per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct F64Wrap(f64);
-
-impl PartialEq for F64Wrap {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.to_bits() == other.0.to_bits()
-    }
-}
-
-impl Eq for F64Wrap {}
-
-impl std::hash::Hash for F64Wrap {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.to_bits().hash(state);
-    }
-}
-
-impl ByteSerializable for F64Wrap {
-    fn to_bytes(&self) -> Vec<u8> {
-        self.0.to_le_bytes().to_vec()
-    }
-}
-
-enum MG {
-    Boolean(MisraGries<bool>),
-    Int8(MisraGries<i8>),
-    Int16(MisraGries<i16>),
-    Int32(MisraGries<i32>),
-    UInt8(MisraGries<u8>),
-    UInt16(MisraGries<u16>),
-    UInt32(MisraGries<u32>),
-    Float32(MisraGries<F64Wrap>),
-    Float64(MisraGries<F64Wrap>),
-    Date32(MisraGries<i32>),
-    Utf8(MisraGries<String>),
-}
-
-enum Cnt {
-    Boolean(Counter<bool>),
-    Int8(Counter<i8>),
-    Int16(Counter<i16>),
-    Int32(Counter<i32>),
-    UInt8(Counter<u8>),
-    UInt16(Counter<u16>),
-    UInt32(Counter<u32>),
-    Float32(Counter<F64Wrap>),
-    Float64(Counter<F64Wrap>),
-    Date32(Counter<i32>),
-    Utf8(Counter<String>),
-}
-
 impl DataFusionPerTableStats {
     pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
-        batch_iter: RecordBatchIterator<I>,
+        batch_iter1: RecordBatchIterator<I>,
+        batch_iter2: RecordBatchIterator<I>,
     ) -> anyhow::Result<Self> {
-        let schema = batch_iter.schema();
+        let schema = batch_iter1.schema();
         let col_types = schema
             .fields()
             .iter()
@@ -132,149 +81,26 @@ impl DataFusionPerTableStats {
         let mut row_cnt = 0;
 
         let mut hlls = vec![HyperLogLog::new(hyperloglog::DEFAULT_PRECISION); col_cnt];
-        let mut mg = Vec::<Option<MG>>::with_capacity(col_cnt);
-        for col_type in &col_types {
-            let mg_elem = match col_type {
-                DataType::Boolean => Some(MG::Boolean(MisraGries::new(DEFAULT_K_TO_TRACK))),
-                DataType::Int8 => Some(MG::Int8(MisraGries::new(DEFAULT_K_TO_TRACK))),
-                DataType::Int16 => Some(MG::Int16(MisraGries::new(DEFAULT_K_TO_TRACK))),
-                DataType::Int32 => Some(MG::Int32(MisraGries::new(DEFAULT_K_TO_TRACK))),
-                DataType::UInt8 => Some(MG::UInt8(MisraGries::new(DEFAULT_K_TO_TRACK))),
-                DataType::UInt16 => Some(MG::UInt16(MisraGries::new(DEFAULT_K_TO_TRACK))),
-                DataType::UInt32 => Some(MG::UInt32(MisraGries::new(DEFAULT_K_TO_TRACK))),
-                DataType::Float32 => Some(MG::Float32(MisraGries::new(DEFAULT_K_TO_TRACK))),
-                DataType::Float64 => Some(MG::Float64(MisraGries::new(DEFAULT_K_TO_TRACK))),
-                DataType::Date32 => Some(MG::Date32(MisraGries::new(DEFAULT_K_TO_TRACK))),
-                DataType::Utf8 => Some(MG::Utf8(MisraGries::new(DEFAULT_K_TO_TRACK))),
-                _ => None,
-            };
-            mg.push(mg_elem);
-        }
-
+        let mut mgs: Vec<MisraGries<Value>> = vec![MisraGries::new(DEFAULT_K_TO_TRACK); col_cnt];
         let mut null_cnt = vec![0; col_cnt];
 
-        // First pass: HLL + MG + null_cnt + row_cnt
-        for batch in batch_iter {
+        // 1. First pass: HLL + MG + null_cnt + row_cnt.
+        for batch in batch_iter1 {
             let batch = batch?;
             row_cnt += batch.num_rows();
 
-            // Enumerate the columns.
             for (i, col) in batch.columns().iter().enumerate() {
                 let col_type = &col_types[i];
                 if Self::is_type_supported(col_type) {
-                    // Update null cnt.
                     null_cnt[i] += col.null_count();
-
                     Self::generate_partial_stats_for_column(
                         col,
                         col_type,
-                        &mut mg[i].as_mut().unwrap(),
+                        &mut mgs[i],
                         &mut hlls[i],
                     );
                 }
             }
-        }
-
-        let mut cnt = Vec::<Option<Cnt>>::with_capacity(col_cnt);
-        for (idx, col_type) in col_types.iter().enumerate() {
-            let elem = match col_type {
-                DataType::Boolean => match &mg[idx] {
-                    Some(MG::Boolean(mg)) => {
-                        let bla: Vec<bool> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
-                        Some(Cnt::Boolean(Counter::new(&bla)))
-                    }
-                    _ => unreachable!(),
-                },
-
-                DataType::Int8 => match &mg[idx] {
-                    Some(MG::Int8(mg)) => {
-                        let bla: Vec<i8> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
-                        Some(Cnt::Int8(Counter::new(&bla)))
-                    }
-                    _ => unreachable!(),
-                },
-
-                DataType::Int16 => match &mg[idx] {
-                    Some(MG::Int16(mg)) => {
-                        let bla: Vec<i16> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
-                        Some(Cnt::Int16(Counter::new(&bla)))
-                    }
-                    _ => unreachable!(),
-                },
-
-                DataType::Int32 => match &mg[idx] {
-                    Some(MG::Int32(mg)) => {
-                        let bla: Vec<i32> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
-                        Some(Cnt::Int32(Counter::new(&bla)))
-                    }
-                    _ => unreachable!(),
-                },
-
-                DataType::UInt8 => match &mg[idx] {
-                    Some(MG::UInt8(mg)) => {
-                        let bla: Vec<u8> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
-                        Some(Cnt::UInt8(Counter::new(&bla)))
-                    }
-                    _ => unreachable!(),
-                },
-
-                DataType::UInt16 => match &mg[idx] {
-                    Some(MG::UInt16(mg)) => {
-                        let bla: Vec<u16> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
-                        Some(Cnt::UInt16(Counter::new(&bla)))
-                    }
-                    _ => unreachable!(),
-                },
-
-                DataType::UInt32 => match &mg[idx] {
-                    Some(MG::UInt32(mg)) => {
-                        let bla: Vec<u32> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
-                        Some(Cnt::UInt32(Counter::new(&bla)))
-                    }
-                    _ => unreachable!(),
-                },
-
-                DataType::Float32 => match &mg[idx] {
-                    Some(MG::Float32(mg)) => {
-                        let bla: Vec<F64Wrap> =
-                            mg.most_frequent_keys().iter().map(|&&x| x).collect();
-                        Some(Cnt::Float32(Counter::new(&bla)))
-                    }
-                    _ => unreachable!(),
-                },
-
-                DataType::Float64 => match &mg[idx] {
-                    Some(MG::Float64(mg)) => {
-                        let bla: Vec<F64Wrap> =
-                            mg.most_frequent_keys().iter().map(|&&x| x).collect();
-                        Some(Cnt::Float64(Counter::new(&bla)))
-                    }
-                    _ => unreachable!(),
-                },
-
-                DataType::Date32 => match &mg[idx] {
-                    Some(MG::Date32(mg)) => {
-                        let bla: Vec<i32> = mg.most_frequent_keys().iter().map(|&&x| x).collect();
-                        Some(Cnt::Date32(Counter::new(&bla)))
-                    }
-                    _ => unreachable!(),
-                },
-
-                DataType::Utf8 => match &mg[idx] {
-                    Some(MG::Utf8(mg)) => {
-                        let bla: Vec<String> = mg
-                            .most_frequent_keys()
-                            .into_iter()
-                            .map(|s| s.clone())
-                            .collect();
-                        Some(Cnt::Utf8(Counter::new(&bla)))
-                    }
-                    _ => unreachable!(),
-                },
-                _ => None,
-            };
-
-            cnt.push(elem);
         }
 
         let mut distr = col_types
@@ -287,26 +113,37 @@ impl DataFusionPerTableStats {
                 }
             })
             .collect_vec();
+        let mut cnts: Vec<Counter<Value>> = mgs
+            .iter()
+            .map(|mg| {
+                let mfk: Vec<Value> = mg
+                    .most_frequent_keys()
+                    .into_iter()
+                    .map(|item| item.clone())
+                    .collect();
+                Counter::new(&mfk)
+            })
+            .collect();
 
-        // TODO(Alexis): Second scan here.
+        // 2. Second pass: MCV + TDigest.
+        for batch in batch_iter2 {
+            let batch = batch?;
 
+            for (i, col) in batch.columns().iter().enumerate() {
+                let col_type = &col_types[i];
+                if Self::is_type_supported(col_type) {
+                    Self::generate_stats_for_column(col, col_type, &mut distr[i], &mut cnts[i]);
+                }
+            }
+        }
+
+        // 3. Assemble stats.
         let mut per_column_stats_vec = Vec::with_capacity(col_cnt);
         for i in 0..col_cnt {
             per_column_stats_vec.push(if Self::is_type_supported(&col_types[i]) {
+                let counter = cnts.remove(i);
                 Some(PerColumnStats::new(
-                    match cnt[i].take().unwrap() {
-                        Cnt::Boolean(_) => todo!(),
-                        Cnt::Int8(_) => todo!(),
-                        Cnt::Int16(_) => todo!(),
-                        Cnt::Int32(_) => todo!(),
-                        Cnt::UInt8(_) => todo!(),
-                        Cnt::UInt16(_) => todo!(),
-                        Cnt::UInt32(_) => todo!(),
-                        Cnt::Float32(_) => todo!(),
-                        Cnt::Float64(_) => todo!(),
-                        Cnt::Date32(_) => todo!(),
-                        Cnt::Utf8(_) => todo!(),
-                    },
+                    counter,
                     hlls[i].n_distinct(),
                     null_cnt[i] as f64 / row_cnt as f64,
                     distr[i].take().unwrap(),
@@ -342,99 +179,96 @@ impl DataFusionPerTableStats {
     fn generate_partial_stats_for_column(
         col: &Arc<dyn Array>,
         col_type: &DataType,
-        mg: &mut MG,
+        mg: &mut MisraGries<Value>,
         hll: &mut HyperLogLog,
     ) {
         macro_rules! generate_partial_stats_for_col {
-            ({ $col:expr, $mg:expr, $hll:expr, $array_type:path}) => {{
+            ({ $col:expr, $mg:expr, $hll:expr, $array_type:path, $value_type:path}) => {{
                 let array = $col.as_any().downcast_ref::<$array_type>().unwrap();
+
                 // Filter out `None` values.
-                let values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+                let mg_values = array
+                    .iter()
+                    .filter_map(|x| x)
+                    .map(|x| $value_type(x))
+                    .collect::<Vec<_>>();
+                let hll_values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
 
-                // Update mg.
-                $mg.aggregate(&values);
-
-                // Update hll.
-                $hll.aggregate(&values);
+                $mg.aggregate(&mg_values);
+                $hll.aggregate(&hll_values);
             }};
         }
 
         match col_type {
-            DataType::Boolean => match mg {
-                MG::Boolean(mg) => generate_partial_stats_for_col!({ col, mg, hll, BooleanArray }),
-                _ => unreachable!(),
-            },
-            DataType::Int8 => match mg {
-                MG::Int8(mg) => generate_partial_stats_for_col!({ col, mg, hll, Int8Array }),
-                _ => unreachable!(),
-            },
-            DataType::Int16 => match mg {
-                MG::Int16(mg) => generate_partial_stats_for_col!({ col, mg, hll, Int16Array }),
-                _ => unreachable!(),
-            },
-            DataType::Int32 => match mg {
-                MG::Int32(mg) => generate_partial_stats_for_col!({ col, mg, hll, Int32Array }),
-                _ => unreachable!(),
-            },
-            DataType::UInt8 => match mg {
-                MG::UInt8(mg) => generate_partial_stats_for_col!({ col, mg, hll, UInt8Array }),
-                _ => unreachable!(),
-            },
-            DataType::UInt16 => match mg {
-                MG::UInt16(mg) => generate_partial_stats_for_col!({ col, mg, hll, UInt16Array }),
-                _ => unreachable!(),
-            },
-            DataType::UInt32 => match mg {
-                MG::UInt32(mg) => generate_partial_stats_for_col!({ col, mg, hll, UInt32Array }),
-                _ => unreachable!(),
-            },
-            DataType::Float32 => match mg {
-                MG::Float32(mg) => {
-                    let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
-                    let values = array
-                        .iter()
-                        .filter_map(|x| x)
-                        .map(|x| F64Wrap(x.into()))
-                        .collect::<Vec<_>>();
+            DataType::Boolean => {
+                generate_partial_stats_for_col!({ col, mg, hll, BooleanArray, Value::Bool })
+            }
+            DataType::Int8 => {
+                generate_partial_stats_for_col!({ col, mg, hll, Int8Array, Value::Int8 })
+            }
+            DataType::Int16 => {
+                generate_partial_stats_for_col!({ col, mg, hll, Int16Array, Value::Int16 })
+            }
+            DataType::Int32 => {
+                generate_partial_stats_for_col!({ col, mg, hll, Int32Array, Value::Int32 })
+            }
+            DataType::UInt8 => {
+                generate_partial_stats_for_col!({ col, mg, hll, UInt8Array, Value::UInt8 })
+            }
+            DataType::UInt16 => {
+                generate_partial_stats_for_col!({ col, mg, hll, UInt16Array, Value::UInt16 })
+            }
+            DataType::UInt32 => {
+                generate_partial_stats_for_col!({ col, mg, hll, UInt32Array, Value::UInt32 })
+            }
+            DataType::Float32 => {
+                let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
 
-                    mg.aggregate(&values);
-                    hll.aggregate(&values);
-                }
-                _ => unreachable!(),
-            },
-            DataType::Float64 => match mg {
-                MG::Float64(mg) => {
-                    let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
-                    let values = array
-                        .iter()
-                        .filter_map(|x| x)
-                        .map(|x| F64Wrap(x.into()))
-                        .collect::<Vec<_>>();
+                let mg_values = array
+                    .iter()
+                    .filter_map(|x| x)
+                    .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
+                    .collect::<Vec<_>>();
+                let hll_values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
 
-                    mg.aggregate(&values);
-                    hll.aggregate(&values);
-                }
-                _ => unreachable!(),
-            },
-            DataType::Date32 => match mg {
-                MG::Date32(mg) => generate_partial_stats_for_col!({ col, mg, hll, Date32Array }),
-                _ => unreachable!(),
-            },
-         
-            DataType::Utf8 => match mg {
-                MG::Utf8(mg) => {
-                    let array = col.as_any().downcast_ref::<StringArray>().unwrap();
-                    let values = array
-                        .iter()
-                        .filter_map(|x| x)
-                        .map(|x| x.to_string())
-                        .collect::<Vec<_>>();
+                mg.aggregate(&mg_values);
+                hll.aggregate(&hll_values);
+            }
+            DataType::Float64 => {
+                let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
 
-                    mg.aggregate(&values);
-                    hll.aggregate(&values);
-                }
-                _ => unreachable!(),
-            },
+                let mg_values = array
+                    .iter()
+                    .filter_map(|x| x)
+                    .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
+                    .collect::<Vec<_>>();
+                let hll_values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+
+                mg.aggregate(&mg_values);
+                hll.aggregate(&hll_values);
+            }
+            DataType::Date32 => {
+                generate_partial_stats_for_col!({ col, mg, hll, Date32Array, Value::Date32 })
+            }
+            DataType::Utf8 => {
+                let array = col.as_any().downcast_ref::<StringArray>().unwrap();
+
+                let mg_values = array
+                    .iter()
+                    .filter_map(|x| x)
+                    .map(|x| x.to_string())
+                    .map(|x| Value::String(x.into()))
+                    .collect::<Vec<_>>();
+                let hll_values = array
+                    .iter()
+                    .filter_map(|x| x)
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>();
+
+                mg.aggregate(&mg_values);
+                hll.aggregate(&hll_values);
+            }
+
             _ => unreachable!(),
         }
     }
@@ -444,19 +278,25 @@ impl DataFusionPerTableStats {
         col: &Arc<dyn Array>,
         col_type: &DataType,
         distr: &mut Option<TDigest>,
-        mcv: &mut Cnt,
+        cnt: &mut Counter<Value>,
     ) {
         macro_rules! generate_stats_for_col {
-            ({ $col:expr, $distr:expr, $array_type:path, $to_f64:ident }) => {{
+            ({ $col:expr, $distr:expr, $array_type:path, $to_f64:ident, $value_type:path }) => {{
                 let array = $col.as_any().downcast_ref::<$array_type>().unwrap();
                 // Filter out `None` values.
-                let values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+                let distr_values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+                let cnt_values = array
+                    .iter()
+                    .filter_map(|x| x)
+                    .map(|x| $value_type(x))
+                    .collect::<Vec<_>>();
 
-                // Update distribution.
                 *$distr = {
-                    let mut f64_values = values.iter().map(|x| $to_f64(*x)).collect::<Vec<_>>();
+                    let mut f64_values =
+                        distr_values.iter().map(|x| $to_f64(*x)).collect::<Vec<_>>();
                     Some($distr.take().unwrap().merge_values(&mut f64_values))
                 };
+                cnt.aggregate(&cnt_values);
             }};
         }
 
@@ -465,55 +305,96 @@ impl DataFusionPerTableStats {
             val.into()
         }
 
-        /// Convert i128 to f64 with possible precision loss.
-        ///
-        /// Note: optd represents decimal with the significand as f64 (see `ConstantExpr::decimal`).
-        /// For instance 0.04 of type `Decimal128(15, 2)` is just 4.0, the type information
-        /// is discarded. Therefore we must use the significand to generate the statistics.
-        fn i128_to_f64(val: i128) -> f64 {
-            val as f64
-        }
-
         fn str_to_f64(string: &str) -> f64 {
             arith_encoder::encode(string)
         }
 
         match col_type {
             DataType::Boolean => {
-                generate_stats_for_col!({ col, distr, BooleanArray, to_f64_safe })
+                generate_stats_for_col!({ col, distr, BooleanArray, to_f64_safe, Value::Bool })
             }
             DataType::Int8 => {
-                generate_stats_for_col!({ col, distr, Int8Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, Int8Array, to_f64_safe, Value::Int8 })
             }
             DataType::Int16 => {
-                generate_stats_for_col!({ col, distr, Int16Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, Int16Array, to_f64_safe, Value::Int16 })
             }
             DataType::Int32 => {
-                generate_stats_for_col!({ col, distr, Int32Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, Int32Array, to_f64_safe, Value::Int32 })
             }
             DataType::UInt8 => {
-                generate_stats_for_col!({ col, distr, UInt8Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, UInt8Array, to_f64_safe, Value::UInt8 })
             }
             DataType::UInt16 => {
-                generate_stats_for_col!({ col, distr, UInt16Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, UInt16Array, to_f64_safe, Value::UInt16 })
             }
             DataType::UInt32 => {
-                generate_stats_for_col!({ col, distr, UInt32Array, to_f64_safe })
+                generate_stats_for_col!({ col, distr, UInt32Array, to_f64_safe, Value::UInt32 })
             }
             DataType::Float32 => {
-                generate_stats_for_col!({ col, distr, Float32Array, to_f64_safe })
+                let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
+
+                let distr_values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+                let cnt_values = array
+                    .iter()
+                    .filter_map(|x| x)
+                    .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
+                    .collect::<Vec<_>>();
+
+                *distr = {
+                    let mut f64_values = distr_values
+                        .iter()
+                        .map(|x| to_f64_safe(*x))
+                        .collect::<Vec<_>>();
+                    Some(distr.take().unwrap().merge_values(&mut f64_values))
+                };
+                cnt.aggregate(&cnt_values);
             }
             DataType::Float64 => {
-                generate_stats_for_col!({ col, distr, Float64Array, to_f64_safe })
+                let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
+
+                let distr_values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+                let cnt_values = array
+                    .iter()
+                    .filter_map(|x| x)
+                    .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
+                    .collect::<Vec<_>>();
+
+                *distr = {
+                    let mut f64_values = distr_values
+                        .iter()
+                        .map(|x| to_f64_safe(*x))
+                        .collect::<Vec<_>>();
+                    Some(distr.take().unwrap().merge_values(&mut f64_values))
+                };
+                cnt.aggregate(&cnt_values);
             }
             DataType::Date32 => {
-                generate_stats_for_col!({ col, distr, Date32Array, to_f64_safe })
-            }
-            DataType::Decimal128(_, _) => {
-                generate_stats_for_col!({ col, distr, Decimal128Array, i128_to_f64 })
+                generate_stats_for_col!({ col, distr, Date32Array, to_f64_safe, Value::Date32 })
             }
             DataType::Utf8 => {
-                generate_stats_for_col!({ col, distr, StringArray, str_to_f64 })
+                let array = col.as_any().downcast_ref::<StringArray>().unwrap();
+
+                let distr_values = array
+                    .iter()
+                    .filter_map(|x| x)
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>();
+                let cnt_values = array
+                    .iter()
+                    .filter_map(|x| x)
+                    .map(|x| x.to_string())
+                    .map(|x| Value::String(x.into()))
+                    .collect::<Vec<_>>();
+
+                *distr = {
+                    let mut f64_values = distr_values
+                        .iter()
+                        .map(|x| str_to_f64(x))
+                        .collect::<Vec<_>>();
+                    Some(distr.take().unwrap().merge_values(&mut f64_values))
+                };
+                cnt.aggregate(&cnt_values);
             }
             _ => unreachable!(),
         }
