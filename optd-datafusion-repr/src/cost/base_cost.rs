@@ -59,7 +59,7 @@ pub struct OptCostModel<M: MostCommonValues, D: Distribution> {
     per_table_stats_map: BaseTableStats<M, D>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct PerTableStats<M: MostCommonValues, D: Distribution> {
     row_cnt: usize,
     per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>,
@@ -128,6 +128,7 @@ impl DataFusionPerTableStats {
             .collect();
 
         // 2. Second pass: MCV + TDigest.
+        // TODO(Alexis): Remove MCV from TDigest.
         for batch in batch_iter2 {
             let batch = batch?;
 

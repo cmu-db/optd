@@ -35,7 +35,7 @@ lazy_static! {
 
 pub fn encode(string: &str) -> f64 {
     let mut left = 0.0;
-    let mut right = f64::MAX;
+    let mut right = 10_000.0;
 
     for char in string.chars() {
         let cdf = CDF.get(&char).unwrap_or(&1.0);
