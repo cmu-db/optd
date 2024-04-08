@@ -10,7 +10,8 @@ use crate::{
 };
 use arrow_schema::{ArrowError, DataType};
 use datafusion::arrow::array::{
-    Array, BooleanArray, Date32Array, Float32Array, Int16Array, Int32Array, Int8Array, RecordBatch, RecordBatchIterator, RecordBatchReader, StringArray, UInt16Array, UInt32Array, UInt8Array
+    Array, BooleanArray, Date32Array, Float32Array, Int16Array, Int32Array, Int8Array, RecordBatch,
+    RecordBatchIterator, RecordBatchReader, StringArray, UInt16Array, UInt32Array, UInt8Array,
 };
 use itertools::Itertools;
 use optd_core::rel_node::SerializableOrderedF64;
@@ -71,7 +72,7 @@ impl DataFusionPerTableStats {
     ) -> anyhow::Result<Self> {
         let batch_iter1 = batch_iter_builder()?;
         let batch_iter2 = batch_iter_builder()?;
-        
+
         let schema = batch_iter1.schema();
         let col_types = schema
             .fields()

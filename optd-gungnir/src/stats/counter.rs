@@ -3,19 +3,21 @@
 
 use std::{collections::HashMap, hash::Hash};
 
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 /// The Counter structure to track exact frequencies of fixed elements.
+#[serde_with::serde_as]
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Counter<T: PartialEq + Eq + Hash + Clone> {
+pub struct Counter<T: PartialEq + Eq + Hash + Clone + Serialize + DeserializeOwned> {
+    #[serde_as(as = "HashMap<serde_with::json::JsonString, _>")]
     counts: HashMap<T, i32>, // The exact counts of an element T.
-    total_count: i32,        // The total number of elements.
+    total_count: i32, // The total number of elements.
 }
 
 // Self-contained implementation of the Counter data structure.
 impl<T> Counter<T>
 where
-    T: PartialEq + Eq + Hash + Clone,
+    T: PartialEq + Eq + Hash + Clone + Serialize + DeserializeOwned,
 {
     /// Creates and initializes a new empty Counter with the frequency map sized
     /// based on the number of unique elements in `to_track`.
