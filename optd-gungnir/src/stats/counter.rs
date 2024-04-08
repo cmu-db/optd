@@ -6,7 +6,7 @@ use std::{collections::HashMap, hash::Hash};
 use serde::{Deserialize, Serialize};
 
 /// The Counter structure to track exact frequencies of fixed elements.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Counter<T: PartialEq + Eq + Hash + Clone> {
     counts: HashMap<T, i32>, // The exact counts of an element T.
     total_count: i32,        // The total number of elements.

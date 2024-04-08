@@ -10,7 +10,7 @@ use std::f64::consts::PI;
 pub const DEFAULT_COMPRESSION: f64 = 200.0;
 
 /// The TDigest structure for the statistical aggregator to query quantiles.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct TDigest {
     /// A sorted array of Centroids, according to their mean.
     centroids: Vec<Centroid>,
@@ -21,7 +21,7 @@ pub struct TDigest {
 }
 
 /// A Centroid is a cluster of aggregated data points.
-#[derive(PartialEq, PartialOrd, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, PartialOrd, Clone, Serialize, Deserialize, Debug)]
 struct Centroid {
     /// Mean of all aggregated points in this cluster.
     mean: f64,

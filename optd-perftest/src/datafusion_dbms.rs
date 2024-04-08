@@ -12,7 +12,7 @@ use crate::{
 use async_trait::async_trait;
 use datafusion::{
     arrow::{
-        array::RecordBatchIterator, csv::ReaderBuilder, datatypes::Schema, util::display::{ArrayFormatter, FormatOptions}
+        array::RecordBatchIterator, csv::ReaderBuilder, util::display::{ArrayFormatter, FormatOptions}
     },
     execution::{
         config::SessionConfig,
@@ -299,6 +299,7 @@ impl DatafusionDBMS {
         &mut self,
         tpch_config: &TpchConfig,
     ) -> anyhow::Result<DataFusionBaseTableStats> {
+        println!("HWIAEWAE");
         // Generate the tables
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_config)?;
@@ -314,6 +315,7 @@ impl DatafusionDBMS {
         for ddl in ddls {
             Self::execute(&ctx, ddl).await?;
         }
+
         let mut base_table_stats = BaseTableStats::default();
         for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap() {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();

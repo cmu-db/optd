@@ -140,8 +140,8 @@ impl DataFusionPerTableStats {
         // 3. Assemble stats.
         let mut per_column_stats_vec = Vec::with_capacity(col_cnt);
         for i in 0..col_cnt {
+            let counter = cnts.remove(0);
             per_column_stats_vec.push(if Self::is_type_supported(&col_types[i]) {
-                let counter = cnts.remove(i);
                 Some(PerColumnStats::new(
                     counter,
                     hlls[i].n_distinct(),
@@ -401,7 +401,7 @@ impl DataFusionPerTableStats {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct PerColumnStats<M: MostCommonValues, D: Distribution> {
     // even if nulls are the most common, they cannot appear in mcvs
     mcvs: M,
