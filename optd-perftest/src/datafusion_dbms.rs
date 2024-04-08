@@ -34,7 +34,7 @@ use regex::Regex;
 
 pub struct DatafusionDBMS {
     workspace_dpath: PathBuf,
-    no_cached_stats: bool,
+    rebuild_cached_stats: bool,
     ctx: SessionContext,
 }
 
@@ -63,11 +63,11 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
 impl DatafusionDBMS {
     pub async fn new<P: AsRef<Path>>(
         workspace_dpath: P,
-        no_cached_stats: bool,
+        rebuild_cached_stats: bool,
     ) -> anyhow::Result<Self> {
         Ok(DatafusionDBMS {
             workspace_dpath: workspace_dpath.as_ref().to_path_buf(),
-            no_cached_stats,
+            rebuild_cached_stats,
             ctx: Self::new_session_ctx(None).await?,
         })
     }
@@ -145,13 +145,13 @@ impl DatafusionDBMS {
 
         let mut estcards = vec![];
         for (query_id, sql_fpath) in tpch_kit.get_sql_fpath_ordered_iter(tpch_config)? {
+            println!(
+                "about to evaluate datafusion's estcard for TPC-H Q{}",
+                query_id
+            );
             let sql = fs::read_to_string(sql_fpath)?;
             let estcard = self.eval_query_estcard(&sql).await?;
             estcards.push(estcard);
-            println!(
-                "done evaluating datafusion's estcard for TPC-H Q{}",
-                query_id
-            );
         }
 
         Ok(estcards)
@@ -213,7 +213,7 @@ impl DatafusionDBMS {
             .workspace_dpath
             .join("datafusion_stats_caches")
             .join(format!("{}.json", benchmark_fname));
-        if !self.no_cached_stats && stats_cache_fpath.exists() {
+        if !self.rebuild_cached_stats && stats_cache_fpath.exists() {
             let file = File::open(&stats_cache_fpath)?;
             Ok(serde_json::from_reader(file)?)
         } else {
@@ -222,9 +222,8 @@ impl DatafusionDBMS {
                 _ => unimplemented!(),
             };
 
-            // regardless of whether self.no_cached_stats is true or false, we want to update the cache
-            // this way, even if we choose not to read from the cache, the cache still always has the
-            // most up to date version of the stats
+            // When self.rebuild_cached_stats is true, we *don't read* from the cache but we still
+            //   *do write* to the cache.
             fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
             let file = File::create(&stats_cache_fpath)?;
             serde_json::to_writer(file, &base_table_stats)?;

@@ -285,13 +285,19 @@ impl<T: RelNodeTyp> Memo<T> {
             };
 
             // if the new expr already in the memo table, merge the group and remove old expr
-            if let Some(&expr_id) = self.expr_node_to_expr_id.get(&memo_node) {
-                let group_id = self.get_group_id_of_expr_id(expr_id);
+            if let Some(&new_expr_id) = self.expr_node_to_expr_id.get(&memo_node) {
+                if new_expr_id == expr_id {
+                    // This is not acceptable, as it means the expr returned by a heuristic rule is exactly
+                    // the same as the original expr, which should not happen
+                    // TODO: we can silently ignore this case without marking the original one as a deadend
+                    // But the rule creators should follow the definition of the heuristic rule
+                    // and return an empty vec if their rule does not do the real transformation
+                    unreachable!("replace_group_expr: you're replacing the old expr with the same expr, please check your rules registered as heuristic
+                        and make sure if it does not do any transformation, it should return an empty vec!");
+                }
+                let group_id = self.get_group_id_of_expr_id(new_expr_id);
                 let group_id = self.get_reduced_group_id(group_id);
                 self.merge_group_inner(replace_group_id, group_id);
-
-                // TODO: instead of remove this expr from the old group,
-                // we mark the expr as all rules have been fired to make it a dead end
                 return false;
             }
 
