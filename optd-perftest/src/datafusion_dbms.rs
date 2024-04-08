@@ -12,7 +12,9 @@ use crate::{
 use async_trait::async_trait;
 use datafusion::{
     arrow::{
-        array::RecordBatchIterator, csv::ReaderBuilder, util::display::{ArrayFormatter, FormatOptions}
+        array::RecordBatchIterator,
+        csv::ReaderBuilder,
+        util::display::{ArrayFormatter, FormatOptions},
     },
     execution::{
         config::SessionConfig,
@@ -329,26 +331,17 @@ impl DatafusionDBMS {
                 .unwrap()
                 .schema();
 
-            // TODO(Alexis): refactor this and understand what is the rustic way to do this...
-            let tbl_file1 = fs::File::open(&tbl_fpath)?;
-            let csv_reader1 = ReaderBuilder::new(schema.clone())
-                .has_header(false)
-                .with_delimiter(b'|')
-                .build(tbl_file1)
-                .unwrap();
-            let batch_iter1 = RecordBatchIterator::new(csv_reader1, schema.clone());
-
-            let tbl_file2 = fs::File::open(&tbl_fpath)?;
-            let csv_reader2 = ReaderBuilder::new(schema.clone())
-                .has_header(false)
-                .with_delimiter(b'|')
-                .build(tbl_file2)
-                .unwrap();
-            let batch_iter2 = RecordBatchIterator::new(csv_reader2, schema);
-
             base_table_stats.insert(
                 tbl_name.to_string(),
-                PerTableStats::from_record_batches(batch_iter1, batch_iter2)?,
+                PerTableStats::from_record_batches(|| {
+                    let tbl_file = fs::File::open(&tbl_fpath)?;
+                    let csv_reader1 = ReaderBuilder::new(schema.clone())
+                        .has_header(false)
+                        .with_delimiter(b'|')
+                        .build(tbl_file)
+                        .unwrap();
+                    Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))
+                })?,
             );
         }
 

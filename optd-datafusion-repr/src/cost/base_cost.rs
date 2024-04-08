@@ -67,9 +67,11 @@ pub struct PerTableStats<M: MostCommonValues, D: Distribution> {
 
 impl DataFusionPerTableStats {
     pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
-        batch_iter1: RecordBatchIterator<I>,
-        batch_iter2: RecordBatchIterator<I>,
+        batch_iter_builder: impl Fn() -> anyhow::Result<RecordBatchIterator<I>>,
     ) -> anyhow::Result<Self> {
+        let batch_iter1 = batch_iter_builder()?;
+        let batch_iter2 = batch_iter_builder()?;
+        
         let schema = batch_iter1.schema();
         let col_types = schema
             .fields()
