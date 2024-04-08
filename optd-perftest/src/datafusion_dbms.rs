@@ -301,7 +301,6 @@ impl DatafusionDBMS {
         &mut self,
         tpch_config: &TpchConfig,
     ) -> anyhow::Result<DataFusionBaseTableStats> {
-        println!("HWIAEWAE");
         // Generate the tables
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_config)?;
