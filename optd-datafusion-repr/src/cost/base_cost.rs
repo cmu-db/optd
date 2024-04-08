@@ -121,8 +121,7 @@ impl DataFusionPerTableStats {
             .map(|mg| {
                 let mfk: Vec<Value> = mg
                     .most_frequent_keys()
-                    .into_iter()
-                    .map(|item| item.clone())
+                    .into_iter().cloned()
                     .collect();
                 Counter::new(&mfk)
             })
@@ -193,10 +192,10 @@ impl DataFusionPerTableStats {
                 // Filter out `None` values.
                 let mg_values = array
                     .iter()
-                    .filter_map(|x| x)
+                    .flatten()
                     .map(|x| $value_type(x))
                     .collect::<Vec<_>>();
-                let hll_values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+                let hll_values = array.iter().flatten().collect::<Vec<_>>();
 
                 $mg.aggregate(&mg_values);
                 $hll.aggregate(&hll_values);
@@ -230,10 +229,10 @@ impl DataFusionPerTableStats {
 
                 let mg_values = array
                     .iter()
-                    .filter_map(|x| x)
+                    .flatten()
                     .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
                     .collect::<Vec<_>>();
-                let hll_values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+                let hll_values = array.iter().flatten().collect::<Vec<_>>();
 
                 mg.aggregate(&mg_values);
                 hll.aggregate(&hll_values);
@@ -243,10 +242,10 @@ impl DataFusionPerTableStats {
 
                 let mg_values = array
                     .iter()
-                    .filter_map(|x| x)
+                    .flatten()
                     .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
                     .collect::<Vec<_>>();
-                let hll_values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+                let hll_values = array.iter().flatten().collect::<Vec<_>>();
 
                 mg.aggregate(&mg_values);
                 hll.aggregate(&hll_values);
@@ -259,13 +258,13 @@ impl DataFusionPerTableStats {
 
                 let mg_values = array
                     .iter()
-                    .filter_map(|x| x)
+                    .flatten()
                     .map(|x| x.to_string())
                     .map(|x| Value::String(x.into()))
                     .collect::<Vec<_>>();
                 let hll_values = array
                     .iter()
-                    .filter_map(|x| x)
+                    .flatten()
                     .map(|x| x.to_string())
                     .collect::<Vec<_>>();
 
@@ -288,10 +287,10 @@ impl DataFusionPerTableStats {
             ({ $col:expr, $distr:expr, $array_type:path, $to_f64:ident, $value_type:path }) => {{
                 let array = $col.as_any().downcast_ref::<$array_type>().unwrap();
                 // Filter out `None` values.
-                let distr_values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+                let distr_values = array.iter().flatten().collect::<Vec<_>>();
                 let cnt_values = array
                     .iter()
-                    .filter_map(|x| x)
+                    .flatten()
                     .map(|x| $value_type(x))
                     .collect::<Vec<_>>();
 
@@ -338,10 +337,10 @@ impl DataFusionPerTableStats {
             DataType::Float32 => {
                 let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
 
-                let distr_values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+                let distr_values = array.iter().flatten().collect::<Vec<_>>();
                 let cnt_values = array
                     .iter()
-                    .filter_map(|x| x)
+                    .flatten()
                     .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
                     .collect::<Vec<_>>();
 
@@ -357,10 +356,10 @@ impl DataFusionPerTableStats {
             DataType::Float64 => {
                 let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
 
-                let distr_values = array.iter().filter_map(|x| x).collect::<Vec<_>>();
+                let distr_values = array.iter().flatten().collect::<Vec<_>>();
                 let cnt_values = array
                     .iter()
-                    .filter_map(|x| x)
+                    .flatten()
                     .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
                     .collect::<Vec<_>>();
 
@@ -381,12 +380,12 @@ impl DataFusionPerTableStats {
 
                 let distr_values = array
                     .iter()
-                    .filter_map(|x| x)
+                    .flatten()
                     .map(|x| x.to_string())
                     .collect::<Vec<_>>();
                 let cnt_values = array
                     .iter()
-                    .filter_map(|x| x)
+                    .flatten()
                     .map(|x| x.to_string())
                     .map(|x| Value::String(x.into()))
                     .collect::<Vec<_>>();
