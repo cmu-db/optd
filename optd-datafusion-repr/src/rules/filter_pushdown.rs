@@ -75,26 +75,6 @@ fn determine_join_cond_dep(
     }
 }
 
-/// Do not call directly
-fn categorize_conds_helper(cond: Expr, bottom_level_children: &mut Vec<Expr>) {
-    assert!(cond.typ().is_expression());
-    match cond.typ() {
-        OptRelNodeTyp::ColumnRef | OptRelNodeTyp::Constant(_) => bottom_level_children.push(cond),
-        _ => {
-            for child in &cond.clone().into_rel_node().children {
-                if child.typ == OptRelNodeTyp::List {
-                    // TODO: What should we do when we encounter a List?
-                    continue;
-                }
-                categorize_conds_helper(
-                    Expr::from_rel_node(child.clone()).unwrap(),
-                    bottom_level_children,
-                );
-            }
-        }
-    }
-}
-
 /// This function recurses/loops to the bottom-level of the expression tree,
 ///     building a list of bottom-level exprs for each separable expr
 ///
@@ -104,6 +84,27 @@ fn categorize_conds_helper(cond: Expr, bottom_level_children: &mut Vec<Expr>) {
 ///     categorized.
 /// * `cond` - The top-level expression node to begin separating
 fn categorize_conds(mut categorization_fn: impl FnMut(Expr, &Vec<Expr>), cond: Expr) {
+    fn categorize_conds_helper(cond: Expr, bottom_level_children: &mut Vec<Expr>) {
+        assert!(cond.typ().is_expression());
+        match cond.typ() {
+            OptRelNodeTyp::ColumnRef | OptRelNodeTyp::Constant(_) => {
+                bottom_level_children.push(cond)
+            }
+            _ => {
+                for child in &cond.clone().into_rel_node().children {
+                    if child.typ == OptRelNodeTyp::List {
+                        // TODO: What should we do when we encounter a List?
+                        continue;
+                    }
+                    categorize_conds_helper(
+                        Expr::from_rel_node(child.clone()).unwrap(),
+                        bottom_level_children,
+                    );
+                }
+            }
+        }
+    }
+
     let mut categorize_indep_expr = |cond: Expr| {
         let bottom_level_children = &mut vec![];
         categorize_conds_helper(cond.clone(), bottom_level_children);
@@ -172,7 +173,6 @@ fn apply_filter_merge(
 }
 
 // TODO: define_rule! should be able to match on any join type, ideally...
-
 define_rule!(
     FilterCrossJoinTransposeRule,
     apply_filter_cross_join_transpose,
@@ -235,6 +235,8 @@ fn apply_filter_inner_join_transpose(
 /// - Push down to the left child (only involves keys from the left child)
 /// - Push down to the right child (only involves keys from the right child)
 /// - Push into the join condition (involves keys from both children)
+/// We will consider each part of the conjunction separately, and push down
+/// only the relevant parts.
 fn filter_join_transpose(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     join_typ: JoinType,
@@ -358,7 +360,8 @@ define_rule!(
 );
 
 /// Filter is commutable past aggregations when the filter condition only
-/// involves the group by columns.
+/// involves the group by columns. We will consider each part of the conjunction
+/// separately, and push down only the relevant parts.
 fn apply_filter_agg_transpose(
     _optimizer: &impl Optimizer<OptRelNodeTyp>,
     FilterAggTransposeRulePicks {
