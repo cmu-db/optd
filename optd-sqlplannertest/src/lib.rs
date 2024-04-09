@@ -163,6 +163,16 @@ impl DatafusionDBMS {
                         .map(|x| &x[1])
                         .unwrap()
                 )?;
+            } else if subtask == "logical_optd_heuristic" {
+                writeln!(
+                    r,
+                    "{}",
+                    result
+                        .iter()
+                        .find(|x| x[0] == "logical_plan after optd-heuristic")
+                        .map(|x| &x[1])
+                        .unwrap()
+                )?;
             } else if subtask == "logical_optd" {
                 writeln!(
                     r,
