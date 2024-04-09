@@ -233,11 +233,11 @@ impl<T: RelNodeTyp> Task<T> for ApplyRuleTask {
 
                     trace!(event = "apply_rule replace", expr_id = %self.expr_id, rule_id = %self.rule_id);
 
-                    // rules registed as heuristics are always logical, exploring its children
-                    tasks.push(
-                        Box::new(OptimizeExpressionTask::new(self.expr_id, self.exploring))
-                            as Box<dyn Task<T>>,
-                    );
+                    // the expr returned by heuristic rule is a brand new one
+                    // so there's no optimizeExpressionTask for it in the original task list
+                    // we should set exploring as false to both envoke tranform rule and impl rule for it
+                    tasks.push(Box::new(OptimizeExpressionTask::new(self.expr_id, false))
+                        as Box<dyn Task<T>>);
                 }
                 continue;
             }
