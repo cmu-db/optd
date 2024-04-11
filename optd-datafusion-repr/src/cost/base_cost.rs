@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::plan_nodes::{
-    BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, ExprList, LogOpExpr, LogOpType,
-    OptRelNode, UnOpType,
+    BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, ExprList, InListExpr, LogOpExpr,
+    LogOpType, OptRelNode, UnOpType,
 };
 use crate::properties::column_ref::{ColumnRefPropertyBuilder, GroupColumnRefs};
 use crate::{
@@ -709,7 +709,10 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             OptRelNodeTyp::DataType(_) => {
                 panic!("the selectivity of a data type is not defined")
             }
-            OptRelNodeTyp::InList => UNIMPLEMENTED_SEL,
+            OptRelNodeTyp::InList => {
+                let in_list_expr = InListExpr::from_rel_node(expr_tree).unwrap();
+                self.get_filter_in_list_selectivity(&in_list_expr, column_refs)
+            }
             _ => unreachable!(
                 "all expression OptRelNodeTyp were enumerated. this should be unreachable"
             ),
@@ -1130,6 +1133,9 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 // always safe because usize is at least as large as i32
                 let ndistinct_as_usize = per_column_stats.ndistinct as usize;
                 let non_mcv_cnt = ndistinct_as_usize - per_column_stats.mcvs.cnt();
+                if non_mcv_cnt == 0 {
+                    return 0.0;
+                }
                 // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
                 (non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64)
             };
@@ -1220,6 +1226,61 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         }
     }
 
+    /// Only support colA in (val1, val2, val3) where colA is a column ref and
+    /// val1, val2, val3 are constants.
+    fn get_filter_in_list_selectivity(
+        &self,
+        expr: &InListExpr,
+        column_refs: &GroupColumnRefs,
+    ) -> f64 {
+        let child = expr.child();
+
+        // Check child is a column ref.
+        if !matches!(child.typ(), OptRelNodeTyp::ColumnRef) {
+            return UNIMPLEMENTED_SEL;
+        }
+
+        // Check all expressions in the list are constants.
+        let list_exprs = expr.list().to_vec();
+        if list_exprs
+            .iter()
+            .any(|expr| !matches!(expr.typ(), OptRelNodeTyp::Constant(_)))
+        {
+            return UNIMPLEMENTED_SEL;
+        }
+
+        // Convert child and const expressions to concrete types.
+        let col_ref_idx = ColumnRefExpr::from_rel_node(child.into_rel_node())
+            .unwrap()
+            .index();
+        let list_exprs = list_exprs
+            .into_iter()
+            .map(|expr| {
+                ConstantExpr::from_rel_node(expr.into_rel_node())
+                    .expect("we already checked all list elements are constants")
+            })
+            .collect::<Vec<_>>();
+        let negated = expr.negated();
+
+        if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
+            let in_sel = list_exprs
+                .iter()
+                .map(|expr| {
+                    self.get_column_equality_selectivity(table, *col_idx, &expr.value(), true)
+                })
+                .sum::<f64>()
+                .min(1.0);
+            if negated {
+                1.0 - in_sel
+            } else {
+                in_sel
+            }
+        } else {
+            // Child is a derived column.
+            UNIMPLEMENTED_SEL
+        }
+    }
+
     pub fn get_row_cnt(&self, table: &str) -> Option<usize> {
         self.per_table_stats_map
             .get(table)
@@ -1241,14 +1302,15 @@ impl<M: MostCommonValues, D: Distribution> PerTableStats<M, D> {
 /// and optd-datafusion-repr
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use optd_core::rel_node::Value;
     use std::collections::HashMap;
 
     use crate::{
         cost::base_cost::DEFAULT_EQ_SEL,
         plan_nodes::{
-            BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, JoinType, LogOpExpr,
-            LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
+            BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, InListExpr,
+            JoinType, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
         },
         properties::column_ref::{ColumnRef, GroupColumnRefs},
     };
@@ -1408,6 +1470,18 @@ mod tests {
             op_type,
         )
         .into_rel_node()
+    }
+
+    fn in_list(col_ref_idx: u64, list: Vec<Value>, negated: bool) -> InListExpr {
+        InListExpr::new(
+            Expr::from_rel_node(col_ref(col_ref_idx)).unwrap(),
+            ExprList::new(
+                list.into_iter()
+                    .map(|v| Expr::from_rel_node(cnst(v)).unwrap())
+                    .collect_vec(),
+            ),
+            negated,
+        )
     }
 
     /// The reason this isn't an associated function of PerColumnStats is because that would require
@@ -1981,6 +2055,62 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.7
+        );
+    }
+
+    #[test]
+    fn test_filtersel_in_list() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.8), (Value::Int32(2), 0.2)]),
+            2,
+            0.0,
+            TestDistribution::empty(),
+        ));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(1)], false),
+                &column_refs
+            ),
+            0.8
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(1), Value::Int32(2)], false),
+                &column_refs
+            ),
+            1.0
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(3)], false),
+                &column_refs
+            ),
+            0.0
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(1)], true),
+                &column_refs
+            ),
+            0.2
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(1), Value::Int32(2)], true),
+                &column_refs
+            ),
+            0.0
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(3)], true),
+                &column_refs
+            ),
+            1.0
         );
     }
 
