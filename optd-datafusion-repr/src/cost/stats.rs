@@ -3,8 +3,9 @@ use std::{collections::HashMap, sync::Arc};
 use arrow_schema::{ArrowError, DataType};
 use datafusion::arrow::array::{
     Array, BooleanArray, Date32Array, Float32Array, Int16Array, Int32Array, Int8Array, RecordBatch,
-    RecordBatchIterator, StringArray, UInt16Array, UInt32Array, UInt8Array,
+    RecordBatchIterator, RecordBatchReader, StringArray, UInt16Array, UInt32Array, UInt8Array,
 };
+use itertools::Itertools;
 use optd_core::rel_node::{SerializableOrderedF64, Value};
 use optd_gungnir::{
     stats::{
@@ -22,6 +23,7 @@ use serde::{Deserialize, Serialize};
 // All of optd (except unit tests) must use the same types.
 pub type DataFusionMostCommonValues = Counter<Value>;
 pub type DataFusionDistribution = TDigest;
+
 pub type DataFusionBaseTableStats =
     BaseTableStats<DataFusionMostCommonValues, DataFusionDistribution>;
 pub type DataFusionPerTableStats =
@@ -91,19 +93,19 @@ impl MostCommonValues for Counter<Value> {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PerColumnStats<M: MostCommonValues, D: Distribution> {
     // even if nulls are the most common, they cannot appear in mcvs
-    mcvs: M,
+    pub mcvs: M,
 
     // ndistinct _does_ include the values in mcvs
     // ndistinct _does not_ include nulls
-    ndistinct: u64,
+    pub ndistinct: u64,
 
     // postgres uses null_frac instead of something like "num_nulls" so we'll follow suit
     // my guess for why they use null_frac is because we only ever use the fraction of nulls, not the #
-    null_frac: f64,
+    pub null_frac: f64,
 
     // distribution _does not_ include the values in mcvs
     // distribution _does not_ include nulls
-    distr: D,
+    pub distr: D,
 }
 
 impl<M: MostCommonValues, D: Distribution> PerColumnStats<M, D> {
@@ -128,7 +130,16 @@ pub struct PerTableStats<M: MostCommonValues, D: Distribution> {
     per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>,
 }
 
-type BaseTableStats<M, D> = HashMap<String, PerTableStats<M, D>>;
+impl<M: MostCommonValues, D: Distribution> PerTableStats<M, D> {
+    pub fn new(row_cnt: usize, per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>) -> Self {
+        Self {
+            row_cnt,
+            per_column_stats_vec,
+        }
+    }
+}
+
+pub type BaseTableStats<M, D> = HashMap<String, PerTableStats<M, D>>;
 
 impl PerTableStats<Counter<Value>, TDigest> {
     pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(

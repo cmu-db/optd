@@ -1,34 +1,25 @@
+mod limit;
+
 use std::ops::Bound;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use crate::plan_nodes::{
     BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, ExprList, InListExpr, LogOpExpr,
-    LogOpType, OptRelNode, UnOpType,
+    LogOpType, OptRelNode,
 };
 use crate::properties::column_ref::{ColumnRefPropertyBuilder, GroupColumnRefs};
 use crate::{
     plan_nodes::{JoinType, OptRelNodeRef, OptRelNodeTyp},
     properties::column_ref::ColumnRef,
 };
-use arrow_schema::{ArrowError, DataType};
-use datafusion::arrow::array::{
-    Array, BooleanArray, Date32Array, Float32Array, Int16Array, Int32Array, Int8Array, RecordBatch,
-    RecordBatchIterator, RecordBatchReader, StringArray, UInt16Array, UInt32Array, UInt8Array,
-};
 use itertools::Itertools;
-use optd_core::rel_node::SerializableOrderedF64;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
     cost::{Cost, CostModel},
     rel_node::{RelNode, RelNodeTyp, Value},
 };
-use optd_gungnir::stats::counter::Counter;
-use optd_gungnir::stats::hyperloglog::{self, HyperLogLog};
-use optd_gungnir::stats::misragries::{MisraGries, DEFAULT_K_TO_TRACK};
-use optd_gungnir::stats::tdigest::{self, TDigest};
-use optd_gungnir::utils::arith_encoder;
-use ordered_float::OrderedFloat;
-use serde::{Deserialize, Serialize};
+
+use super::stats::{BaseTableStats, Distribution, MostCommonValues, PerColumnStats, PerTableStats};
 
 fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     model: &C,
@@ -45,423 +36,9 @@ fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     cost
 }
 
-pub type BaseTableStats<M, D> = HashMap<String, PerTableStats<M, D>>;
-
-// The "standard" concrete types that optd currently uses
-// All of optd (except unit tests) must use the same types
-pub type DataFusionMostCommonValues = Counter<Value>;
-pub type DataFusionDistribution = TDigest;
-pub type DataFusionBaseTableStats =
-    BaseTableStats<DataFusionMostCommonValues, DataFusionDistribution>;
-pub type DataFusionPerTableStats =
-    PerTableStats<DataFusionMostCommonValues, DataFusionDistribution>;
-pub type DataFusionPerColumnStats =
-    PerColumnStats<DataFusionMostCommonValues, DataFusionDistribution>;
-
 pub struct OptCostModel<M: MostCommonValues, D: Distribution> {
     per_table_stats_map: BaseTableStats<M, D>,
 }
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct PerTableStats<M: MostCommonValues, D: Distribution> {
-    row_cnt: usize,
-    // This is a Vec of Options instead of just a Vec because some columns may not have stats
-    //   due to their type being non-comparable.
-    // Further, I chose to represent it as a Vec of Options instead of a HashMap because a Vec
-    //   of Options clearly differentiates between two different failure modes: "out-of-bounds
-    //   access" and "column has no stats".
-    per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>,
-}
-
-impl DataFusionPerTableStats {
-    pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
-        batch_iter_builder: impl Fn() -> anyhow::Result<RecordBatchIterator<I>>,
-    ) -> anyhow::Result<Self> {
-        let batch_iter1 = batch_iter_builder()?;
-        let batch_iter2 = batch_iter_builder()?;
-
-        let schema = batch_iter1.schema();
-        let col_types = schema
-            .fields()
-            .iter()
-            .map(|f| f.data_type().clone())
-            .collect_vec();
-        let col_cnt = col_types.len();
-
-        let mut row_cnt = 0;
-
-        let mut hlls = vec![HyperLogLog::new(hyperloglog::DEFAULT_PRECISION); col_cnt];
-        let mut mgs: Vec<MisraGries<Value>> = vec![MisraGries::new(DEFAULT_K_TO_TRACK); col_cnt];
-        let mut null_cnt = vec![0; col_cnt];
-
-        // 1. First pass: HLL + MG + null_cnt + row_cnt.
-        for batch in batch_iter1 {
-            let batch = batch?;
-            row_cnt += batch.num_rows();
-
-            for (i, col) in batch.columns().iter().enumerate() {
-                let col_type = &col_types[i];
-                if Self::is_type_supported(col_type) {
-                    null_cnt[i] += col.null_count();
-                    Self::generate_partial_stats_for_column(
-                        col,
-                        col_type,
-                        &mut mgs[i],
-                        &mut hlls[i],
-                    );
-                }
-            }
-        }
-
-        let mut distr = col_types
-            .iter()
-            .map(|col_type| {
-                if Self::is_type_supported(col_type) {
-                    Some(TDigest::new(tdigest::DEFAULT_COMPRESSION))
-                } else {
-                    None
-                }
-            })
-            .collect_vec();
-        let mut cnts: Vec<Counter<Value>> = mgs
-            .iter()
-            .map(|mg| {
-                let mfk: Vec<Value> = mg.most_frequent_keys().into_iter().cloned().collect();
-                Counter::new(&mfk)
-            })
-            .collect();
-
-        // 2. Second pass: MCV + TDigest.
-        // TODO(Alexis): Remove MCV from TDigest.
-        for batch in batch_iter2 {
-            let batch = batch?;
-
-            for (i, col) in batch.columns().iter().enumerate() {
-                let col_type = &col_types[i];
-                if Self::is_type_supported(col_type) {
-                    Self::generate_stats_for_column(col, col_type, &mut distr[i], &mut cnts[i]);
-                }
-            }
-        }
-
-        // 3. Assemble stats.
-        let mut per_column_stats_vec = Vec::with_capacity(col_cnt);
-        for i in 0..col_cnt {
-            let counter = cnts.remove(0);
-            per_column_stats_vec.push(if Self::is_type_supported(&col_types[i]) {
-                Some(PerColumnStats::new(
-                    counter,
-                    hlls[i].n_distinct(),
-                    null_cnt[i] as f64 / row_cnt as f64,
-                    distr[i].take().unwrap(),
-                ))
-            } else {
-                None
-            });
-        }
-
-        Ok(Self {
-            row_cnt,
-            per_column_stats_vec,
-        })
-    }
-
-    fn is_type_supported(data_type: &DataType) -> bool {
-        matches!(
-            data_type,
-            DataType::Boolean
-                | DataType::Int8
-                | DataType::Int16
-                | DataType::Int32
-                | DataType::UInt8
-                | DataType::UInt16
-                | DataType::UInt32
-                | DataType::Float32
-                | DataType::Float64
-                | DataType::Utf8
-        )
-    }
-
-    /// Generate partial statistics for a column.
-    fn generate_partial_stats_for_column(
-        col: &Arc<dyn Array>,
-        col_type: &DataType,
-        mg: &mut MisraGries<Value>,
-        hll: &mut HyperLogLog,
-    ) {
-        macro_rules! generate_partial_stats_for_col {
-            ({ $col:expr, $mg:expr, $hll:expr, $array_type:path, $value_type:path}) => {{
-                let array = $col.as_any().downcast_ref::<$array_type>().unwrap();
-
-                // Filter out `None` values.
-                let mg_values = array
-                    .iter()
-                    .flatten()
-                    .map(|x| $value_type(x))
-                    .collect::<Vec<_>>();
-                let hll_values = array.iter().flatten().collect::<Vec<_>>();
-
-                $mg.aggregate(&mg_values);
-                $hll.aggregate(&hll_values);
-            }};
-        }
-
-        match col_type {
-            DataType::Boolean => {
-                generate_partial_stats_for_col!({ col, mg, hll, BooleanArray, Value::Bool })
-            }
-            DataType::Int8 => {
-                generate_partial_stats_for_col!({ col, mg, hll, Int8Array, Value::Int8 })
-            }
-            DataType::Int16 => {
-                generate_partial_stats_for_col!({ col, mg, hll, Int16Array, Value::Int16 })
-            }
-            DataType::Int32 => {
-                generate_partial_stats_for_col!({ col, mg, hll, Int32Array, Value::Int32 })
-            }
-            DataType::UInt8 => {
-                generate_partial_stats_for_col!({ col, mg, hll, UInt8Array, Value::UInt8 })
-            }
-            DataType::UInt16 => {
-                generate_partial_stats_for_col!({ col, mg, hll, UInt16Array, Value::UInt16 })
-            }
-            DataType::UInt32 => {
-                generate_partial_stats_for_col!({ col, mg, hll, UInt32Array, Value::UInt32 })
-            }
-            DataType::Float32 => {
-                let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
-
-                let mg_values = array
-                    .iter()
-                    .flatten()
-                    .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
-                    .collect::<Vec<_>>();
-                let hll_values = array.iter().flatten().collect::<Vec<_>>();
-
-                mg.aggregate(&mg_values);
-                hll.aggregate(&hll_values);
-            }
-            DataType::Float64 => {
-                let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
-
-                let mg_values = array
-                    .iter()
-                    .flatten()
-                    .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
-                    .collect::<Vec<_>>();
-                let hll_values = array.iter().flatten().collect::<Vec<_>>();
-
-                mg.aggregate(&mg_values);
-                hll.aggregate(&hll_values);
-            }
-            DataType::Date32 => {
-                generate_partial_stats_for_col!({ col, mg, hll, Date32Array, Value::Date32 })
-            }
-            DataType::Utf8 => {
-                let array = col.as_any().downcast_ref::<StringArray>().unwrap();
-
-                let mg_values = array
-                    .iter()
-                    .flatten()
-                    .map(|x| x.to_string())
-                    .map(|x| Value::String(x.into()))
-                    .collect::<Vec<_>>();
-                let hll_values = array
-                    .iter()
-                    .flatten()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<_>>();
-
-                mg.aggregate(&mg_values);
-                hll.aggregate(&hll_values);
-            }
-
-            _ => unreachable!(),
-        }
-    }
-
-    /// Generate statistics for a column.
-    fn generate_stats_for_column(
-        col: &Arc<dyn Array>,
-        col_type: &DataType,
-        distr: &mut Option<TDigest>,
-        cnt: &mut Counter<Value>,
-    ) {
-        macro_rules! generate_stats_for_col {
-            ({ $col:expr, $distr:expr, $array_type:path, $to_f64:ident, $value_type:path }) => {{
-                let array = $col.as_any().downcast_ref::<$array_type>().unwrap();
-                // Filter out `None` values.
-                let distr_values = array.iter().flatten().collect::<Vec<_>>();
-                let cnt_values = array
-                    .iter()
-                    .flatten()
-                    .map(|x| $value_type(x))
-                    .collect::<Vec<_>>();
-
-                *$distr = {
-                    let mut f64_values =
-                        distr_values.iter().map(|x| $to_f64(*x)).collect::<Vec<_>>();
-                    Some($distr.take().unwrap().merge_values(&mut f64_values))
-                };
-                cnt.aggregate(&cnt_values);
-            }};
-        }
-
-        /// Convert a value to f64 with no out of range or precision loss.
-        fn to_f64_safe<T: Into<f64>>(val: T) -> f64 {
-            val.into()
-        }
-
-        fn str_to_f64(string: &str) -> f64 {
-            arith_encoder::encode(string)
-        }
-
-        match col_type {
-            DataType::Boolean => {
-                generate_stats_for_col!({ col, distr, BooleanArray, to_f64_safe, Value::Bool })
-            }
-            DataType::Int8 => {
-                generate_stats_for_col!({ col, distr, Int8Array, to_f64_safe, Value::Int8 })
-            }
-            DataType::Int16 => {
-                generate_stats_for_col!({ col, distr, Int16Array, to_f64_safe, Value::Int16 })
-            }
-            DataType::Int32 => {
-                generate_stats_for_col!({ col, distr, Int32Array, to_f64_safe, Value::Int32 })
-            }
-            DataType::UInt8 => {
-                generate_stats_for_col!({ col, distr, UInt8Array, to_f64_safe, Value::UInt8 })
-            }
-            DataType::UInt16 => {
-                generate_stats_for_col!({ col, distr, UInt16Array, to_f64_safe, Value::UInt16 })
-            }
-            DataType::UInt32 => {
-                generate_stats_for_col!({ col, distr, UInt32Array, to_f64_safe, Value::UInt32 })
-            }
-            DataType::Float32 => {
-                let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
-
-                let distr_values = array.iter().flatten().collect::<Vec<_>>();
-                let cnt_values = array
-                    .iter()
-                    .flatten()
-                    .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
-                    .collect::<Vec<_>>();
-
-                *distr = {
-                    let mut f64_values = distr_values
-                        .iter()
-                        .map(|x| to_f64_safe(*x))
-                        .collect::<Vec<_>>();
-                    Some(distr.take().unwrap().merge_values(&mut f64_values))
-                };
-                cnt.aggregate(&cnt_values);
-            }
-            DataType::Float64 => {
-                let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
-
-                let distr_values = array.iter().flatten().collect::<Vec<_>>();
-                let cnt_values = array
-                    .iter()
-                    .flatten()
-                    .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
-                    .collect::<Vec<_>>();
-
-                *distr = {
-                    let mut f64_values = distr_values
-                        .iter()
-                        .map(|x| to_f64_safe(*x))
-                        .collect::<Vec<_>>();
-                    Some(distr.take().unwrap().merge_values(&mut f64_values))
-                };
-                cnt.aggregate(&cnt_values);
-            }
-            DataType::Date32 => {
-                generate_stats_for_col!({ col, distr, Date32Array, to_f64_safe, Value::Date32 })
-            }
-            DataType::Utf8 => {
-                let array = col.as_any().downcast_ref::<StringArray>().unwrap();
-
-                let distr_values = array
-                    .iter()
-                    .flatten()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<_>>();
-                let cnt_values = array
-                    .iter()
-                    .flatten()
-                    .map(|x| x.to_string())
-                    .map(|x| Value::String(x.into()))
-                    .collect::<Vec<_>>();
-
-                *distr = {
-                    let mut f64_values = distr_values
-                        .iter()
-                        .map(|x| str_to_f64(x))
-                        .collect::<Vec<_>>();
-                    Some(distr.take().unwrap().merge_values(&mut f64_values))
-                };
-                cnt.aggregate(&cnt_values);
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct PerColumnStats<M: MostCommonValues, D: Distribution> {
-    // even if nulls are the most common, they cannot appear in mcvs
-    mcvs: M,
-
-    // ndistinct _does_ include the values in mcvs
-    // ndistinct _does not_ include nulls
-    ndistinct: u64,
-
-    // postgres uses null_frac instead of something like "num_nulls" so we'll follow suit
-    // my guess for why they use null_frac is because we only ever use the fraction of nulls, not the #
-    null_frac: f64,
-
-    // distribution _does not_ include the values in mcvs
-    // distribution _does not_ include nulls
-    distr: D,
-}
-
-impl<M: MostCommonValues, D: Distribution> PerColumnStats<M, D> {
-    pub fn new(mcvs: M, ndistinct: u64, null_frac: f64, distr: D) -> Self {
-        Self {
-            mcvs,
-            ndistinct,
-            null_frac,
-            distr,
-        }
-    }
-}
-
-pub trait MostCommonValues: 'static + Send + Sync {
-    // it is true that we could just expose freq_over_pred() and use that for freq() and total_freq()
-    // however, freq() and total_freq() each have potential optimizations (freq() is O(1) instead of
-    //     O(n) and total_freq() can be cached)
-    // additionally, it makes sense to return an Option<f64> for freq() instead of just 0 if value doesn't exist
-    // thus, I expose three different functions
-    fn freq(&self, value: &Value) -> Option<f64>;
-    fn total_freq(&self) -> f64;
-    fn freq_over_pred(&self, pred: Box<dyn Fn(&Value) -> bool>) -> f64;
-
-    // returns the # of entries (i.e. value + freq) in the most common values structure
-    fn cnt(&self) -> usize;
-}
-
-// A more general interface meant to perform the task of a histogram
-// This more general interface is still compatible with histograms but allows
-//     more powerful statistics like TDigest
-pub trait Distribution: 'static + Send + Sync {
-    // Give the probability of a random value sampled from the distribution being <= `value`
-    fn cdf(&self, value: &Value) -> f64;
-}
-
-pub const ROW_COUNT: usize = 1;
-pub const COMPUTE_COST: usize = 2;
-pub const IO_COST: usize = 3;
 
 // Default statistics. All are from selfuncs.h in Postgres unless specified otherwise
 // Default selectivity estimate for equalities such as "A = b"
@@ -477,6 +54,10 @@ const DEFAULT_UNK_SEL: f64 = 0.005;
 
 // A placeholder for unimplemented!() for codepaths which are accessed by plannertest
 const UNIMPLEMENTED_SEL: f64 = 0.01;
+
+pub const ROW_COUNT: usize = 1;
+pub const COMPUTE_COST: usize = 2;
+pub const IO_COST: usize = 3;
 
 impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
@@ -551,38 +132,7 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
                 Self::cost(row_cnt, 0.0, row_cnt)
             }
             OptRelNodeTyp::PhysicalEmptyRelation => Self::cost(0.5, 0.01, 0.0),
-            OptRelNodeTyp::PhysicalLimit => {
-                let (row_cnt, compute_cost, _) = Self::cost_tuple(&children[0]);
-                let row_cnt = if let (Some(context), Some(optimizer)) = (context, optimizer) {
-                    let mut fetch_expr =
-                        optimizer.get_all_group_bindings(context.children_group_ids[2], false);
-                    assert!(
-                        fetch_expr.len() == 1,
-                        "fetch expression should be the only expr in the group"
-                    );
-                    let fetch_expr = fetch_expr.pop().unwrap();
-                    assert!(
-                        matches!(
-                            fetch_expr.typ,
-                            OptRelNodeTyp::Constant(ConstantType::UInt64)
-                        ),
-                        "fetch type can only be UInt64"
-                    );
-                    let fetch = ConstantExpr::from_rel_node(fetch_expr)
-                        .unwrap()
-                        .value()
-                        .as_u64();
-                    // u64::MAX represents None
-                    if fetch == u64::MAX {
-                        row_cnt
-                    } else {
-                        row_cnt.min(fetch as f64)
-                    }
-                } else {
-                    (row_cnt * DEFAULT_UNK_SEL).max(1.0)
-                };
-                Self::cost(row_cnt, compute_cost, 0.0)
-            }
+            OptRelNodeTyp::PhysicalLimit => Self::get_limit_cost(children, context, optimizer),
             OptRelNodeTyp::PhysicalFilter => {
                 let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
                 let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
@@ -775,79 +325,6 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             }
         } else {
             (child_row_cnt * DEFAULT_UNK_SEL).max(1.0)
-        }
-    }
-
-    /// The expr_tree input must be a "mixed expression tree"
-    ///     An "expression node" refers to a RelNode that returns true for is_expression()
-    ///     A "full expression tree" is where every node in the tree is an expression node
-    ///     A "mixed expression tree" is where every base-case node and all its parents are expression nodes
-    ///     A "base-case node" is a node that doesn't lead to further recursion (such as a BinOp(Eq))
-    /// The schema input is the schema the predicate represented by the expr_tree is applied on
-    /// The output will be the selectivity of the expression tree if it were a "filter predicate".
-    /// A "filter predicate" operates on one input node, unlike a "join predicate" which operates on two input nodes.
-    ///     This is why the function only takes in a single schema.
-    fn get_filter_selectivity(
-        &self,
-        expr_tree: OptRelNodeRef,
-        column_refs: &GroupColumnRefs,
-    ) -> f64 {
-        assert!(expr_tree.typ.is_expression());
-        match &expr_tree.typ {
-            OptRelNodeTyp::Constant(_) => Self::get_constant_selectivity(expr_tree),
-            OptRelNodeTyp::ColumnRef => unimplemented!("check bool type or else panic"),
-            OptRelNodeTyp::UnOp(un_op_typ) => {
-                assert!(expr_tree.children.len() == 1);
-                let child = expr_tree.child(0);
-                match un_op_typ {
-                    // not doesn't care about nulls so there's no complex logic. it just reverses the selectivity
-                    // for instance, != _will not_ include nulls but "NOT ==" _will_ include nulls
-                    UnOpType::Not => 1.0 - self.get_filter_selectivity(child, column_refs),
-                    UnOpType::Neg => panic!(
-                        "the selectivity of operations that return numerical values is undefined"
-                    ),
-                }
-            }
-            OptRelNodeTyp::BinOp(bin_op_typ) => {
-                assert!(expr_tree.children.len() == 2);
-                let left_child = expr_tree.child(0);
-                let right_child = expr_tree.child(1);
-
-                if bin_op_typ.is_comparison() {
-                    self.get_filter_comp_op_selectivity(
-                        *bin_op_typ,
-                        left_child,
-                        right_child,
-                        column_refs,
-                    )
-                } else if bin_op_typ.is_numerical() {
-                    panic!(
-                        "the selectivity of operations that return numerical values is undefined"
-                    )
-                } else {
-                    unreachable!("all BinOpTypes should be true for at least one is_*() function")
-                }
-            }
-            OptRelNodeTyp::LogOp(log_op_typ) => {
-                self.get_filter_log_op_selectivity(*log_op_typ, &expr_tree.children, column_refs)
-            }
-            OptRelNodeTyp::Func(_) => unimplemented!("check bool type or else panic"),
-            OptRelNodeTyp::SortOrder(_) => {
-                panic!("the selectivity of sort order expressions is undefined")
-            }
-            OptRelNodeTyp::Between => UNIMPLEMENTED_SEL,
-            OptRelNodeTyp::Cast => unimplemented!("check bool type or else panic"),
-            OptRelNodeTyp::Like => DEFAULT_MATCH_SEL,
-            OptRelNodeTyp::DataType(_) => {
-                panic!("the selectivity of a data type is not defined")
-            }
-            OptRelNodeTyp::InList => {
-                let in_list_expr = InListExpr::from_rel_node(expr_tree).unwrap();
-                self.get_filter_in_list_selectivity(&in_list_expr, column_refs)
-            }
-            _ => unreachable!(
-                "all expression OptRelNodeTyp were enumerated. this should be unreachable"
-            ),
         }
     }
 
@@ -1419,15 +896,6 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     }
 }
 
-impl<M: MostCommonValues, D: Distribution> PerTableStats<M, D> {
-    pub fn new(row_cnt: usize, per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>) -> Self {
-        Self {
-            row_cnt,
-            per_column_stats_vec,
-        }
-    }
-}
-
 /// I thought about using the system's own parser and planner to generate these expression trees, but
 /// this is not currently feasible because it would create a cyclic dependency between optd-datafusion-bridge
 /// and optd-datafusion-repr
@@ -1438,7 +906,7 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::{
-        cost::base_cost::DEFAULT_EQ_SEL,
+        cost::{base_cost::DEFAULT_EQ_SEL, stats::*},
         plan_nodes::{
             BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, InListExpr,
             JoinType, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
@@ -1446,7 +914,7 @@ mod tests {
         properties::column_ref::{ColumnRef, GroupColumnRefs},
     };
 
-    use super::{Distribution, MostCommonValues, OptCostModel, PerColumnStats, PerTableStats};
+    use super::*;
     type TestPerColumnStats = PerColumnStats<TestMostCommonValues, TestDistribution>;
     type TestOptCostModel = OptCostModel<TestMostCommonValues, TestDistribution>;
 
