@@ -450,3 +450,625 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use optd_core::rel_node::Value;
+
+    use crate::{
+        cost::base_cost::tests::*,
+        plan_nodes::{BinOpType, LogOpType, UnOpType},
+        properties::column_ref::ColumnRef,
+    };
+
+    #[test]
+    fn test_const() {
+        let cost_model = create_one_column_cost_model(get_empty_per_col_stats());
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(cnst(Value::Bool(true)), &vec![]),
+            1.0
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(cnst(Value::Bool(false)), &vec![]),
+            0.0
+        );
+    }
+
+    #[test]
+    fn test_colref_eq_constint_in_mcv() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
+            0,
+            0.0,
+            TestDistribution::empty(),
+        ));
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
+        let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(1)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.3
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.3
+        );
+    }
+
+    #[test]
+    fn test_colref_eq_constint_not_in_mcv_no_nulls() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)]),
+            5,
+            0.0,
+            TestDistribution::empty(),
+        ));
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
+        let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.12
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.12
+        );
+    }
+
+    #[test]
+    fn test_colref_eq_constint_not_in_mcv_with_nulls() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)]),
+            5,
+            0.03,
+            TestDistribution::empty(),
+        ));
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
+        let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.11
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.11
+        );
+    }
+
+    /// I only have one test for NEQ since I'll assume that it uses the same underlying logic as EQ
+    #[test]
+    fn test_colref_neq_constint_in_mcv() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
+            0,
+            0.0,
+            TestDistribution::empty(),
+        ));
+        let expr_tree = bin_op(BinOpType::Neq, col_ref(0), cnst(Value::Int32(1)));
+        let expr_tree_rev = bin_op(BinOpType::Neq, cnst(Value::Int32(1)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            1.0 - 0.3
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            1.0 - 0.3
+        );
+    }
+
+    #[test]
+    fn test_colref_leq_constint_no_mcvs_in_range() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            10,
+            0.0,
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+        ));
+        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.7
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.7
+        );
+    }
+
+    #[test]
+    fn test_colref_leq_constint_no_mcvs_in_range_with_nulls() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            10,
+            0.1,
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+        ));
+        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.7 * 0.9
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.7 * 0.9
+        );
+    }
+
+    #[test]
+    fn test_colref_leq_constint_with_mcvs_in_range_not_at_border() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues {
+                mcvs: vec![
+                    (Value::Int32(6), 0.05),
+                    (Value::Int32(10), 0.1),
+                    (Value::Int32(17), 0.08),
+                    (Value::Int32(25), 0.07),
+                ]
+                .into_iter()
+                .collect(),
+            },
+            10,
+            0.0,
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+        ));
+        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.85
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.85
+        );
+    }
+
+    #[test]
+    fn test_colref_leq_constint_with_mcv_at_border() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![
+                (Value::Int32(6), 0.05),
+                (Value::Int32(10), 0.1),
+                (Value::Int32(15), 0.08),
+                (Value::Int32(25), 0.07),
+            ]),
+            10,
+            0.0,
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+        ));
+        let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.93
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.93
+        );
+    }
+
+    #[test]
+    fn test_colref_lt_constint_no_mcvs_in_range() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            10,
+            0.0,
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+        ));
+        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.6
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.6
+        );
+    }
+
+    #[test]
+    fn test_colref_lt_constint_no_mcvs_in_range_with_nulls() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
+            0.1,
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+        ));
+        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.6 * 0.9
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.6 * 0.9
+        );
+    }
+
+    #[test]
+    fn test_colref_lt_constint_with_mcvs_in_range_not_at_border() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues {
+                mcvs: vec![
+                    (Value::Int32(6), 0.05),
+                    (Value::Int32(10), 0.1),
+                    (Value::Int32(17), 0.08),
+                    (Value::Int32(25), 0.07),
+                ]
+                .into_iter()
+                .collect(),
+            },
+            11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
+            0.0,
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+        ));
+        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
+        // TODO(phw2): make column_refs a function
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.75
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.75
+        );
+    }
+
+    #[test]
+    fn test_colref_lt_constint_with_mcv_at_border() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues {
+                mcvs: vec![
+                    (Value::Int32(6), 0.05),
+                    (Value::Int32(10), 0.1),
+                    (Value::Int32(15), 0.08),
+                    (Value::Int32(25), 0.07),
+                ]
+                .into_iter()
+                .collect(),
+            },
+            11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
+            0.0,
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+        ));
+        let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.85
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.85
+        );
+    }
+
+    /// I have fewer tests for GT since I'll assume that it uses the same underlying logic as LEQ
+    /// The only interesting thing to test is that if there are nulls, those aren't included in GT
+    #[test]
+    fn test_colref_gt_constint_no_nulls() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            10,
+            0.0,
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+        ));
+        let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            1.0 - 0.7
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            1.0 - 0.7
+        );
+    }
+
+    #[test]
+    fn test_colref_gt_constint_with_nulls() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            10,
+            0.1,
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+        ));
+        let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            (1.0 - 0.7) * 0.9
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            (1.0 - 0.7) * 0.9
+        );
+    }
+
+    /// As with above, I have one test without nulls and one test with nulls
+    #[test]
+    fn test_colref_geq_constint_no_nulls() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            10,
+            0.0,
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+        ));
+        let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            1.0 - 0.6
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            1.0 - 0.6
+        );
+    }
+
+    #[test]
+    fn test_colref_geq_constint_with_nulls() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::empty(),
+            9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
+            0.1,
+            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+        ));
+        let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
+        let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        // we have to add 0.1 since it's Geq
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            (1.0 - 0.7 + 0.1) * 0.9
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            (1.0 - 0.7 + 0.1) * 0.9
+        );
+    }
+
+    #[test]
+    fn test_and() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues {
+                mcvs: vec![
+                    (Value::Int32(1), 0.3),
+                    (Value::Int32(5), 0.5),
+                    (Value::Int32(8), 0.2),
+                ]
+                .into_iter()
+                .collect(),
+            },
+            0,
+            0.0,
+            TestDistribution::empty(),
+        ));
+        let eq1 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
+        let eq5 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(5)));
+        let eq8 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(8)));
+        let expr_tree = log_op(LogOpType::And, vec![eq1.clone(), eq5.clone(), eq8.clone()]);
+        let expr_tree_shift1 = log_op(LogOpType::And, vec![eq5.clone(), eq8.clone(), eq1.clone()]);
+        let expr_tree_shift2 = log_op(LogOpType::And, vec![eq8.clone(), eq1.clone(), eq5.clone()]);
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.03
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_shift1, &column_refs),
+            0.03
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_shift2, &column_refs),
+            0.03
+        );
+    }
+
+    #[test]
+    fn test_or() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues {
+                mcvs: vec![
+                    (Value::Int32(1), 0.3),
+                    (Value::Int32(5), 0.5),
+                    (Value::Int32(8), 0.2),
+                ]
+                .into_iter()
+                .collect(),
+            },
+            0,
+            0.0,
+            TestDistribution::empty(),
+        ));
+        let eq1 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
+        let eq5 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(5)));
+        let eq8 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(8)));
+        let expr_tree = log_op(LogOpType::Or, vec![eq1.clone(), eq5.clone(), eq8.clone()]);
+        let expr_tree_shift1 = log_op(LogOpType::Or, vec![eq5.clone(), eq8.clone(), eq1.clone()]);
+        let expr_tree_shift2 = log_op(LogOpType::Or, vec![eq8.clone(), eq1.clone(), eq5.clone()]);
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.72
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_shift1, &column_refs),
+            0.72
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_shift2, &column_refs),
+            0.72
+        );
+    }
+
+    #[test]
+    fn test_not_no_nulls() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
+            0,
+            0.0,
+            TestDistribution::empty(),
+        ));
+        let expr_tree = un_op(
+            UnOpType::Not,
+            bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1))),
+        );
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.7
+        );
+    }
+
+    #[test]
+    fn test_not_with_nulls() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
+            0,
+            0.1,
+            TestDistribution::empty(),
+        ));
+        let expr_tree = un_op(
+            UnOpType::Not,
+            bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1))),
+        );
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        // not doesn't care about nulls. it just reverses the selectivity
+        // for instance, != _will not_ include nulls but "NOT ==" _will_ include nulls
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.7
+        );
+    }
+
+    #[test]
+    fn test_in_list() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.8), (Value::Int32(2), 0.2)]),
+            2,
+            0.0,
+            TestDistribution::empty(),
+        ));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model
+                .get_in_list_selectivity(&in_list(0, vec![Value::Int32(1)], false), &column_refs),
+            0.8
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(1), Value::Int32(2)], false),
+                &column_refs
+            ),
+            1.0
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model
+                .get_in_list_selectivity(&in_list(0, vec![Value::Int32(3)], false), &column_refs),
+            0.0
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model
+                .get_in_list_selectivity(&in_list(0, vec![Value::Int32(1)], true), &column_refs),
+            0.2
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(1), Value::Int32(2)], true),
+                &column_refs
+            ),
+            0.0
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model
+                .get_in_list_selectivity(&in_list(0, vec![Value::Int32(3)], true), &column_refs),
+            1.0
+        );
+    }
+
+    // I didn't test any non-unique cases with filter. The non-unique tests without filter should cover that
+}
