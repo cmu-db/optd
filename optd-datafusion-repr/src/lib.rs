@@ -4,8 +4,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
 use cost::{
-    adaptive_cost::DataFusionAdaptiveCostModel, base_cost::DataFusionBaseTableStats,
-    AdaptiveCostModel, BaseTableStats, RuntimeAdaptionStorage, DEFAULT_DECAY,
+    adaptive_cost::DataFusionAdaptiveCostModel, AdaptiveCostModel, DataFusionBaseTableStats,
+    RuntimeAdaptionStorage, DEFAULT_DECAY,
 };
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId, OptimizerProperties},
@@ -182,7 +182,8 @@ impl DatafusionOptimizer {
             RuleWrapper::new_heuristic(Arc::new(EliminateFilterRule::new())),
         );
 
-        let cost_model = DataFusionAdaptiveCostModel::new(1000, BaseTableStats::default()); // very large decay
+        let cost_model =
+            DataFusionAdaptiveCostModel::new(1000, DataFusionBaseTableStats::default()); // very large decay
         let runtime_statistics = cost_model.get_runtime_map();
         let optimizer = CascadesOptimizer::new(
             rule_wrappers,

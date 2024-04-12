@@ -28,8 +28,6 @@ pub type DataFusionBaseTableStats =
     BaseTableStats<DataFusionMostCommonValues, DataFusionDistribution>;
 pub type DataFusionPerTableStats =
     PerTableStats<DataFusionMostCommonValues, DataFusionDistribution>;
-pub type DataFusionPerColumnStats =
-    PerColumnStats<DataFusionMostCommonValues, DataFusionDistribution>;
 
 /// A more general interface meant to perform the task of a histogram.
 //.

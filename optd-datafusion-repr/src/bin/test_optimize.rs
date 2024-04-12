@@ -8,7 +8,7 @@ use optd_core::{
     rules::{Rule, RuleWrapper},
 };
 use optd_datafusion_repr::{
-    cost::{base_cost::DataFusionPerTableStats, OptCostModel},
+    cost::{DataFusionPerTableStats, OptCostModel},
     plan_nodes::{
         BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, JoinType, LogicalFilter, LogicalJoin,
         LogicalScan, OptRelNode, OptRelNodeTyp, PlanNode,

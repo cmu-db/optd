@@ -27,7 +27,7 @@ use datafusion_optd_cli::helper::unescape_input;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::{
-    cost::{base_cost::DataFusionBaseTableStats, BaseTableStats, PerTableStats},
+    cost::{DataFusionBaseTableStats, DataFusionPerTableStats},
     DatafusionOptimizer,
 };
 use regex::Regex;
@@ -316,7 +316,7 @@ impl DatafusionDBMS {
             Self::execute(&ctx, ddl).await?;
         }
 
-        let mut base_table_stats = BaseTableStats::default();
+        let mut base_table_stats = DataFusionBaseTableStats::default();
         for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap() {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
             let schema = ctx
@@ -331,7 +331,7 @@ impl DatafusionDBMS {
 
             base_table_stats.insert(
                 tbl_name.to_string(),
-                PerTableStats::from_record_batches(|| {
+                DataFusionPerTableStats::from_record_batches(|| {
                     let tbl_file = fs::File::open(&tbl_fpath)?;
                     let csv_reader1 = ReaderBuilder::new(schema.clone())
                         .has_header(false)
