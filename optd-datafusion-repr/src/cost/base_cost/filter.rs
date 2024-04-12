@@ -1,6 +1,53 @@
-use crate::plan_nodes::{OptRelNodeTyp, UnOpType};
+use std::ops::Bound;
+
+use optd_core::{
+    cascades::{CascadesOptimizer, RelNodeContext},
+    cost::Cost,
+    rel_node::Value,
+};
+
+use crate::{
+    cost::{
+        base_cost::{DEFAULT_MATCH_SEL, UNIMPLEMENTED_SEL},
+        stats::{Distribution, MostCommonValues, PerColumnStats},
+    },
+    plan_nodes::{
+        BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, InListExpr, LogOpType, OptRelNode,
+        OptRelNodeRef, OptRelNodeTyp, UnOpType,
+    },
+    properties::column_ref::{ColumnRef, ColumnRefPropertyBuilder, GroupColumnRefs},
+};
+
+use super::{OptCostModel, DEFAULT_EQ_SEL, DEFAULT_INEQ_SEL, DEFAULT_UNK_SEL};
 
 impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
+    pub(super) fn get_filter_cost(
+        &self,
+        children: &[Cost],
+        context: Option<RelNodeContext>,
+        optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
+    ) -> Cost {
+        let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
+        let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
+        let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
+            let column_refs =
+                optimizer.get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
+            let expr_group_id = context.children_group_ids[1];
+            let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
+            // there may be more than one expression tree in a group (you can see this trivially as you can just swap the order of two subtrees for commutative operators)
+            // however, we just take an arbitrary expression tree from the group to compute selectivity
+            let expr_tree = expr_trees.first().expect("expression missing");
+            self.get_filter_selectivity(expr_tree.clone(), &column_refs)
+        } else {
+            DEFAULT_UNK_SEL
+        };
+        Self::cost(
+            (row_cnt * selectivity).max(1.0),
+            row_cnt * compute_cost,
+            0.0,
+        )
+    }
+
     /// The expr_tree input must be a "mixed expression tree".
     ///
     /// - An "expression node" refers to a RelNode that returns true for is_expression()
@@ -41,12 +88,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 let right_child = expr_tree.child(1);
 
                 if bin_op_typ.is_comparison() {
-                    self.get_filter_comp_op_selectivity(
-                        *bin_op_typ,
-                        left_child,
-                        right_child,
-                        column_refs,
-                    )
+                    self.get_comp_op_selectivity(*bin_op_typ, left_child, right_child, column_refs)
                 } else if bin_op_typ.is_numerical() {
                     panic!(
                         "the selectivity of operations that return numerical values is undefined"
@@ -56,7 +98,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 }
             }
             OptRelNodeTyp::LogOp(log_op_typ) => {
-                self.get_filter_log_op_selectivity(*log_op_typ, &expr_tree.children, column_refs)
+                self.get_log_op_selectivity(*log_op_typ, &expr_tree.children, column_refs)
             }
             OptRelNodeTyp::Func(_) => unimplemented!("check bool type or else panic"),
             OptRelNodeTyp::SortOrder(_) => {
@@ -70,11 +112,294 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             }
             OptRelNodeTyp::InList => {
                 let in_list_expr = InListExpr::from_rel_node(expr_tree).unwrap();
-                self.get_filter_in_list_selectivity(&in_list_expr, column_refs)
+                self.get_in_list_selectivity(&in_list_expr, column_refs)
             }
             _ => unreachable!(
                 "all expression OptRelNodeTyp were enumerated. this should be unreachable"
             ),
+        }
+    }
+
+    fn get_constant_selectivity(const_node: OptRelNodeRef) -> f64 {
+        if let OptRelNodeTyp::Constant(const_typ) = const_node.typ {
+            if matches!(const_typ, ConstantType::Bool) {
+                let value = const_node
+                    .as_ref()
+                    .data
+                    .as_ref()
+                    .expect("constants should have data");
+                if let Value::Bool(bool_value) = value {
+                    if *bool_value {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    unreachable!(
+                        "if the typ is ConstantType::Bool, the value should be a Value::Bool"
+                    )
+                }
+            } else {
+                panic!("selectivity is not defined on constants which are not bools")
+            }
+        } else {
+            panic!("get_constant_selectivity must be called on a constant")
+        }
+    }
+
+    fn get_log_op_selectivity(
+        &self,
+        log_op_typ: LogOpType,
+        children: &[OptRelNodeRef],
+        column_refs: &GroupColumnRefs,
+    ) -> f64 {
+        let children_sel = children
+            .iter()
+            .map(|expr| self.get_filter_selectivity(expr.clone(), column_refs));
+
+        match log_op_typ {
+            LogOpType::And => children_sel.product(),
+            // the formula is 1.0 - the probability of _none_ of the events happening
+            LogOpType::Or => 1.0 - children_sel.fold(1.0, |acc, sel| acc * (1.0 - sel)),
+        }
+    }
+
+    /// Comparison operators are the base case for recursion in get_filter_selectivity()
+    fn get_comp_op_selectivity(
+        &self,
+        comp_bin_op_typ: BinOpType,
+        left: OptRelNodeRef,
+        right: OptRelNodeRef,
+        column_refs: &GroupColumnRefs,
+    ) -> f64 {
+        assert!(comp_bin_op_typ.is_comparison());
+
+        // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
+        let (col_ref_exprs, non_col_ref_exprs, is_left_col_ref) =
+            Self::get_semantic_nodes(left, right);
+
+        // handle the different cases of column nodes
+        if col_ref_exprs.is_empty() {
+            UNIMPLEMENTED_SEL
+        } else if col_ref_exprs.len() == 1 {
+            let col_ref_expr = col_ref_exprs
+                .first()
+                .expect("we just checked that col_ref_exprs.len() == 1");
+            let col_ref_idx = col_ref_expr.index();
+
+            if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
+                let non_col_ref_expr = non_col_ref_exprs
+                    .first()
+                    .expect("non_col_ref_exprs should have a value since col_ref_exprs.len() == 1");
+
+                match non_col_ref_expr.as_ref().typ {
+                    OptRelNodeTyp::Constant(_) => {
+                        let value = non_col_ref_expr
+                            .as_ref()
+                            .data
+                            .as_ref()
+                            .expect("constants should have data");
+                        match comp_bin_op_typ {
+                            BinOpType::Eq => {
+                                self.get_column_equality_selectivity(table, *col_idx, value, true)
+                            }
+                            BinOpType::Neq => {
+                                self.get_column_equality_selectivity(table, *col_idx, value, false)
+                            }
+                            BinOpType::Lt | BinOpType::Leq | BinOpType::Gt | BinOpType::Geq => {
+                                let start = match (comp_bin_op_typ, is_left_col_ref) {
+                                    (BinOpType::Lt, true) | (BinOpType::Geq, false) => Bound::Unbounded,
+                                    (BinOpType::Leq, true) | (BinOpType::Gt, false) => Bound::Unbounded,
+                                    (BinOpType::Gt, true) | (BinOpType::Leq, false) => Bound::Excluded(value),
+                                    (BinOpType::Geq, true) | (BinOpType::Lt, false) => Bound::Included(value),
+                                    _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
+                                };
+                                let end = match (comp_bin_op_typ, is_left_col_ref) {
+                                    (BinOpType::Lt, true) | (BinOpType::Geq, false) => Bound::Excluded(value),
+                                    (BinOpType::Leq, true) | (BinOpType::Gt, false) => Bound::Included(value),
+                                    (BinOpType::Gt, true) | (BinOpType::Leq, false) => Bound::Unbounded,
+                                    (BinOpType::Geq, true) | (BinOpType::Lt, false) => Bound::Unbounded,
+                                    _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
+                                };
+                                self.get_column_range_selectivity(
+                                    table,
+                                    *col_idx,
+                                    start,
+                                    end,
+                                )
+                            },
+                            _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
+                        }
+                    }
+                    OptRelNodeTyp::BinOp(_) => {
+                        Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
+                    }
+                    OptRelNodeTyp::Cast => UNIMPLEMENTED_SEL,
+                    _ => unimplemented!(
+                        "unhandled case of comparing a column ref node to {}",
+                        non_col_ref_expr.as_ref().typ
+                    ),
+                }
+            } else {
+                Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
+            }
+        } else if col_ref_exprs.len() == 2 {
+            Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
+        } else {
+            unreachable!("we could have at most pushed left and right into col_ref_exprs")
+        }
+    }
+
+    /// Only support colA in (val1, val2, val3) where colA is a column ref and
+    /// val1, val2, val3 are constants.
+    fn get_in_list_selectivity(&self, expr: &InListExpr, column_refs: &GroupColumnRefs) -> f64 {
+        let child = expr.child();
+
+        // Check child is a column ref.
+        if !matches!(child.typ(), OptRelNodeTyp::ColumnRef) {
+            return UNIMPLEMENTED_SEL;
+        }
+
+        // Check all expressions in the list are constants.
+        let list_exprs = expr.list().to_vec();
+        if list_exprs
+            .iter()
+            .any(|expr| !matches!(expr.typ(), OptRelNodeTyp::Constant(_)))
+        {
+            return UNIMPLEMENTED_SEL;
+        }
+
+        // Convert child and const expressions to concrete types.
+        let col_ref_idx = ColumnRefExpr::from_rel_node(child.into_rel_node())
+            .unwrap()
+            .index();
+        let list_exprs = list_exprs
+            .into_iter()
+            .map(|expr| {
+                ConstantExpr::from_rel_node(expr.into_rel_node())
+                    .expect("we already checked all list elements are constants")
+            })
+            .collect::<Vec<_>>();
+        let negated = expr.negated();
+
+        if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
+            let in_sel = list_exprs
+                .iter()
+                .map(|expr| {
+                    self.get_column_equality_selectivity(table, *col_idx, &expr.value(), true)
+                })
+                .sum::<f64>()
+                .min(1.0);
+            if negated {
+                1.0 - in_sel
+            } else {
+                in_sel
+            }
+        } else {
+            // Child is a derived column.
+            UNIMPLEMENTED_SEL
+        }
+    }
+
+    /// Get the selectivity of an expression of the form "column equals value" (or "value equals column")
+    /// Will handle the case of statistics missing
+    /// Equality predicates are handled entirely differently from range predicates so this is its own function
+    /// Also, get_column_equality_selectivity is a subroutine when computing range selectivity, which is another
+    ///     reason for separating these into two functions
+    /// is_eq means whether it's == or !=
+    fn get_column_equality_selectivity(
+        &self,
+        table: &str,
+        col_idx: usize,
+        value: &Value,
+        is_eq: bool,
+    ) -> f64 {
+        if let Some(per_column_stats) = self.get_per_column_stats(table, col_idx) {
+            let eq_freq = if let Some(freq) = per_column_stats.mcvs.freq(value) {
+                freq
+            } else {
+                let non_mcv_freq = 1.0 - per_column_stats.mcvs.total_freq();
+                // always safe because usize is at least as large as i32
+                let ndistinct_as_usize = per_column_stats.ndistinct as usize;
+                let non_mcv_cnt = ndistinct_as_usize - per_column_stats.mcvs.cnt();
+                if non_mcv_cnt == 0 {
+                    return 0.0;
+                }
+                // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
+                (non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64)
+            };
+            if is_eq {
+                eq_freq
+            } else {
+                1.0 - eq_freq - per_column_stats.null_frac
+            }
+        } else {
+            #[allow(clippy::collapsible_else_if)]
+            if is_eq {
+                DEFAULT_EQ_SEL
+            } else {
+                1.0 - DEFAULT_EQ_SEL
+            }
+        }
+    }
+
+    /// Compute the frequency of values in a column less than or equal to the given value.
+    fn get_column_leq_value_freq(per_column_stats: &PerColumnStats<M, D>, value: &Value) -> f64 {
+        // because distr does not include the values in MCVs, we need to compute the CDFs there as well
+        // because nulls return false in any comparison, they are never included when computing range selectivity
+        let distr_leq_freq = per_column_stats.distr.cdf(value);
+        let value = value.clone();
+        let pred = Box::new(move |val: &Value| val <= &value);
+        let mcvs_leq_freq = per_column_stats.mcvs.freq_over_pred(pred);
+        distr_leq_freq + mcvs_leq_freq
+    }
+
+    /// Compute the frequency of values in a column less than the given value.
+    fn get_column_lt_value_freq(
+        &self,
+        per_column_stats: &PerColumnStats<M, D>,
+        table: &str,
+        col_idx: usize,
+        value: &Value,
+    ) -> f64 {
+        // depending on whether value is in mcvs or not, we use different logic to turn total_lt_cdf into total_leq_cdf
+        // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
+        Self::get_column_leq_value_freq(per_column_stats, value)
+            - self.get_column_equality_selectivity(table, col_idx, value, true)
+    }
+
+    /// Get the selectivity of an expression of the form "column </<=/>=/> value" (or "value </<=/>=/> column").
+    /// Computes selectivity based off of statistics.
+    /// Range predicates are handled entirely differently from equality predicates so this is its own function.
+    /// If it is unable to find the statistics, it returns DEFAULT_INEQ_SEL.
+    /// The selectivity is computed as quantile of the right bound minus quantile of the left bound.
+    fn get_column_range_selectivity(
+        &self,
+        table: &str,
+        col_idx: usize,
+        start: Bound<&Value>,
+        end: Bound<&Value>,
+    ) -> f64 {
+        if let Some(per_column_stats) = self.get_per_column_stats(table, col_idx) {
+            let left_quantile = match start {
+                Bound::Unbounded => 0.0,
+                Bound::Included(value) => {
+                    self.get_column_lt_value_freq(per_column_stats, table, col_idx, value)
+                }
+                Bound::Excluded(value) => Self::get_column_leq_value_freq(per_column_stats, value),
+            };
+            let right_quantile = match end {
+                Bound::Unbounded => 1.0,
+                Bound::Included(value) => Self::get_column_leq_value_freq(per_column_stats, value),
+                Bound::Excluded(value) => {
+                    self.get_column_lt_value_freq(per_column_stats, table, col_idx, value)
+                }
+            };
+            assert!(left_quantile <= right_quantile);
+            // `Distribution` does not account for NULL values, so the selectivity is smaller than frequency.
+            (right_quantile - left_quantile) * (1.0 - per_column_stats.null_frac)
+        } else {
+            DEFAULT_INEQ_SEL
         }
     }
 }
