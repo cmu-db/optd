@@ -344,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_inner_const() {
+    fn test_inner_const() {
         let cost_model = create_one_column_cost_model(get_empty_per_col_stats());
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_join_selectivity_from_expr_tree(
@@ -369,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_inner_oncond() {
+    fn test_inner_oncond() {
         let cost_model = create_two_table_cost_model(
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
@@ -413,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_inner_and_of_onconds() {
+    fn test_inner_and_of_onconds() {
         let cost_model = create_two_table_cost_model(
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
@@ -459,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_inner_and_of_oncond_and_filter() {
+    fn test_inner_and_of_oncond_and_filter() {
         let cost_model = create_two_table_cost_model(
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
@@ -505,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_inner_and_of_filters() {
+    fn test_inner_and_of_filters() {
         let cost_model = create_two_table_cost_model(
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
@@ -551,7 +551,7 @@ mod tests {
     }
 
     #[test]
-    fn test_joinsel_inner_colref_eq_colref_same_table_is_not_oncond() {
+    fn test_inner_colref_eq_colref_same_table_is_not_oncond() {
         let cost_model = create_two_table_cost_model(
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
@@ -586,7 +586,7 @@ mod tests {
     // We don't test joinsel or with oncond because if there is an oncond (on condition), the top-level operator must be an AND
 
     /// I made this helper function to avoid copying all eight lines over and over
-    fn assert_joinsel_outer_selectivities(
+    fn assert_outer_selectivities(
         cost_model: &TestOptCostModel,
         expr_tree: OptRelNodeRef,
         expr_tree_rev: OptRelNodeRef,
@@ -682,7 +682,7 @@ mod tests {
     /// There's only one case if both columns are unique and have different row counts: the inner will be < 1 / row count
     ///   of one table and = 1 / row count of another
     #[test]
-    fn test_joinsel_outer_unique_oncond() {
+    fn test_outer_unique_oncond() {
         let cost_model = create_two_table_cost_model_custom_row_cnts(
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
@@ -735,7 +735,7 @@ mod tests {
             expected_inner_sel
         );
         // check the outer sels
-        assert_joinsel_outer_selectivities(
+        assert_outer_selectivities(
             &cost_model,
             expr_tree,
             expr_tree_rev,
@@ -748,7 +748,7 @@ mod tests {
     /// Non-unique oncond means the column is not unique in either table
     /// Inner always >= row count means that the inner join result is >= 1 / the row count of both tables
     #[test]
-    fn test_joinsel_outer_nonunique_oncond_inner_always_geq_rowcnt() {
+    fn test_outer_nonunique_oncond_inner_always_geq_rowcnt() {
         let cost_model = create_two_table_cost_model_custom_row_cnts(
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
@@ -801,7 +801,7 @@ mod tests {
             expected_inner_sel
         );
         // check the outer sels
-        assert_joinsel_outer_selectivities(
+        assert_outer_selectivities(
             &cost_model,
             expr_tree,
             expr_tree_rev,
@@ -815,7 +815,7 @@ mod tests {
     /// Inner sometimes < row count means that the inner join result < 1 / the row count of exactly one table.
     ///   Note that without a join filter, it's impossible to be less than the row count of both tables
     #[test]
-    fn test_joinsel_outer_nonunique_oncond_inner_sometimes_lt_rowcnt() {
+    fn test_outer_nonunique_oncond_inner_sometimes_lt_rowcnt() {
         let cost_model = create_two_table_cost_model_custom_row_cnts(
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
@@ -868,7 +868,7 @@ mod tests {
             expected_inner_sel
         );
         // check the outer sels
-        assert_joinsel_outer_selectivities(
+        assert_outer_selectivities(
             &cost_model,
             expr_tree,
             expr_tree_rev,
@@ -882,7 +882,7 @@ mod tests {
     /// Filter means we're adding a join filter
     /// There's only one case if both columns are unique and there's a filter: the inner will be < 1 / row count of both tables
     #[test]
-    fn test_joinsel_outer_unique_oncond_filter() {
+    fn test_outer_unique_oncond_filter() {
         let cost_model = create_two_table_cost_model_custom_row_cnts(
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
@@ -939,7 +939,7 @@ mod tests {
             expected_inner_sel
         );
         // check the outer sels
-        assert_joinsel_outer_selectivities(
+        assert_outer_selectivities(
             &cost_model,
             expr_tree,
             expr_tree_inner_rev,
