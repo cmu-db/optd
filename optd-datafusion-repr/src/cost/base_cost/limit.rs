@@ -5,7 +5,7 @@ use optd_core::{
 
 use crate::{
     cost::stats::{Distribution, MostCommonValues},
-    plan_nodes::{ConstantExpr, OptRelNodeTyp},
+    plan_nodes::{ConstantExpr, ConstantType, OptRelNode, OptRelNodeTyp},
 };
 
 use super::{OptCostModel, DEFAULT_UNK_SEL};
