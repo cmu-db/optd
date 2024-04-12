@@ -27,7 +27,7 @@ pub trait RelNodeTyp:
     fn list_typ() -> Self;
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SerializableOrderedF64(pub OrderedFloat<f64>);
 
 impl Serialize for SerializableOrderedF64 {
@@ -51,7 +51,7 @@ impl<'de> Deserialize<'de> for SerializableOrderedF64 {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 pub enum Value {
     UInt8(u8),
     UInt16(u16),

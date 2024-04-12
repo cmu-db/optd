@@ -32,7 +32,7 @@ enum Commands {
         #[clap(long)]
         #[clap(value_delimiter = ',', num_args = 1..)]
         // this is the current list of all queries that work in perftest
-        #[clap(default_value = "2,3,5,6,7,8,9,10,11,12,13,14,17")]
+        #[clap(default_value = "2,3,5,6,7,8,9,10,11,12,13,14,17,19")]
         #[clap(help = "The queries to get the Q-error of")]
         query_ids: Vec<u32>,
 

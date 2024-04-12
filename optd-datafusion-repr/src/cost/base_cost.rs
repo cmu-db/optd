@@ -1,8 +1,9 @@
+use std::ops::Bound;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::plan_nodes::{
-    BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, ExprList, LogOpExpr, LogOpType,
-    OptRelNode, UnOpType,
+    BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, ExprList, InListExpr, LogOpExpr,
+    LogOpType, OptRelNode, UnOpType,
 };
 use crate::properties::column_ref::{ColumnRefPropertyBuilder, GroupColumnRefs};
 use crate::{
@@ -840,7 +841,10 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             OptRelNodeTyp::DataType(_) => {
                 panic!("the selectivity of a data type is not defined")
             }
-            OptRelNodeTyp::InList => UNIMPLEMENTED_SEL,
+            OptRelNodeTyp::InList => {
+                let in_list_expr = InListExpr::from_rel_node(expr_tree).unwrap();
+                self.get_filter_in_list_selectivity(&in_list_expr, column_refs)
+            }
             _ => unreachable!(
                 "all expression OptRelNodeTyp were enumerated. this should be unreachable"
             ),
@@ -1116,34 +1120,28 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                             BinOpType::Neq => {
                                 self.get_column_equality_selectivity(table, *col_idx, value, false)
                             }
-                            BinOpType::Lt => self.get_column_range_selectivity(
-                                table,
-                                *col_idx,
-                                value,
-                                is_left_col_ref,
-                                false,
-                            ),
-                            BinOpType::Leq => self.get_column_range_selectivity(
-                                table,
-                                *col_idx,
-                                value,
-                                is_left_col_ref,
-                                true,
-                            ),
-                            BinOpType::Gt => self.get_column_range_selectivity(
-                                table,
-                                *col_idx,
-                                value,
-                                !is_left_col_ref,
-                                false,
-                            ),
-                            BinOpType::Geq => self.get_column_range_selectivity(
-                                table,
-                                *col_idx,
-                                value,
-                                !is_left_col_ref,
-                                true,
-                            ),
+                            BinOpType::Lt | BinOpType::Leq | BinOpType::Gt | BinOpType::Geq => {
+                                let start = match (comp_bin_op_typ, is_left_col_ref) {
+                                    (BinOpType::Lt, true) | (BinOpType::Geq, false) => Bound::Unbounded,
+                                    (BinOpType::Leq, true) | (BinOpType::Gt, false) => Bound::Unbounded,
+                                    (BinOpType::Gt, true) | (BinOpType::Leq, false) => Bound::Excluded(value),
+                                    (BinOpType::Geq, true) | (BinOpType::Lt, false) => Bound::Included(value),
+                                    _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
+                                };
+                                let end = match (comp_bin_op_typ, is_left_col_ref) {
+                                    (BinOpType::Lt, true) | (BinOpType::Geq, false) => Bound::Excluded(value),
+                                    (BinOpType::Leq, true) | (BinOpType::Gt, false) => Bound::Included(value),
+                                    (BinOpType::Gt, true) | (BinOpType::Leq, false) => Bound::Unbounded,
+                                    (BinOpType::Geq, true) | (BinOpType::Lt, false) => Bound::Unbounded,
+                                    _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
+                                };
+                                self.get_column_range_selectivity(
+                                    table,
+                                    *col_idx,
+                                    start,
+                                    end,
+                                )
+                            },
                             _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
                         }
                     }
@@ -1261,6 +1259,9 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 // always safe because usize is at least as large as i32
                 let ndistinct_as_usize = per_column_stats.ndistinct as usize;
                 let non_mcv_cnt = ndistinct_as_usize - per_column_stats.mcvs.cnt();
+                if non_mcv_cnt == 0 {
+                    return 0.0;
+                }
                 // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
                 (non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64)
             };
@@ -1279,56 +1280,61 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         }
     }
 
-    /// Get the selectivity of an expression of the form "column </<=/>=/> value" (or "value </<=/>=/> column")
-    /// Computes selectivity based off of statistics
-    /// Range predicates are handled entirely differently from equality predicates so this is its own function
-    /// If it is unable to find the statistics, it returns None
-    /// Like in the Postgres source code, we decompose the four operators "</<=/>=/>" into "is_lt" and "is_eq"
-    /// The "is_lt" and "is_eq" values are set as if column is on the left hand side
+    /// Compute the frequency of values in a column less than or equal to the given value.
+    fn get_column_leq_value_freq(per_column_stats: &PerColumnStats<M, D>, value: &Value) -> f64 {
+        // because distr does not include the values in MCVs, we need to compute the CDFs there as well
+        // because nulls return false in any comparison, they are never included when computing range selectivity
+        let distr_leq_freq = per_column_stats.distr.cdf(value);
+        let value = value.clone();
+        let pred = Box::new(move |val: &Value| val <= &value);
+        let mcvs_leq_freq = per_column_stats.mcvs.freq_over_pred(pred);
+        distr_leq_freq + mcvs_leq_freq
+    }
+
+    /// Compute the frequency of values in a column less than the given value.
+    fn get_column_lt_value_freq(
+        &self,
+        per_column_stats: &PerColumnStats<M, D>,
+        table: &str,
+        col_idx: usize,
+        value: &Value,
+    ) -> f64 {
+        // depending on whether value is in mcvs or not, we use different logic to turn total_lt_cdf into total_leq_cdf
+        // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
+        Self::get_column_leq_value_freq(per_column_stats, value)
+            - self.get_column_equality_selectivity(table, col_idx, value, true)
+    }
+
+    /// Get the selectivity of an expression of the form "column </<=/>=/> value" (or "value </<=/>=/> column").
+    /// Computes selectivity based off of statistics.
+    /// Range predicates are handled entirely differently from equality predicates so this is its own function.
+    /// If it is unable to find the statistics, it returns DEFAULT_INEQ_SEL.
+    /// The selectivity is computed as quantile of the right bound minus quantile of the left bound.
     fn get_column_range_selectivity(
         &self,
         table: &str,
         col_idx: usize,
-        value: &Value,
-        is_col_lt_val: bool,
-        is_col_eq_val: bool,
+        start: Bound<&Value>,
+        end: Bound<&Value>,
     ) -> f64 {
         if let Some(per_column_stats) = self.get_per_column_stats(table, col_idx) {
-            // because distr does not include the values in MCVs, we need to compute the CDFs there as well
-            // because nulls return false in any comparison, they are never included when computing range selectivity
-            let distr_leq_freq = per_column_stats.distr.cdf(value);
-            let value_clone = value.clone(); // clone the value so that we can move it into the closure to avoid lifetime issues
-                                             // TODO: in a future PR, figure out how to make Values comparable. rn I just hardcoded as_i32() to work around this
-            let pred = Box::new(move |val: &Value| val.as_i32() <= value_clone.as_i32());
-            let mcvs_leq_freq = per_column_stats.mcvs.freq_over_pred(pred);
-            let total_leq_freq = distr_leq_freq + mcvs_leq_freq;
-
-            // depending on whether value is in mcvs or not, we use different logic to turn total_leq_cdf into total_lt_cdf
-            // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
-            let total_lt_freq =
-                total_leq_freq - self.get_column_equality_selectivity(table, col_idx, value, true);
-
-            // use either total_leq_freq or total_lt_freq to get the selectivity
-            if is_col_lt_val {
-                if is_col_eq_val {
-                    // this branch means <=
-                    total_leq_freq
-                } else {
-                    // this branch means <
-                    total_lt_freq
+            let left_quantile = match start {
+                Bound::Unbounded => 0.0,
+                Bound::Included(value) => {
+                    self.get_column_lt_value_freq(per_column_stats, table, col_idx, value)
                 }
-            } else {
-                // clippy wants me to collapse this into an else if, but keeping two nested if else statements is clearer
-                #[allow(clippy::collapsible_else_if)]
-                if is_col_eq_val {
-                    // this branch means >=, which is 1 - < - null_frac
-                    // we need to subtract null_frac since that isn't included in >= either
-                    1.0 - total_lt_freq - per_column_stats.null_frac
-                } else {
-                    // this branch means >. same logic as above
-                    1.0 - total_leq_freq - per_column_stats.null_frac
+                Bound::Excluded(value) => Self::get_column_leq_value_freq(per_column_stats, value),
+            };
+            let right_quantile = match end {
+                Bound::Unbounded => 1.0,
+                Bound::Included(value) => Self::get_column_leq_value_freq(per_column_stats, value),
+                Bound::Excluded(value) => {
+                    self.get_column_lt_value_freq(per_column_stats, table, col_idx, value)
                 }
-            }
+            };
+            assert!(left_quantile <= right_quantile);
+            // `Distribution` does not account for NULL values, so the selectivity is smaller than frequency.
+            (right_quantile - left_quantile) * (1.0 - per_column_stats.null_frac)
         } else {
             DEFAULT_INEQ_SEL
         }
@@ -1348,6 +1354,61 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             LogOpType::And => children_sel.product(),
             // the formula is 1.0 - the probability of _none_ of the events happening
             LogOpType::Or => 1.0 - children_sel.fold(1.0, |acc, sel| acc * (1.0 - sel)),
+        }
+    }
+
+    /// Only support colA in (val1, val2, val3) where colA is a column ref and
+    /// val1, val2, val3 are constants.
+    fn get_filter_in_list_selectivity(
+        &self,
+        expr: &InListExpr,
+        column_refs: &GroupColumnRefs,
+    ) -> f64 {
+        let child = expr.child();
+
+        // Check child is a column ref.
+        if !matches!(child.typ(), OptRelNodeTyp::ColumnRef) {
+            return UNIMPLEMENTED_SEL;
+        }
+
+        // Check all expressions in the list are constants.
+        let list_exprs = expr.list().to_vec();
+        if list_exprs
+            .iter()
+            .any(|expr| !matches!(expr.typ(), OptRelNodeTyp::Constant(_)))
+        {
+            return UNIMPLEMENTED_SEL;
+        }
+
+        // Convert child and const expressions to concrete types.
+        let col_ref_idx = ColumnRefExpr::from_rel_node(child.into_rel_node())
+            .unwrap()
+            .index();
+        let list_exprs = list_exprs
+            .into_iter()
+            .map(|expr| {
+                ConstantExpr::from_rel_node(expr.into_rel_node())
+                    .expect("we already checked all list elements are constants")
+            })
+            .collect::<Vec<_>>();
+        let negated = expr.negated();
+
+        if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
+            let in_sel = list_exprs
+                .iter()
+                .map(|expr| {
+                    self.get_column_equality_selectivity(table, *col_idx, &expr.value(), true)
+                })
+                .sum::<f64>()
+                .min(1.0);
+            if negated {
+                1.0 - in_sel
+            } else {
+                in_sel
+            }
+        } else {
+            // Child is a derived column.
+            UNIMPLEMENTED_SEL
         }
     }
 
@@ -1372,14 +1433,15 @@ impl<M: MostCommonValues, D: Distribution> PerTableStats<M, D> {
 /// and optd-datafusion-repr
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use optd_core::rel_node::Value;
     use std::collections::HashMap;
 
     use crate::{
         cost::base_cost::DEFAULT_EQ_SEL,
         plan_nodes::{
-            BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, JoinType, LogOpExpr,
-            LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
+            BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, InListExpr,
+            JoinType, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
         },
         properties::column_ref::{ColumnRef, GroupColumnRefs},
     };
@@ -1541,6 +1603,18 @@ mod tests {
         .into_rel_node()
     }
 
+    fn in_list(col_ref_idx: u64, list: Vec<Value>, negated: bool) -> InListExpr {
+        InListExpr::new(
+            Expr::from_rel_node(col_ref(col_ref_idx)).unwrap(),
+            ExprList::new(
+                list.into_iter()
+                    .map(|v| Expr::from_rel_node(cnst(v)).unwrap())
+                    .collect_vec(),
+            ),
+            negated,
+        )
+    }
+
     /// The reason this isn't an associated function of PerColumnStats is because that would require
     ///   adding an empty() function to the trait definitions of MostCommonValues and Distribution,
     ///   which I wanted to avoid
@@ -1672,7 +1746,7 @@ mod tests {
             TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
-        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
+        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1696,18 +1770,18 @@ mod tests {
             TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
-        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
+        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
         }];
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
-            0.7
+            0.7 * 0.9
         );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
-            0.7
+            0.7 * 0.9
         );
     }
 
@@ -1729,7 +1803,7 @@ mod tests {
             TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
-        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
+        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1758,7 +1832,7 @@ mod tests {
             TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
-        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
+        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1782,7 +1856,7 @@ mod tests {
             TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
-        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
+        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1806,18 +1880,18 @@ mod tests {
             TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
-        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
+        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
         }];
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
-            0.6
+            0.6 * 0.9
         );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
-            0.6
+            0.6 * 0.9
         );
     }
 
@@ -1839,7 +1913,7 @@ mod tests {
             TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
-        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
+        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
         // TODO(phw2): make column_refs a function
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
@@ -1873,7 +1947,7 @@ mod tests {
             TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
-        let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
+        let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1899,7 +1973,7 @@ mod tests {
             TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
-        let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
+        let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1923,19 +1997,18 @@ mod tests {
             TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
-        let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
+        let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
         }];
-        // we have to subtract 0.1 since we don't want to include them in GT either
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
-            1.0 - 0.7 - 0.1
+            (1.0 - 0.7) * 0.9
         );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
-            1.0 - 0.7 - 0.1
+            (1.0 - 0.7) * 0.9
         );
     }
 
@@ -1949,7 +2022,7 @@ mod tests {
             TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
-        let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
+        let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1973,19 +2046,19 @@ mod tests {
             TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
         ));
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
-        let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
+        let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
         }];
-        // we have to subtract 0.1 since we don't want to include them in GT either
+        // we have to add 0.1 since it's Geq
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
-            1.0 - 0.6 - 0.1
+            (1.0 - 0.7 + 0.1) * 0.9
         );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
-            1.0 - 0.6 - 0.1
+            (1.0 - 0.7 + 0.1) * 0.9
         );
     }
 
@@ -2112,6 +2185,62 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.7
+        );
+    }
+
+    #[test]
+    fn test_filtersel_in_list() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.8), (Value::Int32(2), 0.2)]),
+            2,
+            0.0,
+            TestDistribution::empty(),
+        ));
+        let column_refs = vec![ColumnRef::BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        }];
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(1)], false),
+                &column_refs
+            ),
+            0.8
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(1), Value::Int32(2)], false),
+                &column_refs
+            ),
+            1.0
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(3)], false),
+                &column_refs
+            ),
+            0.0
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(1)], true),
+                &column_refs
+            ),
+            0.2
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(1), Value::Int32(2)], true),
+                &column_refs
+            ),
+            0.0
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_in_list_selectivity(
+                &in_list(0, vec![Value::Int32(3)], true),
+                &column_refs
+            ),
+            1.0
         );
     }
 

@@ -39,10 +39,6 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
         data: Option<optd_core::rel_node::Value>,
         children: &[&Self::Prop],
     ) -> Self::Prop {
-        // println!(
-        //     "derive column_ref: {:?}, data: {:?}, children: {:?}",
-        //     typ, data, children
-        // );
         match typ {
             // Should account for PhysicalScan.
             OptRelNodeTyp::Scan => {
