@@ -61,7 +61,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     ///
     /// A "filter predicate" operates on one input node, unlike a "join predicate" which operates on two input nodes.
     /// This is why the function only takes in a single schema.
-    fn get_filter_selectivity(
+    pub(super) fn get_filter_selectivity(
         &self,
         expr_tree: OptRelNodeRef,
         column_refs: &GroupColumnRefs,
@@ -162,6 +162,38 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             // the formula is 1.0 - the probability of _none_ of the events happening
             LogOpType::Or => 1.0 - children_sel.fold(1.0, |acc, sel| acc * (1.0 - sel)),
         }
+    }
+
+    /// Convert the left and right child nodes of some operation to what they semantically are
+    /// This is convenient to avoid repeating the same logic just with "left" and "right" swapped
+    fn get_semantic_nodes(
+        left: OptRelNodeRef,
+        right: OptRelNodeRef,
+    ) -> (Vec<ColumnRefExpr>, Vec<OptRelNodeRef>, bool) {
+        let mut col_ref_exprs = vec![];
+        let mut non_col_ref_exprs = vec![];
+        let is_left_col_ref;
+        // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
+        // We always want to use "col_ref_expr" and "non_col_ref_expr" instead of "left" or "right"
+        if left.as_ref().typ == OptRelNodeTyp::ColumnRef {
+            is_left_col_ref = true;
+            col_ref_exprs.push(
+                ColumnRefExpr::from_rel_node(left)
+                    .expect("we already checked that the type is ColumnRef"),
+            );
+        } else {
+            is_left_col_ref = false;
+            non_col_ref_exprs.push(left);
+        }
+        if right.as_ref().typ == OptRelNodeTyp::ColumnRef {
+            col_ref_exprs.push(
+                ColumnRefExpr::from_rel_node(right)
+                    .expect("we already checked that the type is ColumnRef"),
+            );
+        } else {
+            non_col_ref_exprs.push(right);
+        }
+        (col_ref_exprs, non_col_ref_exprs, is_left_col_ref)
     }
 
     /// Comparison operators are the base case for recursion in get_filter_selectivity()
@@ -400,6 +432,21 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             (right_quantile - left_quantile) * (1.0 - per_column_stats.null_frac)
         } else {
             DEFAULT_INEQ_SEL
+        }
+    }
+
+    /// The default selectivity of a comparison expression
+    /// Used when one side of the comparison is a column while the other side is something too
+    ///   complex/impossible to evaluate (subquery, UDF, another column, we have no stats, etc.)
+    fn get_default_comparison_op_selectivity(comp_bin_op_typ: BinOpType) -> f64 {
+        assert!(comp_bin_op_typ.is_comparison());
+        match comp_bin_op_typ {
+            BinOpType::Eq => DEFAULT_EQ_SEL,
+            BinOpType::Neq => 1.0 - DEFAULT_EQ_SEL,
+            BinOpType::Lt | BinOpType::Leq | BinOpType::Gt | BinOpType::Geq => DEFAULT_INEQ_SEL,
+            _ => unreachable!(
+                "all comparison BinOpTypes were enumerated. this should be unreachable"
+            ),
         }
     }
 }
