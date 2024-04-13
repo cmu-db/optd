@@ -1,8 +1,5 @@
 use crate::{
-    benchmark::Benchmark,
-    cardtest::CardtestRunnerDBMSHelper,
-    tpch::{TpchConfig, TpchKit},
-    truecard::{TruecardCache, TruecardGetter},
+    benchmark::Benchmark, cardtest::CardtestRunnerDBMSHelper, job::JobConfig, tpch::{TpchConfig, TpchKit}, truecard::{TruecardCache, TruecardGetter}
 };
 use async_trait::async_trait;
 use futures::Sink;
@@ -214,6 +211,15 @@ impl PostgresDBMS {
         Ok(estcards)
     }
 
+    async fn eval_job_estcards(
+        &self,
+        client: &Client,
+        job_config: &JobConfig,
+    ) -> anyhow::Result<Vec<usize>> {
+        let mut estcards = vec![];
+        Ok(estcards)
+    }
+
     fn log_explain(&self, explain_rows: &[Row]) {
         let explain_lines: Vec<&str> = explain_rows.iter().map(|row| row.get(0)).collect();
         let explain_str = explain_lines.join("\n");
@@ -253,6 +259,17 @@ impl PostgresDBMS {
             truecards.push(truecard);
         }
 
+        Ok(truecards)
+    }
+
+    async fn eval_job_truecards(
+        &mut self,
+        client: &Client,
+        job_config: &JobConfig,
+        dbname: &str, // used by truecard_cache
+        truecard_cache: &mut TruecardCache,
+    ) -> anyhow::Result<Vec<usize>> {
+        let mut truecards = vec![];
         Ok(truecards)
     }
 
@@ -297,8 +314,8 @@ impl CardtestRunnerDBMSHelper for PostgresDBMS {
         let dbname = benchmark.get_dbname();
         let client = self.connect_to_db(&dbname).await?;
         match benchmark {
-            Benchmark::Test => unimplemented!(),
             Benchmark::Tpch(tpch_config) => self.eval_tpch_estcards(&client, tpch_config).await,
+            Benchmark::Job(job_config) => self.eval_job_estcards(&client, job_config).await,
         }
     }
 }
@@ -322,9 +339,12 @@ impl TruecardGetter for PostgresDBMS {
         let client = self.connect_to_db(&dbname).await?;
         // all "eval_*" functions should add the truecards they find to the truecard cache
         match benchmark {
-            Benchmark::Test => unimplemented!(),
             Benchmark::Tpch(tpch_config) => {
                 self.eval_tpch_truecards(&client, tpch_config, &dbname, &mut truecard_cache)
+                    .await
+            },
+            Benchmark::Job(job_config) => {
+                self.eval_job_truecards(&client, job_config, &dbname, &mut truecard_cache)
                     .await
             }
         }

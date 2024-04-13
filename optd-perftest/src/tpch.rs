@@ -27,8 +27,8 @@ impl Display for TpchConfig {
         // Use write! macro to write formatted string to `f`
         write!(
             f,
-            "TpchConfig(scale_factor={}, seed={})",
-            self.scale_factor, self.seed
+            "TpchConfig(dbms={}, scale_factor={}, seed={}, query_ids={:?})",
+            self.dbms, self.scale_factor, self.seed, self.query_ids
         )
     }
 }

@@ -5,4 +5,5 @@ pub mod job;
 mod postgres_dbms;
 pub mod shell;
 pub mod tpch;
+pub mod job;
 mod truecard;
