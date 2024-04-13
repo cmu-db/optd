@@ -41,6 +41,8 @@ mod tests {
             "--workspace",
             WORKSPACE,
             "cardtest",
+            "--benchmark-name",
+            "tpch",
             // make sure scale factor is low so the test runs fast
             "--scale-factor",
             "0.01",

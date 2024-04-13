@@ -13,7 +13,7 @@ const JOB_TABLES_URL: &str = "https://homepages.cwi.nl/~boncz/job/imdb.tgz";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JobConfig {
-    pub query_ids: Vec<u32>,
+    pub query_ids: Vec<String>,
 }
 
 impl Display for JobConfig {
@@ -128,13 +128,16 @@ impl JobKit {
     pub fn get_sql_fpath_ordered_iter(
         &self,
         job_config: &JobConfig,
-    ) -> io::Result<impl Iterator<Item = (u32, PathBuf)>> {
+    ) -> io::Result<impl Iterator<Item = (String, PathBuf)>> {
         let queries_dpath = self.queries_dpath.clone();
         let sql_fpath_ordered_iter = job_config
             .query_ids
             .clone()
             .into_iter()
-            .map(move |query_id| (query_id, queries_dpath.join(format!("{}.sql", query_id))));
+            .map(move |query_id| {
+                let this_genned_query_fpath = queries_dpath.join(format!("{}.sql", &query_id));
+                (query_id, this_genned_query_fpath)
+            });
         Ok(sql_fpath_ordered_iter)
     }
 }

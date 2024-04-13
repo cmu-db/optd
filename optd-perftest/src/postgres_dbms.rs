@@ -1,5 +1,5 @@
 use crate::{
-    benchmark::Benchmark, cardtest::CardtestRunnerDBMSHelper, job::JobConfig, tpch::{TpchConfig, TpchKit}, truecard::{TruecardCache, TruecardGetter}
+    benchmark::Benchmark, cardtest::CardtestRunnerDBMSHelper, job::{JobConfig, JobKit}, tpch::{TpchConfig, TpchKit}, truecard::{TruecardCache, TruecardGetter}
 };
 use async_trait::async_trait;
 use futures::Sink;
@@ -269,7 +269,22 @@ impl PostgresDBMS {
         dbname: &str, // used by truecard_cache
         truecard_cache: &mut TruecardCache,
     ) -> anyhow::Result<Vec<usize>> {
+        let job_kit = JobKit::build(&self.workspace_dpath)?;
+
         let mut truecards = vec![];
+        for (query_id, sql_fpath) in job_kit.get_sql_fpath_ordered_iter(job_config)? {
+            let sql = fs::read_to_string(sql_fpath)?;
+            let truecard = match truecard_cache.get_truecard(dbname, &query_id) {
+                Some(truecard) => truecard,
+                None => {
+                    let truecard = self.eval_query_truecard(client, &sql).await?;
+                    truecard_cache.insert_truecard(dbname, &query_id, truecard);
+                    truecard
+                }
+            };
+            truecards.push(truecard);
+        }
+
         Ok(truecards)
     }
 

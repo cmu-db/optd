@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use optd_perftest::cardtest;
+use optd_perftest::job::JobConfig;
 use optd_perftest::shell;
 use optd_perftest::tpch::{TpchConfig, TPCH_KIT_POSTGRES};
 use optd_perftest::benchmark::Benchmark;
@@ -78,13 +79,22 @@ fn fmt_qerror(qerror: f64) -> String {
 /// cardtest::cardtest_core() expects sanitized inputs and returns outputs in their simplest form.
 /// This function wraps around cardtest::cardtest_core() to sanitize the inputs and print the outputs nicely.
 async fn cardtest<P: AsRef<Path>>(workspace_dpath: P, benchmark_name: BenchmarkName, scale_factor: f64, seed: i32, query_ids: Vec<String>, rebuild_cached_optd_stats: bool, pguser: String, pgpassword: String) -> anyhow::Result<()> {
-    let tpch_config = TpchConfig {
-        dbms: String::from(TPCH_KIT_POSTGRES),
-        scale_factor,
-        seed,
-        query_ids: query_ids.clone(),
+    let benchmark = match benchmark_name {
+        BenchmarkName::Tpch => {
+            Benchmark::Tpch(TpchConfig {
+                dbms: String::from(TPCH_KIT_POSTGRES),
+                scale_factor,
+                seed,
+                query_ids: query_ids.clone(),
+            })
+        },
+        BenchmarkName::Job => {
+            Benchmark::Job(JobConfig {
+                query_ids: query_ids.clone(),
+            })
+        }
     };
-    let benchmark = Benchmark::Tpch(tpch_config);
+
     let cardinfo_alldbs = cardtest::cardtest_core(
         &workspace_dpath,
         rebuild_cached_optd_stats,
@@ -93,6 +103,7 @@ async fn cardtest<P: AsRef<Path>>(workspace_dpath: P, benchmark_name: BenchmarkN
         benchmark,
     )
     .await?;
+
     println!();
     println!(" Aggregate Q-Error Comparison");
     let mut agg_qerror_table = Table::new();
