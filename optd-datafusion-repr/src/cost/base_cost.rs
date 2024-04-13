@@ -215,7 +215,7 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::{
-        cost::stats::*,
+        cost::base_cost::stats::*,
         plan_nodes::{
             BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, InListExpr,
             LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
