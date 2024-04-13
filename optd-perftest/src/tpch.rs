@@ -92,34 +92,13 @@ impl TpchKit {
             indexes_fpath,
         };
 
-        // set envvars (DSS_PATH can change so we don't set it now)
+        // setup
         env::set_var("DSS_CONFIG", kit.dbgen_dpath.to_str().unwrap());
         env::set_var("DSS_QUERY", kit.queries_dpath.to_str().unwrap());
-
-        // do setup after creating kit
-        kit.clonepull_tpch_kit_repo()?;
+        shell::clonepull_repo(TPCH_KIT_REPO_URL, &kit.tpch_kit_repo_dpath)?;
 
         log::debug!("[end] building TpchKit");
         Ok(kit)
-    }
-
-    fn clonepull_tpch_kit_repo(&self) -> io::Result<()> {
-        if !self.tpch_kit_repo_dpath.exists() {
-            log::debug!("[start] cloning tpch-kit repo");
-            shell::run_command_with_status_check(&format!(
-                "git clone {} {}",
-                TPCH_KIT_REPO_URL,
-                self.tpch_kit_repo_dpath.to_str().unwrap()
-            ))?;
-            log::debug!("[end] cloning tpch-kit repo");
-        } else {
-            log::debug!("[skip] cloning tpch-kit repo");
-        }
-        log::debug!("[start] pulling latest tpch-kit repo");
-        shell::run_command_with_status_check_in_dir("git pull", Some(&self.tpch_kit_repo_dpath))?;
-        log::debug!("[end] pulling latest tpch-kit repo");
-        // make sure to do this so that get_optd_root() doesn't break
-        Ok(())
     }
 
     pub fn make(&self, dbms: &str) -> io::Result<()> {

@@ -80,3 +80,23 @@ pub fn parse_pathstr(pathstr: &str) -> io::Result<PathBuf> {
     };
     Ok(path)
 }
+
+/// Get a repo to its latest state by either cloning or pulling
+pub fn clonepull_repo<P: AsRef<Path>>(repo_url: &str, repo_dpath: P) -> io::Result<()> {
+    if !repo_dpath.as_ref().exists() {
+        log::debug!("[start] cloning {} repo", repo_url);
+        run_command_with_status_check(&format!(
+            "git clone {} {}",
+            repo_url,
+            repo_dpath.as_ref().to_str().unwrap()
+        ))?;
+        log::debug!("[end] cloning {} repo", repo_url);
+    } else {
+        log::debug!("[skip] cloning {} repo", repo_url);
+    }
+    log::debug!("[start] pulling latest {} repo", repo_url);
+    run_command_with_status_check_in_dir("git pull", Some(&repo_dpath))?;
+    log::debug!("[end] pulling latest {} repo", repo_url);
+    // make sure to do this so that get_optd_root() doesn't break
+    Ok(())
+}

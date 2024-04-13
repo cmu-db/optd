@@ -748,7 +748,6 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
-        // TODO(phw2): make column_refs a function
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,

@@ -70,31 +70,11 @@ impl JobKit {
             indexes_fpath,
         };
 
-        // do setup after creating kit
-        kit.clonepull_job_kit_repo()?;
+        // setup
+        shell::clonepull_repo(JOB_KIT_REPO_URL, &kit.job_kit_repo_dpath)?;
 
         log::debug!("[end] building TpchKit");
         Ok(kit)
-    }
-
-    // TODO(phw2): refactor both clonepulls
-    fn clonepull_job_kit_repo(&self) -> io::Result<()> {
-        if !self.job_kit_repo_dpath.exists() {
-            log::debug!("[start] cloning job-kit repo");
-            shell::run_command_with_status_check(&format!(
-                "git clone {} {}",
-                JOB_KIT_REPO_URL,
-                self.job_kit_repo_dpath.to_str().unwrap()
-            ))?;
-            log::debug!("[end] cloning job-kit repo");
-        } else {
-            log::debug!("[skip] cloning job-kit repo");
-        }
-        log::debug!("[start] pulling latest job-kit repo");
-        shell::run_command_with_status_check_in_dir("git pull", Some(&self.job_kit_repo_dpath))?;
-        log::debug!("[end] pulling latest job-kit repo");
-        // make sure to do this so that get_optd_root() doesn't break
-        Ok(())
     }
 
     /// Download the .csv files for all tables of JOB
