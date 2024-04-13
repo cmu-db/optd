@@ -19,7 +19,7 @@ pub trait TruecardGetter {
 /// A cache that gets persisted to disk for the true cardinalities of all queries of all benchmarks
 pub struct TruecardCache {
     truecard_cache_fpath: PathBuf,
-    cache: HashMap<String, HashMap<u32, usize>>,
+    cache: HashMap<String, HashMap<String, usize>>,
 }
 
 impl TruecardCache {
@@ -38,7 +38,7 @@ impl TruecardCache {
         })
     }
 
-    pub fn insert_truecard(&mut self, dbname: &str, query_id: u32, truecard: usize) {
+    pub fn insert_truecard(&mut self, dbname: &str, query_id: &str, truecard: usize) {
         let db_cache = match self.cache.get_mut(dbname) {
             Some(db_cache) => db_cache,
             None => {
@@ -46,13 +46,13 @@ impl TruecardCache {
                 self.cache.get_mut(dbname).unwrap()
             }
         };
-        db_cache.insert(query_id, truecard);
+        db_cache.insert(String::from(query_id), truecard);
     }
 
-    pub fn get_truecard(&self, dbname: &str, query_id: u32) -> Option<usize> {
+    pub fn get_truecard(&self, dbname: &str, query_id: &str) -> Option<usize> {
         self.cache
             .get(dbname)
-            .and_then(|db_cache| db_cache.get(&query_id).copied())
+            .and_then(|db_cache| db_cache.get(query_id).copied())
     }
 
     pub fn save(&self) -> anyhow::Result<()> {

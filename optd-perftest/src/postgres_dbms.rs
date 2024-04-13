@@ -242,11 +242,11 @@ impl PostgresDBMS {
         let mut truecards = vec![];
         for (query_id, sql_fpath) in tpch_kit.get_sql_fpath_ordered_iter(tpch_config)? {
             let sql = fs::read_to_string(sql_fpath)?;
-            let truecard = match truecard_cache.get_truecard(dbname, query_id) {
+            let truecard = match truecard_cache.get_truecard(dbname, &query_id) {
                 Some(truecard) => truecard,
                 None => {
                     let truecard = self.eval_query_truecard(client, &sql).await?;
-                    truecard_cache.insert_truecard(dbname, query_id, truecard);
+                    truecard_cache.insert_truecard(dbname, &query_id, truecard);
                     truecard
                 }
             };

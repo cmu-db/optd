@@ -19,7 +19,7 @@ pub struct TpchConfig {
     pub dbms: String,
     pub scale_factor: f64,
     pub seed: i32,
-    pub query_ids: Vec<u32>,
+    pub query_ids: Vec<String>,
 }
 
 impl Display for TpchConfig {
@@ -222,7 +222,7 @@ impl TpchKit {
     pub fn get_sql_fpath_ordered_iter(
         &self,
         tpch_config: &TpchConfig,
-    ) -> io::Result<impl Iterator<Item = (u32, PathBuf)>> {
+    ) -> io::Result<impl Iterator<Item = (String, PathBuf)>> {
         let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_config);
         let sql_fpath_ordered_iter =
             tpch_config
@@ -230,9 +230,10 @@ impl TpchKit {
                 .clone()
                 .into_iter()
                 .map(move |query_id| {
+                    let this_genned_query_fpath = this_genned_queries_dpath.join(format!("{}.sql", &query_id));
                     (
                         query_id,
-                        this_genned_queries_dpath.join(format!("{}.sql", query_id)),
+                        this_genned_query_fpath,
                     )
                 });
         Ok(sql_fpath_ordered_iter)

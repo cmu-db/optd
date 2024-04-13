@@ -1,4 +1,4 @@
-mod benchmark;
+pub mod benchmark;
 pub mod cardtest;
 mod datafusion_dbms;
 pub mod job;

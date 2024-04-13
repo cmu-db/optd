@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use optd_perftest::cardtest;
 use optd_perftest::shell;
 use optd_perftest::tpch::{TpchConfig, TPCH_KIT_POSTGRES};
+use optd_perftest::benchmark::Benchmark;
 use prettytable::{format, Table};
 use std::fs;
 
@@ -31,18 +32,18 @@ enum Commands {
 
         #[clap(long)]
         #[clap(value_delimiter = ',', num_args = 1..)]
-        // this is the current list of all queries that work in perftest
+        // This is the current list of all queries that work in perftest
         #[clap(default_value = "2,3,5,6,7,8,9,10,11,12,13,14,17,19")]
         #[clap(help = "The queries to get the Q-error of")]
-        query_ids: Vec<u32>,
+        query_ids: Vec<String>,
 
         #[clap(long)]
         #[clap(action)]
         #[clap(help = "Whether to use the cached optd stats/cache generated stats")]
-        // this is an option because you want to make it true whenever you update the
-        //   code for how stats are generated in optd, in order to not use cached stats
+        // This is an option because you want to make it true whenever you update the
+        //   code for how stats are generated in optd, in order to not use cached stats.
         // I found that I almost always want to use the cache though, which is why the
-        //   system will use the cache by default
+        //   system will use the cache by default.
         rebuild_cached_optd_stats: bool,
 
         #[clap(long)]
@@ -87,12 +88,13 @@ async fn main() -> anyhow::Result<()> {
                 seed,
                 query_ids: query_ids.clone(),
             };
+            let benchmark = Benchmark::Tpch(tpch_config);
             let cardinfo_alldbs = cardtest::cardtest(
                 &workspace_dpath,
                 rebuild_cached_optd_stats,
                 &pguser,
                 &pgpassword,
-                tpch_config,
+                benchmark,
             )
             .await?;
             println!();

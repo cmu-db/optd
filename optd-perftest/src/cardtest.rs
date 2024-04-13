@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::postgres_dbms::PostgresDBMS;
 use crate::truecard::TruecardGetter;
-use crate::{benchmark::Benchmark, datafusion_dbms::DatafusionDBMS, tpch::TpchConfig};
+use crate::{benchmark::Benchmark, datafusion_dbms::DatafusionDBMS};
 
 use anyhow::{self};
 use async_trait::async_trait;
@@ -106,17 +106,16 @@ pub async fn cardtest<P: AsRef<Path>>(
     rebuild_cached_optd_stats: bool,
     pguser: &str,
     pgpassword: &str,
-    tpch_config: TpchConfig,
+    benchmark: Benchmark,
 ) -> anyhow::Result<HashMap<String, Vec<Cardinfo>>> {
     let pg_dbms = Box::new(PostgresDBMS::build(&workspace_dpath, pguser, pgpassword)?);
     let truecard_getter = pg_dbms.clone();
     let df_dbms = Box::new(DatafusionDBMS::new(&workspace_dpath, rebuild_cached_optd_stats).await?);
     let dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>> = vec![pg_dbms, df_dbms];
 
-    let tpch_benchmark = Benchmark::Tpch(tpch_config.clone());
     let mut cardtest_runner = CardtestRunner::new(dbmss, truecard_getter).await?;
     let cardinfos_alldbs = cardtest_runner
-        .eval_benchmark_cardinfos_alldbs(&tpch_benchmark)
+        .eval_benchmark_cardinfos_alldbs(&benchmark)
         .await?;
     Ok(cardinfos_alldbs)
 }
