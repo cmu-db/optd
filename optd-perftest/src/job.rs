@@ -112,10 +112,7 @@ impl JobKit {
                 "tar -zxvf ../imdb.tgz",
                 Some(&self.downloaded_tables_dpath),
             )?;
-            shell::run_command_with_status_check_in_dir(
-                "rm imdb.tgz",
-                Some(&self.job_dpath),
-            )?;
+            shell::run_command_with_status_check_in_dir("rm imdb.tgz", Some(&self.job_dpath))?;
             File::create(done_fpath)?;
             log::debug!("[end] downloading tables for {}", job_config);
         } else {
