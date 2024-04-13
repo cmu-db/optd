@@ -101,7 +101,8 @@ pub trait CardtestRunnerDBMSHelper {
     ) -> anyhow::Result<Vec<usize>>;
 }
 
-pub async fn cardtest<P: AsRef<Path>>(
+/// The core logic of cardinality testing.
+pub async fn cardtest_core<P: AsRef<Path>>(
     workspace_dpath: P,
     rebuild_cached_optd_stats: bool,
     pguser: &str,
