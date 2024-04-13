@@ -215,7 +215,7 @@ impl PostgresDBMS {
         let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
         let stmt = client
             .prepare(&format!(
-                "COPY {} FROM STDIN WITH (FORMAT csv, DELIMITER '{}', QUOTE '\\')",
+                "COPY {} FROM STDIN WITH (FORMAT csv, DELIMITER '{}', ESCAPE '\\')",
                 tbl_name,
                 delimiter
             ))
