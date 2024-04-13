@@ -119,7 +119,7 @@ impl PostgresDBMS {
             let client = self.connect_to_db(&dbname).await?;
             match benchmark {
                 Benchmark::Tpch(tpch_config) => self.load_tpch_data(&client, tpch_config).await?,
-                Benchmark::Job(_) => self.load_job_data(&client).await?,
+                Benchmark::Job(job_config) => self.load_job_data(&client, job_config).await?,
             };
             File::create(done_fpath).await?;
             log::debug!("[end] loading benchmark data");
@@ -169,17 +169,18 @@ impl PostgresDBMS {
     async fn load_job_data(
         &self,
         client: &Client,
+        job_config: &JobConfig,
     ) -> anyhow::Result<()> {
         // set up TpchKit
         let job_kit = JobKit::build(&self.workspace_dpath)?;
 
         // load the schema
         // we need to call make to ensure that the schema file exists
-        // tpch_kit.make(TPCH_KIT_POSTGRES);
         let sql = fs::read_to_string(job_kit.schema_fpath.to_str().unwrap())?;
         client.batch_execute(&sql).await?;
 
         // load the tables
+        job_kit.download_tables(job_config)?;
         for tbl_fpath in job_kit.get_tbl_fpath_iter()? {
             println!("copying {:?}...", tbl_fpath);
             Self::copy_from_stdin(client, tbl_fpath, ",").await?;
@@ -214,7 +215,7 @@ impl PostgresDBMS {
         let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
         let stmt = client
             .prepare(&format!(
-                "COPY {} FROM STDIN WITH (FORMAT csv, DELIMITER '{}')",
+                "COPY {} FROM STDIN WITH (FORMAT csv, DELIMITER '{}', QUOTE '\\')",
                 tbl_name,
                 delimiter
             ))
