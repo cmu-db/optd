@@ -84,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
     }
     let sql_fpath_iter = job_kit.get_sql_fpath_ordered_iter(&job_config)?;
     for sql_fpath in sql_fpath_iter {
-        println!("tbl_fpath={:?}", sql_fpath);
+        println!("sql_fpath={:?}", sql_fpath);
     }
 
     Ok(())

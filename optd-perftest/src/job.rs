@@ -108,8 +108,8 @@ impl JobKit {
             log::debug!("[start] downloading tables for {}", job_config);
             // Instructions are from https://cedardb.com/docs/guides/example_datasets/job/, not from the job-kit repo.
             shell::run_command_with_status_check_in_dir(&format!("curl -O {JOB_TABLES_URL}"), Some(&self.job_dpath))?;
-            shell::run_command_with_status_check_in_dir(&format!("tar -zxvf imdb.tgz"), Some(&self.job_dpath))?;
-            shell::run_command_with_status_check_in_dir(&format!("mv imdb {}", self.downloaded_tables_dpath.to_str().unwrap()), Some(&self.job_dpath))?;
+            shell::make_into_empty_dir(&self.downloaded_tables_dpath)?;
+            shell::run_command_with_status_check_in_dir(&format!("tar -zxvf ../imdb.tgz"), Some(&self.downloaded_tables_dpath))?;
             shell::run_command_with_status_check_in_dir(&format!("rm imdb.tgz"), Some(&self.job_dpath))?;
             File::create(done_fpath)?;
             log::debug!("[end] downloading tables for {}", job_config);
@@ -139,7 +139,7 @@ impl JobKit {
         // return None in various cases
         let path_iter = dirent_iter.map(|dirent| dirent.unwrap().path());
         let tbl_fpath_iter = path_iter
-            .filter(|path| path.extension().map(|ext| ext.to_str().unwrap()) == Some("tbl"));
+            .filter(|path| path.extension().map(|ext| ext.to_str().unwrap()) == Some("csv"));
         Ok(tbl_fpath_iter)
     }
 
