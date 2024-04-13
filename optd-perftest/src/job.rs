@@ -85,14 +85,14 @@ impl JobKit {
             // Instructions are from https://cedardb.com/docs/guides/example_datasets/job/, not from the job-kit repo.
             shell::run_command_with_status_check_in_dir(
                 &format!("curl -O {JOB_TABLES_URL}"),
-                Some(&self.job_dpath),
+                &self.job_dpath,
             )?;
             shell::make_into_empty_dir(&self.downloaded_tables_dpath)?;
             shell::run_command_with_status_check_in_dir(
                 "tar -zxvf ../imdb.tgz",
-                Some(&self.downloaded_tables_dpath),
+                &self.downloaded_tables_dpath,
             )?;
-            shell::run_command_with_status_check_in_dir("rm imdb.tgz", Some(&self.job_dpath))?;
+            shell::run_command_with_status_check_in_dir("rm imdb.tgz", &self.job_dpath)?;
             File::create(done_fpath)?;
             log::debug!("[end] downloading tables for {}", job_config);
         } else {

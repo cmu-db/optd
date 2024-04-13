@@ -6,12 +6,20 @@ use std::{fs, io};
 /// Runs a command, exiting the program immediately if the command fails
 pub fn run_command_with_status_check(cmd_str: &str) -> io::Result<Output> {
     // we need to bind it to some arbitrary type that implements AsRef<Path>. I just chose &Path
-    run_command_with_status_check_in_dir::<&Path>(cmd_str, None)
+    run_command_with_status_check_core::<&Path>(cmd_str, None)
 }
 
 /// Runs a command in a directory, exiting the program immediately if the command fails
-/// TODO(phw2): refactor so that in_path is not an option. make a wrapper around this
 pub fn run_command_with_status_check_in_dir<P: AsRef<Path>>(
+    cmd_str: &str,
+    in_path: P,
+) -> io::Result<Output> {
+    run_command_with_status_check_core::<P>(cmd_str, Some(in_path))
+}
+
+/// This function exposes all the different ways to run a command, but the interface is not ergonomic.
+/// The ergonomic wrappers above are a workaround for Rust not having default values on parameters.
+pub fn run_command_with_status_check_core<P: AsRef<Path>>(
     cmd_str: &str,
     in_path: Option<P>,
 ) -> io::Result<Output> {
@@ -95,7 +103,7 @@ pub fn clonepull_repo<P: AsRef<Path>>(repo_url: &str, repo_dpath: P) -> io::Resu
         log::debug!("[skip] cloning {} repo", repo_url);
     }
     log::debug!("[start] pulling latest {} repo", repo_url);
-    run_command_with_status_check_in_dir("git pull", Some(&repo_dpath))?;
+    run_command_with_status_check_in_dir("git pull", &repo_dpath)?;
     log::debug!("[end] pulling latest {} repo", repo_url);
     // make sure to do this so that get_optd_root() doesn't break
     Ok(())
