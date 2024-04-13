@@ -109,11 +109,11 @@ impl JobKit {
             )?;
             shell::make_into_empty_dir(&self.downloaded_tables_dpath)?;
             shell::run_command_with_status_check_in_dir(
-                &format!("tar -zxvf ../imdb.tgz"),
+                "tar -zxvf ../imdb.tgz",
                 Some(&self.downloaded_tables_dpath),
             )?;
             shell::run_command_with_status_check_in_dir(
-                &format!("rm imdb.tgz"),
+                "rm imdb.tgz",
                 Some(&self.job_dpath),
             )?;
             File::create(done_fpath)?;
