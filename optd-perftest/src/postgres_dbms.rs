@@ -119,7 +119,7 @@ impl PostgresDBMS {
             let client = self.connect_to_db(&dbname).await?;
             match benchmark {
                 Benchmark::Tpch(tpch_config) => self.load_tpch_data(&client, tpch_config).await?,
-                _ => unimplemented!(),
+                Benchmark::Job(_) => self.load_job_data(&client).await?,
             };
             File::create(done_fpath).await?;
             log::debug!("[end] loading benchmark data");
@@ -147,14 +147,46 @@ impl PostgresDBMS {
         // load the tables
         tpch_kit.gen_tables(tpch_config)?;
         for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config)? {
-            Self::copy_from_stdin(client, tbl_fpath).await?;
+            Self::copy_from_stdin(client, tbl_fpath, "|").await?;
         }
 
         // load the constraints and indexes
-        // TODO: constraints are currently broken
+        // TODO(phw2): constraints are currently broken
         let sql = fs::read_to_string(tpch_kit.constraints_fpath.to_str().unwrap())?;
         client.batch_execute(&sql).await?;
         let sql = fs::read_to_string(tpch_kit.indexes_fpath.to_str().unwrap())?;
+        client.batch_execute(&sql).await?;
+
+        // create stats
+        // you need to do VACUUM FULL ANALYZE and not just ANALYZE to make sure the stats are created in a deterministic way
+        // this is standard practice for postgres benchmarking
+        client.query("VACUUM FULL ANALYZE", &[]).await?;
+
+        Ok(())
+    }
+
+    /// Load the JOB data to the database that client is connected to
+    async fn load_job_data(
+        &self,
+        client: &Client,
+    ) -> anyhow::Result<()> {
+        // set up TpchKit
+        let job_kit = JobKit::build(&self.workspace_dpath)?;
+
+        // load the schema
+        // we need to call make to ensure that the schema file exists
+        // tpch_kit.make(TPCH_KIT_POSTGRES);
+        let sql = fs::read_to_string(job_kit.schema_fpath.to_str().unwrap())?;
+        client.batch_execute(&sql).await?;
+
+        // load the tables
+        for tbl_fpath in job_kit.get_tbl_fpath_iter()? {
+            println!("copying {:?}...", tbl_fpath);
+            Self::copy_from_stdin(client, tbl_fpath, ",").await?;
+        }
+
+        // load the indexes
+        let sql = fs::read_to_string(job_kit.indexes_fpath.to_str().unwrap())?;
         client.batch_execute(&sql).await?;
 
         // create stats
@@ -170,6 +202,7 @@ impl PostgresDBMS {
     async fn copy_from_stdin<P: AsRef<Path>>(
         client: &tokio_postgres::Client,
         tbl_fpath: P,
+        delimiter: &str,
     ) -> anyhow::Result<()> {
         // read file
         let mut file = File::open(&tbl_fpath).await?;
@@ -181,8 +214,9 @@ impl PostgresDBMS {
         let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
         let stmt = client
             .prepare(&format!(
-                "COPY {} FROM STDIN WITH (FORMAT csv, DELIMITER '|')",
-                tbl_name
+                "COPY {} FROM STDIN WITH (FORMAT csv, DELIMITER '{}')",
+                tbl_name,
+                delimiter
             ))
             .await?;
         let sink = client.copy_in(&stmt).await?;
