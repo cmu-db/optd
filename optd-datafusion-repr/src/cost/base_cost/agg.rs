@@ -8,8 +8,8 @@ use optd_core::{
 
 use crate::{
     cost::{
+        base_cost::stats::{Distribution, MostCommonValues},
         base_cost::DEFAULT_NUM_DISTINCT,
-        stats::{Distribution, MostCommonValues},
     },
     plan_nodes::{ExprList, OptRelNode, OptRelNodeTyp},
     properties::column_ref::{ColumnRef, ColumnRefPropertyBuilder},

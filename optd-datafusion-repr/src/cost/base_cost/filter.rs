@@ -8,8 +8,8 @@ use optd_core::{
 
 use crate::{
     cost::{
+        base_cost::stats::{Distribution, MostCommonValues, PerColumnStats},
         base_cost::{DEFAULT_MATCH_SEL, UNIMPLEMENTED_SEL},
-        stats::{Distribution, MostCommonValues, PerColumnStats},
     },
     plan_nodes::{
         BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, InListExpr, LogOpType, OptRelNode,

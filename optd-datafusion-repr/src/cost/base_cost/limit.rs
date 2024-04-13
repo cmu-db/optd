@@ -4,7 +4,7 @@ use optd_core::{
 };
 
 use crate::{
-    cost::stats::{Distribution, MostCommonValues},
+    cost::base_cost::stats::{Distribution, MostCommonValues},
     plan_nodes::{ConstantExpr, ConstantType, OptRelNode, OptRelNodeTyp},
 };
 

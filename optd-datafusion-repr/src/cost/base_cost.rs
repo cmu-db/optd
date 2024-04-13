@@ -2,6 +2,7 @@ mod agg;
 mod filter;
 mod join;
 mod limit;
+pub(crate) mod stats;
 
 use crate::{plan_nodes::OptRelNodeTyp, properties::column_ref::ColumnRef};
 use itertools::Itertools;
@@ -11,7 +12,7 @@ use optd_core::{
     rel_node::{RelNode, RelNodeTyp, Value},
 };
 
-use super::stats::{BaseTableStats, Distribution, MostCommonValues, PerColumnStats};
+use super::base_cost::stats::{BaseTableStats, Distribution, MostCommonValues, PerColumnStats};
 
 fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     model: &C,

@@ -10,7 +10,7 @@ use optd_core::{
     rel_node::{RelNode, Value},
 };
 
-use super::stats::{
+use super::base_cost::stats::{
     BaseTableStats, DataFusionDistribution, DataFusionMostCommonValues, Distribution,
     MostCommonValues,
 };
