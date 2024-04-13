@@ -1,7 +1,7 @@
+/// A wrapper around tpch-kit
 use serde::{Deserialize, Serialize};
 
 use crate::shell;
-/// A wrapper around tpch-kit (https://github.com/gregrahn/tpch-kit)
 use std::env;
 use std::env::consts::OS;
 use std::fmt::{self, Display, Formatter};
@@ -53,7 +53,6 @@ pub struct TpchKit {
     pub indexes_fpath: PathBuf,
 }
 
-/// I keep the same conventions for these methods as I do for PostgresDBMS
 impl TpchKit {
     pub fn build<P: AsRef<Path>>(workspace_dpath: P) -> io::Result<Self> {
         log::debug!("[start] building TpchKit");

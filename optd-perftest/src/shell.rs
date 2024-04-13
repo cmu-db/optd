@@ -10,6 +10,7 @@ pub fn run_command_with_status_check(cmd_str: &str) -> io::Result<Output> {
 }
 
 /// Runs a command in a directory, exiting the program immediately if the command fails
+/// TODO(phw2): refactor so that in_path is not an option. make a wrapper around this
 pub fn run_command_with_status_check_in_dir<P: AsRef<Path>>(
     cmd_str: &str,
     in_path: Option<P>,
