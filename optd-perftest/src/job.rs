@@ -19,11 +19,7 @@ pub struct JobConfig {
 impl Display for JobConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         // Use write! macro to write formatted string to `f`
-        write!(
-            f,
-            "JobConfig(query_ids={:?})",
-            self.query_ids,
-        )
+        write!(f, "JobConfig(query_ids={:?})", self.query_ids,)
     }
 }
 
@@ -107,10 +103,19 @@ impl JobKit {
         if !done_fpath.exists() {
             log::debug!("[start] downloading tables for {}", job_config);
             // Instructions are from https://cedardb.com/docs/guides/example_datasets/job/, not from the job-kit repo.
-            shell::run_command_with_status_check_in_dir(&format!("curl -O {JOB_TABLES_URL}"), Some(&self.job_dpath))?;
+            shell::run_command_with_status_check_in_dir(
+                &format!("curl -O {JOB_TABLES_URL}"),
+                Some(&self.job_dpath),
+            )?;
             shell::make_into_empty_dir(&self.downloaded_tables_dpath)?;
-            shell::run_command_with_status_check_in_dir(&format!("tar -zxvf ../imdb.tgz"), Some(&self.downloaded_tables_dpath))?;
-            shell::run_command_with_status_check_in_dir(&format!("rm imdb.tgz"), Some(&self.job_dpath))?;
+            shell::run_command_with_status_check_in_dir(
+                &format!("tar -zxvf ../imdb.tgz"),
+                Some(&self.downloaded_tables_dpath),
+            )?;
+            shell::run_command_with_status_check_in_dir(
+                &format!("rm imdb.tgz"),
+                Some(&self.job_dpath),
+            )?;
             File::create(done_fpath)?;
             log::debug!("[end] downloading tables for {}", job_config);
         } else {
@@ -131,9 +136,7 @@ impl JobKit {
     }
 
     /// Get an iterator through all generated .tbl files of a given config
-    pub fn get_tbl_fpath_iter(
-        &self,
-    ) -> io::Result<impl Iterator<Item = PathBuf>> {
+    pub fn get_tbl_fpath_iter(&self) -> io::Result<impl Iterator<Item = PathBuf>> {
         let dirent_iter = fs::read_dir(&self.downloaded_tables_dpath)?;
         // all results/options are fine to be unwrapped except for path.extension() because that could
         // return None in various cases
@@ -150,17 +153,11 @@ impl JobKit {
         job_config: &JobConfig,
     ) -> io::Result<impl Iterator<Item = (u32, PathBuf)>> {
         let queries_dpath = self.queries_dpath.clone();
-        let sql_fpath_ordered_iter =
-            job_config
-                .query_ids
-                .clone()
-                .into_iter()
-                .map(move |query_id| {
-                    (
-                        query_id,
-                        queries_dpath.join(format!("{}.sql", query_id)),
-                    )
-                });
+        let sql_fpath_ordered_iter = job_config
+            .query_ids
+            .clone()
+            .into_iter()
+            .map(move |query_id| (query_id, queries_dpath.join(format!("{}.sql", query_id))));
         Ok(sql_fpath_ordered_iter)
     }
 }
