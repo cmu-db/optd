@@ -206,14 +206,15 @@ impl PostgresDBMS {
     ) -> anyhow::Result<()> {
         // Setup
         let mut file = File::open(&tbl_fpath).await?;
-        const BUFFER_SIZE: usize = 512 * 1024 * 1024;
+        // Internally, File::read() seems to read at most 2MB at a time, so I set BUFFER_SIZE to be that.
+        const BUFFER_SIZE: usize = 2 * 1024 * 1024;
         let mut extra_bytes_buffer = vec![];
 
-        // Read the file 512MB at a time, sending a copy statement accordingly.
-        // We do 512MB at a time because sending a single statement that is >1GB in size
+        // Read the file BUFFER_SIZE at a time, sending a copy statement accordingly.
+        // BUFFER_SIZE must be < 1GB because sending a single statement that is >1GB in size
         //   causes Postgres to cancel the transaction.
         loop {
-            // Add the extra bytes from last time and then read from the file to fill the buffer to at most 512MB
+            // Add the extra bytes from last time and then read from the file to fill the buffer to at most BUFFER_SIZE
             let mut buffer = vec![0u8; BUFFER_SIZE];
             let num_extra_bytes = extra_bytes_buffer.len();
             buffer.splice(0..num_extra_bytes, extra_bytes_buffer);
@@ -259,7 +260,6 @@ impl PostgresDBMS {
             sink.finish().await?;
         }
 
-        panic!("done");
         Ok(())
     }
 
