@@ -379,7 +379,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     fn get_column_leq_value_freq(per_column_stats: &PerColumnStats<M, D>, value: &Value) -> f64 {
         // because distr does not include the values in MCVs, we need to compute the CDFs there as well
         // because nulls return false in any comparison, they are never included when computing range selectivity
-        let distr_leq_freq = per_column_stats.distr.cdf(value);
+        let distr_leq_freq = per_column_stats.distr.as_ref().unwrap().cdf(value);
         let value = value.clone();
         let pred = Box::new(move |val: &Value| val <= &value);
         let mcvs_leq_freq = per_column_stats.mcvs.freq_over_pred(pred);

@@ -103,7 +103,7 @@ pub struct PerColumnStats<M: MostCommonValues, D: Distribution> {
 
     // distribution _does not_ include the values in mcvs
     // distribution _does not_ include nulls
-    pub distr: D,
+    pub distr: Option<D>,
 }
 
 impl<M: MostCommonValues, D: Distribution> PerColumnStats<M, D> {
@@ -112,7 +112,7 @@ impl<M: MostCommonValues, D: Distribution> PerColumnStats<M, D> {
             mcvs,
             ndistinct,
             null_frac,
-            distr,
+            distr: Some(distr),
         }
     }
 }
@@ -233,6 +233,76 @@ impl PerTableStats<Counter<Value>, TDigest> {
         })
     }
 
+    pub fn extend_with_multi_column_stats<
+        I: IntoIterator<Item = Result<RecordBatch, ArrowError>>,
+    >(
+        self,
+        batch_iter_builder: impl Fn() -> anyhow::Result<RecordBatchIterator<I>>,
+        combinations: Vec<Vec<usize>>,
+    ) -> anyhow::Result<Self> {
+        for comb in combinations.iter() {
+            let batch_iter1 = batch_iter_builder()?;
+            let batch_iter2 = batch_iter_builder()?;
+
+            let schema = batch_iter1.schema();
+            let col_types = schema
+                .fields()
+                .iter()
+                .map(|f| f.data_type().clone())
+                .collect_vec();
+
+            if comb
+                .iter()
+                .all(|&idx| !Self::is_type_supported(&col_types[idx]))
+            {
+                let mut row_cnt = 0;
+
+                let mut hll = HyperLogLog::new(hyperloglog::DEFAULT_PRECISION);
+                let mut mg: MisraGries<Vec<Option<Value>>> =
+                    MisraGries::new(misragries::DEFAULT_K_TO_TRACK);
+                let mut null_cnt = 0; // TODO(Alexis): How to handle?
+
+                // 1. First pass: HLL + MG + null_cnt + row_cnt.
+                for batch in batch_iter1 {
+                    let batch = batch?;
+                    row_cnt += batch.num_rows();
+
+                    let mut cols = Vec::<Arc<dyn Array>>::new();
+                    let mut col_types = Vec::<DataType>::new();
+                    for idx in comb.iter() {
+                        cols.push(batch.column(*idx).clone());
+                        col_types.push(col_types[*idx].clone());
+                    }
+
+                    Self::generate_partial_stats_for_comb(cols, col_types, &mut mg, &mut hll);
+                }
+
+                let mfk: Vec<Vec<Option<Value>>> =
+                    mg.most_frequent_keys().into_iter().cloned().collect();
+                let mut cnt = Counter::new(&mfk);
+
+                // 2. Second pass: MCV.
+                for batch in batch_iter2 {
+                    let batch = batch?;
+
+                    // TODO(Alexis): Code dup.
+                    let mut cols = Vec::<Arc<dyn Array>>::new();
+                    let mut col_types = Vec::<DataType>::new();
+                    for idx in comb.iter() {
+                        cols.push(batch.column(*idx).clone());
+                        col_types.push(col_types[*idx].clone());
+                    }
+
+                    // TODO(Alexis): Full stat gen.
+                }
+
+                // TODO(Alexis): Append new stat to TableStat (some hashtable).
+            }
+        }
+
+        Ok(self)
+    }
+
     fn is_type_supported(data_type: &DataType) -> bool {
         matches!(
             data_type,
@@ -247,6 +317,80 @@ impl PerTableStats<Counter<Value>, TDigest> {
                 | DataType::Float64
                 | DataType::Utf8
         )
+    }
+
+    /// Matches to the typed column.
+    fn to_typed_column(col: &Arc<dyn Array>, col_type: &DataType) -> Vec<Option<Value>> {
+        macro_rules! simple_col_cast {
+            ({ $col:expr, $array_type:path, $value_type:path}) => {
+                $col.as_any()
+                    .downcast_ref::<$array_type>()
+                    .unwrap()
+                    .iter()
+                    .map(|x| x.map($value_type))
+                    .collect::<Vec<_>>()
+            };
+        }
+
+        macro_rules! float_col_cast {
+            ({ $col:expr}) => {
+                $col.as_any()
+                    .downcast_ref::<Float32Array>()
+                    .unwrap()
+                    .iter()
+                    .map(|x| {
+                        x.map(|y| {
+                            Value::Float(SerializableOrderedF64(OrderedFloat::from(y as f64)))
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            };
+        }
+
+        macro_rules! utf8_col_cast {
+            ({ $col:expr}) => {
+                col.as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+                    .iter()
+                    .map(|x| x.map(|y| Value::String(y.to_string().into())))
+                    .collect::<Vec<_>>()
+            };
+        }
+
+        match col_type {
+            DataType::Boolean => simple_col_cast!({col, BooleanArray, Value::Bool}),
+            DataType::Int8 => simple_col_cast!({col, Int8Array, Value::Int8}),
+            DataType::Int16 => simple_col_cast!({col, Int16Array, Value::Int16}),
+            DataType::Int32 => simple_col_cast!({col, Int32Array, Value::Int32}),
+            DataType::UInt8 => simple_col_cast!({col, UInt8Array, Value::UInt8}),
+            DataType::UInt16 => simple_col_cast!({col, UInt16Array, Value::UInt16}),
+            DataType::UInt32 => simple_col_cast!({col, UInt32Array, Value::UInt32}),
+            DataType::Float32 => float_col_cast!({ col }),
+            DataType::Float64 => float_col_cast!({ col }),
+            DataType::Date32 => simple_col_cast!({col, Date32Array, Value::Date32}),
+            DataType::Utf8 => utf8_col_cast!({ col }),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Generate partial statistics for a combination of columns.
+    fn generate_partial_stats_for_comb(
+        cols: Vec<Arc<dyn Array>>,
+        col_types: Vec<DataType>,
+        mg: &mut MisraGries<Vec<Option<Value>>>,
+        hll: &mut HyperLogLog,
+    ) {
+        let mut rows = Vec::<Vec<Option<Value>>>::new();
+        for (col, col_type) in cols.iter().zip(col_types.iter()) {
+            for (idx, val) in Self::to_typed_column(col, col_type).iter().enumerate() {
+                rows[idx].push(val.clone());
+            }
+        }
+
+        mg.aggregate(&rows);
+        // TODO(Alexis): I was here.
+        // hll.aggregate(&rows);
     }
 
     /// Generate partial statistics for a column.
