@@ -38,9 +38,9 @@ impl Benchmark {
         match self {
             Self::Tpch(tpch_config) => {
                 format!("tpch_sf{}", tpch_config.scale_factor)
-            },
+            }
             Self::Job(_) => {
-                format!("job")
+                String::from("job")
             }
         }
     }

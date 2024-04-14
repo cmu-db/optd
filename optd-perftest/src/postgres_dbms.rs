@@ -1,5 +1,9 @@
 use crate::{
-    benchmark::Benchmark, cardtest::CardtestRunnerDBMSHelper, job::{JobConfig, JobKit}, tpch::{TpchConfig, TpchKit}, truecard::{TruecardCache, TruecardGetter}
+    benchmark::Benchmark,
+    cardtest::CardtestRunnerDBMSHelper,
+    job::{JobConfig, JobKit},
+    tpch::{TpchConfig, TpchKit},
+    truecard::{TruecardCache, TruecardGetter},
 };
 use async_trait::async_trait;
 use futures::Sink;
@@ -7,7 +11,9 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 use std::{
-    fs, io::Cursor, path::{Path, PathBuf}
+    fs,
+    io::Cursor,
+    path::{Path, PathBuf},
 };
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
@@ -165,11 +171,7 @@ impl PostgresDBMS {
     }
 
     /// Load the JOB data to the database that client is connected to
-    async fn load_job_data(
-        &self,
-        client: &Client,
-        job_config: &JobConfig,
-    ) -> anyhow::Result<()> {
+    async fn load_job_data(&self, client: &Client, job_config: &JobConfig) -> anyhow::Result<()> {
         // set up TpchKit
         let job_kit = JobKit::build(&self.workspace_dpath)?;
 
@@ -249,9 +251,7 @@ impl PostgresDBMS {
             let stmt = client
                 .prepare(&format!(
                     "COPY {} FROM STDIN WITH (FORMAT csv, DELIMITER '{}', ESCAPE '{}')",
-                    tbl_name,
-                    delimiter,
-                    escape
+                    tbl_name, delimiter, escape
                 ))
                 .await?;
             let sink = client.copy_in(&stmt).await?;
@@ -392,7 +392,7 @@ impl TruecardGetter for PostgresDBMS {
             Benchmark::Tpch(tpch_config) => {
                 self.eval_tpch_truecards(&client, tpch_config, &dbname, &mut truecard_cache)
                     .await
-            },
+            }
             Benchmark::Job(_job_config) => unimplemented!(),
         }
         // note that truecard_cache will save itself when it goes out of scope

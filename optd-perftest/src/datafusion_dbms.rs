@@ -5,7 +5,9 @@ use std::{
 };
 
 use crate::{
-    benchmark::Benchmark, cardtest::CardtestRunnerDBMSHelper, tpch::{TpchConfig, TpchKit}
+    benchmark::Benchmark,
+    cardtest::CardtestRunnerDBMSHelper,
+    tpch::{TpchConfig, TpchKit},
 };
 use async_trait::async_trait;
 use datafusion::{

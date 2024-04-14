@@ -230,11 +230,9 @@ impl TpchKit {
                 .clone()
                 .into_iter()
                 .map(move |query_id| {
-                    let this_genned_query_fpath = this_genned_queries_dpath.join(format!("{}.sql", &query_id));
-                    (
-                        query_id,
-                        this_genned_query_fpath,
-                    )
+                    let this_genned_query_fpath =
+                        this_genned_queries_dpath.join(format!("{}.sql", &query_id));
+                    (query_id, this_genned_query_fpath)
                 });
         Ok(sql_fpath_ordered_iter)
     }
