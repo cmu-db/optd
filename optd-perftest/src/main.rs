@@ -104,11 +104,11 @@ async fn cardtest<P: AsRef<Path>>(
 
     let benchmark = match benchmark_name {
         BenchmarkName::Tpch => Benchmark::Tpch(TpchConfig {
-                dbms: String::from(TPCH_KIT_POSTGRES),
-                scale_factor,
-                seed,
-                query_ids: query_ids.clone(),
-            }),
+            dbms: String::from(TPCH_KIT_POSTGRES),
+            scale_factor,
+            seed,
+            query_ids: query_ids.clone(),
+        }),
         BenchmarkName::Job => Benchmark::Job(JobConfig {
             query_ids: query_ids.clone(),
         }),

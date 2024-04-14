@@ -347,6 +347,8 @@ impl PostgresDBMS {
             truecards.push(truecard);
         }
 
+        panic!("done");
+
         Ok(truecards)
     }
 
