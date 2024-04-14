@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    benchmark::Benchmark, cardtest::CardtestRunnerDBMSHelper, job::JobConfig, tpch::{TpchConfig, TpchKit}
+    benchmark::Benchmark, cardtest::CardtestRunnerDBMSHelper, tpch::{TpchConfig, TpchKit}
 };
 use async_trait::async_trait;
 use datafusion::{
@@ -53,7 +53,7 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
         self.create_tpch_tables(&tpch_kit).await?;
         match benchmark {
             Benchmark::Tpch(tpch_config) => self.eval_tpch_estcards(tpch_config).await,
-            Benchmark::Job(job_config) => self.eval_job_estcards(job_config).await,
+            Benchmark::Job(_job_config) => unimplemented!(),
         }
     }
 }
@@ -152,11 +152,6 @@ impl DatafusionDBMS {
             estcards.push(estcard);
         }
 
-        Ok(estcards)
-    }
-
-    async fn eval_job_estcards(&self, job_config: &JobConfig) -> anyhow::Result<Vec<usize>> {
-        let mut estcards = vec![];
         Ok(estcards)
     }
 
