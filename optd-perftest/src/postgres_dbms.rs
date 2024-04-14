@@ -2,7 +2,7 @@ use crate::{
     benchmark::Benchmark, cardtest::CardtestRunnerDBMSHelper, job::{JobConfig, JobKit}, tpch::{TpchConfig, TpchKit}, truecard::{TruecardCache, TruecardGetter}
 };
 use async_trait::async_trait;
-use futures::Sink;
+use futures::{Sink, SinkExt};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -11,7 +11,7 @@ use std::{
     io::Cursor,
     path::{Path, PathBuf},
 };
-use tokio::fs::File;
+use tokio::{fs::File, io::BufReader};
 use tokio::io::AsyncReadExt;
 use tokio_postgres::{Client, NoTls, Row};
 
@@ -126,6 +126,7 @@ impl PostgresDBMS {
         } else {
             log::debug!("[skip] loading benchmark data");
         }
+
         Ok(())
     }
 
@@ -181,7 +182,7 @@ impl PostgresDBMS {
 
         // load the tables
         job_kit.download_tables(job_config)?;
-        for tbl_fpath in job_kit.get_tbl_fpath_iter()? {
+        for tbl_fpath in job_kit.get_tbl_fpath_iter()?.filter(|tbl_fpath| tbl_fpath.to_str().unwrap().contains("cast_info.csv")) {
             println!("copying {:?}...", tbl_fpath);
             Self::copy_from_stdin(client, tbl_fpath, ",").await?;
         }
@@ -195,6 +196,7 @@ impl PostgresDBMS {
         // this is standard practice for postgres benchmarking
         client.query("VACUUM FULL ANALYZE", &[]).await?;
 
+        panic!("done");
         Ok(())
     }
 

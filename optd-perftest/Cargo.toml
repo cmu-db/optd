@@ -43,6 +43,7 @@ statistical = "1.0"
 prettytable-rs = "0.10"
 serde = "1.0"
 serde_json = "1.0"
+test-case = "3.3"
 
 [dev_dependencies]
 assert_cmd = "2.0"
