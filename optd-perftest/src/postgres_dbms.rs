@@ -2,16 +2,14 @@ use crate::{
     benchmark::Benchmark, cardtest::CardtestRunnerDBMSHelper, job::{JobConfig, JobKit}, tpch::{TpchConfig, TpchKit}, truecard::{TruecardCache, TruecardGetter}
 };
 use async_trait::async_trait;
-use futures::{Sink, SinkExt};
+use futures::Sink;
 use lazy_static::lazy_static;
 use regex::Regex;
 
 use std::{
-    fs,
-    io::Cursor,
-    path::{Path, PathBuf},
+    fs, io::Cursor, path::{Path, PathBuf}
 };
-use tokio::{fs::File, io::BufReader};
+use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio_postgres::{Client, NoTls, Row};
 
@@ -148,7 +146,7 @@ impl PostgresDBMS {
         // load the tables
         tpch_kit.gen_tables(tpch_config)?;
         for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config)? {
-            Self::copy_from_stdin(client, tbl_fpath, "|").await?;
+            Self::copy_from_stdin(client, tbl_fpath, "|", "\\").await?;
         }
 
         // load the constraints and indexes
@@ -182,9 +180,8 @@ impl PostgresDBMS {
 
         // load the tables
         job_kit.download_tables(job_config)?;
-        for tbl_fpath in job_kit.get_tbl_fpath_iter()?.filter(|tbl_fpath| tbl_fpath.to_str().unwrap().contains("cast_info.csv")) {
-            println!("copying {:?}...", tbl_fpath);
-            Self::copy_from_stdin(client, tbl_fpath, ",").await?;
+        for tbl_fpath in job_kit.get_tbl_fpath_iter()? {
+            Self::copy_from_stdin(client, tbl_fpath, ",", "\\").await?;
         }
 
         // load the indexes
@@ -196,7 +193,6 @@ impl PostgresDBMS {
         // this is standard practice for postgres benchmarking
         client.query("VACUUM FULL ANALYZE", &[]).await?;
 
-        panic!("done");
         Ok(())
     }
 
@@ -206,27 +202,64 @@ impl PostgresDBMS {
         client: &tokio_postgres::Client,
         tbl_fpath: P,
         delimiter: &str,
+        escape: &str,
     ) -> anyhow::Result<()> {
-        // read file
+        // Setup
         let mut file = File::open(&tbl_fpath).await?;
-        let mut data = Vec::new();
-        file.read_to_end(&mut data).await?;
-        let cursor = Cursor::new(data);
+        const BUFFER_SIZE: usize = 512 * 1024 * 1024;
+        let mut extra_bytes_buffer = vec![];
 
-        // run copy from statement
-        let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
-        let stmt = client
-            .prepare(&format!(
-                "COPY {} FROM STDIN WITH (FORMAT csv, DELIMITER '{}', ESCAPE '\\')",
-                tbl_name,
-                delimiter
-            ))
-            .await?;
-        let sink = client.copy_in(&stmt).await?;
-        futures::pin_mut!(sink);
-        sink.as_mut().start_send(cursor)?;
-        sink.finish().await?;
+        // Read the file 512MB at a time, sending a copy statement accordingly.
+        // We do 512MB at a time because sending a single statement that is >1GB in size
+        //   causes Postgres to cancel the transaction.
+        loop {
+            // Add the extra bytes from last time and then read from the file to fill the buffer to at most 512MB
+            let mut buffer = vec![0u8; BUFFER_SIZE];
+            let num_extra_bytes = extra_bytes_buffer.len();
+            buffer.splice(0..num_extra_bytes, extra_bytes_buffer);
+            let num_bytes_read = file.read(&mut buffer[num_extra_bytes..]).await?;
+            let num_bytes_in_buffer = num_extra_bytes + num_bytes_read;
 
+            if num_bytes_in_buffer == 0 {
+                break;
+            }
+
+            // Truncate here to handle when file.read() encounters the end of the file.
+            buffer.truncate(num_bytes_in_buffer);
+
+            // Find the last newline in the buffer. Copy the extra data out and truncate the buffer.
+            extra_bytes_buffer = vec![];
+            let last_newline_idx = buffer.iter().rposition(|&x| x == b'\n');
+            // It's possible that the buffer doesn't contain any newlines if it only has the very last line of the file.
+            // In that case, we'll just assume it's the last line of the file and not truncate the buffer.
+            // It's also possible that we have a line that's too long, but it's easier to just let Postgres throw an
+            //   error if this happens.
+            if let Some(last_newline_idx) = last_newline_idx {
+                let extra_bytes_start_idx = last_newline_idx + 1;
+                // Since we truncated buffer earlier, &buffer[extra_bytes_start_idx..] will not contain
+                //   any bytes *not* in the file.
+                extra_bytes_buffer.extend_from_slice(&buffer[extra_bytes_start_idx..]);
+                buffer.truncate(extra_bytes_start_idx);
+            }
+
+            // Execute a COPY FROM STDIN statement with the buffer
+            let cursor = Cursor::new(buffer);
+            let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
+            let stmt = client
+                .prepare(&format!(
+                    "COPY {} FROM STDIN WITH (FORMAT csv, DELIMITER '{}', ESCAPE '{}')",
+                    tbl_name,
+                    delimiter,
+                    escape
+                ))
+                .await?;
+            let sink = client.copy_in(&stmt).await?;
+            futures::pin_mut!(sink);
+            sink.as_mut().start_send(cursor)?;
+            sink.finish().await?;
+        }
+
+        panic!("done");
         Ok(())
     }
 
