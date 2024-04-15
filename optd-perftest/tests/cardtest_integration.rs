@@ -14,8 +14,9 @@ mod tests {
     ///   preferred way of starting it (in Docker container, with Mac app, custom build, etc.)
     /// It's important to exercise all the different benchmarks to make sure their respective
     ///   kits, loading logic, and execution logic are sound.
+    /// While it'd be nice to test JOB, JOB only has one scale factor and that scale factor
+    ///   takes 30 minutes to build stats as of 4/15/24, so we don't test it right now.
     #[test_case::test_case("tpch")]
-    // #[test_case::test_case("job")]
     fn cli_run_cardtest_twice(benchmark_name: &str) {
         // perform cleanup (clear workspace)
         let workspace_dpath = shell::parse_pathstr(WORKSPACE).unwrap();
