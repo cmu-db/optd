@@ -233,6 +233,101 @@ impl PerTableStats<Counter<Value>, TDigest> {
         })
     }
 
+    /// Currently, stats creation runs into various issues with JOB. This temporary function
+    ///   allows JOB to at least run while we fix these issues.
+    pub fn from_record_batches_job<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
+        batch_iter_builder: impl Fn() -> anyhow::Result<RecordBatchIterator<I>>,
+    ) -> anyhow::Result<Self> {
+        let batch_iter1 = batch_iter_builder()?;
+        let batch_iter2 = batch_iter_builder()?;
+
+        let schema = batch_iter1.schema();
+        let col_types = schema
+            .fields()
+            .iter()
+            .map(|f| f.data_type().clone())
+            .collect_vec();
+        let col_cnt = col_types.len();
+
+        let mut row_cnt = 0;
+
+        let mut hlls = vec![HyperLogLog::new(hyperloglog::DEFAULT_PRECISION); col_cnt];
+        let mut mgs: Vec<MisraGries<Value>> =
+            vec![MisraGries::new(misragries::DEFAULT_K_TO_TRACK); col_cnt];
+        let mut null_cnt = vec![0; col_cnt];
+
+        // 1. First pass: HLL + MG + null_cnt + row_cnt.
+        for batch in batch_iter1 {
+            let batch = batch?;
+            row_cnt += batch.num_rows();
+
+            for (i, col) in batch.columns().iter().enumerate() {
+                let col_type = &col_types[i];
+                if Self::is_type_supported(col_type) {
+                    null_cnt[i] += col.null_count();
+                    Self::generate_partial_stats_for_column(
+                        col,
+                        col_type,
+                        &mut mgs[i],
+                        &mut hlls[i],
+                    );
+                }
+            }
+        }
+
+        let mut distr = col_types
+            .iter()
+            .map(|col_type| {
+                if Self::is_type_supported(col_type) {
+                    Some(TDigest::new(tdigest::DEFAULT_COMPRESSION))
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+        let mut cnts: Vec<Counter<Value>> = mgs
+            .iter()
+            .map(|mg| {
+                let mfk: Vec<Value> = mg.most_frequent_keys().into_iter().cloned().collect();
+                Counter::new(&mfk)
+            })
+            .collect();
+
+        // 2. Second pass: MCV + TDigest.
+        // TODO(Alexis): Remove MCV from TDigest.
+        for batch in batch_iter2 {
+            let batch = batch?;
+
+            for (i, col) in batch.columns().iter().enumerate() {
+                let col_type = &col_types[i];
+                if Self::is_type_supported(col_type) {
+                    Self::generate_stats_for_column(col, col_type, &mut distr[i], &mut cnts[i]);
+                }
+            }
+        }
+
+        // 3. Assemble stats.
+        let mut per_column_stats_vec = Vec::with_capacity(col_cnt);
+        for i in 0..col_cnt {
+            let counter = Counter::<Value>::new(&[]);
+            per_column_stats_vec.push(if Self::is_type_supported(&col_types[i]) {
+                Some(PerColumnStats::new(
+                    counter,
+                    200,
+                    null_cnt[i] as f64 / row_cnt as f64,
+                    distr[i].take().unwrap(),
+                ))
+            } else {
+                None
+            });
+        }
+
+        Ok(Self {
+            row_cnt,
+            per_column_stats_vec,
+        })
+    }
+
     fn is_type_supported(data_type: &DataType) -> bool {
         matches!(
             data_type,

@@ -244,8 +244,8 @@ impl DatafusionDBMS {
                 Benchmark::Job(job_config) => self.get_job_stats(job_config).await?,
             };
 
-            // When self.rebuild_cached_stats is true, we *don't read* from the cache but we still
-            //   *do write* to the cache.
+            // When self.rebuild_cached_optd_stats is true, we *don't read* from the cache but we
+            //   still *do write* to the cache.
             fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
             let file = File::create(&stats_cache_fpath)?;
             serde_json::to_writer(file, &base_table_stats)?;
@@ -418,7 +418,7 @@ impl DatafusionDBMS {
 
             base_table_stats.insert(
                 tbl_name.to_string(),
-                DataFusionPerTableStats::from_record_batches(|| {
+                DataFusionPerTableStats::from_record_batches_job(|| {
                     let tbl_file = fs::File::open(&tbl_fpath)?;
                     let csv_reader1 = ReaderBuilder::new(schema.clone())
                         .has_header(false)
