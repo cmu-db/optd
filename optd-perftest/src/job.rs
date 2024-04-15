@@ -45,7 +45,7 @@ impl JobKit {
     pub fn build<P: AsRef<Path>>(workspace_dpath: P) -> io::Result<Self> {
         log::debug!("[start] building JobKit");
 
-        // build paths, sometimes creating them if they don't exist
+        // Build paths, sometimes creating them if they don't exist
         let workspace_dpath = workspace_dpath.as_ref().to_path_buf();
         let job_dpath = workspace_dpath.join("job");
         if !job_dpath.exists() {
@@ -57,10 +57,14 @@ impl JobKit {
         if !downloaded_tables_dpath.exists() {
             fs::create_dir(&downloaded_tables_dpath)?;
         }
+        // Note that the downloaded tables directory has a file called schematext.sql.
+        // I chose to use the schema.sql in the repo itself for one simple reason: since
+        //   we forked the repo, we can modify the schema.sql if necessary.
+        // Note also that I copied schematext.sql into our job-kit fork *for reference only*.
         let schema_fpath = job_kit_repo_dpath.join("schema.sql");
         let indexes_fpath = job_kit_repo_dpath.join("fkindexes.sql");
 
-        // create Self
+        // Create Self
         let kit = JobKit {
             _workspace_dpath: workspace_dpath,
             job_dpath,
