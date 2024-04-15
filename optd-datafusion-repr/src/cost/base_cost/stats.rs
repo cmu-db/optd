@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 // The "standard" concrete types that optd currently uses.
 // All of optd (except unit tests) must use the same types.
-pub type DataFusionMostCommonValues = Counter<Value>;
+pub type DataFusionMostCommonValues = Counter<Vec<Option<Value>>>;
 pub type DataFusionDistribution = TDigest;
 
 pub type DataFusionBaseTableStats =
@@ -58,16 +58,16 @@ pub trait MostCommonValues: 'static + Send + Sync {
     //     O(n) and total_freq() can be cached)
     // additionally, it makes sense to return an Option<f64> for freq() instead of just 0 if value doesn't exist
     // thus, I expose three different functions
-    fn freq(&self, value: &Value) -> Option<f64>;
+    fn freq(&self, value: &[Option<Value>]) -> Option<f64>;
     fn total_freq(&self) -> f64;
-    fn freq_over_pred(&self, pred: Box<dyn Fn(&Value) -> bool>) -> f64;
+    fn freq_over_pred(&self, pred: Box<dyn Fn(&[Option<Value>]) -> bool>) -> f64;
 
     // returns the # of entries (i.e. value + freq) in the most common values structure
     fn cnt(&self) -> usize;
 }
 
-impl MostCommonValues for Counter<Value> {
-    fn freq(&self, value: &Value) -> Option<f64> {
+impl MostCommonValues for Counter<Vec<Option<Value>>> {
+    fn freq(&self, value: &[Option<Value>]) -> Option<f64> {
         self.frequencies().get(value).copied()
     }
 
@@ -75,7 +75,7 @@ impl MostCommonValues for Counter<Value> {
         self.frequencies().values().sum()
     }
 
-    fn freq_over_pred(&self, pred: Box<dyn Fn(&Value) -> bool>) -> f64 {
+    fn freq_over_pred(&self, pred: Box<dyn Fn(&[Option<Value>]) -> bool>) -> f64 {
         self.frequencies()
             .iter()
             .filter(|(val, _)| pred(val))
@@ -115,6 +115,15 @@ impl<M: MostCommonValues, D: Distribution> PerColumnStats<M, D> {
             distr: Some(distr),
         }
     }
+
+    pub fn new_comb(mcvs: M, ndistinct: u64, null_frac: f64) -> Self {
+        Self {
+            mcvs,
+            ndistinct,
+            null_frac,
+            distr: None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -126,6 +135,8 @@ pub struct PerTableStats<M: MostCommonValues, D: Distribution> {
     //   of Options clearly differentiates between two different failure modes: "out-of-bounds
     //   access" and "column has no stats".
     pub per_column_stats_vec: Vec<Option<PerColumnStats<M, D>>>,
+
+    pub column_combi_stats: HashMap<Vec<usize>, PerColumnStats<M, D>>,
 }
 
 impl<M: MostCommonValues, D: Distribution> PerTableStats<M, D> {
@@ -133,13 +144,14 @@ impl<M: MostCommonValues, D: Distribution> PerTableStats<M, D> {
         Self {
             row_cnt,
             per_column_stats_vec,
+            column_combi_stats: HashMap::new(),
         }
     }
 }
 
 pub type BaseTableStats<M, D> = HashMap<String, PerTableStats<M, D>>;
 
-impl PerTableStats<Counter<Value>, TDigest> {
+impl PerTableStats<Counter<Vec<Option<Value>>>, TDigest> {
     pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
         batch_iter_builder: impl Fn() -> anyhow::Result<RecordBatchIterator<I>>,
     ) -> anyhow::Result<Self> {
@@ -190,11 +202,16 @@ impl PerTableStats<Counter<Value>, TDigest> {
                 }
             })
             .collect_vec();
-        let mut cnts: Vec<Counter<Value>> = mgs
+        let mut cnts: Vec<Counter<Vec<Option<Value>>>> = mgs
             .iter()
             .map(|mg| {
-                let mfk: Vec<Value> = mg.most_frequent_keys().into_iter().cloned().collect();
-                Counter::new(&mfk)
+                let mfk: Vec<Option<Value>> = mg
+                    .most_frequent_keys()
+                    .into_iter()
+                    .cloned()
+                    .map(|v| Some(v))
+                    .collect();
+                Counter::new(&vec![mfk])
             })
             .collect();
 
@@ -230,16 +247,28 @@ impl PerTableStats<Counter<Value>, TDigest> {
         Ok(Self {
             row_cnt,
             per_column_stats_vec,
+            column_combi_stats: HashMap::new(),
         })
+    }
+
+    fn get_col_projection(batch: RecordBatch, comb: &Vec<usize>) -> Vec<Arc<dyn Array>> {
+        let mut cols = Vec::<Arc<dyn Array>>::new();
+        let mut col_types = Vec::<DataType>::new();
+        for idx in comb.iter() {
+            cols.push(batch.column(*idx).clone());
+            col_types.push(col_types[*idx].clone());
+        }
+
+        cols
     }
 
     pub fn extend_with_multi_column_stats<
         I: IntoIterator<Item = Result<RecordBatch, ArrowError>>,
     >(
-        self,
+        &mut self,
         batch_iter_builder: impl Fn() -> anyhow::Result<RecordBatchIterator<I>>,
         combinations: Vec<Vec<usize>>,
-    ) -> anyhow::Result<Self> {
+    ) -> anyhow::Result<()> {
         for comb in combinations.iter() {
             let batch_iter1 = batch_iter_builder()?;
             let batch_iter2 = batch_iter_builder()?;
@@ -260,21 +289,20 @@ impl PerTableStats<Counter<Value>, TDigest> {
                 let mut hll = HyperLogLog::new(hyperloglog::DEFAULT_PRECISION);
                 let mut mg: MisraGries<Vec<Option<Value>>> =
                     MisraGries::new(misragries::DEFAULT_K_TO_TRACK);
-                let mut null_cnt = 0; // TODO(Alexis): How to handle?
+                let mut null_cnt = 0;
 
                 // 1. First pass: HLL + MG + null_cnt + row_cnt.
                 for batch in batch_iter1 {
                     let batch = batch?;
                     row_cnt += batch.num_rows();
 
-                    let mut cols = Vec::<Arc<dyn Array>>::new();
-                    let mut col_types = Vec::<DataType>::new();
-                    for idx in comb.iter() {
-                        cols.push(batch.column(*idx).clone());
-                        col_types.push(col_types[*idx].clone());
-                    }
-
-                    Self::generate_partial_stats_for_comb(cols, col_types, &mut mg, &mut hll);
+                    Self::generate_partial_stats_for_comb(
+                        Self::get_col_projection(batch, comb),
+                        &col_types,
+                        &mut mg,
+                        &mut hll,
+                        &mut null_cnt,
+                    );
                 }
 
                 let mfk: Vec<Vec<Option<Value>>> =
@@ -285,22 +313,26 @@ impl PerTableStats<Counter<Value>, TDigest> {
                 for batch in batch_iter2 {
                     let batch = batch?;
 
-                    // TODO(Alexis): Code dup.
-                    let mut cols = Vec::<Arc<dyn Array>>::new();
-                    let mut col_types = Vec::<DataType>::new();
-                    for idx in comb.iter() {
-                        cols.push(batch.column(*idx).clone());
-                        col_types.push(col_types[*idx].clone());
-                    }
-
-                    // TODO(Alexis): Full stat gen.
+                    Self::generate_stats_for_comb(
+                        Self::get_col_projection(batch, comb),
+                        &col_types,
+                        &mut cnt,
+                    );
                 }
 
-                // TODO(Alexis): Append new stat to TableStat (some hashtable).
+                // 3. Assemble stats.
+                // Any distribution type (TDigest) to silence type checker...
+                let stats = PerColumnStats::<Counter<Vec<Option<Value>>>, TDigest>::new_comb(
+                    cnt,
+                    hll.n_distinct(),
+                    null_cnt as f64 / row_cnt as f64,
+                );
+
+                self.column_combi_stats.insert(comb.to_vec(), stats);
             }
         }
 
-        Ok(self)
+        Ok(())
     }
 
     fn is_type_supported(data_type: &DataType) -> bool {
@@ -374,13 +406,10 @@ impl PerTableStats<Counter<Value>, TDigest> {
         }
     }
 
-    /// Generate partial statistics for a combination of columns.
-    fn generate_partial_stats_for_comb(
+    fn get_typed_rows(
         cols: Vec<Arc<dyn Array>>,
-        col_types: Vec<DataType>,
-        mg: &mut MisraGries<Vec<Option<Value>>>,
-        hll: &mut HyperLogLog,
-    ) {
+        col_types: &Vec<DataType>,
+    ) -> Vec<Vec<Option<Value>>> {
         let mut rows = Vec::<Vec<Option<Value>>>::new();
         for (col, col_type) in cols.iter().zip(col_types.iter()) {
             for (idx, val) in Self::to_typed_column(col, col_type).iter().enumerate() {
@@ -388,9 +417,37 @@ impl PerTableStats<Counter<Value>, TDigest> {
             }
         }
 
-        mg.aggregate(&rows);
-        // TODO(Alexis): I was here.
-        // hll.aggregate(&rows);
+        rows
+    }
+
+    /// Generate partial statistics for a combination of columns.
+    fn generate_partial_stats_for_comb(
+        cols: Vec<Arc<dyn Array>>,
+        col_types: &Vec<DataType>,
+        mg: &mut MisraGries<Vec<Option<Value>>>,
+        hll: &mut HyperLogLog,
+        null_count: &mut i32,
+    ) {
+        let rows = Self::get_typed_rows(cols, col_types);
+
+        let (fully_null_rows, non_fully_null_rows): (Vec<_>, Vec<_>) = rows
+            .into_iter()
+            .partition(|row| row.iter().all(|v| v.is_none()));
+
+        *null_count += fully_null_rows.len() as i32;
+
+        mg.aggregate(&non_fully_null_rows);
+        hll.aggregate(&non_fully_null_rows);
+    }
+
+    fn generate_stats_for_comb(
+        cols: Vec<Arc<dyn Array>>,
+        col_types: &Vec<DataType>,
+        cnt: &mut Counter<Vec<Option<Value>>>,
+    ) {
+        let rows = Self::get_typed_rows(cols, col_types);
+
+        cnt.aggregate(&rows);
     }
 
     /// Generate partial statistics for a column.
@@ -496,7 +553,7 @@ impl PerTableStats<Counter<Value>, TDigest> {
         col: &Arc<dyn Array>,
         col_type: &DataType,
         distr: &mut Option<TDigest>,
-        cnt: &mut Counter<Value>,
+        cnt: &mut Counter<Vec<Option<Value>>>,
     ) {
         macro_rules! generate_stats_for_col {
             ({ $col:expr, $distr:expr, $array_type:path, $to_f64:ident, $value_type:path }) => {{
@@ -505,8 +562,8 @@ impl PerTableStats<Counter<Value>, TDigest> {
                 let distr_values = array.iter().flatten().collect::<Vec<_>>();
                 let cnt_values = array
                     .iter()
-                    .flatten()
-                    .map(|x| $value_type(x))
+                    .filter(|e| !e.is_none())
+                    .map(|x| Some($value_type(x.unwrap())))
                     .collect::<Vec<_>>();
 
                 *$distr = {
@@ -514,7 +571,7 @@ impl PerTableStats<Counter<Value>, TDigest> {
                         distr_values.iter().map(|x| $to_f64(*x)).collect::<Vec<_>>();
                     Some($distr.take().unwrap().merge_values(&mut f64_values))
                 };
-                cnt.aggregate(&cnt_values);
+                cnt.aggregate(&[cnt_values]);
             }};
         }
 
@@ -555,8 +612,12 @@ impl PerTableStats<Counter<Value>, TDigest> {
                 let distr_values = array.iter().flatten().collect::<Vec<_>>();
                 let cnt_values = array
                     .iter()
-                    .flatten()
-                    .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
+                    .filter(|e| !e.is_none())
+                    .map(|x| {
+                        Some(Value::Float(SerializableOrderedF64(OrderedFloat::from(
+                            x.unwrap() as f64,
+                        ))))
+                    })
                     .collect::<Vec<_>>();
 
                 *distr = {
@@ -566,7 +627,7 @@ impl PerTableStats<Counter<Value>, TDigest> {
                         .collect::<Vec<_>>();
                     Some(distr.take().unwrap().merge_values(&mut f64_values))
                 };
-                cnt.aggregate(&cnt_values);
+                cnt.aggregate(&[cnt_values]);
             }
             DataType::Float64 => {
                 let array = col.as_any().downcast_ref::<Float32Array>().unwrap();
@@ -574,8 +635,12 @@ impl PerTableStats<Counter<Value>, TDigest> {
                 let distr_values = array.iter().flatten().collect::<Vec<_>>();
                 let cnt_values = array
                     .iter()
-                    .flatten()
-                    .map(|x| Value::Float(SerializableOrderedF64(OrderedFloat::from(x as f64))))
+                    .filter(|e| !e.is_none())
+                    .map(|x| {
+                        Some(Value::Float(SerializableOrderedF64(OrderedFloat::from(
+                            x.unwrap() as f64,
+                        ))))
+                    })
                     .collect::<Vec<_>>();
 
                 *distr = {
@@ -585,7 +650,7 @@ impl PerTableStats<Counter<Value>, TDigest> {
                         .collect::<Vec<_>>();
                     Some(distr.take().unwrap().merge_values(&mut f64_values))
                 };
-                cnt.aggregate(&cnt_values);
+                cnt.aggregate(&[cnt_values]);
             }
             DataType::Date32 => {
                 generate_stats_for_col!({ col, distr, Date32Array, to_f64_safe, Value::Date32 })
@@ -600,9 +665,8 @@ impl PerTableStats<Counter<Value>, TDigest> {
                     .collect::<Vec<_>>();
                 let cnt_values = array
                     .iter()
-                    .flatten()
-                    .map(|x| x.to_string())
-                    .map(|x| Value::String(x.into()))
+                    .filter(|e| !e.is_none())
+                    .map(|x| Some(Value::String(x.unwrap().to_string().into())))
                     .collect::<Vec<_>>();
 
                 *distr = {
@@ -612,7 +676,7 @@ impl PerTableStats<Counter<Value>, TDigest> {
                         .collect::<Vec<_>>();
                     Some(distr.take().unwrap().merge_values(&mut f64_values))
                 };
-                cnt.aggregate(&cnt_values);
+                cnt.aggregate(&[cnt_values]);
             }
             _ => unreachable!(),
         }

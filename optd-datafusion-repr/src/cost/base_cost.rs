@@ -227,7 +227,7 @@ mod tests {
     pub type TestOptCostModel = OptCostModel<TestMostCommonValues, TestDistribution>;
 
     pub struct TestMostCommonValues {
-        pub mcvs: HashMap<Value, f64>,
+        pub mcvs: HashMap<Vec<Option<Value>>, f64>,
     }
 
     pub struct TestDistribution {
@@ -237,7 +237,10 @@ mod tests {
     impl TestMostCommonValues {
         pub fn new(mcvs_vec: Vec<(Value, f64)>) -> Self {
             Self {
-                mcvs: mcvs_vec.into_iter().collect(),
+                mcvs: mcvs_vec
+                    .into_iter()
+                    .map(|(v, freq)| (vec![Some(v)], freq))
+                    .collect(),
             }
         }
 
@@ -247,7 +250,7 @@ mod tests {
     }
 
     impl MostCommonValues for TestMostCommonValues {
-        fn freq(&self, value: &Value) -> Option<f64> {
+        fn freq(&self, value: &[Option<Value>]) -> Option<f64> {
             self.mcvs.get(value).copied()
         }
 
@@ -255,7 +258,7 @@ mod tests {
             self.mcvs.values().sum()
         }
 
-        fn freq_over_pred(&self, pred: Box<dyn Fn(&Value) -> bool>) -> f64 {
+        fn freq_over_pred(&self, pred: Box<dyn Fn(&[Option<Value>]) -> bool>) -> f64 {
             self.mcvs
                 .iter()
                 .filter(|(val, _)| pred(val))

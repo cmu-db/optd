@@ -347,7 +347,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         is_eq: bool,
     ) -> f64 {
         if let Some(per_column_stats) = self.get_per_column_stats(table, col_idx) {
-            let eq_freq = if let Some(freq) = per_column_stats.mcvs.freq(value) {
+            let eq_freq = if let Some(freq) = per_column_stats.mcvs.freq(&[Some(value.clone())]) {
                 freq
             } else {
                 let non_mcv_freq = 1.0 - per_column_stats.mcvs.total_freq();
@@ -381,7 +381,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         // because nulls return false in any comparison, they are never included when computing range selectivity
         let distr_leq_freq = per_column_stats.distr.as_ref().unwrap().cdf(value);
         let value = value.clone();
-        let pred = Box::new(move |val: &Value| val <= &value);
+        let pred = Box::new(move |val: &[Option<Value>]| *val[0].as_ref().unwrap() <= value);
         let mcvs_leq_freq = per_column_stats.mcvs.freq_over_pred(pred);
         distr_leq_freq + mcvs_leq_freq
     }
@@ -624,10 +624,10 @@ mod tests {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
-                    (Value::Int32(6), 0.05),
-                    (Value::Int32(10), 0.1),
-                    (Value::Int32(17), 0.08),
-                    (Value::Int32(25), 0.07),
+                    (vec![Some(Value::Int32(6))], 0.05),
+                    (vec![Some(Value::Int32(10))], 0.1),
+                    (vec![Some(Value::Int32(17))], 0.08),
+                    (vec![Some(Value::Int32(25))], 0.07),
                 ]
                 .into_iter()
                 .collect(),
@@ -734,10 +734,10 @@ mod tests {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
-                    (Value::Int32(6), 0.05),
-                    (Value::Int32(10), 0.1),
-                    (Value::Int32(17), 0.08),
-                    (Value::Int32(25), 0.07),
+                    (vec![Some(Value::Int32(6))], 0.05),
+                    (vec![Some(Value::Int32(10))], 0.1),
+                    (vec![Some(Value::Int32(17))], 0.08),
+                    (vec![Some(Value::Int32(25))], 0.07),
                 ]
                 .into_iter()
                 .collect(),
@@ -768,10 +768,10 @@ mod tests {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
-                    (Value::Int32(6), 0.05),
-                    (Value::Int32(10), 0.1),
-                    (Value::Int32(15), 0.08),
-                    (Value::Int32(25), 0.07),
+                    (vec![Some(Value::Int32(6))], 0.05),
+                    (vec![Some(Value::Int32(10))], 0.1),
+                    (vec![Some(Value::Int32(15))], 0.08),
+                    (vec![Some(Value::Int32(25))], 0.07),
                 ]
                 .into_iter()
                 .collect(),
@@ -901,9 +901,9 @@ mod tests {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
-                    (Value::Int32(1), 0.3),
-                    (Value::Int32(5), 0.5),
-                    (Value::Int32(8), 0.2),
+                    (vec![Some(Value::Int32(1))], 0.3),
+                    (vec![Some(Value::Int32(5))], 0.5),
+                    (vec![Some(Value::Int32(8))], 0.2),
                 ]
                 .into_iter()
                 .collect(),
@@ -941,9 +941,9 @@ mod tests {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
-                    (Value::Int32(1), 0.3),
-                    (Value::Int32(5), 0.5),
-                    (Value::Int32(8), 0.2),
+                    (vec![Some(Value::Int32(1))], 0.3),
+                    (vec![Some(Value::Int32(5))], 0.5),
+                    (vec![Some(Value::Int32(8))], 0.2),
                 ]
                 .into_iter()
                 .collect(),
