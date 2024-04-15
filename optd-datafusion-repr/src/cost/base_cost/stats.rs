@@ -218,8 +218,7 @@ impl PerTableStats<Counter<Value>, TDigest> {
             per_column_stats_vec.push(if Self::is_type_supported(&col_types[i]) {
                 Some(PerColumnStats::new(
                     counter,
-                    // hlls[i].n_distinct(), DEBUG(phw2)
-                    200,
+                    hlls[i].n_distinct(),
                     null_cnt[i] as f64 / row_cnt as f64,
                     distr[i].take().unwrap(),
                 ))
