@@ -396,8 +396,10 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     ) -> f64 {
         // depending on whether value is in mcvs or not, we use different logic to turn total_lt_cdf into total_leq_cdf
         // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
-        Self::get_column_leq_value_freq(per_column_stats, value)
-            - self.get_column_equality_selectivity(table, col_idx, value, true)
+        let freq = Self::get_column_leq_value_freq(per_column_stats, value)
+            - self.get_column_equality_selectivity(table, col_idx, value, true);
+        assert!(freq >= 0.0 && freq <= 1.0, "freq ({}) should be in [0, 1]", freq);
+        freq
     }
 
     /// Get the selectivity of an expression of the form "column </<=/>=/> value" (or "value </<=/>=/> column").
@@ -427,7 +429,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     self.get_column_lt_value_freq(per_column_stats, table, col_idx, value)
                 }
             };
-            assert!(left_quantile <= right_quantile);
+            assert!(left_quantile <= right_quantile, "left_quantile ({}) should be <= right_quantile ({})", left_quantile, right_quantile);
             // `Distribution` does not account for NULL values, so the selectivity is smaller than frequency.
             (right_quantile - left_quantile) * (1.0 - per_column_stats.null_frac)
         } else {

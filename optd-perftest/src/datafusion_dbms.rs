@@ -48,12 +48,19 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
     ) -> anyhow::Result<Vec<usize>> {
         let base_table_stats = self.get_benchmark_stats(benchmark).await?;
         self.clear_state(Some(base_table_stats)).await?;
-        // Create the tables. This must be done after clear_state because that clears everything
-        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
-        self.create_tpch_tables(&tpch_kit).await?;
+        
         match benchmark {
-            Benchmark::Tpch(tpch_config) => self.eval_tpch_estcards(tpch_config).await,
-            Benchmark::Job(_job_config) => unimplemented!(),
+            Benchmark::Tpch(tpch_config) => {
+                // Create the tables. This must be done after clear_state because that clears everything
+                let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
+                self.create_tpch_tables(&tpch_kit).await?;
+                self.eval_tpch_estcards(tpch_config).await
+            },
+            Benchmark::Job(job_config) => {
+                let job_kit = JobKit::build(&self.workspace_dpath)?;
+                self.create_job_tables(&job_kit).await?;
+                self.eval_job_estcards(job_config).await
+            },
         }
     }
 }
@@ -155,6 +162,23 @@ impl DatafusionDBMS {
         Ok(estcards)
     }
 
+    async fn eval_job_estcards(&self, job_config: &JobConfig) -> anyhow::Result<Vec<usize>> {
+        let job_kit = JobKit::build(&self.workspace_dpath)?;
+
+        let mut estcards = vec![];
+        for (query_id, sql_fpath) in job_kit.get_sql_fpath_ordered_iter(job_config)? {
+            println!(
+                "about to evaluate datafusion's estcard for TPC-H Q{}",
+                query_id
+            );
+            let sql = fs::read_to_string(sql_fpath)?;
+            let estcard = self.eval_query_estcard(&sql).await?;
+            estcards.push(estcard);
+        }
+
+        Ok(estcards)
+    }
+
     fn log_explain(&self, explains: &[Vec<String>]) {
         // row_cnt is exclusively in physical_plan after optd
         let physical_plan_after_optd_lines = explains
@@ -232,6 +256,19 @@ impl DatafusionDBMS {
 
     async fn create_tpch_tables(&mut self, tpch_kit: &TpchKit) -> anyhow::Result<()> {
         let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
+        let ddls = ddls
+            .split(';')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>();
+        for ddl in ddls {
+            Self::execute(&self.ctx, ddl).await?;
+        }
+        Ok(())
+    }
+
+    async fn create_job_tables(&mut self, job_kit: &JobKit) -> anyhow::Result<()> {
+        let ddls = fs::read_to_string(&job_kit.schema_fpath)?;
         let ddls = ddls
             .split(';')
             .map(|s| s.trim())
@@ -385,7 +422,8 @@ impl DatafusionDBMS {
                     let tbl_file = fs::File::open(&tbl_fpath)?;
                     let csv_reader1 = ReaderBuilder::new(schema.clone())
                         .has_header(false)
-                        .with_delimiter(b'|')
+                        .with_delimiter(b',')
+                        .with_escape(b'\\')
                         .build(tbl_file)
                         .unwrap();
                     Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))
