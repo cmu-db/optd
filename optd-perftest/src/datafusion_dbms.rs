@@ -5,7 +5,10 @@ use std::{
 };
 
 use crate::{
-    benchmark::Benchmark, cardtest::CardtestRunnerDBMSHelper, job::{JobConfig, JobKit}, tpch::{TpchConfig, TpchKit}
+    benchmark::Benchmark,
+    cardtest::CardtestRunnerDBMSHelper,
+    job::{JobConfig, JobKit},
+    tpch::{TpchConfig, TpchKit},
 };
 use async_trait::async_trait;
 use datafusion::{
@@ -48,19 +51,19 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
     ) -> anyhow::Result<Vec<usize>> {
         let base_table_stats = self.get_benchmark_stats(benchmark).await?;
         self.clear_state(Some(base_table_stats)).await?;
-        
+
         match benchmark {
             Benchmark::Tpch(tpch_config) => {
                 // Create the tables. This must be done after clear_state because that clears everything
                 let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
                 self.create_tpch_tables(&tpch_kit).await?;
                 self.eval_tpch_estcards(tpch_config).await
-            },
+            }
             Benchmark::Job(job_config) => {
                 let job_kit = JobKit::build(&self.workspace_dpath)?;
                 self.create_job_tables(&job_kit).await?;
                 self.eval_job_estcards(job_config).await
-            },
+            }
         }
     }
 }

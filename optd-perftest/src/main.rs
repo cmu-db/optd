@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use optd_perftest::benchmark::Benchmark;
-use optd_perftest::{cardtest, job, tpch};
 use optd_perftest::job::JobConfig;
 use optd_perftest::shell;
 use optd_perftest::tpch::{TpchConfig, TPCH_KIT_POSTGRES};
+use optd_perftest::{cardtest, job, tpch};
 use prettytable::{format, Table};
 use std::fs;
 use std::path::Path;
@@ -91,13 +91,12 @@ async fn cardtest<P: AsRef<Path>>(
 ) -> anyhow::Result<()> {
     let query_ids = if query_ids.is_empty() {
         Vec::from(match benchmark_name {
-            BenchmarkName::Tpch => {
-                tpch::WORKING_QUERY_IDS
-            },
-            BenchmarkName::Job => {
-                job::WORKING_QUERY_IDS
-            },
-        }).into_iter().map(|s| String::from(s)).collect()
+            BenchmarkName::Tpch => tpch::WORKING_QUERY_IDS,
+            BenchmarkName::Job => job::WORKING_QUERY_IDS,
+        })
+        .into_iter()
+        .map(String::from)
+        .collect()
     } else {
         query_ids
     };

@@ -351,7 +351,6 @@ impl PostgresDBMS {
 
         let mut truecards = vec![];
         for (query_id, sql_fpath) in job_kit.get_sql_fpath_ordered_iter(job_config)? {
-            println!("sql_fpath={:?}", sql_fpath);
             let sql = fs::read_to_string(sql_fpath)?;
             let truecard = match truecard_cache.get_truecard(dbname, &query_id) {
                 Some(truecard) => truecard,
@@ -433,8 +432,14 @@ impl TruecardGetter for PostgresDBMS {
         let client = self.connect_to_db(&dbname).await?;
         // all "eval_*" functions should add the truecards they find to the truecard cache
         match benchmark {
-            Benchmark::Tpch(tpch_config) => self.eval_tpch_truecards(&client, tpch_config, &dbname, &mut truecard_cache).await,
-            Benchmark::Job(job_config) => self.eval_job_truecards(&client, job_config, &dbname, &mut truecard_cache).await,
+            Benchmark::Tpch(tpch_config) => {
+                self.eval_tpch_truecards(&client, tpch_config, &dbname, &mut truecard_cache)
+                    .await
+            }
+            Benchmark::Job(job_config) => {
+                self.eval_job_truecards(&client, job_config, &dbname, &mut truecard_cache)
+                    .await
+            }
         }
         // note that truecard_cache will save itself when it goes out of scope
     }
