@@ -52,6 +52,8 @@ impl Distribution for TDigest {
     }
 }
 
+type ValuePredicateFn = dyn Fn(&[Option<Value>]) -> bool;
+
 pub trait MostCommonValues: 'static + Send + Sync {
     // it is true that we could just expose freq_over_pred() and use that for freq() and total_freq()
     // however, freq() and total_freq() each have potential optimizations (freq() is O(1) instead of
@@ -60,7 +62,7 @@ pub trait MostCommonValues: 'static + Send + Sync {
     // thus, I expose three different functions
     fn freq(&self, value: &[Option<Value>]) -> Option<f64>;
     fn total_freq(&self) -> f64;
-    fn freq_over_pred(&self, pred: Box<dyn Fn(&[Option<Value>]) -> bool>) -> f64;
+    fn freq_over_pred(&self, pred: Box<ValuePredicateFn>) -> f64;
 
     // returns the # of entries (i.e. value + freq) in the most common values structure
     fn cnt(&self) -> usize;
@@ -75,7 +77,7 @@ impl MostCommonValues for Counter<Vec<Option<Value>>> {
         self.frequencies().values().sum()
     }
 
-    fn freq_over_pred(&self, pred: Box<dyn Fn(&[Option<Value>]) -> bool>) -> f64 {
+    fn freq_over_pred(&self, pred: Box<ValuePredicateFn>) -> f64 {
         self.frequencies()
             .iter()
             .filter(|(val, _)| pred(val))
@@ -209,9 +211,9 @@ impl PerTableStats<Counter<Vec<Option<Value>>>, TDigest> {
                     .most_frequent_keys()
                     .into_iter()
                     .cloned()
-                    .map(|v| Some(v))
+                    .map(Some)
                     .collect();
-                Counter::new(&vec![mfk])
+                Counter::new(&[mfk])
             })
             .collect();
 
@@ -251,7 +253,7 @@ impl PerTableStats<Counter<Vec<Option<Value>>>, TDigest> {
         })
     }
 
-    fn get_col_projection(batch: RecordBatch, comb: &Vec<usize>) -> Vec<Arc<dyn Array>> {
+    fn get_col_projection(batch: RecordBatch, comb: &[usize]) -> Vec<Arc<dyn Array>> {
         let mut cols = Vec::<Arc<dyn Array>>::new();
         let mut col_types = Vec::<DataType>::new();
         for idx in comb.iter() {
@@ -408,7 +410,7 @@ impl PerTableStats<Counter<Vec<Option<Value>>>, TDigest> {
 
     fn get_typed_rows(
         cols: Vec<Arc<dyn Array>>,
-        col_types: &Vec<DataType>,
+        col_types: &[DataType],
     ) -> Vec<Vec<Option<Value>>> {
         let mut rows = Vec::<Vec<Option<Value>>>::new();
         for (col, col_type) in cols.iter().zip(col_types.iter()) {
@@ -423,7 +425,7 @@ impl PerTableStats<Counter<Vec<Option<Value>>>, TDigest> {
     /// Generate partial statistics for a combination of columns.
     fn generate_partial_stats_for_comb(
         cols: Vec<Arc<dyn Array>>,
-        col_types: &Vec<DataType>,
+        col_types: &[DataType],
         mg: &mut MisraGries<Vec<Option<Value>>>,
         hll: &mut HyperLogLog,
         null_count: &mut i32,
@@ -442,7 +444,7 @@ impl PerTableStats<Counter<Vec<Option<Value>>>, TDigest> {
 
     fn generate_stats_for_comb(
         cols: Vec<Arc<dyn Array>>,
-        col_types: &Vec<DataType>,
+        col_types: &[DataType],
         cnt: &mut Counter<Vec<Option<Value>>>,
     ) {
         let rows = Self::get_typed_rows(cols, col_types);
