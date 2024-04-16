@@ -317,16 +317,17 @@ impl TableStats<Counter<ColumnCombValue>, TDigest> {
         for (idx, column_comb) in column_combs.iter().enumerate() {
             // TODO(Alexis): Redundant copy.
             // Here, we filter out mfks, so it's guaranteed to never be null.
-            let filtered_mfks: Vec<ColumnCombValue> = column_comb
-                .iter()
-                .filter(|row| cnts[idx].is_tracking(row))
-                .cloned()
-                .collect();
+            let (tracking, not_tracking): (Vec<ColumnCombValue>, Vec<ColumnCombValue>) =
+                column_comb
+                    .iter()
+                    .filter(|row| row.iter().any(|val| val.is_some()))
+                    .cloned()
+                    .partition(|row| cnts[idx].is_tracking(row));
 
-            cnts[idx].aggregate(&filtered_mfks);
+            cnts[idx].aggregate(&tracking);
             if let Some(distr) = distrs[idx].take() {
                 // We project it down to 1D, as we do not support nD TDigests.
-                let mut single_col_f64 = filtered_mfks
+                let mut single_col_f64 = not_tracking
                     .iter()
                     .map(|row| value_to_float(row[0].as_ref().unwrap()))
                     .collect_vec();
