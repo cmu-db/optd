@@ -353,7 +353,7 @@ impl<
         value: &Value,
         is_eq: bool,
     ) -> f64 {
-        if let Some(column_stats) = self.get_column_comb_stats(table, &[col_idx]) {
+        let ret_freq = if let Some(column_stats) = self.get_column_comb_stats(table, &[col_idx]) {
             let eq_freq = if let Some(freq) = column_stats.mcvs.freq(&vec![Some(value.clone())]) {
                 freq
             } else {
@@ -379,7 +379,13 @@ impl<
             } else {
                 1.0 - DEFAULT_EQ_SEL
             }
-        }
+        };
+        assert!(
+            (0.0..=1.0).contains(&ret_freq),
+            "ret_freq ({}) should be in [0, 1]",
+            ret_freq
+        );
+        ret_freq
     }
 
     /// Compute the frequency of values in a column less than or equal to the given value.
@@ -393,7 +399,13 @@ impl<
         let value = value.clone();
         let pred = Box::new(move |val: &ColumnCombValue| *val[0].as_ref().unwrap() <= value);
         let mcvs_leq_freq = per_column_stats.mcvs.freq_over_pred(pred);
-        distr_leq_freq + mcvs_leq_freq
+        let ret_freq = distr_leq_freq + mcvs_leq_freq;
+        assert!(
+            (0.0..=1.0).contains(&ret_freq),
+            "ret_freq ({}) should be in [0, 1]",
+            ret_freq
+        );
+        ret_freq
     }
 
     /// Compute the frequency of values in a column less than the given value.
@@ -406,8 +418,14 @@ impl<
     ) -> f64 {
         // depending on whether value is in mcvs or not, we use different logic to turn total_lt_cdf into total_leq_cdf
         // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
-        Self::get_column_leq_value_freq(column_stats, value)
-            - self.get_column_equality_selectivity(table, col_idx, value, true)
+        let ret_freq = Self::get_column_leq_value_freq(column_stats, value)
+            - self.get_column_equality_selectivity(table, col_idx, value, true);
+        assert!(
+            (0.0..=1.0).contains(&ret_freq),
+            "ret_freq ({}) should be in [0, 1]",
+            ret_freq
+        );
+        ret_freq
     }
 
     /// Get the selectivity of an expression of the form "column </<=/>=/> value" (or "value </<=/>=/> column").
@@ -437,7 +455,12 @@ impl<
                     self.get_column_lt_value_freq(column_stats, table, col_idx, value)
                 }
             };
-            assert!(left_quantile <= right_quantile);
+            assert!(
+                left_quantile <= right_quantile,
+                "left_quantile ({}) should be <= right_quantile ({})",
+                left_quantile,
+                right_quantile
+            );
             // `Distribution` does not account for NULL values, so the selectivity is smaller than frequency.
             (right_quantile - left_quantile) * (1.0 - column_stats.null_frac)
         } else {
@@ -758,7 +781,6 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
-        // TODO(phw2): make column_refs a function
         let column_refs = vec![ColumnRef::BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,

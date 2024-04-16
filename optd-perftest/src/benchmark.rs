@@ -1,11 +1,10 @@
-use crate::tpch::TpchConfig;
+use crate::{job::JobConfig, tpch::TpchConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize)]
 pub enum Benchmark {
-    #[allow(dead_code)]
-    Test,
     Tpch(TpchConfig),
+    Job(JobConfig),
 }
 
 impl Benchmark {
@@ -25,40 +24,29 @@ impl Benchmark {
     ///     lowercase. To resolve the inconsistency, the names output by this function will
     ///     *not* contain uppercase letters.
     pub fn get_dbname(&self) -> String {
-        let dbname = match self {
-            Self::Test => String::from("test"),
-            Self::Tpch(tpch_config) => {
-                format!("tpch_sf{}", tpch_config.scale_factor)
-            }
-        };
+        let fname = self.get_fname();
         // since Postgres names cannot contain periods
-        let dbname = dbname.replace('.', "point");
+        let dbname = fname.replace('.', "point");
         // due to the weird inconsistency with Postgres (see function comment)
         dbname.to_lowercase()
     }
 
-    /// Use this when you need a unique file name. The rules for file names are different from the
-    ///   rules for database names, so this is a different function
+    /// Use this when you need a unique file name to deterministically describe the "data"
+    ///   of the benchmark. The rules for file names are different from the rules for
+    ///   database names, so this is a different function.
     pub fn get_fname(&self) -> String {
         match self {
-            Self::Test => String::from("test"),
             Self::Tpch(tpch_config) => {
                 format!("tpch_sf{}", tpch_config.scale_factor)
             }
+            Self::Job(_) => String::from("job"),
         }
-    }
-
-    /// An ID is just a unique string identifying the benchmark
-    /// It's not always used in the same situations as get_dbname(), so it's a separate function
-    pub fn get_id(&self) -> String {
-        // the fact that it happens to return dbname is an implementation detail
-        self.get_dbname()
     }
 
     pub fn is_readonly(&self) -> bool {
         match self {
-            Self::Test => true,
             Self::Tpch(_) => true,
+            Self::Job(_) => true,
         }
     }
 }
