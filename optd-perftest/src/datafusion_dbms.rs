@@ -226,7 +226,7 @@ impl DatafusionDBMS {
             //   *do write* to the cache.
             fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
             let file = File::create(&stats_cache_fpath)?;
-            serde_json::to_writer(file, &base_table_stats)?;
+            serde_json::to_writer_pretty(file, &base_table_stats)?;
 
             Ok(base_table_stats)
         }

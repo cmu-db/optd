@@ -59,7 +59,7 @@ impl TruecardCache {
         fs::create_dir_all(self.truecard_cache_fpath.parent().unwrap())?;
         // this will create a new file or truncate the file if it already exists
         let file = File::create(&self.truecard_cache_fpath)?;
-        serde_json::to_writer(file, &self.cache)?;
+        serde_json::to_writer_pretty(file, &self.cache)?;
         Ok(())
     }
 }
