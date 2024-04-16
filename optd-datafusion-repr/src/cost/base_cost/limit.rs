@@ -11,7 +11,11 @@ use crate::{
 
 use super::{OptCostModel, DEFAULT_UNK_SEL};
 
-impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> OptCostModel<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > OptCostModel<M, D>
+{
     pub(super) fn get_limit_cost(
         children: &[Cost],
         context: Option<RelNodeContext>,

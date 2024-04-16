@@ -32,7 +32,10 @@ fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     cost
 }
 
-pub struct OptCostModel<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> {
+pub struct OptCostModel<
+    M: MostCommonValues + Serialize + DeserializeOwned,
+    D: Distribution + Serialize + DeserializeOwned,
+> {
     per_table_stats_map: BaseTableStats<M, D>,
 }
 
@@ -55,7 +58,11 @@ pub const ROW_COUNT: usize = 1;
 pub const COMPUTE_COST: usize = 2;
 pub const IO_COST: usize = 3;
 
-impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> OptCostModel<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > OptCostModel<M, D>
+{
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
         cost[ROW_COUNT]
     }
@@ -87,7 +94,11 @@ impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Seria
     }
 }
 
-impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> CostModel<OptRelNodeTyp> for OptCostModel<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > CostModel<OptRelNodeTyp> for OptCostModel<M, D>
+{
     fn explain(&self, cost: &Cost) -> String {
         format!(
             "weighted={},row_cnt={},compute={},io={}",
@@ -183,7 +194,11 @@ impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Seria
     }
 }
 
-impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> OptCostModel<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > OptCostModel<M, D>
+{
     pub fn new(per_table_stats_map: BaseTableStats<M, D>) -> Self {
         Self {
             per_table_stats_map,

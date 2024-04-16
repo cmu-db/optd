@@ -28,13 +28,20 @@ pub struct RuntimeAdaptionStorageInner {
 
 pub const DEFAULT_DECAY: usize = 50;
 
-pub struct AdaptiveCostModel<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> {
+pub struct AdaptiveCostModel<
+    M: MostCommonValues + Serialize + DeserializeOwned,
+    D: Distribution + Serialize + DeserializeOwned,
+> {
     runtime_row_cnt: RuntimeAdaptionStorage,
     base_model: OptCostModel<M, D>,
     decay: usize,
 }
 
-impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> CostModel<OptRelNodeTyp> for AdaptiveCostModel<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > CostModel<OptRelNodeTyp> for AdaptiveCostModel<M, D>
+{
     fn explain(&self, cost: &Cost) -> String {
         self.base_model.explain(cost)
     }
@@ -88,7 +95,11 @@ impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Seria
     }
 }
 
-impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> AdaptiveCostModel<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > AdaptiveCostModel<M, D>
+{
     pub fn new(decay: usize, stats: BaseTableStats<M, D>) -> Self {
         Self {
             runtime_row_cnt: RuntimeAdaptionStorage::default(),

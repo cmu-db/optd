@@ -134,13 +134,20 @@ impl<M: MostCommonValues, D: Distribution> ColumnCombValueStats<M, D> {
 
 #[serde_with::serde_as]
 #[derive(Serialize, Deserialize, Debug)]
-pub struct TableStats<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> {
+pub struct TableStats<
+    M: MostCommonValues + Serialize + DeserializeOwned,
+    D: Distribution + Serialize + DeserializeOwned,
+> {
     pub row_cnt: usize,
     #[serde_as(as = "HashMap<serde_with::json::JsonString, _>")]
     pub column_comb_stats: HashMap<ColumnsIdx, ColumnCombValueStats<M, D>>,
 }
 
-impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> TableStats<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > TableStats<M, D>
+{
     pub fn new(
         row_cnt: usize,
         column_comb_stats: HashMap<ColumnsIdx, ColumnCombValueStats<M, D>>,

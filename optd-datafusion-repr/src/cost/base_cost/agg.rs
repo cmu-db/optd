@@ -18,7 +18,11 @@ use crate::{
 
 use super::{OptCostModel, DEFAULT_UNK_SEL};
 
-impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> OptCostModel<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > OptCostModel<M, D>
+{
     pub(super) fn get_agg_cost(
         &self,
         children: &[Cost],
@@ -65,7 +69,9 @@ impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Seria
                     .map(|col_ref| match col_ref {
                         ColumnRef::BaseTableColumnRef { table, col_idx } => {
                             let table_stats = self.per_table_stats_map.get(table);
-                            let column_stats = table_stats.and_then(|table_stats| table_stats.column_comb_stats.get(&vec![*col_idx]));
+                            let column_stats = table_stats.and_then(|table_stats| {
+                                table_stats.column_comb_stats.get(&vec![*col_idx])
+                            });
 
                             if let Some(column_stats) = column_stats {
                                 column_stats.ndistinct as f64
