@@ -11,6 +11,7 @@ use optd_core::{
     cost::{Cost, CostModel},
     rel_node::{RelNode, RelNodeTyp, Value},
 };
+use serde::{de::DeserializeOwned, Serialize};
 
 use super::base_cost::stats::{
     BaseTableStats, ColumnCombValueStats, Distribution, MostCommonValues,
@@ -31,7 +32,7 @@ fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     cost
 }
 
-pub struct OptCostModel<M: MostCommonValues, D: Distribution> {
+pub struct OptCostModel<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> {
     per_table_stats_map: BaseTableStats<M, D>,
 }
 
@@ -54,7 +55,7 @@ pub const ROW_COUNT: usize = 1;
 pub const COMPUTE_COST: usize = 2;
 pub const IO_COST: usize = 3;
 
-impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
+impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> OptCostModel<M, D> {
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
         cost[ROW_COUNT]
     }
@@ -86,7 +87,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     }
 }
 
-impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostModel<M, D> {
+impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> CostModel<OptRelNodeTyp> for OptCostModel<M, D> {
     fn explain(&self, cost: &Cost) -> String {
         format!(
             "weighted={},row_cnt={},compute={},io={}",
@@ -182,7 +183,7 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
     }
 }
 
-impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
+impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> OptCostModel<M, D> {
     pub fn new(per_table_stats_map: BaseTableStats<M, D>) -> Self {
         Self {
             per_table_stats_map,
@@ -218,6 +219,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
 mod tests {
     use itertools::Itertools;
     use optd_core::rel_node::Value;
+    use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
 
     use crate::{
@@ -232,10 +234,12 @@ mod tests {
     pub type TestPerColumnStats = ColumnCombValueStats<TestMostCommonValues, TestDistribution>;
     pub type TestOptCostModel = OptCostModel<TestMostCommonValues, TestDistribution>;
 
+    #[derive(Serialize, Deserialize)]
     pub struct TestMostCommonValues {
         pub mcvs: HashMap<Vec<Option<Value>>, f64>,
     }
 
+    #[derive(Serialize, Deserialize)]
     pub struct TestDistribution {
         cdfs: HashMap<Value, f64>,
     }

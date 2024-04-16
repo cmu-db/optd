@@ -17,7 +17,7 @@ use optd_gungnir::{
     utils::arith_encoder,
 };
 use ordered_float::OrderedFloat;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 // The "standard" concrete types that optd currently uses.
 // All of optd (except unit tests) must use the same types.
@@ -32,6 +32,9 @@ pub type DataFusionPerTableStats = TableStats<DataFusionMostCommonValues, DataFu
 //.
 /// This more general interface is still compatible with histograms but allows
 /// more powerful statistics like TDigest.
+/// Ideally, MostCommonValues would have trait bounds for Serialize and Deserialize. However, I have not figured
+//    out how to both have Deserialize as a trait bound and utilize the Deserialize macro, because the Deserialize
+//    trait involves lifetimes.
 pub trait Distribution: 'static + Send + Sync {
     // Give the probability of a random value sampled from the distribution being <= `value`
     fn cdf(&self, value: &Value) -> f64;
@@ -65,6 +68,10 @@ impl Distribution for TDigest {
 pub type ColumnsIdx = Vec<usize>;
 pub type ColumnsType = Vec<DataType>;
 pub type ColumnCombValue = Vec<Option<Value>>;
+
+/// Ideally, MostCommonValues would have trait bounds for Serialize and Deserialize. However, I have not figured
+///   out how to both have Deserialize as a trait bound and utilize the Deserialize macro, because the Deserialize
+///   trait involves lifetimes.
 pub trait MostCommonValues: 'static + Send + Sync {
     // it is true that we could just expose freq_over_pred() and use that for freq() and total_freq()
     // however, freq() and total_freq() each have potential optimizations (freq() is O(1) instead of
@@ -125,16 +132,16 @@ impl<M: MostCommonValues, D: Distribution> ColumnCombValueStats<M, D> {
     }
 }
 
-// #[serde_with::serde_as]
+#[serde_with::serde_as]
 #[derive(Serialize, Deserialize, Debug)]
-pub struct TableStats<M: MostCommonValues, D: Distribution> {
+pub struct TableStats<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> {
     pub row_cnt: usize,
-    // #[serde_as(as = "HashMap<serde_with::json::JsonString, _>")]
     // TODO(Patrick): I think this is the source of the problem...
+    #[serde_as(as = "HashMap<serde_with::json::JsonString, _>")]
     pub column_comb_stats: HashMap<ColumnsIdx, ColumnCombValueStats<M, D>>,
 }
 
-impl<M: MostCommonValues, D: Distribution> TableStats<M, D> {
+impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> TableStats<M, D> {
     pub fn new(
         row_cnt: usize,
         column_comb_stats: HashMap<ColumnsIdx, ColumnCombValueStats<M, D>>,

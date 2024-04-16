@@ -5,6 +5,7 @@ use optd_core::{
     cost::Cost,
     rel_node::Value,
 };
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
     cost::{
@@ -22,7 +23,7 @@ use super::{
     stats::ColumnCombValue, OptCostModel, DEFAULT_EQ_SEL, DEFAULT_INEQ_SEL, DEFAULT_UNK_SEL,
 };
 
-impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
+impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> OptCostModel<M, D> {
     pub(super) fn get_filter_cost(
         &self,
         children: &[Cost],

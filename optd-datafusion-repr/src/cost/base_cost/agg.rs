@@ -5,6 +5,7 @@ use optd_core::{
     cost::Cost,
     rel_node::RelNode,
 };
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
     cost::{
@@ -17,7 +18,7 @@ use crate::{
 
 use super::{OptCostModel, DEFAULT_UNK_SEL};
 
-impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
+impl<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> OptCostModel<M, D> {
     pub(super) fn get_agg_cost(
         &self,
         children: &[Cost],
