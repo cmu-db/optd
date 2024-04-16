@@ -24,6 +24,7 @@ use datafusion::{
     sql::{parser::DFParser, sqlparser::dialect::GenericDialect},
 };
 use datafusion_optd_cli::helper::unescape_input;
+use itertools::iproduct;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::{
@@ -31,7 +32,6 @@ use optd_datafusion_repr::{
     DatafusionOptimizer,
 };
 use regex::Regex;
-
 pub struct DatafusionDBMS {
     workspace_dpath: PathBuf,
     rebuild_cached_stats: bool,
@@ -226,7 +226,7 @@ impl DatafusionDBMS {
             //   *do write* to the cache.
             fs::create_dir_all(stats_cache_fpath.parent().unwrap())?;
             let file = File::create(&stats_cache_fpath)?;
-            serde_json::to_writer_pretty(file, &base_table_stats)?;
+            serde_json::to_writer(file, &base_table_stats)?;
 
             Ok(base_table_stats)
         }
@@ -329,6 +329,12 @@ impl DatafusionDBMS {
                 .unwrap()
                 .schema();
 
+            let nb_cols = schema.fields().len();
+            let single_cols = (0..schema.fields().len()).map(|v| vec![v]);
+            let pairwise_cols = iproduct!(0..nb_cols, 0..nb_cols)
+                .filter(|(i, j)| i != j)
+                .map(|(i, j)| vec![i, j]);
+
             base_table_stats.insert(
                 tbl_name.to_string(),
                 DataFusionPerTableStats::from_record_batches(
@@ -341,7 +347,7 @@ impl DatafusionDBMS {
                             .unwrap();
                         Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))
                     },
-                    (0..schema.fields().len()).map(|v| vec![v]).collect(),
+                    single_cols.chain(pairwise_cols).collect(),
                 )?,
             );
         }
