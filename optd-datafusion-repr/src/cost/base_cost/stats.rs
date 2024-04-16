@@ -60,7 +60,7 @@ fn value_to_float(val: &Value) -> f64 {
 
 impl Distribution for TDigest {
     fn cdf(&self, value: &Value) -> f64 {
-        value_to_float(value)
+        self.cdf(value_to_float(value))
     }
 }
 
