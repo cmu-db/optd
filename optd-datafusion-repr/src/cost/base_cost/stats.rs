@@ -136,7 +136,6 @@ impl<M: MostCommonValues, D: Distribution> ColumnCombValueStats<M, D> {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TableStats<M: MostCommonValues + Serialize + DeserializeOwned, D: Distribution + Serialize + DeserializeOwned> {
     pub row_cnt: usize,
-    // TODO(Patrick): I think this is the source of the problem...
     #[serde_as(as = "HashMap<serde_with::json::JsonString, _>")]
     pub column_comb_stats: HashMap<ColumnsIdx, ColumnCombValueStats<M, D>>,
 }
