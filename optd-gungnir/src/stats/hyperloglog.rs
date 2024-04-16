@@ -140,9 +140,10 @@ impl HyperLogLog {
     pub fn n_distinct(&self) -> u64 {
         let m = self.m as f64;
         let raw_estimate = self.alpha * (m * m)
-            / self.registers.iter().fold(0.0, |acc, elem| {
-                (1.0 / 2.0f64.powi(*elem as i32) as f64) + acc
-            });
+            / self
+                .registers
+                .iter()
+                .fold(0.0, |acc, elem| (1.0 / 2.0f64.powi(*elem as i32)) + acc);
 
         if raw_estimate <= ((5.0 * m) / 2.0) {
             let empty_reg = self.registers.iter().filter(|&elem| *elem == 0).count();
