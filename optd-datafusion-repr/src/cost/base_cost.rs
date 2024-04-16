@@ -12,7 +12,9 @@ use optd_core::{
     rel_node::{RelNode, RelNodeTyp, Value},
 };
 
-use super::base_cost::stats::{BaseTableStats, Distribution, MostCommonValues, PerColumnStats};
+use super::base_cost::stats::{
+    BaseTableStats, ColumnCombValueStats, Distribution, MostCommonValues,
+};
 
 fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     model: &C,
@@ -187,21 +189,25 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         }
     }
 
-    fn get_per_column_stats_from_col_ref(
+    fn get_single_column_stats_from_col_ref(
         &self,
         col_ref: &ColumnRef,
-    ) -> Option<&PerColumnStats<M, D>> {
+    ) -> Option<&ColumnCombValueStats<M, D>> {
         if let ColumnRef::BaseTableColumnRef { table, col_idx } = col_ref {
-            self.get_per_column_stats(table, *col_idx)
+            self.get_column_comb_stats(table, &[*col_idx])
         } else {
             None
         }
     }
 
-    fn get_per_column_stats(&self, table: &str, col_idx: usize) -> Option<&PerColumnStats<M, D>> {
+    fn get_column_comb_stats(
+        &self,
+        table: &str,
+        col_comb: &[usize],
+    ) -> Option<&ColumnCombValueStats<M, D>> {
         self.per_table_stats_map
             .get(table)
-            .and_then(|per_table_stats| per_table_stats.per_column_stats_vec[col_idx].as_ref())
+            .and_then(|per_table_stats| per_table_stats.column_comb_stats.get(col_comb))
     }
 }
 
@@ -223,7 +229,7 @@ mod tests {
     };
 
     use super::*;
-    pub type TestPerColumnStats = PerColumnStats<TestMostCommonValues, TestDistribution>;
+    pub type TestPerColumnStats = ColumnCombValueStats<TestMostCommonValues, TestDistribution>;
     pub type TestOptCostModel = OptCostModel<TestMostCommonValues, TestDistribution>;
 
     pub struct TestMostCommonValues {
@@ -250,7 +256,7 @@ mod tests {
     }
 
     impl MostCommonValues for TestMostCommonValues {
-        fn freq(&self, value: &[Option<Value>]) -> Option<f64> {
+        fn freq(&self, value: &ColumnCombValue) -> Option<f64> {
             self.mcvs.get(value).copied()
         }
 
@@ -258,7 +264,7 @@ mod tests {
             self.mcvs.values().sum()
         }
 
-        fn freq_over_pred(&self, pred: Box<dyn Fn(&[Option<Value>]) -> bool>) -> f64 {
+        fn freq_over_pred(&self, pred: Box<dyn Fn(&ColumnCombValue) -> bool>) -> f64 {
             self.mcvs
                 .iter()
                 .filter(|(val, _)| pred(val))
@@ -297,7 +303,7 @@ mod tests {
         OptCostModel::new(
             vec![(
                 String::from(TABLE1_NAME),
-                PerTableStats::new(100, vec![Some(per_column_stats)]),
+                TableStats::new(100, vec![(vec![0], per_column_stats)].into_iter().collect()),
             )]
             .into_iter()
             .collect(),
@@ -328,11 +334,17 @@ mod tests {
             vec![
                 (
                     String::from(TABLE1_NAME),
-                    PerTableStats::new(tbl1_row_cnt, vec![Some(tbl1_per_column_stats)]),
+                    TableStats::new(
+                        tbl1_row_cnt,
+                        vec![(vec![0], tbl1_per_column_stats)].into_iter().collect(),
+                    ),
                 ),
                 (
                     String::from(TABLE2_NAME),
-                    PerTableStats::new(tbl2_row_cnt, vec![Some(tbl2_per_column_stats)]),
+                    TableStats::new(
+                        tbl2_row_cnt,
+                        vec![(vec![0], tbl2_per_column_stats)].into_iter().collect(),
+                    ),
                 ),
             ]
             .into_iter()
@@ -402,7 +414,7 @@ mod tests {
             TestMostCommonValues::empty(),
             0,
             0.0,
-            TestDistribution::empty(),
+            Some(TestDistribution::empty()),
         )
     }
 }

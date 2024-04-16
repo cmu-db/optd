@@ -65,10 +65,10 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                         ColumnRef::BaseTableColumnRef { table, col_idx } => {
                             let table_stats = self.per_table_stats_map.get(table);
                             let column_stats = table_stats.map(|table_stats| {
-                                table_stats.per_column_stats_vec.get(*col_idx).unwrap()
+                                table_stats.column_comb_stats.get(&vec![*col_idx]).unwrap()
                             });
 
-                            if let Some(Some(column_stats)) = column_stats {
+                            if let Some(column_stats) = column_stats {
                                 column_stats.ndistinct as f64
                             } else {
                                 // The column type is not supported or stats are missing.

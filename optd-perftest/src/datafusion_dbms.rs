@@ -331,15 +331,18 @@ impl DatafusionDBMS {
 
             base_table_stats.insert(
                 tbl_name.to_string(),
-                DataFusionPerTableStats::from_record_batches(|| {
-                    let tbl_file = fs::File::open(&tbl_fpath)?;
-                    let csv_reader1 = ReaderBuilder::new(schema.clone())
-                        .has_header(false)
-                        .with_delimiter(b'|')
-                        .build(tbl_file)
-                        .unwrap();
-                    Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))
-                })?,
+                DataFusionPerTableStats::from_record_batches(
+                    || {
+                        let tbl_file = fs::File::open(&tbl_fpath)?;
+                        let csv_reader1 = ReaderBuilder::new(schema.clone())
+                            .has_header(false)
+                            .with_delimiter(b'|')
+                            .build(tbl_file)
+                            .unwrap();
+                        Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))
+                    },
+                    (0..schema.fields().len()).map(|v| vec![v]).collect(),
+                )?,
             );
         }
 

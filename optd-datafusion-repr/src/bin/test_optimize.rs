@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use optd_core::{
     cascades::CascadesOptimizer,
@@ -45,7 +45,12 @@ pub fn main() {
         Box::new(OptCostModel::new(
             [("t1", 1000), ("t2", 100), ("t3", 10000)]
                 .into_iter()
-                .map(|(x, y)| (x.to_string(), DataFusionPerTableStats::new(y, vec![])))
+                .map(|(x, y)| {
+                    (
+                        x.to_string(),
+                        DataFusionPerTableStats::new(y, HashMap::new()),
+                    )
+                })
                 .collect(),
         )),
         vec![],

@@ -291,7 +291,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         on_col_ref_pairs.iter().map(|on_col_ref_pair| {
             // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
             let ndistincts = vec![&on_col_ref_pair.0, &on_col_ref_pair.1].into_iter().map(|on_col_ref_expr| {
-                match self.get_per_column_stats_from_col_ref(&column_refs[on_col_ref_expr.index()]) {
+                match self.get_single_column_stats_from_col_ref(&column_refs[on_col_ref_expr.index()]) {
                     Some(per_col_stats) => per_col_stats.ndistinct,
                     None => DEFAULT_NUM_DISTINCT,
                 }
@@ -375,13 +375,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
         );
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
@@ -419,13 +419,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
         );
         let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
@@ -465,13 +465,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
         );
         let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
@@ -511,13 +511,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
         );
         let neq12 = bin_op(BinOpType::Neq, col_ref(0), cnst(Value::Int32(12)));
@@ -557,13 +557,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
         );
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(0));
@@ -688,13 +688,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             5,
             4,
@@ -754,13 +754,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             10,
             8,
@@ -821,13 +821,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 10,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 2,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             20,
             4,
@@ -888,13 +888,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 50,
                 0.0,
-                TestDistribution::new(vec![(Value::Int32(128), 0.4)]),
+                Some(TestDistribution::new(vec![(Value::Int32(128), 0.4)])),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             50,
             4,

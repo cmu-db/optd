@@ -2840,6 +2840,7 @@ dependencies = [
  "ordered-float 4.2.0",
  "pretty-xmlish",
  "serde",
+ "serde_with",
  "tracing",
  "tracing-subscriber",
 ]
