@@ -7,14 +7,11 @@ use datafusion::arrow::array::{
 };
 use itertools::Itertools;
 use optd_core::rel_node::{SerializableOrderedF64, Value};
-use optd_gungnir::{
-    stats::{
-        counter::Counter,
-        hyperloglog::{self, HyperLogLog},
-        misragries::{self, MisraGries},
-        tdigest::{self, TDigest},
-    },
-    utils::arith_encoder,
+use optd_gungnir::stats::{
+    counter::Counter,
+    hyperloglog::{self, HyperLogLog},
+    misragries::{self, MisraGries},
+    tdigest::{self, TDigest},
 };
 use ordered_float::OrderedFloat;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -22,7 +19,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 // The "standard" concrete types that optd currently uses.
 // All of optd (except unit tests) must use the same types.
 pub type DataFusionMostCommonValues = Counter<Vec<Option<Value>>>;
-pub type DataFusionDistribution = TDigest;
+pub type DataFusionDistribution = TDigest<Value>;
 
 pub type DataFusionBaseTableStats =
     BaseTableStats<DataFusionMostCommonValues, DataFusionDistribution>;
@@ -40,27 +37,9 @@ pub trait Distribution: 'static + Send + Sync {
     fn cdf(&self, value: &Value) -> f64;
 }
 
-fn value_to_float(val: &Value) -> f64 {
-    match val {
-        Value::UInt8(v) => *v as f64,
-        Value::UInt16(v) => *v as f64,
-        Value::UInt32(v) => *v as f64,
-        Value::UInt64(v) => *v as f64,
-        Value::Int8(v) => *v as f64,
-        Value::Int16(v) => *v as f64,
-        Value::Int32(v) => *v as f64,
-        Value::Int64(v) => *v as f64,
-        Value::Float(v) => *v.0,
-        Value::Bool(v) => *v as i64 as f64,
-        Value::String(v) => arith_encoder::encode(v),
-        Value::Date32(v) => *v as f64,
-        _ => unreachable!(),
-    }
-}
-
-impl Distribution for TDigest {
+impl Distribution for TDigest<Value> {
     fn cdf(&self, value: &Value) -> f64 {
-        self.cdf(value_to_float(value))
+        self.cdf(value)
     }
 }
 
@@ -161,7 +140,7 @@ impl<
 
 pub type BaseTableStats<M, D> = HashMap<String, TableStats<M, D>>;
 
-impl TableStats<Counter<ColumnCombValue>, TDigest> {
+impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
     fn is_type_supported(data_type: &DataType) -> bool {
         matches!(
             data_type,
@@ -288,7 +267,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest> {
     fn generate_partial_stats(
         column_combs: &[Vec<ColumnCombValue>],
         mgs: &mut [MisraGries<ColumnCombValue>],
-        hlls: &mut [HyperLogLog],
+        hlls: &mut [HyperLogLog<ColumnCombValue>],
         null_counts: &mut [i32],
         row_counts: &mut [i32],
     ) {
@@ -312,26 +291,22 @@ impl TableStats<Counter<ColumnCombValue>, TDigest> {
     fn generate_full_stats(
         column_combs: &[Vec<ColumnCombValue>],
         cnts: &mut [Counter<ColumnCombValue>],
-        distrs: &mut [Option<TDigest>],
+        distrs: &mut [Option<TDigest<Value>>],
     ) {
         for (idx, column_comb) in column_combs.iter().enumerate() {
-            // TODO(Alexis): Redundant copy.
-            // Here, we filter out mfks, so it's guaranteed to never be null.
-            let (tracking, not_tracking): (Vec<ColumnCombValue>, Vec<ColumnCombValue>) =
-                column_comb
-                    .iter()
-                    .filter(|row| row.iter().any(|val| val.is_some()))
-                    .cloned()
-                    .partition(|row| cnts[idx].is_tracking(row));
-
-            cnts[idx].aggregate(&tracking);
-            if let Some(distr) = distrs[idx].take() {
+            cnts[idx].aggregate(column_comb);
+            if let Some(distr) = &mut distrs[idx] {
+                // TODO(Alexis): Redundant copy.
                 // We project it down to 1D, as we do not support nD TDigests.
-                let mut single_col_f64 = not_tracking
+                let single_col_filtered = column_comb
                     .iter()
-                    .map(|row| value_to_float(row[0].as_ref().unwrap()))
+                    .filter(|row| !cnts[idx].is_tracking(row))
+                    .map(|row| row[0].as_ref())
+                    .flatten()
+                    .cloned()
                     .collect_vec();
-                distrs[idx] = Some(distr.merge_values(&mut single_col_f64));
+
+                distr.merge_values(&single_col_filtered);
             }
         }
     }
