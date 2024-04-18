@@ -336,7 +336,7 @@ mod tests {
                         let num: f64 = uniform_distr.sample(&mut rng);
                         random_numbers.push(OrderedFloat(num));
                     }
-                    local_tdigest.merge_values(&mut random_numbers);
+                    local_tdigest.merge_values(&random_numbers);
 
                     let mut result = result_tdigest.lock().unwrap();
                     result.merge(&local_tdigest);
@@ -372,7 +372,7 @@ mod tests {
                 let num: f64 = choices[weighted_distr.sample(&mut rng)];
                 random_numbers.push(OrderedFloat(num));
             }
-            tdigest.merge_values(&mut random_numbers);
+            tdigest.merge_values(&random_numbers);
         }
 
         let mut curr_weight = 0;
