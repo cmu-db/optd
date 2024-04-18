@@ -316,6 +316,8 @@ mod tests {
 
     pub const TABLE1_NAME: &str = "table1";
     pub const TABLE2_NAME: &str = "table2";
+    pub const TABLE1_COL_CNT: usize = 1;
+    pub const TABLE2_COL_CNT: usize = 1;
 
     // one column is sufficient for all filter selectivity tests
     pub fn create_one_column_cost_model(per_column_stats: TestPerColumnStats) -> TestOptCostModel {
