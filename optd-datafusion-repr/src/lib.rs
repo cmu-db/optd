@@ -31,6 +31,11 @@ use rules::{
 
 pub use optd_core::rel_node::Value;
 
+use crate::{
+    plan_nodes::{OptRelNode, PlanNode},
+    rules::DepJoinPastProj,
+};
+
 pub mod cost;
 mod explain;
 pub mod plan_nodes;
@@ -86,6 +91,7 @@ impl DatafusionOptimizer {
             Arc::new(EliminateLimitRule::new()),
             Arc::new(EliminateDuplicatedSortExprRule::new()),
             Arc::new(EliminateDuplicatedAggExprRule::new()),
+            Arc::new(DepJoinPastProj::new()),
         ]
     }
 
@@ -207,9 +213,15 @@ impl DatafusionOptimizer {
     }
 
     pub fn heuristic_optimize(&mut self, root_rel: OptRelNodeRef) -> OptRelNodeRef {
-        self.hueristic_optimizer
+        let res = self
+            .hueristic_optimizer
             .optimize(root_rel)
-            .expect("heuristics returns error")
+            .expect("heuristics returns error");
+        println!(
+            "{}",
+            PlanNode::from_group(res.clone()).explain_to_string(None)
+        );
+        res
     }
 
     pub fn cascades_optimize(

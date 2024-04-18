@@ -6,6 +6,7 @@ mod filter_pushdown;
 mod joins;
 mod macros;
 mod physical;
+mod subquery;
 
 // pub use filter_join::FilterJoinPullUpRule;
 pub use eliminate_duplicated_expr::{
@@ -21,3 +22,4 @@ pub use joins::{
     EliminateJoinRule, HashJoinRule, JoinAssocRule, JoinCommuteRule, ProjectionPullUpJoin,
 };
 pub use physical::PhysicalConversionRule;
+pub use subquery::DepJoinPastProj;

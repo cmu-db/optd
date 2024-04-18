@@ -90,7 +90,8 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 })
                 .collect(),
             // Should account for all physical join types.
-            OptRelNodeTyp::Join(_) => {
+            OptRelNodeTyp::Join(_)
+            | OptRelNodeTyp::DepJoin(_) => {
                 // Concatenate left and right children properties.
                 Self::concat_children_properties(&children[0..2])
             }
@@ -120,6 +121,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 children[0].clone()
             }
             OptRelNodeTyp::Constant(_)
+            | OptRelNodeTyp::ExternColumnRef // TODO Possibly very very wrong---consult cost model team
             | OptRelNodeTyp::Func(_)
             | OptRelNodeTyp::BinOp(_)
             | OptRelNodeTyp::DataType(_)

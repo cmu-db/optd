@@ -529,7 +529,6 @@ impl OptdPlanContext<'_> {
 
     pub fn conv_into_optd(&mut self, root_rel: &LogicalPlan) -> Result<OptRelNodeRef> {
         let res = self.conv_into_optd_plan_node(root_rel, None)?;
-        println!("{}", res.explain_to_string(None));
         Ok(res.into_rel_node())
     }
 }
