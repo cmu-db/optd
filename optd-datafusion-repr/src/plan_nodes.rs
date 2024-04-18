@@ -11,6 +11,7 @@ pub(super) mod macros;
 mod projection;
 mod scan;
 mod sort;
+mod subquery;
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -37,6 +38,7 @@ use pretty_xmlish::{Pretty, PrettyConfig};
 pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
 pub use sort::{LogicalSort, PhysicalSort};
+pub use subquery::{DependentJoin, ExternColumnRefExpr};
 
 use crate::properties::schema::{Schema, SchemaPropertyBuilder};
 
@@ -52,6 +54,7 @@ pub enum OptRelNodeTyp {
     Filter,
     Scan,
     Join(JoinType),
+    DepJoin(JoinType),
     Sort,
     Agg,
     Apply(ApplyType),
@@ -70,6 +73,7 @@ pub enum OptRelNodeTyp {
     // Expressions
     Constant(ConstantType),
     ColumnRef,
+    ExternColumnRef,
     UnOp(UnOpType),
     BinOp(BinOpType),
     LogOp(LogOpType),
@@ -90,6 +94,7 @@ impl OptRelNodeTyp {
                 | Self::Filter
                 | Self::Scan
                 | Self::Join(_)
+                | Self::DepJoin(_)
                 | Self::Apply(_)
                 | Self::Sort
                 | Self::Agg
@@ -112,6 +117,7 @@ impl OptRelNodeTyp {
             self,
             Self::Constant(_)
                 | Self::ColumnRef
+                | Self::ExternColumnRef
                 | Self::UnOp(_)
                 | Self::BinOp(_)
                 | Self::LogOp(_)
@@ -368,6 +374,9 @@ pub fn explain(rel_node: OptRelNodeRef, meta_map: Option<&RelNodeMetaMap>) -> Pr
         OptRelNodeTyp::ColumnRef => ColumnRefExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(meta_map),
+        OptRelNodeTyp::ExternColumnRef => ExternColumnRefExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
         OptRelNodeTyp::Constant(_) => ConstantExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(meta_map),
@@ -381,6 +390,9 @@ pub fn explain(rel_node: OptRelNodeRef, meta_map: Option<&RelNodeMetaMap>) -> Pr
             .unwrap()
             .dispatch_explain(meta_map),
         OptRelNodeTyp::Join(_) => LogicalJoin::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::DepJoin(_) => DependentJoin::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(meta_map),
         OptRelNodeTyp::Scan => LogicalScan::from_rel_node(rel_node)
