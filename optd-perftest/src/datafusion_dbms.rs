@@ -25,7 +25,6 @@ use datafusion::{
     sql::{parser::DFParser, sqlparser::dialect::GenericDialect},
 };
 use datafusion_optd_cli::helper::unescape_input;
-use itertools::iproduct;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::{
@@ -369,10 +368,10 @@ impl DatafusionDBMS {
                 .schema();
 
             let nb_cols = schema.fields().len();
-            let single_cols = (0..schema.fields().len()).map(|v| vec![v]);
-            let pairwise_cols = iproduct!(0..nb_cols, 0..nb_cols)
-                .filter(|(i, j)| i != j)
-                .map(|(i, j)| vec![i, j]);
+            let single_cols = (0..nb_cols).map(|v| vec![v]);
+            /*let pairwise_cols = iproduct!(0..nb_cols, 0..nb_cols)
+            .filter(|(i, j)| i != j)
+            .map(|(i, j)| vec![i, j]);*/
 
             base_table_stats.insert(
                 tbl_name.to_string(),
@@ -386,7 +385,7 @@ impl DatafusionDBMS {
                             .unwrap();
                         Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))
                     },
-                    single_cols.chain(pairwise_cols).collect(),
+                    single_cols.collect(),
                 )?,
             );
         }
@@ -429,10 +428,10 @@ impl DatafusionDBMS {
                 .schema();
 
             let nb_cols = schema.fields().len();
-            let single_cols = (0..schema.fields().len()).map(|v| vec![v]);
-            let pairwise_cols = iproduct!(0..nb_cols, 0..nb_cols)
-                .filter(|(i, j)| i != j)
-                .map(|(i, j)| vec![i, j]);
+            let single_cols = (0..nb_cols).map(|v| vec![v]);
+            /*let pairwise_cols = iproduct!(0..nb_cols, 0..nb_cols)
+            .filter(|(i, j)| i != j)
+            .map(|(i, j)| vec![i, j]);*/
 
             base_table_stats.insert(
                 tbl_name.to_string(),
@@ -447,7 +446,7 @@ impl DatafusionDBMS {
                             .unwrap();
                         Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))
                     },
-                    single_cols.chain(pairwise_cols).collect(),
+                    single_cols.collect(),
                 )?,
             );
         }

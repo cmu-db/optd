@@ -39,7 +39,12 @@ pub trait Distribution: 'static + Send + Sync {
 
 impl Distribution for TDigest<Value> {
     fn cdf(&self, value: &Value) -> f64 {
-        self.cdf(value)
+        let nb_rows = self.norm_weight;
+        if nb_rows == 0 {
+            self.cdf(value)
+        } else {
+            self.centroids.len() as f64 * self.cdf(value) / nb_rows as f64
+        }
     }
 }
 
@@ -269,7 +274,6 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         mgs: &mut [MisraGries<ColumnCombValue>],
         hlls: &mut [HyperLogLog<ColumnCombValue>],
         null_counts: &mut [i32],
-        row_counts: &mut [i32],
     ) {
         for (idx, column_comb) in column_combs.iter().enumerate() {
             // TODO(Alexis): Redundant copy.
@@ -281,7 +285,6 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
             let nb_rows: i32 = column_comb.len() as i32;
 
             null_counts[idx] += nb_rows - filtered_nulls.len() as i32;
-            row_counts[idx] += nb_rows;
 
             mgs[idx].aggregate(&filtered_nulls);
             hlls[idx].aggregate(&filtered_nulls);
@@ -292,8 +295,12 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         column_combs: &[Vec<ColumnCombValue>],
         cnts: &mut [Counter<ColumnCombValue>],
         distrs: &mut [Option<TDigest<Value>>],
+        row_counts: &mut [i32],
     ) {
         for (idx, column_comb) in column_combs.iter().enumerate() {
+            let nb_rows: i32 = column_comb.len() as i32;
+            row_counts[idx] += nb_rows;
+
             cnts[idx].aggregate(column_comb);
             if let Some(distr) = &mut distrs[idx] {
                 // TODO(Alexis): Redundant copy.
@@ -301,11 +308,11 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                 let single_col_filtered = column_comb
                     .iter()
                     .filter(|row| !cnts[idx].is_tracking(row))
-                    .map(|row| row[0].as_ref())
-                    .flatten()
+                    .filter_map(|row| row[0].as_ref())
                     .cloned()
                     .collect_vec();
 
+                distr.norm_weight += nb_rows as usize;
                 distr.merge_values(&single_col_filtered);
             }
         }
@@ -332,11 +339,10 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
             });
         }
 
-        // 1. FIRST PASS: hlls + mgs + null_cnts + row_cnts.
+        // 1. FIRST PASS: hlls + mgs + null_cnts.
         let mut hlls = vec![HyperLogLog::new(hyperloglog::DEFAULT_PRECISION); nb_stats];
         let mut mgs = vec![MisraGries::new(misragries::DEFAULT_K_TO_TRACK); nb_stats];
         let mut null_cnts = vec![0; nb_stats];
-        let mut row_cnts = vec![0; nb_stats]; // All the same, but more convenient like this.
 
         for batch in batch_iter {
             let batch = batch?;
@@ -345,11 +351,10 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                 &mut mgs,
                 &mut hlls,
                 &mut null_cnts,
-                &mut row_cnts,
             );
         }
 
-        // 2. SECOND PASS:  MCV + TDigest.
+        // 2. SECOND PASS:  MCV + TDigest + row_cnts.
         let batch_iter = batch_iter_builder()?;
         let mut distrs = comb_stat_types
             .iter()
@@ -365,6 +370,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                 Counter::new(&mfk)
             })
             .collect_vec();
+        let mut row_cnts = vec![0; nb_stats]; // All the same, but more convenient like this.
 
         for batch in batch_iter {
             let batch = batch?;
@@ -372,6 +378,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                 &Self::get_column_combs(&batch, &comb_stat_types),
                 &mut cnts,
                 &mut distrs,
+                &mut row_cnts,
             );
         }
 

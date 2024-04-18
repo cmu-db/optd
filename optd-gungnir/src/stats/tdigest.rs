@@ -21,18 +21,22 @@ pub trait IntoFloat {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct TDigest<T: IntoFloat + Eq + Hash + Clone> {
     /// A sorted array of Centroids, according to their mean.
-    centroids: Vec<Centroid>,
+    pub centroids: Vec<Centroid>, // TODO(Alexis): Temporary fix to normalize the stats in stats.rs [pub].
     /// Compression factor: higher is more precise, but has higher memory requirements.
     compression: f64,
     /// Number of values in the TDigest (sum of all centroids).
     total_weight: usize,
+
+    // TODO(Alexis): Temporary fix to normalize the stats in stats.rs [field].
+    pub norm_weight: usize,
 
     data_type: PhantomData<T>, // For type checker.
 }
 
 /// A Centroid is a cluster of aggregated data points.
 #[derive(PartialEq, PartialOrd, Clone, Serialize, Deserialize, Debug)]
-struct Centroid {
+pub struct Centroid {
+    // TODO(Alexis): Temporary fix to normalize the stats in stats.rs [pub].
     /// Mean of all aggregated points in this cluster.
     mean: f64,
     /// The number of points in this cluster.
@@ -83,6 +87,7 @@ where
             compression,
             total_weight: 0,
 
+            norm_weight: 0,
             data_type: PhantomData,
         }
     }
@@ -104,6 +109,7 @@ where
             compression,
             total_weight,
 
+            norm_weight: 0,
             data_type: PhantomData,
         });
     }
