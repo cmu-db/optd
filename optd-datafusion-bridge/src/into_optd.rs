@@ -7,11 +7,11 @@ use datafusion::{
 use datafusion_expr::Subquery;
 use optd_core::rel_node::RelNode;
 use optd_datafusion_repr::plan_nodes::{
-    BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, DependentJoin, Expr,
-    ExprList, ExternColumnRefExpr, FuncExpr, FuncType, InListExpr, JoinType, LikeExpr, LogOpExpr,
-    LogOpType, LogicalAgg, LogicalEmptyRelation, LogicalFilter, LogicalJoin, LogicalLimit,
-    LogicalProjection, LogicalScan, LogicalSort, OptRelNode, OptRelNodeRef, OptRelNodeTyp,
-    PlanNode, SortOrderExpr, SortOrderType,
+    BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList,
+    ExternColumnRefExpr, FuncExpr, FuncType, InListExpr, JoinType, LikeExpr, LogOpExpr, LogOpType,
+    LogicalAgg, LogicalDependentJoin, LogicalEmptyRelation, LogicalFilter, LogicalJoin,
+    LogicalLimit, LogicalProjection, LogicalScan, LogicalSort, OptRelNode, OptRelNodeRef,
+    OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
 };
 use optd_datafusion_repr::properties::schema::Schema as OptdSchema;
 
@@ -31,11 +31,11 @@ impl OptdPlanContext<'_> {
         } in subqueries.into_iter()
         {
             let subquery_root = self.conv_into_optd_plan_node(subquery, Some(input_schema))?;
-            let dep_join = DependentJoin::new(
+            let dep_join = LogicalDependentJoin::new(
                 node,
                 subquery_root,
                 ConstantExpr::bool(true).into_expr(),
-                JoinType::Inner,
+                JoinType::Cross,
             );
             node = PlanNode::from_rel_node(dep_join.into_rel_node()).unwrap();
         }
@@ -181,11 +181,11 @@ impl OptdPlanContext<'_> {
                 self.conv_into_optd_expr(x.expr.as_ref(), context, dep_ctx, subqueries)
             }
             Expr::ScalarFunction(x) => {
-                let args = self.conv_into_optd_expr_list(&x.args, context, dep_ctx)?;
+                let args = self.conv_into_optd_expr_list(&x.args, context, dep_ctx, subqueries)?;
                 Ok(FuncExpr::new(FuncType::new_scalar(x.fun), args).into_expr())
             }
             Expr::AggregateFunction(x) => {
-                let args = self.conv_into_optd_expr_list(&x.args, context, dep_ctx)?;
+                let args = self.conv_into_optd_expr_list(&x.args, context, dep_ctx, subqueries)?;
                 Ok(FuncExpr::new(FuncType::new_agg(x.fun.clone()), args).into_expr())
             }
             Expr::Case(x) => {
@@ -246,7 +246,7 @@ impl OptdPlanContext<'_> {
             Expr::InList(x) => {
                 let expr =
                     self.conv_into_optd_expr(x.expr.as_ref(), context, dep_ctx, subqueries)?;
-                let list = self.conv_into_optd_expr_list(&x.list, context, dep_ctx)?;
+                let list = self.conv_into_optd_expr_list(&x.list, context, dep_ctx, subqueries)?;
                 Ok(InListExpr::new(expr, list, x.negated).into_expr())
             }
             Expr::ScalarSubquery(sq) => {
@@ -266,7 +266,14 @@ impl OptdPlanContext<'_> {
         dep_ctx: Option<&DFSchema>,
     ) -> Result<LogicalProjection> {
         let input = self.conv_into_optd_plan_node(node.input.as_ref(), dep_ctx)?;
-        let expr_list = self.conv_into_optd_expr_list(&node.expr, node.input.schema(), dep_ctx)?;
+        let mut subqueries = vec![];
+        let expr_list = self.conv_into_optd_expr_list(
+            &node.expr,
+            node.input.schema(),
+            dep_ctx,
+            &mut subqueries,
+        )?;
+        let input = self.subqueries_to_dependent_joins(&subqueries, input, node.input.schema())?;
         Ok(LogicalProjection::new(input, expr_list))
     }
 
@@ -289,21 +296,17 @@ impl OptdPlanContext<'_> {
         Ok(LogicalFilter::new(input, expr))
     }
 
-    fn conv_into_optd_expr_list(
+    fn conv_into_optd_expr_list<'a>(
         &mut self,
-        exprs: &[logical_expr::Expr],
+        exprs: &'a [logical_expr::Expr],
         context: &DFSchema,
         dep_ctx: Option<&DFSchema>,
+        subqueries: &mut Vec<&'a Subquery>,
     ) -> Result<ExprList> {
-        let mut subqueries = vec![];
         let exprs = exprs
             .iter()
-            .map(|expr| self.conv_into_optd_expr(expr, context, dep_ctx, &mut subqueries))
+            .map(|expr| self.conv_into_optd_expr(expr, context, dep_ctx, subqueries))
             .collect::<Result<Vec<_>>>()?;
-        assert!(
-            subqueries.is_empty(),
-            "Subqueries encountered in conv_into_optd_expr_list---not supported currently"
-        );
         Ok(ExprList::new(exprs))
     }
 
@@ -313,7 +316,17 @@ impl OptdPlanContext<'_> {
         dep_ctx: Option<&DFSchema>,
     ) -> Result<LogicalSort> {
         let input = self.conv_into_optd_plan_node(node.input.as_ref(), dep_ctx)?;
-        let expr_list = self.conv_into_optd_expr_list(&node.expr, node.input.schema(), dep_ctx)?;
+        let mut subqueries = vec![];
+        let expr_list = self.conv_into_optd_expr_list(
+            &node.expr,
+            node.input.schema(),
+            dep_ctx,
+            &mut subqueries,
+        )?;
+        assert!(
+            subqueries.is_empty(),
+            "Subqueries encountered in conv_into_optd_sort---not supported currently"
+        );
         Ok(LogicalSort::new(input, expr_list))
     }
 
@@ -323,10 +336,23 @@ impl OptdPlanContext<'_> {
         dep_ctx: Option<&DFSchema>,
     ) -> Result<LogicalAgg> {
         let input = self.conv_into_optd_plan_node(node.input.as_ref(), dep_ctx)?;
-        let agg_exprs =
-            self.conv_into_optd_expr_list(&node.aggr_expr, node.input.schema(), dep_ctx)?;
-        let group_exprs =
-            self.conv_into_optd_expr_list(&node.group_expr, node.input.schema(), dep_ctx)?;
+        let mut subqueries = vec![];
+        let agg_exprs = self.conv_into_optd_expr_list(
+            &node.aggr_expr,
+            node.input.schema(),
+            dep_ctx,
+            &mut subqueries,
+        )?;
+        let group_exprs = self.conv_into_optd_expr_list(
+            &node.group_expr,
+            node.input.schema(),
+            dep_ctx,
+            &mut subqueries,
+        )?;
+        assert!(
+            subqueries.is_empty(),
+            "Subqueries encountered in conv_into_optd_agg---not supported currently"
+        );
         Ok(LogicalAgg::new(input, agg_exprs, group_exprs))
     }
 
