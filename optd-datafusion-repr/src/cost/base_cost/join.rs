@@ -102,6 +102,7 @@ impl<
     }
 
     /// A wrapper to convert the join keys to the format expected by get_join_selectivity_core()
+    #[allow(clippy::too_many_arguments)]
     fn get_join_selectivity_from_keys(
         &self,
         join_typ: JoinType,
@@ -139,6 +140,7 @@ impl<
     }
 
     /// The core logic of join selectivity which assumes we've already separated the expression into the on conditions and the filters
+    #[allow(clippy::too_many_arguments)]
     fn get_join_selectivity_core(
         &self,
         join_typ: JoinType,
