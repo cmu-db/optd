@@ -94,13 +94,6 @@ impl<
         } else {
             DEFAULT_UNK_SEL
         };
-        println!(
-            "l: {:.2}, r: {:.2}, sel: {}, output: {}",
-            row_cnt_1,
-            row_cnt_2,
-            selectivity,
-            (row_cnt_1 * row_cnt_2 * selectivity).max(1.0)
-        );
         Self::cost(
             (row_cnt_1 * row_cnt_2 * selectivity).max(1.0),
             row_cnt_1 * 2.0 + row_cnt_2,
@@ -311,20 +304,12 @@ impl<
         column_refs: &GroupColumnRefs,
         right_col_ref_offset: usize,
     ) -> f64 {
-        println!("left col cnt: {}", right_col_ref_offset,);
-        println!("{:?}", column_refs);
         // multiply the selectivities of all individual conditions together
         on_col_ref_pairs.iter().map(|on_col_ref_pair| {
-            println!(
-                "left_idx: {}, right_idx: {}",
-                on_col_ref_pair.0.index(),
-                on_col_ref_pair.1.index()
-            );
             // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
             let ndistincts = vec![on_col_ref_pair.0.index(), on_col_ref_pair.1.index() + right_col_ref_offset].into_iter().map(|col_index| {
                 match self.get_single_column_stats_from_col_ref(&column_refs[col_index]) {
                     Some(per_col_stats) => {
-                        println!("{:?} ndistinct: {}", column_refs[col_index], per_col_stats.ndistinct);
                         per_col_stats.ndistinct
                     },
                     None => DEFAULT_NUM_DISTINCT,
@@ -418,8 +403,8 @@ mod tests {
                 Some(TestDistribution::empty()),
             ),
         );
-        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(0));
-        let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(0), col_ref(0));
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
+        let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let column_refs = vec![
             ColumnRef::BaseTableColumnRef {
                 table: String::from(TABLE1_NAME),
@@ -462,8 +447,8 @@ mod tests {
                 Some(TestDistribution::empty()),
             ),
         );
-        let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(0));
-        let eq1and0 = bin_op(BinOpType::Eq, col_ref(0), col_ref(0));
+        let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
+        let eq1and0 = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let expr_tree = log_op(LogOpType::And, vec![eq0and1.clone(), eq1and0.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq1and0.clone(), eq0and1.clone()]);
         let column_refs = vec![
@@ -508,8 +493,8 @@ mod tests {
                 Some(TestDistribution::empty()),
             ),
         );
-        let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(0));
-        let eq100 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(100)));
+        let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
+        let eq100 = bin_op(BinOpType::Eq, col_ref(1), cnst(Value::Int32(100)));
         let expr_tree = log_op(LogOpType::And, vec![eq0and1.clone(), eq100.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq100.clone(), eq0and1.clone()]);
         let column_refs = vec![
