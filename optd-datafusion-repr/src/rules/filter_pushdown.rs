@@ -268,7 +268,7 @@ fn filter_join_transpose(
         match location {
             JoinCondDependency::Left => left_conds.push(expr),
             JoinCondDependency::Right => right_conds.push(
-                expr.rewrite_column_refs(&|idx| {
+                expr.rewrite_column_refs(&mut |idx| {
                     Some(LogicalJoin::map_through_join(
                         idx,
                         left_schema_size,

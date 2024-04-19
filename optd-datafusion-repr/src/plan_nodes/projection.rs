@@ -76,7 +76,7 @@ impl ProjectionMapping {
     /// All B's in `cond` will be rewritten as A.
     pub fn rewrite_condition(&self, cond: Expr, child_schema_len: usize) -> Expr {
         let proj_schema_size = self.forward.len();
-        cond.rewrite_column_refs(&|idx| {
+        cond.rewrite_column_refs(&mut |idx| {
             Some(if idx < proj_schema_size {
                 self.projection_col_refers_to(idx)
             } else {

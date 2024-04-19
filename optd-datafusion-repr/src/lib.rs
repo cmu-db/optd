@@ -33,7 +33,7 @@ pub use optd_core::rel_node::Value;
 
 use crate::{
     plan_nodes::{OptRelNode, PlanNode},
-    rules::{DepInitialDistinct, DepJoinPastFilter, DepJoinPastProj},
+    rules::{DepInitialDistinct, DepJoinEliminateAtScan, DepJoinPastFilter, DepJoinPastProj},
 };
 
 pub mod cost;
@@ -91,6 +91,7 @@ impl DatafusionOptimizer {
             Arc::new(EliminateLimitRule::new()),
             Arc::new(EliminateDuplicatedSortExprRule::new()),
             Arc::new(EliminateDuplicatedAggExprRule::new()),
+            Arc::new(DepJoinEliminateAtScan::new()),
             Arc::new(DepInitialDistinct::new()),
             Arc::new(DepJoinPastProj::new()),
             Arc::new(DepJoinPastFilter::new()),

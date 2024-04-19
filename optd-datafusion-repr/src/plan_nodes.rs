@@ -301,7 +301,7 @@ impl Expr {
     /// the call stack, and no expression will be returned.
     pub fn rewrite_column_refs(
         &self,
-        rewrite_fn: &impl Fn(usize) -> Option<usize>,
+        rewrite_fn: &mut impl FnMut(usize) -> Option<usize>,
     ) -> Option<Self> {
         assert!(self.typ().is_expression());
         if let OptRelNodeTyp::ColumnRef = self.typ() {

@@ -1,3 +1,5 @@
+use itertools::Itertools;
+use optd_core::rel_node::Value;
 use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 use std::collections::HashMap;
@@ -5,10 +7,53 @@ use std::collections::HashMap;
 use crate::plan_nodes::{
     BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, ExternColumnRefExpr,
     JoinType, LogOpExpr, LogOpType, LogicalAgg, LogicalDependentJoin, LogicalFilter, LogicalJoin,
-    LogicalProjection, OptRelNode, OptRelNodeTyp, PlanNode,
+    LogicalProjection, LogicalScan, OptRelNode, OptRelNodeTyp, PlanNode,
 };
 use crate::properties::schema::SchemaPropertyBuilder;
 use crate::rules::macros::define_rule;
+
+/// Like rewrite_column_refs, except it translates ExternColumnRefs into ColumnRefs
+fn rewrite_extern_column_refs(
+    expr: &Expr,
+    rewrite_fn: &mut impl FnMut(usize) -> Option<usize>,
+) -> Option<Expr> {
+    let expr_rel = expr.clone().into_rel_node();
+    assert!(expr.typ().is_expression());
+    if let OptRelNodeTyp::ExternColumnRef = expr.typ() {
+        let col_ref = ExternColumnRefExpr::from_rel_node(expr_rel.clone()).unwrap();
+        let rewritten = rewrite_fn(col_ref.index());
+        return if let Some(rewritten_idx) = rewritten {
+            let new_col_ref = ColumnRefExpr::new(rewritten_idx);
+            Some(Expr::from_rel_node(new_col_ref.into_rel_node()).unwrap())
+        } else {
+            None
+        };
+    }
+
+    let children = expr_rel.children.clone();
+    let children = children
+        .into_iter()
+        .map(|child| {
+            if child.typ == OptRelNodeTyp::List {
+                // TODO: What should we do with List?
+                return Some(child);
+            }
+            rewrite_extern_column_refs(&Expr::from_rel_node(child).unwrap(), rewrite_fn)
+                .map(|x| x.into_rel_node())
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(
+        Expr::from_rel_node(
+            RelNode {
+                typ: expr_rel.typ.clone(),
+                children: children,
+                data: expr_rel.data.clone(),
+            }
+            .into(),
+        )
+        .unwrap(),
+    )
+}
 
 define_rule!(
     DepInitialDistinct,
@@ -135,6 +180,7 @@ fn apply_dep_join_past_proj(
         extern_cols,
     }: DepJoinPastProjPicks,
 ) -> Vec<RelNode<OptRelNodeTyp>> {
+    // TODO: can we have external columns in projection node? I don't think so?
     // Cross join should always have true cond
     assert!(cond == *ConstantExpr::bool(true).into_rel_node());
     let left_schema_len = optimizer
@@ -146,7 +192,7 @@ fn apply_dep_join_past_proj(
         .to_vec()
         .into_iter()
         .map(|expr| {
-            expr.rewrite_column_refs(&|col| Some(col + left_schema_len))
+            expr.rewrite_column_refs(&mut |col| Some(col + left_schema_len))
                 .unwrap()
         })
         .collect::<Vec<Expr>>();
@@ -199,27 +245,93 @@ fn apply_dep_join_past_filter(
         extern_cols,
     }: DepJoinPastFilterPicks,
 ) -> Vec<RelNode<OptRelNodeTyp>> {
-    dbg!("Filter town\n");
     // Cross join should always have true cond
     assert!(cond == *ConstantExpr::bool(true).into_rel_node());
     let left_schema_len = optimizer
         .get_property::<SchemaPropertyBuilder>(left.clone().into(), 0)
         .len();
 
+    let correlated_col_indices = ExprList::from_rel_node(extern_cols.clone().into())
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .map(|x| {
+            ExternColumnRefExpr::from_rel_node(x.into_rel_node())
+                .unwrap()
+                .index()
+        })
+        .collect::<Vec<usize>>();
+
+    let rewritten_expr = Expr::from_rel_node(filter_cond.into())
+        .unwrap()
+        .rewrite_column_refs(&mut |col| Some(col + left_schema_len))
+        .unwrap();
+
+    let rewritten_expr = rewrite_extern_column_refs(&rewritten_expr, &mut |col| {
+        let idx = correlated_col_indices
+            .iter()
+            .position(|&x| x == col)
+            .unwrap();
+        Some(idx)
+    })
+    .unwrap();
+
     let new_dep_join = LogicalDependentJoin::new(
         PlanNode::from_group(left.into()),
         PlanNode::from_group(right.into()),
         Expr::from_rel_node(cond.into()).unwrap(),
-        ExprList::from_rel_node(extern_cols.into()).unwrap(),
+        ExprList::new(
+            correlated_col_indices
+                .into_iter()
+                .map(|x| ExternColumnRefExpr::new(x).into_expr())
+                .collect(),
+        ),
         JoinType::Cross,
     );
+
     let new_filter = LogicalFilter::new(
         PlanNode::from_rel_node(new_dep_join.into_rel_node()).unwrap(),
-        Expr::from_rel_node(filter_cond.into())
-            .unwrap()
-            .rewrite_column_refs(&|col| Some(col + left_schema_len))
-            .unwrap(),
+        rewritten_expr,
     );
 
     vec![new_filter.into_rel_node().as_ref().clone()]
+}
+
+define_rule!(
+    DepJoinEliminateAtScan,
+    apply_dep_join_eliminate_at_scan, // TODO matching is all wrong
+    (DepJoin(JoinType::Cross), left, right, [cond], [extern_cols])
+);
+
+/// If we've gone all the way down to the scan node, we can swap the dependent join
+/// for an inner join! Our main mission is complete!
+fn apply_dep_join_eliminate_at_scan(
+    _optimizer: &impl Optimizer<OptRelNodeTyp>,
+    DepJoinEliminateAtScanPicks {
+        left,
+        right,
+        cond,
+        extern_cols: _,
+    }: DepJoinEliminateAtScanPicks,
+) -> Vec<RelNode<OptRelNodeTyp>> {
+    // TODO: Is there ever a situation we need to detect that we can convert earlier?
+    // Technically we can convert as soon as we clear the last externcolumnref...
+
+    // Cross join should always have true cond
+    assert!(cond == *ConstantExpr::bool(true).into_rel_node());
+
+    if right.typ != OptRelNodeTyp::Scan {
+        return vec![];
+    }
+
+    let scan = LogicalScan::new("test".to_string()).into_rel_node();
+
+    let new_join = LogicalJoin::new(
+        PlanNode::from_group(left.into()),
+        PlanNode::from_group(right.into()),
+        ConstantExpr::bool(true).into_expr(),
+        JoinType::Inner,
+    );
+
+    vec![new_join.into_rel_node().as_ref().clone()]
 }
