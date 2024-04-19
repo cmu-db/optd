@@ -27,7 +27,7 @@ impl OptdPlanContext<'_> {
         let mut node = input;
         for Subquery {
             subquery,
-            outer_ref_columns: _,
+            outer_ref_columns,
         } in subqueries.into_iter()
         {
             let subquery_root = self.conv_into_optd_plan_node(subquery, Some(input_schema))?;
@@ -35,6 +35,23 @@ impl OptdPlanContext<'_> {
                 node,
                 subquery_root,
                 ConstantExpr::bool(true).into_expr(),
+                ExprList::new(
+                    outer_ref_columns
+                        .iter()
+                        .filter_map(|col| {
+                            if let datafusion_expr::Expr::OuterReferenceColumn(_, col) = col {
+                                return Some(
+                                    ExternColumnRefExpr::new(
+                                        input_schema.index_of_column(col).unwrap(),
+                                    )
+                                    .into_expr(),
+                                );
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
+                ),
                 JoinType::Cross,
             );
             node = PlanNode::from_rel_node(dep_join.into_rel_node()).unwrap();

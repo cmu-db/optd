@@ -2,7 +2,7 @@ use optd_core::rel_node::{RelNode, RelNodeMetaMap, Value};
 use pretty_xmlish::Pretty;
 
 use super::macros::define_plan_node;
-use super::{Expr, JoinType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
+use super::{Expr, ExprList, JoinType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 
 #[derive(Clone, Debug)]
 pub struct LogicalDependentJoin(pub PlanNode);
@@ -13,7 +13,8 @@ define_plan_node!(
         { 0, left: PlanNode },
         { 1, right: PlanNode }
     ], [
-        { 2, cond: Expr }
+        { 2, cond: Expr },
+        { 3, extern_cols: ExprList }
     ], { join_type: JoinType }
 );
 

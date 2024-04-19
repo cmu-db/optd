@@ -62,7 +62,7 @@ fn determine_join_cond_dep(
             let index = col_ref.index();
             if index < left_schema_size {
                 left_col = true;
-            } else if index >= left_schema_size && index < left_schema_size + right_schema_size {
+            } else if index > left_schema_size && index < left_schema_size + right_schema_size {
                 right_col = true;
             }
         }

@@ -38,7 +38,7 @@ use pretty_xmlish::{Pretty, PrettyConfig};
 pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
 pub use sort::{LogicalSort, PhysicalSort};
-pub use subquery::{ExternColumnRefExpr, LogicalDependentJoin};
+pub use subquery::{ExternColumnRefExpr, LogicalDependentJoin}; // Add missing import
 
 use crate::properties::schema::{Schema, SchemaPropertyBuilder};
 

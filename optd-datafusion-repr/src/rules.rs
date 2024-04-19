@@ -22,4 +22,4 @@ pub use joins::{
     EliminateJoinRule, HashJoinRule, JoinAssocRule, JoinCommuteRule, ProjectionPullUpJoin,
 };
 pub use physical::PhysicalConversionRule;
-pub use subquery::DepJoinPastProj;
+pub use subquery::{DepInitialDistinct, DepJoinPastFilter, DepJoinPastProj};
