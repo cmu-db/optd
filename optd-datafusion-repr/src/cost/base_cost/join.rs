@@ -111,7 +111,7 @@ impl<
         column_refs: &GroupColumnRefs,
         left_row_cnt: f64,
         right_row_cnt: f64,
-        right_col_ref_offset: usize,
+        left_col_cnt: usize,
     ) -> f64 {
         assert!(left_keys.len() == right_keys.len());
         // I assume that the keys are already in the right order s.t. the ith key of left_keys corresponds with the ith key of right_keys
@@ -135,11 +135,17 @@ impl<
             column_refs,
             left_row_cnt,
             right_row_cnt,
-            right_col_ref_offset,
+            left_col_cnt,
         )
     }
 
     /// The core logic of join selectivity which assumes we've already separated the expression into the on conditions and the filters
+    /// Hash join and NLJ reference right table columns differently, hence the `right_col_ref_offset` parameter.
+    /// For hash join, the right table columns indices are with respect to the right table,
+    ///   which means #0 is the first column of the right table.
+    /// For NLJ, the right table columns indices are with respect to the output of the join.
+    ///   For example, if the left table has 3 columns, the first column of the right table
+    ///   is #3 instead of #0.
     #[allow(clippy::too_many_arguments)]
     fn get_join_selectivity_core(
         &self,
