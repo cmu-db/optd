@@ -1,6 +1,5 @@
 use std::ops::Bound;
 
-use datafusion::arrow::{array::StringArray, compute::like};
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
     cost::Cost,
@@ -23,6 +22,8 @@ use crate::{
 use super::{
     stats::ColumnCombValue, OptCostModel, DEFAULT_EQ_SEL, DEFAULT_INEQ_SEL, DEFAULT_UNK_SEL,
 };
+
+mod like;
 
 impl<
         M: MostCommonValues + Serialize + DeserializeOwned,
@@ -340,87 +341,6 @@ impl<
             }
         } else {
             // Child is a derived column.
-            UNIMPLEMENTED_SEL
-        }
-    }
-
-    /// Compute the selectivity of a (NOT) LIKE expression.
-    ///
-    /// The logic is somewhat similar to Postgres but different. Postgres first estimates the histogram part of the
-    /// population and then add up data for any MCV values. If the histogram is large enough, it just uses the number
-    /// of matches in the histogram, otherwise it estimates the fixed prefix and remainder of pattern separately and
-    /// combine them.
-    ///
-    /// Our approach is simpler and less selective. Firstly, we don't use histogram. The selectivity is composed of MCV
-    /// frequency and non-MCV selectivity. MCV frequency is computed by adding up frequencies of MCVs that match the
-    /// pattern. Non-MCV  selectivity is computed in the same way that Postgres computes selectivity for the wildcard
-    /// part of the pattern.
-    fn get_like_selectivity(&self, like_expr: &LikeExpr, column_refs: &GroupColumnRefs) -> f64 {
-        const FULL_WILDCARD_SEL: f64 = 5.0;
-        const FIXED_CHAR_SEL: f64 = 0.2;
-
-        let child = like_expr.child();
-
-        // Check child is a column ref.
-        if !matches!(child.typ(), OptRelNodeTyp::ColumnRef) {
-            return UNIMPLEMENTED_SEL;
-        }
-
-        // Check pattern is a constant.
-        let pattern = like_expr.pattern();
-        if !matches!(pattern.typ(), OptRelNodeTyp::Constant(_)) {
-            return UNIMPLEMENTED_SEL;
-        }
-
-        let col_ref_idx = ColumnRefExpr::from_rel_node(child.into_rel_node())
-            .unwrap()
-            .index();
-
-        if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
-            let pattern = ConstantExpr::from_rel_node(pattern.into_rel_node())
-                .expect("we already checked pattern is a constant")
-                .value()
-                .as_str();
-
-            // Compute the selectivity exculuding MCVs.
-            // See Postgres `like_selectivity`.
-            let non_mcv_sel = pattern
-                .chars()
-                .fold(1.0, |acc, c| {
-                    if c == '%' {
-                        acc * FULL_WILDCARD_SEL
-                    } else {
-                        acc * FIXED_CHAR_SEL
-                    }
-                })
-                .min(1.0);
-
-            // Compute the selectivity in MCVs.
-            let column_stats = self.get_column_comb_stats(table, &[*col_idx]);
-            let (mcv_freq, null_frac) = if let Some(column_stats) = column_stats {
-                let pred = Box::new(move |val: &ColumnCombValue| {
-                    let string =
-                        StringArray::from(vec![val[0].as_ref().unwrap().as_str().as_ref()]);
-                    let pattern = StringArray::from(vec![pattern.as_ref()]);
-                    like(&string, &pattern).unwrap().value(0)
-                });
-                (
-                    column_stats.mcvs.freq_over_pred(pred),
-                    column_stats.null_frac,
-                )
-            } else {
-                (0.0, 0.0)
-            };
-
-            // Postgres clamps the result after histogram and before MCV. See Postgres `patternsel_common`.
-            let result = (non_mcv_sel + mcv_freq * (1.0 - null_frac)).clamp(0.0001, 0.9999);
-
-            if like_expr.negated() {
-                1.0 - result - null_frac
-            } else {
-                result
-            }
-        } else {
             UNIMPLEMENTED_SEL
         }
     }

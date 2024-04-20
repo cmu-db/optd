@@ -239,7 +239,7 @@ mod tests {
         cost::base_cost::stats::*,
         plan_nodes::{
             BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, InListExpr,
-            LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
+            LikeExpr, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
         },
     };
 
@@ -420,6 +420,15 @@ mod tests {
                     .collect_vec(),
             ),
             negated,
+        )
+    }
+
+    pub fn like(col_ref_idx: u64, pattern: &str, negated: bool) -> LikeExpr {
+        LikeExpr::new(
+            negated,
+            false,
+            Expr::from_rel_node(col_ref(col_ref_idx)).unwrap(),
+            Expr::from_rel_node(cnst(Value::String(pattern.into()))).unwrap(),
         )
     }
 
