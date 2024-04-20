@@ -44,8 +44,6 @@ pub struct OptCostModel<
 const DEFAULT_EQ_SEL: f64 = 0.005;
 // Default selectivity estimate for inequalities such as "A < b"
 const DEFAULT_INEQ_SEL: f64 = 0.3333333333333333;
-// Default selectivity estimate for pattern-match operators such as LIKE
-const DEFAULT_MATCH_SEL: f64 = 0.005;
 // Default n-distinct estimate for derived columns or columns lacking statistics
 const DEFAULT_NUM_DISTINCT: u64 = 200;
 // Default selectivity if we have no information
