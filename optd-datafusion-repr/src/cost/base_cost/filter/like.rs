@@ -13,8 +13,13 @@ use crate::{
     properties::column_ref::{ColumnRef, GroupColumnRefs},
 };
 
-const FULL_WILDCARD_SEL: f64 = 5.0;
-const FIXED_CHAR_SEL: f64 = 0.2;
+// Used for estimating pattern selectivity character-by-character. These numbers
+// are not used on their own. Depending on the characters in the pattern, the
+// selectivity is multiplied by these factors.
+//
+// See `FULL_WILDCARD_SEL` and `FIXED_CHAR_SEL` in Postgres.
+const FULL_WILDCARD_SEL_FACTOR: f64 = 5.0;
+const FIXED_CHAR_SEL_FACTOR: f64 = 0.2;
 
 impl<
         M: MostCommonValues + Serialize + DeserializeOwned,
@@ -66,9 +71,9 @@ impl<
                 .chars()
                 .fold(1.0, |acc, c| {
                     if c == '%' {
-                        acc * FULL_WILDCARD_SEL
+                        acc * FULL_WILDCARD_SEL_FACTOR
                     } else {
-                        acc * FIXED_CHAR_SEL
+                        acc * FIXED_CHAR_SEL_FACTOR
                     }
                 })
                 .min(1.0);
@@ -110,7 +115,7 @@ mod tests {
 
     use crate::{
         cost::base_cost::{
-            filter::like::{FIXED_CHAR_SEL, FULL_WILDCARD_SEL},
+            filter::like::{FIXED_CHAR_SEL_FACTOR, FULL_WILDCARD_SEL_FACTOR},
             tests::{
                 create_one_column_cost_model, like, TestDistribution, TestMostCommonValues,
                 TestPerColumnStats, TABLE1_NAME,
@@ -136,15 +141,15 @@ mod tests {
         }];
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_like_selectivity(&like(0, "%abcd%", false), &column_refs),
-            0.1 + FULL_WILDCARD_SEL.powi(2) * FIXED_CHAR_SEL.powi(4)
+            0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(4)
         );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_like_selectivity(&like(0, "%abc%", false), &column_refs),
-            0.1 + 0.1 + FULL_WILDCARD_SEL.powi(2) * FIXED_CHAR_SEL.powi(3)
+            0.1 + 0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(3)
         );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_like_selectivity(&like(0, "%abc%", true), &column_refs),
-            1.0 - (0.1 + 0.1 + FULL_WILDCARD_SEL.powi(2) * FIXED_CHAR_SEL.powi(3))
+            1.0 - (0.1 + 0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(3))
         );
     }
 
@@ -163,11 +168,13 @@ mod tests {
         }];
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_like_selectivity(&like(0, "%abcd%", false), &column_refs),
-            (0.1 + FULL_WILDCARD_SEL.powi(2) * FIXED_CHAR_SEL.powi(4)) * null_frac
+            (0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(4)) * null_frac
         );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_like_selectivity(&like(0, "%abcd%", true), &column_refs),
-            1.0 - (0.1 + FULL_WILDCARD_SEL.powi(2) * FIXED_CHAR_SEL.powi(4)) * null_frac - 0.5
+            1.0 - (0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(4))
+                * null_frac
+                - 0.5
         );
     }
 }
