@@ -13,8 +13,8 @@ use crate::{
         UNIMPLEMENTED_SEL,
     },
     plan_nodes::{
-        BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, InListExpr, LikeExpr, LogOpType,
-        OptRelNode, OptRelNodeRef, OptRelNodeTyp, UnOpType,
+        BinOpType, ColumnRefExpr, ConstantType, InListExpr, LikeExpr, LogOpType, OptRelNode,
+        OptRelNodeRef, OptRelNodeTyp, UnOpType,
     },
     properties::column_ref::{ColumnRef, ColumnRefPropertyBuilder, GroupColumnRefs},
 };
@@ -23,6 +23,7 @@ use super::{
     stats::ColumnCombValue, OptCostModel, DEFAULT_EQ_SEL, DEFAULT_INEQ_SEL, DEFAULT_UNK_SEL,
 };
 
+mod in_list;
 mod like;
 
 impl<
@@ -291,57 +292,6 @@ impl<
             Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
         } else {
             unreachable!("we could have at most pushed left and right into col_ref_exprs")
-        }
-    }
-
-    /// Only support colA in (val1, val2, val3) where colA is a column ref and
-    /// val1, val2, val3 are constants.
-    fn get_in_list_selectivity(&self, expr: &InListExpr, column_refs: &GroupColumnRefs) -> f64 {
-        let child = expr.child();
-
-        // Check child is a column ref.
-        if !matches!(child.typ(), OptRelNodeTyp::ColumnRef) {
-            return UNIMPLEMENTED_SEL;
-        }
-
-        // Check all expressions in the list are constants.
-        let list_exprs = expr.list().to_vec();
-        if list_exprs
-            .iter()
-            .any(|expr| !matches!(expr.typ(), OptRelNodeTyp::Constant(_)))
-        {
-            return UNIMPLEMENTED_SEL;
-        }
-
-        // Convert child and const expressions to concrete types.
-        let col_ref_idx = ColumnRefExpr::from_rel_node(child.into_rel_node())
-            .unwrap()
-            .index();
-        let list_exprs = list_exprs
-            .into_iter()
-            .map(|expr| {
-                ConstantExpr::from_rel_node(expr.into_rel_node())
-                    .expect("we already checked all list elements are constants")
-            })
-            .collect::<Vec<_>>();
-        let negated = expr.negated();
-
-        if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
-            let in_sel = list_exprs
-                .iter()
-                .map(|expr| {
-                    self.get_column_equality_selectivity(table, *col_idx, &expr.value(), true)
-                })
-                .sum::<f64>()
-                .min(1.0);
-            if negated {
-                1.0 - in_sel
-            } else {
-                in_sel
-            }
-        } else {
-            // Child is a derived column.
-            UNIMPLEMENTED_SEL
         }
     }
 
@@ -1056,54 +1006,6 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.7
-        );
-    }
-
-    #[test]
-    fn test_in_list() {
-        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
-            TestMostCommonValues::new(vec![(Value::Int32(1), 0.8), (Value::Int32(2), 0.2)]),
-            2,
-            0.0,
-            Some(TestDistribution::empty()),
-        ));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
-        assert_approx_eq::assert_approx_eq!(
-            cost_model
-                .get_in_list_selectivity(&in_list(0, vec![Value::Int32(1)], false), &column_refs),
-            0.8
-        );
-        assert_approx_eq::assert_approx_eq!(
-            cost_model.get_in_list_selectivity(
-                &in_list(0, vec![Value::Int32(1), Value::Int32(2)], false),
-                &column_refs
-            ),
-            1.0
-        );
-        assert_approx_eq::assert_approx_eq!(
-            cost_model
-                .get_in_list_selectivity(&in_list(0, vec![Value::Int32(3)], false), &column_refs),
-            0.0
-        );
-        assert_approx_eq::assert_approx_eq!(
-            cost_model
-                .get_in_list_selectivity(&in_list(0, vec![Value::Int32(1)], true), &column_refs),
-            0.2
-        );
-        assert_approx_eq::assert_approx_eq!(
-            cost_model.get_in_list_selectivity(
-                &in_list(0, vec![Value::Int32(1), Value::Int32(2)], true),
-                &column_refs
-            ),
-            0.0
-        );
-        assert_approx_eq::assert_approx_eq!(
-            cost_model
-                .get_in_list_selectivity(&in_list(0, vec![Value::Int32(3)], true), &column_refs),
-            1.0
         );
     }
 
