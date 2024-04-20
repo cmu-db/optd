@@ -346,7 +346,7 @@ impl<
 
     /// Compute the selectivity of a (NOT) LIKE expression.
     ///
-    /// The logical is somewhat similar to Postgres but different. Postgres first estimates the histogram part of the
+    /// The logic is somewhat similar to Postgres but different. Postgres first estimates the histogram part of the
     /// population and then add up data for any MCV values. If the histogram is large enough, it just uses the number
     /// of matches in the histogram, otherwise it estimates the fixed prefix and remainder of pattern separately and
     /// combine them.
