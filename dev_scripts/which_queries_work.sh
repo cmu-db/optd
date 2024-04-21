@@ -32,7 +32,7 @@ done
 echo >&2
 echo " Useful Outputs"
 echo "================"
-working_query_ids_vec="pub const WORKING_QUERY_IDS: &[&str] = &[\"${successful_ids[0]\"}"
+working_query_ids_vec="pub const WORKING_QUERY_IDS: &[&str] = &[\"${successful_ids[0]}\""
 IFS=" "
 for id in "${successful_ids[@]:1}"; do
     working_query_ids_vec+=", \"$id\""
