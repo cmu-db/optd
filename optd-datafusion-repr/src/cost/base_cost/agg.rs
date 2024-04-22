@@ -5,6 +5,7 @@ use optd_core::{
     cost::Cost,
     rel_node::RelNode,
 };
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
     cost::{
@@ -17,7 +18,11 @@ use crate::{
 
 use super::{OptCostModel, DEFAULT_UNK_SEL};
 
-impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > OptCostModel<M, D>
+{
     pub(super) fn get_agg_cost(
         &self,
         children: &[Cost],
@@ -64,11 +69,11 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     .map(|col_ref| match col_ref {
                         ColumnRef::BaseTableColumnRef { table, col_idx } => {
                             let table_stats = self.per_table_stats_map.get(table);
-                            let column_stats = table_stats.map(|table_stats| {
-                                table_stats.per_column_stats_vec.get(*col_idx).unwrap()
+                            let column_stats = table_stats.and_then(|table_stats| {
+                                table_stats.column_comb_stats.get(&vec![*col_idx])
                             });
 
-                            if let Some(Some(column_stats)) = column_stats {
+                            if let Some(column_stats) = column_stats {
                                 column_stats.ndistinct as f64
                             } else {
                                 // The column type is not supported or stats are missing.

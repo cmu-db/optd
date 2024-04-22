@@ -2,6 +2,7 @@ use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
     cost::Cost,
 };
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
     cost::base_cost::stats::{Distribution, MostCommonValues},
@@ -10,7 +11,11 @@ use crate::{
 
 use super::{OptCostModel, DEFAULT_UNK_SEL};
 
-impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > OptCostModel<M, D>
+{
     pub(super) fn get_limit_cost(
         children: &[Cost],
         context: Option<RelNodeContext>,

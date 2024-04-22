@@ -11,8 +11,11 @@ use optd_core::{
     cost::{Cost, CostModel},
     rel_node::{RelNode, RelNodeTyp, Value},
 };
+use serde::{de::DeserializeOwned, Serialize};
 
-use super::base_cost::stats::{BaseTableStats, Distribution, MostCommonValues, PerColumnStats};
+use super::base_cost::stats::{
+    BaseTableStats, ColumnCombValueStats, Distribution, MostCommonValues,
+};
 
 fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     model: &C,
@@ -29,7 +32,10 @@ fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
     cost
 }
 
-pub struct OptCostModel<M: MostCommonValues, D: Distribution> {
+pub struct OptCostModel<
+    M: MostCommonValues + Serialize + DeserializeOwned,
+    D: Distribution + Serialize + DeserializeOwned,
+> {
     per_table_stats_map: BaseTableStats<M, D>,
 }
 
@@ -38,8 +44,6 @@ pub struct OptCostModel<M: MostCommonValues, D: Distribution> {
 const DEFAULT_EQ_SEL: f64 = 0.005;
 // Default selectivity estimate for inequalities such as "A < b"
 const DEFAULT_INEQ_SEL: f64 = 0.3333333333333333;
-// Default selectivity estimate for pattern-match operators such as LIKE
-const DEFAULT_MATCH_SEL: f64 = 0.005;
 // Default n-distinct estimate for derived columns or columns lacking statistics
 const DEFAULT_NUM_DISTINCT: u64 = 200;
 // Default selectivity if we have no information
@@ -52,7 +56,11 @@ pub const ROW_COUNT: usize = 1;
 pub const COMPUTE_COST: usize = 2;
 pub const IO_COST: usize = 3;
 
-impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > OptCostModel<M, D>
+{
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
         cost[ROW_COUNT]
     }
@@ -84,7 +92,11 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     }
 }
 
-impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostModel<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > CostModel<OptRelNodeTyp> for OptCostModel<M, D>
+{
     fn explain(&self, cost: &Cost) -> String {
         format!(
             "weighted={},row_cnt={},compute={},io={}",
@@ -180,28 +192,36 @@ impl<M: MostCommonValues, D: Distribution> CostModel<OptRelNodeTyp> for OptCostM
     }
 }
 
-impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > OptCostModel<M, D>
+{
     pub fn new(per_table_stats_map: BaseTableStats<M, D>) -> Self {
         Self {
             per_table_stats_map,
         }
     }
 
-    fn get_per_column_stats_from_col_ref(
+    fn get_single_column_stats_from_col_ref(
         &self,
         col_ref: &ColumnRef,
-    ) -> Option<&PerColumnStats<M, D>> {
+    ) -> Option<&ColumnCombValueStats<M, D>> {
         if let ColumnRef::BaseTableColumnRef { table, col_idx } = col_ref {
-            self.get_per_column_stats(table, *col_idx)
+            self.get_column_comb_stats(table, &[*col_idx])
         } else {
             None
         }
     }
 
-    fn get_per_column_stats(&self, table: &str, col_idx: usize) -> Option<&PerColumnStats<M, D>> {
+    fn get_column_comb_stats(
+        &self,
+        table: &str,
+        col_comb: &[usize],
+    ) -> Option<&ColumnCombValueStats<M, D>> {
         self.per_table_stats_map
             .get(table)
-            .and_then(|per_table_stats| per_table_stats.per_column_stats_vec[col_idx].as_ref())
+            .and_then(|per_table_stats| per_table_stats.column_comb_stats.get(col_comb))
     }
 }
 
@@ -212,24 +232,27 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
 mod tests {
     use itertools::Itertools;
     use optd_core::rel_node::Value;
+    use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
 
     use crate::{
         cost::base_cost::stats::*,
         plan_nodes::{
             BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, InListExpr,
-            LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
+            LikeExpr, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
         },
     };
 
     use super::*;
-    pub type TestPerColumnStats = PerColumnStats<TestMostCommonValues, TestDistribution>;
+    pub type TestPerColumnStats = ColumnCombValueStats<TestMostCommonValues, TestDistribution>;
     pub type TestOptCostModel = OptCostModel<TestMostCommonValues, TestDistribution>;
 
+    #[derive(Serialize, Deserialize)]
     pub struct TestMostCommonValues {
-        pub mcvs: HashMap<Value, f64>,
+        pub mcvs: HashMap<Vec<Option<Value>>, f64>,
     }
 
+    #[derive(Serialize, Deserialize)]
     pub struct TestDistribution {
         cdfs: HashMap<Value, f64>,
     }
@@ -237,7 +260,10 @@ mod tests {
     impl TestMostCommonValues {
         pub fn new(mcvs_vec: Vec<(Value, f64)>) -> Self {
             Self {
-                mcvs: mcvs_vec.into_iter().collect(),
+                mcvs: mcvs_vec
+                    .into_iter()
+                    .map(|(v, freq)| (vec![Some(v)], freq))
+                    .collect(),
             }
         }
 
@@ -247,7 +273,7 @@ mod tests {
     }
 
     impl MostCommonValues for TestMostCommonValues {
-        fn freq(&self, value: &Value) -> Option<f64> {
+        fn freq(&self, value: &ColumnCombValue) -> Option<f64> {
             self.mcvs.get(value).copied()
         }
 
@@ -255,7 +281,7 @@ mod tests {
             self.mcvs.values().sum()
         }
 
-        fn freq_over_pred(&self, pred: Box<dyn Fn(&Value) -> bool>) -> f64 {
+        fn freq_over_pred(&self, pred: Box<dyn Fn(&ColumnCombValue) -> bool>) -> f64 {
             self.mcvs
                 .iter()
                 .filter(|(val, _)| pred(val))
@@ -294,7 +320,7 @@ mod tests {
         OptCostModel::new(
             vec![(
                 String::from(TABLE1_NAME),
-                PerTableStats::new(100, vec![Some(per_column_stats)]),
+                TableStats::new(100, vec![(vec![0], per_column_stats)].into_iter().collect()),
             )]
             .into_iter()
             .collect(),
@@ -325,11 +351,17 @@ mod tests {
             vec![
                 (
                     String::from(TABLE1_NAME),
-                    PerTableStats::new(tbl1_row_cnt, vec![Some(tbl1_per_column_stats)]),
+                    TableStats::new(
+                        tbl1_row_cnt,
+                        vec![(vec![0], tbl1_per_column_stats)].into_iter().collect(),
+                    ),
                 ),
                 (
                     String::from(TABLE2_NAME),
-                    PerTableStats::new(tbl2_row_cnt, vec![Some(tbl2_per_column_stats)]),
+                    TableStats::new(
+                        tbl2_row_cnt,
+                        vec![(vec![0], tbl2_per_column_stats)].into_iter().collect(),
+                    ),
                 ),
             ]
             .into_iter()
@@ -391,6 +423,15 @@ mod tests {
         )
     }
 
+    pub fn like(col_ref_idx: u64, pattern: &str, negated: bool) -> LikeExpr {
+        LikeExpr::new(
+            negated,
+            false,
+            Expr::from_rel_node(col_ref(col_ref_idx)).unwrap(),
+            Expr::from_rel_node(cnst(Value::String(pattern.into()))).unwrap(),
+        )
+    }
+
     /// The reason this isn't an associated function of PerColumnStats is because that would require
     ///   adding an empty() function to the trait definitions of MostCommonValues and Distribution,
     ///   which I wanted to avoid
@@ -399,7 +440,7 @@ mod tests {
             TestMostCommonValues::empty(),
             0,
             0.0,
-            TestDistribution::empty(),
+            Some(TestDistribution::empty()),
         )
     }
 }

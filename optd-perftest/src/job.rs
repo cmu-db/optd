@@ -10,7 +10,11 @@ use std::path::{Path, PathBuf};
 
 const JOB_KIT_REPO_URL: &str = "https://github.com/wangpatrick57/job-kit.git";
 const JOB_TABLES_URL: &str = "https://homepages.cwi.nl/~boncz/job/imdb.tgz";
-pub const WORKING_QUERY_IDS: &[&str] = &["1a", "1b"];
+pub const WORKING_QUERY_IDS: &[&str] = &[
+    "1a", "1b", "1c", "1d", "2a", "2b", "2c", "2d", "3a", "3b", "3c", "4a", "4b", "4c", "5a", "5b",
+    "5c", "6a", "6b", "6c", "6d", "8a", "8b", "8c", "8d", "10a", "10b", "10c", "12a", "12b", "12c",
+    "13a", "14a",
+];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JobConfig {

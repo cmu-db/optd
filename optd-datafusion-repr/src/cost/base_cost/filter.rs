@@ -5,22 +5,32 @@ use optd_core::{
     cost::Cost,
     rel_node::Value,
 };
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
-    cost::{
-        base_cost::stats::{Distribution, MostCommonValues, PerColumnStats},
-        base_cost::{DEFAULT_MATCH_SEL, UNIMPLEMENTED_SEL},
+    cost::base_cost::{
+        stats::{ColumnCombValueStats, Distribution, MostCommonValues},
+        UNIMPLEMENTED_SEL,
     },
     plan_nodes::{
-        BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, InListExpr, LogOpType, OptRelNode,
+        BinOpType, ColumnRefExpr, ConstantType, InListExpr, LikeExpr, LogOpType, OptRelNode,
         OptRelNodeRef, OptRelNodeTyp, UnOpType,
     },
     properties::column_ref::{ColumnRef, ColumnRefPropertyBuilder, GroupColumnRefs},
 };
 
-use super::{OptCostModel, DEFAULT_EQ_SEL, DEFAULT_INEQ_SEL, DEFAULT_UNK_SEL};
+use super::{
+    stats::ColumnCombValue, OptCostModel, DEFAULT_EQ_SEL, DEFAULT_INEQ_SEL, DEFAULT_UNK_SEL,
+};
 
-impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
+mod in_list;
+mod like;
+
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > OptCostModel<M, D>
+{
     pub(super) fn get_filter_cost(
         &self,
         children: &[Cost],
@@ -106,7 +116,10 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             }
             OptRelNodeTyp::Between => UNIMPLEMENTED_SEL,
             OptRelNodeTyp::Cast => unimplemented!("check bool type or else panic"),
-            OptRelNodeTyp::Like => DEFAULT_MATCH_SEL,
+            OptRelNodeTyp::Like => {
+                let like_expr = LikeExpr::from_rel_node(expr_tree).unwrap();
+                self.get_like_selectivity(&like_expr, column_refs)
+            }
             OptRelNodeTyp::DataType(_) => {
                 panic!("the selectivity of a data type is not defined")
             }
@@ -282,57 +295,6 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         }
     }
 
-    /// Only support colA in (val1, val2, val3) where colA is a column ref and
-    /// val1, val2, val3 are constants.
-    fn get_in_list_selectivity(&self, expr: &InListExpr, column_refs: &GroupColumnRefs) -> f64 {
-        let child = expr.child();
-
-        // Check child is a column ref.
-        if !matches!(child.typ(), OptRelNodeTyp::ColumnRef) {
-            return UNIMPLEMENTED_SEL;
-        }
-
-        // Check all expressions in the list are constants.
-        let list_exprs = expr.list().to_vec();
-        if list_exprs
-            .iter()
-            .any(|expr| !matches!(expr.typ(), OptRelNodeTyp::Constant(_)))
-        {
-            return UNIMPLEMENTED_SEL;
-        }
-
-        // Convert child and const expressions to concrete types.
-        let col_ref_idx = ColumnRefExpr::from_rel_node(child.into_rel_node())
-            .unwrap()
-            .index();
-        let list_exprs = list_exprs
-            .into_iter()
-            .map(|expr| {
-                ConstantExpr::from_rel_node(expr.into_rel_node())
-                    .expect("we already checked all list elements are constants")
-            })
-            .collect::<Vec<_>>();
-        let negated = expr.negated();
-
-        if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
-            let in_sel = list_exprs
-                .iter()
-                .map(|expr| {
-                    self.get_column_equality_selectivity(table, *col_idx, &expr.value(), true)
-                })
-                .sum::<f64>()
-                .min(1.0);
-            if negated {
-                1.0 - in_sel
-            } else {
-                in_sel
-            }
-        } else {
-            // Child is a derived column.
-            UNIMPLEMENTED_SEL
-        }
-    }
-
     /// Get the selectivity of an expression of the form "column equals value" (or "value equals column")
     /// Will handle the case of statistics missing
     /// Equality predicates are handled entirely differently from range predicates so this is its own function
@@ -346,24 +308,24 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         value: &Value,
         is_eq: bool,
     ) -> f64 {
-        let ret_freq = if let Some(per_column_stats) = self.get_per_column_stats(table, col_idx) {
-            let eq_freq = if let Some(freq) = per_column_stats.mcvs.freq(value) {
+        let ret_freq = if let Some(column_stats) = self.get_column_comb_stats(table, &[col_idx]) {
+            let eq_freq = if let Some(freq) = column_stats.mcvs.freq(&vec![Some(value.clone())]) {
                 freq
             } else {
-                let non_mcv_freq = 1.0 - per_column_stats.mcvs.total_freq();
+                let non_mcv_freq = 1.0 - column_stats.mcvs.total_freq();
                 // always safe because usize is at least as large as i32
-                let ndistinct_as_usize = per_column_stats.ndistinct as usize;
-                let non_mcv_cnt = ndistinct_as_usize - per_column_stats.mcvs.cnt();
+                let ndistinct_as_usize = column_stats.ndistinct as usize;
+                let non_mcv_cnt = ndistinct_as_usize - column_stats.mcvs.cnt();
                 if non_mcv_cnt == 0 {
                     return 0.0;
                 }
                 // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
-                (non_mcv_freq - per_column_stats.null_frac) / (non_mcv_cnt as f64)
+                (non_mcv_freq - column_stats.null_frac) / (non_mcv_cnt as f64)
             };
             if is_eq {
                 eq_freq
             } else {
-                1.0 - eq_freq - per_column_stats.null_frac
+                1.0 - eq_freq - column_stats.null_frac
             }
         } else {
             #[allow(clippy::collapsible_else_if)]
@@ -382,12 +344,15 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     }
 
     /// Compute the frequency of values in a column less than or equal to the given value.
-    fn get_column_leq_value_freq(per_column_stats: &PerColumnStats<M, D>, value: &Value) -> f64 {
+    fn get_column_leq_value_freq(
+        per_column_stats: &ColumnCombValueStats<M, D>,
+        value: &Value,
+    ) -> f64 {
         // because distr does not include the values in MCVs, we need to compute the CDFs there as well
         // because nulls return false in any comparison, they are never included when computing range selectivity
-        let distr_leq_freq = per_column_stats.distr.cdf(value);
+        let distr_leq_freq = per_column_stats.distr.as_ref().unwrap().cdf(value);
         let value = value.clone();
-        let pred = Box::new(move |val: &Value| val <= &value);
+        let pred = Box::new(move |val: &ColumnCombValue| *val[0].as_ref().unwrap() <= value);
         let mcvs_leq_freq = per_column_stats.mcvs.freq_over_pred(pred);
         let ret_freq = distr_leq_freq + mcvs_leq_freq;
         assert!(
@@ -401,14 +366,14 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     /// Compute the frequency of values in a column less than the given value.
     fn get_column_lt_value_freq(
         &self,
-        per_column_stats: &PerColumnStats<M, D>,
+        column_stats: &ColumnCombValueStats<M, D>,
         table: &str,
         col_idx: usize,
         value: &Value,
     ) -> f64 {
         // depending on whether value is in mcvs or not, we use different logic to turn total_lt_cdf into total_leq_cdf
         // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
-        let ret_freq = Self::get_column_leq_value_freq(per_column_stats, value)
+        let ret_freq = Self::get_column_leq_value_freq(column_stats, value)
             - self.get_column_equality_selectivity(table, col_idx, value, true);
         assert!(
             (0.0..=1.0).contains(&ret_freq),
@@ -430,19 +395,19 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         start: Bound<&Value>,
         end: Bound<&Value>,
     ) -> f64 {
-        if let Some(per_column_stats) = self.get_per_column_stats(table, col_idx) {
+        if let Some(column_stats) = self.get_column_comb_stats(table, &[col_idx]) {
             let left_quantile = match start {
                 Bound::Unbounded => 0.0,
                 Bound::Included(value) => {
-                    self.get_column_lt_value_freq(per_column_stats, table, col_idx, value)
+                    self.get_column_lt_value_freq(column_stats, table, col_idx, value)
                 }
-                Bound::Excluded(value) => Self::get_column_leq_value_freq(per_column_stats, value),
+                Bound::Excluded(value) => Self::get_column_leq_value_freq(column_stats, value),
             };
             let right_quantile = match end {
                 Bound::Unbounded => 1.0,
-                Bound::Included(value) => Self::get_column_leq_value_freq(per_column_stats, value),
+                Bound::Included(value) => Self::get_column_leq_value_freq(column_stats, value),
                 Bound::Excluded(value) => {
-                    self.get_column_lt_value_freq(per_column_stats, table, col_idx, value)
+                    self.get_column_lt_value_freq(column_stats, table, col_idx, value)
                 }
             };
             assert!(
@@ -452,7 +417,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 right_quantile
             );
             // `Distribution` does not account for NULL values, so the selectivity is smaller than frequency.
-            (right_quantile - left_quantile) * (1.0 - per_column_stats.null_frac)
+            (right_quantile - left_quantile) * (1.0 - column_stats.null_frac)
         } else {
             DEFAULT_INEQ_SEL
         }
@@ -503,7 +468,7 @@ mod tests {
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
             0.0,
-            TestDistribution::empty(),
+            Some(TestDistribution::empty()),
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(1)), col_ref(0));
@@ -527,7 +492,7 @@ mod tests {
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)]),
             5,
             0.0,
-            TestDistribution::empty(),
+            Some(TestDistribution::empty()),
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
@@ -551,7 +516,7 @@ mod tests {
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.2), (Value::Int32(3), 0.44)]),
             5,
             0.03,
-            TestDistribution::empty(),
+            Some(TestDistribution::empty()),
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
@@ -576,7 +541,7 @@ mod tests {
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
             0.0,
-            TestDistribution::empty(),
+            Some(TestDistribution::empty()),
         ));
         let expr_tree = bin_op(BinOpType::Neq, col_ref(0), cnst(Value::Int32(1)));
         let expr_tree_rev = bin_op(BinOpType::Neq, cnst(Value::Int32(1)), col_ref(0));
@@ -600,7 +565,7 @@ mod tests {
             TestMostCommonValues::empty(),
             10,
             0.0,
-            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+            Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
@@ -624,7 +589,7 @@ mod tests {
             TestMostCommonValues::empty(),
             10,
             0.1,
-            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+            Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
@@ -647,17 +612,17 @@ mod tests {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
-                    (Value::Int32(6), 0.05),
-                    (Value::Int32(10), 0.1),
-                    (Value::Int32(17), 0.08),
-                    (Value::Int32(25), 0.07),
+                    (vec![Some(Value::Int32(6))], 0.05),
+                    (vec![Some(Value::Int32(10))], 0.1),
+                    (vec![Some(Value::Int32(17))], 0.08),
+                    (vec![Some(Value::Int32(25))], 0.07),
                 ]
                 .into_iter()
                 .collect(),
             },
             10,
             0.0,
-            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+            Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
@@ -686,7 +651,7 @@ mod tests {
             ]),
             10,
             0.0,
-            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+            Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
@@ -710,7 +675,7 @@ mod tests {
             TestMostCommonValues::empty(),
             10,
             0.0,
-            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+            Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
@@ -734,7 +699,7 @@ mod tests {
             TestMostCommonValues::empty(),
             9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
             0.1,
-            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+            Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
@@ -757,17 +722,17 @@ mod tests {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
-                    (Value::Int32(6), 0.05),
-                    (Value::Int32(10), 0.1),
-                    (Value::Int32(17), 0.08),
-                    (Value::Int32(25), 0.07),
+                    (vec![Some(Value::Int32(6))], 0.05),
+                    (vec![Some(Value::Int32(10))], 0.1),
+                    (vec![Some(Value::Int32(17))], 0.08),
+                    (vec![Some(Value::Int32(25))], 0.07),
                 ]
                 .into_iter()
                 .collect(),
             },
             11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
             0.0,
-            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+            Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
@@ -790,17 +755,17 @@ mod tests {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
-                    (Value::Int32(6), 0.05),
-                    (Value::Int32(10), 0.1),
-                    (Value::Int32(15), 0.08),
-                    (Value::Int32(25), 0.07),
+                    (vec![Some(Value::Int32(6))], 0.05),
+                    (vec![Some(Value::Int32(10))], 0.1),
+                    (vec![Some(Value::Int32(15))], 0.08),
+                    (vec![Some(Value::Int32(25))], 0.07),
                 ]
                 .into_iter()
                 .collect(),
             },
             11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
             0.0,
-            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+            Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
@@ -826,7 +791,7 @@ mod tests {
             TestMostCommonValues::empty(),
             10,
             0.0,
-            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+            Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
@@ -850,7 +815,7 @@ mod tests {
             TestMostCommonValues::empty(),
             10,
             0.1,
-            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+            Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
@@ -875,7 +840,7 @@ mod tests {
             TestMostCommonValues::empty(),
             10,
             0.0,
-            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+            Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
@@ -899,7 +864,7 @@ mod tests {
             TestMostCommonValues::empty(),
             9, // 90% of the values aren't nulls since null_frac = 0.1. if there are 9 distinct non-null values, each will have 0.1 frequency
             0.1,
-            TestDistribution::new(vec![(Value::Int32(15), 0.7)]),
+            Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
@@ -923,16 +888,16 @@ mod tests {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
-                    (Value::Int32(1), 0.3),
-                    (Value::Int32(5), 0.5),
-                    (Value::Int32(8), 0.2),
+                    (vec![Some(Value::Int32(1))], 0.3),
+                    (vec![Some(Value::Int32(5))], 0.5),
+                    (vec![Some(Value::Int32(8))], 0.2),
                 ]
                 .into_iter()
                 .collect(),
             },
             0,
             0.0,
-            TestDistribution::empty(),
+            Some(TestDistribution::empty()),
         ));
         let eq1 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
         let eq5 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(5)));
@@ -963,16 +928,16 @@ mod tests {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues {
                 mcvs: vec![
-                    (Value::Int32(1), 0.3),
-                    (Value::Int32(5), 0.5),
-                    (Value::Int32(8), 0.2),
+                    (vec![Some(Value::Int32(1))], 0.3),
+                    (vec![Some(Value::Int32(5))], 0.5),
+                    (vec![Some(Value::Int32(8))], 0.2),
                 ]
                 .into_iter()
                 .collect(),
             },
             0,
             0.0,
-            TestDistribution::empty(),
+            Some(TestDistribution::empty()),
         ));
         let eq1 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
         let eq5 = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(5)));
@@ -1004,7 +969,7 @@ mod tests {
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
             0.0,
-            TestDistribution::empty(),
+            Some(TestDistribution::empty()),
         ));
         let expr_tree = un_op(
             UnOpType::Not,
@@ -1026,7 +991,7 @@ mod tests {
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
             0.1,
-            TestDistribution::empty(),
+            Some(TestDistribution::empty()),
         ));
         let expr_tree = un_op(
             UnOpType::Not,
@@ -1041,54 +1006,6 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.7
-        );
-    }
-
-    #[test]
-    fn test_in_list() {
-        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
-            TestMostCommonValues::new(vec![(Value::Int32(1), 0.8), (Value::Int32(2), 0.2)]),
-            2,
-            0.0,
-            TestDistribution::empty(),
-        ));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
-        assert_approx_eq::assert_approx_eq!(
-            cost_model
-                .get_in_list_selectivity(&in_list(0, vec![Value::Int32(1)], false), &column_refs),
-            0.8
-        );
-        assert_approx_eq::assert_approx_eq!(
-            cost_model.get_in_list_selectivity(
-                &in_list(0, vec![Value::Int32(1), Value::Int32(2)], false),
-                &column_refs
-            ),
-            1.0
-        );
-        assert_approx_eq::assert_approx_eq!(
-            cost_model
-                .get_in_list_selectivity(&in_list(0, vec![Value::Int32(3)], false), &column_refs),
-            0.0
-        );
-        assert_approx_eq::assert_approx_eq!(
-            cost_model
-                .get_in_list_selectivity(&in_list(0, vec![Value::Int32(1)], true), &column_refs),
-            0.2
-        );
-        assert_approx_eq::assert_approx_eq!(
-            cost_model.get_in_list_selectivity(
-                &in_list(0, vec![Value::Int32(1), Value::Int32(2)], true),
-                &column_refs
-            ),
-            0.0
-        );
-        assert_approx_eq::assert_approx_eq!(
-            cost_model
-                .get_in_list_selectivity(&in_list(0, vec![Value::Int32(3)], true), &column_refs),
-            1.0
         );
     }
 

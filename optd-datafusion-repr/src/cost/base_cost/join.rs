@@ -3,11 +3,12 @@ use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
     cost::Cost,
 };
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
-    cost::{
-        base_cost::stats::{Distribution, MostCommonValues},
-        base_cost::DEFAULT_NUM_DISTINCT,
+    cost::base_cost::{
+        stats::{Distribution, MostCommonValues},
+        DEFAULT_NUM_DISTINCT,
     },
     plan_nodes::{
         BinOpType, ColumnRefExpr, Expr, ExprList, JoinType, LogOpExpr, LogOpType, OptRelNode,
@@ -18,7 +19,11 @@ use crate::{
 
 use super::{OptCostModel, DEFAULT_UNK_SEL};
 
-impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
+impl<
+        M: MostCommonValues + Serialize + DeserializeOwned,
+        D: Distribution + Serialize + DeserializeOwned,
+    > OptCostModel<M, D>
+{
     pub(super) fn get_nlj_cost(
         &self,
         join_typ: JoinType,
@@ -67,6 +72,9 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 optimizer.get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
             let left_keys_group_id = context.children_group_ids[2];
             let right_keys_group_id = context.children_group_ids[3];
+            let left_col_cnt = optimizer
+                .get_property_by_group::<ColumnRefPropertyBuilder>(context.children_group_ids[0], 1)
+                .len();
             let left_keys_list = optimizer.get_all_group_bindings(left_keys_group_id, false);
             let right_keys_list = optimizer.get_all_group_bindings(right_keys_group_id, false);
             // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
@@ -81,6 +89,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 &column_refs,
                 row_cnt_1,
                 row_cnt_2,
+                left_col_cnt,
             )
         } else {
             DEFAULT_UNK_SEL
@@ -93,6 +102,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
     }
 
     /// A wrapper to convert the join keys to the format expected by get_join_selectivity_core()
+    #[allow(clippy::too_many_arguments)]
     fn get_join_selectivity_from_keys(
         &self,
         join_typ: JoinType,
@@ -101,6 +111,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         column_refs: &GroupColumnRefs,
         left_row_cnt: f64,
         right_row_cnt: f64,
+        left_col_cnt: usize,
     ) -> f64 {
         assert!(left_keys.len() == right_keys.len());
         // I assume that the keys are already in the right order s.t. the ith key of left_keys corresponds with the ith key of right_keys
@@ -124,10 +135,18 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
             column_refs,
             left_row_cnt,
             right_row_cnt,
+            left_col_cnt,
         )
     }
 
     /// The core logic of join selectivity which assumes we've already separated the expression into the on conditions and the filters
+    /// Hash join and NLJ reference right table columns differently, hence the `right_col_ref_offset` parameter.
+    /// For hash join, the right table columns indices are with respect to the right table,
+    ///   which means #0 is the first column of the right table.
+    /// For NLJ, the right table columns indices are with respect to the output of the join.
+    ///   For example, if the left table has 3 columns, the first column of the right table
+    ///   is #3 instead of #0.
+    #[allow(clippy::too_many_arguments)]
     fn get_join_selectivity_core(
         &self,
         join_typ: JoinType,
@@ -136,8 +155,14 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         column_refs: &GroupColumnRefs,
         left_row_cnt: f64,
         right_row_cnt: f64,
+        right_col_ref_offset: usize,
     ) -> f64 {
-        let join_on_selectivity = self.get_join_on_selectivity(&on_col_ref_pairs, column_refs);
+        let join_on_selectivity =
+            self.get_join_on_selectivity(&on_col_ref_pairs, column_refs, right_col_ref_offset);
+        println!(
+            "l: {:.2}, r: {:.2}, sel: {:.2}",
+            left_row_cnt, right_row_cnt, join_on_selectivity
+        );
         // Currently, there is no difference in how we handle a join filter and a select filter, so we use the same function
         // One difference (that we *don't* care about right now) is that join filters can contain expressions from multiple
         //   different tables. Currently, this doesn't affect the get_filter_selectivity() function, but this may change in
@@ -205,6 +230,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                 column_refs,
                 left_row_cnt,
                 right_row_cnt,
+                0,
             )
         } else {
             #[allow(clippy::collapsible_else_if)]
@@ -217,6 +243,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     column_refs,
                     left_row_cnt,
                     right_row_cnt,
+                    0,
                 )
             } else {
                 self.get_join_selectivity_core(
@@ -226,6 +253,7 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
                     column_refs,
                     left_row_cnt,
                     right_row_cnt,
+                    0,
                 )
             }
         }
@@ -286,18 +314,23 @@ impl<M: MostCommonValues, D: Distribution> OptCostModel<M, D> {
         &self,
         on_col_ref_pairs: &[(ColumnRefExpr, ColumnRefExpr)],
         column_refs: &GroupColumnRefs,
+        right_col_ref_offset: usize,
     ) -> f64 {
         // multiply the selectivities of all individual conditions together
         on_col_ref_pairs.iter().map(|on_col_ref_pair| {
             // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
-            let ndistincts = vec![&on_col_ref_pair.0, &on_col_ref_pair.1].into_iter().map(|on_col_ref_expr| {
-                match self.get_per_column_stats_from_col_ref(&column_refs[on_col_ref_expr.index()]) {
-                    Some(per_col_stats) => per_col_stats.ndistinct,
+            let ndistincts = vec![on_col_ref_pair.0.index(), on_col_ref_pair.1.index() + right_col_ref_offset].into_iter().map(|col_index| {
+                println!("col: {:?}", column_refs[col_index]);
+                match self.get_single_column_stats_from_col_ref(&column_refs[col_index]) {
+                    Some(per_col_stats) => {
+                        per_col_stats.ndistinct
+                    },
                     None => DEFAULT_NUM_DISTINCT,
                 }
             });
             // using reduce(f64::min) is the idiomatic workaround to min() because f64 does not implement Ord due to NaN
             let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
+            println!("selectivity: {:?}", selectivity);
             assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
             selectivity
         }).product()
@@ -375,13 +408,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
         );
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
@@ -419,13 +452,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
         );
         let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
@@ -465,13 +498,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
         );
         let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
@@ -511,13 +544,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
         );
         let neq12 = bin_op(BinOpType::Neq, col_ref(0), cnst(Value::Int32(12)));
@@ -557,13 +590,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
         );
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(0));
@@ -688,13 +721,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             5,
             4,
@@ -754,13 +787,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 5,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             10,
             8,
@@ -821,13 +854,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 10,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 2,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             20,
             4,
@@ -888,13 +921,13 @@ mod tests {
                 TestMostCommonValues::empty(),
                 50,
                 0.0,
-                TestDistribution::new(vec![(Value::Int32(128), 0.4)]),
+                Some(TestDistribution::new(vec![(Value::Int32(128), 0.4)])),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
                 4,
                 0.0,
-                TestDistribution::empty(),
+                Some(TestDistribution::empty()),
             ),
             50,
             4,
