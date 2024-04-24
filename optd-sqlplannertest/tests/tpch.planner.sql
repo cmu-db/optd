@@ -627,29 +627,29 @@ PhysicalSort
         │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
         │           └── #23
         ├── groups: [ #41 ]
-        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #36 ], right_keys: [ #0 ] }
-            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #19, #3 ], right_keys: [ #0, #3 ] }
-            │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
-            │   │   ├── PhysicalScan { table: customer }
-            │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-            │   │       ├── PhysicalFilter
-            │   │       │   ├── cond:And
-            │   │       │   │   ├── Geq
-            │   │       │   │   │   ├── #4
-            │   │       │   │   │   └── Cast { cast_to: Date32, expr: "2023-01-01" }
-            │   │       │   │   └── Lt
-            │   │       │   │       ├── #4
-            │   │       │   │       └── Cast { cast_to: Date32, expr: "2024-01-01" }
-            │   │       │   └── PhysicalScan { table: orders }
-            │   │       └── PhysicalScan { table: lineitem }
-            │   └── PhysicalScan { table: supplier }
-            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
-                ├── PhysicalScan { table: nation }
-                └── PhysicalFilter
-                    ├── cond:Eq
-                    │   ├── #1
-                    │   └── "Asia"
-                    └── PhysicalScan { table: region }
+        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #19, #3 ], right_keys: [ #0, #3 ] }
+            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
+            │   ├── PhysicalScan { table: customer }
+            │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+            │       ├── PhysicalFilter
+            │       │   ├── cond:And
+            │       │   │   ├── Geq
+            │       │   │   │   ├── #4
+            │       │   │   │   └── Cast { cast_to: Date32, expr: "2023-01-01" }
+            │       │   │   └── Lt
+            │       │   │       ├── #4
+            │       │   │       └── Cast { cast_to: Date32, expr: "2024-01-01" }
+            │       │   └── PhysicalScan { table: orders }
+            │       └── PhysicalScan { table: lineitem }
+            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #3 ], right_keys: [ #0 ] }
+                ├── PhysicalScan { table: supplier }
+                └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
+                    ├── PhysicalScan { table: nation }
+                    └── PhysicalFilter
+                        ├── cond:Eq
+                        │   ├── #1
+                        │   └── "Asia"
+                        └── PhysicalScan { table: region }
 */
 
 -- TPC-H Q6
