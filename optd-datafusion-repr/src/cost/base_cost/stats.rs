@@ -14,6 +14,7 @@ use optd_gungnir::stats::{
     tdigest::{self, TDigest},
 };
 use ordered_float::OrderedFloat;
+use rayon::prelude::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 // The "standard" concrete types that optd currently uses.
@@ -275,20 +276,23 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         hlls: &mut [HyperLogLog<ColumnCombValue>],
         null_counts: &mut [i32],
     ) {
-        for (idx, column_comb) in column_combs.iter().enumerate() {
-            // TODO(Alexis): Redundant copy.
-            let filtered_nulls: Vec<ColumnCombValue> = column_comb
-                .iter()
-                .filter(|row| row.iter().any(|val| val.is_some()))
-                .cloned()
-                .collect();
-            let nb_rows: i32 = column_comb.len() as i32;
+        column_combs
+            .par_iter()
+            .zip(mgs)
+            .zip(hlls)
+            .zip(null_counts)
+            .for_each(|(((column_comb, mg), hll), count)| {
+                let filtered_nulls: Vec<ColumnCombValue> = column_comb
+                    .iter()
+                    .filter(|row| row.iter().any(|val| val.is_some()))
+                    .cloned()
+                    .collect();
+                let nb_rows = column_comb.len() as i32;
 
-            null_counts[idx] += nb_rows - filtered_nulls.len() as i32;
-
-            mgs[idx].aggregate(&filtered_nulls);
-            hlls[idx].aggregate(&filtered_nulls);
-        }
+                *count += nb_rows - filtered_nulls.len() as i32;
+                mg.aggregate(&filtered_nulls);
+                hll.aggregate(&filtered_nulls);
+            });
     }
 
     fn generate_full_stats(
@@ -297,25 +301,28 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         distrs: &mut [Option<TDigest<Value>>],
         row_counts: &mut [i32],
     ) {
-        for (idx, column_comb) in column_combs.iter().enumerate() {
-            let nb_rows: i32 = column_comb.len() as i32;
-            row_counts[idx] += nb_rows;
+        column_combs
+            .par_iter()
+            .zip(cnts)
+            .zip(distrs)
+            .zip(row_counts)
+            .for_each(|(((column_comb, cnt), distr), count)| {
+                let nb_rows = column_comb.len() as i32;
+                *count += nb_rows;
+                cnt.aggregate(column_comb);
 
-            cnts[idx].aggregate(column_comb);
-            if let Some(distr) = &mut distrs[idx] {
-                // TODO(Alexis): Redundant copy.
-                // We project it down to 1D, as we do not support nD TDigests.
-                let single_col_filtered = column_comb
-                    .iter()
-                    .filter(|row| !cnts[idx].is_tracking(row))
-                    .filter_map(|row| row[0].as_ref())
-                    .cloned()
-                    .collect_vec();
+                if let Some(d) = distr.as_mut() {
+                    let filtered_values: Vec<_> = column_comb
+                        .iter()
+                        .filter(|row| !cnt.is_tracking(row))
+                        .filter_map(|row| row.get(0).and_then(|v| v.as_ref()))
+                        .cloned()
+                        .collect();
 
-                distr.norm_weight += nb_rows as usize;
-                distr.merge_values(&single_col_filtered);
-            }
-        }
+                    d.norm_weight += nb_rows as usize;
+                    d.merge_values(&filtered_values);
+                }
+            });
     }
 
     pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
