@@ -446,18 +446,24 @@ mod tests {
     use crate::{
         cost::base_cost::tests::*,
         plan_nodes::{BinOpType, LogOpType, UnOpType},
-        properties::column_ref::ColumnRef,
+        properties::column_ref::{ColumnRef, GroupColumnRefs},
     };
 
     #[test]
     fn test_const() {
         let cost_model = create_one_column_cost_model(get_empty_per_col_stats());
         assert_approx_eq::assert_approx_eq!(
-            cost_model.get_filter_selectivity(cnst(Value::Bool(true)), &vec![]),
+            cost_model.get_filter_selectivity(
+                cnst(Value::Bool(true)),
+                &GroupColumnRefs::new(vec![], None)
+            ),
             1.0
         );
         assert_approx_eq::assert_approx_eq!(
-            cost_model.get_filter_selectivity(cnst(Value::Bool(false)), &vec![]),
+            cost_model.get_filter_selectivity(
+                cnst(Value::Bool(false)),
+                &GroupColumnRefs::new(vec![], None)
+            ),
             0.0
         );
     }
@@ -472,10 +478,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(1)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.3
@@ -496,10 +505,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.12
@@ -520,10 +532,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.11
@@ -545,10 +560,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Neq, col_ref(0), cnst(Value::Int32(1)));
         let expr_tree_rev = bin_op(BinOpType::Neq, cnst(Value::Int32(1)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             1.0 - 0.3
@@ -569,10 +587,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.7
@@ -593,10 +614,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.7 * 0.9
@@ -626,10 +650,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.85
@@ -655,10 +682,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.93
@@ -679,10 +709,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.6
@@ -703,10 +736,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.6 * 0.9
@@ -736,10 +772,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.75
@@ -769,10 +808,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.85
@@ -795,10 +837,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             1.0 - 0.7
@@ -819,10 +864,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             (1.0 - 0.7) * 0.9
@@ -844,10 +892,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             1.0 - 0.6
@@ -868,10 +919,13 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         // we have to add 0.1 since it's Geq
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
@@ -905,10 +959,13 @@ mod tests {
         let expr_tree = log_op(LogOpType::And, vec![eq1.clone(), eq5.clone(), eq8.clone()]);
         let expr_tree_shift1 = log_op(LogOpType::And, vec![eq5.clone(), eq8.clone(), eq1.clone()]);
         let expr_tree_shift2 = log_op(LogOpType::And, vec![eq8.clone(), eq1.clone(), eq5.clone()]);
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.03
@@ -945,10 +1002,13 @@ mod tests {
         let expr_tree = log_op(LogOpType::Or, vec![eq1.clone(), eq5.clone(), eq8.clone()]);
         let expr_tree_shift1 = log_op(LogOpType::Or, vec![eq5.clone(), eq8.clone(), eq1.clone()]);
         let expr_tree_shift2 = log_op(LogOpType::Or, vec![eq8.clone(), eq1.clone(), eq5.clone()]);
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.72
@@ -975,10 +1035,13 @@ mod tests {
             UnOpType::Not,
             bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1))),
         );
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree, &column_refs),
             0.7
@@ -997,10 +1060,13 @@ mod tests {
             UnOpType::Not,
             bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1))),
         );
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         // not doesn't care about nulls. it just reverses the selectivity
         // for instance, != _will not_ include nulls but "NOT ==" _will_ include nulls
         assert_approx_eq::assert_approx_eq!(

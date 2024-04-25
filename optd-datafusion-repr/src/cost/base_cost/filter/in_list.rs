@@ -82,7 +82,7 @@ mod tests {
             create_one_column_cost_model, in_list, TestDistribution, TestMostCommonValues,
             TestPerColumnStats, TABLE1_NAME,
         },
-        properties::column_ref::ColumnRef,
+        properties::column_ref::{ColumnRef, GroupColumnRefs},
     };
 
     #[test]
@@ -93,10 +93,13 @@ mod tests {
             0.0,
             Some(TestDistribution::empty()),
         ));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model
                 .get_in_list_selectivity(&in_list(0, vec![Value::Int32(1)], false), &column_refs),

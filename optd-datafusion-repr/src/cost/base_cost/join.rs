@@ -74,6 +74,7 @@ impl<
             let right_keys_group_id = context.children_group_ids[3];
             let left_col_cnt = optimizer
                 .get_property_by_group::<ColumnRefPropertyBuilder>(context.children_group_ids[0], 1)
+                .column_refs
                 .len();
             let left_keys_list = optimizer.get_all_group_bindings(left_keys_group_id, false);
             let right_keys_list = optimizer.get_all_group_bindings(right_keys_group_id, false);
@@ -159,10 +160,6 @@ impl<
     ) -> f64 {
         let join_on_selectivity =
             self.get_join_on_selectivity(&on_col_ref_pairs, column_refs, right_col_ref_offset);
-        println!(
-            "l: {:.2}, r: {:.2}, sel: {:.2}",
-            left_row_cnt, right_row_cnt, join_on_selectivity
-        );
         // Currently, there is no difference in how we handle a join filter and a select filter, so we use the same function
         // One difference (that we *don't* care about right now) is that join filters can contain expressions from multiple
         //   different tables. Currently, this doesn't affect the get_filter_selectivity() function, but this may change in
@@ -320,7 +317,6 @@ impl<
         on_col_ref_pairs.iter().map(|on_col_ref_pair| {
             // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
             let ndistincts = vec![on_col_ref_pair.0.index(), on_col_ref_pair.1.index() + right_col_ref_offset].into_iter().map(|col_index| {
-                println!("col: {:?}", column_refs[col_index]);
                 match self.get_single_column_stats_from_col_ref(&column_refs[col_index]) {
                     Some(per_col_stats) => {
                         per_col_stats.ndistinct
@@ -383,7 +379,7 @@ mod tests {
             cost_model.get_join_selectivity_from_expr_tree(
                 JoinType::Inner,
                 cnst(Value::Bool(true)),
-                &vec![],
+                &GroupColumnRefs::new(vec![], None),
                 f64::NAN,
                 f64::NAN
             ),
@@ -393,7 +389,7 @@ mod tests {
             cost_model.get_join_selectivity_from_expr_tree(
                 JoinType::Inner,
                 cnst(Value::Bool(false)),
-                &vec![],
+                &GroupColumnRefs::new(vec![], None),
                 f64::NAN,
                 f64::NAN
             ),
@@ -419,16 +415,19 @@ mod tests {
         );
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new(
+            vec![
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE1_NAME),
+                    col_idx: 0,
+                },
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE2_NAME),
+                    col_idx: 0,
+                },
+            ],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
             0.2
@@ -439,7 +438,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree_rev,
-                &column_refs
+                &column_refs,
             ),
             0.2
         );
@@ -465,16 +464,19 @@ mod tests {
         let eq1and0 = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let expr_tree = log_op(LogOpType::And, vec![eq0and1.clone(), eq1and0.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq1and0.clone(), eq0and1.clone()]);
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new(
+            vec![
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE1_NAME),
+                    col_idx: 0,
+                },
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE2_NAME),
+                    col_idx: 0,
+                },
+            ],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
             0.04
@@ -511,16 +513,19 @@ mod tests {
         let eq100 = bin_op(BinOpType::Eq, col_ref(1), cnst(Value::Int32(100)));
         let expr_tree = log_op(LogOpType::And, vec![eq0and1.clone(), eq100.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq100.clone(), eq0and1.clone()]);
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new(
+            vec![
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE1_NAME),
+                    col_idx: 0,
+                },
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE2_NAME),
+                    col_idx: 0,
+                },
+            ],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
             0.05
@@ -557,16 +562,19 @@ mod tests {
         let eq100 = bin_op(BinOpType::Eq, col_ref(1), cnst(Value::Int32(100)));
         let expr_tree = log_op(LogOpType::And, vec![neq12.clone(), eq100.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq100.clone(), neq12.clone()]);
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new(
+            vec![
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE1_NAME),
+                    col_idx: 0,
+                },
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE2_NAME),
+                    col_idx: 0,
+                },
+            ],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
             0.2
@@ -600,16 +608,19 @@ mod tests {
             ),
         );
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(0));
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new(
+            vec![
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE1_NAME),
+                    col_idx: 0,
+                },
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE2_NAME),
+                    col_idx: 0,
+                },
+            ],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
             DEFAULT_EQ_SEL
@@ -735,16 +746,19 @@ mod tests {
         // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new(
+            vec![
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE1_NAME),
+                    col_idx: 0,
+                },
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE2_NAME),
+                    col_idx: 0,
+                },
+            ],
+            None,
+        );
         // sanity check the expected inner sel
         let expected_inner_sel = 0.2;
         assert_approx_eq::assert_approx_eq!(
@@ -801,16 +815,19 @@ mod tests {
         // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new(
+            vec![
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE1_NAME),
+                    col_idx: 0,
+                },
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE2_NAME),
+                    col_idx: 0,
+                },
+            ],
+            None,
+        );
         // sanity check the expected inner sel
         let expected_inner_sel = 0.2;
         assert_approx_eq::assert_approx_eq!(
@@ -868,16 +885,19 @@ mod tests {
         // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new(
+            vec![
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE1_NAME),
+                    col_idx: 0,
+                },
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE2_NAME),
+                    col_idx: 0,
+                },
+            ],
+            None,
+        );
         // sanity check the expected inner sel
         let expected_inner_sel = 0.1;
         assert_approx_eq::assert_approx_eq!(
@@ -939,16 +959,19 @@ mod tests {
         let expr_tree = log_op(LogOpType::And, vec![eq0and1, filter.clone()]);
         // inner rev means its the inner expr (the eq op) whose children are being reversed, as opposed to the and op
         let expr_tree_inner_rev = log_op(LogOpType::And, vec![eq1and0, filter.clone()]);
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new(
+            vec![
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE1_NAME),
+                    col_idx: 0,
+                },
+                ColumnRef::BaseTableColumnRef {
+                    table: String::from(TABLE2_NAME),
+                    col_idx: 0,
+                },
+            ],
+            None,
+        );
         // sanity check the expected inner sel
         let expected_inner_sel = 0.008;
         assert_approx_eq::assert_approx_eq!(

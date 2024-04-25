@@ -121,7 +121,7 @@ mod tests {
                 TestPerColumnStats, TABLE1_NAME,
             },
         },
-        properties::column_ref::ColumnRef,
+        properties::column_ref::{ColumnRef, GroupColumnRefs},
     };
 
     #[test]
@@ -135,10 +135,13 @@ mod tests {
             0.0,
             Some(TestDistribution::empty()),
         ));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_like_selectivity(&like(0, "%abcd%", false), &column_refs),
             0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(4)
@@ -162,10 +165,13 @@ mod tests {
             null_frac,
             Some(TestDistribution::empty()),
         ));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new(
+            vec![ColumnRef::BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            }],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_like_selectivity(&like(0, "%abcd%", false), &column_refs),
             (0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(4)) * null_frac

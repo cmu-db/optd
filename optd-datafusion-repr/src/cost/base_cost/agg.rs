@@ -61,9 +61,10 @@ impl<
             } else {
                 // Multiply the n-distinct of all the group by columns.
                 // TODO: improve with multi-dimensional n-distinct
-                let base_table_col_refs = optimizer
+                let group_col_refs = optimizer
                     .get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
-                base_table_col_refs
+                group_col_refs
+                    .column_refs
                     .iter()
                     .take(group_by.len())
                     .map(|col_ref| match col_ref {
