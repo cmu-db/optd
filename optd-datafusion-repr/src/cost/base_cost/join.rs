@@ -76,7 +76,7 @@ impl<
             let right_keys_group_id = context.children_group_ids[3];
             let left_col_cnt = optimizer
                 .get_property_by_group::<ColumnRefPropertyBuilder>(context.children_group_ids[0], 1)
-                .column_refs
+                .column_refs()
                 .len();
             let left_keys_list = optimizer.get_all_group_bindings(left_keys_group_id, false);
             let right_keys_list = optimizer.get_all_group_bindings(right_keys_group_id, false);
@@ -380,7 +380,7 @@ mod tests {
             cost_model.get_join_selectivity_from_expr_tree(
                 JoinType::Inner,
                 cnst(Value::Bool(true)),
-                &GroupColumnRefs::new(vec![], None),
+                &GroupColumnRefs::new_test(vec![], None),
                 f64::NAN,
                 f64::NAN
             ),
@@ -390,7 +390,7 @@ mod tests {
             cost_model.get_join_selectivity_from_expr_tree(
                 JoinType::Inner,
                 cnst(Value::Bool(false)),
-                &GroupColumnRefs::new(vec![], None),
+                &GroupColumnRefs::new_test(vec![], None),
                 f64::NAN,
                 f64::NAN
             ),
@@ -416,7 +416,7 @@ mod tests {
         );
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
                 ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
@@ -459,7 +459,7 @@ mod tests {
         let eq1and0 = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let expr_tree = log_op(LogOpType::And, vec![eq0and1.clone(), eq1and0.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq1and0.clone(), eq0and1.clone()]);
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
                 ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
@@ -502,7 +502,7 @@ mod tests {
         let eq100 = bin_op(BinOpType::Eq, col_ref(1), cnst(Value::Int32(100)));
         let expr_tree = log_op(LogOpType::And, vec![eq0and1.clone(), eq100.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq100.clone(), eq0and1.clone()]);
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
                 ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
@@ -545,7 +545,7 @@ mod tests {
         let eq100 = bin_op(BinOpType::Eq, col_ref(1), cnst(Value::Int32(100)));
         let expr_tree = log_op(LogOpType::And, vec![neq12.clone(), eq100.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq100.clone(), neq12.clone()]);
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
                 ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
@@ -585,7 +585,7 @@ mod tests {
             ),
         );
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
                 ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
@@ -717,7 +717,7 @@ mod tests {
         // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
                 ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
@@ -780,7 +780,7 @@ mod tests {
         // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
                 ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
@@ -844,7 +844,7 @@ mod tests {
         // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
                 ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
@@ -912,7 +912,7 @@ mod tests {
         let expr_tree = log_op(LogOpType::And, vec![eq0and1, filter.clone()]);
         // inner rev means its the inner expr (the eq op) whose children are being reversed, as opposed to the and op
         let expr_tree_inner_rev = log_op(LogOpType::And, vec![eq1and0, filter.clone()]);
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
                 ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),

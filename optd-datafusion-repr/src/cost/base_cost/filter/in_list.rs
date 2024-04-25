@@ -95,7 +95,7 @@ mod tests {
             0.0,
             Some(TestDistribution::empty()),
         ));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,

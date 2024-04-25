@@ -459,14 +459,14 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(
                 cnst(Value::Bool(true)),
-                &GroupColumnRefs::new(vec![], None)
+                &GroupColumnRefs::new_test(vec![], None)
             ),
             1.0
         );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(
                 cnst(Value::Bool(false)),
-                &GroupColumnRefs::new(vec![], None)
+                &GroupColumnRefs::new_test(vec![], None)
             ),
             0.0
         );
@@ -482,7 +482,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(1)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -509,7 +509,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -536,7 +536,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -564,7 +564,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Neq, col_ref(0), cnst(Value::Int32(1)));
         let expr_tree_rev = bin_op(BinOpType::Neq, cnst(Value::Int32(1)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -591,7 +591,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -618,7 +618,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -654,7 +654,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -686,7 +686,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -713,7 +713,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -740,7 +740,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -776,7 +776,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -812,7 +812,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -841,7 +841,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -868,7 +868,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -896,7 +896,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -923,7 +923,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -963,7 +963,7 @@ mod tests {
         let expr_tree = log_op(LogOpType::And, vec![eq1.clone(), eq5.clone(), eq8.clone()]);
         let expr_tree_shift1 = log_op(LogOpType::And, vec![eq5.clone(), eq8.clone(), eq1.clone()]);
         let expr_tree_shift2 = log_op(LogOpType::And, vec![eq8.clone(), eq1.clone(), eq5.clone()]);
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -1006,7 +1006,7 @@ mod tests {
         let expr_tree = log_op(LogOpType::Or, vec![eq1.clone(), eq5.clone(), eq8.clone()]);
         let expr_tree_shift1 = log_op(LogOpType::Or, vec![eq5.clone(), eq8.clone(), eq1.clone()]);
         let expr_tree_shift2 = log_op(LogOpType::Or, vec![eq8.clone(), eq1.clone(), eq5.clone()]);
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -1039,7 +1039,7 @@ mod tests {
             UnOpType::Not,
             bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1))),
         );
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,
@@ -1064,7 +1064,7 @@ mod tests {
             UnOpType::Not,
             bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1))),
         );
-        let column_refs = GroupColumnRefs::new(
+        let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
                 0,

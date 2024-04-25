@@ -132,16 +132,46 @@ impl EqBaseTableColumnSets {
 
 #[derive(Clone, Debug)]
 pub struct GroupColumnRefs {
-    pub column_refs: Vec<ColumnRef>,
-    pub correlation: Option<SemanticCorrelation>,
+    column_refs: Vec<ColumnRef>,
+    /// Correlation of the output of the group. Used to build the logical property.
+    output_correlation: Option<SemanticCorrelation>,
+    /// Correlation of the input of the group. It can only be `Some` for plan nodes.
+    input_correlation: Option<SemanticCorrelation>,
 }
 
 impl GroupColumnRefs {
-    pub fn new(column_refs: Vec<ColumnRef>, correlation: Option<SemanticCorrelation>) -> Self {
+    pub fn new(
+        column_refs: Vec<ColumnRef>,
+        output_correlation: Option<SemanticCorrelation>,
+        input_correlation: Option<SemanticCorrelation>,
+    ) -> Self {
         Self {
             column_refs,
-            correlation,
+            output_correlation,
+            input_correlation,
         }
+    }
+
+    #[cfg(test)]
+    // There's no need for `output_correlation` in tests, since it's only used
+    // when driving the property from children.
+    pub fn new_test(
+        column_refs: Vec<ColumnRef>,
+        input_correlation: Option<SemanticCorrelation>,
+    ) -> Self {
+        Self {
+            column_refs,
+            output_correlation: None,
+            input_correlation,
+        }
+    }
+
+    pub fn column_refs(&self) -> &[ColumnRef] {
+        &self.column_refs
+    }
+
+    pub fn input_correlation(&self) -> Option<&SemanticCorrelation> {
+        self.input_correlation.as_ref()
     }
 }
 
@@ -190,7 +220,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 let column_refs = (0..column_cnt)
                     .map(|i| ColumnRef::base_table_column_ref(table_name.clone(), i))
                     .collect();
-                GroupColumnRefs::new(column_refs, None)
+                GroupColumnRefs::new(column_refs, None, None)
             }
             OptRelNodeTyp::EmptyRelation => {
                 let data = data.unwrap().as_slice();
@@ -201,7 +231,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 let column_refs = (0..column_cnt)
                     .map(|i| ColumnRef::base_table_column_ref(DEFAULT_NAME.to_string(), i))
                     .collect();
-                GroupColumnRefs::new(column_refs, None)
+                GroupColumnRefs::new(column_refs, None, None)
             }
             OptRelNodeTyp::ColumnRef => {
                 let col_ref_idx = data.unwrap().as_u64();
@@ -210,12 +240,12 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 let column_refs = vec![ColumnRef::ChildColumnRef {
                     col_idx: usize_col_ref_idx,
                 }];
-                GroupColumnRefs::new(column_refs, None)
+                GroupColumnRefs::new(column_refs, None, None)
             }
             OptRelNodeTyp::List => {
                 // Concatentate the children column refs.
                 let column_refs = Self::concat_children_col_refs(children);
-                GroupColumnRefs::new(column_refs, None)
+                GroupColumnRefs::new(column_refs, None, None)
             }
             OptRelNodeTyp::LogOp(op_type) => {
                 let column_refs = vec![ColumnRef::Derived];
@@ -227,7 +257,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                             for child in children {
                                 if let Some(SemanticCorrelation {
                                     eq_column: EqColumns::EqColumnIdxPairs(pairs),
-                                }) = &child.correlation
+                                }) = &child.output_correlation
                                 {
                                     eq_column_idx_pairs.extend(pairs.iter());
                                 }
@@ -239,7 +269,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                         _ => None,
                     }
                 };
-                GroupColumnRefs::new(column_refs, correlation)
+                GroupColumnRefs::new(column_refs, correlation, None)
             }
             OptRelNodeTyp::Projection => {
                 let child = children[0];
@@ -256,47 +286,59 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                     })
                     .collect();
                 // Projection keeps the semantic correlations of the children.
-                GroupColumnRefs::new(column_refs, child.correlation.clone())
+                GroupColumnRefs::new(
+                    column_refs,
+                    child.output_correlation.clone(),
+                    child.output_correlation.clone(),
+                )
             }
             // Should account for all physical join types.
             OptRelNodeTyp::Join(join_type) => {
                 // Concatenate left and right children column refs.
                 let column_refs = Self::concat_children_col_refs(&children[0..2]);
-                let correlation = match join_type {
+                // Merge the equal columns of two children as input correlation.
+                let children_eq_columns = {
+                    let left = children[0].output_correlation.as_ref();
+                    let right = children[1].output_correlation.as_ref();
+                    match (left, right) {
+                        (
+                            Some(SemanticCorrelation {
+                                eq_column: EqColumns::EqBaseTableColumnSets(left),
+                            }),
+                            Some(SemanticCorrelation {
+                                eq_column: EqColumns::EqBaseTableColumnSets(right),
+                            }),
+                        ) => EqBaseTableColumnSets::union(left, right),
+                        (
+                            Some(SemanticCorrelation {
+                                eq_column: EqColumns::EqBaseTableColumnSets(left),
+                            }),
+                            None,
+                        ) => left.clone(),
+                        (
+                            None,
+                            Some(SemanticCorrelation {
+                                eq_column: EqColumns::EqBaseTableColumnSets(right),
+                            }),
+                        ) => right.clone(),
+                        _ => EqBaseTableColumnSets::new(),
+                    }
+                };
+                let mut eq_columns = children_eq_columns.clone();
+                let input_correlation = Some(SemanticCorrelation {
+                    eq_column: EqColumns::EqBaseTableColumnSets(children_eq_columns),
+                });
+
+                // If the join type is inner or cross, merge the equal columns in the join condition
+                // into the those from the children.
+                //
+                // Otherwise be conservative and discard all correlations.
+                let output_correlation = match join_type {
                     JoinType::Inner | JoinType::Cross => {
                         // Merge the equal columns in the join condition into the those from the children.
-                        // Step 1: merge the equal columns of two children.
-                        let mut eq_columns = {
-                            let left = children[0].correlation.as_ref();
-                            let right = children[1].correlation.as_ref();
-                            match (left, right) {
-                                (
-                                    Some(SemanticCorrelation {
-                                        eq_column: EqColumns::EqBaseTableColumnSets(left),
-                                    }),
-                                    Some(SemanticCorrelation {
-                                        eq_column: EqColumns::EqBaseTableColumnSets(right),
-                                    }),
-                                ) => EqBaseTableColumnSets::union(left, right),
-                                (
-                                    Some(SemanticCorrelation {
-                                        eq_column: EqColumns::EqBaseTableColumnSets(left),
-                                    }),
-                                    None,
-                                ) => left.clone(),
-                                (
-                                    None,
-                                    Some(SemanticCorrelation {
-                                        eq_column: EqColumns::EqBaseTableColumnSets(right),
-                                    }),
-                                ) => right.clone(),
-                                _ => EqBaseTableColumnSets::new(),
-                            }
-                        };
-                        // Step 2: merge join condition into children's equal columns.
                         if let Some(SemanticCorrelation {
                             eq_column: EqColumns::EqColumnIdxPairs(pairs),
-                        }) = &children[2].correlation
+                        }) = &children[2].output_correlation
                         {
                             for (l_col_idx, r_col_idx) in pairs {
                                 let l_col_ref = &column_refs[*l_col_idx];
@@ -317,13 +359,14 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                     }
                     _ => None,
                 };
-                // println!(
-                //     "left: {:#?}, right: {:#?}, join condition: {:#?}, new correlation: {:#?}",
-                //     children[0], children[1], children[2], correlation
-                // );
-                GroupColumnRefs::new(column_refs, correlation)
+                println!(
+                    "left: {:?}\n right: {:?}\n join condition: {:?}\n input correlation: {:#?} \n output correlation: {:#?}",
+                    children[0], children[1], children[2], input_correlation, output_correlation
+                );
+                GroupColumnRefs::new(column_refs, output_correlation, input_correlation)
             }
             OptRelNodeTyp::Agg => {
+                let child = children[0];
                 // Group by columns first.
                 let mut group_by_col_refs: Vec<_> = children[2]
                     .column_refs
@@ -333,14 +376,14 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                             ColumnRef::ChildColumnRef { col_idx } => *col_idx,
                             _ => panic!("group by expr must be ColumnRef"),
                         };
-                        children[0].column_refs[col_idx].clone()
+                        child.column_refs[col_idx].clone()
                     })
                     .collect();
                 // Then the aggregate expressions. These columns, (e.g. SUM, COUNT, etc.) are derived columns.
                 let agg_expr_cnt = children[1].column_refs.len();
                 group_by_col_refs.extend((0..agg_expr_cnt).map(|_| ColumnRef::Derived));
                 // Aggregation clears all semantic correlations.
-                GroupColumnRefs::new(group_by_col_refs, None)
+                GroupColumnRefs::new(group_by_col_refs, None, child.output_correlation.clone())
             }
             OptRelNodeTyp::Filter
             | OptRelNodeTyp::Sort
@@ -375,14 +418,14 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                     }
                     _ => None,
                 };
-                GroupColumnRefs::new(column_refs, correlation)
+                GroupColumnRefs::new(column_refs, correlation, None)
             }
             OptRelNodeTyp::Constant(_)
             | OptRelNodeTyp::Func(_)
             | OptRelNodeTyp::DataType(_)
             | OptRelNodeTyp::Between
             | OptRelNodeTyp::Like
-            | OptRelNodeTyp::InList => GroupColumnRefs::new(vec![ColumnRef::Derived], None),
+            | OptRelNodeTyp::InList => GroupColumnRefs::new(vec![ColumnRef::Derived], None, None),
             _ => unimplemented!("Unsupported rel node type {:?}", typ),
         }
     }
