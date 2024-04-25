@@ -2862,6 +2862,7 @@ dependencies = [
  "itertools 0.11.0",
  "lazy_static",
  "optd-core",
+ "ordered-float 4.2.0",
  "rand 0.8.5",
  "serde",
  "serde_with",

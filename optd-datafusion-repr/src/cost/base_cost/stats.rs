@@ -7,14 +7,11 @@ use datafusion::arrow::array::{
 };
 use itertools::Itertools;
 use optd_core::rel_node::{SerializableOrderedF64, Value};
-use optd_gungnir::{
-    stats::{
-        counter::Counter,
-        hyperloglog::{self, HyperLogLog},
-        misragries::{self, MisraGries},
-        tdigest::{self, TDigest},
-    },
-    utils::arith_encoder,
+use optd_gungnir::stats::{
+    counter::Counter,
+    hyperloglog::{self, HyperLogLog},
+    misragries::{self, MisraGries},
+    tdigest::{self, TDigest},
 };
 use ordered_float::OrderedFloat;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -22,7 +19,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 // The "standard" concrete types that optd currently uses.
 // All of optd (except unit tests) must use the same types.
 pub type DataFusionMostCommonValues = Counter<Vec<Option<Value>>>;
-pub type DataFusionDistribution = TDigest;
+pub type DataFusionDistribution = TDigest<Value>;
 
 pub type DataFusionBaseTableStats =
     BaseTableStats<DataFusionMostCommonValues, DataFusionDistribution>;
@@ -40,27 +37,14 @@ pub trait Distribution: 'static + Send + Sync {
     fn cdf(&self, value: &Value) -> f64;
 }
 
-fn value_to_float(val: &Value) -> f64 {
-    match val {
-        Value::UInt8(v) => *v as f64,
-        Value::UInt16(v) => *v as f64,
-        Value::UInt32(v) => *v as f64,
-        Value::UInt64(v) => *v as f64,
-        Value::Int8(v) => *v as f64,
-        Value::Int16(v) => *v as f64,
-        Value::Int32(v) => *v as f64,
-        Value::Int64(v) => *v as f64,
-        Value::Float(v) => *v.0,
-        Value::Bool(v) => *v as i64 as f64,
-        Value::String(v) => arith_encoder::encode(v),
-        Value::Date32(v) => *v as f64,
-        _ => unreachable!(),
-    }
-}
-
-impl Distribution for TDigest {
+impl Distribution for TDigest<Value> {
     fn cdf(&self, value: &Value) -> f64 {
-        self.cdf(value_to_float(value))
+        let nb_rows = self.norm_weight;
+        if nb_rows == 0 {
+            self.cdf(value)
+        } else {
+            self.centroids.len() as f64 * self.cdf(value) / nb_rows as f64
+        }
     }
 }
 
@@ -161,7 +145,7 @@ impl<
 
 pub type BaseTableStats<M, D> = HashMap<String, TableStats<M, D>>;
 
-impl TableStats<Counter<ColumnCombValue>, TDigest> {
+impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
     fn is_type_supported(data_type: &DataType) -> bool {
         matches!(
             data_type,
@@ -288,9 +272,8 @@ impl TableStats<Counter<ColumnCombValue>, TDigest> {
     fn generate_partial_stats(
         column_combs: &[Vec<ColumnCombValue>],
         mgs: &mut [MisraGries<ColumnCombValue>],
-        hlls: &mut [HyperLogLog],
+        hlls: &mut [HyperLogLog<ColumnCombValue>],
         null_counts: &mut [i32],
-        row_counts: &mut [i32],
     ) {
         for (idx, column_comb) in column_combs.iter().enumerate() {
             // TODO(Alexis): Redundant copy.
@@ -302,7 +285,6 @@ impl TableStats<Counter<ColumnCombValue>, TDigest> {
             let nb_rows: i32 = column_comb.len() as i32;
 
             null_counts[idx] += nb_rows - filtered_nulls.len() as i32;
-            row_counts[idx] += nb_rows;
 
             mgs[idx].aggregate(&filtered_nulls);
             hlls[idx].aggregate(&filtered_nulls);
@@ -312,25 +294,26 @@ impl TableStats<Counter<ColumnCombValue>, TDigest> {
     fn generate_full_stats(
         column_combs: &[Vec<ColumnCombValue>],
         cnts: &mut [Counter<ColumnCombValue>],
-        distrs: &mut [Option<TDigest>],
+        distrs: &mut [Option<TDigest<Value>>],
+        row_counts: &mut [i32],
     ) {
         for (idx, column_comb) in column_combs.iter().enumerate() {
-            // TODO(Alexis): Redundant copy.
-            // Here, we filter out mfks, so it's guaranteed to never be null.
-            let filtered_mfks: Vec<ColumnCombValue> = column_comb
-                .iter()
-                .filter(|row| cnts[idx].is_tracking(row))
-                .cloned()
-                .collect();
+            let nb_rows: i32 = column_comb.len() as i32;
+            row_counts[idx] += nb_rows;
 
-            cnts[idx].aggregate(&filtered_mfks);
-            if let Some(distr) = distrs[idx].take() {
+            cnts[idx].aggregate(column_comb);
+            if let Some(distr) = &mut distrs[idx] {
+                // TODO(Alexis): Redundant copy.
                 // We project it down to 1D, as we do not support nD TDigests.
-                let mut single_col_f64 = filtered_mfks
+                let single_col_filtered = column_comb
                     .iter()
-                    .map(|row| value_to_float(row[0].as_ref().unwrap()))
+                    .filter(|row| !cnts[idx].is_tracking(row))
+                    .filter_map(|row| row[0].as_ref())
+                    .cloned()
                     .collect_vec();
-                distrs[idx] = Some(distr.merge_values(&mut single_col_f64));
+
+                distr.norm_weight += nb_rows as usize;
+                distr.merge_values(&single_col_filtered);
             }
         }
     }
@@ -356,11 +339,10 @@ impl TableStats<Counter<ColumnCombValue>, TDigest> {
             });
         }
 
-        // 1. FIRST PASS: hlls + mgs + null_cnts + row_cnts.
+        // 1. FIRST PASS: hlls + mgs + null_cnts.
         let mut hlls = vec![HyperLogLog::new(hyperloglog::DEFAULT_PRECISION); nb_stats];
         let mut mgs = vec![MisraGries::new(misragries::DEFAULT_K_TO_TRACK); nb_stats];
         let mut null_cnts = vec![0; nb_stats];
-        let mut row_cnts = vec![0; nb_stats]; // All the same, but more convenient like this.
 
         for batch in batch_iter {
             let batch = batch?;
@@ -369,11 +351,10 @@ impl TableStats<Counter<ColumnCombValue>, TDigest> {
                 &mut mgs,
                 &mut hlls,
                 &mut null_cnts,
-                &mut row_cnts,
             );
         }
 
-        // 2. SECOND PASS:  MCV + TDigest.
+        // 2. SECOND PASS:  MCV + TDigest + row_cnts.
         let batch_iter = batch_iter_builder()?;
         let mut distrs = comb_stat_types
             .iter()
@@ -389,6 +370,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest> {
                 Counter::new(&mfk)
             })
             .collect_vec();
+        let mut row_cnts = vec![0; nb_stats]; // All the same, but more convenient like this.
 
         for batch in batch_iter {
             let batch = batch?;
@@ -396,6 +378,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest> {
                 &Self::get_column_combs(&batch, &comb_stat_types),
                 &mut cnts,
                 &mut distrs,
+                &mut row_cnts,
             );
         }
 

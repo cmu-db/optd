@@ -44,8 +44,6 @@ pub struct OptCostModel<
 const DEFAULT_EQ_SEL: f64 = 0.005;
 // Default selectivity estimate for inequalities such as "A < b"
 const DEFAULT_INEQ_SEL: f64 = 0.3333333333333333;
-// Default selectivity estimate for pattern-match operators such as LIKE
-const DEFAULT_MATCH_SEL: f64 = 0.005;
 // Default n-distinct estimate for derived columns or columns lacking statistics
 const DEFAULT_NUM_DISTINCT: u64 = 200;
 // Default selectivity if we have no information
@@ -241,7 +239,7 @@ mod tests {
         cost::base_cost::stats::*,
         plan_nodes::{
             BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, InListExpr,
-            LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
+            LikeExpr, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
         },
     };
 
@@ -422,6 +420,15 @@ mod tests {
                     .collect_vec(),
             ),
             negated,
+        )
+    }
+
+    pub fn like(col_ref_idx: u64, pattern: &str, negated: bool) -> LikeExpr {
+        LikeExpr::new(
+            negated,
+            false,
+            Expr::from_rel_node(col_ref(col_ref_idx)).unwrap(),
+            Expr::from_rel_node(cnst(Value::String(pattern.into()))).unwrap(),
         )
     }
 
