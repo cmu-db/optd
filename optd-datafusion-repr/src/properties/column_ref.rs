@@ -6,12 +6,12 @@ use optd_core::property::PropertyBuilder;
 use union_find::disjoint_sets::DisjointSets;
 use union_find::union_find::UnionFind;
 
-use crate::plan_nodes::{EmptyRelationData, OptRelNodeTyp};
+use crate::plan_nodes::{BinOpType, EmptyRelationData, JoinType, LogOpType, OptRelNodeTyp};
 
 use super::schema::Catalog;
 use super::DEFAULT_NAME;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct BaseTableColumnRef {
     pub table: String,
     pub col_idx: usize,
@@ -41,63 +41,92 @@ impl ColumnRef {
 /// `SemanticCorrelation` represents the semantic correlation between columns in a
 /// query. "Semantic" means that the columns are correlated based on the
 /// semantics of the query, not the statistics.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct SemanticCorrelation {
-    eq_column_sets: EqColumnSets,
+    eq_column: EqColumns,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug)]
+pub enum EqColumns {
+    /// Equal columns denoted by sets of base table columns,
+    /// e.g. t1.c1 = t2.c2 = t3.c3.
+    EqBaseTableColumnSets(EqBaseTableColumnSets),
+    /// Equal columns denoted by pairs of column indices. This is for keeping
+    /// track of the column indices in the filter/join predicates, which only
+    /// contains relative column indices.
+    ///
+    /// It is only used when building the property. It should NEVER be used when
+    /// computing cost.
+    EqColumnIdxPairs(Vec<(usize, usize)>),
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct EqPredicate {
-    left: usize,
-    right: usize,
+    left: BaseTableColumnRef,
+    right: BaseTableColumnRef,
 }
 
 impl EqPredicate {
-    pub fn new(left: usize, right: usize) -> Self {
-        Self {
-            left: left.min(right),
-            right: left.max(right),
-        }
+    pub fn new(left: BaseTableColumnRef, right: BaseTableColumnRef) -> Self {
+        Self { left, right }
     }
 
-    pub fn left(&self) -> usize {
-        self.left
+    pub fn left(&self) -> &BaseTableColumnRef {
+        &self.left
     }
 
-    pub fn right(&self) -> usize {
-        self.right
+    pub fn right(&self) -> &BaseTableColumnRef {
+        &self.right
     }
 }
 
-/// A disjoint set of columns with equal values in the same row, along with the
-/// predicates that define the equality.
-#[derive(Clone, Debug, Default)]
-pub struct EqColumnSets {
-    eq_cols: DisjointSets<usize>,
+/// A disjoint set of base table columns with equal values in the same row,
+/// along with the predicates that define the equality.
+#[derive(Clone, Debug)]
+pub struct EqBaseTableColumnSets {
+    disjoint_eq_col_sets: DisjointSets<BaseTableColumnRef>,
     eq_predicates: HashSet<EqPredicate>,
 }
 
-impl EqColumnSets {
-    pub fn add_predicate(&mut self, predicate: EqPredicate) {
-        self.eq_predicates.insert(predicate);
+impl EqBaseTableColumnSets {
+    fn new() -> Self {
+        Self {
+            disjoint_eq_col_sets: DisjointSets::new(),
+            eq_predicates: HashSet::new(),
+        }
+    }
 
+    pub fn add_predicate(&mut self, predicate: EqPredicate) {
         let left = predicate.left();
         let right = predicate.right();
+
         // Add the indices to the set if they do not exist.
-        if !self.eq_cols.contains(left) {
-            self.eq_cols
-                .make_set(left)
+        if !self.disjoint_eq_col_sets.contains(left) {
+            self.disjoint_eq_col_sets
+                .make_set(left.clone())
                 .expect("just checked left column index does not exist");
         }
-        if !self.eq_cols.contains(right) {
-            self.eq_cols
-                .make_set(right)
+        if !self.disjoint_eq_col_sets.contains(right) {
+            self.disjoint_eq_col_sets
+                .make_set(right.clone())
                 .expect("just checked right column index does not exist");
         }
         // Union the columns.
-        self.eq_cols
+        self.disjoint_eq_col_sets
             .union(left, right)
             .expect("both column indices should exist");
+
+        // Keep track of the predicate.
+        self.eq_predicates.insert(predicate);
+    }
+
+    pub fn union(x: &EqBaseTableColumnSets, y: &EqBaseTableColumnSets) -> EqBaseTableColumnSets {
+        let mut eq_col_sets = Self::new();
+        // TODO: one redundant clone here.
+        for predicate in x.eq_predicates.union(&y.eq_predicates).cloned() {
+            eq_col_sets.add_predicate(predicate);
+        }
+        eq_col_sets
     }
 }
 
@@ -188,10 +217,29 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 let column_refs = Self::concat_children_col_refs(children);
                 GroupColumnRefs::new(column_refs, None)
             }
-            OptRelNodeTyp::LogOp(_) => {
-                // Concatentate the children column refs.
-                let column_refs = Self::concat_children_col_refs(children);
-                GroupColumnRefs::new(column_refs, None)
+            OptRelNodeTyp::LogOp(op_type) => {
+                let column_refs = vec![ColumnRef::Derived];
+                // For AND, combine the eq columns of each child expression.
+                let correlation = {
+                    match op_type {
+                        LogOpType::And => {
+                            let mut eq_column_idx_pairs = Vec::new();
+                            for child in children {
+                                if let Some(SemanticCorrelation {
+                                    eq_column: EqColumns::EqColumnIdxPairs(pairs),
+                                }) = &child.correlation
+                                {
+                                    eq_column_idx_pairs.extend(pairs.iter());
+                                }
+                            }
+                            Some(SemanticCorrelation {
+                                eq_column: EqColumns::EqColumnIdxPairs(eq_column_idx_pairs),
+                            })
+                        }
+                        _ => None,
+                    }
+                };
+                GroupColumnRefs::new(column_refs, correlation)
             }
             OptRelNodeTyp::Projection => {
                 let child = children[0];
@@ -211,10 +259,69 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 GroupColumnRefs::new(column_refs, child.correlation.clone())
             }
             // Should account for all physical join types.
-            OptRelNodeTyp::Join(_) => {
+            OptRelNodeTyp::Join(join_type) => {
                 // Concatenate left and right children column refs.
                 let column_refs = Self::concat_children_col_refs(&children[0..2]);
-                GroupColumnRefs::new(column_refs, None)
+                let correlation = match join_type {
+                    JoinType::Inner | JoinType::Cross => {
+                        // Merge the equal columns in the join condition into the those from the children.
+                        // Step 1: merge the equal columns of two children.
+                        let mut eq_columns = {
+                            let left = children[0].correlation.as_ref();
+                            let right = children[1].correlation.as_ref();
+                            match (left, right) {
+                                (
+                                    Some(SemanticCorrelation {
+                                        eq_column: EqColumns::EqBaseTableColumnSets(left),
+                                    }),
+                                    Some(SemanticCorrelation {
+                                        eq_column: EqColumns::EqBaseTableColumnSets(right),
+                                    }),
+                                ) => EqBaseTableColumnSets::union(left, right),
+                                (
+                                    Some(SemanticCorrelation {
+                                        eq_column: EqColumns::EqBaseTableColumnSets(left),
+                                    }),
+                                    None,
+                                ) => left.clone(),
+                                (
+                                    None,
+                                    Some(SemanticCorrelation {
+                                        eq_column: EqColumns::EqBaseTableColumnSets(right),
+                                    }),
+                                ) => right.clone(),
+                                _ => EqBaseTableColumnSets::new(),
+                            }
+                        };
+                        // Step 2: merge join condition into children's equal columns.
+                        if let Some(SemanticCorrelation {
+                            eq_column: EqColumns::EqColumnIdxPairs(pairs),
+                        }) = &children[2].correlation
+                        {
+                            for (l_col_idx, r_col_idx) in pairs {
+                                let l_col_ref = &column_refs[*l_col_idx];
+                                let r_col_ref = &column_refs[*r_col_idx];
+                                if let (
+                                    ColumnRef::BaseTableColumnRef(l),
+                                    ColumnRef::BaseTableColumnRef(r),
+                                ) = (l_col_ref, r_col_ref)
+                                {
+                                    eq_columns
+                                        .add_predicate(EqPredicate::new(l.clone(), r.clone()));
+                                }
+                            }
+                        };
+                        Some(SemanticCorrelation {
+                            eq_column: EqColumns::EqBaseTableColumnSets(eq_columns),
+                        })
+                    }
+                    _ => None,
+                };
+                // println!(
+                //     "left: {:#?}, right: {:#?}, join condition: {:#?}, new correlation: {:#?}",
+                //     children[0], children[1], children[2], correlation
+                // );
+                GroupColumnRefs::new(column_refs, correlation)
             }
             OptRelNodeTyp::Agg => {
                 // Group by columns first.
@@ -243,9 +350,35 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 // FIXME: we just assume the column value does not change.
                 children[0].clone()
             }
+            OptRelNodeTyp::BinOp(op_type) => {
+                let column_refs = vec![ColumnRef::Derived];
+                // For correlation, we only handle the column = column case, e.g. #0 = #1.
+                let correlation = match op_type {
+                    BinOpType::Eq => {
+                        let l_col_ref = &children[0].column_refs;
+                        let r_col_ref = &children[1].column_refs;
+                        if l_col_ref.len() != 1 || r_col_ref.len() != 1 {
+                            None
+                        } else {
+                            match (&l_col_ref[0], &r_col_ref[0]) {
+                                (
+                                    ColumnRef::ChildColumnRef { col_idx: l_col_idx },
+                                    ColumnRef::ChildColumnRef { col_idx: r_col_idx },
+                                ) => Some(SemanticCorrelation {
+                                    eq_column: EqColumns::EqColumnIdxPairs(vec![(
+                                        *l_col_idx, *r_col_idx,
+                                    )]),
+                                }),
+                                _ => None,
+                            }
+                        }
+                    }
+                    _ => None,
+                };
+                GroupColumnRefs::new(column_refs, correlation)
+            }
             OptRelNodeTyp::Constant(_)
             | OptRelNodeTyp::Func(_)
-            | OptRelNodeTyp::BinOp(_)
             | OptRelNodeTyp::DataType(_)
             | OptRelNodeTyp::Between
             | OptRelNodeTyp::Like

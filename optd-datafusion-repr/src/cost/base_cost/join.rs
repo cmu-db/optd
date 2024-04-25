@@ -328,7 +328,6 @@ impl<
             });
             // using reduce(f64::min) is the idiomatic workaround to min() because f64 does not implement Ord due to NaN
             let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
-            println!("selectivity: {:?}", selectivity);
             assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
             selectivity
         }).product()
