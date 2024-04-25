@@ -16,7 +16,9 @@ use crate::{
         BinOpType, ColumnRefExpr, ConstantType, InListExpr, LikeExpr, LogOpType, OptRelNode,
         OptRelNodeRef, OptRelNodeTyp, UnOpType,
     },
-    properties::column_ref::{ColumnRef, ColumnRefPropertyBuilder, GroupColumnRefs},
+    properties::column_ref::{
+        BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, GroupColumnRefs,
+    },
 };
 
 use super::{
@@ -232,7 +234,9 @@ impl<
                 .expect("we just checked that col_ref_exprs.len() == 1");
             let col_ref_idx = col_ref_expr.index();
 
-            if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
+            if let ColumnRef::BaseTableColumnRef(BaseTableColumnRef { table, col_idx }) =
+                &column_refs[col_ref_idx]
+            {
                 let non_col_ref_expr = non_col_ref_exprs
                     .first()
                     .expect("non_col_ref_exprs should have a value since col_ref_exprs.len() == 1");
@@ -479,10 +483,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(1)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -506,10 +510,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -533,10 +537,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(2)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int32(2)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -561,10 +565,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Neq, col_ref(0), cnst(Value::Int32(1)));
         let expr_tree_rev = bin_op(BinOpType::Neq, cnst(Value::Int32(1)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -588,10 +592,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -615,10 +619,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -651,10 +655,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -683,10 +687,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Gt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -710,10 +714,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -737,10 +741,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -773,10 +777,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -809,10 +813,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Lt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Geq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -838,10 +842,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -865,10 +869,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Gt, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Leq, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -893,10 +897,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -920,10 +924,10 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Geq, col_ref(0), cnst(Value::Int32(15)));
         let expr_tree_rev = bin_op(BinOpType::Lt, cnst(Value::Int32(15)), col_ref(0));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         // we have to add 0.1 since it's Geq
@@ -960,10 +964,10 @@ mod tests {
         let expr_tree_shift1 = log_op(LogOpType::And, vec![eq5.clone(), eq8.clone(), eq1.clone()]);
         let expr_tree_shift2 = log_op(LogOpType::And, vec![eq8.clone(), eq1.clone(), eq5.clone()]);
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -1003,10 +1007,10 @@ mod tests {
         let expr_tree_shift1 = log_op(LogOpType::Or, vec![eq5.clone(), eq8.clone(), eq1.clone()]);
         let expr_tree_shift2 = log_op(LogOpType::Or, vec![eq8.clone(), eq1.clone(), eq5.clone()]);
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -1036,10 +1040,10 @@ mod tests {
             bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1))),
         );
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -1061,10 +1065,10 @@ mod tests {
             bin_op(BinOpType::Eq, col_ref(0), cnst(Value::Int32(1))),
         );
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         // not doesn't care about nulls. it just reverses the selectivity

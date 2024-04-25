@@ -4,7 +4,10 @@ mod join;
 mod limit;
 pub(crate) mod stats;
 
-use crate::{plan_nodes::OptRelNodeTyp, properties::column_ref::ColumnRef};
+use crate::{
+    plan_nodes::OptRelNodeTyp,
+    properties::column_ref::{BaseTableColumnRef, ColumnRef},
+};
 use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
@@ -207,7 +210,7 @@ impl<
         &self,
         col_ref: &ColumnRef,
     ) -> Option<&ColumnCombValueStats<M, D>> {
-        if let ColumnRef::BaseTableColumnRef { table, col_idx } = col_ref {
+        if let ColumnRef::BaseTableColumnRef(BaseTableColumnRef { table, col_idx }) = col_ref {
             self.get_column_comb_stats(table, &[*col_idx])
         } else {
             None

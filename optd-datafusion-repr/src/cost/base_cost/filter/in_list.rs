@@ -9,7 +9,7 @@ use crate::{
         OptCostModel,
     },
     plan_nodes::{ColumnRefExpr, ConstantExpr, InListExpr, OptRelNode, OptRelNodeTyp},
-    properties::column_ref::{ColumnRef, GroupColumnRefs},
+    properties::column_ref::{BaseTableColumnRef, ColumnRef, GroupColumnRefs},
 };
 
 impl<
@@ -53,7 +53,9 @@ impl<
             .collect::<Vec<_>>();
         let negated = expr.negated();
 
-        if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
+        if let ColumnRef::BaseTableColumnRef(BaseTableColumnRef { table, col_idx }) =
+            &column_refs[col_ref_idx]
+        {
             let in_sel = list_exprs
                 .iter()
                 .map(|expr| {
@@ -94,10 +96,10 @@ mod tests {
             Some(TestDistribution::empty()),
         ));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(

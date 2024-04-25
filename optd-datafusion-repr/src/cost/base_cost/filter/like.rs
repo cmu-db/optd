@@ -10,7 +10,7 @@ use crate::{
         OptCostModel,
     },
     plan_nodes::{ColumnRefExpr, ConstantExpr, LikeExpr, OptRelNode, OptRelNodeTyp},
-    properties::column_ref::{ColumnRef, GroupColumnRefs},
+    properties::column_ref::{BaseTableColumnRef, ColumnRef, GroupColumnRefs},
 };
 
 // Used for estimating pattern selectivity character-by-character. These numbers
@@ -59,7 +59,9 @@ impl<
             .unwrap()
             .index();
 
-        if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
+        if let ColumnRef::BaseTableColumnRef(BaseTableColumnRef { table, col_idx }) =
+            &column_refs[col_ref_idx]
+        {
             let pattern = ConstantExpr::from_rel_node(pattern.into_rel_node())
                 .expect("we already checked pattern is a constant")
                 .value()
@@ -136,10 +138,10 @@ mod tests {
             Some(TestDistribution::empty()),
         ));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(
@@ -166,10 +168,10 @@ mod tests {
             Some(TestDistribution::empty()),
         ));
         let column_refs = GroupColumnRefs::new(
-            vec![ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            }],
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
             None,
         );
         assert_approx_eq::assert_approx_eq!(

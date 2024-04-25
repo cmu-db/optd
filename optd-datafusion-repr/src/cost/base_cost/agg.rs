@@ -8,12 +8,12 @@ use optd_core::{
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
-    cost::{
-        base_cost::stats::{Distribution, MostCommonValues},
-        base_cost::DEFAULT_NUM_DISTINCT,
+    cost::base_cost::{
+        stats::{Distribution, MostCommonValues},
+        DEFAULT_NUM_DISTINCT,
     },
     plan_nodes::{ExprList, OptRelNode, OptRelNodeTyp},
-    properties::column_ref::{ColumnRef, ColumnRefPropertyBuilder},
+    properties::column_ref::{BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder},
 };
 
 use super::{OptCostModel, DEFAULT_UNK_SEL};
@@ -68,7 +68,7 @@ impl<
                     .iter()
                     .take(group_by.len())
                     .map(|col_ref| match col_ref {
-                        ColumnRef::BaseTableColumnRef { table, col_idx } => {
+                        ColumnRef::BaseTableColumnRef(BaseTableColumnRef { table, col_idx }) => {
                             let table_stats = self.per_table_stats_map.get(table);
                             let column_stats = table_stats.and_then(|table_stats| {
                                 table_stats.column_comb_stats.get(&vec![*col_idx])

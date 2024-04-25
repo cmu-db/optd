@@ -14,7 +14,9 @@ use crate::{
         BinOpType, ColumnRefExpr, Expr, ExprList, JoinType, LogOpExpr, LogOpType, OptRelNode,
         OptRelNodeRef, OptRelNodeTyp,
     },
-    properties::column_ref::{ColumnRef, ColumnRefPropertyBuilder, GroupColumnRefs},
+    properties::column_ref::{
+        BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, GroupColumnRefs,
+    },
 };
 
 use super::{OptCostModel, DEFAULT_UNK_SEL};
@@ -279,12 +281,12 @@ impl<
                 let left_col_ref = &column_refs[left_col_ref_expr.index()];
                 let right_col_ref = &column_refs[right_col_ref_expr.index()];
                 let is_same_table = if let (
-                    ColumnRef::BaseTableColumnRef {
+                    ColumnRef::BaseTableColumnRef(BaseTableColumnRef {
                         table: left_table, ..
-                    },
-                    ColumnRef::BaseTableColumnRef {
+                    }),
+                    ColumnRef::BaseTableColumnRef(BaseTableColumnRef {
                         table: right_table, ..
-                    },
+                    }),
                 ) = (left_col_ref, right_col_ref)
                 {
                     left_table == right_table
@@ -417,14 +419,8 @@ mod tests {
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let column_refs = GroupColumnRefs::new(
             vec![
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE1_NAME),
-                    col_idx: 0,
-                },
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE2_NAME),
-                    col_idx: 0,
-                },
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
             ],
             None,
         );
@@ -466,14 +462,8 @@ mod tests {
         let expr_tree_rev = log_op(LogOpType::And, vec![eq1and0.clone(), eq0and1.clone()]);
         let column_refs = GroupColumnRefs::new(
             vec![
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE1_NAME),
-                    col_idx: 0,
-                },
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE2_NAME),
-                    col_idx: 0,
-                },
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
             ],
             None,
         );
@@ -515,14 +505,8 @@ mod tests {
         let expr_tree_rev = log_op(LogOpType::And, vec![eq100.clone(), eq0and1.clone()]);
         let column_refs = GroupColumnRefs::new(
             vec![
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE1_NAME),
-                    col_idx: 0,
-                },
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE2_NAME),
-                    col_idx: 0,
-                },
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
             ],
             None,
         );
@@ -564,14 +548,8 @@ mod tests {
         let expr_tree_rev = log_op(LogOpType::And, vec![eq100.clone(), neq12.clone()]);
         let column_refs = GroupColumnRefs::new(
             vec![
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE1_NAME),
-                    col_idx: 0,
-                },
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE2_NAME),
-                    col_idx: 0,
-                },
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
             ],
             None,
         );
@@ -610,14 +588,8 @@ mod tests {
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(0));
         let column_refs = GroupColumnRefs::new(
             vec![
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE1_NAME),
-                    col_idx: 0,
-                },
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE2_NAME),
-                    col_idx: 0,
-                },
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
             ],
             None,
         );
@@ -748,14 +720,8 @@ mod tests {
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let column_refs = GroupColumnRefs::new(
             vec![
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE1_NAME),
-                    col_idx: 0,
-                },
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE2_NAME),
-                    col_idx: 0,
-                },
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
             ],
             None,
         );
@@ -817,14 +783,8 @@ mod tests {
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let column_refs = GroupColumnRefs::new(
             vec![
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE1_NAME),
-                    col_idx: 0,
-                },
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE2_NAME),
-                    col_idx: 0,
-                },
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
             ],
             None,
         );
@@ -887,14 +847,8 @@ mod tests {
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let column_refs = GroupColumnRefs::new(
             vec![
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE1_NAME),
-                    col_idx: 0,
-                },
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE2_NAME),
-                    col_idx: 0,
-                },
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
             ],
             None,
         );
@@ -961,14 +915,8 @@ mod tests {
         let expr_tree_inner_rev = log_op(LogOpType::And, vec![eq1and0, filter.clone()]);
         let column_refs = GroupColumnRefs::new(
             vec![
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE1_NAME),
-                    col_idx: 0,
-                },
-                ColumnRef::BaseTableColumnRef {
-                    table: String::from(TABLE2_NAME),
-                    col_idx: 0,
-                },
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
             ],
             None,
         );

@@ -12,17 +12,30 @@ use super::schema::Catalog;
 use super::DEFAULT_NAME;
 
 #[derive(Clone, Debug)]
+pub struct BaseTableColumnRef {
+    pub table: String,
+    pub col_idx: usize,
+}
+
+#[derive(Clone, Debug)]
 pub enum ColumnRef {
-    BaseTableColumnRef {
-        table: String,
-        col_idx: usize,
-    },
+    BaseTableColumnRef(BaseTableColumnRef),
     /// This variant is only used when building the property. It should NEVER
     /// be used when computing cost.
     ChildColumnRef {
         col_idx: usize,
     },
     Derived,
+}
+
+impl ColumnRef {
+    pub fn base_table_column_ref(table: String, col_idx: usize) -> Self {
+        ColumnRef::BaseTableColumnRef(BaseTableColumnRef { table, col_idx })
+    }
+
+    pub fn child_column_ref(col_idx: usize) -> Self {
+        ColumnRef::ChildColumnRef { col_idx }
+    }
 }
 
 /// `SemanticCorrelation` represents the semantic correlation between columns in a
@@ -146,10 +159,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 let schema = self.catalog.get(&table_name);
                 let column_cnt = schema.fields.len();
                 let column_refs = (0..column_cnt)
-                    .map(|i| ColumnRef::BaseTableColumnRef {
-                        table: table_name.clone(),
-                        col_idx: i,
-                    })
+                    .map(|i| ColumnRef::base_table_column_ref(table_name.clone(), i))
                     .collect();
                 GroupColumnRefs::new(column_refs, None)
             }
@@ -160,10 +170,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 let schema = empty_relation_data.schema;
                 let column_cnt = schema.fields.len();
                 let column_refs = (0..column_cnt)
-                    .map(|i| ColumnRef::BaseTableColumnRef {
-                        table: DEFAULT_NAME.to_string(),
-                        col_idx: i,
-                    })
+                    .map(|i| ColumnRef::base_table_column_ref(DEFAULT_NAME.to_string(), i))
                     .collect();
                 GroupColumnRefs::new(column_refs, None)
             }
