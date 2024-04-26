@@ -11,7 +11,7 @@ use crate::plan_nodes::{BinOpType, EmptyRelationData, JoinType, LogOpType, OptRe
 use super::schema::Catalog;
 use super::DEFAULT_NAME;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct BaseTableColumnRef {
     pub table: String,
     pub col_idx: usize,
@@ -35,6 +35,12 @@ impl ColumnRef {
 
     pub fn child_column_ref(col_idx: usize) -> Self {
         ColumnRef::ChildColumnRef { col_idx }
+    }
+}
+
+impl From<BaseTableColumnRef> for ColumnRef {
+    fn from(col: BaseTableColumnRef) -> Self {
+        ColumnRef::BaseTableColumnRef(col)
     }
 }
 
@@ -72,21 +78,13 @@ pub enum EqColumns {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct EqPredicate {
-    left: BaseTableColumnRef,
-    right: BaseTableColumnRef,
+    pub left: BaseTableColumnRef,
+    pub right: BaseTableColumnRef,
 }
 
 impl EqPredicate {
     pub fn new(left: BaseTableColumnRef, right: BaseTableColumnRef) -> Self {
         Self { left, right }
-    }
-
-    pub fn left(&self) -> &BaseTableColumnRef {
-        &self.left
-    }
-
-    pub fn right(&self) -> &BaseTableColumnRef {
-        &self.right
     }
 }
 
@@ -107,8 +105,8 @@ impl EqBaseTableColumnSets {
     }
 
     pub fn add_predicate(&mut self, predicate: EqPredicate) {
-        let left = predicate.left();
-        let right = predicate.right();
+        let left = &predicate.left;
+        let right = &predicate.right;
 
         // Add the indices to the set if they do not exist.
         if !self.disjoint_eq_col_sets.contains(left) {
@@ -132,7 +130,13 @@ impl EqBaseTableColumnSets {
 
     /// Determine if two columns are equal.
     pub fn is_eq(&mut self, left: &BaseTableColumnRef, right: &BaseTableColumnRef) -> bool {
-        self.disjoint_eq_col_sets.same_set(left, right).unwrap()
+        self.disjoint_eq_col_sets
+            .same_set(left, right)
+            .unwrap_or(false)
+    }
+
+    pub fn num_eq_columns(&mut self, col: &BaseTableColumnRef) -> usize {
+        self.disjoint_eq_col_sets.set_size(col).unwrap()
     }
 
     /// Find the set of predicates that define the equality of the set of columns `col` belongs to.
@@ -142,8 +146,8 @@ impl EqBaseTableColumnSets {
     ) -> Vec<EqPredicate> {
         let mut predicates = Vec::new();
         for predicate in &self.eq_predicates {
-            let left = predicate.left();
-            let right = predicate.right();
+            let left = &predicate.left;
+            let right = &predicate.right;
             if (left != col && self.disjoint_eq_col_sets.same_set(col, left).unwrap())
                 || (right != col && self.disjoint_eq_col_sets.same_set(col, right).unwrap())
             {
@@ -392,10 +396,6 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                     }
                     _ => None,
                 };
-                println!(
-                    "left: {:?}\n right: {:?}\n join condition: {:?}\n input correlation: {:#?} \n output correlation: {:#?}",
-                    children[0], children[1], children[2], input_correlation, output_correlation
-                );
                 GroupColumnRefs::new(column_refs, output_correlation, input_correlation)
             }
             OptRelNodeTyp::Agg => {

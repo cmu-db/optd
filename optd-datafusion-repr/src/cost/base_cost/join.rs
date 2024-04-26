@@ -1,9 +1,12 @@
+use std::ops::ControlFlow;
+
 use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
     cost::Cost,
 };
 use serde::{de::DeserializeOwned, Serialize};
+use union_find::{disjoint_sets::DisjointSets, union_find::UnionFind};
 
 use crate::{
     cost::base_cost::{
@@ -15,7 +18,8 @@ use crate::{
         OptRelNodeRef, OptRelNodeTyp,
     },
     properties::column_ref::{
-        BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, EqPredicate, GroupColumnRefs,
+        BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, EqBaseTableColumnSets,
+        EqPredicate, GroupColumnRefs,
     },
 };
 
@@ -306,9 +310,121 @@ impl<
         }
     }
 
+    /// Get the selectivity of one column eq predicate, e.g. colA = colB.
+    fn get_join_selectivity_from_on_col_ref_pair(
+        &self,
+        left: &ColumnRef,
+        right: &ColumnRef,
+    ) -> f64 {
+        // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
+        let ndistincts = vec![left, right].into_iter().map(|col_ref| {
+            match self.get_single_column_stats_from_col_ref(col_ref) {
+                Some(per_col_stats) => per_col_stats.ndistinct,
+                None => DEFAULT_NUM_DISTINCT,
+            }
+        });
+        // using reduce(f64::min) is the idiomatic workaround to min() because f64 does not implement Ord due to NaN
+        let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
+        assert!(
+            !selectivity.is_nan(),
+            "it should be impossible for selectivity to be NaN since n-distinct is never 0"
+        );
+        selectivity
+    }
+
+    /// Given a set of predicates P that define N equal columns, find the selectivity of
+    /// the most selective N - 1 predicates that "touches" all the columns using MST.
+    fn get_join_selecitivity_from_most_selective_predicates(
+        &self,
+        predicates: Vec<EqPredicate>,
+        num_cols: usize,
+    ) -> f64 {
+        let mut acc_sel = 1.0;
+        let mut num_picked_predicates = 0;
+        let mut disjoint_sets = DisjointSets::new();
+
+        // Sort predicates by selectivity in ascending order.
+        let mut sorted_predicates = predicates
+            .into_iter()
+            .map(|p| {
+                let sel = self.get_join_selectivity_from_on_col_ref_pair(
+                    &p.left.clone().into(),
+                    &p.right.clone().into(),
+                );
+                (p, sel)
+            })
+            .sorted_by(|(_, sel1), (_, sel2)| sel1.partial_cmp(sel2).unwrap());
+
+        sorted_predicates.try_for_each(|(p, sel)| {
+            if !disjoint_sets.contains(&p.left) {
+                disjoint_sets.make_set(p.left.clone()).unwrap();
+            }
+            if !disjoint_sets.contains(&p.right) {
+                disjoint_sets.make_set(p.right.clone()).unwrap();
+            }
+            if !disjoint_sets.same_set(&p.left, &p.right).unwrap() {
+                acc_sel = acc_sel * sel;
+                num_picked_predicates += 1;
+            }
+            if num_picked_predicates == num_cols - 1 {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
+        assert!(
+            num_picked_predicates == num_cols - 1,
+            "we should have picked N - 1 predicates"
+        );
+        acc_sel
+    }
+
+    /// See `get_join_on_selectivity` for details.
+    fn get_join_selectivity_from_redundant_predicate(
+        &self,
+        predicate: EqPredicate,
+        past_eq_columns: &mut EqBaseTableColumnSets,
+    ) -> f64 {
+        let left = predicate.left.clone();
+        // Compute the selectivity of the most selective N - 1 predicates.
+        let children_pred_sel = {
+            let predicates = past_eq_columns.find_predicates_for_eq_column_set(&left);
+            self.get_join_selecitivity_from_most_selective_predicates(
+                predicates,
+                past_eq_columns.num_eq_columns(&left),
+            )
+        };
+        // Add predicate to past_eq_columns.
+        past_eq_columns.add_predicate(predicate);
+        // Repeat the same process with the new predicate.
+        let new_pred_sel = {
+            let predicates = past_eq_columns.find_predicates_for_eq_column_set(&left);
+            self.get_join_selecitivity_from_most_selective_predicates(
+                predicates,
+                past_eq_columns.num_eq_columns(&left),
+            )
+        };
+
+        // Compute division of MSTs as the selectivity.
+        new_pred_sel / children_pred_sel
+    }
+
     /// Get the selectivity of the on conditions.
     ///
     /// Note that the selectivity of the on conditions does not depend on join type. Join type is accounted for separately in get_join_selectivity_core().
+    ///
+    /// We also check if each predicate is correlated with any of the previous predicates.
+    ///
+    /// More specifically, we are checking if the predicate can be expressed with other existing predicates.
+    /// E.g. if we have a predicate like A = B and B = C, we can express A = C is redundant.
+    //
+    /// However, we don't just throw away A = C, because we want to pick the most selective predicates.
+    ///
+    /// More generally, if we have N columns that are equal, and the set of predicates P that make them equal (|P| >= N - 1),
+    /// we select compute the MST of the graph where the columns are nodes and the predicates are edges.
+    ///
+    /// Then the selecitivy of such "redundant" predicate p is the MST of the graph with p (minimum as in having
+    /// the smallest product of selectivities) divided by the MST of the graph without p.
     fn get_join_on_selectivity(
         &self,
         on_col_ref_pairs: &[(ColumnRefExpr, ColumnRefExpr)],
@@ -320,52 +436,28 @@ impl<
             .unwrap()
             .eq_base_table_columns()
             .clone();
+
         // multiply the selectivities of all individual conditions together
-        on_col_ref_pairs.iter().map(|on_col_ref_pair| {
-            // Check if the predicate is correlated with any of the previous predicates. 
-            //
-            // More specifically, we are checking if the predicate can be expressed with other existing predicates.
-            // E.g. if we have a predicate like A = B and B = C, we can express A = C is redundant.
-            //
-            // However, we don't just throw away A = C, because we want to pick the most selective predicates.
-            //
-            // More generally, if we have N columns that are equal, and the set of predicates P that make them equal (|P| >= N - 1),
-            // we select compute the MST of the graph where the columns are nodes and the predicates are edges.
-            //
-            // Then the selecitivy of such "redundant" predicate p is the MST of the graph with p (minimum as in having 
-            // the smallest product of selectivities) divided by the MST of the graph without p.
-            let left_col_ref = &column_refs[on_col_ref_pair.0.index()];
-            let right_col_ref = &column_refs[on_col_ref_pair.1.index() + right_col_ref_offset];
-            if let (ColumnRef::BaseTableColumnRef(left_col_ref), ColumnRef::BaseTableColumnRef(right_col_ref)) = (left_col_ref, right_col_ref) {
-                if past_eq_columns.is_eq(left_col_ref, right_col_ref) {
-                    // Find the predicates in the same set.
-                    // Construct a graph using the predicates.
-                    // Compute MST.
+        on_col_ref_pairs
+            .iter()
+            .map(|on_col_ref_pair| {
+                let left_col_ref = &column_refs[on_col_ref_pair.0.index()];
+                let right_col_ref = &column_refs[on_col_ref_pair.1.index() + right_col_ref_offset];
 
-                    // Add predicate to past_eq_columns.
-                    past_eq_columns.add_predicate(EqPredicate::new(left_col_ref.clone(), right_col_ref.clone()));
-                    // Construct the new graph.
-                    // Compute MST.
-
-                    // Compute division of MSTs as the selectivity.
-
+                if let (ColumnRef::BaseTableColumnRef(left), ColumnRef::BaseTableColumnRef(right)) =
+                    (left_col_ref, right_col_ref)
+                {
+                    if past_eq_columns.is_eq(left, right) {
+                        return self.get_join_selectivity_from_redundant_predicate(
+                            EqPredicate::new(left.clone(), right.clone()),
+                            &mut past_eq_columns,
+                        );
+                    }
                 }
-            }
 
-            // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
-            let ndistincts = vec![left_col_ref, right_col_ref].into_iter().map(|col_ref| {
-                match self.get_single_column_stats_from_col_ref(col_ref) {
-                    Some(per_col_stats) => {
-                        per_col_stats.ndistinct
-                    },
-                    None => DEFAULT_NUM_DISTINCT,
-                }
-            });
-            // using reduce(f64::min) is the idiomatic workaround to min() because f64 does not implement Ord due to NaN
-            let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
-            assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
-            selectivity
-        }).product()
+                self.get_join_selectivity_from_on_col_ref_pair(&left_col_ref, &right_col_ref)
+            })
+            .product()
     }
 }
 
