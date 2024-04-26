@@ -416,6 +416,8 @@ impl<
     /// `past_eq_columns`, `predicate` produces a selectivity adjustment factor, which is the
     /// multiplied selectivity of the most selective N - 1 predicate among `past_eq_columns` union
     /// `predicate` divided by the selectivity of the `past_eq_columns`.
+    ///
+    /// NOTE: This function modifies `past_eq_columns` by adding `predicate` to it.
     fn get_join_selectivity_adjustment_from_redundant_predicates(
         &self,
         predicate: EqPredicate,
