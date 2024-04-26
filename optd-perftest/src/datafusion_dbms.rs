@@ -7,8 +7,8 @@ use std::{
 use crate::{
     benchmark::Benchmark,
     cardtest::CardtestRunnerDBMSHelper,
-    job::{JobKitConfig, JobKit},
-    tpch::{TpchKitConfig, TpchKit},
+    job::{JobKit, JobKitConfig},
+    tpch::{TpchKit, TpchKitConfig},
 };
 use async_trait::async_trait;
 use datafusion::{
@@ -146,7 +146,10 @@ impl DatafusionDBMS {
         Ok(result)
     }
 
-    async fn eval_tpch_estcards(&self, tpch_kit_config: &TpchKitConfig) -> anyhow::Result<Vec<usize>> {
+    async fn eval_tpch_estcards(
+        &self,
+        tpch_kit_config: &TpchKitConfig,
+    ) -> anyhow::Result<Vec<usize>> {
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_queries(tpch_kit_config)?;
 
@@ -169,11 +172,14 @@ impl DatafusionDBMS {
 
         let mut estcards = vec![];
         for (query_id, sql_fpath) in job_kit.get_sql_fpath_ordered_iter(job_kit_config)? {
-            let benchmark_name = if job_kit_config.is_light { "JOB" } else { "JOB-light" };
+            let benchmark_name = if job_kit_config.is_light {
+                "JOB"
+            } else {
+                "JOB-light"
+            };
             println!(
                 "about to evaluate datafusion's estcard for {} Q{}",
-                benchmark_name,
-                query_id
+                benchmark_name, query_id
             );
             let sql = fs::read_to_string(sql_fpath)?;
             let estcard = self.eval_query_estcard(&sql).await?;
@@ -286,7 +292,10 @@ impl DatafusionDBMS {
     }
 
     #[allow(dead_code)]
-    async fn load_tpch_data_no_stats(&mut self, tpch_kit_config: &TpchKitConfig) -> anyhow::Result<()> {
+    async fn load_tpch_data_no_stats(
+        &mut self,
+        tpch_kit_config: &TpchKitConfig,
+    ) -> anyhow::Result<()> {
         // Generate the tables.
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_kit_config)?;

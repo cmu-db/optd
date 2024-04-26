@@ -181,7 +181,10 @@ impl TpchKit {
     /// If two TpchKitConfig instances would *not always* generate the same data, then their
     ///   directory names must be different.
     fn get_this_genned_tables_dpath(&self, tpch_kit_config: &TpchKitConfig) -> PathBuf {
-        let dname = format!("db{}_sf{}", tpch_kit_config.dbms, tpch_kit_config.scale_factor,);
+        let dname = format!(
+            "db{}_sf{}",
+            tpch_kit_config.dbms, tpch_kit_config.scale_factor,
+        );
         self.genned_tables_dpath.join(dname)
     }
 

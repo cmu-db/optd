@@ -1,8 +1,8 @@
 use crate::{
     benchmark::Benchmark,
     cardtest::CardtestRunnerDBMSHelper,
-    job::{JobKitConfig, JobKit},
-    tpch::{TpchKitConfig, TpchKit},
+    job::{JobKit, JobKitConfig},
+    tpch::{TpchKit, TpchKitConfig},
     truecard::{TruecardCache, TruecardGetter},
 };
 use async_trait::async_trait;
@@ -122,9 +122,15 @@ impl PostgresDBMS {
             // now that we've created `dbname`, we can connect to that
             let client = self.connect_to_db(&dbname).await?;
             match benchmark {
-                Benchmark::Tpch(tpch_kit_config) => self.load_tpch_data(&client, tpch_kit_config).await?,
-                Benchmark::Job(job_kit_config) => self.load_job_data(&client, job_kit_config).await?,
-                Benchmark::Joblight(job_kit_config) => self.load_job_data(&client, job_kit_config).await?,
+                Benchmark::Tpch(tpch_kit_config) => {
+                    self.load_tpch_data(&client, tpch_kit_config).await?
+                }
+                Benchmark::Job(job_kit_config) => {
+                    self.load_job_data(&client, job_kit_config).await?
+                }
+                Benchmark::Joblight(job_kit_config) => {
+                    self.load_job_data(&client, job_kit_config).await?
+                }
             };
             File::create(done_fpath).await?;
             log::debug!("[end] loading benchmark data");
@@ -172,7 +178,11 @@ impl PostgresDBMS {
     }
 
     /// Load the JOB data to the database that client is connected to
-    async fn load_job_data(&self, client: &Client, job_kit_config: &JobKitConfig) -> anyhow::Result<()> {
+    async fn load_job_data(
+        &self,
+        client: &Client,
+        job_kit_config: &JobKitConfig,
+    ) -> anyhow::Result<()> {
         // set up TpchKit
         let job_kit = JobKit::build(&self.workspace_dpath)?;
 
@@ -408,8 +418,12 @@ impl CardtestRunnerDBMSHelper for PostgresDBMS {
         let dbname = benchmark.get_dbname();
         let client = self.connect_to_db(&dbname).await?;
         match benchmark {
-            Benchmark::Tpch(tpch_kit_config) => self.eval_tpch_estcards(&client, tpch_kit_config).await,
-            Benchmark::Job(job_kit_config) | Benchmark::Joblight(job_kit_config) => self.eval_job_estcards(&client, job_kit_config).await,
+            Benchmark::Tpch(tpch_kit_config) => {
+                self.eval_tpch_estcards(&client, tpch_kit_config).await
+            }
+            Benchmark::Job(job_kit_config) | Benchmark::Joblight(job_kit_config) => {
+                self.eval_job_estcards(&client, job_kit_config).await
+            }
         }
     }
 }
@@ -435,12 +449,22 @@ impl TruecardGetter for PostgresDBMS {
         // all "eval_*" functions should add the truecards they find to the truecard cache
         match benchmark {
             Benchmark::Tpch(tpch_kit_config) => {
-                self.eval_tpch_truecards(&client, tpch_kit_config, &data_and_queries_name, &mut truecard_cache)
-                    .await
+                self.eval_tpch_truecards(
+                    &client,
+                    tpch_kit_config,
+                    &data_and_queries_name,
+                    &mut truecard_cache,
+                )
+                .await
             }
             Benchmark::Job(job_kit_config) | Benchmark::Joblight(job_kit_config) => {
-                self.eval_job_truecards(&client, job_kit_config, &data_and_queries_name, &mut truecard_cache)
-                    .await
+                self.eval_job_truecards(
+                    &client,
+                    job_kit_config,
+                    &data_and_queries_name,
+                    &mut truecard_cache,
+                )
+                .await
             }
         }
         // note that truecard_cache will save itself when it goes out of scope

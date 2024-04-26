@@ -38,11 +38,17 @@ impl TruecardCache {
         })
     }
 
-    pub fn insert_truecard(&mut self, data_and_queries_name: &str, query_id: &str, truecard: usize) {
+    pub fn insert_truecard(
+        &mut self,
+        data_and_queries_name: &str,
+        query_id: &str,
+        truecard: usize,
+    ) {
         let db_cache = match self.cache.get_mut(data_and_queries_name) {
             Some(db_cache) => db_cache,
             None => {
-                self.cache.insert(String::from(data_and_queries_name), HashMap::new());
+                self.cache
+                    .insert(String::from(data_and_queries_name), HashMap::new());
                 self.cache.get_mut(data_and_queries_name).unwrap()
             }
         };

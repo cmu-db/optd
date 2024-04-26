@@ -77,7 +77,7 @@ fn fmt_qerror(qerror: f64) -> String {
     format!("{:.2}", qerror)
 }
 
-fn percentile(sorted_v: &Vec<f64>, percentile: f64) -> f64 {
+fn percentile(sorted_v: &[f64], percentile: f64) -> f64 {
     let idx = ((percentile / 100.0) * (sorted_v.len() - 1) as f64).round() as usize;
     sorted_v[idx]
 }
@@ -227,16 +227,16 @@ async fn cardtest<P: AsRef<Path>>(
         }
     }
     let mut cmp_qerror_table = Table::new();
-    cmp_qerror_table.set_titles(prettytable::row![
-        "DBMS", "# Best", "# Tied Best"
-    ]);
-    for (dbms, _) in &cardinfo_alldbs {
-        let num_best = best_qerror_infos.iter().filter(|(_, dbmss)| {
-            dbmss.len() == 1 && dbmss.contains(&dbms)
-        }).count();
-        let num_tied_best = best_qerror_infos.iter().filter(|(_, dbmss)| {
-            dbmss.len() > 1 && dbmss.contains(&dbms)
-        }).count();
+    cmp_qerror_table.set_titles(prettytable::row!["DBMS", "# Best", "# Tied Best"]);
+    for dbms in cardinfo_alldbs.keys() {
+        let num_best = best_qerror_infos
+            .iter()
+            .filter(|(_, dbmss)| dbmss.len() == 1 && dbmss.contains(&dbms))
+            .count();
+        let num_tied_best = best_qerror_infos
+            .iter()
+            .filter(|(_, dbmss)| dbmss.len() > 1 && dbmss.contains(&dbms))
+            .count();
         cmp_qerror_table.add_row(prettytable::row![dbms, num_best, num_tied_best]);
     }
     cmp_qerror_table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
