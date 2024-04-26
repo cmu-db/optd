@@ -19,7 +19,7 @@ use crate::{
     },
     properties::column_ref::{
         BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, EqBaseTableColumnSets,
-        EqPredicate, GroupColumnRefs,
+        EqPredicate, GroupColumnRefs, SemanticCorrelation,
     },
 };
 
@@ -448,9 +448,9 @@ impl<
     ) -> f64 {
         let mut past_eq_columns = column_refs
             .input_correlation()
-            .unwrap()
-            .eq_base_table_columns()
-            .clone();
+            .map(SemanticCorrelation::eq_base_table_columns)
+            .cloned()
+            .unwrap_or_default();
 
         // multiply the selectivities of all individual conditions together
         on_col_ref_pairs
@@ -617,7 +617,7 @@ mod tests {
         );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
-            0.04
+            0.2
         );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(
@@ -627,7 +627,7 @@ mod tests {
                 expr_tree_rev,
                 &column_refs
             ),
-            0.04
+            0.2
         );
     }
 

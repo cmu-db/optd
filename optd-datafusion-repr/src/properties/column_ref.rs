@@ -97,7 +97,7 @@ impl EqPredicate {
 
 /// A disjoint set of base table columns with equal values in the same row,
 /// along with the predicates that define the equalities.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct EqBaseTableColumnSets {
     disjoint_eq_col_sets: DisjointSets<BaseTableColumnRef>,
     eq_predicates: HashSet<EqPredicate>,
