@@ -53,6 +53,13 @@ pub struct SemanticCorrelation {
 }
 
 impl SemanticCorrelation {
+    #[cfg(test)]
+    pub fn new(eq_columns: EqBaseTableColumnSets) -> Self {
+        Self {
+            eq_columns: EqColumns::EqBaseTableColumnSets(eq_columns),
+        }
+    }
+
     pub fn eq_base_table_columns(&self) -> &EqBaseTableColumnSets {
         if let EqColumns::EqBaseTableColumnSets(eq_columns) = &self.eq_columns {
             eq_columns
@@ -97,7 +104,7 @@ pub struct EqBaseTableColumnSets {
 }
 
 impl EqBaseTableColumnSets {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             disjoint_eq_col_sets: DisjointSets::new(),
             eq_predicates: HashSet::new(),

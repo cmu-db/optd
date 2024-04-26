@@ -347,7 +347,7 @@ impl<
         let mut sorted_predicates = predicates
             .into_iter()
             .map(|p| {
-                let sel = self.get_join_selectivity_from_on_col_ref_pair(
+                let sel: f64 = self.get_join_selectivity_from_on_col_ref_pair(
                     &p.left.clone().into(),
                     &p.right.clone().into(),
                 );
@@ -363,7 +363,7 @@ impl<
                 disjoint_sets.make_set(p.right.clone()).unwrap();
             }
             if !disjoint_sets.same_set(&p.left, &p.right).unwrap() {
-                acc_sel = acc_sel * sel;
+                acc_sel *= sel;
                 num_picked_predicates += 1;
             }
             if num_picked_predicates == num_cols - 1 {
@@ -447,15 +447,18 @@ impl<
                 if let (ColumnRef::BaseTableColumnRef(left), ColumnRef::BaseTableColumnRef(right)) =
                     (left_col_ref, right_col_ref)
                 {
+                    let predicate = EqPredicate::new(left.clone(), right.clone());
                     if past_eq_columns.is_eq(left, right) {
                         return self.get_join_selectivity_from_redundant_predicate(
-                            EqPredicate::new(left.clone(), right.clone()),
+                            predicate,
                             &mut past_eq_columns,
                         );
+                    } else {
+                        past_eq_columns.add_predicate(predicate);
                     }
                 }
 
-                self.get_join_selectivity_from_on_col_ref_pair(&left_col_ref, &right_col_ref)
+                self.get_join_selectivity_from_on_col_ref_pair(left_col_ref, right_col_ref)
             })
             .product()
     }
@@ -468,7 +471,10 @@ mod tests {
     use crate::{
         cost::base_cost::{tests::*, DEFAULT_EQ_SEL},
         plan_nodes::{BinOpType, JoinType, LogOpType, OptRelNodeRef},
-        properties::column_ref::{ColumnRef, GroupColumnRefs},
+        properties::column_ref::{
+            BaseTableColumnRef, ColumnRef, EqBaseTableColumnSets, EqPredicate, GroupColumnRefs,
+            SemanticCorrelation,
+        },
     };
 
     /// A wrapper around get_join_selectivity_from_expr_tree that extracts the table row counts from the cost model
@@ -1076,6 +1082,64 @@ mod tests {
             &column_refs,
             0.25,
             0.02,
+        );
+    }
+
+    #[test]
+    fn test_inner_redundant_predicate() {
+        let cost_model = create_three_table_cost_model(
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                2,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                4,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                5,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+        );
+        let col01_sel = 0.25;
+        let col02_sel = 0.2;
+        let col12_sel = 0.2;
+        let col0_base_ref = BaseTableColumnRef {
+            table: String::from(TABLE1_NAME),
+            col_idx: 0,
+        };
+        let col1_base_ref = BaseTableColumnRef {
+            table: String::from(TABLE2_NAME),
+            col_idx: 0,
+        };
+        let col2_base_ref = BaseTableColumnRef {
+            table: String::from(TABLE3_NAME),
+            col_idx: 0,
+        };
+        let col0_ref: ColumnRef = col0_base_ref.clone().into();
+        let col1_ref: ColumnRef = col1_base_ref.clone().into();
+        let col2_ref: ColumnRef = col2_base_ref.clone().into();
+
+        let mut eq_columns = EqBaseTableColumnSets::new();
+        eq_columns.add_predicate(EqPredicate::new(col0_base_ref, col1_base_ref));
+        let semantic_correlation = SemanticCorrelation::new(eq_columns);
+        let column_refs = GroupColumnRefs::new_test(
+            vec![col0_ref.clone(), col1_ref.clone(), col2_ref.clone()],
+            Some(semantic_correlation),
+        );
+
+        let eq0and2 = bin_op(BinOpType::Eq, col_ref(0), col_ref(2));
+        let eq1and2 = bin_op(BinOpType::Eq, col_ref(1), col_ref(2));
+        let expr_tree = log_op(LogOpType::And, vec![eq0and2, eq1and2]);
+        assert_approx_eq::assert_approx_eq!(
+            test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
+            col02_sel * (col02_sel * col12_sel) / (col01_sel * col12_sel)
         );
     }
 }
