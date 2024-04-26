@@ -61,7 +61,7 @@ impl JobKit {
             fs::create_dir(&job_dpath)?;
         }
         let job_kit_repo_dpath = job_dpath.join("job-kit");
-        let queries_dpath = job_kit_repo_dpath.clone();
+        let queries_dpath = job_kit_repo_dpath.join("cardest_job_queries");
         let downloaded_tables_dpath = job_dpath.join("downloaded_tables");
         if !downloaded_tables_dpath.exists() {
             fs::create_dir(&downloaded_tables_dpath)?;
