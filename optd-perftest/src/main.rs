@@ -76,6 +76,11 @@ fn fmt_qerror(qerror: f64) -> String {
     format!("{:.2}", qerror)
 }
 
+fn percentile(sorted_v: &Vec<f64>, percentile: f64) -> f64 {
+    let idx = ((percentile / 100.0) * (sorted_v.len() - 1) as f64).round() as usize;
+    sorted_v[idx]
+}
+
 /// cardtest::cardtest_core() expects sanitized inputs and returns outputs in their simplest form.
 /// This function wraps around cardtest::cardtest_core() to sanitize the inputs and print the outputs nicely.
 #[allow(clippy::too_many_arguments)]
@@ -123,48 +128,8 @@ async fn cardtest<P: AsRef<Path>>(
     .await?;
 
     println!();
-    println!(" Aggregate Q-Error Comparison");
-    let mut agg_qerror_table = Table::new();
-    agg_qerror_table.set_titles(prettytable::row![
-        "DBMS", "Median", "# Inf", "Mean", "Min", "Max"
-    ]);
-    for (dbms, cardinfos) in &cardinfo_alldbs {
-        if !cardinfos.is_empty() {
-            let qerrors: Vec<f64> = cardinfos.iter().map(|cardinfo| cardinfo.qerror).collect();
-            let finite_qerrors: Vec<f64> = qerrors
-                .clone()
-                .into_iter()
-                .filter(|qerror| qerror.is_finite())
-                .collect();
-            let ninf_qerrors = qerrors.len() - finite_qerrors.len();
-            let mean_qerror = finite_qerrors.iter().sum::<f64>() / finite_qerrors.len() as f64;
-            let min_qerror = qerrors
-                .iter()
-                .min_by(|a, b| a.partial_cmp(b).unwrap())
-                .unwrap();
-            let median_qerror = statistical::median(&qerrors);
-            let max_qerror = qerrors
-                .iter()
-                .max_by(|a, b| a.partial_cmp(b).unwrap())
-                .unwrap();
-            agg_qerror_table.add_row(prettytable::row![
-                dbms,
-                fmt_qerror(median_qerror),
-                ninf_qerrors,
-                fmt_qerror(mean_qerror),
-                fmt_qerror(*min_qerror),
-                fmt_qerror(*max_qerror),
-            ]);
-        } else {
-            agg_qerror_table.add_row(prettytable::row![dbms, "N/A", "N/A", "N/A", "N/A", "N/A"]);
-        }
-    }
-    agg_qerror_table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
-    agg_qerror_table.printstd();
-
-    println!();
-    println!(" Per-Query Cardinality Info");
-    println!(" ===========================");
+    println!(" Per-Query Cardinality Information");
+    println!("===================================");
     for (i, query_id) in query_ids.iter().enumerate() {
         println!(" Query {}", query_id);
         let mut this_query_cardinfo_table = Table::new();
@@ -186,6 +151,90 @@ async fn cardtest<P: AsRef<Path>>(
         this_query_cardinfo_table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
         this_query_cardinfo_table.printstd();
     }
+
+    println!();
+    println!(" Aggregate Q-Error Information");
+    let mut agg_qerror_table = Table::new();
+    agg_qerror_table.set_titles(prettytable::row![
+        "DBMS", "Median", "P90", "P95", "P99", "# Inf", "Mean", "Min", "Max"
+    ]);
+    for (dbms, cardinfos) in &cardinfo_alldbs {
+        if !cardinfos.is_empty() {
+            let qerrors: Vec<f64> = cardinfos.iter().map(|cardinfo| cardinfo.qerror).collect();
+            let finite_qerrors: Vec<f64> = qerrors
+                .clone()
+                .into_iter()
+                .filter(|qerror| qerror.is_finite())
+                .collect();
+            let mut sorted_qerrors = finite_qerrors.clone();
+            sorted_qerrors.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let median_qerror = percentile(&sorted_qerrors, 50.0);
+            let p90_qerror = percentile(&sorted_qerrors, 90.0);
+            let p95_qerror = percentile(&sorted_qerrors, 95.0);
+            let p99_qerror = percentile(&sorted_qerrors, 99.0);
+            let ninf_qerrors = qerrors.len() - finite_qerrors.len();
+            let mean_qerror = finite_qerrors.iter().sum::<f64>() / finite_qerrors.len() as f64;
+            let min_qerror = qerrors
+                .iter()
+                .min_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap();
+            let max_qerror = finite_qerrors
+                .iter()
+                .max_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap();
+            agg_qerror_table.add_row(prettytable::row![
+                dbms,
+                fmt_qerror(median_qerror),
+                fmt_qerror(p90_qerror),
+                fmt_qerror(p95_qerror),
+                fmt_qerror(p99_qerror),
+                ninf_qerrors,
+                fmt_qerror(mean_qerror),
+                fmt_qerror(*min_qerror),
+                fmt_qerror(*max_qerror),
+            ]);
+        } else {
+            agg_qerror_table.add_row(prettytable::row![dbms, "N/A", "N/A", "N/A", "N/A", "N/A"]);
+        }
+    }
+    agg_qerror_table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
+    agg_qerror_table.printstd();
+
+    println!();
+    println!(" Comparative Q-Error Information");
+    let mut best_qerror_infos = vec![];
+    for (dbms, cardinfos) in &cardinfo_alldbs {
+        for (i, cardinfo) in cardinfos.iter().enumerate() {
+            if i >= best_qerror_infos.len() {
+                assert!(i == best_qerror_infos.len());
+                best_qerror_infos.push((cardinfo.qerror, vec![dbms]));
+            } else {
+                let (best_qerror, _) = best_qerror_infos[i];
+
+                if cardinfo.qerror < best_qerror {
+                    *best_qerror_infos.get_mut(i).unwrap() = (cardinfo.qerror, vec![dbms]);
+                } else if cardinfo.qerror == best_qerror {
+                    best_qerror_infos.get_mut(i).unwrap().1.push(dbms);
+                }
+            }
+        }
+    }
+    let mut cmp_qerror_table = Table::new();
+    cmp_qerror_table.set_titles(prettytable::row![
+        "DBMS", "# Best", "# Tied Best"
+    ]);
+    for (dbms, _) in &cardinfo_alldbs {
+        let num_best = best_qerror_infos.iter().filter(|(_, dbmss)| {
+            dbmss.len() == 1 && dbmss.contains(&dbms)
+        }).count();
+        let num_tied_best = best_qerror_infos.iter().filter(|(_, dbmss)| {
+            dbmss.len() > 1 && dbmss.contains(&dbms)
+        }).count();
+        cmp_qerror_table.add_row(prettytable::row![dbms, num_best, num_tied_best]);
+    }
+    cmp_qerror_table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
+    cmp_qerror_table.printstd();
+
     Ok(())
 }
 
