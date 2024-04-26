@@ -396,6 +396,11 @@ impl<
             num_cols - 1,
             "we should have picked N - 1 predicates"
         );
+        debug_assert_eq!(
+            disjoint_sets.num_sets(),
+            1,
+            "all columns should be connected by the predicates"
+        );
         acc_sel
     }
 
