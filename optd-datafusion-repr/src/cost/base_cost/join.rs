@@ -356,7 +356,8 @@ impl<
         let mut num_picked_predicates = 0;
         let mut disjoint_sets = DisjointSets::new();
 
-        // Sort predicates by selectivity in ascending order.
+        // Use Kruskal to compute MST.
+        // Step 1: sort predicates by selectivity in ascending order.
         let mut sorted_predicates = predicates
             .into_iter()
             .map(|p| {
@@ -368,6 +369,7 @@ impl<
             })
             .sorted_by(|(_, sel1), (_, sel2)| sel1.partial_cmp(sel2).unwrap());
 
+        // Step 2: pick predicates until all columns are "connected" by the predicates.
         sorted_predicates.try_for_each(|(p, sel)| {
             if !disjoint_sets.contains(&p.left) {
                 disjoint_sets.make_set(p.left.clone()).unwrap();
@@ -378,6 +380,7 @@ impl<
             if !disjoint_sets.same_set(&p.left, &p.right).unwrap() {
                 acc_sel *= sel;
                 num_picked_predicates += 1;
+                disjoint_sets.union(&p.left, &p.right).unwrap();
             }
             if num_picked_predicates == num_cols - 1 {
                 ControlFlow::Break(())
@@ -385,15 +388,16 @@ impl<
                 ControlFlow::Continue(())
             }
         });
-        assert!(
-            num_picked_predicates == num_cols - 1,
+        debug_assert_eq!(
+            num_picked_predicates,
+            num_cols - 1,
             "we should have picked N - 1 predicates"
         );
         acc_sel
     }
 
     /// See `get_join_on_selectivity` for details.
-    fn get_join_selectivity_from_redundant_predicate(
+    fn get_join_selectivity_from_redundant_predicates(
         &self,
         predicate: EqPredicate,
         past_eq_columns: &mut EqBaseTableColumnSets,
@@ -438,7 +442,7 @@ impl<
     /// defines the equality (|P| >= N - 1), we select compute the MST of the graph where the
     /// columns are nodes and the predicates are edges.
     ///
-    /// Then the selecitivy of such "redundant" predicate p is the MST of the graph with p (minimum
+    /// Then the selectiviy of such "redundant" predicate p is the MST of the graph with p (minimum
     /// as in having the smallest product of selectivities) divided by the MST of the graph without p.
     fn get_join_on_selectivity(
         &self,
@@ -464,7 +468,7 @@ impl<
                 {
                     let predicate = EqPredicate::new(left.clone(), right.clone());
                     if past_eq_columns.is_eq(left, right) {
-                        return self.get_join_selectivity_from_redundant_predicate(
+                        return self.get_join_selectivity_from_redundant_predicates(
                             predicate,
                             &mut past_eq_columns,
                         );
@@ -1102,6 +1106,11 @@ mod tests {
         );
     }
 
+    // Ensure that in `select t1, t2, t3 where t1.a = t2.a and t2.a = t3.a and t1.a = t3.a`,
+    // even if the first join picks the most selective predicate (which should have been discarded,
+    // since we need to ensure the most selective N - 1 predicates are picked), the selectivity is
+    // adjusted in the second join so that the final selectivity is the product of the
+    // selectivities of the 2 most selective redicates.
     #[test]
     fn test_inner_redundant_predicate() {
         let cost_model = create_three_table_cost_model(

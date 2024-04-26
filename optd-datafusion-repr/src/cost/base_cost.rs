@@ -331,7 +331,7 @@ mod tests {
         )
     }
 
-    /// Two columns is sufficient for all join selectivity tests
+    /// Create a cost model with two columns, one for each table. Each column has 100 values.
     pub fn create_two_table_cost_model(
         tbl1_per_column_stats: TestPerColumnStats,
         tbl2_per_column_stats: TestPerColumnStats,
@@ -344,7 +344,7 @@ mod tests {
         )
     }
 
-    /// Two columns is sufficient for all join selectivity tests
+    /// Create a cost model with three columns, one for each table. Each column has 100 values.
     pub fn create_three_table_cost_model(
         tbl1_per_column_stats: TestPerColumnStats,
         tbl2_per_column_stats: TestPerColumnStats,
