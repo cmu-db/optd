@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use optd_perftest::benchmark::Benchmark;
-use optd_perftest::job::JobConfig;
+use optd_perftest::job::JobKitConfig;
 use optd_perftest::shell;
-use optd_perftest::tpch::{TpchConfig, TPCH_KIT_POSTGRES};
+use optd_perftest::tpch::{TpchKitConfig, TPCH_KIT_POSTGRES};
 use optd_perftest::{cardtest, job, tpch};
 use prettytable::{format, Table};
 use std::fs;
@@ -25,6 +25,7 @@ struct Cli {
 enum BenchmarkName {
     Tpch,
     Job,
+    Joblight,
 }
 
 #[derive(Subcommand)]
@@ -97,7 +98,8 @@ async fn cardtest<P: AsRef<Path>>(
     let query_ids = if query_ids.is_empty() {
         Vec::from(match benchmark_name {
             BenchmarkName::Tpch => tpch::WORKING_QUERY_IDS,
-            BenchmarkName::Job => job::WORKING_QUERY_IDS,
+            BenchmarkName::Job => job::WORKING_JOB_QUERY_IDS,
+            BenchmarkName::Joblight => job::WORKING_JOBLIGHT_QUERY_IDS,
         })
         .into_iter()
         .map(String::from)
@@ -107,14 +109,19 @@ async fn cardtest<P: AsRef<Path>>(
     };
 
     let benchmark = match benchmark_name {
-        BenchmarkName::Tpch => Benchmark::Tpch(TpchConfig {
+        BenchmarkName::Tpch => Benchmark::Tpch(TpchKitConfig {
             dbms: String::from(TPCH_KIT_POSTGRES),
             scale_factor,
             seed,
             query_ids: query_ids.clone(),
         }),
-        BenchmarkName::Job => Benchmark::Job(JobConfig {
+        BenchmarkName::Job => Benchmark::Job(JobKitConfig {
             query_ids: query_ids.clone(),
+            is_light: false,
+        }),
+        BenchmarkName::Joblight => Benchmark::Joblight(JobKitConfig {
+            query_ids: query_ids.clone(),
+            is_light: true,
         }),
     };
 

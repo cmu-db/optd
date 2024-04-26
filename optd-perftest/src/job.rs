@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 const JOB_KIT_REPO_URL: &str = "https://github.com/wangpatrick57/job-kit.git";
 const JOB_TABLES_URL: &str = "https://homepages.cwi.nl/~boncz/job/imdb.tgz";
-pub const WORKING_QUERY_IDS: &[&str] = &[
+pub const WORKING_JOB_QUERY_IDS: &[&str] = &[
     "1a", "1b", "1c", "1d", "2a", "2b", "2c", "2d", "3a", "3b", "3c", "4a", "4b", "4c", "5a", "5b",
     "5c", "6a", "6b", "6c", "6d", "6e", "6f", "7b", "8a", "8b", "8c", "8d", "9b", "9c", "9d",
     "10a", "10b", "10c", "12a", "12b", "12c", "13a", "13b", "13c", "13d", "14a", "14b", "14c",
@@ -20,16 +20,20 @@ pub const WORKING_QUERY_IDS: &[&str] = &[
     "28c", "29a", "29b", "29c", "30a", "30b", "30c", "31a", "31b", "31c", "32a", "32b", "33a",
     "33b", "33c",
 ];
+pub const WORKING_JOBLIGHT_QUERY_IDS: &[&str] = &[
+    "1a"
+];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct JobConfig {
+pub struct JobKitConfig {
     pub query_ids: Vec<String>,
+    pub is_light: bool,
 }
 
-impl Display for JobConfig {
+impl Display for JobKitConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         // Use write! macro to write formatted string to `f`
-        write!(f, "JobConfig(query_ids={:?})", self.query_ids,)
+        write!(f, "JobKitConfig(query_ids={:?})", self.query_ids,)
     }
 }
 
@@ -37,7 +41,7 @@ impl Display for JobConfig {
 /// It does not actually execute the queries as it is meant to be DBMS-agnostic.
 /// Is essentially a wrapper around the job-kit repo.
 /// Since it's conceptually a wrapper around the repo, I chose _not_ to make
-///   JobConfig an initialization parameter.
+///   JobKitConfig an initialization parameter.
 pub struct JobKit {
     _workspace_dpath: PathBuf,
 
@@ -45,7 +49,8 @@ pub struct JobKit {
     job_dpath: PathBuf,
     job_kit_repo_dpath: PathBuf,
     downloaded_tables_dpath: PathBuf,
-    queries_dpath: PathBuf,
+    job_queries_dpath: PathBuf,
+    joblight_queries_dpath: PathBuf,
     pub schema_fpath: PathBuf,
     pub indexes_fpath: PathBuf,
 }
@@ -61,7 +66,8 @@ impl JobKit {
             fs::create_dir(&job_dpath)?;
         }
         let job_kit_repo_dpath = job_dpath.join("job-kit");
-        let queries_dpath = job_kit_repo_dpath.join("cardest_job_queries");
+        let job_queries_dpath = job_kit_repo_dpath.join("cardest_job_queries");
+        let joblight_queries_dpath = job_kit_repo_dpath.join("cardest_joblight_queries");
         let downloaded_tables_dpath = job_dpath.join("downloaded_tables");
         if !downloaded_tables_dpath.exists() {
             fs::create_dir(&downloaded_tables_dpath)?;
@@ -78,7 +84,8 @@ impl JobKit {
             _workspace_dpath: workspace_dpath,
             job_dpath,
             job_kit_repo_dpath,
-            queries_dpath,
+            job_queries_dpath,
+            joblight_queries_dpath,
             downloaded_tables_dpath,
             schema_fpath,
             indexes_fpath,
@@ -92,10 +99,10 @@ impl JobKit {
     }
 
     /// Download the .csv files for all tables of JOB
-    pub fn download_tables(&self, job_config: &JobConfig) -> io::Result<()> {
+    pub fn download_tables(&self, job_kit_config: &JobKitConfig) -> io::Result<()> {
         let done_fpath = self.downloaded_tables_dpath.join("download_tables_done");
         if !done_fpath.exists() {
-            log::debug!("[start] downloading tables for {}", job_config);
+            log::debug!("[start] downloading tables for {}", job_kit_config);
             // Instructions are from https://cedardb.com/docs/guides/example_datasets/job/, not from the job-kit repo.
             shell::run_command_with_status_check_in_dir(
                 &format!("curl -O {JOB_TABLES_URL}"),
@@ -108,9 +115,9 @@ impl JobKit {
             )?;
             shell::run_command_with_status_check_in_dir("rm imdb.tgz", &self.job_dpath)?;
             File::create(done_fpath)?;
-            log::debug!("[end] downloading tables for {}", job_config);
+            log::debug!("[end] downloading tables for {}", job_kit_config);
         } else {
-            log::debug!("[skip] downloading tables for {}", job_config);
+            log::debug!("[skip] downloading tables for {}", job_kit_config);
         }
         Ok(())
     }
@@ -141,11 +148,11 @@ impl JobKit {
     /// It's important to iterate _in order_ due to the interface of CardtestRunnerDBMSHelper
     pub fn get_sql_fpath_ordered_iter(
         &self,
-        job_config: &JobConfig,
+        job_kit_config: &JobKitConfig,
     ) -> io::Result<impl Iterator<Item = (String, PathBuf)>> {
-        let queries_dpath = self.queries_dpath.clone();
+        let queries_dpath = (if job_kit_config.is_light { &self.job_queries_dpath } else { &self.joblight_queries_dpath }).clone();
         let sql_fpath_ordered_iter =
-            job_config
+            job_kit_config
                 .query_ids
                 .clone()
                 .into_iter()
