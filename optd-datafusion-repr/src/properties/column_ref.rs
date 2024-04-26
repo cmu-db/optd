@@ -71,15 +71,15 @@ impl SemanticCorrelation {
 
 #[derive(Clone, Debug)]
 pub enum EqColumns {
-    /// Equal columns denoted by sets of base table columns,
-    /// e.g. t1.c1 = t2.c2 = t3.c3.
+    /// Equal columns denoted by disjoint sets of base table columns,
+    /// e.g. {{ t1.c1 = t2.c1 = t3.c1 }, { t1.c2 = t2.c2 }}.
     EqBaseTableColumnSets(EqBaseTableColumnSets),
     /// Equal columns denoted by pairs of column indices. This is for keeping
     /// track of the column indices in the filter/join predicates, which only
     /// contains relative column indices.
     ///
-    /// It is only used when building the property. It should NEVER be used when
-    /// computing cost.
+    /// It is only used when building the property. It should NEVER be used in
+    /// cost computation.
     EqColumnIdxPairs(Vec<(usize, usize)>),
 }
 
@@ -96,7 +96,7 @@ impl EqPredicate {
 }
 
 /// A disjoint set of base table columns with equal values in the same row,
-/// along with the predicates that define the equality.
+/// along with the predicates that define the equalities.
 #[derive(Clone, Debug)]
 pub struct EqBaseTableColumnSets {
     disjoint_eq_col_sets: DisjointSets<BaseTableColumnRef>,
@@ -142,6 +142,7 @@ impl EqBaseTableColumnSets {
             .unwrap_or(false)
     }
 
+    /// Get the number of columns that are equal to `col`, including `col` itself.
     pub fn num_eq_columns(&mut self, col: &BaseTableColumnRef) -> usize {
         self.disjoint_eq_col_sets.set_size(col).unwrap()
     }
@@ -164,6 +165,7 @@ impl EqBaseTableColumnSets {
         predicates
     }
 
+    /// Union two `EqBaseTableColumnSets` to produce a new disjoint sets.
     pub fn union(x: &EqBaseTableColumnSets, y: &EqBaseTableColumnSets) -> EqBaseTableColumnSets {
         let mut eq_col_sets = Self::new();
         // TODO: one redundant clone here.
@@ -177,9 +179,9 @@ impl EqBaseTableColumnSets {
 #[derive(Clone, Debug)]
 pub struct GroupColumnRefs {
     column_refs: Vec<ColumnRef>,
-    /// Correlation of the output of the group. Used to build the logical property.
+    /// Correlation of the output columns of the group. Only used to build the logical property.
     output_correlation: Option<SemanticCorrelation>,
-    /// Correlation of the input of the group. It can only be `Some` for plan nodes.
+    /// Correlation of the input columns of the group. It can only be `Some` for plan nodes.
     input_correlation: Option<SemanticCorrelation>,
 }
 
@@ -196,9 +198,9 @@ impl GroupColumnRefs {
         }
     }
 
-    #[cfg(test)]
     // There's no need for `output_correlation` in tests, since it's only used
-    // when driving the property from children.
+    // when deriving the property from children.
+    #[cfg(test)]
     pub fn new_test(
         column_refs: Vec<ColumnRef>,
         input_correlation: Option<SemanticCorrelation>,
