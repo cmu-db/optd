@@ -45,7 +45,8 @@ impl<
                 optimizer.get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
             let expr_group_id = context.children_group_ids[2];
             let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
-            // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
+            // there may be more than one expression tree in a group.
+            // see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
             let expr_tree = expr_trees.first().expect("expression missing");
             self.get_join_selectivity_from_expr_tree(
                 join_typ,
@@ -84,7 +85,8 @@ impl<
                 .len();
             let left_keys_list = optimizer.get_all_group_bindings(left_keys_group_id, false);
             let right_keys_list = optimizer.get_all_group_bindings(right_keys_group_id, false);
-            // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
+            // there may be more than one expression tree in a group.
+            // see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
             let left_keys = left_keys_list.first().expect("left keys missing");
             let right_keys = right_keys_list.first().expect("right keys missing");
             self.get_join_selectivity_from_keys(
@@ -121,7 +123,8 @@ impl<
         left_col_cnt: usize,
     ) -> f64 {
         assert!(left_keys.len() == right_keys.len());
-        // I assume that the keys are already in the right order s.t. the ith key of left_keys corresponds with the ith key of right_keys
+        // I assume that the keys are already in the right order
+        // s.t. the ith key of left_keys corresponds with the ith key of right_keys
         let on_col_ref_pairs = left_keys
             .to_vec()
             .into_iter()
@@ -146,13 +149,18 @@ impl<
         )
     }
 
-    /// The core logic of join selectivity which assumes we've already separated the expression into the on conditions and the filters
-    /// Hash join and NLJ reference right table columns differently, hence the `right_col_ref_offset` parameter.
+    /// The core logic of join selectivity which assumes we've already separated the expression
+    /// into the on conditions and the filters.
+    ///
+    /// Hash join and NLJ reference right table columns differently, hence the
+    /// `right_col_ref_offset` parameter.
+    ///
     /// For hash join, the right table columns indices are with respect to the right table,
-    ///   which means #0 is the first column of the right table.
+    /// which means #0 is the first column of the right table.
+    ///
     /// For NLJ, the right table columns indices are with respect to the output of the join.
-    ///   For example, if the left table has 3 columns, the first column of the right table
-    ///   is #3 instead of #0.
+    /// For example, if the left table has 3 columns, the first column of the right table
+    /// is #3 instead of #0.
     #[allow(clippy::too_many_arguments)]
     fn get_join_selectivity_core(
         &self,
@@ -166,10 +174,12 @@ impl<
     ) -> f64 {
         let join_on_selectivity =
             self.get_join_on_selectivity(&on_col_ref_pairs, column_refs, right_col_ref_offset);
-        // Currently, there is no difference in how we handle a join filter and a select filter, so we use the same function
+        // Currently, there is no difference in how we handle a join filter and a select filter,
+        // so we use the same function.
+        //
         // One difference (that we *don't* care about right now) is that join filters can contain expressions from multiple
-        //   different tables. Currently, this doesn't affect the get_filter_selectivity() function, but this may change in
-        //   the future
+        // different tables. Currently, this doesn't affect the get_filter_selectivity() function, but this may change in
+        // the future.
         let join_filter_selectivity = match filter_expr_tree {
             Some(filter_expr_tree) => self.get_filter_selectivity(filter_expr_tree, column_refs),
             None => 1.0,
@@ -190,9 +200,10 @@ impl<
         }
     }
 
-    /// The expr_tree input must be a "mixed expression tree", just like with get_filter_selectivity()
-    /// This is a "wrapper" to separate the equality conditions from the filter conditions before calling
-    ///   the "main" get_join_selectivity_core() function.
+    /// The expr_tree input must be a "mixed expression tree", just like with `get_filter_selectivity`.
+    ///
+    /// This is a "wrapper" to separate the equality conditions from the filter conditions before
+    /// calling the "main" `get_join_selectivity_core` function.
     fn get_join_selectivity_from_expr_tree(
         &self,
         join_typ: JoinType,
@@ -316,14 +327,16 @@ impl<
         left: &ColumnRef,
         right: &ColumnRef,
     ) -> f64 {
-        // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
+        // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2)
+        // (see https://postgrespro.com/blog/pgsql/5969618)
         let ndistincts = vec![left, right].into_iter().map(|col_ref| {
             match self.get_single_column_stats_from_col_ref(col_ref) {
                 Some(per_col_stats) => per_col_stats.ndistinct,
                 None => DEFAULT_NUM_DISTINCT,
             }
         });
-        // using reduce(f64::min) is the idiomatic workaround to min() because f64 does not implement Ord due to NaN
+        // using reduce(f64::min) is the idiomatic workaround to min() because
+        // f64 does not implement Ord due to NaN
         let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
         assert!(
             !selectivity.is_nan(),
@@ -411,7 +424,8 @@ impl<
 
     /// Get the selectivity of the on conditions.
     ///
-    /// Note that the selectivity of the on conditions does not depend on join type. Join type is accounted for separately in get_join_selectivity_core().
+    /// Note that the selectivity of the on conditions does not depend on join type.
+    /// Join type is accounted for separately in get_join_selectivity_core().
     ///
     /// We also check if each predicate is correlated with any of the previous predicates.
     ///
@@ -420,11 +434,12 @@ impl<
     //
     /// However, we don't just throw away A = C, because we want to pick the most selective predicates.
     ///
-    /// More generally, if we have N columns that are equal, and the set of predicates P that make them equal (|P| >= N - 1),
-    /// we select compute the MST of the graph where the columns are nodes and the predicates are edges.
+    /// More generally, if we have N columns that are equal, and the set of predicates P that
+    /// defines the equality (|P| >= N - 1), we select compute the MST of the graph where the
+    /// columns are nodes and the predicates are edges.
     ///
-    /// Then the selecitivy of such "redundant" predicate p is the MST of the graph with p (minimum as in having
-    /// the smallest product of selectivities) divided by the MST of the graph without p.
+    /// Then the selecitivy of such "redundant" predicate p is the MST of the graph with p (minimum
+    /// as in having the smallest product of selectivities) divided by the MST of the graph without p.
     fn get_join_on_selectivity(
         &self,
         on_col_ref_pairs: &[(ColumnRefExpr, ColumnRefExpr)],
@@ -477,7 +492,8 @@ mod tests {
         },
     };
 
-    /// A wrapper around get_join_selectivity_from_expr_tree that extracts the table row counts from the cost model
+    /// A wrapper around get_join_selectivity_from_expr_tree that extracts the
+    /// table row counts from the cost model.
     fn test_get_join_selectivity(
         cost_model: &TestOptCostModel,
         reverse_tables: bool,
@@ -1019,7 +1035,8 @@ mod tests {
 
     /// Unique oncond means an oncondition on columns which are unique in both tables
     /// Filter means we're adding a join filter
-    /// There's only one case if both columns are unique and there's a filter: the inner will be < 1 / row count of both tables
+    /// There's only one case if both columns are unique and there's a filter:
+    /// the inner will be < 1 / row count of both tables
     #[test]
     fn test_outer_unique_oncond_filter() {
         let cost_model = create_two_table_cost_model_custom_row_cnts(
