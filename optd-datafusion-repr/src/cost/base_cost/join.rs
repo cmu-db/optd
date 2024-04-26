@@ -399,19 +399,24 @@ impl<
         acc_sel
     }
 
-    /// A set of predicates contains "redundant" some of them can be expressed with the rest.
+    /// A predicate set contains "redundant" predicates if some of them can be expressed with the rest.
     /// E.g. In { A = B, B = C, A = C }, one of the predicates is redundant.
     /// In this case, we want to pick the most selective predicates that touch all the columns
     /// that this set of predicates touches.
     ///
     /// If we have N columns that are equal, and the set of equality predicates P that defines the
-    /// equality (|P| >= N - 1), we compute the MST of the graph where the columns are nodes
-    /// and the predicates are edges (see `get_join_selecitivity_from_most_selective_predicates`
-    /// for MST implementation).
+    /// equalities (|P| >= N - 1), we pick the N - 1 most selective predicates (denoted P') that
+    /// define the equalities by computing the MST of the graph where the columns are nodes and the
+    /// predicates are edges (see `get_join_selecitivity_from_most_selective_predicates` for
+    /// implementation).
     ///
-    /// Then the selectiviy of such "redundant" predicate p is the MST of the graph with p (minimum
-    /// as in having the smallest product of selectivities) divided by the MST of the graph without p.
-    fn get_join_selectivity_from_redundant_predicates(
+    /// But since child has already picked some predicates which might not be the most selective
+    /// (because it has not seen the most selective ones), when we encounter a potentially more
+    /// selective `predicate` (in the parameter) and a set of previously seen predicates
+    /// `past_eq_columns`, `predicate` produces a selectivity adjustment factor, which is the
+    /// multiplied selectivity of the most selective N - 1 predicate among `past_eq_columns` union
+    /// `predicate` divided by the selectivity of the `past_eq_columns`.
+    fn get_join_selectivity_adjustment_from_redundant_predicates(
         &self,
         predicate: EqPredicate,
         past_eq_columns: &mut EqBaseTableColumnSets,
@@ -476,7 +481,7 @@ impl<
                 {
                     let predicate = EqPredicate::new(left.clone(), right.clone());
                     if past_eq_columns.is_eq(left, right) {
-                        return self.get_join_selectivity_from_redundant_predicates(
+                        return self.get_join_selectivity_adjustment_from_redundant_predicates(
                             predicate,
                             &mut past_eq_columns,
                         );
