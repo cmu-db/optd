@@ -20,9 +20,7 @@ pub const WORKING_JOB_QUERY_IDS: &[&str] = &[
     "28c", "29a", "29b", "29c", "30a", "30b", "30c", "31a", "31b", "31c", "32a", "32b", "33a",
     "33b", "33c",
 ];
-pub const WORKING_JOBLIGHT_QUERY_IDS: &[&str] = &[
-    "1a"
-];
+pub const WORKING_JOBLIGHT_QUERY_IDS: &[&str] = &["1a", "1b", "1d", "2a", "3a", "3b", "3c", "4a", "4b", "4c", "5c", "6a", "6b", "6c", "6d", "6e", "7b", "8a", "8b", "8c", "9b", "10a", "10c", "12a", "12b", "12c", "13a", "14a", "14b", "14c", "15a", "15b", "15c", "16a", "17a", "17b", "17c", "18a", "18c", "19b", "20a", "20b", "20c", "22a", "22b", "22c", "23a", "23b", "24a", "24b", "25a", "26a", "26b", "28a"];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JobKitConfig {
