@@ -170,7 +170,7 @@ impl DatafusionDBMS {
         let mut estcards = vec![];
         for (query_id, sql_fpath) in job_kit.get_sql_fpath_ordered_iter(job_config)? {
             println!(
-                "about to evaluate datafusion's estcard for TPC-H Q{}",
+                "about to evaluate datafusion's estcard for JOB Q{}",
                 query_id
             );
             let sql = fs::read_to_string(sql_fpath)?;
