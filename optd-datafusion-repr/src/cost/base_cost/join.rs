@@ -159,10 +159,6 @@ impl<
     ) -> f64 {
         let join_on_selectivity =
             self.get_join_on_selectivity(&on_col_ref_pairs, column_refs, right_col_ref_offset);
-        println!(
-            "l: {:.2}, r: {:.2}, sel: {:.2}",
-            left_row_cnt, right_row_cnt, join_on_selectivity
-        );
         // Currently, there is no difference in how we handle a join filter and a select filter, so we use the same function
         // One difference (that we *don't* care about right now) is that join filters can contain expressions from multiple
         //   different tables. Currently, this doesn't affect the get_filter_selectivity() function, but this may change in
@@ -320,7 +316,6 @@ impl<
         on_col_ref_pairs.iter().map(|on_col_ref_pair| {
             // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
             let ndistincts = vec![on_col_ref_pair.0.index(), on_col_ref_pair.1.index() + right_col_ref_offset].into_iter().map(|col_index| {
-                println!("col: {:?}", column_refs[col_index]);
                 match self.get_single_column_stats_from_col_ref(&column_refs[col_index]) {
                     Some(per_col_stats) => {
                         per_col_stats.ndistinct
@@ -330,7 +325,6 @@ impl<
             });
             // using reduce(f64::min) is the idiomatic workaround to min() because f64 does not implement Ord due to NaN
             let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
-            println!("selectivity: {:?}", selectivity);
             assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
             selectivity
         }).product()
