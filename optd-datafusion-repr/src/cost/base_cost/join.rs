@@ -399,7 +399,18 @@ impl<
         acc_sel
     }
 
-    /// See `get_join_on_selectivity` for details.
+    /// A set of predicates contains "redundant" some of them can be expressed with the rest.
+    /// E.g. In { A = B, B = C, A = C }, one of the predicates is redundant.
+    /// In this case, we want to pick the most selective predicates that touch all the columns
+    /// that this set of predicates touches.
+    ///
+    /// If we have N columns that are equal, and the set of equality predicates P that defines the
+    /// equality (|P| >= N - 1), we compute the MST of the graph where the columns are nodes
+    /// and the predicates are edges (see `get_join_selecitivity_from_most_selective_predicates`
+    /// for MST implementation).
+    ///
+    /// Then the selectiviy of such "redundant" predicate p is the MST of the graph with p (minimum
+    /// as in having the smallest product of selectivities) divided by the MST of the graph without p.
     fn get_join_selectivity_from_redundant_predicates(
         &self,
         predicate: EqPredicate,
@@ -437,16 +448,10 @@ impl<
     /// We also check if each predicate is correlated with any of the previous predicates.
     ///
     /// More specifically, we are checking if the predicate can be expressed with other existing predicates.
-    /// E.g. if we have a predicate like A = B and B = C, we can express A = C is redundant.
+    /// E.g. if we have a predicate like A = B and B = C is equivalent to A = C.
     //
     /// However, we don't just throw away A = C, because we want to pick the most selective predicates.
-    ///
-    /// More generally, if we have N columns that are equal, and the set of predicates P that
-    /// defines the equality (|P| >= N - 1), we select compute the MST of the graph where the
-    /// columns are nodes and the predicates are edges.
-    ///
-    /// Then the selectiviy of such "redundant" predicate p is the MST of the graph with p (minimum
-    /// as in having the smallest product of selectivities) divided by the MST of the graph without p.
+    /// For details on how we do this, see `get_join_selectivity_from_redundant_predicates`.
     fn get_join_on_selectivity(
         &self,
         on_col_ref_pairs: &[(ColumnRefExpr, ColumnRefExpr)],
