@@ -345,8 +345,11 @@ impl<
         selectivity
     }
 
-    /// Given a set of predicates P that define N equal columns, find the selectivity of
-    /// the most selective N - 1 predicates that "touches" all the columns using MST.
+    /// Given a set of equality predicates P that define N equal columns, find the selectivity of
+    /// the most selective N - 1 predicates that "touches" all the columns.
+    ///
+    /// We solve the problem using MST (Minimum Spanning Tree), where the columns are nodes and the
+    /// predicates are undirected edges. Since all the columns are equal, the graph is connected.
     fn get_join_selecitivity_from_most_selective_predicates(
         &self,
         predicates: Vec<EqPredicate>,
