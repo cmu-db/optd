@@ -43,7 +43,17 @@ impl ColumnRef {
 /// semantics of the query, not the statistics.
 #[derive(Clone, Debug)]
 pub struct SemanticCorrelation {
-    eq_column: EqColumns,
+    eq_columns: EqColumns,
+}
+
+impl SemanticCorrelation {
+    pub fn eq_base_table_columns(&self) -> &EqBaseTableColumnSets {
+        if let EqColumns::EqBaseTableColumnSets(eq_columns) = &self.eq_columns {
+            eq_columns
+        } else {
+            panic!("not EqBaseTableColumnSets");
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -118,6 +128,29 @@ impl EqBaseTableColumnSets {
 
         // Keep track of the predicate.
         self.eq_predicates.insert(predicate);
+    }
+
+    /// Determine if two columns are equal.
+    pub fn is_eq(&mut self, left: &BaseTableColumnRef, right: &BaseTableColumnRef) -> bool {
+        self.disjoint_eq_col_sets.same_set(left, right).unwrap()
+    }
+
+    /// Find the set of predicates that define the equality of the set of columns `col` belongs to.
+    pub fn find_predicates_for_eq_column_set(
+        &mut self,
+        col: &BaseTableColumnRef,
+    ) -> Vec<EqPredicate> {
+        let mut predicates = Vec::new();
+        for predicate in &self.eq_predicates {
+            let left = predicate.left();
+            let right = predicate.right();
+            if (left != col && self.disjoint_eq_col_sets.same_set(col, left).unwrap())
+                || (right != col && self.disjoint_eq_col_sets.same_set(col, right).unwrap())
+            {
+                predicates.push(predicate.clone());
+            }
+        }
+        predicates
     }
 
     pub fn union(x: &EqBaseTableColumnSets, y: &EqBaseTableColumnSets) -> EqBaseTableColumnSets {
@@ -256,14 +289,14 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                             let mut eq_column_idx_pairs = Vec::new();
                             for child in children {
                                 if let Some(SemanticCorrelation {
-                                    eq_column: EqColumns::EqColumnIdxPairs(pairs),
+                                    eq_columns: EqColumns::EqColumnIdxPairs(pairs),
                                 }) = &child.output_correlation
                                 {
                                     eq_column_idx_pairs.extend(pairs.iter());
                                 }
                             }
                             Some(SemanticCorrelation {
-                                eq_column: EqColumns::EqColumnIdxPairs(eq_column_idx_pairs),
+                                eq_columns: EqColumns::EqColumnIdxPairs(eq_column_idx_pairs),
                             })
                         }
                         _ => None,
@@ -303,22 +336,22 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                     match (left, right) {
                         (
                             Some(SemanticCorrelation {
-                                eq_column: EqColumns::EqBaseTableColumnSets(left),
+                                eq_columns: EqColumns::EqBaseTableColumnSets(left),
                             }),
                             Some(SemanticCorrelation {
-                                eq_column: EqColumns::EqBaseTableColumnSets(right),
+                                eq_columns: EqColumns::EqBaseTableColumnSets(right),
                             }),
                         ) => EqBaseTableColumnSets::union(left, right),
                         (
                             Some(SemanticCorrelation {
-                                eq_column: EqColumns::EqBaseTableColumnSets(left),
+                                eq_columns: EqColumns::EqBaseTableColumnSets(left),
                             }),
                             None,
                         ) => left.clone(),
                         (
                             None,
                             Some(SemanticCorrelation {
-                                eq_column: EqColumns::EqBaseTableColumnSets(right),
+                                eq_columns: EqColumns::EqBaseTableColumnSets(right),
                             }),
                         ) => right.clone(),
                         _ => EqBaseTableColumnSets::new(),
@@ -326,7 +359,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 };
                 let mut eq_columns = children_eq_columns.clone();
                 let input_correlation = Some(SemanticCorrelation {
-                    eq_column: EqColumns::EqBaseTableColumnSets(children_eq_columns),
+                    eq_columns: EqColumns::EqBaseTableColumnSets(children_eq_columns),
                 });
 
                 // If the join type is inner or cross, merge the equal columns in the join condition
@@ -337,7 +370,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                     JoinType::Inner | JoinType::Cross => {
                         // Merge the equal columns in the join condition into the those from the children.
                         if let Some(SemanticCorrelation {
-                            eq_column: EqColumns::EqColumnIdxPairs(pairs),
+                            eq_columns: EqColumns::EqColumnIdxPairs(pairs),
                         }) = &children[2].output_correlation
                         {
                             for (l_col_idx, r_col_idx) in pairs {
@@ -354,7 +387,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                             }
                         };
                         Some(SemanticCorrelation {
-                            eq_column: EqColumns::EqBaseTableColumnSets(eq_columns),
+                            eq_columns: EqColumns::EqBaseTableColumnSets(eq_columns),
                         })
                     }
                     _ => None,
@@ -408,7 +441,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                                     ColumnRef::ChildColumnRef { col_idx: l_col_idx },
                                     ColumnRef::ChildColumnRef { col_idx: r_col_idx },
                                 ) => Some(SemanticCorrelation {
-                                    eq_column: EqColumns::EqColumnIdxPairs(vec![(
+                                    eq_columns: EqColumns::EqColumnIdxPairs(vec![(
                                         *l_col_idx, *r_col_idx,
                                     )]),
                                 }),
@@ -432,5 +465,64 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
 
     fn property_name(&self) -> &'static str {
         "column_ref"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_eq_base_table_column_sets() {
+        let col1 = BaseTableColumnRef {
+            table: "t1".to_string(),
+            col_idx: 1,
+        };
+        let col2 = BaseTableColumnRef {
+            table: "t2".to_string(),
+            col_idx: 2,
+        };
+        let col3 = BaseTableColumnRef {
+            table: "t3".to_string(),
+            col_idx: 3,
+        };
+        let col4 = BaseTableColumnRef {
+            table: "t4".to_string(),
+            col_idx: 4,
+        };
+        let pred1 = EqPredicate::new(col1.clone(), col2.clone());
+        let pred2 = EqPredicate::new(col3.clone(), col4.clone());
+        let pred3 = EqPredicate::new(col1.clone(), col3.clone());
+
+        let mut eq_col_sets = EqBaseTableColumnSets::new();
+
+        // (1, 2)
+        eq_col_sets.add_predicate(pred1.clone());
+        assert!(eq_col_sets.is_eq(&col1, &col2));
+
+        // (1, 2), (3, 4)
+        eq_col_sets.add_predicate(pred2.clone());
+        assert!(eq_col_sets.is_eq(&col3, &col4));
+        assert!(!eq_col_sets.is_eq(&col2, &col3));
+
+        let predicates = eq_col_sets.find_predicates_for_eq_column_set(&col1);
+        assert_eq!(predicates.len(), 1);
+        assert!(predicates.contains(&pred1));
+
+        let predicates = eq_col_sets.find_predicates_for_eq_column_set(&col3);
+        assert_eq!(predicates.len(), 1);
+        assert!(predicates.contains(&pred2));
+
+        // (1, 2, 3, 4)
+        eq_col_sets.add_predicate(pred3.clone());
+        assert!(eq_col_sets.is_eq(&col1, &col3));
+        assert!(eq_col_sets.is_eq(&col2, &col4));
+        assert!(eq_col_sets.is_eq(&col1, &col4));
+
+        let predicates = eq_col_sets.find_predicates_for_eq_column_set(&col1);
+        assert_eq!(predicates.len(), 3);
+        assert!(predicates.contains(&pred1));
+        assert!(predicates.contains(&pred2));
+        assert!(predicates.contains(&pred3));
     }
 }

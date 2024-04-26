@@ -15,7 +15,7 @@ use crate::{
         OptRelNodeRef, OptRelNodeTyp,
     },
     properties::column_ref::{
-        BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, GroupColumnRefs,
+        BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, EqPredicate, GroupColumnRefs,
     },
 };
 
@@ -315,11 +315,46 @@ impl<
         column_refs: &GroupColumnRefs,
         right_col_ref_offset: usize,
     ) -> f64 {
+        let mut past_eq_columns = column_refs
+            .input_correlation()
+            .unwrap()
+            .eq_base_table_columns()
+            .clone();
         // multiply the selectivities of all individual conditions together
         on_col_ref_pairs.iter().map(|on_col_ref_pair| {
+            // Check if the predicate is correlated with any of the previous predicates. 
+            //
+            // More specifically, we are checking if the predicate can be expressed with other existing predicates.
+            // E.g. if we have a predicate like A = B and B = C, we can express A = C is redundant.
+            //
+            // However, we don't just throw away A = C, because we want to pick the most selective predicates.
+            //
+            // More generally, if we have N columns that are equal, and the set of predicates P that make them equal (|P| >= N - 1),
+            // we select compute the MST of the graph where the columns are nodes and the predicates are edges.
+            //
+            // Then the selecitivy of such "redundant" predicate p is the MST of the graph with p (minimum as in having 
+            // the smallest product of selectivities) divided by the MST of the graph without p.
+            let left_col_ref = &column_refs[on_col_ref_pair.0.index()];
+            let right_col_ref = &column_refs[on_col_ref_pair.1.index() + right_col_ref_offset];
+            if let (ColumnRef::BaseTableColumnRef(left_col_ref), ColumnRef::BaseTableColumnRef(right_col_ref)) = (left_col_ref, right_col_ref) {
+                if past_eq_columns.is_eq(left_col_ref, right_col_ref) {
+                    // Find the predicates in the same set.
+                    // Construct a graph using the predicates.
+                    // Compute MST.
+
+                    // Add predicate to past_eq_columns.
+                    past_eq_columns.add_predicate(EqPredicate::new(left_col_ref.clone(), right_col_ref.clone()));
+                    // Construct the new graph.
+                    // Compute MST.
+
+                    // Compute division of MSTs as the selectivity.
+
+                }
+            }
+
             // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
-            let ndistincts = vec![on_col_ref_pair.0.index(), on_col_ref_pair.1.index() + right_col_ref_offset].into_iter().map(|col_index| {
-                match self.get_single_column_stats_from_col_ref(&column_refs[col_index]) {
+            let ndistincts = vec![left_col_ref, right_col_ref].into_iter().map(|col_ref| {
+                match self.get_single_column_stats_from_col_ref(col_ref) {
                     Some(per_col_stats) => {
                         per_col_stats.ndistinct
                     },
