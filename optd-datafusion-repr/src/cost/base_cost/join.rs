@@ -401,6 +401,11 @@ impl<
             1,
             "all columns should be connected by the predicates"
         );
+        debug_assert_eq!(
+            disjoint_sets.num_items(),
+            num_cols,
+            "all columns should be connected by the predicates"
+        );
         acc_sel
     }
 
