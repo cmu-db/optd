@@ -1132,8 +1132,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_add_edge_to_multi_equal_graph_which_maintains_mst() {
+    /// Test all possible permutations of three-table joins that only involve two join operators.
+    /// A three-table join consists of at least two joins. `join1_on_cond` is the condition of the first
+    ///   join. There can only be one condition because only two tables are involved at the time of the
+    ///   first join.
+    #[test_case::test_case((0, 1))]
+    #[test_case::test_case((0, 2))]
+    #[test_case::test_case((1, 2))]
+    fn test_three_table_join_for_join1_on_cond(join1_on_cond: (usize, usize)) {
         let cost_model = create_three_table_cost_model(
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
@@ -1154,38 +1160,71 @@ mod tests {
                 Some(TestDistribution::empty()),
             ),
         );
-        let col0_base_ref = BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        };
-        let col1_base_ref = BaseTableColumnRef {
-            table: String::from(TABLE2_NAME),
-            col_idx: 0,
-        };
-        let col2_base_ref = BaseTableColumnRef {
-            table: String::from(TABLE3_NAME),
-            col_idx: 0,
-        };
-        let col0_ref: ColumnRef = col0_base_ref.clone().into();
-        let col1_ref: ColumnRef = col1_base_ref.clone().into();
-        let col2_ref: ColumnRef = col2_base_ref.clone().into();
+        let col_base_refs = vec![
+            BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            },
+            BaseTableColumnRef {
+                table: String::from(TABLE2_NAME),
+                col_idx: 0,
+            },
+            BaseTableColumnRef {
+                table: String::from(TABLE3_NAME),
+                col_idx: 0,
+            },
+        ];
+        let col_refs: Vec<ColumnRef> = col_base_refs.clone().into_iter().map(|col_base_ref| col_base_ref.into()).collect();
 
         let mut eq_columns = EqBaseTableColumnSets::new();
-        eq_columns.add_predicate(EqPredicate::new(col0_base_ref, col1_base_ref));
+        eq_columns.add_predicate(EqPredicate::new(col_base_refs[join1_on_cond.0].clone(), col_base_refs[join1_on_cond.1].clone()));
+        let join1_selectivity = {
+            if join1_on_cond == (0, 1) {
+                1.0 / 3.0
+            } else if join1_on_cond == (0, 2) {
+                1.0 / 4.0
+            } else if join1_on_cond == (1, 2) {
+                1.0 / 4.0
+            } else {
+                panic!();
+            }
+        };
         let semantic_correlation = SemanticCorrelation::new(eq_columns);
         let column_refs = GroupColumnRefs::new_test(
-            vec![col0_ref.clone(), col1_ref.clone(), col2_ref.clone()],
+            col_refs,
             Some(semantic_correlation),
         );
 
-        // These are the two possible ways of adding a new edge such that we maintain that the multi-equal graph
-        //   is an MST.
+        // Try all join conditions of the second join which would lead to a fully joined third
+        //   table (i.e. any set of pair of columns except the set that contains a single pair
+        //   which is the exact on condition of the first join).
+        let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let eq0and2 = bin_op(BinOpType::Eq, col_ref(0), col_ref(2));
         let eq1and2 = bin_op(BinOpType::Eq, col_ref(1), col_ref(2));
-        assert_approx_eq::assert_approx_eq!(
-            test_get_join_selectivity(&cost_model, false, JoinType::Inner, eq0and2, &column_refs),
-            test_get_join_selectivity(&cost_model, false, JoinType::Inner, eq1and2, &column_refs),
-            1.0 / 12.0
-        );
+        let and_01_02 = log_op(LogOpType::And, vec![eq0and1.clone(), eq0and2.clone()]);
+        let and_01_12 = log_op(LogOpType::And, vec![eq0and1.clone(), eq1and2.clone()]);
+        let and_02_12 = log_op(LogOpType::And, vec![eq0and2.clone(), eq1and2.clone()]);
+        let mut join2_expr_trees = vec![and_01_02, and_01_12, and_02_12];
+        if join1_on_cond == (0, 1) {
+            join2_expr_trees.push(eq0and2);
+            join2_expr_trees.push(eq1and2);
+        } else if join1_on_cond == (0, 2) {
+            join2_expr_trees.push(eq0and1);
+            join2_expr_trees.push(eq1and2);
+        } else if join1_on_cond == (1, 2) {
+            join2_expr_trees.push(eq0and1);
+            join2_expr_trees.push(eq0and2);
+        } else {
+            panic!();
+        }
+        for expr_tree in join2_expr_trees {
+            println!("expr_tree={:?}", expr_tree);
+            assert_approx_eq::assert_approx_eq!(
+                join1_selectivity * test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
+                1.0 / 12.0
+            );
+        }
     }
+
+    // TODO(phw2): three table join that involves three join operations
 }

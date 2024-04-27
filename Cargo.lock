@@ -2850,6 +2850,7 @@ dependencies = [
  "pretty-xmlish",
  "serde",
  "serde_with",
+ "test-case",
  "tracing",
  "tracing-subscriber",
  "union-find",
