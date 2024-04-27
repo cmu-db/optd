@@ -1156,7 +1156,7 @@ mod tests {
         for initial_join_on_cond in initial_join_on_conds {
             eq_columns.add_predicate(EqPredicate::new(col_base_refs[initial_join_on_cond.0].clone(), col_base_refs[initial_join_on_cond.1].clone()));
         }
-        let join1_selectivity = {
+        let initial_selectivity = {
             if initial_join_on_conds.len() == 1 {
                 let initial_join_on_cond = initial_join_on_conds.first().unwrap();
                 if initial_join_on_cond == &(0, 1) {
@@ -1203,12 +1203,74 @@ mod tests {
             }
         }
         for expr_tree in join2_expr_trees {
-            let both_joins_selectivity = join1_selectivity * test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree.clone(), &column_refs);
-            println!("expr_tree={:?}, both_joins_selectivity={both_joins_selectivity}", expr_tree);
+            let overall_selectivity = initial_selectivity * test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree.clone(), &column_refs);
             assert_approx_eq::assert_approx_eq!(
-                both_joins_selectivity,
+                overall_selectivity,
                 1.0 / 12.0
             );
         }
+    }
+
+    #[test]
+    fn test_join_which_connects_two_components_together() {
+        let cost_model = create_four_table_cost_model(
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                2,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                3,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                4,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                5,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+        );
+        let col_base_refs = vec![
+            BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            },
+            BaseTableColumnRef {
+                table: String::from(TABLE2_NAME),
+                col_idx: 0,
+            },
+            BaseTableColumnRef {
+                table: String::from(TABLE3_NAME),
+                col_idx: 0,
+            },
+            BaseTableColumnRef {
+                table: String::from(TABLE4_NAME),
+                col_idx: 0,
+            },
+        ];
+        let col_refs: Vec<ColumnRef> = col_base_refs.clone().into_iter().map(|col_base_ref| col_base_ref.into()).collect();
+        
+        let mut eq_columns = EqBaseTableColumnSets::new();
+        eq_columns.add_predicate(EqPredicate::new(col_base_refs[0].clone(), col_base_refs[1].clone()));
+        eq_columns.add_predicate(EqPredicate::new(col_base_refs[2].clone(), col_base_refs[3].clone()));
+        let initial_selectivity = 1.0 / (3.0 * 5.0);
+        let semantic_correlation = SemanticCorrelation::new(eq_columns);
+        let column_refs = GroupColumnRefs::new_test(
+            col_refs,
+            Some(semantic_correlation),
+        );
+
+        let eq1and2 = bin_op(BinOpType::Eq, col_ref(1), col_ref(2));
+        let overall_selectivity = initial_selectivity * test_get_join_selectivity(&cost_model, false, JoinType::Inner, eq1and2.clone(), &column_refs);
+        assert_approx_eq::assert_approx_eq!(overall_selectivity, 1.0 / (3.0 * 4.0 * 5.0));
     }
 }
