@@ -135,11 +135,15 @@ impl EqBaseTableColumnSets {
         self.eq_predicates.insert(predicate);
     }
 
-    /// Determine if two columns are equal.
+    /// Determine if two columns are in the same set.
     pub fn is_eq(&mut self, left: &BaseTableColumnRef, right: &BaseTableColumnRef) -> bool {
         self.disjoint_eq_col_sets
             .same_set(left, right)
             .unwrap_or(false)
+    }
+
+    pub fn contains(&self, base_col_ref: &BaseTableColumnRef) -> bool {
+        self.disjoint_eq_col_sets.contains(base_col_ref)
     }
 
     /// Get the number of columns that are equal to `col`, including `col` itself.

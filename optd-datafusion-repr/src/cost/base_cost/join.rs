@@ -354,6 +354,7 @@ impl<
         &self,
         base_col_refs: HashSet<BaseTableColumnRef>,
     ) -> f64 {
+        assert!(base_col_refs.len() > 1);
         let num_base_col_refs = base_col_refs.len();
         base_col_refs.into_iter().map(|base_col_ref| {
             match self.get_column_comb_stats(&base_col_ref.table, &[base_col_ref.col_idx]) {
@@ -384,29 +385,48 @@ impl<
     /// NOTE: This function modifies `past_eq_columns` by adding `predicate` to it.
     fn get_join_selectivity_adjustment_from_redundant_predicates(
         &self,
-        predicate: EqPredicate,
+        predicate: &EqPredicate,
         past_eq_columns: &mut EqBaseTableColumnSets,
     ) -> f64 {
-        // Compute the selectivity of the most selective N - 1 predicates.
-        let left = predicate.left.clone();
+        // To find the adjustment, we need to know the selectivity of the graph before `predicate` is added.
+        //
+        // There are two cases: (1) adding `predicate` does not change the # of connected components, and
+        // (2) adding `predicate` reduces the # of connected by 1. Note that columns not involved in any
+        // predicates are considered a part of the graph and are a connected component on their own.
         let children_pred_sel = {
-            let cols = past_eq_columns.find_cols_for_eq_column_set(&left);
-            self.get_join_selectivity_from_most_selective_columns(
-                cols
-            )
+            if past_eq_columns.is_eq(&predicate.left, &predicate.right) {
+                self.get_join_selectivity_from_most_selective_columns(
+                    past_eq_columns.find_cols_for_eq_column_set(&predicate.left)
+                )
+            } else {
+                let left_sel = if past_eq_columns.contains(&predicate.left) {
+                    self.get_join_selectivity_from_most_selective_columns(
+                        past_eq_columns.find_cols_for_eq_column_set(&predicate.left)
+                    )
+                } else {
+                    1.0
+                };
+                let right_sel = if past_eq_columns.contains(&predicate.right) {
+                    self.get_join_selectivity_from_most_selective_columns(
+                        past_eq_columns.find_cols_for_eq_column_set(&predicate.right)
+                    )
+                } else {
+                    1.0
+                };
+                left_sel * right_sel
+            }
         };
 
-        // Add predicate to past_eq_columns and repeat the process.
-        past_eq_columns.add_predicate(predicate);
+        // Add predicate to past_eq_columns and compute the selectivity of the connected component it creates.
+        past_eq_columns.add_predicate(predicate.clone());
         let new_pred_sel = {
-            let cols = past_eq_columns.find_cols_for_eq_column_set(&left);
+            let cols = past_eq_columns.find_cols_for_eq_column_set(&predicate.left);
             self.get_join_selectivity_from_most_selective_columns(
                 cols
             )
         };
 
         // Compute division of MSTs as the selectivity.
-        println!("new_pred_sel={new_pred_sel}, children_pred_sel={children_pred_sel}");
         new_pred_sel / children_pred_sel
     }
 
@@ -445,14 +465,10 @@ impl<
                     (left_col_ref, right_col_ref)
                 {
                     let predicate = EqPredicate::new(left.clone(), right.clone());
-                    if past_eq_columns.is_eq(left, right) {
-                        return self.get_join_selectivity_adjustment_from_redundant_predicates(
-                            predicate,
-                            &mut past_eq_columns,
-                        );
-                    } else {
-                        past_eq_columns.add_predicate(predicate);
-                    }
+                    return self.get_join_selectivity_adjustment_from_redundant_predicates(
+                        &predicate,
+                        &mut past_eq_columns,
+                    );
                 }
 
                 self.get_join_selectivity_from_on_col_ref_pair(left_col_ref, right_col_ref)
