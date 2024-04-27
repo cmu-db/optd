@@ -1132,13 +1132,8 @@ mod tests {
         );
     }
 
-    // Ensure that in `select t1, t2, t3 where t1.a = t2.a and t2.a = t3.a and t1.a = t3.a`,
-    // even if the first join picks the most selective predicate (which should have been discarded,
-    // since we need to ensure the most selective N - 1 predicates are picked), the selectivity is
-    // adjusted in the second join so that the final selectivity is the product of the
-    // selectivities of the 2 most selective redicates.
     #[test]
-    fn test_inner_redundant_predicate() {
+    fn test_add_edge_to_multi_equal_graph_which_maintains_mst() {
         let cost_model = create_three_table_cost_model(
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
@@ -1148,20 +1143,17 @@ mod tests {
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
-                4,
+                3,
                 0.0,
                 Some(TestDistribution::empty()),
             ),
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
-                5,
+                4,
                 0.0,
                 Some(TestDistribution::empty()),
             ),
         );
-        let col01_sel = 0.25;
-        let col02_sel = 0.2;
-        let col12_sel = 0.2;
         let col0_base_ref = BaseTableColumnRef {
             table: String::from(TABLE1_NAME),
             col_idx: 0,
@@ -1186,12 +1178,14 @@ mod tests {
             Some(semantic_correlation),
         );
 
+        // These are the two possible ways of adding a new edge such that we maintain that the multi-equal graph
+        //   is an MST.
         let eq0and2 = bin_op(BinOpType::Eq, col_ref(0), col_ref(2));
         let eq1and2 = bin_op(BinOpType::Eq, col_ref(1), col_ref(2));
-        let expr_tree = log_op(LogOpType::And, vec![eq0and2, eq1and2]);
         assert_approx_eq::assert_approx_eq!(
-            test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
-            col02_sel * (col02_sel * col12_sel) / (col01_sel * col12_sel)
+            test_get_join_selectivity(&cost_model, false, JoinType::Inner, eq0and2, &column_refs),
+            test_get_join_selectivity(&cost_model, false, JoinType::Inner, eq1and2, &column_refs),
+            1.0 / 12.0
         );
     }
 }
