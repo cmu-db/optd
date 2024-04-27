@@ -1,6 +1,6 @@
 #!/bin/bash
 benchmark_name=$1
-USAGE="Usage: $0 [job|tpch]"
+USAGE="Usage: $0 [job|joblight|tpch]"
 
 if [ $# -ne 1 ]; then
     echo >&2 $USAGE
