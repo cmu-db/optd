@@ -1,4 +1,4 @@
-use std::ops::ControlFlow;
+use std::{collections::HashSet, ops::ControlFlow};
 
 use itertools::Itertools;
 use optd_core::{
@@ -346,68 +346,21 @@ impl<
         selectivity
     }
 
-    /// Given a set of equality predicates P that define N equal columns, find the selectivity of
-    /// the most selective N - 1 predicates that "touches" all the columns.
-    ///
-    /// We solve the problem using MST (Minimum Spanning Tree), where the columns are nodes and the
-    /// predicates are undirected edges. Since all the columns are equal, the graph is connected.
-    fn get_join_selecitivity_from_most_selective_predicates(
+    /// Given a set of N columns involved in a multi-equality, find the total selectivity
+    /// of the multi-equality.
+    /// 
+    /// This is a generalization of get_join_selectivity_from_on_col_ref_pair().
+    fn get_join_selectivity_from_most_selective_columns(
         &self,
-        predicates: Vec<EqPredicate>,
-        num_cols: usize,
+        base_col_refs: HashSet<BaseTableColumnRef>,
     ) -> f64 {
-        let mut acc_sel = 1.0;
-        let mut num_picked_predicates = 0;
-        let mut disjoint_sets = DisjointSets::new();
-
-        // Use Kruskal to compute MST.
-        // Step 1: sort predicates by selectivity in ascending order.
-        let mut sorted_predicates = predicates
-            .into_iter()
-            .map(|p| {
-                let sel: f64 = self.get_join_selectivity_from_on_col_ref_pair(
-                    &p.left.clone().into(),
-                    &p.right.clone().into(),
-                );
-                (p, sel)
-            })
-            .sorted_by(|(_, sel1), (_, sel2)| sel1.partial_cmp(sel2).unwrap());
-
-        // Step 2: pick predicates until all columns are "connected" by the predicates.
-        sorted_predicates.try_for_each(|(p, sel)| {
-            if !disjoint_sets.contains(&p.left) {
-                disjoint_sets.make_set(p.left.clone()).unwrap();
+        let num_base_col_refs = base_col_refs.len();
+        base_col_refs.into_iter().map(|base_col_ref| {
+            match self.get_column_comb_stats(&base_col_ref.table, &[base_col_ref.col_idx]) {
+                Some(per_col_stats) => per_col_stats.ndistinct,
+                None => DEFAULT_NUM_DISTINCT
             }
-            if !disjoint_sets.contains(&p.right) {
-                disjoint_sets.make_set(p.right.clone()).unwrap();
-            }
-            if !disjoint_sets.same_set(&p.left, &p.right).unwrap() {
-                acc_sel *= sel;
-                num_picked_predicates += 1;
-                disjoint_sets.union(&p.left, &p.right).unwrap();
-            }
-            if num_picked_predicates == num_cols - 1 {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        });
-        debug_assert_eq!(
-            num_picked_predicates,
-            num_cols - 1,
-            "we should have picked N - 1 predicates"
-        );
-        debug_assert_eq!(
-            disjoint_sets.num_sets(),
-            1,
-            "all columns should be connected by the predicates"
-        );
-        debug_assert_eq!(
-            disjoint_sets.num_items(),
-            num_cols,
-            "all columns should be connected by the predicates"
-        );
-        acc_sel
+        }).map(|ndistinct| 1.0 / ndistinct as f64).sorted_by(|a, b| a.partial_cmp(b).expect("No floats should be NaN since n-distinct is never 0")).take(num_base_col_refs - 1).product()
     }
 
     /// A predicate set contains "redundant" predicates if some of them can be expressed with the rest.
@@ -418,7 +371,7 @@ impl<
     /// If we have N columns that are equal, and the set of equality predicates P that defines the
     /// equalities (|P| >= N - 1), we pick the N - 1 most selective predicates (denoted P') that
     /// define the equalities by computing the MST of the graph where the columns are nodes and the
-    /// predicates are edges (see `get_join_selecitivity_from_most_selective_predicates` for
+    /// predicates are edges (see `get_join_selectivity_from_most_selective_predicates` for
     /// implementation).
     ///
     /// But since child has already picked some predicates which might not be the most selective
@@ -434,27 +387,26 @@ impl<
         predicate: EqPredicate,
         past_eq_columns: &mut EqBaseTableColumnSets,
     ) -> f64 {
-        let left = predicate.left.clone();
         // Compute the selectivity of the most selective N - 1 predicates.
+        let left = predicate.left.clone();
         let children_pred_sel = {
-            let predicates = past_eq_columns.find_predicates_for_eq_column_set(&left);
-            self.get_join_selecitivity_from_most_selective_predicates(
-                predicates,
-                past_eq_columns.num_eq_columns(&left),
+            let cols = past_eq_columns.find_cols_for_eq_column_set(&left);
+            self.get_join_selectivity_from_most_selective_columns(
+                cols
             )
         };
-        // Add predicate to past_eq_columns.
+
+        // Add predicate to past_eq_columns and repeat the process.
         past_eq_columns.add_predicate(predicate);
-        // Repeat the same process with the new predicate.
         let new_pred_sel = {
-            let predicates = past_eq_columns.find_predicates_for_eq_column_set(&left);
-            self.get_join_selecitivity_from_most_selective_predicates(
-                predicates,
-                past_eq_columns.num_eq_columns(&left),
+            let cols = past_eq_columns.find_cols_for_eq_column_set(&left);
+            self.get_join_selectivity_from_most_selective_columns(
+                cols
             )
         };
 
         // Compute division of MSTs as the selectivity.
+        println!("new_pred_sel={new_pred_sel}, children_pred_sel={children_pred_sel}");
         new_pred_sel / children_pred_sel
     }
 
@@ -1218,9 +1170,10 @@ mod tests {
             panic!();
         }
         for expr_tree in join2_expr_trees {
-            println!("expr_tree={:?}", expr_tree);
+            let both_joins_selectivity = join1_selectivity * test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree.clone(), &column_refs);
+            println!("expr_tree={:?}, both_joins_selectivity={both_joins_selectivity}", expr_tree);
             assert_approx_eq::assert_approx_eq!(
-                join1_selectivity * test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
+                both_joins_selectivity,
                 1.0 / 12.0
             );
         }

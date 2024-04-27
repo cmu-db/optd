@@ -165,6 +165,15 @@ impl EqBaseTableColumnSets {
         predicates
     }
 
+    /// Find the set of columns that define the equality of the set of columns `col` belongs to.
+    pub fn find_cols_for_eq_column_set(
+        &mut self,
+        col: &BaseTableColumnRef,
+    ) -> HashSet<BaseTableColumnRef> {
+        let predicates = self.find_predicates_for_eq_column_set(col);
+        predicates.into_iter().flat_map(|predicate| vec![predicate.left, predicate.right]).collect()
+    }
+
     /// Union two `EqBaseTableColumnSets` to produce a new disjoint sets.
     pub fn union(x: &EqBaseTableColumnSets, y: &EqBaseTableColumnSets) -> EqBaseTableColumnSets {
         let mut eq_col_sets = Self::new();
