@@ -335,6 +335,7 @@ impl<
                 None => DEFAULT_NUM_DISTINCT,
             }
         });
+        // println!("ndistincts={:?}", ndistincts.clone().map(|ndistinct| format!("{}", ndistinct)).collect::<Vec<String>>().join(" "));
         // using reduce(f64::min) is the idiomatic workaround to min() because
         // f64 does not implement Ord due to NaN
         let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
