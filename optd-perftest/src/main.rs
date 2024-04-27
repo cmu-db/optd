@@ -31,7 +31,6 @@ enum BenchmarkName {
 #[derive(Subcommand)]
 enum Commands {
     Cardtest {
-        #[clap(long)]
         #[clap(value_enum)]
         #[clap(default_value = "tpch")]
         benchmark_name: BenchmarkName,
