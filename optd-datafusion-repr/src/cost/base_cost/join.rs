@@ -379,12 +379,16 @@ impl<
     /// standalone connected components.
     ///
     /// The selectivity of each connected component of N nodes is equal to the product of 1/ndistinct of
-    /// the N-1 nodes with the highest ndistinct values. However, we cannot simply add `predicate` to the
-    /// multi-equality graph and compute the selectivity of the entire connected component, because this
-    /// would be "double counting" a lot of nodes. The join(s) before this join would already have a selectivity
-    /// value. Thus, we compute the selectivity of the join(s) before this join (the first block of the
-    /// function) and then the selectivity of the connected component after this join. The quotient is the
-    /// "adjustment" factor.
+    /// the N-1 nodes with the highest ndistinct values. You can see this if you imagine that all columns
+    /// being joined are unique columns and that they follow the inclusion principle (every element of the
+    /// smaller tables is present in the larger tables). When these assumptions are not true, the selectivity
+    /// may not be completely accurate. However, it is still fairly accurate.
+    ///
+    /// However, we cannot simply add `predicate` to the multi-equality graph and compute the selectivity of
+    /// the entire connected component, because this would be "double counting" a lot of nodes. The join(s)
+    /// before this join would already have a selectivity value. Thus, we compute the selectivity of the
+    /// join(s) before this join (the first block of the function) and then the selectivity of the connected
+    /// component after this join. The quotient is the "adjustment" factor.
     ///
     /// NOTE: This function modifies `past_eq_columns` by adding `predicate` to it.
     fn get_join_selectivity_adjustment_when_adding_to_multi_equality_graph(
