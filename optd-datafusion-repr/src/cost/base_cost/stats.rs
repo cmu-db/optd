@@ -276,12 +276,14 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         hlls: &mut [HyperLogLog<ColumnCombValue>],
         null_counts: &mut [i32],
     ) {
+        let now = std::time::Instant::now();
         column_combs
             .par_iter()
             .zip(mgs)
             .zip(hlls)
             .zip(null_counts)
             .for_each(|(((column_comb, mg), hll), count)| {
+                let now = std::time::Instant::now();
                 let filtered_nulls: Vec<ColumnCombValue> = column_comb
                     .iter()
                     .filter(|row| row.iter().any(|val| val.is_some()))
@@ -292,7 +294,9 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                 *count += nb_rows - filtered_nulls.len() as i32;
                 mg.aggregate(&filtered_nulls);
                 hll.aggregate(&filtered_nulls);
+                println!("generate_partial_stats one task took {:?}", now.elapsed());
             });
+        println!("generate_partial_stats took {:?}, per row {:?}", now.elapsed(), now.elapsed().as_millis() as f64 / column_combs[0].len() as f64);
     }
 
     fn generate_full_stats(
@@ -301,12 +305,14 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         distrs: &mut [Option<TDigest<Value>>],
         row_counts: &mut [i32],
     ) {
+        let now = std::time::Instant::now();
         column_combs
             .par_iter()
             .zip(cnts)
             .zip(distrs)
             .zip(row_counts)
             .for_each(|(((column_comb, cnt), distr), count)| {
+                let now = std::time::Instant::now();
                 let nb_rows = column_comb.len() as i32;
                 *count += nb_rows;
                 cnt.aggregate(column_comb);
@@ -321,14 +327,17 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
 
                     d.norm_weight += nb_rows as usize;
                     d.merge_values(&filtered_values);
+                    println!("generate_full_stats one task took {:?}", now.elapsed());
                 }
             });
-    }
+            println!("generate_full_stats took {:?}, per row {:?}", now.elapsed(), now.elapsed().as_micros() as f64 / column_combs[0].len() as f64);
+        }
 
     pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
         batch_iter_builder: impl Fn() -> anyhow::Result<RecordBatchIterator<I>>,
         combinations: Vec<ColumnsIdx>,
     ) -> anyhow::Result<Self> {
+        println!("new table");
         let batch_iter = batch_iter_builder()?;
         let comb_stat_types = Self::get_stats_types(&combinations, &batch_iter.schema());
         let nb_stats = comb_stat_types.len();
@@ -353,8 +362,13 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
 
         for batch in batch_iter {
             let batch = batch?;
+
+            let now = std::time::Instant::now();
+            let comn = &Self::get_column_combs(&batch, &comb_stat_types);
+            println!("comb took {:?}", now.elapsed());
+
             Self::generate_partial_stats(
-                &Self::get_column_combs(&batch, &comb_stat_types),
+                comn,
                 &mut mgs,
                 &mut hlls,
                 &mut null_cnts,
