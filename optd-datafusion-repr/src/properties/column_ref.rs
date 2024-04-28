@@ -175,7 +175,10 @@ impl EqBaseTableColumnSets {
         col: &BaseTableColumnRef,
     ) -> HashSet<BaseTableColumnRef> {
         let predicates = self.find_predicates_for_eq_column_set(col);
-        predicates.into_iter().flat_map(|predicate| vec![predicate.left, predicate.right]).collect()
+        predicates
+            .into_iter()
+            .flat_map(|predicate| vec![predicate.left, predicate.right])
+            .collect()
     }
 
     /// Union two `EqBaseTableColumnSets` to produce a new disjoint sets.

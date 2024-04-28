@@ -1,4 +1,4 @@
-use std::{collections::HashSet, ops::ControlFlow};
+use std::collections::HashSet;
 
 use itertools::Itertools;
 use optd_core::{
@@ -6,7 +6,6 @@ use optd_core::{
     cost::Cost,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use union_find::{disjoint_sets::DisjointSets, union_find::UnionFind};
 
 use crate::{
     cost::base_cost::{
@@ -348,7 +347,7 @@ impl<
 
     /// Given a set of N columns involved in a multi-equality, find the total selectivity
     /// of the multi-equality.
-    /// 
+    ///
     /// This is a generalization of get_join_selectivity_from_on_col_ref_pair().
     fn get_join_selectivity_from_most_selective_columns(
         &self,
@@ -356,12 +355,21 @@ impl<
     ) -> f64 {
         assert!(base_col_refs.len() > 1);
         let num_base_col_refs = base_col_refs.len();
-        base_col_refs.into_iter().map(|base_col_ref| {
-            match self.get_column_comb_stats(&base_col_ref.table, &[base_col_ref.col_idx]) {
-                Some(per_col_stats) => per_col_stats.ndistinct,
-                None => DEFAULT_NUM_DISTINCT
-            }
-        }).map(|ndistinct| 1.0 / ndistinct as f64).sorted_by(|a, b| a.partial_cmp(b).expect("No floats should be NaN since n-distinct is never 0")).take(num_base_col_refs - 1).product()
+        base_col_refs
+            .into_iter()
+            .map(|base_col_ref| {
+                match self.get_column_comb_stats(&base_col_ref.table, &[base_col_ref.col_idx]) {
+                    Some(per_col_stats) => per_col_stats.ndistinct,
+                    None => DEFAULT_NUM_DISTINCT,
+                }
+            })
+            .map(|ndistinct| 1.0 / ndistinct as f64)
+            .sorted_by(|a, b| {
+                a.partial_cmp(b)
+                    .expect("No floats should be NaN since n-distinct is never 0")
+            })
+            .take(num_base_col_refs - 1)
+            .product()
     }
 
     /// A predicate set contains "redundant" predicates if some of them can be expressed with the rest.
@@ -396,19 +404,19 @@ impl<
         let children_pred_sel = {
             if past_eq_columns.is_eq(&predicate.left, &predicate.right) {
                 self.get_join_selectivity_from_most_selective_columns(
-                    past_eq_columns.find_cols_for_eq_column_set(&predicate.left)
+                    past_eq_columns.find_cols_for_eq_column_set(&predicate.left),
                 )
             } else {
                 let left_sel = if past_eq_columns.contains(&predicate.left) {
                     self.get_join_selectivity_from_most_selective_columns(
-                        past_eq_columns.find_cols_for_eq_column_set(&predicate.left)
+                        past_eq_columns.find_cols_for_eq_column_set(&predicate.left),
                     )
                 } else {
                     1.0
                 };
                 let right_sel = if past_eq_columns.contains(&predicate.right) {
                     self.get_join_selectivity_from_most_selective_columns(
-                        past_eq_columns.find_cols_for_eq_column_set(&predicate.right)
+                        past_eq_columns.find_cols_for_eq_column_set(&predicate.right),
                     )
                 } else {
                     1.0
@@ -421,9 +429,7 @@ impl<
         past_eq_columns.add_predicate(predicate.clone());
         let new_pred_sel = {
             let cols = past_eq_columns.find_cols_for_eq_column_set(&predicate.left);
-            self.get_join_selectivity_from_most_selective_columns(
-                cols
-            )
+            self.get_join_selectivity_from_most_selective_columns(cols)
         };
 
         // Compute division of MSTs as the selectivity.
@@ -1114,8 +1120,15 @@ mod tests {
     #[test_case::test_case(&[(0, 2), (1, 2)])]
     #[test_case::test_case(&[(0, 1), (0, 2), (1, 2)])]
     fn test_three_table_join_for_initial_join_on_conds(initial_join_on_conds: &[(usize, usize)]) {
-        assert!(!initial_join_on_conds.is_empty(), "initial_join_on_conds should be non-empty");
-        assert_eq!(initial_join_on_conds.len(), initial_join_on_conds.iter().collect::<HashSet<_>>().len(), "initial_join_on_conds shouldn't contain duplicates");
+        assert!(
+            !initial_join_on_conds.is_empty(),
+            "initial_join_on_conds should be non-empty"
+        );
+        assert_eq!(
+            initial_join_on_conds.len(),
+            initial_join_on_conds.iter().collect::<HashSet<_>>().len(),
+            "initial_join_on_conds shouldn't contain duplicates"
+        );
         let cost_model = create_three_table_cost_model(
             TestPerColumnStats::new(
                 TestMostCommonValues::empty(),
@@ -1150,20 +1163,25 @@ mod tests {
                 col_idx: 0,
             },
         ];
-        let col_refs: Vec<ColumnRef> = col_base_refs.clone().into_iter().map(|col_base_ref| col_base_ref.into()).collect();
+        let col_refs: Vec<ColumnRef> = col_base_refs
+            .clone()
+            .into_iter()
+            .map(|col_base_ref| col_base_ref.into())
+            .collect();
 
         let mut eq_columns = EqBaseTableColumnSets::new();
         for initial_join_on_cond in initial_join_on_conds {
-            eq_columns.add_predicate(EqPredicate::new(col_base_refs[initial_join_on_cond.0].clone(), col_base_refs[initial_join_on_cond.1].clone()));
+            eq_columns.add_predicate(EqPredicate::new(
+                col_base_refs[initial_join_on_cond.0].clone(),
+                col_base_refs[initial_join_on_cond.1].clone(),
+            ));
         }
         let initial_selectivity = {
             if initial_join_on_conds.len() == 1 {
                 let initial_join_on_cond = initial_join_on_conds.first().unwrap();
                 if initial_join_on_cond == &(0, 1) {
                     1.0 / 3.0
-                } else if initial_join_on_cond == &(0, 2) {
-                    1.0 / 4.0
-                } else if initial_join_on_cond == &(1, 2) {
+                } else if initial_join_on_cond == &(0, 2) || initial_join_on_cond == &(1, 2) {
                     1.0 / 4.0
                 } else {
                     panic!();
@@ -1173,10 +1191,7 @@ mod tests {
             }
         };
         let semantic_correlation = SemanticCorrelation::new(eq_columns);
-        let column_refs = GroupColumnRefs::new_test(
-            col_refs,
-            Some(semantic_correlation),
-        );
+        let column_refs = GroupColumnRefs::new_test(col_refs, Some(semantic_correlation));
 
         // Try all join conditions of the final join which would lead to all three tables being joined.
         let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
@@ -1185,7 +1200,10 @@ mod tests {
         let and_01_02 = log_op(LogOpType::And, vec![eq0and1.clone(), eq0and2.clone()]);
         let and_01_12 = log_op(LogOpType::And, vec![eq0and1.clone(), eq1and2.clone()]);
         let and_02_12 = log_op(LogOpType::And, vec![eq0and2.clone(), eq1and2.clone()]);
-        let and_01_02_12 = log_op(LogOpType::And, vec![eq0and1.clone(), eq0and2.clone(), eq1and2.clone()]);
+        let and_01_02_12 = log_op(
+            LogOpType::And,
+            vec![eq0and1.clone(), eq0and2.clone(), eq1and2.clone()],
+        );
         let mut join2_expr_trees = vec![and_01_02, and_01_12, and_02_12, and_01_02_12];
         if initial_join_on_conds.len() == 1 {
             let initial_join_on_cond = initial_join_on_conds.first().unwrap();
@@ -1203,11 +1221,15 @@ mod tests {
             }
         }
         for expr_tree in join2_expr_trees {
-            let overall_selectivity = initial_selectivity * test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree.clone(), &column_refs);
-            assert_approx_eq::assert_approx_eq!(
-                overall_selectivity,
-                1.0 / 12.0
-            );
+            let overall_selectivity = initial_selectivity
+                * test_get_join_selectivity(
+                    &cost_model,
+                    false,
+                    JoinType::Inner,
+                    expr_tree.clone(),
+                    &column_refs,
+                );
+            assert_approx_eq::assert_approx_eq!(overall_selectivity, 1.0 / 12.0);
         }
     }
 
@@ -1257,20 +1279,34 @@ mod tests {
                 col_idx: 0,
             },
         ];
-        let col_refs: Vec<ColumnRef> = col_base_refs.clone().into_iter().map(|col_base_ref| col_base_ref.into()).collect();
-        
+        let col_refs: Vec<ColumnRef> = col_base_refs
+            .clone()
+            .into_iter()
+            .map(|col_base_ref| col_base_ref.into())
+            .collect();
+
         let mut eq_columns = EqBaseTableColumnSets::new();
-        eq_columns.add_predicate(EqPredicate::new(col_base_refs[0].clone(), col_base_refs[1].clone()));
-        eq_columns.add_predicate(EqPredicate::new(col_base_refs[2].clone(), col_base_refs[3].clone()));
+        eq_columns.add_predicate(EqPredicate::new(
+            col_base_refs[0].clone(),
+            col_base_refs[1].clone(),
+        ));
+        eq_columns.add_predicate(EqPredicate::new(
+            col_base_refs[2].clone(),
+            col_base_refs[3].clone(),
+        ));
         let initial_selectivity = 1.0 / (3.0 * 5.0);
         let semantic_correlation = SemanticCorrelation::new(eq_columns);
-        let column_refs = GroupColumnRefs::new_test(
-            col_refs,
-            Some(semantic_correlation),
-        );
+        let column_refs = GroupColumnRefs::new_test(col_refs, Some(semantic_correlation));
 
         let eq1and2 = bin_op(BinOpType::Eq, col_ref(1), col_ref(2));
-        let overall_selectivity = initial_selectivity * test_get_join_selectivity(&cost_model, false, JoinType::Inner, eq1and2.clone(), &column_refs);
+        let overall_selectivity = initial_selectivity
+            * test_get_join_selectivity(
+                &cost_model,
+                false,
+                JoinType::Inner,
+                eq1and2.clone(),
+                &column_refs,
+            );
         assert_approx_eq::assert_approx_eq!(overall_selectivity, 1.0 / (3.0 * 4.0 * 5.0));
     }
 }

@@ -179,7 +179,8 @@ impl DatafusionDBMS {
             };
             log::debug!(
                 "about to evaluate datafusion's estcard for {} Q{}",
-                benchmark_name, query_id
+                benchmark_name,
+                query_id
             );
             let sql = fs::read_to_string(sql_fpath)?;
             let estcard = self.eval_query_estcard(&sql).await?;
