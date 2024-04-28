@@ -334,7 +334,6 @@ impl<
                 None => DEFAULT_NUM_DISTINCT,
             }
         });
-        // println!("ndistincts={:?}", ndistincts.clone().map(|ndistinct| format!("{}", ndistinct)).collect::<Vec<String>>().join(" "));
         // using reduce(f64::min) is the idiomatic workaround to min() because
         // f64 does not implement Ord due to NaN
         let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
@@ -372,26 +371,23 @@ impl<
             .product()
     }
 
-    /// A predicate set contains "redundant" predicates if some of them can be expressed with the rest.
-    /// E.g. In { A = B, B = C, A = C }, one of the predicates is redundant.
-    /// In this case, we want to pick the most selective predicates that touch all the columns
-    /// that this set of predicates touches.
+    /// A predicate set defines a "multi-equality graph", which is an unweighted undirected graph. The
+    /// nodes are columns while edges are predicates. The old graph is defined by `past_eq_columns`
+    /// while the `predicate` is the new addition to this graph. This unweighted undirected graph
+    /// consists of a number of connected components, where each connected component represents columns
+    /// that are set to be equal to each other. Single nodes not connected to anything are considered
+    /// standalone connected components.
     ///
-    /// If we have N columns that are equal, and the set of equality predicates P that defines the
-    /// equalities (|P| >= N - 1), we pick the N - 1 most selective predicates (denoted P') that
-    /// define the equalities by computing the MST of the graph where the columns are nodes and the
-    /// predicates are edges (see `get_join_selectivity_from_most_selective_predicates` for
-    /// implementation).
-    ///
-    /// But since child has already picked some predicates which might not be the most selective
-    /// (because it has not seen the most selective ones), when we encounter a potentially more
-    /// selective `predicate` (in the parameter) and a set of previously seen predicates
-    /// `past_eq_columns`, `predicate` produces a selectivity adjustment factor, which is the
-    /// multiplied selectivity of the most selective N - 1 predicate among `past_eq_columns` union
-    /// `predicate` divided by the selectivity of the `past_eq_columns`.
+    /// The selectivity of each connected component of N nodes is equal to the product of 1/ndistinct of
+    /// the N-1 nodes with the highest ndistinct values. However, we cannot simply add `predicate` to the
+    /// multi-equality graph and compute the selectivity of the entire connected component, because this
+    /// would be "double counting" a lot of nodes. The join(s) before this join would already have a selectivity
+    /// value. Thus, we compute the selectivity of the join(s) before this join (the first block of the
+    /// function) and then the selectivity of the connected component after this join. The quotient is the
+    /// "adjustment" factor.
     ///
     /// NOTE: This function modifies `past_eq_columns` by adding `predicate` to it.
-    fn get_join_selectivity_adjustment_from_redundant_predicates(
+    fn get_join_selectivity_adjustment_when_adding_to_multi_equality_graph(
         &self,
         predicate: &EqPredicate,
         past_eq_columns: &mut EqBaseTableColumnSets,
@@ -432,7 +428,7 @@ impl<
             self.get_join_selectivity_from_most_selective_columns(cols)
         };
 
-        // Compute division of MSTs as the selectivity.
+        // Compute the adjustment factor.
         new_pred_sel / children_pred_sel
     }
 
@@ -471,10 +467,11 @@ impl<
                     (left_col_ref, right_col_ref)
                 {
                     let predicate = EqPredicate::new(left.clone(), right.clone());
-                    return self.get_join_selectivity_adjustment_from_redundant_predicates(
-                        &predicate,
-                        &mut past_eq_columns,
-                    );
+                    return self
+                        .get_join_selectivity_adjustment_when_adding_to_multi_equality_graph(
+                            &predicate,
+                            &mut past_eq_columns,
+                        );
                 }
 
                 self.get_join_selectivity_from_on_col_ref_pair(left_col_ref, right_col_ref)
