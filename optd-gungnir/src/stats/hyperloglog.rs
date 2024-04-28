@@ -10,7 +10,7 @@ use optd_core::rel_node::Value;
 use crate::stats::murmur2::murmur_hash;
 use std::{cmp::max, marker::PhantomData};
 
-pub const DEFAULT_PRECISION: u8 = 12;
+pub const DEFAULT_PRECISION: u8 = 16;
 
 /// Trait to transform any object into a stream of bytes.
 pub trait ByteSerializable {
