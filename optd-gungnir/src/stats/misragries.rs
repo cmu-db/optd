@@ -5,10 +5,9 @@
 //! For more details, refer to:
 //! https://people.csail.mit.edu/rrw/6.045-2017/encalgs-mg.pdf
 
+use hashbrown::HashMap;
 use itertools::Itertools;
 use std::{cmp::min, hash::Hash};
-use hashbrown::HashMap;
-
 
 pub const DEFAULT_K_TO_TRACK: u16 = 200;
 
