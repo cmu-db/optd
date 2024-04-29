@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fs::{self, File},
     path::{Path, PathBuf},
     sync::Arc,
