@@ -165,9 +165,9 @@ impl DatafusionDBMS {
                 query_id
             );
             let sql = fs::read_to_string(sql_fpath)?;
-            // DEBUG(phw2)
-            self.execute_query(&sql).await?;
             let estcard = self.eval_query_estcard(&sql).await?;
+            // Execute the query to fill the true cardinality cache.
+            self.execute_query(&sql).await?;
             estcards.push(estcard);
         }
 
@@ -191,6 +191,8 @@ impl DatafusionDBMS {
             );
             let sql = fs::read_to_string(sql_fpath)?;
             let estcard = self.eval_query_estcard(&sql).await?;
+            // Execute the query to fill the true cardinality cache.
+            self.execute_query(&sql).await?;
             estcards.push(estcard);
         }
 
