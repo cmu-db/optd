@@ -66,8 +66,6 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
                 self.eval_tpch_estcards(tpch_kit_config).await
             }
             Benchmark::Job(job_kit_config) | Benchmark::Joblight(job_kit_config) => {
-                let job_kit = JobKit::build(&self.workspace_dpath)?;
-                self.create_job_tables(&job_kit).await?;
                 self.eval_job_estcards(job_kit_config).await
             }
         }
@@ -303,7 +301,10 @@ impl DatafusionDBMS {
                 let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
                 self.create_tpch_tables(&tpch_kit).await?;
             },
-            _ => unimplemented!()
+            Benchmark::Job(_) | Benchmark::Joblight(_) => {
+                let job_kit = JobKit::build(&self.workspace_dpath)?;
+                self.create_job_tables(&job_kit).await?;
+            }
         };
         Ok(())
     }
