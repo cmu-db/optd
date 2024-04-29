@@ -1,7 +1,11 @@
 use std::{
     fs::{self, File},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        mpsc::{self, Receiver},
+        Arc, Mutex,
+    },
+    thread::{self, JoinHandle},
     time::Instant,
 };
 
@@ -14,8 +18,10 @@ use crate::{
 use async_trait::async_trait;
 use datafusion::{
     arrow::{
-        array::RecordBatchIterator,
+        array::{RecordBatch, RecordBatchIterator},
         csv::ReaderBuilder,
+        datatypes::SchemaRef,
+        error::ArrowError,
         util::display::{ArrayFormatter, FormatOptions},
     },
     execution::{
@@ -309,7 +315,7 @@ impl DatafusionDBMS {
         self.create_tpch_tables(&tpch_kit).await?;
 
         // Load the data by creating an external table first and copying the data to real tables.
-        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(tpch_kit_config).unwrap();
+        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_vec(tpch_kit_config).unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
             Self::execute(
@@ -350,6 +356,84 @@ impl DatafusionDBMS {
         Ok(())
     }
 
+    fn gen_base_stats(
+        tbl_paths: Vec<PathBuf>,
+        ctx: SessionContext,
+        delim: u8,
+    ) -> anyhow::Result<DataFusionBaseTableStats> {
+        let base_table_stats = Mutex::new(DataFusionBaseTableStats::default());
+        let now = Instant::now();
+
+        tbl_paths.par_iter().for_each(|tbl_fpath| {
+            let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(tbl_fpath);
+            let start = Instant::now();
+
+            let schema = block_on(async {
+                ctx.catalog("datafusion")
+                    .unwrap()
+                    .schema("public")
+                    .unwrap()
+                    .table(&tbl_name)
+                    .await
+                    .unwrap()
+                    .schema()
+            });
+
+            let nb_cols = schema.fields().len();
+            let single_cols = (0..nb_cols).map(|v| vec![v]).collect::<Vec<_>>();
+
+            let stats_result = DataFusionPerTableStats::from_record_batches(
+                Self::create_batch_channel(tbl_fpath.clone(), schema.clone(), delim),
+                Self::create_batch_channel(tbl_fpath.clone(), schema.clone(), delim),
+                single_cols,
+                schema,
+            );
+
+            if let Ok(per_table_stats) = stats_result {
+                let mut stats = base_table_stats.lock().unwrap();
+                stats.insert(tbl_name.to_string(), per_table_stats);
+            }
+
+            println!(
+                "Table {:?} took in total {:?}...",
+                tbl_name,
+                start.elapsed()
+            );
+        });
+
+        println!("Total execution time {:?}...", now.elapsed());
+
+        Ok(base_table_stats.into_inner()?)
+    }
+
+    fn create_batch_channel(
+        tbl_fpath: PathBuf,
+        schema: SchemaRef,
+        delim: u8,
+    ) -> impl FnOnce() -> (JoinHandle<()>, Receiver<Result<RecordBatch, ArrowError>>) {
+        move || {
+            let (sender, receiver) = mpsc::channel();
+
+            let handle = thread::spawn(move || {
+                let tbl_file = File::open(tbl_fpath).expect("Failed to open file");
+                let csv_reader = ReaderBuilder::new(schema.clone())
+                    .has_header(false)
+                    .with_delimiter(delim)
+                    .with_escape(b'\\')
+                    .with_batch_size(1024)
+                    .build(tbl_file)
+                    .expect("Failed to build CSV reader");
+
+                let batch_iter = RecordBatchIterator::new(csv_reader, schema);
+                for batch in batch_iter {
+                    sender.send(batch).expect("Failed to send batch");
+                }
+            });
+
+            (handle, receiver)
+        }
+    }
+
     async fn get_tpch_stats(
         &mut self,
         tpch_kit_config: &TpchKitConfig,
@@ -370,44 +454,9 @@ impl DatafusionDBMS {
             Self::execute(&ctx, ddl).await?;
         }
 
-        // Build the DataFusionBaseTableStats object.
-        let mut base_table_stats = DataFusionBaseTableStats::default();
-        for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_kit_config).unwrap() {
-            let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
-            let schema = ctx
-                .catalog("datafusion")
-                .unwrap()
-                .schema("public")
-                .unwrap()
-                .table(&tbl_name)
-                .await
-                .unwrap()
-                .schema();
-
-            let nb_cols = schema.fields().len();
-            let single_cols = (0..nb_cols).map(|v| vec![v]);
-            /*let pairwise_cols = iproduct!(0..nb_cols, 0..nb_cols)
-            .filter(|(i, j)| i != j)
-            .map(|(i, j)| vec![i, j]);*/
-
-            base_table_stats.insert(
-                tbl_name.to_string(),
-                DataFusionPerTableStats::from_record_batches(
-                    || {
-                        let tbl_file = fs::File::open(&tbl_fpath)?;
-                        let csv_reader1 = ReaderBuilder::new(schema.clone())
-                            .has_header(false)
-                            .with_delimiter(b'|')
-                            .build(tbl_file)
-                            .unwrap();
-                        Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))
-                    },
-                    single_cols.collect(),
-                )?,
-            );
-        }
-
-        Ok(base_table_stats)
+        // Compute base statistics.
+        let tbl_paths = tpch_kit.get_tbl_fpath_vec(tpch_kit_config)?;
+        Self::gen_base_stats(tbl_paths, ctx, b'|')
     }
 
     async fn get_job_stats(
@@ -430,64 +479,9 @@ impl DatafusionDBMS {
             Self::execute(&ctx, ddl).await?;
         }
 
-        let now = Instant::now();
-
-        // Build the DataFusionBaseTableStats object.
-        let base_table_stats = Mutex::new(DataFusionBaseTableStats::default());
+        // Compute base statistics.
         let tbl_paths = job_kit.get_tbl_fpath_vec().unwrap();
-
-        tbl_paths.par_iter().for_each(|tbl_fpath| {
-            let tbl_name = JobKit::get_tbl_name_from_tbl_fpath(tbl_fpath);
-            let start = Instant::now();
-
-            let schema = block_on(async {
-                ctx.catalog("datafusion")
-                    .unwrap()
-                    .schema("public")
-                    .unwrap()
-                    .table(&tbl_name)
-                    .await
-                    .unwrap()
-                    .schema()
-            });
-            println!(
-                "Table {:?} starting after {:?}...",
-                tbl_name,
-                start.elapsed()
-            );
-
-            let nb_cols = schema.fields().len();
-            let single_cols = (0..nb_cols).map(|v| vec![v]).collect::<Vec<_>>();
-
-            let stats_result = DataFusionPerTableStats::from_record_batches(
-                || {
-                    let tbl_file = fs::File::open(tbl_fpath)?;
-                    let csv_reader1 = ReaderBuilder::new(schema.clone())
-                        .has_header(false)
-                        .with_delimiter(b',')
-                        .with_escape(b'\\')
-                        .with_batch_size(1024)
-                        .build(tbl_file)
-                        .unwrap();
-                    Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))
-                },
-                single_cols,
-            );
-
-            if let Ok(per_table_stats) = stats_result {
-                let mut stats = base_table_stats.lock().unwrap();
-                stats.insert(tbl_name.to_string(), per_table_stats);
-            }
-
-            println!(
-                "Table {:?} took in total {:?}...",
-                tbl_name,
-                start.elapsed()
-            );
-        });
-
-        println!("Total execution time {:?}...", now.elapsed());
-        Ok(base_table_stats.into_inner().unwrap())
+        Self::gen_base_stats(tbl_paths, ctx, b',')
     }
 }
 

@@ -1,9 +1,13 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{mpsc::Receiver, Arc},
+    thread::JoinHandle,
+};
 
-use arrow_schema::{ArrowError, DataType, SchemaRef};
+use arrow_schema::{ArrowError, DataType, Schema, SchemaRef};
 use datafusion::arrow::array::{
     Array, BooleanArray, Date32Array, Float32Array, Int16Array, Int32Array, Int8Array, RecordBatch,
-    RecordBatchIterator, RecordBatchReader, StringArray, UInt16Array, UInt32Array, UInt8Array,
+    StringArray, UInt16Array, UInt32Array, UInt8Array,
 };
 use itertools::Itertools;
 use optd_core::rel_node::{SerializableOrderedF64, Value};
@@ -330,16 +334,17 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
             .zip(hlls)
             .zip(null_counts)
             .for_each(|(((column_comb, mg), hll), count)| {
-                let filtered_nulls: Vec<ColumnCombValue> = column_comb
-                    .iter()
-                    .filter(|row| row.iter().any(|val| val.is_some()))
-                    .cloned()
-                    .collect();
-                let nb_rows = column_comb.len() as i32;
+                let filtered_nulls = column_comb
+                    .into_iter()
+                    .filter(|row| row.iter().any(|val| val.is_some()));
 
-                *count += nb_rows - filtered_nulls.len() as i32;
-                mg.aggregate(&filtered_nulls);
-                hll.aggregate(&filtered_nulls);
+                *count += column_comb.len() as i32;
+
+                filtered_nulls.for_each(|e| {
+                    mg.insert_element(e, 1);
+                    hll.process(e);
+                    *count -= 1;
+                });
             });
     }
 
@@ -373,46 +378,38 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
             });
     }
 
-    pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
-        batch_iter_builder: impl Fn() -> anyhow::Result<RecordBatchIterator<I>>,
+    pub fn from_record_batches(
+        first_batch_channel: impl FnOnce()
+            -> (JoinHandle<()>, Receiver<Result<RecordBatch, ArrowError>>),
+        second_batch_channel: impl FnOnce()
+            -> (JoinHandle<()>, Receiver<Result<RecordBatch, ArrowError>>),
         combinations: Vec<ColumnsIdx>,
+        schema: Arc<Schema>,
     ) -> anyhow::Result<Self> {
-        let batch_iter = batch_iter_builder()?;
-        let comb_stat_types = Self::get_stats_types(&combinations, &batch_iter.schema());
+        let comb_stat_types = Self::get_stats_types(&combinations, &schema);
         let nb_stats = comb_stat_types.len();
 
-        // 0. Just count row numbers if no combinations can give stats.
-        if nb_stats == 0 {
-            let mut row_cnt = 0;
-            for batch in batch_iter {
-                row_cnt += batch?.num_rows();
-            }
-
-            return Ok(Self {
-                row_cnt,
-                column_comb_stats: HashMap::new(),
-            });
-        }
-
-        // TODO(Alexis): This materialization is OK as JOB only takes 1GB, but should be made in parallel...
-        // Unfortunately, par_bridge doesn't work as the BatchIterator doesn't implement Send.
-        let materialized: Vec<_> = batch_iter.collect(); 
-        
-        // 1. FIRST PASS: hlls + mgs + null_cnts.        
+        // 1. FIRST PASS: hlls + mgs + null_cnts.
         let now = std::time::Instant::now();
-        let (hlls, mgs, null_cnts) = materialized
-            .par_iter()
+        let (handle, receiver) = first_batch_channel();
+
+        let (hlls, mgs, null_cnts) = receiver
+            .into_iter()
+            .par_bridge()
             .fold(Self::first_pass_stats_id(nb_stats), |local_stats, batch| {
                 let mut local_stats = local_stats?;
 
                 match batch {
                     Ok(batch) => {
                         let (hlls, mgs, null_cnts) = &mut local_stats;
-                        let comb = Self::get_column_combs(batch, &comb_stat_types);
+                        let comb = Self::get_column_combs(&batch, &comb_stat_types);
                         Self::generate_partial_stats(&comb, mgs, hlls, null_cnts);
                         Ok(local_stats)
                     }
-                    Err(_) => todo!(), // TODO(Alexis): Could not satisfy the type checker otherwise, but never happens!
+                    Err(e) => {
+                        println!("Err: {:?},, {:?}", e, comb_stat_types.len());
+                        Err(e.into())
+                    }
                 }
             })
             .reduce(
@@ -433,12 +430,17 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                     Ok(final_stats)
                 },
             )?;
+
+        let _ = handle.join();
         let first = now.elapsed();
 
         // 2. SECOND PASS: mcv + tdigest + row_cnts.
         let now = std::time::Instant::now();
-        let (distrs, cnts, row_cnts) = materialized
-            .par_iter()
+        let (handle, receiver) = second_batch_channel();
+
+        let (distrs, cnts, row_cnts) = receiver
+            .into_iter()
+            .par_bridge()
             .fold(
                 Self::second_pass_stats_id(&comb_stat_types, &mgs, nb_stats),
                 |local_stats, batch| {
@@ -447,11 +449,11 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                     match batch {
                         Ok(batch) => {
                             let (distrs, cnts, row_cnts) = &mut local_stats;
-                            let comb = Self::get_column_combs(batch, &comb_stat_types);
+                            let comb = Self::get_column_combs(&batch, &comb_stat_types);
                             Self::generate_full_stats(&comb, cnts, distrs, row_cnts);
                             Ok(local_stats)
                         }
-                        Err(_) => todo!(), // TODO(Alexis): Could not satisfy the type checker otherwise, but never happens!
+                        Err(e) => Err(e.into()),
                     }
                 },
             )
@@ -479,10 +481,11 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                     Ok(final_stats)
                 },
             )?;
-        let second = now.elapsed();
+
+        let _ = handle.join();
+        println!("First: {:?}, Second: {:?}", first, now.elapsed());
 
         // 3. ASSEMBLE STATS.
-        let now = std::time::Instant::now();
         let row_cnt = row_cnts[0];
         let mut column_comb_stats = HashMap::new();
 
@@ -506,7 +509,6 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
             );
             column_comb_stats.insert(comb, column_stats);
         }
-        println!("First: {:?}, Second: {:?}, Third: {:?}", first, second, now.elapsed());
 
         Ok(Self {
             row_cnt: row_cnt as usize,

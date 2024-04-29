@@ -23,9 +23,9 @@ pub struct MisraGries<T: PartialEq + Eq + Hash + Clone> {
 }
 
 // Self-contained implementation of the Misra-Gries data structure.
-impl<T> MisraGries<T>
+impl<'a, T> MisraGries<T>
 where
-    T: PartialEq + Eq + Hash + Clone,
+    T: PartialEq + Eq + Hash + Clone + 'a,
 {
     /// Creates and initializes a new empty Misra-Gries.
     pub fn new(k: u16) -> Self {
@@ -48,7 +48,7 @@ where
     }
 
     // Inserts an element occ times into the `self` Misra-Gries structure.
-    fn insert_element(&mut self, elem: &T, occ: i32) {
+    pub fn insert_element(&mut self, elem: &T, occ: i32) {
         match self.frequencies.get_mut(elem) {
             Some(freq) => {
                 *freq += occ; // Hit.
@@ -93,8 +93,11 @@ where
     }
 
     /// Digests an array of data into the Misra-Gries structure.
-    pub fn aggregate(&mut self, data: &[T]) {
-        data.iter().for_each(|key| self.insert_element(key, 1));
+    pub fn aggregate<I>(&mut self, data: I)
+    where
+        I: Iterator<Item = &'a T>,
+    {
+        data.for_each(|key| self.insert_element(&key, 1));
     }
 
     /// Merges another MisraGries into the current one.
@@ -131,7 +134,7 @@ mod tests {
         let data = vec![0, 1, 2, 3];
         let mut misra_gries = MisraGries::<i32>::new(data.len() as u16);
 
-        misra_gries.aggregate(&data);
+        misra_gries.aggregate(data.iter());
 
         for key in misra_gries.most_frequent_keys() {
             assert!(data.contains(key));
@@ -145,7 +148,7 @@ mod tests {
 
         let mut misra_gries = MisraGries::<i32>::new(data.len() as u16);
 
-        misra_gries.aggregate(&data_dup);
+        misra_gries.aggregate(data_dup.iter());
 
         for key in misra_gries.most_frequent_keys() {
             assert!(data.contains(key));
@@ -189,7 +192,7 @@ mod tests {
         let data = create_zipfian(n_distinct, 0);
         let mut misra_gries = MisraGries::<i32>::new(k as u16);
 
-        misra_gries.aggregate(&data);
+        misra_gries.aggregate(data.iter());
 
         check_zipfian(&misra_gries, n_distinct);
     }
@@ -209,7 +212,7 @@ mod tests {
                     let curr_job_id = job_id.fetch_add(1, Ordering::SeqCst);
 
                     let data = create_zipfian(n_distinct, curr_job_id as u64);
-                    local_misra_gries.aggregate(&data);
+                    local_misra_gries.aggregate(data.iter());
 
                     check_zipfian(&local_misra_gries, n_distinct);
 

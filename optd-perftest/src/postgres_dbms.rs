@@ -158,7 +158,7 @@ impl PostgresDBMS {
 
         // load the tables
         tpch_kit.gen_tables(tpch_kit_config)?;
-        for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_kit_config)? {
+        for tbl_fpath in tpch_kit.get_tbl_fpath_vec(tpch_kit_config)? {
             Self::copy_from_stdin(client, tbl_fpath, "|", "\\").await?;
         }
 
