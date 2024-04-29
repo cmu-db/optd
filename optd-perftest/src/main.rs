@@ -61,6 +61,7 @@ enum Commands {
 
         #[clap(long)]
         #[clap(help = "Whether to enable adaptivity for optd")]
+        #[clap(default_value = "true")]
         adaptive: bool,
 
         #[clap(long)]
