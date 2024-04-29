@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
@@ -14,7 +16,10 @@ use crate::{
         BinOpType, ColumnRefExpr, Expr, ExprList, JoinType, LogOpExpr, LogOpType, OptRelNode,
         OptRelNodeRef, OptRelNodeTyp,
     },
-    properties::column_ref::{ColumnRef, ColumnRefPropertyBuilder, GroupColumnRefs},
+    properties::column_ref::{
+        BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, EqBaseTableColumnSets,
+        EqPredicate, GroupColumnRefs, SemanticCorrelation,
+    },
 };
 
 use super::{OptCostModel, DEFAULT_UNK_SEL};
@@ -39,7 +44,8 @@ impl<
                 optimizer.get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
             let expr_group_id = context.children_group_ids[2];
             let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
-            // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
+            // there may be more than one expression tree in a group.
+            // see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
             let expr_tree = expr_trees.first().expect("expression missing");
             self.get_join_selectivity_from_expr_tree(
                 join_typ,
@@ -74,10 +80,12 @@ impl<
             let right_keys_group_id = context.children_group_ids[3];
             let left_col_cnt = optimizer
                 .get_property_by_group::<ColumnRefPropertyBuilder>(context.children_group_ids[0], 1)
+                .column_refs()
                 .len();
             let left_keys_list = optimizer.get_all_group_bindings(left_keys_group_id, false);
             let right_keys_list = optimizer.get_all_group_bindings(right_keys_group_id, false);
-            // there may be more than one expression tree in a group. see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
+            // there may be more than one expression tree in a group.
+            // see comment in OptRelNodeTyp::PhysicalFilter(_) for more information
             let left_keys = left_keys_list.first().expect("left keys missing");
             let right_keys = right_keys_list.first().expect("right keys missing");
             self.get_join_selectivity_from_keys(
@@ -114,7 +122,8 @@ impl<
         left_col_cnt: usize,
     ) -> f64 {
         assert!(left_keys.len() == right_keys.len());
-        // I assume that the keys are already in the right order s.t. the ith key of left_keys corresponds with the ith key of right_keys
+        // I assume that the keys are already in the right order
+        // s.t. the ith key of left_keys corresponds with the ith key of right_keys
         let on_col_ref_pairs = left_keys
             .to_vec()
             .into_iter()
@@ -139,13 +148,18 @@ impl<
         )
     }
 
-    /// The core logic of join selectivity which assumes we've already separated the expression into the on conditions and the filters
-    /// Hash join and NLJ reference right table columns differently, hence the `right_col_ref_offset` parameter.
+    /// The core logic of join selectivity which assumes we've already separated the expression
+    /// into the on conditions and the filters.
+    ///
+    /// Hash join and NLJ reference right table columns differently, hence the
+    /// `right_col_ref_offset` parameter.
+    ///
     /// For hash join, the right table columns indices are with respect to the right table,
-    ///   which means #0 is the first column of the right table.
+    /// which means #0 is the first column of the right table.
+    ///
     /// For NLJ, the right table columns indices are with respect to the output of the join.
-    ///   For example, if the left table has 3 columns, the first column of the right table
-    ///   is #3 instead of #0.
+    /// For example, if the left table has 3 columns, the first column of the right table
+    /// is #3 instead of #0.
     #[allow(clippy::too_many_arguments)]
     fn get_join_selectivity_core(
         &self,
@@ -159,10 +173,12 @@ impl<
     ) -> f64 {
         let join_on_selectivity =
             self.get_join_on_selectivity(&on_col_ref_pairs, column_refs, right_col_ref_offset);
-        // Currently, there is no difference in how we handle a join filter and a select filter, so we use the same function
+        // Currently, there is no difference in how we handle a join filter and a select filter,
+        // so we use the same function.
+        //
         // One difference (that we *don't* care about right now) is that join filters can contain expressions from multiple
-        //   different tables. Currently, this doesn't affect the get_filter_selectivity() function, but this may change in
-        //   the future
+        // different tables. Currently, this doesn't affect the get_filter_selectivity() function, but this may change in
+        // the future.
         let join_filter_selectivity = match filter_expr_tree {
             Some(filter_expr_tree) => self.get_filter_selectivity(filter_expr_tree, column_refs),
             None => 1.0,
@@ -183,9 +199,10 @@ impl<
         }
     }
 
-    /// The expr_tree input must be a "mixed expression tree", just like with get_filter_selectivity()
-    /// This is a "wrapper" to separate the equality conditions from the filter conditions before calling
-    ///   the "main" get_join_selectivity_core() function.
+    /// The expr_tree input must be a "mixed expression tree", just like with `get_filter_selectivity`.
+    ///
+    /// This is a "wrapper" to separate the equality conditions from the filter conditions before
+    /// calling the "main" `get_join_selectivity_core` function.
     fn get_join_selectivity_from_expr_tree(
         &self,
         join_typ: JoinType,
@@ -278,12 +295,12 @@ impl<
                 let left_col_ref = &column_refs[left_col_ref_expr.index()];
                 let right_col_ref = &column_refs[right_col_ref_expr.index()];
                 let is_same_table = if let (
-                    ColumnRef::BaseTableColumnRef {
+                    ColumnRef::BaseTableColumnRef(BaseTableColumnRef {
                         table: left_table, ..
-                    },
-                    ColumnRef::BaseTableColumnRef {
+                    }),
+                    ColumnRef::BaseTableColumnRef(BaseTableColumnRef {
                         table: right_table, ..
-                    },
+                    }),
                 ) = (left_col_ref, right_col_ref)
                 {
                     left_table == right_table
@@ -303,45 +320,187 @@ impl<
         }
     }
 
+    /// Get the selectivity of one column eq predicate, e.g. colA = colB.
+    fn get_join_selectivity_from_on_col_ref_pair(
+        &self,
+        left: &ColumnRef,
+        right: &ColumnRef,
+    ) -> f64 {
+        // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2)
+        // (see https://postgrespro.com/blog/pgsql/5969618)
+        let ndistincts = vec![left, right].into_iter().map(|col_ref| {
+            match self.get_single_column_stats_from_col_ref(col_ref) {
+                Some(per_col_stats) => per_col_stats.ndistinct,
+                None => DEFAULT_NUM_DISTINCT,
+            }
+        });
+        // using reduce(f64::min) is the idiomatic workaround to min() because
+        // f64 does not implement Ord due to NaN
+        let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
+        assert!(
+            !selectivity.is_nan(),
+            "it should be impossible for selectivity to be NaN since n-distinct is never 0"
+        );
+        selectivity
+    }
+
+    /// Given a set of N columns involved in a multi-equality, find the total selectivity
+    /// of the multi-equality.
+    ///
+    /// This is a generalization of get_join_selectivity_from_on_col_ref_pair().
+    fn get_join_selectivity_from_most_selective_columns(
+        &self,
+        base_col_refs: HashSet<BaseTableColumnRef>,
+    ) -> f64 {
+        assert!(base_col_refs.len() > 1);
+        let num_base_col_refs = base_col_refs.len();
+        base_col_refs
+            .into_iter()
+            .map(|base_col_ref| {
+                match self.get_column_comb_stats(&base_col_ref.table, &[base_col_ref.col_idx]) {
+                    Some(per_col_stats) => per_col_stats.ndistinct,
+                    None => DEFAULT_NUM_DISTINCT,
+                }
+            })
+            .map(|ndistinct| 1.0 / ndistinct as f64)
+            .sorted_by(|a, b| {
+                a.partial_cmp(b)
+                    .expect("No floats should be NaN since n-distinct is never 0")
+            })
+            .take(num_base_col_refs - 1)
+            .product()
+    }
+
+    /// A predicate set defines a "multi-equality graph", which is an unweighted undirected graph. The
+    /// nodes are columns while edges are predicates. The old graph is defined by `past_eq_columns`
+    /// while the `predicate` is the new addition to this graph. This unweighted undirected graph
+    /// consists of a number of connected components, where each connected component represents columns
+    /// that are set to be equal to each other. Single nodes not connected to anything are considered
+    /// standalone connected components.
+    ///
+    /// The selectivity of each connected component of N nodes is equal to the product of 1/ndistinct of
+    /// the N-1 nodes with the highest ndistinct values. You can see this if you imagine that all columns
+    /// being joined are unique columns and that they follow the inclusion principle (every element of the
+    /// smaller tables is present in the larger tables). When these assumptions are not true, the selectivity
+    /// may not be completely accurate. However, it is still fairly accurate.
+    ///
+    /// However, we cannot simply add `predicate` to the multi-equality graph and compute the selectivity of
+    /// the entire connected component, because this would be "double counting" a lot of nodes. The join(s)
+    /// before this join would already have a selectivity value. Thus, we compute the selectivity of the
+    /// join(s) before this join (the first block of the function) and then the selectivity of the connected
+    /// component after this join. The quotient is the "adjustment" factor.
+    ///
+    /// NOTE: This function modifies `past_eq_columns` by adding `predicate` to it.
+    fn get_join_selectivity_adjustment_when_adding_to_multi_equality_graph(
+        &self,
+        predicate: &EqPredicate,
+        past_eq_columns: &mut EqBaseTableColumnSets,
+    ) -> f64 {
+        // To find the adjustment, we need to know the selectivity of the graph before `predicate` is added.
+        //
+        // There are two cases: (1) adding `predicate` does not change the # of connected components, and
+        // (2) adding `predicate` reduces the # of connected by 1. Note that columns not involved in any
+        // predicates are considered a part of the graph and are a connected component on their own.
+        let children_pred_sel = {
+            if past_eq_columns.is_eq(&predicate.left, &predicate.right) {
+                self.get_join_selectivity_from_most_selective_columns(
+                    past_eq_columns.find_cols_for_eq_column_set(&predicate.left),
+                )
+            } else {
+                let left_sel = if past_eq_columns.contains(&predicate.left) {
+                    self.get_join_selectivity_from_most_selective_columns(
+                        past_eq_columns.find_cols_for_eq_column_set(&predicate.left),
+                    )
+                } else {
+                    1.0
+                };
+                let right_sel = if past_eq_columns.contains(&predicate.right) {
+                    self.get_join_selectivity_from_most_selective_columns(
+                        past_eq_columns.find_cols_for_eq_column_set(&predicate.right),
+                    )
+                } else {
+                    1.0
+                };
+                left_sel * right_sel
+            }
+        };
+
+        // Add predicate to past_eq_columns and compute the selectivity of the connected component it creates.
+        past_eq_columns.add_predicate(predicate.clone());
+        let new_pred_sel = {
+            let cols = past_eq_columns.find_cols_for_eq_column_set(&predicate.left);
+            self.get_join_selectivity_from_most_selective_columns(cols)
+        };
+
+        // Compute the adjustment factor.
+        new_pred_sel / children_pred_sel
+    }
+
     /// Get the selectivity of the on conditions.
     ///
-    /// Note that the selectivity of the on conditions does not depend on join type. Join type is accounted for separately in get_join_selectivity_core().
+    /// Note that the selectivity of the on conditions does not depend on join type.
+    /// Join type is accounted for separately in get_join_selectivity_core().
+    ///
+    /// We also check if each predicate is correlated with any of the previous predicates.
+    ///
+    /// More specifically, we are checking if the predicate can be expressed with other existing predicates.
+    /// E.g. if we have a predicate like A = B and B = C is equivalent to A = C.
+    //
+    /// However, we don't just throw away A = C, because we want to pick the most selective predicates.
+    /// For details on how we do this, see `get_join_selectivity_from_redundant_predicates`.
     fn get_join_on_selectivity(
         &self,
         on_col_ref_pairs: &[(ColumnRefExpr, ColumnRefExpr)],
         column_refs: &GroupColumnRefs,
         right_col_ref_offset: usize,
     ) -> f64 {
+        let mut past_eq_columns = column_refs
+            .input_correlation()
+            .map(SemanticCorrelation::eq_base_table_columns)
+            .cloned()
+            .unwrap_or_default();
+
         // multiply the selectivities of all individual conditions together
-        on_col_ref_pairs.iter().map(|on_col_ref_pair| {
-            // the formula for each pair is min(1 / ndistinct1, 1 / ndistinct2) (see https://postgrespro.com/blog/pgsql/5969618)
-            let ndistincts = vec![on_col_ref_pair.0.index(), on_col_ref_pair.1.index() + right_col_ref_offset].into_iter().map(|col_index| {
-                match self.get_single_column_stats_from_col_ref(&column_refs[col_index]) {
-                    Some(per_col_stats) => {
-                        per_col_stats.ndistinct
-                    },
-                    None => DEFAULT_NUM_DISTINCT,
+        on_col_ref_pairs
+            .iter()
+            .map(|on_col_ref_pair| {
+                let left_col_ref = &column_refs[on_col_ref_pair.0.index()];
+                let right_col_ref = &column_refs[on_col_ref_pair.1.index() + right_col_ref_offset];
+
+                if let (ColumnRef::BaseTableColumnRef(left), ColumnRef::BaseTableColumnRef(right)) =
+                    (left_col_ref, right_col_ref)
+                {
+                    let predicate = EqPredicate::new(left.clone(), right.clone());
+                    return self
+                        .get_join_selectivity_adjustment_when_adding_to_multi_equality_graph(
+                            &predicate,
+                            &mut past_eq_columns,
+                        );
                 }
-            });
-            // using reduce(f64::min) is the idiomatic workaround to min() because f64 does not implement Ord due to NaN
-            let selectivity = ndistincts.map(|ndistinct| 1.0 / ndistinct as f64).reduce(f64::min).expect("reduce() only returns None if the iterator is empty, which is impossible since col_ref_exprs.len() == 2");
-            assert!(!selectivity.is_nan(), "it should be impossible for selectivity to be NaN since n-distinct is never 0");
-            selectivity
-        }).product()
+
+                self.get_join_selectivity_from_on_col_ref_pair(left_col_ref, right_col_ref)
+            })
+            .product()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use optd_core::rel_node::Value;
 
     use crate::{
         cost::base_cost::{tests::*, DEFAULT_EQ_SEL},
         plan_nodes::{BinOpType, JoinType, LogOpType, OptRelNodeRef},
-        properties::column_ref::{ColumnRef, GroupColumnRefs},
+        properties::column_ref::{
+            BaseTableColumnRef, ColumnRef, EqBaseTableColumnSets, EqPredicate, GroupColumnRefs,
+            SemanticCorrelation,
+        },
     };
 
-    /// A wrapper around get_join_selectivity_from_expr_tree that extracts the table row counts from the cost model
+    /// A wrapper around get_join_selectivity_from_expr_tree that extracts the
+    /// table row counts from the cost model.
     fn test_get_join_selectivity(
         cost_model: &TestOptCostModel,
         reverse_tables: bool,
@@ -377,7 +536,7 @@ mod tests {
             cost_model.get_join_selectivity_from_expr_tree(
                 JoinType::Inner,
                 cnst(Value::Bool(true)),
-                &vec![],
+                &GroupColumnRefs::new_test(vec![], None),
                 f64::NAN,
                 f64::NAN
             ),
@@ -387,7 +546,7 @@ mod tests {
             cost_model.get_join_selectivity_from_expr_tree(
                 JoinType::Inner,
                 cnst(Value::Bool(false)),
-                &vec![],
+                &GroupColumnRefs::new_test(vec![], None),
                 f64::NAN,
                 f64::NAN
             ),
@@ -413,16 +572,13 @@ mod tests {
         );
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new_test(
+            vec![
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
+            ],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
             0.2
@@ -433,7 +589,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree_rev,
-                &column_refs
+                &column_refs,
             ),
             0.2
         );
@@ -459,19 +615,16 @@ mod tests {
         let eq1and0 = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let expr_tree = log_op(LogOpType::And, vec![eq0and1.clone(), eq1and0.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq1and0.clone(), eq0and1.clone()]);
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new_test(
+            vec![
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
+            ],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
-            0.04
+            0.2
         );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(
@@ -481,7 +634,7 @@ mod tests {
                 expr_tree_rev,
                 &column_refs
             ),
-            0.04
+            0.2
         );
     }
 
@@ -505,16 +658,13 @@ mod tests {
         let eq100 = bin_op(BinOpType::Eq, col_ref(1), cnst(Value::Int32(100)));
         let expr_tree = log_op(LogOpType::And, vec![eq0and1.clone(), eq100.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq100.clone(), eq0and1.clone()]);
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new_test(
+            vec![
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
+            ],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
             0.05
@@ -551,16 +701,13 @@ mod tests {
         let eq100 = bin_op(BinOpType::Eq, col_ref(1), cnst(Value::Int32(100)));
         let expr_tree = log_op(LogOpType::And, vec![neq12.clone(), eq100.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq100.clone(), neq12.clone()]);
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new_test(
+            vec![
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
+            ],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
             0.2
@@ -594,16 +741,13 @@ mod tests {
             ),
         );
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(0));
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new_test(
+            vec![
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
+            ],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
             DEFAULT_EQ_SEL
@@ -729,16 +873,13 @@ mod tests {
         // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new_test(
+            vec![
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
+            ],
+            None,
+        );
         // sanity check the expected inner sel
         let expected_inner_sel = 0.2;
         assert_approx_eq::assert_approx_eq!(
@@ -795,16 +936,13 @@ mod tests {
         // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new_test(
+            vec![
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
+            ],
+            None,
+        );
         // sanity check the expected inner sel
         let expected_inner_sel = 0.2;
         assert_approx_eq::assert_approx_eq!(
@@ -862,16 +1000,13 @@ mod tests {
         // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new_test(
+            vec![
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
+            ],
+            None,
+        );
         // sanity check the expected inner sel
         let expected_inner_sel = 0.1;
         assert_approx_eq::assert_approx_eq!(
@@ -907,7 +1042,8 @@ mod tests {
 
     /// Unique oncond means an oncondition on columns which are unique in both tables
     /// Filter means we're adding a join filter
-    /// There's only one case if both columns are unique and there's a filter: the inner will be < 1 / row count of both tables
+    /// There's only one case if both columns are unique and there's a filter:
+    /// the inner will be < 1 / row count of both tables
     #[test]
     fn test_outer_unique_oncond_filter() {
         let cost_model = create_two_table_cost_model_custom_row_cnts(
@@ -933,16 +1069,13 @@ mod tests {
         let expr_tree = log_op(LogOpType::And, vec![eq0and1, filter.clone()]);
         // inner rev means its the inner expr (the eq op) whose children are being reversed, as opposed to the and op
         let expr_tree_inner_rev = log_op(LogOpType::And, vec![eq1and0, filter.clone()]);
-        let column_refs = vec![
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE1_NAME),
-                col_idx: 0,
-            },
-            ColumnRef::BaseTableColumnRef {
-                table: String::from(TABLE2_NAME),
-                col_idx: 0,
-            },
-        ];
+        let column_refs = GroupColumnRefs::new_test(
+            vec![
+                ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
+                ColumnRef::base_table_column_ref(String::from(TABLE2_NAME), 0),
+            ],
+            None,
+        );
         // sanity check the expected inner sel
         let expected_inner_sel = 0.008;
         assert_approx_eq::assert_approx_eq!(
@@ -974,5 +1107,207 @@ mod tests {
             0.25,
             0.02,
         );
+    }
+
+    /// Test all possible permutations of three-table joins.
+    /// A three-table join consists of at least two joins. `join1_on_cond` is the condition of the first
+    ///   join. There can only be one condition because only two tables are involved at the time of the
+    ///   first join.
+    #[test_case::test_case(&[(0, 1)])]
+    #[test_case::test_case(&[(0, 2)])]
+    #[test_case::test_case(&[(1, 2)])]
+    #[test_case::test_case(&[(0, 1), (0, 2)])]
+    #[test_case::test_case(&[(0, 1), (1, 2)])]
+    #[test_case::test_case(&[(0, 2), (1, 2)])]
+    #[test_case::test_case(&[(0, 1), (0, 2), (1, 2)])]
+    fn test_three_table_join_for_initial_join_on_conds(initial_join_on_conds: &[(usize, usize)]) {
+        assert!(
+            !initial_join_on_conds.is_empty(),
+            "initial_join_on_conds should be non-empty"
+        );
+        assert_eq!(
+            initial_join_on_conds.len(),
+            initial_join_on_conds.iter().collect::<HashSet<_>>().len(),
+            "initial_join_on_conds shouldn't contain duplicates"
+        );
+        let cost_model = create_three_table_cost_model(
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                2,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                3,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                4,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+        );
+        let col_base_refs = vec![
+            BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            },
+            BaseTableColumnRef {
+                table: String::from(TABLE2_NAME),
+                col_idx: 0,
+            },
+            BaseTableColumnRef {
+                table: String::from(TABLE3_NAME),
+                col_idx: 0,
+            },
+        ];
+        let col_refs: Vec<ColumnRef> = col_base_refs
+            .clone()
+            .into_iter()
+            .map(|col_base_ref| col_base_ref.into())
+            .collect();
+
+        let mut eq_columns = EqBaseTableColumnSets::new();
+        for initial_join_on_cond in initial_join_on_conds {
+            eq_columns.add_predicate(EqPredicate::new(
+                col_base_refs[initial_join_on_cond.0].clone(),
+                col_base_refs[initial_join_on_cond.1].clone(),
+            ));
+        }
+        let initial_selectivity = {
+            if initial_join_on_conds.len() == 1 {
+                let initial_join_on_cond = initial_join_on_conds.first().unwrap();
+                if initial_join_on_cond == &(0, 1) {
+                    1.0 / 3.0
+                } else if initial_join_on_cond == &(0, 2) || initial_join_on_cond == &(1, 2) {
+                    1.0 / 4.0
+                } else {
+                    panic!();
+                }
+            } else {
+                1.0 / 12.0
+            }
+        };
+        let semantic_correlation = SemanticCorrelation::new(eq_columns);
+        let column_refs = GroupColumnRefs::new_test(col_refs, Some(semantic_correlation));
+
+        // Try all join conditions of the final join which would lead to all three tables being joined.
+        let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
+        let eq0and2 = bin_op(BinOpType::Eq, col_ref(0), col_ref(2));
+        let eq1and2 = bin_op(BinOpType::Eq, col_ref(1), col_ref(2));
+        let and_01_02 = log_op(LogOpType::And, vec![eq0and1.clone(), eq0and2.clone()]);
+        let and_01_12 = log_op(LogOpType::And, vec![eq0and1.clone(), eq1and2.clone()]);
+        let and_02_12 = log_op(LogOpType::And, vec![eq0and2.clone(), eq1and2.clone()]);
+        let and_01_02_12 = log_op(
+            LogOpType::And,
+            vec![eq0and1.clone(), eq0and2.clone(), eq1and2.clone()],
+        );
+        let mut join2_expr_trees = vec![and_01_02, and_01_12, and_02_12, and_01_02_12];
+        if initial_join_on_conds.len() == 1 {
+            let initial_join_on_cond = initial_join_on_conds.first().unwrap();
+            if initial_join_on_cond == &(0, 1) {
+                join2_expr_trees.push(eq0and2);
+                join2_expr_trees.push(eq1and2);
+            } else if initial_join_on_cond == &(0, 2) {
+                join2_expr_trees.push(eq0and1);
+                join2_expr_trees.push(eq1and2);
+            } else if initial_join_on_cond == &(1, 2) {
+                join2_expr_trees.push(eq0and1);
+                join2_expr_trees.push(eq0and2);
+            } else {
+                panic!();
+            }
+        }
+        for expr_tree in join2_expr_trees {
+            let overall_selectivity = initial_selectivity
+                * test_get_join_selectivity(
+                    &cost_model,
+                    false,
+                    JoinType::Inner,
+                    expr_tree.clone(),
+                    &column_refs,
+                );
+            assert_approx_eq::assert_approx_eq!(overall_selectivity, 1.0 / 12.0);
+        }
+    }
+
+    #[test]
+    fn test_join_which_connects_two_components_together() {
+        let cost_model = create_four_table_cost_model(
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                2,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                3,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                4,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+            TestPerColumnStats::new(
+                TestMostCommonValues::empty(),
+                5,
+                0.0,
+                Some(TestDistribution::empty()),
+            ),
+        );
+        let col_base_refs = vec![
+            BaseTableColumnRef {
+                table: String::from(TABLE1_NAME),
+                col_idx: 0,
+            },
+            BaseTableColumnRef {
+                table: String::from(TABLE2_NAME),
+                col_idx: 0,
+            },
+            BaseTableColumnRef {
+                table: String::from(TABLE3_NAME),
+                col_idx: 0,
+            },
+            BaseTableColumnRef {
+                table: String::from(TABLE4_NAME),
+                col_idx: 0,
+            },
+        ];
+        let col_refs: Vec<ColumnRef> = col_base_refs
+            .clone()
+            .into_iter()
+            .map(|col_base_ref| col_base_ref.into())
+            .collect();
+
+        let mut eq_columns = EqBaseTableColumnSets::new();
+        eq_columns.add_predicate(EqPredicate::new(
+            col_base_refs[0].clone(),
+            col_base_refs[1].clone(),
+        ));
+        eq_columns.add_predicate(EqPredicate::new(
+            col_base_refs[2].clone(),
+            col_base_refs[3].clone(),
+        ));
+        let initial_selectivity = 1.0 / (3.0 * 5.0);
+        let semantic_correlation = SemanticCorrelation::new(eq_columns);
+        let column_refs = GroupColumnRefs::new_test(col_refs, Some(semantic_correlation));
+
+        let eq1and2 = bin_op(BinOpType::Eq, col_ref(1), col_ref(2));
+        let overall_selectivity = initial_selectivity
+            * test_get_join_selectivity(
+                &cost_model,
+                false,
+                JoinType::Inner,
+                eq1and2.clone(),
+                &column_refs,
+            );
+        assert_approx_eq::assert_approx_eq!(overall_selectivity, 1.0 / (3.0 * 4.0 * 5.0));
     }
 }

@@ -7,8 +7,8 @@ use std::{
 use crate::{
     benchmark::Benchmark,
     cardtest::CardtestRunnerDBMSHelper,
-    job::{JobConfig, JobKit},
-    tpch::{TpchConfig, TpchKit},
+    job::{JobKit, JobKitConfig},
+    tpch::{TpchKit, TpchKitConfig},
 };
 use async_trait::async_trait;
 use datafusion::{
@@ -53,16 +53,16 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
         self.clear_state(Some(base_table_stats)).await?;
 
         match benchmark {
-            Benchmark::Tpch(tpch_config) => {
+            Benchmark::Tpch(tpch_kit_config) => {
                 // Create the tables. This must be done after clear_state because that clears everything
                 let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
                 self.create_tpch_tables(&tpch_kit).await?;
-                self.eval_tpch_estcards(tpch_config).await
+                self.eval_tpch_estcards(tpch_kit_config).await
             }
-            Benchmark::Job(job_config) => {
+            Benchmark::Job(job_kit_config) | Benchmark::Joblight(job_kit_config) => {
                 let job_kit = JobKit::build(&self.workspace_dpath)?;
                 self.create_job_tables(&job_kit).await?;
-                self.eval_job_estcards(job_config).await
+                self.eval_job_estcards(job_kit_config).await
             }
         }
     }
@@ -150,13 +150,16 @@ impl DatafusionDBMS {
         Ok(result)
     }
 
-    async fn eval_tpch_estcards(&self, tpch_config: &TpchConfig) -> anyhow::Result<Vec<usize>> {
+    async fn eval_tpch_estcards(
+        &self,
+        tpch_kit_config: &TpchKitConfig,
+    ) -> anyhow::Result<Vec<usize>> {
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
-        tpch_kit.gen_queries(tpch_config)?;
+        tpch_kit.gen_queries(tpch_kit_config)?;
 
         let mut estcards = vec![];
-        for (query_id, sql_fpath) in tpch_kit.get_sql_fpath_ordered_iter(tpch_config)? {
-            println!(
+        for (query_id, sql_fpath) in tpch_kit.get_sql_fpath_ordered_iter(tpch_kit_config)? {
+            log::debug!(
                 "about to evaluate datafusion's estcard for TPC-H Q{}",
                 query_id
             );
@@ -168,13 +171,19 @@ impl DatafusionDBMS {
         Ok(estcards)
     }
 
-    async fn eval_job_estcards(&self, job_config: &JobConfig) -> anyhow::Result<Vec<usize>> {
+    async fn eval_job_estcards(&self, job_kit_config: &JobKitConfig) -> anyhow::Result<Vec<usize>> {
         let job_kit = JobKit::build(&self.workspace_dpath)?;
 
         let mut estcards = vec![];
-        for (query_id, sql_fpath) in job_kit.get_sql_fpath_ordered_iter(job_config)? {
-            println!(
-                "about to evaluate datafusion's estcard for TPC-H Q{}",
+        for (query_id, sql_fpath) in job_kit.get_sql_fpath_ordered_iter(job_kit_config)? {
+            let benchmark_name = if job_kit_config.is_light {
+                "JOB"
+            } else {
+                "JOB-light"
+            };
+            log::debug!(
+                "about to evaluate datafusion's estcard for {} Q{}",
+                benchmark_name,
                 query_id
             );
             let sql = fs::read_to_string(sql_fpath)?;
@@ -226,7 +235,7 @@ impl DatafusionDBMS {
     #[allow(dead_code)]
     async fn load_benchmark_data_no_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
-            Benchmark::Tpch(tpch_config) => self.load_tpch_data_no_stats(tpch_config).await,
+            Benchmark::Tpch(tpch_kit_config) => self.load_tpch_data_no_stats(tpch_kit_config).await,
             _ => unimplemented!(),
         }
     }
@@ -246,8 +255,9 @@ impl DatafusionDBMS {
             Ok(serde_json::from_reader(file)?)
         } else {
             let base_table_stats = match benchmark {
-                Benchmark::Tpch(tpch_config) => self.get_tpch_stats(tpch_config).await?,
-                Benchmark::Job(job_config) => self.get_job_stats(job_config).await?,
+                Benchmark::Tpch(tpch_kit_config) => self.get_tpch_stats(tpch_kit_config).await?,
+                Benchmark::Job(job_kit_config) => self.get_job_stats(job_kit_config).await?,
+                Benchmark::Joblight(job_kit_config) => self.get_job_stats(job_kit_config).await?,
             };
 
             // When self.rebuild_cached_optd_stats is true, we *don't read* from the cache but we
@@ -287,16 +297,19 @@ impl DatafusionDBMS {
     }
 
     #[allow(dead_code)]
-    async fn load_tpch_data_no_stats(&mut self, tpch_config: &TpchConfig) -> anyhow::Result<()> {
+    async fn load_tpch_data_no_stats(
+        &mut self,
+        tpch_kit_config: &TpchKitConfig,
+    ) -> anyhow::Result<()> {
         // Generate the tables.
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
-        tpch_kit.gen_tables(tpch_config)?;
+        tpch_kit.gen_tables(tpch_kit_config)?;
 
         // Create the tables.
         self.create_tpch_tables(&tpch_kit).await?;
 
         // Load the data by creating an external table first and copying the data to real tables.
-        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap();
+        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(tpch_kit_config).unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
             Self::execute(
@@ -339,11 +352,11 @@ impl DatafusionDBMS {
 
     async fn get_tpch_stats(
         &mut self,
-        tpch_config: &TpchConfig,
+        tpch_kit_config: &TpchKitConfig,
     ) -> anyhow::Result<DataFusionBaseTableStats> {
         // Generate the tables
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
-        tpch_kit.gen_tables(tpch_config)?;
+        tpch_kit.gen_tables(tpch_kit_config)?;
 
         // To get the schema of each table.
         let ctx = Self::new_session_ctx(None, self.adaptive).await?;
@@ -359,7 +372,7 @@ impl DatafusionDBMS {
 
         // Build the DataFusionBaseTableStats object.
         let mut base_table_stats = DataFusionBaseTableStats::default();
-        for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_config).unwrap() {
+        for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_kit_config).unwrap() {
             let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
             let schema = ctx
                 .catalog("datafusion")
@@ -399,11 +412,11 @@ impl DatafusionDBMS {
 
     async fn get_job_stats(
         &mut self,
-        job_config: &JobConfig,
+        job_kit_config: &JobKitConfig,
     ) -> anyhow::Result<DataFusionBaseTableStats> {
         // Generate the tables
         let job_kit = JobKit::build(&self.workspace_dpath)?;
-        job_kit.download_tables(job_config)?;
+        job_kit.download_tables(job_kit_config)?;
 
         // To get the schema of each table.
         let ctx = Self::new_session_ctx(None, self.adaptive).await?;
