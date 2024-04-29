@@ -62,9 +62,7 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
         }
 
         match benchmark {
-            Benchmark::Tpch(tpch_kit_config) => {
-                self.eval_tpch_estcards(tpch_kit_config).await
-            }
+            Benchmark::Tpch(tpch_kit_config) => self.eval_tpch_estcards(tpch_kit_config).await,
             Benchmark::Job(job_kit_config) | Benchmark::Joblight(job_kit_config) => {
                 self.eval_job_estcards(job_kit_config).await
             }
@@ -255,15 +253,9 @@ impl DatafusionDBMS {
     async fn load_benchmark_data_no_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
             Benchmark::Tpch(tpch_kit_config) => self.load_tpch_data_no_stats(tpch_kit_config).await,
-            _ => unimplemented!(),
-        }
-    }
-
-    /// This function creates the tables for the benchmark without loading the data.
-    async fn create_benchmark_tables_no_data(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
-        match benchmark {
-            Benchmark::Tpch(tpch_kit_config) => self.load_tpch_data_no_stats(tpch_kit_config).await,
-            _ => unimplemented!(),
+            Benchmark::Job(job_kit_config) | Benchmark::Joblight(job_kit_config) => {
+                self.load_job_data_no_stats(job_kit_config).await
+            }
         }
     }
 
@@ -297,12 +289,13 @@ impl DatafusionDBMS {
         }
     }
 
+    /// This function creates the tables for the benchmark without loading the data.
     async fn create_benchmark_tables(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
             Benchmark::Tpch(_) => {
                 let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
                 self.create_tpch_tables(&tpch_kit).await?;
-            },
+            }
             Benchmark::Job(_) | Benchmark::Joblight(_) => {
                 let job_kit = JobKit::build(&self.workspace_dpath)?;
                 self.create_job_tables(&job_kit).await?;
@@ -337,7 +330,6 @@ impl DatafusionDBMS {
         Ok(())
     }
 
-    #[allow(dead_code)]
     async fn load_tpch_data_no_stats(
         &mut self,
         tpch_kit_config: &TpchKitConfig,
@@ -388,6 +380,59 @@ impl DatafusionDBMS {
             .await?;
         }
 
+        Ok(())
+    }
+
+    // Load job data by creating an external table first and copying the data to real tables.
+    async fn load_job_data_no_stats(
+        &mut self,
+        job_kit_config: &JobKitConfig,
+    ) -> anyhow::Result<()> {
+        // Download the tables.
+        let job_kit = JobKit::build(&self.workspace_dpath)?;
+        job_kit.download_tables(&job_kit_config)?;
+
+        // Create the tables.
+        self.create_job_tables(&job_kit).await?;
+
+        // Load the data by creating an external table first and copying the data to real tables.
+        let tbl_fpath_iter = job_kit.get_tbl_fpath_iter().unwrap();
+        for tbl_fpath in tbl_fpath_iter {
+            let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
+            Self::execute(
+                &self.ctx,
+                &format!(
+                    "create external table {}_tbl stored as csv delimiter ',' location '{}';",
+                    tbl_name,
+                    tbl_fpath.to_str().unwrap()
+                ),
+            )
+            .await?;
+
+            // Get the number of columns of this table.
+            let schema = self
+                .ctx
+                .catalog("datafusion")
+                .unwrap()
+                .schema("public")
+                .unwrap()
+                .table(tbl_name)
+                .await
+                .unwrap()
+                .schema();
+            let projection_list = (1..=schema.fields().len())
+                .map(|i| format!("column_{}", i))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Self::execute(
+                &self.ctx,
+                &format!(
+                    "insert into {} select {} from {}_tbl;",
+                    tbl_name, projection_list, tbl_name,
+                ),
+            )
+            .await?;
+        }
         Ok(())
     }
 
