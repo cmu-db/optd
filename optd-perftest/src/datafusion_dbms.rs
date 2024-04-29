@@ -174,7 +174,7 @@ impl DatafusionDBMS {
                 // If we're in adaptive mode, execute the query to fill the true cardinality cache.
                 self.execute_query(&sql).await?;
             }
-            
+
             let estcard = self.eval_query_estcard(&sql).await?;
             estcards.push(estcard);
         }
@@ -401,46 +401,30 @@ impl DatafusionDBMS {
         // Create the tables.
         self.create_job_tables(&job_kit).await?;
 
-        // Extract the schema string from the DDLs.
-        let tbl_to_schema_str = {
-            let mut tbl_to_schema_str = HashMap::new();
-            let ddls = fs::read_to_string(&job_kit.schema_fpath)?;
-            let ddls = ddls
-                .split(';')
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>();
-            for ddl in ddls {
-                let paren_start_idx = ddl.find('(').unwrap();
-                let table_name = ddl["CREATE TABLE".len()..paren_start_idx].trim();
-                let schema_string = &ddl[paren_start_idx..];
-
-                // Insert into the hash map
-                tbl_to_schema_str.insert(table_name.to_string(), schema_string.to_string());
-            }
-            tbl_to_schema_str
-        };
-
         // Load the data by creating an external table first and copying the data to real tables.
         let tbl_fpath_iter = job_kit.get_tbl_fpath_iter().unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
-            Self::execute(
-                &self.ctx,
-                &format!(
-                    "create external table {}_tbl {} stored as csv delimiter ',' location '{}';",
-                    tbl_name,
-                    tbl_to_schema_str.get(tbl_name).unwrap(),
-                    tbl_fpath.to_str().unwrap()
-                ),
-            )
-            .await?;
-
-            Self::execute(
-                &self.ctx,
-                &format!("insert into {} select * from {}_tbl;", tbl_name, tbl_name),
-            )
-            .await?;
+            let schema = self
+                .ctx
+                .catalog("datafusion")
+                .unwrap()
+                .schema("public")
+                .unwrap()
+                .table(tbl_name)
+                .await
+                .unwrap()
+                .schema();
+            self.ctx
+                .register_csv(
+                    &tbl_name,
+                    tbl_fpath.to_str().unwrap(),
+                    CsvReadOptions::new()
+                        .schema(&schema)
+                        .delimiter(b',')
+                        .escape(b'\\'),
+                )
+                .await?;
         }
         Ok(())
     }
