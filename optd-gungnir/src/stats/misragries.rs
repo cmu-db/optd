@@ -5,11 +5,12 @@
 //! For more details, refer to:
 //! https://people.csail.mit.edu/rrw/6.045-2017/encalgs-mg.pdf
 
-use std::{cmp::min, collections::HashMap, hash::Hash};
-
 use itertools::Itertools;
+use std::{cmp::min, hash::Hash};
+use hashbrown::HashMap;
 
-pub const DEFAULT_K_TO_TRACK: u16 = 1000;
+
+pub const DEFAULT_K_TO_TRACK: u16 = 200;
 
 /// The Misra-Gries structure to approximate the k most frequent elements in
 /// a stream of N elements. It will always identify elements with frequency

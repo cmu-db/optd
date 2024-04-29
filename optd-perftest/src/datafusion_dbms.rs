@@ -466,6 +466,7 @@ impl DatafusionDBMS {
                         .has_header(false)
                         .with_delimiter(b',')
                         .with_escape(b'\\')
+                        .with_batch_size(1024)
                         .build(tbl_file)
                         .unwrap();
                     Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))

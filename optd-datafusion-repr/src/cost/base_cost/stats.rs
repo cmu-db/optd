@@ -308,7 +308,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                     for (row_values, value) in
                         column_comb_values.iter_mut().zip(column_values.iter())
                     {
-                        // TODO(Alexis): Redundant copy.
+                        // This redundant copy is faster than making to_typed_column return an iterator!
                         row_values.push(value.clone());
                     }
                 }
@@ -338,14 +338,9 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                 let nb_rows = column_comb.len() as i32;
 
                 *count += nb_rows - filtered_nulls.len() as i32;
-                //let now = std::time::Instant::now();
                 mg.aggregate(&filtered_nulls);
-                //let mg_time = now.elapsed();
-                //let now = std::time::Instant::now();
                 hll.aggregate(&filtered_nulls);
-                //println!("HLL took {:?} and MG {:?}", now.elapsed(), mg_time);
             });
-        //println!("generate_partial_stats took {:?}", now.elapsed());
     }
 
     fn generate_full_stats(
@@ -354,14 +349,12 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         distrs: &mut [Option<TDigest<Value>>],
         row_counts: &mut [i32],
     ) {
-        //let now = std::time::Instant::now();
         column_combs
             .iter()
             .zip(cnts)
             .zip(distrs)
             .zip(row_counts)
             .for_each(|(((column_comb, cnt), distr), count)| {
-                //let now = std::time::Instant::now();
                 let nb_rows = column_comb.len() as i32;
                 *count += nb_rows;
                 cnt.aggregate(column_comb);
@@ -376,10 +369,8 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
 
                     d.norm_weight += nb_rows as usize;
                     d.merge_values(&filtered_values);
-                    //println!("generate_full_stats one task took {:?}", now.elapsed());
                 }
             });
-        //println!("generate_full_stats took {:?}", now.elapsed());
     }
 
     pub fn from_record_batches<I: IntoIterator<Item = Result<RecordBatch, ArrowError>>>(
@@ -407,8 +398,8 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         // Unfortunately, par_bridge doesn't work as the BatchIterator doesn't implement Send.
         let materialized: Vec<_> = batch_iter.collect(); 
         
-
         // 1. FIRST PASS: hlls + mgs + null_cnts.        
+        let now = std::time::Instant::now();
         let (hlls, mgs, null_cnts) = materialized
             .par_iter()
             .fold(Self::first_pass_stats_id(nb_stats), |local_stats, batch| {
@@ -442,8 +433,10 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                     Ok(final_stats)
                 },
             )?;
+        let first = now.elapsed();
 
         // 2. SECOND PASS: mcv + tdigest + row_cnts.
+        let now = std::time::Instant::now();
         let (distrs, cnts, row_cnts) = materialized
             .par_iter()
             .fold(
@@ -486,8 +479,10 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                     Ok(final_stats)
                 },
             )?;
+        let second = now.elapsed();
 
         // 3. ASSEMBLE STATS.
+        let now = std::time::Instant::now();
         let row_cnt = row_cnts[0];
         let mut column_comb_stats = HashMap::new();
 
@@ -511,6 +506,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
             );
             column_comb_stats.insert(comb, column_stats);
         }
+        println!("First: {:?}, Second: {:?}, Third: {:?}", first, second, now.elapsed());
 
         Ok(Self {
             row_cnt: row_cnt as usize,
