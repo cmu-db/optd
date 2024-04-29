@@ -49,7 +49,7 @@ where
 
     // Inserts an element occ times into the `self` Misra-Gries structure.
     fn insert_element(&mut self, elem: &T, occ: i32) {
-        match self.frequencies.get_mut(&elem) {
+        match self.frequencies.get_mut(elem) {
             Some(freq) => {
                 *freq += occ; // Hit.
                 if *elem == self.least_frequent.as_ref().unwrap().0 {

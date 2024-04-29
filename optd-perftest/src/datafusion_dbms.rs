@@ -437,7 +437,7 @@ impl DatafusionDBMS {
         let tbl_paths = job_kit.get_tbl_fpath_vec().unwrap();
 
         tbl_paths.par_iter().for_each(|tbl_fpath| {
-            let tbl_name = JobKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
+            let tbl_name = JobKit::get_tbl_name_from_tbl_fpath(tbl_fpath);
             let start = Instant::now();
 
             let schema = block_on(async {
@@ -461,7 +461,7 @@ impl DatafusionDBMS {
 
             let stats_result = DataFusionPerTableStats::from_record_batches(
                 || {
-                    let tbl_file = fs::File::open(&tbl_fpath)?;
+                    let tbl_file = fs::File::open(tbl_fpath)?;
                     let csv_reader1 = ReaderBuilder::new(schema.clone())
                         .has_header(false)
                         .with_delimiter(b',')

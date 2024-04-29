@@ -180,8 +180,8 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
     }
 
     fn second_pass_stats_id<'a, 'b>(
-        comb_stat_types: &'a Vec<(Vec<usize>, Vec<DataType>, StatType)>,
-        mgs: &'a Vec<MisraGries<ColumnCombValue>>,
+        comb_stat_types: &'a [(Vec<usize>, Vec<DataType>, StatType)],
+        mgs: &'a [MisraGries<ColumnCombValue>],
         nb_stats: usize,
     ) -> impl Fn() -> anyhow::Result<(
         Vec<Option<TDigest<Value>>>,
@@ -370,7 +370,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                     let filtered_values: Vec<_> = column_comb
                         .iter()
                         .filter(|row| !cnt.is_tracking(row))
-                        .filter_map(|row| row.get(0).and_then(|v| v.as_ref()))
+                        .filter_map(|row| row.first().and_then(|v| v.as_ref()))
                         .cloned()
                         .collect();
 
@@ -417,7 +417,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                 match batch {
                     Ok(batch) => {
                         let (hlls, mgs, null_cnts) = &mut local_stats;
-                        let comb = Self::get_column_combs(&batch, &comb_stat_types);
+                        let comb = Self::get_column_combs(batch, &comb_stat_types);
                         Self::generate_partial_stats(&comb, mgs, hlls, null_cnts);
                         Ok(local_stats)
                     }
@@ -454,7 +454,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                     match batch {
                         Ok(batch) => {
                             let (distrs, cnts, row_cnts) = &mut local_stats;
-                            let comb = Self::get_column_combs(&batch, &comb_stat_types);
+                            let comb = Self::get_column_combs(batch, &comb_stat_types);
                             Self::generate_full_stats(&comb, cnts, distrs, row_cnts);
                             Ok(local_stats)
                         }
