@@ -201,7 +201,7 @@ impl DatafusionDBMS {
                 // Execute the query to fill the true cardinality cache.
                 self.execute_query(&sql).await?;
             }
-            
+
             let estcard = self.eval_query_estcard(&sql).await?;
             estcards.push(estcard);
         }
@@ -214,14 +214,6 @@ impl DatafusionDBMS {
         let physical_plan_after_optd_lines = explains
             .iter()
             .find(|explain| explain.first().unwrap() == "physical_plan after optd")
-            .unwrap();
-        let explain_str = physical_plan_after_optd_lines.join("\n");
-        log::info!("{} {}", self.get_name(), explain_str);
-
-        // DEBUG(phw2)
-        let physical_plan_after_optd_lines = explains
-            .iter()
-            .find(|explain| explain.first().unwrap() == "physical_plan")
             .unwrap();
         let explain_str = physical_plan_after_optd_lines.join("\n");
         log::info!("{} {}", self.get_name(), explain_str);
