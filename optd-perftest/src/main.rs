@@ -60,8 +60,8 @@ enum Commands {
         rebuild_cached_optd_stats: bool,
 
         #[clap(long)]
+        #[clap(action)]
         #[clap(help = "Whether to enable adaptivity for optd")]
-        #[clap(default_value = "true")]
         adaptive: bool,
 
         #[clap(long)]

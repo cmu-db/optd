@@ -52,7 +52,7 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
         let base_table_stats = self.get_benchmark_stats(benchmark).await?;
         self.clear_state(Some(base_table_stats)).await?;
 
-        if true {
+        if self.adaptive {
             // We need to load the stats if we're doing adaptivity because that involves executing the queries in datafusion.
             // This function also calls create_tables().
             self.load_benchmark_data_no_stats(benchmark).await?;
@@ -167,8 +167,12 @@ impl DatafusionDBMS {
                 query_id
             );
             let sql = fs::read_to_string(sql_fpath)?;
-            // Execute the query to fill the true cardinality cache.
-            self.execute_query(&sql).await?;
+
+            if self.adaptive {
+                // If we're in adaptive mode, execute the query to fill the true cardinality cache.
+                self.execute_query(&sql).await?;
+            }
+            
             let estcard = self.eval_query_estcard(&sql).await?;
             estcards.push(estcard);
         }
@@ -192,8 +196,12 @@ impl DatafusionDBMS {
                 query_id
             );
             let sql = fs::read_to_string(sql_fpath)?;
-            // Execute the query to fill the true cardinality cache.
-            self.execute_query(&sql).await?;
+
+            if self.adaptive {
+                // Execute the query to fill the true cardinality cache.
+                self.execute_query(&sql).await?;
+            }
+            
             let estcard = self.eval_query_estcard(&sql).await?;
             estcards.push(estcard);
         }
