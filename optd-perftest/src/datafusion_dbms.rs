@@ -303,7 +303,7 @@ impl DatafusionDBMS {
             }
             Benchmark::Job(_) | Benchmark::Joblight(_) => {
                 let job_kit = JobKit::build(&self.workspace_dpath)?;
-                self.create_job_tables(&job_kit).await?;
+                Self::create_job_tables(&self.ctx, &job_kit).await?;
             }
         };
         Ok(())
@@ -322,7 +322,7 @@ impl DatafusionDBMS {
         Ok(())
     }
 
-    async fn create_job_tables(&mut self, job_kit: &JobKit) -> anyhow::Result<()> {
+    async fn create_job_tables(ctx: &SessionContext, job_kit: &JobKit) -> anyhow::Result<()> {
         let ddls = fs::read_to_string(&job_kit.schema_fpath)?;
         let ddls = ddls
             .split(';')
@@ -330,7 +330,7 @@ impl DatafusionDBMS {
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>();
         for ddl in ddls {
-            Self::execute(&self.ctx, ddl).await?;
+            Self::execute(ctx, ddl).await?;
         }
         Ok(())
     }
@@ -388,24 +388,26 @@ impl DatafusionDBMS {
         Ok(())
     }
 
-    // Load job data by creating an external table first and copying the data to real tables.
+    // Load job data from a .csv file.
     async fn load_job_data_no_stats(
         &mut self,
         job_kit_config: &JobKitConfig,
     ) -> anyhow::Result<()> {
+        let ctx = Self::new_session_ctx(None, self.adaptive).await?;
+
         // Download the tables.
         let job_kit = JobKit::build(&self.workspace_dpath)?;
         job_kit.download_tables(&job_kit_config)?;
 
         // Create the tables.
-        self.create_job_tables(&job_kit).await?;
+        Self::create_job_tables(&ctx, &job_kit).await?;
 
-        // Load the data by creating an external table first and copying the data to real tables.
+        // Load each table using register_csv()
         let tbl_fpath_iter = job_kit.get_tbl_fpath_iter().unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
-            let schema = self
-                .ctx
+            let schema = 
+                ctx
                 .catalog("datafusion")
                 .unwrap()
                 .schema("public")
