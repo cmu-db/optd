@@ -50,13 +50,19 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
     ) -> anyhow::Result<Vec<usize>> {
         let base_table_stats = self.get_benchmark_stats(benchmark).await?;
         self.clear_state(Some(base_table_stats)).await?;
-        self.load_benchmark_data_no_stats(benchmark).await?;
+
+        if true {
+            // We need to load the stats if we're doing adaptivity because that involves executing the queries in datafusion.
+            // This function also calls create_tables().
+            self.load_benchmark_data_no_stats(benchmark).await?;
+        } else {
+            // We only create the tables so that the optimizer doesn't work. However, we can save on the time of loading
+            //   the data if we're not doing adaptivity because we won't be executing queries.
+            self.create_benchmark_tables(benchmark).await?;
+        }
 
         match benchmark {
             Benchmark::Tpch(tpch_kit_config) => {
-                // Create the tables. This must be done after clear_state because that clears everything
-                let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
-                // self.create_tpch_tables(&tpch_kit).await?;
                 self.eval_tpch_estcards(tpch_kit_config).await
             }
             Benchmark::Job(job_kit_config) | Benchmark::Joblight(job_kit_config) => {
@@ -289,6 +295,17 @@ impl DatafusionDBMS {
 
             Ok(base_table_stats)
         }
+    }
+
+    async fn create_benchmark_tables(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
+        match benchmark {
+            Benchmark::Tpch(_) => {
+                let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
+                self.create_tpch_tables(&tpch_kit).await?;
+            },
+            _ => unimplemented!()
+        };
+        Ok(())
     }
 
     async fn create_tpch_tables(&mut self, tpch_kit: &TpchKit) -> anyhow::Result<()> {
