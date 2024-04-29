@@ -24,7 +24,8 @@ fi
 successful_ids=()
 IFS=','
 for id in $all_ids; do
-    cargo run --bin optd-perftest cardtest $benchmark_name --query-ids $id &>/dev/null
+    # make sure to execute with --adaptive so that we actually run the query in datafusion
+    cargo run --bin optd-perftest cardtest $benchmark_name --query-ids $id --adaptive &>/dev/null
 
     if [ $? -eq 0 ]; then
         echo >&2 $id succeeded

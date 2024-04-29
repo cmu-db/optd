@@ -37,6 +37,7 @@ use regex::Regex;
 pub struct DatafusionDBMS {
     workspace_dpath: PathBuf,
     rebuild_cached_stats: bool,
+    adaptive: bool,
     ctx: SessionContext,
 }
 
@@ -53,7 +54,7 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
         let base_table_stats = self.get_benchmark_stats(benchmark).await?;
         self.clear_state(Some(base_table_stats)).await?;
 
-        if true {
+        if self.adaptive {
             // We need to load the stats if we're doing adaptivity because that involves executing the queries in datafusion.
             // This function also calls create_tables().
             self.load_benchmark_data_no_stats(benchmark).await?;
@@ -76,11 +77,13 @@ impl DatafusionDBMS {
     pub async fn new<P: AsRef<Path>>(
         workspace_dpath: P,
         rebuild_cached_stats: bool,
+        adaptive: bool,
     ) -> anyhow::Result<Self> {
         Ok(DatafusionDBMS {
             workspace_dpath: workspace_dpath.as_ref().to_path_buf(),
             rebuild_cached_stats,
-            ctx: Self::new_session_ctx(None).await?,
+            adaptive,
+            ctx: Self::new_session_ctx(None, adaptive).await?,
         })
     }
 
@@ -90,12 +93,13 @@ impl DatafusionDBMS {
     /// A more ideal way to generate statistics would be to use the `ANALYZE`
     /// command in SQL, but DataFusion does not support that yet.
     async fn clear_state(&mut self, stats: Option<DataFusionBaseTableStats>) -> anyhow::Result<()> {
-        self.ctx = Self::new_session_ctx(stats).await?;
+        self.ctx = Self::new_session_ctx(stats, self.adaptive).await?;
         Ok(())
     }
 
     async fn new_session_ctx(
         stats: Option<DataFusionBaseTableStats>,
+        adaptive: bool,
     ) -> anyhow::Result<SessionContext> {
         let session_config = SessionConfig::from_env()?.with_information_schema(true);
         let rn_config = RuntimeConfig::new();
@@ -106,7 +110,7 @@ impl DatafusionDBMS {
             let optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical(
                 Arc::new(DatafusionCatalog::new(state.catalog_list())),
                 stats.unwrap_or_default(),
-                true,
+                adaptive,
             );
             state = state.with_physical_optimizer_rules(vec![]);
             state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));
@@ -165,8 +169,12 @@ impl DatafusionDBMS {
                 query_id
             );
             let sql = fs::read_to_string(sql_fpath)?;
-            // DEBUG(phw2)
-            self.execute_query(&sql).await?;
+
+            if self.adaptive {
+                // If we're in adaptive mode, execute the query to fill the true cardinality cache.
+                self.execute_query(&sql).await?;
+            }
+            
             let estcard = self.eval_query_estcard(&sql).await?;
             estcards.push(estcard);
         }
@@ -190,6 +198,12 @@ impl DatafusionDBMS {
                 query_id
             );
             let sql = fs::read_to_string(sql_fpath)?;
+
+            if self.adaptive {
+                // Execute the query to fill the true cardinality cache.
+                self.execute_query(&sql).await?;
+            }
+
             let estcard = self.eval_query_estcard(&sql).await?;
             estcards.push(estcard);
         }
@@ -202,14 +216,6 @@ impl DatafusionDBMS {
         let physical_plan_after_optd_lines = explains
             .iter()
             .find(|explain| explain.first().unwrap() == "physical_plan after optd")
-            .unwrap();
-        let explain_str = physical_plan_after_optd_lines.join("\n");
-        log::info!("{} {}", self.get_name(), explain_str);
-
-        // DEBUG(phw2)
-        let physical_plan_after_optd_lines = explains
-            .iter()
-            .find(|explain| explain.first().unwrap() == "physical_plan")
             .unwrap();
         let explain_str = physical_plan_after_optd_lines.join("\n");
         log::info!("{} {}", self.get_name(), explain_str);
@@ -448,7 +454,7 @@ impl DatafusionDBMS {
         tpch_kit.gen_tables(tpch_kit_config)?;
 
         // To get the schema of each table.
-        let ctx = Self::new_session_ctx(None).await?;
+        let ctx = Self::new_session_ctx(None, self.adaptive).await?;
         let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
         let ddls = ddls
             .split(';')
@@ -508,7 +514,7 @@ impl DatafusionDBMS {
         job_kit.download_tables(job_kit_config)?;
 
         // To get the schema of each table.
-        let ctx = Self::new_session_ctx(None).await?;
+        let ctx = Self::new_session_ctx(None, self.adaptive).await?;
         let ddls = fs::read_to_string(&job_kit.schema_fpath)?;
         let ddls = ddls
             .split(';')
