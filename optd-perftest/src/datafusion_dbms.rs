@@ -1,7 +1,8 @@
 use std::{
     fs::{self, File},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
+    time::Instant,
 };
 
 use crate::{
@@ -25,13 +26,16 @@ use datafusion::{
     sql::{parser::DFParser, sqlparser::dialect::GenericDialect},
 };
 use datafusion_optd_cli::helper::unescape_input;
+use futures::executor::block_on;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::{
     cost::{DataFusionBaseTableStats, DataFusionPerTableStats},
     DatafusionOptimizer,
 };
+use rayon::prelude::*;
 use regex::Regex;
+
 pub struct DatafusionDBMS {
     workspace_dpath: PathBuf,
     rebuild_cached_stats: bool,
@@ -383,8 +387,8 @@ impl DatafusionDBMS {
             let nb_cols = schema.fields().len();
             let single_cols = (0..nb_cols).map(|v| vec![v]);
             /*let pairwise_cols = iproduct!(0..nb_cols, 0..nb_cols)
-                .filter(|(i, j)| i != j)
-                .map(|(i, j)| vec![i, j]);*/
+            .filter(|(i, j)| i != j)
+            .map(|(i, j)| vec![i, j]);*/
 
             base_table_stats.insert(
                 tbl_name.to_string(),
@@ -393,7 +397,6 @@ impl DatafusionDBMS {
                         let tbl_file = fs::File::open(&tbl_fpath)?;
                         let csv_reader1 = ReaderBuilder::new(schema.clone())
                             .has_header(false)
-                            .with_batch_size(1024)
                             .with_delimiter(b'|')
                             .build(tbl_file)
                             .unwrap();
@@ -411,7 +414,7 @@ impl DatafusionDBMS {
         &mut self,
         job_kit_config: &JobKitConfig,
     ) -> anyhow::Result<DataFusionBaseTableStats> {
-        // Generate the tables
+        // Generate the tables.
         let job_kit = JobKit::build(&self.workspace_dpath)?;
         job_kit.download_tables(job_kit_config)?;
 
@@ -427,48 +430,63 @@ impl DatafusionDBMS {
             Self::execute(&ctx, ddl).await?;
         }
 
+        let now = Instant::now();
+
         // Build the DataFusionBaseTableStats object.
-        let mut base_table_stats = DataFusionBaseTableStats::default();
-        let now = std::time::Instant::now();
-        for tbl_fpath in job_kit.get_tbl_fpath_iter().unwrap() {
+        let base_table_stats = Mutex::new(DataFusionBaseTableStats::default());
+        let tbl_paths = job_kit.get_tbl_fpath_vec().unwrap();
+
+        tbl_paths.par_iter().for_each(|tbl_fpath| {
             let tbl_name = JobKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
-            let schema = ctx
-                .catalog("datafusion")
-                .unwrap()
-                .schema("public")
-                .unwrap()
-                .table(&tbl_name)
-                .await
-                .unwrap()
-                .schema();
+            let start = Instant::now();
+
+            let schema = block_on(async {
+                ctx.catalog("datafusion")
+                    .unwrap()
+                    .schema("public")
+                    .unwrap()
+                    .table(&tbl_name)
+                    .await
+                    .unwrap()
+                    .schema()
+            });
+            println!(
+                "Table {:?} starting after {:?}...",
+                tbl_name,
+                start.elapsed()
+            );
 
             let nb_cols = schema.fields().len();
-            let single_cols = (0..nb_cols).map(|v| vec![v]);
-            /*let pairwise_cols = iproduct!(0..nb_cols, 0..nb_cols)
-                .filter(|(i, j)| i != j)
-                .map(|(i, j)| vec![i, j]);*/
+            let single_cols = (0..nb_cols).map(|v| vec![v]).collect::<Vec<_>>();
 
-            base_table_stats.insert(
-                tbl_name.to_string(),
-                DataFusionPerTableStats::from_record_batches(
-                    || {
-                        let tbl_file = fs::File::open(&tbl_fpath)?;
-                        let csv_reader1 = ReaderBuilder::new(schema.clone())
-                            .has_header(false)
-                            .with_batch_size(65536)
-                            .with_delimiter(b',')
-                            .with_escape(b'\\')
-                            .build(tbl_file)
-                            .unwrap();
-                        Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))
-                    },
-                    single_cols.collect(),
-                )?,
+            let stats_result = DataFusionPerTableStats::from_record_batches(
+                || {
+                    let tbl_file = fs::File::open(&tbl_fpath)?;
+                    let csv_reader1 = ReaderBuilder::new(schema.clone())
+                        .has_header(false)
+                        .with_delimiter(b',')
+                        .with_escape(b'\\')
+                        .build(tbl_file)
+                        .unwrap();
+                    Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))
+                },
+                single_cols,
             );
-        }
-        println!("Gungnir took {:?}", now.elapsed());
 
-        Ok(base_table_stats)
+            if let Ok(per_table_stats) = stats_result {
+                let mut stats = base_table_stats.lock().unwrap();
+                stats.insert(tbl_name.to_string(), per_table_stats);
+            }
+
+            println!(
+                "Table {:?} took in total {:?}...",
+                tbl_name,
+                start.elapsed()
+            );
+        });
+
+        println!("Total execution time {:?}...", now.elapsed());
+        Ok(base_table_stats.into_inner().unwrap())
     }
 }
 

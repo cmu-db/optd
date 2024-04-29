@@ -18,6 +18,8 @@ pub const DEFAULT_K_TO_TRACK: u16 = 1000;
 pub struct MisraGries<T: PartialEq + Eq + Hash + Clone> {
     frequencies: HashMap<T, i32>, // The approximated frequencies of an element T.
     k: u16,                       // The max size of our frequencies hashmap.
+
+    least_frequent: Option<(T, i32)>, // The least frequent element in frequencies.
 }
 
 // Self-contained implementation of the Misra-Gries data structure.
@@ -32,6 +34,8 @@ where
         MisraGries::<T> {
             frequencies: HashMap::with_capacity(k as usize),
             k,
+
+            least_frequent: None,
         }
     }
 
@@ -44,27 +48,44 @@ where
     }
 
     // Inserts an element occ times into the `self` Misra-Gries structure.
-    fn insert_element(&mut self, elem: T, occ: i32) {
+    fn insert_element(&mut self, elem: &T, occ: i32) {
         match self.frequencies.get_mut(&elem) {
-            Some(freq) => *freq += occ, // Hit.
+            Some(freq) => {
+                *freq += occ; // Hit.
+                if *elem == self.least_frequent.as_ref().unwrap().0 {
+                    self.least_frequent = Some(self.find_least_frequent());
+                }
+            }
             None => {
                 if self.frequencies.len() < self.k as usize {
-                    self.frequencies.insert(elem, occ); // Discovery phase.
+                    self.frequencies.insert(elem.clone(), occ); // Discovery phase.
+
+                    match &self.least_frequent {
+                        Some(prev) => {
+                            if prev.1 > occ {
+                                self.least_frequent = Some((elem.clone(), occ));
+                            }
+                        }
+                        None => self.least_frequent = Some((elem.clone(), occ)),
+                    }
                 } else {
-                    // Check if there *will* be an evictable frequency; decrement & insert.
-                    let (smallest_freq_key, smallest_freq) = self.find_least_frequent();
+                    let smallest_freq = self.least_frequent.as_ref().unwrap().1;
 
                     let decr = min(smallest_freq, occ);
                     if decr > 0 {
                         for freq in self.frequencies.values_mut() {
                             *freq -= decr;
                         }
+                        self.least_frequent.as_mut().unwrap().1 -= decr;
                     }
 
                     let delta = smallest_freq - occ;
                     if delta < 0 {
-                        self.frequencies.remove(&smallest_freq_key);
-                        self.frequencies.insert(elem, -delta);
+                        self.frequencies
+                            .remove(&self.least_frequent.as_ref().unwrap().0);
+                        self.frequencies.insert(elem.clone(), -delta);
+
+                        self.least_frequent = Some(self.find_least_frequent());
                     }
                 }
             }
@@ -73,8 +94,7 @@ where
 
     /// Digests an array of data into the Misra-Gries structure.
     pub fn aggregate(&mut self, data: &[T]) {
-        data.iter()
-            .for_each(|key| self.insert_element(key.clone(), 1));
+        data.iter().for_each(|key| self.insert_element(key, 1));
     }
 
     /// Merges another MisraGries into the current one.
@@ -85,7 +105,7 @@ where
         other
             .frequencies
             .iter()
-            .for_each(|(key, occ)| self.insert_element(key.clone(), *occ));
+            .for_each(|(key, occ)| self.insert_element(key, *occ));
     }
 
     /// Returns all elements with frequency f >= (n/k),
