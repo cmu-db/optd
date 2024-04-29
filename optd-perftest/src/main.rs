@@ -60,6 +60,11 @@ enum Commands {
         rebuild_cached_optd_stats: bool,
 
         #[clap(long)]
+        #[clap(help = "Whether to enable adaptivity for optd")]
+        #[clap(default_value = "true")]
+        adaptive: bool,
+
+        #[clap(long)]
         #[clap(default_value = "default_user")]
         #[clap(help = "The name of a user with superuser privileges")]
         pguser: String,
@@ -93,6 +98,7 @@ async fn cardtest<P: AsRef<Path>>(
     rebuild_cached_optd_stats: bool,
     pguser: String,
     pgpassword: String,
+    adaptive: bool,
 ) -> anyhow::Result<()> {
     let query_ids = if query_ids.is_empty() {
         Vec::from(match benchmark_name {
@@ -130,6 +136,7 @@ async fn cardtest<P: AsRef<Path>>(
         &pguser,
         &pgpassword,
         benchmark,
+        adaptive,
     )
     .await?;
 
@@ -263,6 +270,7 @@ async fn main() -> anyhow::Result<()> {
             rebuild_cached_optd_stats,
             pguser,
             pgpassword,
+            adaptive,
         } => {
             cardtest(
                 workspace_dpath,
@@ -273,6 +281,7 @@ async fn main() -> anyhow::Result<()> {
                 rebuild_cached_optd_stats,
                 pguser,
                 pgpassword,
+                adaptive,
             )
             .await
         }
