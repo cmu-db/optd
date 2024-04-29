@@ -50,12 +50,13 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
     ) -> anyhow::Result<Vec<usize>> {
         let base_table_stats = self.get_benchmark_stats(benchmark).await?;
         self.clear_state(Some(base_table_stats)).await?;
+        self.load_benchmark_data_no_stats(benchmark).await?;
 
         match benchmark {
             Benchmark::Tpch(tpch_kit_config) => {
                 // Create the tables. This must be done after clear_state because that clears everything
                 let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
-                self.create_tpch_tables(&tpch_kit).await?;
+                // self.create_tpch_tables(&tpch_kit).await?;
                 self.eval_tpch_estcards(tpch_kit_config).await
             }
             Benchmark::Job(job_kit_config) | Benchmark::Joblight(job_kit_config) => {
@@ -160,6 +161,8 @@ impl DatafusionDBMS {
                 query_id
             );
             let sql = fs::read_to_string(sql_fpath)?;
+            // DEBUG(phw2)
+            self.execute_query(&sql).await?;
             let estcard = self.eval_query_estcard(&sql).await?;
             estcards.push(estcard);
         }
@@ -198,6 +201,14 @@ impl DatafusionDBMS {
             .unwrap();
         let explain_str = physical_plan_after_optd_lines.join("\n");
         log::info!("{} {}", self.get_name(), explain_str);
+
+        // DEBUG(phw2)
+        let physical_plan_after_optd_lines = explains
+            .iter()
+            .find(|explain| explain.first().unwrap() == "physical_plan")
+            .unwrap();
+        let explain_str = physical_plan_after_optd_lines.join("\n");
+        log::info!("{} {}", self.get_name(), explain_str);
     }
 
     async fn eval_query_estcard(&self, sql: &str) -> anyhow::Result<usize> {
@@ -224,12 +235,26 @@ impl DatafusionDBMS {
         Ok(row_cnt)
     }
 
+    /// This is used to execute the query in order to load the true cardinalities back into optd
+    /// in order to use the adaptive cost model.
+    async fn execute_query(&self, sql: &str) -> anyhow::Result<()> {
+        Self::execute(&self.ctx, sql).await?;
+        Ok(())
+    }
+
     /// Load the data into DataFusion without building the stats used by optd.
     /// Unlike Postgres, where both data and stats are used by the same program, for this class the
     ///   data is used by DataFusion while the stats are used by optd. That is why there are two
     ///   separate functions to load them.
-    #[allow(dead_code)]
     async fn load_benchmark_data_no_stats(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
+        match benchmark {
+            Benchmark::Tpch(tpch_kit_config) => self.load_tpch_data_no_stats(tpch_kit_config).await,
+            _ => unimplemented!(),
+        }
+    }
+
+    /// This function creates the tables for the benchmark without loading the data.
+    async fn create_benchmark_tables_no_data(&mut self, benchmark: &Benchmark) -> anyhow::Result<()> {
         match benchmark {
             Benchmark::Tpch(tpch_kit_config) => self.load_tpch_data_no_stats(tpch_kit_config).await,
             _ => unimplemented!(),
