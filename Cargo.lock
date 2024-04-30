@@ -2801,6 +2801,7 @@ name = "optd-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrow-schema",
  "itertools 0.11.0",
  "num-derive",
  "num-traits",

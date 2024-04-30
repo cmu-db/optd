@@ -8,6 +8,7 @@ use std::{
     sync::Arc,
 };
 
+use arrow_schema::DataType;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -92,6 +93,10 @@ impl std::fmt::Display for Value {
     }
 }
 
+/// The `as_*()` functions do not perform conversions. This is *unlike* the `as`
+/// keyword in rust.
+/// 
+/// If you want to perform conversions, use the `to_*()` functions.
 impl Value {
     pub fn as_u8(&self) -> u8 {
         match self {
@@ -181,6 +186,19 @@ impl Value {
         match self {
             Value::Serialized(i) => i.clone(),
             _ => panic!("Value is not a serialized"),
+        }
+    }
+
+    pub fn convert_to_type(&self, typ: DataType) -> Value {
+        match typ {
+            DataType::Int32 => {
+                Value::Int32(match self {
+                    Value::Int32(i) => *i,
+                    Value::Int64(i) => (*i).try_into().unwrap(),
+                    _ => panic!("Value can not be converted into an i32"),
+                })
+            }
+            _ => unimplemented!("Have not implemented convert_to_type for type {}", typ)
         }
     }
 }

@@ -190,39 +190,75 @@ impl<
         let mut non_col_ref_exprs = vec![];
         let is_left_col_ref;
 
-        // TODO(phw2): factor is_left_col_ref out of this function
+        // Recursively unwrap casts
+        let mut uncasted_left = left;
+        let mut uncasted_right = right;
+        loop {
+            if uncasted_left.as_ref().typ == OptRelNodeTyp::Cast && uncasted_right.as_ref().typ == OptRelNodeTyp::Cast {
+                let left_cast_expr = CastExpr::from_rel_node(uncasted_left).expect("we already checked that the type is Cast");
+                let right_cast_expr = CastExpr::from_rel_node(uncasted_right).expect("we already checked that the type is Cast");
+                assert!(left_cast_expr.cast_to() == right_cast_expr.cast_to());
+                uncasted_left = left_cast_expr.child().into_rel_node();
+                uncasted_right = right_cast_expr.child().into_rel_node();
+            } else if uncasted_left.as_ref().typ == OptRelNodeTyp::Cast || uncasted_right.as_ref().typ == OptRelNodeTyp::Cast {
+                let is_left_cast = uncasted_left.as_ref().typ == OptRelNodeTyp::Cast;
+                let (mut cast_node, mut non_cast_node) = if is_left_cast {
+                    (uncasted_left, uncasted_right)
+                } else {
+                    (uncasted_right, uncasted_left)
+                };
 
-        // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
-        // We always want to use "col_ref_expr" and "non_col_ref_expr" instead of "left" or "right"
-        match left.as_ref().typ {
+                let cast_expr = CastExpr::from_rel_node(cast_node).expect("we already checked that the type is Cast");
+                let cast_expr_child = cast_expr.child().into_rel_node();
+                let cast_expr_cast_to = cast_expr.cast_to();
+
+                match cast_expr_child.typ {
+                    OptRelNodeTyp::Constant(_) => {
+                        cast_node = ConstantExpr::new(ConstantExpr::from_rel_node(cast_expr_child).expect("we already checked that the type is Constant").value().convert_to_type(cast_expr_cast_to)).into_rel_node()
+                    }
+                    _ => todo!()
+                }
+
+                (uncasted_left, uncasted_right) = if is_left_cast {
+                    (cast_node, non_cast_node)
+                } else {
+                    (non_cast_node, cast_node)
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Sort nodes into col_ref_exprs, values, and non_col_ref_exprs
+        match uncasted_left.as_ref().typ {
             OptRelNodeTyp::ColumnRef => {
                 is_left_col_ref = true;
                 col_ref_exprs.push(
-                    ColumnRefExpr::from_rel_node(left)
+                    ColumnRefExpr::from_rel_node(uncasted_left)
                         .expect("we already checked that the type is ColumnRef"),
                 );
             },
             OptRelNodeTyp::Constant(_) => {
                 is_left_col_ref = false;
-                values.push(ConstantExpr::from_rel_node(left).expect("we already checked that the type is Constant").value())
+                values.push(ConstantExpr::from_rel_node(uncasted_left).expect("we already checked that the type is Constant").value())
             }
             _ => {
                 is_left_col_ref = false;
-                non_col_ref_exprs.push(left);
+                non_col_ref_exprs.push(uncasted_left);
             }
         }
-        match right.as_ref().typ {
+        match uncasted_right.as_ref().typ {
             OptRelNodeTyp::ColumnRef => {
                 col_ref_exprs.push(
-                    ColumnRefExpr::from_rel_node(right)
+                    ColumnRefExpr::from_rel_node(uncasted_right)
                         .expect("we already checked that the type is ColumnRef"),
                 );
             },
             OptRelNodeTyp::Constant(_) => {
-                values.push(ConstantExpr::from_rel_node(right).expect("we already checked that the type is Constant").value())
+                values.push(ConstantExpr::from_rel_node(uncasted_right).expect("we already checked that the type is Constant").value())
             }
             _ => {
-                non_col_ref_exprs.push(right);
+                non_col_ref_exprs.push(uncasted_right);
             }
         }
 
@@ -462,6 +498,7 @@ impl<
 
 #[cfg(test)]
 mod tests {
+    use arrow_schema::DataType;
     use optd_core::rel_node::Value;
 
     use crate::{
@@ -1097,4 +1134,53 @@ mod tests {
     }
 
     // I didn't test any non-unique cases with filter. The non-unique tests without filter should cover that
+
+    #[test]
+    fn test_cast_value() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
+            0,
+            0.1,
+            Some(TestDistribution::empty()),
+        ));
+        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cast(cnst(Value::Int64(1)), DataType::Int32));
+        let expr_tree_rev = bin_op(BinOpType::Eq, cast(cnst(Value::Int64(1)), DataType::Int32), col_ref(0));
+        let column_refs = GroupColumnRefs::new_test(
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
+            None,
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.3
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &column_refs),
+            0.3
+        );
+    }
+
+    #[test]
+    fn test_cast_colref() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
+            0,
+            0.1,
+            Some(TestDistribution::empty()),
+        ));
+        let expr_tree = bin_op(BinOpType::Eq, cast(col_ref(0), DataType::Int64), cnst(Value::Int64(1)));
+        let column_refs = GroupColumnRefs::new_test(
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
+            None,
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &column_refs),
+            0.3
+        );
+    }
 }
