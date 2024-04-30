@@ -41,7 +41,7 @@ pub struct DatafusionDBMS {
 }
 
 const WITH_LOGICAL_FOR_TPCH: bool = true;
-const WITH_LOGICAL_FOR_JOB: bool = false;
+const WITH_LOGICAL_FOR_JOB: bool = true;
 
 #[async_trait]
 impl CardtestRunnerDBMSHelper for DatafusionDBMS {

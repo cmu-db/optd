@@ -18,6 +18,7 @@ pub struct CardtestRunner {
     truecard_getter: Box<dyn TruecardGetter>,
 }
 
+#[derive(Clone)]
 pub struct Cardinfo {
     pub qerror: f64,
     pub estcard: usize,
