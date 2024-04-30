@@ -1,6 +1,5 @@
 use std::ops::Bound;
 
-use arrow_schema::DataType;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
     cost::Cost,
@@ -102,7 +101,7 @@ impl<
                 let right_child = expr_tree.child(1);
 
                 if bin_op_typ.is_comparison() {
-                    self.get_comp_op_selectivity(*bin_op_typ, left_child, right_child, column_refs)
+                    self.get_comp_op_selectivity(*bin_op_typ, left_child, right_child, schema, column_refs)
                 } else if bin_op_typ.is_numerical() {
                     panic!(
                         "the selectivity of operations that return numerical values is undefined"
@@ -188,6 +187,7 @@ impl<
     fn get_semantic_nodes(
         left: OptRelNodeRef,
         right: OptRelNodeRef,
+        schema: &Schema,
     ) -> (Vec<ColumnRefExpr>, Vec<Value>, Vec<OptRelNodeRef>, bool) {
         let mut col_ref_exprs = vec![];
         let mut values = vec![];
@@ -221,9 +221,12 @@ impl<
                         cast_node = ConstantExpr::new(ConstantExpr::from_rel_node(cast_expr_child).expect("we already checked that the type is Constant").value().convert_to_type(cast_expr_cast_to)).into_rel_node();
                     }
                     OptRelNodeTyp::ColumnRef => {
-                        assert!(cast_expr_cast_to == DataType::Int64);
-                        cast_node = cast_expr_child;
-                        non_cast_node = CastExpr::new(Expr::from_rel_node(non_cast_node).unwrap(), DataType::Int32).into_rel_node();
+                        let col_ref_expr = ColumnRefExpr::from_rel_node(cast_expr_child).expect("we already checked that the type is ColumnRef");
+                        let col_ref_idx = col_ref_expr.index();
+                        cast_node = col_ref_expr.into_rel_node();
+                        let field = &schema.fields[col_ref_idx];
+                        let field_data_type = field.typ.into_data_type();
+                        non_cast_node = CastExpr::new(Expr::from_rel_node(non_cast_node).unwrap(), field_data_type).into_rel_node();
                     }
                     _ => todo!()
                 }
@@ -281,13 +284,14 @@ impl<
         comp_bin_op_typ: BinOpType,
         left: OptRelNodeRef,
         right: OptRelNodeRef,
+        schema: &Schema,
         column_refs: &GroupColumnRefs,
     ) -> f64 {
         assert!(comp_bin_op_typ.is_comparison());
 
         // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
         let (col_ref_exprs, values, non_col_ref_exprs, is_left_col_ref) =
-            Self::get_semantic_nodes(left, right);
+            Self::get_semantic_nodes(left, right, schema);
 
         // Handle the different cases of semantic nodes.
         if col_ref_exprs.is_empty() {
@@ -512,8 +516,8 @@ mod tests {
 
     use crate::{
         cost::base_cost::tests::*,
-        plan_nodes::{BinOpType, LogOpType, UnOpType},
-        properties::{column_ref::{ColumnRef, GroupColumnRefs}, schema::Schema},
+        plan_nodes::{BinOpType, ConstantType, LogOpType, UnOpType},
+        properties::{column_ref::{ColumnRef, GroupColumnRefs}, schema::{Field, Schema}},
     };
 
     #[test]
@@ -1204,7 +1208,7 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Eq, cast(col_ref(0), DataType::Int64), cnst(Value::Int64(1)));
         let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int64(1)), cast(col_ref(0), DataType::Int64));
-        let schema = Schema::new(vec![]);
+        let schema = Schema::new(vec![Field {name: String::from(""), typ: ConstantType::Int32, nullable: false}]);
         let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),

@@ -1,6 +1,6 @@
 use std::{fmt::Display, sync::Arc};
 
-use arrow_schema::DataType;
+use arrow_schema::{DataType, IntervalUnit};
 use itertools::Itertools;
 use pretty_xmlish::Pretty;
 use serde::{Deserialize, Serialize};
@@ -100,6 +100,26 @@ impl ConstantType {
             Value::Int64(_) => ConstantType::Int64,
             Value::Float(_) => ConstantType::Float64,
             _ => unimplemented!(),
+        }
+    }
+
+    pub fn into_data_type(&self) -> DataType {
+        match self {
+            ConstantType::Any => unimplemented!(),
+            ConstantType::Bool => DataType::Boolean,
+            ConstantType::UInt8 => DataType::UInt8,
+            ConstantType::UInt16 => DataType::UInt16,
+            ConstantType::UInt32 => DataType::UInt32,
+            ConstantType::UInt64 => DataType::UInt64,
+            ConstantType::Int8 => DataType::Int8,
+            ConstantType::Int16 => DataType::Int16,
+            ConstantType::Int32 => DataType::Int32,
+            ConstantType::Int64 => DataType::Int64,
+            ConstantType::Float64 => DataType::Float64,
+            ConstantType::Date => DataType::Date32,
+            ConstantType::IntervalMonthDateNano => DataType::Interval(IntervalUnit::MonthDayNano),
+            ConstantType::Decimal => DataType::Float64,
+            ConstantType::Utf8String => DataType::Utf8,
         }
     }
 }
