@@ -30,6 +30,12 @@ pub struct Schema {
 }
 
 impl Schema {
+    pub fn new(fields: Vec<Field>) -> Self {
+        Self {
+            fields
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.fields.len()
     }
