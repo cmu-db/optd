@@ -193,7 +193,7 @@ impl PostgresDBMS {
 
         // load the tables
         job_kit.download_tables(job_kit_config)?;
-        for tbl_fpath in job_kit.get_tbl_fpath_vec()? {
+        for tbl_fpath in job_kit.get_tbl_fpath_vec("csv")? {
             Self::copy_from_stdin(client, tbl_fpath, ",", "\\").await?;
         }
 

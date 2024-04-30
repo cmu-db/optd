@@ -18,9 +18,7 @@ use crate::{
 use async_trait::async_trait;
 use datafusion::{
     arrow::{
-        array::{RecordBatch, RecordBatchIterator},
-        csv::ReaderBuilder,
-        datatypes::SchemaRef,
+        array::RecordBatch,
         error::ArrowError,
         util::display::{ArrayFormatter, FormatOptions},
     },
@@ -31,6 +29,7 @@ use datafusion::{
     },
     sql::{parser::DFParser, sqlparser::dialect::GenericDialect},
 };
+
 use datafusion_optd_cli::helper::unescape_input;
 use futures::executor::block_on;
 use lazy_static::lazy_static;
@@ -39,6 +38,7 @@ use optd_datafusion_repr::{
     cost::{DataFusionBaseTableStats, DataFusionPerTableStats},
     DatafusionOptimizer,
 };
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use rayon::prelude::*;
 use regex::Regex;
 
@@ -359,7 +359,6 @@ impl DatafusionDBMS {
     fn gen_base_stats(
         tbl_paths: Vec<PathBuf>,
         ctx: SessionContext,
-        delim: u8,
     ) -> anyhow::Result<DataFusionBaseTableStats> {
         let base_table_stats = Mutex::new(DataFusionBaseTableStats::default());
         let now = Instant::now();
@@ -383,8 +382,8 @@ impl DatafusionDBMS {
             let single_cols = (0..nb_cols).map(|v| vec![v]).collect::<Vec<_>>();
 
             let stats_result = DataFusionPerTableStats::from_record_batches(
-                Self::create_batch_channel(tbl_fpath.clone(), schema.clone(), delim),
-                Self::create_batch_channel(tbl_fpath.clone(), schema.clone(), delim),
+                Self::create_batch_channel(tbl_fpath.clone()),
+                Self::create_batch_channel(tbl_fpath.clone()),
                 single_cols,
                 schema,
             );
@@ -408,26 +407,27 @@ impl DatafusionDBMS {
 
     fn create_batch_channel(
         tbl_fpath: PathBuf,
-        schema: SchemaRef,
-        delim: u8,
     ) -> impl FnOnce() -> (JoinHandle<()>, Receiver<Result<RecordBatch, ArrowError>>) {
         move || {
             let (sender, receiver) = mpsc::channel();
 
             let handle = thread::spawn(move || {
+                // Get the number of row groups.
                 let tbl_file = File::open(tbl_fpath).expect("Failed to open file");
-                let csv_reader = ReaderBuilder::new(schema.clone())
-                    .has_header(false)
-                    .with_delimiter(delim)
-                    .with_escape(b'\\')
-                    .with_batch_size(1024)
-                    .build(tbl_file)
-                    .expect("Failed to build CSV reader");
+                let builder =
+                    ParquetRecordBatchReaderBuilder::try_new(tbl_file.try_clone().unwrap())
+                        .unwrap();
+                let num_row_groups = builder.metadata().num_row_groups();
 
-                let batch_iter = RecordBatchIterator::new(csv_reader, schema);
-                for batch in batch_iter {
-                    sender.send(batch).expect("Failed to send batch");
-                }
+                // Read row groups in parallel.
+                (0..num_row_groups).into_par_iter().for_each(|i| {
+                    ParquetRecordBatchReaderBuilder::try_new(tbl_file.try_clone().unwrap())
+                        .unwrap()
+                        .with_row_groups(vec![i])
+                        .build()
+                        .unwrap()
+                        .for_each(|batch| sender.send(batch).expect("Failed to send batch"))
+                });
             });
 
             (handle, receiver)
@@ -456,7 +456,7 @@ impl DatafusionDBMS {
 
         // Compute base statistics.
         let tbl_paths = tpch_kit.get_tbl_fpath_vec(tpch_kit_config)?;
-        Self::gen_base_stats(tbl_paths, ctx, b'|')
+        Self::gen_base_stats(tbl_paths, ctx)
     }
 
     async fn get_job_stats(
@@ -480,8 +480,8 @@ impl DatafusionDBMS {
         }
 
         // Compute base statistics.
-        let tbl_paths = job_kit.get_tbl_fpath_vec().unwrap();
-        Self::gen_base_stats(tbl_paths, ctx, b',')
+        let tbl_paths = job_kit.get_tbl_fpath_vec("parquet").unwrap();
+        Self::gen_base_stats(tbl_paths, ctx)
     }
 }
 

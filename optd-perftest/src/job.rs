@@ -138,7 +138,7 @@ impl JobKit {
     }
 
     /// Get a vector of all generated .csv files in a given directory path
-    pub fn get_tbl_fpath_vec(&self) -> io::Result<Vec<PathBuf>> {
+    pub fn get_tbl_fpath_vec(&self, target_ext: &str) -> io::Result<Vec<PathBuf>> {
         let dirent_iter = fs::read_dir(&self.downloaded_tables_dpath)?;
 
         let entries: Vec<_> = dirent_iter.collect::<Result<Vec<_>, io::Error>>()?;
@@ -150,7 +150,7 @@ impl JobKit {
                 if path
                     .extension()
                     .and_then(|ext| ext.to_str())
-                    .map(|ext| ext == "csv")
+                    .map(|ext| ext == target_ext)
                     .unwrap_or(false)
                 {
                     Some(path)
