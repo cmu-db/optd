@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    benchmark::Benchmark,
+    benchmark::{self, Benchmark},
     cardtest::CardtestRunnerDBMSHelper,
     job::{JobKit, JobKitConfig},
     tpch::{TpchKit, TpchKitConfig},
@@ -37,8 +37,11 @@ pub struct DatafusionDBMS {
     workspace_dpath: PathBuf,
     rebuild_cached_stats: bool,
     adaptive: bool,
-    ctx: SessionContext,
+    ctx: Option<SessionContext>,
 }
+
+const WITH_LOGICAL_FOR_TPCH: bool = true;
+const WITH_LOGICAL_FOR_JOB: bool = false;
 
 #[async_trait]
 impl CardtestRunnerDBMSHelper for DatafusionDBMS {
@@ -51,7 +54,8 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
         benchmark: &Benchmark,
     ) -> anyhow::Result<Vec<usize>> {
         let base_table_stats = self.get_benchmark_stats(benchmark).await?;
-        self.clear_state(Some(base_table_stats)).await?;
+        // clear_state() is how we "load" the stats into datafusion
+        self.clear_state(Some(base_table_stats), &benchmark).await?;
 
         if self.adaptive {
             // We need to load the stats if we're doing adaptivity because that involves executing the queries in datafusion.
@@ -82,7 +86,7 @@ impl DatafusionDBMS {
             workspace_dpath: workspace_dpath.as_ref().to_path_buf(),
             rebuild_cached_stats,
             adaptive,
-            ctx: Self::new_session_ctx(None, adaptive).await?,
+            ctx: None,
         })
     }
 
@@ -91,16 +95,26 @@ impl DatafusionDBMS {
     ///
     /// A more ideal way to generate statistics would be to use the `ANALYZE`
     /// command in SQL, but DataFusion does not support that yet.
-    async fn clear_state(&mut self, stats: Option<DataFusionBaseTableStats>) -> anyhow::Result<()> {
-        self.ctx = Self::new_session_ctx(stats, self.adaptive).await?;
+    async fn clear_state(&mut self, stats: Option<DataFusionBaseTableStats>, benchmark: &Benchmark) -> anyhow::Result<()> {
+        let with_logical = match benchmark {
+            Benchmark::Tpch(_) => WITH_LOGICAL_FOR_TPCH,
+            Benchmark::Job(_) | Benchmark::Joblight(_) => WITH_LOGICAL_FOR_JOB,
+        };
+        self.ctx = Some(Self::new_session_ctx(stats, self.adaptive, with_logical).await?);
         Ok(())
     }
 
     async fn new_session_ctx(
         stats: Option<DataFusionBaseTableStats>,
         adaptive: bool,
+        with_logical: bool,
     ) -> anyhow::Result<SessionContext> {
-        let session_config = SessionConfig::from_env()?.with_information_schema(true);
+        let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
+
+        if !with_logical {
+            session_config.options_mut().optimizer.max_passes = 0;
+        }
+
         let rn_config = RuntimeConfig::new();
         let runtime_env = RuntimeEnv::new(rn_config.clone())?;
         let ctx = {
@@ -220,11 +234,15 @@ impl DatafusionDBMS {
         log::info!("{} {}", self.get_name(), explain_str);
     }
 
+    fn get_ctx(&self) -> &SessionContext {
+        self.ctx.as_ref().unwrap()
+    }
+
     async fn eval_query_estcard(&self, sql: &str) -> anyhow::Result<usize> {
         lazy_static! {
             static ref ROW_CNT_RE: Regex = Regex::new(r"row_cnt=(\d+\.\d+)").unwrap();
         }
-        let explains = Self::execute(&self.ctx, &format!("explain verbose {}", sql)).await?;
+        let explains = Self::execute(self.get_ctx(), &format!("explain verbose {}", sql)).await?;
         self.log_explain(&explains);
         // Find first occurrence of row_cnt=... in the output.
         let row_cnt = explains
@@ -247,7 +265,7 @@ impl DatafusionDBMS {
     /// This is used to execute the query in order to load the true cardinalities back into optd
     /// in order to use the adaptive cost model.
     async fn execute_query(&self, sql: &str) -> anyhow::Result<()> {
-        Self::execute(&self.ctx, sql).await?;
+        Self::execute(&self.get_ctx(), sql).await?;
         Ok(())
     }
 
@@ -264,7 +282,7 @@ impl DatafusionDBMS {
         }
     }
 
-    /// Build the stats that optd's cost model uses.
+    /// Build the stats that optd's cost model uses, or get the stats from the cache.
     async fn get_benchmark_stats(
         &mut self,
         benchmark: &Benchmark,
@@ -303,7 +321,7 @@ impl DatafusionDBMS {
             }
             Benchmark::Job(_) | Benchmark::Joblight(_) => {
                 let job_kit = JobKit::build(&self.workspace_dpath)?;
-                Self::create_job_tables(&self.ctx, &job_kit).await?;
+                Self::create_job_tables(&self.get_ctx(), &job_kit).await?;
             }
         };
         Ok(())
@@ -317,7 +335,7 @@ impl DatafusionDBMS {
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>();
         for ddl in ddls {
-            Self::execute(&self.ctx, ddl).await?;
+            Self::execute(&self.get_ctx(), ddl).await?;
         }
         Ok(())
     }
@@ -351,7 +369,7 @@ impl DatafusionDBMS {
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
             Self::execute(
-                &self.ctx,
+                &self.get_ctx(),
                 &format!(
                     "create external table {}_tbl stored as csv delimiter '|' location '{}';",
                     tbl_name,
@@ -362,7 +380,7 @@ impl DatafusionDBMS {
 
             // Get the number of columns of this table.
             let schema = self
-                .ctx
+                .get_ctx()
                 .catalog("datafusion")
                 .unwrap()
                 .schema("public")
@@ -376,7 +394,7 @@ impl DatafusionDBMS {
                 .collect::<Vec<_>>()
                 .join(", ");
             Self::execute(
-                &self.ctx,
+                &self.get_ctx(),
                 &format!(
                     "insert into {} select {} from {}_tbl;",
                     tbl_name, projection_list, tbl_name,
@@ -393,7 +411,7 @@ impl DatafusionDBMS {
         &mut self,
         job_kit_config: &JobKitConfig,
     ) -> anyhow::Result<()> {
-        let ctx = Self::new_session_ctx(None, self.adaptive).await?;
+        let ctx = Self::new_session_ctx(None, self.adaptive, WITH_LOGICAL_FOR_JOB).await?;
 
         // Download the tables.
         let job_kit = JobKit::build(&self.workspace_dpath)?;
@@ -416,7 +434,7 @@ impl DatafusionDBMS {
                 .await
                 .unwrap()
                 .schema();
-            self.ctx
+            self.get_ctx()
                 .register_csv(
                     &tbl_name,
                     tbl_fpath.to_str().unwrap(),
@@ -439,7 +457,7 @@ impl DatafusionDBMS {
         tpch_kit.gen_tables(tpch_kit_config)?;
 
         // To get the schema of each table.
-        let ctx = Self::new_session_ctx(None, self.adaptive).await?;
+        let ctx = Self::new_session_ctx(None, self.adaptive, WITH_LOGICAL_FOR_TPCH).await?;
         let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
         let ddls = ddls
             .split(';')
@@ -499,7 +517,7 @@ impl DatafusionDBMS {
         job_kit.download_tables(job_kit_config)?;
 
         // To get the schema of each table.
-        let ctx = Self::new_session_ctx(None, self.adaptive).await?;
+        let ctx = Self::new_session_ctx(None, self.adaptive, WITH_LOGICAL_FOR_JOB).await?;
         let ddls = fs::read_to_string(&job_kit.schema_fpath)?;
         let ddls = ddls
             .split(';')
