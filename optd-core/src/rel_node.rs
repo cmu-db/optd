@@ -73,20 +73,20 @@ pub enum Value {
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UInt8(x) => write!(f, "{x}"),
-            Self::UInt16(x) => write!(f, "{x}"),
-            Self::UInt32(x) => write!(f, "{x}"),
-            Self::UInt64(x) => write!(f, "{x}"),
-            Self::Int8(x) => write!(f, "{x}"),
-            Self::Int16(x) => write!(f, "{x}"),
-            Self::Int32(x) => write!(f, "{x}"),
-            Self::Int64(x) => write!(f, "{x}"),
-            Self::Int128(x) => write!(f, "{x}"),
-            Self::Float(x) => write!(f, "{}", x.0),
+            Self::UInt8(x) => write!(f, "{x}(u8)"),
+            Self::UInt16(x) => write!(f, "{x}(u16)"),
+            Self::UInt32(x) => write!(f, "{x}(u32)"),
+            Self::UInt64(x) => write!(f, "{x}(u64)"),
+            Self::Int8(x) => write!(f, "{x}(i8)"),
+            Self::Int16(x) => write!(f, "{x}(i16)"),
+            Self::Int32(x) => write!(f, "{x}(i32)"),
+            Self::Int64(x) => write!(f, "{x}(i64)"),
+            Self::Int128(x) => write!(f, "{x}(i128)"),
+            Self::Float(x) => write!(f, "{}(float)", x.0),
             Self::String(x) => write!(f, "\"{x}\""),
             Self::Bool(x) => write!(f, "{x}"),
-            Self::Date32(x) => write!(f, "{x}"),
-            Self::Decimal128(x) => write!(f, "{x}"),
+            Self::Date32(x) => write!(f, "{x}(date32)"),
+            Self::Decimal128(x) => write!(f, "{x}(decimal128)"),
             Self::Serialized(x) => write!(f, "<len:{}>", x.len()),
         }
     }
