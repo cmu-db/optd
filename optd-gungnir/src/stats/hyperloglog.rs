@@ -197,7 +197,7 @@ mod tests {
     fn hll_small_strings() {
         let mut hll = HyperLogLog::new(12);
 
-        let data = vec!["a".to_string(), "b".to_string()];
+        let data = ["a".to_string(), "b".to_string()];
         hll.aggregate(data.iter());
         assert_eq!(hll.n_distinct(), data.len() as u64);
     }
@@ -206,7 +206,7 @@ mod tests {
     fn hll_small_u64() {
         let mut hll = HyperLogLog::new(12);
 
-        let data = vec![1, 2];
+        let data = [1, 2];
         hll.aggregate(data.iter());
         assert_eq!(hll.n_distinct(), data.len() as u64);
     }
