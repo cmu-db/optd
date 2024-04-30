@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    benchmark::{self, Benchmark},
+    benchmark::Benchmark,
     cardtest::CardtestRunnerDBMSHelper,
     job::{JobKit, JobKitConfig},
     tpch::{TpchKit, TpchKitConfig},
@@ -182,14 +182,13 @@ impl DatafusionDBMS {
                 query_id
             );
             let sql = fs::read_to_string(sql_fpath)?;
+            let estcard = self.eval_query_estcard(&sql).await?;
+            estcards.push(estcard);
 
             if self.adaptive {
                 // If we're in adaptive mode, execute the query to fill the true cardinality cache.
                 self.execute_query(&sql).await?;
             }
-
-            let estcard = self.eval_query_estcard(&sql).await?;
-            estcards.push(estcard);
         }
 
         Ok(estcards)
@@ -211,14 +210,13 @@ impl DatafusionDBMS {
                 query_id
             );
             let sql = fs::read_to_string(sql_fpath)?;
+            let estcard = self.eval_query_estcard(&sql).await?;
+            estcards.push(estcard);
 
             if self.adaptive {
                 // Execute the query to fill the true cardinality cache.
                 self.execute_query(&sql).await?;
             }
-
-            let estcard = self.eval_query_estcard(&sql).await?;
-            estcards.push(estcard);
         }
 
         Ok(estcards)
