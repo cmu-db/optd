@@ -13,8 +13,7 @@ use crate::{
         UNIMPLEMENTED_SEL,
     },
     plan_nodes::{
-        BinOpType, ColumnRefExpr, ConstantType, InListExpr, LikeExpr, LogOpType, OptRelNode,
-        OptRelNodeRef, OptRelNodeTyp, UnOpType,
+        BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType, InListExpr, LikeExpr, LogOpType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, UnOpType
     },
     properties::column_ref::{
         BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, GroupColumnRefs,
@@ -179,36 +178,56 @@ impl<
         }
     }
 
-    /// Convert the left and right child nodes of some operation to what they semantically are
-    /// This is convenient to avoid repeating the same logic just with "left" and "right" swapped
+    /// Convert the left and right child nodes of some operation to what they semantically are.
+    /// This is convenient to avoid repeating the same logic just with "left" and "right" swapped.
+    /// The last return value is true when the input node (left) is a ColumnRefExpr.
     fn get_semantic_nodes(
         left: OptRelNodeRef,
         right: OptRelNodeRef,
-    ) -> (Vec<ColumnRefExpr>, Vec<OptRelNodeRef>, bool) {
+    ) -> (Vec<ColumnRefExpr>, Vec<Value>, Vec<OptRelNodeRef>, bool) {
         let mut col_ref_exprs = vec![];
+        let mut values = vec![];
         let mut non_col_ref_exprs = vec![];
         let is_left_col_ref;
+
+        // TODO(phw2): factor is_left_col_ref out of this function
+
         // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
         // We always want to use "col_ref_expr" and "non_col_ref_expr" instead of "left" or "right"
-        if left.as_ref().typ == OptRelNodeTyp::ColumnRef {
-            is_left_col_ref = true;
-            col_ref_exprs.push(
-                ColumnRefExpr::from_rel_node(left)
-                    .expect("we already checked that the type is ColumnRef"),
-            );
-        } else {
-            is_left_col_ref = false;
-            non_col_ref_exprs.push(left);
+        match left.as_ref().typ {
+            OptRelNodeTyp::ColumnRef => {
+                is_left_col_ref = true;
+                col_ref_exprs.push(
+                    ColumnRefExpr::from_rel_node(left)
+                        .expect("we already checked that the type is ColumnRef"),
+                );
+            },
+            OptRelNodeTyp::Constant(_) => {
+                is_left_col_ref = false;
+                values.push(ConstantExpr::from_rel_node(left).expect("we already checked that the type is Constant").value())
+            }
+            _ => {
+                is_left_col_ref = false;
+                non_col_ref_exprs.push(left);
+            }
         }
-        if right.as_ref().typ == OptRelNodeTyp::ColumnRef {
-            col_ref_exprs.push(
-                ColumnRefExpr::from_rel_node(right)
-                    .expect("we already checked that the type is ColumnRef"),
-            );
-        } else {
-            non_col_ref_exprs.push(right);
+        match right.as_ref().typ {
+            OptRelNodeTyp::ColumnRef => {
+                col_ref_exprs.push(
+                    ColumnRefExpr::from_rel_node(right)
+                        .expect("we already checked that the type is ColumnRef"),
+                );
+            },
+            OptRelNodeTyp::Constant(_) => {
+                values.push(ConstantExpr::from_rel_node(right).expect("we already checked that the type is Constant").value())
+            }
+            _ => {
+                non_col_ref_exprs.push(right);
+            }
         }
-        (col_ref_exprs, non_col_ref_exprs, is_left_col_ref)
+
+        assert!(col_ref_exprs.len() + values.len() + non_col_ref_exprs.len() == 2);
+        (col_ref_exprs, values, non_col_ref_exprs, is_left_col_ref)
     }
 
     /// Comparison operators are the base case for recursion in get_filter_selectivity()
@@ -222,10 +241,10 @@ impl<
         assert!(comp_bin_op_typ.is_comparison());
 
         // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
-        let (col_ref_exprs, non_col_ref_exprs, is_left_col_ref) =
+        let (col_ref_exprs, values, non_col_ref_exprs, is_left_col_ref) =
             Self::get_semantic_nodes(left, right);
 
-        // handle the different cases of column nodes
+        // Handle the different cases of semantic nodes.
         if col_ref_exprs.is_empty() {
             UNIMPLEMENTED_SEL
         } else if col_ref_exprs.len() == 1 {
@@ -237,57 +256,55 @@ impl<
             if let ColumnRef::BaseTableColumnRef(BaseTableColumnRef { table, col_idx }) =
                 &column_refs[col_ref_idx]
             {
-                let non_col_ref_expr = non_col_ref_exprs
+                if values.len() == 1 {
+                    let value = values.first().expect("we just checked that values.len() == 1");
+                    match comp_bin_op_typ {
+                        BinOpType::Eq => {
+                            self.get_column_equality_selectivity(table, *col_idx, value, true)
+                        }
+                        BinOpType::Neq => {
+                            self.get_column_equality_selectivity(table, *col_idx, value, false)
+                        }
+                        BinOpType::Lt | BinOpType::Leq | BinOpType::Gt | BinOpType::Geq => {
+                            let start = match (comp_bin_op_typ, is_left_col_ref) {
+                                (BinOpType::Lt, true) | (BinOpType::Geq, false) => Bound::Unbounded,
+                                (BinOpType::Leq, true) | (BinOpType::Gt, false) => Bound::Unbounded,
+                                (BinOpType::Gt, true) | (BinOpType::Leq, false) => Bound::Excluded(value),
+                                (BinOpType::Geq, true) | (BinOpType::Lt, false) => Bound::Included(value),
+                                _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
+                            };
+                            let end = match (comp_bin_op_typ, is_left_col_ref) {
+                                (BinOpType::Lt, true) | (BinOpType::Geq, false) => Bound::Excluded(value),
+                                (BinOpType::Leq, true) | (BinOpType::Gt, false) => Bound::Included(value),
+                                (BinOpType::Gt, true) | (BinOpType::Leq, false) => Bound::Unbounded,
+                                (BinOpType::Geq, true) | (BinOpType::Lt, false) => Bound::Unbounded,
+                                _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
+                            };
+                            self.get_column_range_selectivity(
+                                table,
+                                *col_idx,
+                                start,
+                                end,
+                            )
+                        },
+                        _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
+                    }
+                } else {
+                    let non_col_ref_expr = non_col_ref_exprs
                     .first()
                     .expect("non_col_ref_exprs should have a value since col_ref_exprs.len() == 1");
 
-                match non_col_ref_expr.as_ref().typ {
-                    OptRelNodeTyp::Constant(_) => {
-                        let value = non_col_ref_expr
-                            .as_ref()
-                            .data
-                            .as_ref()
-                            .expect("constants should have data");
-                        match comp_bin_op_typ {
-                            BinOpType::Eq => {
-                                self.get_column_equality_selectivity(table, *col_idx, value, true)
-                            }
-                            BinOpType::Neq => {
-                                self.get_column_equality_selectivity(table, *col_idx, value, false)
-                            }
-                            BinOpType::Lt | BinOpType::Leq | BinOpType::Gt | BinOpType::Geq => {
-                                let start = match (comp_bin_op_typ, is_left_col_ref) {
-                                    (BinOpType::Lt, true) | (BinOpType::Geq, false) => Bound::Unbounded,
-                                    (BinOpType::Leq, true) | (BinOpType::Gt, false) => Bound::Unbounded,
-                                    (BinOpType::Gt, true) | (BinOpType::Leq, false) => Bound::Excluded(value),
-                                    (BinOpType::Geq, true) | (BinOpType::Lt, false) => Bound::Included(value),
-                                    _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
-                                };
-                                let end = match (comp_bin_op_typ, is_left_col_ref) {
-                                    (BinOpType::Lt, true) | (BinOpType::Geq, false) => Bound::Excluded(value),
-                                    (BinOpType::Leq, true) | (BinOpType::Gt, false) => Bound::Included(value),
-                                    (BinOpType::Gt, true) | (BinOpType::Leq, false) => Bound::Unbounded,
-                                    (BinOpType::Geq, true) | (BinOpType::Lt, false) => Bound::Unbounded,
-                                    _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
-                                };
-                                self.get_column_range_selectivity(
-                                    table,
-                                    *col_idx,
-                                    start,
-                                    end,
-                                )
-                            },
-                            _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
+                    match non_col_ref_expr.as_ref().typ {
+                        OptRelNodeTyp::BinOp(_) => {
+                            Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
                         }
+                        OptRelNodeTyp::Cast => UNIMPLEMENTED_SEL,
+                        OptRelNodeTyp::Constant(_) => unreachable!("we should have handled this in the values.len() == 1 branch"),
+                        _ => unimplemented!(
+                            "unhandled case of comparing a column ref node to {}",
+                            non_col_ref_expr.as_ref().typ
+                        ),
                     }
-                    OptRelNodeTyp::BinOp(_) => {
-                        Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
-                    }
-                    OptRelNodeTyp::Cast => UNIMPLEMENTED_SEL,
-                    _ => unimplemented!(
-                        "unhandled case of comparing a column ref node to {}",
-                        non_col_ref_expr.as_ref().typ
-                    ),
                 }
             } else {
                 Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
@@ -312,7 +329,7 @@ impl<
         value: &Value,
         is_eq: bool,
     ) -> f64 {
-        let ret_freq = if let Some(column_stats) = self.get_column_comb_stats(table, &[col_idx]) {
+        let ret_sel = if let Some(column_stats) = self.get_column_comb_stats(table, &[col_idx]) {
             let eq_freq = if let Some(freq) = column_stats.mcvs.freq(&vec![Some(value.clone())]) {
                 freq
             } else {
@@ -340,11 +357,11 @@ impl<
             }
         };
         assert!(
-            (0.0..=1.0).contains(&ret_freq),
-            "ret_freq ({}) should be in [0, 1]",
-            ret_freq
+            (0.0..=1.0).contains(&ret_sel),
+            "ret_sel ({}) should be in [0, 1]",
+            ret_sel
         );
-        ret_freq
+        ret_sel
     }
 
     /// Compute the frequency of values in a column less than or equal to the given value.
