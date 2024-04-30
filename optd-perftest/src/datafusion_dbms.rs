@@ -477,6 +477,8 @@ impl DatafusionDBMS {
         println!("Total execution time {:?}...", now.elapsed());
 
         Ok(base_table_stats.into_inner()?)
+    }
+
     // Load job data from a .csv file.
     async fn load_job_data_no_stats(
         &mut self,
@@ -492,7 +494,7 @@ impl DatafusionDBMS {
         Self::create_job_tables(&ctx, &job_kit).await?;
 
         // Load each table using register_csv()
-        let tbl_fpath_iter = job_kit.get_tbl_fpath_iter().unwrap();
+        let tbl_fpath_iter = job_kit.get_tbl_fpath_vec("csv").unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
             let schema = ctx
