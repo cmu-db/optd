@@ -55,7 +55,7 @@ impl CardtestRunnerDBMSHelper for DatafusionDBMS {
     ) -> anyhow::Result<Vec<usize>> {
         let base_table_stats = self.get_benchmark_stats(benchmark).await?;
         // clear_state() is how we "load" the stats into datafusion
-        self.clear_state(Some(base_table_stats), &benchmark).await?;
+        self.clear_state(Some(base_table_stats), benchmark).await?;
 
         if self.adaptive {
             // We need to load the stats if we're doing adaptivity because that involves executing the queries in datafusion.
@@ -95,7 +95,11 @@ impl DatafusionDBMS {
     ///
     /// A more ideal way to generate statistics would be to use the `ANALYZE`
     /// command in SQL, but DataFusion does not support that yet.
-    async fn clear_state(&mut self, stats: Option<DataFusionBaseTableStats>, benchmark: &Benchmark) -> anyhow::Result<()> {
+    async fn clear_state(
+        &mut self,
+        stats: Option<DataFusionBaseTableStats>,
+        benchmark: &Benchmark,
+    ) -> anyhow::Result<()> {
         let with_logical = match benchmark {
             Benchmark::Tpch(_) => WITH_LOGICAL_FOR_TPCH,
             Benchmark::Job(_) | Benchmark::Joblight(_) => WITH_LOGICAL_FOR_JOB,
@@ -263,7 +267,7 @@ impl DatafusionDBMS {
     /// This is used to execute the query in order to load the true cardinalities back into optd
     /// in order to use the adaptive cost model.
     async fn execute_query(&self, sql: &str) -> anyhow::Result<()> {
-        Self::execute(&self.get_ctx(), sql).await?;
+        Self::execute(self.get_ctx(), sql).await?;
         Ok(())
     }
 
@@ -319,7 +323,7 @@ impl DatafusionDBMS {
             }
             Benchmark::Job(_) | Benchmark::Joblight(_) => {
                 let job_kit = JobKit::build(&self.workspace_dpath)?;
-                Self::create_job_tables(&self.get_ctx(), &job_kit).await?;
+                Self::create_job_tables(self.get_ctx(), &job_kit).await?;
             }
         };
         Ok(())
@@ -333,7 +337,7 @@ impl DatafusionDBMS {
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>();
         for ddl in ddls {
-            Self::execute(&self.get_ctx(), ddl).await?;
+            Self::execute(self.get_ctx(), ddl).await?;
         }
         Ok(())
     }
@@ -367,7 +371,7 @@ impl DatafusionDBMS {
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
             Self::execute(
-                &self.get_ctx(),
+                self.get_ctx(),
                 &format!(
                     "create external table {}_tbl stored as csv delimiter '|' location '{}';",
                     tbl_name,
@@ -392,7 +396,7 @@ impl DatafusionDBMS {
                 .collect::<Vec<_>>()
                 .join(", ");
             Self::execute(
-                &self.get_ctx(),
+                self.get_ctx(),
                 &format!(
                     "insert into {} select {} from {}_tbl;",
                     tbl_name, projection_list, tbl_name,
@@ -413,7 +417,7 @@ impl DatafusionDBMS {
 
         // Download the tables.
         let job_kit = JobKit::build(&self.workspace_dpath)?;
-        job_kit.download_tables(&job_kit_config)?;
+        job_kit.download_tables(job_kit_config)?;
 
         // Create the tables.
         Self::create_job_tables(&ctx, &job_kit).await?;
@@ -422,8 +426,7 @@ impl DatafusionDBMS {
         let tbl_fpath_iter = job_kit.get_tbl_fpath_iter().unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
-            let schema = 
-                ctx
+            let schema = ctx
                 .catalog("datafusion")
                 .unwrap()
                 .schema("public")
@@ -434,7 +437,7 @@ impl DatafusionDBMS {
                 .schema();
             self.get_ctx()
                 .register_csv(
-                    &tbl_name,
+                    tbl_name,
                     tbl_fpath.to_str().unwrap(),
                     CsvReadOptions::new()
                         .schema(&schema)
