@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use optd_perftest::benchmark::Benchmark;
+use optd_perftest::cardtest::Cardinfo;
 use optd_perftest::job::JobKitConfig;
 use optd_perftest::shell;
 use optd_perftest::tpch::{TpchKitConfig, TPCH_KIT_POSTGRES};
@@ -60,6 +61,11 @@ enum Commands {
         rebuild_cached_optd_stats: bool,
 
         #[clap(long)]
+        #[clap(action)]
+        #[clap(help = "Whether to enable adaptivity for optd")]
+        adaptive: bool,
+
+        #[clap(long)]
         #[clap(default_value = "default_user")]
         #[clap(help = "The name of a user with superuser privileges")]
         pguser: String,
@@ -93,6 +99,7 @@ async fn cardtest<P: AsRef<Path>>(
     rebuild_cached_optd_stats: bool,
     pguser: String,
     pgpassword: String,
+    adaptive: bool,
 ) -> anyhow::Result<()> {
     let query_ids = if query_ids.is_empty() {
         Vec::from(match benchmark_name {
@@ -130,8 +137,14 @@ async fn cardtest<P: AsRef<Path>>(
         &pguser,
         &pgpassword,
         benchmark,
+        adaptive,
     )
     .await?;
+    let sorted_cardinfo_alldbs = {
+        let mut vec: Vec<(String, Vec<Cardinfo>)> = cardinfo_alldbs.into_iter().collect();
+        vec.sort_by(|a, b| a.0.cmp(&b.0));
+        vec
+    };
 
     println!();
     println!(" Per-Query Cardinality Information");
@@ -145,7 +158,7 @@ async fn cardtest<P: AsRef<Path>>(
             "Est. Card.",
             "True Card."
         ]);
-        for (dbms, cardinfos) in &cardinfo_alldbs {
+        for (dbms, cardinfos) in &sorted_cardinfo_alldbs {
             let this_query_cardinfo = cardinfos.get(i).unwrap();
             this_query_cardinfo_table.add_row(prettytable::row![
                 dbms,
@@ -164,7 +177,7 @@ async fn cardtest<P: AsRef<Path>>(
     agg_qerror_table.set_titles(prettytable::row![
         "DBMS", "Median", "P90", "P95", "P99", "# Inf", "Mean", "Min", "Max"
     ]);
-    for (dbms, cardinfos) in &cardinfo_alldbs {
+    for (dbms, cardinfos) in &sorted_cardinfo_alldbs {
         if !cardinfos.is_empty() {
             let qerrors: Vec<f64> = cardinfos.iter().map(|cardinfo| cardinfo.qerror).collect();
             let finite_qerrors: Vec<f64> = qerrors
@@ -209,25 +222,25 @@ async fn cardtest<P: AsRef<Path>>(
     println!();
     println!(" Comparative Q-Error Information");
     let mut best_qerror_infos = vec![];
-    for (dbms, cardinfos) in &cardinfo_alldbs {
+    for (dbms, cardinfos) in &sorted_cardinfo_alldbs {
         for (i, cardinfo) in cardinfos.iter().enumerate() {
             if i >= best_qerror_infos.len() {
                 assert!(i == best_qerror_infos.len());
-                best_qerror_infos.push((cardinfo.qerror, vec![dbms]));
+                best_qerror_infos.push((cardinfo.qerror, vec![dbms.clone()]));
             } else {
                 let (best_qerror, _) = best_qerror_infos[i];
 
                 if cardinfo.qerror < best_qerror {
-                    *best_qerror_infos.get_mut(i).unwrap() = (cardinfo.qerror, vec![dbms]);
+                    *best_qerror_infos.get_mut(i).unwrap() = (cardinfo.qerror, vec![dbms.clone()]);
                 } else if cardinfo.qerror == best_qerror {
-                    best_qerror_infos.get_mut(i).unwrap().1.push(dbms);
+                    best_qerror_infos.get_mut(i).unwrap().1.push(dbms.clone());
                 }
             }
         }
     }
     let mut cmp_qerror_table = Table::new();
     cmp_qerror_table.set_titles(prettytable::row!["DBMS", "# Best", "# Tied Best"]);
-    for dbms in cardinfo_alldbs.keys() {
+    for (dbms, _) in sorted_cardinfo_alldbs {
         let num_best = best_qerror_infos
             .iter()
             .filter(|(_, dbmss)| dbmss.len() == 1 && dbmss.contains(&dbms))
@@ -263,6 +276,7 @@ async fn main() -> anyhow::Result<()> {
             rebuild_cached_optd_stats,
             pguser,
             pgpassword,
+            adaptive,
         } => {
             cardtest(
                 workspace_dpath,
@@ -273,6 +287,7 @@ async fn main() -> anyhow::Result<()> {
                 rebuild_cached_optd_stats,
                 pguser,
                 pgpassword,
+                adaptive,
             )
             .await
         }

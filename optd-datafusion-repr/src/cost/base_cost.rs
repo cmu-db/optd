@@ -233,6 +233,7 @@ impl<
 /// and optd-datafusion-repr
 #[cfg(test)]
 mod tests {
+    use arrow_schema::DataType;
     use itertools::Itertools;
     use optd_core::rel_node::Value;
     use serde::{Deserialize, Serialize};
@@ -241,8 +242,9 @@ mod tests {
     use crate::{
         cost::base_cost::stats::*,
         plan_nodes::{
-            BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, InListExpr,
-            LikeExpr, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
+            BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList,
+            InListExpr, LikeExpr, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr,
+            UnOpType,
         },
     };
 
@@ -460,6 +462,14 @@ mod tests {
 
     pub fn cnst(value: Value) -> OptRelNodeRef {
         ConstantExpr::new(value).into_rel_node()
+    }
+
+    pub fn cast(child: OptRelNodeRef, cast_type: DataType) -> OptRelNodeRef {
+        CastExpr::new(
+            Expr::from_rel_node(child).expect("child should be an Expr"),
+            cast_type,
+        )
+        .into_rel_node()
     }
 
     pub fn bin_op(op_type: BinOpType, left: OptRelNodeRef, right: OptRelNodeRef) -> OptRelNodeRef {

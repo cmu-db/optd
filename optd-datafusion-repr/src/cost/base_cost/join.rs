@@ -16,9 +16,12 @@ use crate::{
         BinOpType, ColumnRefExpr, Expr, ExprList, JoinType, LogOpExpr, LogOpType, OptRelNode,
         OptRelNodeRef, OptRelNodeTyp,
     },
-    properties::column_ref::{
-        BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, EqBaseTableColumnSets,
-        EqPredicate, GroupColumnRefs, SemanticCorrelation,
+    properties::{
+        column_ref::{
+            BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, EqBaseTableColumnSets,
+            EqPredicate, GroupColumnRefs, SemanticCorrelation,
+        },
+        schema::{Schema, SchemaPropertyBuilder},
     },
 };
 
@@ -40,6 +43,8 @@ impl<
         let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
         let (_, compute_cost, _) = Self::cost_tuple(&children[2]);
         let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
+            let schema =
+                optimizer.get_property_by_group::<SchemaPropertyBuilder>(context.group_id, 0);
             let column_refs =
                 optimizer.get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
             let expr_group_id = context.children_group_ids[2];
@@ -50,6 +55,7 @@ impl<
             self.get_join_selectivity_from_expr_tree(
                 join_typ,
                 expr_tree.clone(),
+                &schema,
                 &column_refs,
                 row_cnt_1,
                 row_cnt_2,
@@ -74,6 +80,8 @@ impl<
         let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
         let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
         let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
+            let schema =
+                optimizer.get_property_by_group::<SchemaPropertyBuilder>(context.group_id, 0);
             let column_refs =
                 optimizer.get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
             let left_keys_group_id = context.children_group_ids[2];
@@ -94,6 +102,7 @@ impl<
                     .expect("left_keys should be an ExprList"),
                 ExprList::from_rel_node(right_keys.clone())
                     .expect("right_keys should be an ExprList"),
+                &schema,
                 &column_refs,
                 row_cnt_1,
                 row_cnt_2,
@@ -116,6 +125,7 @@ impl<
         join_typ: JoinType,
         left_keys: ExprList,
         right_keys: ExprList,
+        schema: &Schema,
         column_refs: &GroupColumnRefs,
         left_row_cnt: f64,
         right_row_cnt: f64,
@@ -141,6 +151,7 @@ impl<
             join_typ,
             on_col_ref_pairs,
             None,
+            schema,
             column_refs,
             left_row_cnt,
             right_row_cnt,
@@ -166,6 +177,7 @@ impl<
         join_typ: JoinType,
         on_col_ref_pairs: Vec<(ColumnRefExpr, ColumnRefExpr)>,
         filter_expr_tree: Option<OptRelNodeRef>,
+        schema: &Schema,
         column_refs: &GroupColumnRefs,
         left_row_cnt: f64,
         right_row_cnt: f64,
@@ -180,7 +192,9 @@ impl<
         // different tables. Currently, this doesn't affect the get_filter_selectivity() function, but this may change in
         // the future.
         let join_filter_selectivity = match filter_expr_tree {
-            Some(filter_expr_tree) => self.get_filter_selectivity(filter_expr_tree, column_refs),
+            Some(filter_expr_tree) => {
+                self.get_filter_selectivity(filter_expr_tree, schema, column_refs)
+            }
             None => 1.0,
         };
         let inner_join_selectivity = join_on_selectivity * join_filter_selectivity;
@@ -207,6 +221,7 @@ impl<
         &self,
         join_typ: JoinType,
         expr_tree: OptRelNodeRef,
+        schema: &Schema,
         column_refs: &GroupColumnRefs,
         left_row_cnt: f64,
         right_row_cnt: f64,
@@ -240,6 +255,7 @@ impl<
                 join_typ,
                 on_col_ref_pairs,
                 filter_expr_tree,
+                schema,
                 column_refs,
                 left_row_cnt,
                 right_row_cnt,
@@ -253,6 +269,7 @@ impl<
                     join_typ,
                     vec![on_col_ref_pair],
                     None,
+                    schema,
                     column_refs,
                     left_row_cnt,
                     right_row_cnt,
@@ -263,6 +280,7 @@ impl<
                     join_typ,
                     vec![],
                     Some(expr_tree),
+                    schema,
                     column_refs,
                     left_row_cnt,
                     right_row_cnt,
@@ -493,9 +511,12 @@ mod tests {
     use crate::{
         cost::base_cost::{tests::*, DEFAULT_EQ_SEL},
         plan_nodes::{BinOpType, JoinType, LogOpType, OptRelNodeRef},
-        properties::column_ref::{
-            BaseTableColumnRef, ColumnRef, EqBaseTableColumnSets, EqPredicate, GroupColumnRefs,
-            SemanticCorrelation,
+        properties::{
+            column_ref::{
+                BaseTableColumnRef, ColumnRef, EqBaseTableColumnSets, EqPredicate, GroupColumnRefs,
+                SemanticCorrelation,
+            },
+            schema::Schema,
         },
     };
 
@@ -506,6 +527,7 @@ mod tests {
         reverse_tables: bool,
         join_typ: JoinType,
         expr_tree: OptRelNodeRef,
+        schema: &Schema,
         column_refs: &GroupColumnRefs,
     ) -> f64 {
         let table1_row_cnt = cost_model.per_table_stats_map[TABLE1_NAME].row_cnt as f64;
@@ -514,6 +536,7 @@ mod tests {
             cost_model.get_join_selectivity_from_expr_tree(
                 join_typ,
                 expr_tree,
+                schema,
                 column_refs,
                 table1_row_cnt,
                 table2_row_cnt,
@@ -522,6 +545,7 @@ mod tests {
             cost_model.get_join_selectivity_from_expr_tree(
                 join_typ,
                 expr_tree,
+                schema,
                 column_refs,
                 table2_row_cnt,
                 table1_row_cnt,
@@ -536,6 +560,7 @@ mod tests {
             cost_model.get_join_selectivity_from_expr_tree(
                 JoinType::Inner,
                 cnst(Value::Bool(true)),
+                &Schema::new(vec![]),
                 &GroupColumnRefs::new_test(vec![], None),
                 f64::NAN,
                 f64::NAN
@@ -546,6 +571,7 @@ mod tests {
             cost_model.get_join_selectivity_from_expr_tree(
                 JoinType::Inner,
                 cnst(Value::Bool(false)),
+                &Schema::new(vec![]),
                 &GroupColumnRefs::new_test(vec![], None),
                 f64::NAN,
                 f64::NAN
@@ -572,6 +598,7 @@ mod tests {
         );
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
+        let schema = Schema::new(vec![]);
         let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
@@ -580,7 +607,14 @@ mod tests {
             None,
         );
         assert_approx_eq::assert_approx_eq!(
-            test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
+            test_get_join_selectivity(
+                &cost_model,
+                false,
+                JoinType::Inner,
+                expr_tree,
+                &schema,
+                &column_refs
+            ),
             0.2
         );
         assert_approx_eq::assert_approx_eq!(
@@ -589,6 +623,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree_rev,
+                &schema,
                 &column_refs,
             ),
             0.2
@@ -615,6 +650,7 @@ mod tests {
         let eq1and0 = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let expr_tree = log_op(LogOpType::And, vec![eq0and1.clone(), eq1and0.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq1and0.clone(), eq0and1.clone()]);
+        let schema = Schema::new(vec![]);
         let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
@@ -623,7 +659,14 @@ mod tests {
             None,
         );
         assert_approx_eq::assert_approx_eq!(
-            test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
+            test_get_join_selectivity(
+                &cost_model,
+                false,
+                JoinType::Inner,
+                expr_tree,
+                &schema,
+                &column_refs
+            ),
             0.2
         );
         assert_approx_eq::assert_approx_eq!(
@@ -632,6 +675,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree_rev,
+                &schema,
                 &column_refs
             ),
             0.2
@@ -658,6 +702,7 @@ mod tests {
         let eq100 = bin_op(BinOpType::Eq, col_ref(1), cnst(Value::Int32(100)));
         let expr_tree = log_op(LogOpType::And, vec![eq0and1.clone(), eq100.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq100.clone(), eq0and1.clone()]);
+        let schema = Schema::new(vec![]);
         let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
@@ -666,7 +711,14 @@ mod tests {
             None,
         );
         assert_approx_eq::assert_approx_eq!(
-            test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
+            test_get_join_selectivity(
+                &cost_model,
+                false,
+                JoinType::Inner,
+                expr_tree,
+                &schema,
+                &column_refs
+            ),
             0.05
         );
         assert_approx_eq::assert_approx_eq!(
@@ -675,6 +727,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree_rev,
+                &schema,
                 &column_refs
             ),
             0.05
@@ -701,6 +754,7 @@ mod tests {
         let eq100 = bin_op(BinOpType::Eq, col_ref(1), cnst(Value::Int32(100)));
         let expr_tree = log_op(LogOpType::And, vec![neq12.clone(), eq100.clone()]);
         let expr_tree_rev = log_op(LogOpType::And, vec![eq100.clone(), neq12.clone()]);
+        let schema = Schema::new(vec![]);
         let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
@@ -709,7 +763,14 @@ mod tests {
             None,
         );
         assert_approx_eq::assert_approx_eq!(
-            test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
+            test_get_join_selectivity(
+                &cost_model,
+                false,
+                JoinType::Inner,
+                expr_tree,
+                &schema,
+                &column_refs
+            ),
             0.2
         );
         assert_approx_eq::assert_approx_eq!(
@@ -718,6 +779,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree_rev,
+                &schema,
                 &column_refs
             ),
             0.2
@@ -741,6 +803,7 @@ mod tests {
             ),
         );
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(0));
+        let schema = Schema::new(vec![]);
         let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
@@ -749,7 +812,14 @@ mod tests {
             None,
         );
         assert_approx_eq::assert_approx_eq!(
-            test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &column_refs),
+            test_get_join_selectivity(
+                &cost_model,
+                false,
+                JoinType::Inner,
+                expr_tree,
+                &schema,
+                &column_refs
+            ),
             DEFAULT_EQ_SEL
         );
     }
@@ -761,6 +831,7 @@ mod tests {
         cost_model: &TestOptCostModel,
         expr_tree: OptRelNodeRef,
         expr_tree_rev: OptRelNodeRef,
+        schema: &Schema,
         column_refs: &GroupColumnRefs,
         expected_table1_outer_sel: f64,
         expected_table2_outer_sel: f64,
@@ -772,6 +843,7 @@ mod tests {
                 false,
                 JoinType::LeftOuter,
                 expr_tree.clone(),
+                schema,
                 column_refs
             ),
             expected_table1_outer_sel
@@ -782,6 +854,7 @@ mod tests {
                 false,
                 JoinType::LeftOuter,
                 expr_tree_rev.clone(),
+                schema,
                 column_refs
             ),
             expected_table1_outer_sel
@@ -792,6 +865,7 @@ mod tests {
                 true,
                 JoinType::RightOuter,
                 expr_tree.clone(),
+                schema,
                 column_refs
             ),
             expected_table1_outer_sel
@@ -802,6 +876,7 @@ mod tests {
                 true,
                 JoinType::RightOuter,
                 expr_tree_rev.clone(),
+                schema,
                 column_refs
             ),
             expected_table1_outer_sel
@@ -813,6 +888,7 @@ mod tests {
                 true,
                 JoinType::LeftOuter,
                 expr_tree.clone(),
+                schema,
                 column_refs
             ),
             expected_table2_outer_sel
@@ -823,6 +899,7 @@ mod tests {
                 true,
                 JoinType::LeftOuter,
                 expr_tree_rev.clone(),
+                schema,
                 column_refs
             ),
             expected_table2_outer_sel
@@ -833,6 +910,7 @@ mod tests {
                 false,
                 JoinType::RightOuter,
                 expr_tree.clone(),
+                schema,
                 column_refs
             ),
             expected_table2_outer_sel
@@ -843,6 +921,7 @@ mod tests {
                 false,
                 JoinType::RightOuter,
                 expr_tree_rev.clone(),
+                schema,
                 column_refs
             ),
             expected_table2_outer_sel
@@ -873,6 +952,7 @@ mod tests {
         // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
+        let schema = Schema::new(vec![]);
         let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
@@ -888,6 +968,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree.clone(),
+                &schema,
                 &column_refs
             ),
             expected_inner_sel
@@ -898,6 +979,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree_rev.clone(),
+                &schema,
                 &column_refs
             ),
             expected_inner_sel
@@ -907,6 +989,7 @@ mod tests {
             &cost_model,
             expr_tree,
             expr_tree_rev,
+            &schema,
             &column_refs,
             0.25,
             0.2,
@@ -936,6 +1019,7 @@ mod tests {
         // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
+        let schema = Schema::new(vec![]);
         let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
@@ -951,6 +1035,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree.clone(),
+                &schema,
                 &column_refs
             ),
             expected_inner_sel
@@ -961,6 +1046,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree_rev.clone(),
+                &schema,
                 &column_refs
             ),
             expected_inner_sel
@@ -970,6 +1056,7 @@ mod tests {
             &cost_model,
             expr_tree,
             expr_tree_rev,
+            &schema,
             &column_refs,
             0.2,
             0.2,
@@ -1000,6 +1087,7 @@ mod tests {
         // the left/right of the join refers to the tables, not the order of columns in the predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
+        let schema = Schema::new(vec![]);
         let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
@@ -1015,6 +1103,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree.clone(),
+                &schema,
                 &column_refs
             ),
             expected_inner_sel
@@ -1025,6 +1114,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree_rev.clone(),
+                &schema,
                 &column_refs
             ),
             expected_inner_sel
@@ -1034,6 +1124,7 @@ mod tests {
             &cost_model,
             expr_tree,
             expr_tree_rev,
+            &schema,
             &column_refs,
             0.25,
             0.1,
@@ -1069,6 +1160,7 @@ mod tests {
         let expr_tree = log_op(LogOpType::And, vec![eq0and1, filter.clone()]);
         // inner rev means its the inner expr (the eq op) whose children are being reversed, as opposed to the and op
         let expr_tree_inner_rev = log_op(LogOpType::And, vec![eq1and0, filter.clone()]);
+        let schema = Schema::new(vec![]);
         let column_refs = GroupColumnRefs::new_test(
             vec![
                 ColumnRef::base_table_column_ref(String::from(TABLE1_NAME), 0),
@@ -1084,6 +1176,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree.clone(),
+                &schema,
                 &column_refs
             ),
             expected_inner_sel
@@ -1094,6 +1187,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 expr_tree_inner_rev.clone(),
+                &schema,
                 &column_refs
             ),
             expected_inner_sel
@@ -1103,6 +1197,7 @@ mod tests {
             &cost_model,
             expr_tree,
             expr_tree_inner_rev,
+            &schema,
             &column_refs,
             0.25,
             0.02,
@@ -1192,6 +1287,7 @@ mod tests {
             }
         };
         let semantic_correlation = SemanticCorrelation::new(eq_columns);
+        let schema = Schema::new(vec![]);
         let column_refs = GroupColumnRefs::new_test(col_refs, Some(semantic_correlation));
 
         // Try all join conditions of the final join which would lead to all three tables being joined.
@@ -1228,6 +1324,7 @@ mod tests {
                     false,
                     JoinType::Inner,
                     expr_tree.clone(),
+                    &schema,
                     &column_refs,
                 );
             assert_approx_eq::assert_approx_eq!(overall_selectivity, 1.0 / 12.0);
@@ -1297,6 +1394,7 @@ mod tests {
         ));
         let initial_selectivity = 1.0 / (3.0 * 5.0);
         let semantic_correlation = SemanticCorrelation::new(eq_columns);
+        let schema = Schema::new(vec![]);
         let column_refs = GroupColumnRefs::new_test(col_refs, Some(semantic_correlation));
 
         let eq1and2 = bin_op(BinOpType::Eq, col_ref(1), col_ref(2));
@@ -1306,6 +1404,7 @@ mod tests {
                 false,
                 JoinType::Inner,
                 eq1and2.clone(),
+                &schema,
                 &column_refs,
             );
         assert_approx_eq::assert_approx_eq!(overall_selectivity, 1.0 / (3.0 * 4.0 * 5.0));

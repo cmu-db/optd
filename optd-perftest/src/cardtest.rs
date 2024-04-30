@@ -18,6 +18,7 @@ pub struct CardtestRunner {
     truecard_getter: Box<dyn TruecardGetter>,
 }
 
+#[derive(Clone)]
 pub struct Cardinfo {
     pub qerror: f64,
     pub estcard: usize,
@@ -108,10 +109,12 @@ pub async fn cardtest_core<P: AsRef<Path>>(
     pguser: &str,
     pgpassword: &str,
     benchmark: Benchmark,
+    adaptive: bool,
 ) -> anyhow::Result<HashMap<String, Vec<Cardinfo>>> {
     let pg_dbms = Box::new(PostgresDBMS::build(&workspace_dpath, pguser, pgpassword)?);
     let truecard_getter = pg_dbms.clone();
-    let df_dbms = Box::new(DatafusionDBMS::new(&workspace_dpath, rebuild_cached_optd_stats).await?);
+    let df_dbms =
+        Box::new(DatafusionDBMS::new(&workspace_dpath, rebuild_cached_optd_stats, adaptive).await?);
     let dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>> = vec![pg_dbms, df_dbms];
 
     let mut cardtest_runner = CardtestRunner::new(dbmss, truecard_getter).await?;
