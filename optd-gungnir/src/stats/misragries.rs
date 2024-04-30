@@ -97,7 +97,7 @@ where
     where
         I: Iterator<Item = &'a T>,
     {
-        data.for_each(|key| self.insert_element(&key, 1));
+        data.for_each(|key| self.insert_element(key, 1));
     }
 
     /// Merges another MisraGries into the current one.

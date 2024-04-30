@@ -209,7 +209,11 @@ impl TpchKit {
     }
 
     /// Get a vector of all generated .tbl files of a given config
-    pub fn get_tbl_fpath_vec(&self, tpch_kit_config: &TpchKitConfig, target_ext: &str) -> io::Result<Vec<PathBuf>> {
+    pub fn get_tbl_fpath_vec(
+        &self,
+        tpch_kit_config: &TpchKitConfig,
+        target_ext: &str,
+    ) -> io::Result<Vec<PathBuf>> {
         let this_genned_tables_dpath = self.get_this_genned_tables_dpath(tpch_kit_config);
         let dirent_iter = fs::read_dir(this_genned_tables_dpath)?;
 

@@ -149,6 +149,18 @@ impl<
 
 pub type BaseTableStats<M, D> = HashMap<String, TableStats<M, D>>;
 
+type FirstPassState = (
+    Vec<HyperLogLog<ColumnCombValue>>,
+    Vec<MisraGries<ColumnCombValue>>,
+    Vec<i32>,
+);
+
+type SecondPassState = (
+    Vec<Option<TDigest<Value>>>,
+    Vec<Counter<ColumnCombValue>>,
+    Vec<i32>,
+);
+
 impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
     fn is_type_supported(data_type: &DataType) -> bool {
         matches!(
@@ -166,13 +178,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         )
     }
 
-    fn first_pass_stats_id(
-        nb_stats: usize,
-    ) -> anyhow::Result<(
-        Vec<HyperLogLog<ColumnCombValue>>,
-        Vec<MisraGries<ColumnCombValue>>,
-        Vec<i32>,
-    )> {
+    fn first_pass_stats_id(nb_stats: usize) -> anyhow::Result<FirstPassState> {
         Ok((
             vec![HyperLogLog::<ColumnCombValue>::new(hyperloglog::DEFAULT_PRECISION); nb_stats],
             vec![MisraGries::<ColumnCombValue>::new(misragries::DEFAULT_K_TO_TRACK); nb_stats],
@@ -184,11 +190,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         comb_stat_types: &[(Vec<usize>, Vec<DataType>, StatType)],
         mgs: &[MisraGries<ColumnCombValue>],
         nb_stats: usize,
-    ) -> anyhow::Result<(
-        Vec<Option<TDigest<Value>>>,
-        Vec<Counter<ColumnCombValue>>,
-        Vec<i32>,
-    )> {
+    ) -> anyhow::Result<SecondPassState> {
         Ok((
             comb_stat_types
                 .iter()
@@ -327,7 +329,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
             .zip(null_counts)
             .for_each(|(((column_comb, mg), hll), count)| {
                 let filtered_nulls = column_comb
-                    .into_iter()
+                    .iter()
                     .filter(|row| row.iter().any(|val| val.is_some()));
 
                 *count += column_comb.len() as i32;
