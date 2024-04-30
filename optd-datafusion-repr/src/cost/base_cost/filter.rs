@@ -1,5 +1,6 @@
 use std::ops::Bound;
 
+use chrono::Local;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
     cost::Cost,
@@ -194,10 +195,11 @@ impl<
         let mut non_col_ref_exprs = vec![];
         let is_left_col_ref;
 
-        // Recursively unwrap casts
+        // Recursively unwrap casts as much as we can.
         let mut uncasted_left = left;
         let mut uncasted_right = right;
         loop {
+            // println!("loop {}, uncasted_left={:?}, uncasted_right={:?}", Local::now(), uncasted_left, uncasted_right);
             if uncasted_left.as_ref().typ == OptRelNodeTyp::Cast && uncasted_right.as_ref().typ == OptRelNodeTyp::Cast {
                 let left_cast_expr = CastExpr::from_rel_node(uncasted_left).expect("we already checked that the type is Cast");
                 let right_cast_expr = CastExpr::from_rel_node(uncasted_right).expect("we already checked that the type is Cast");
@@ -216,25 +218,43 @@ impl<
                 let cast_expr_child = cast_expr.child().into_rel_node();
                 let cast_expr_cast_to = cast_expr.cast_to();
 
-                match cast_expr_child.typ {
+                let should_break = match cast_expr_child.typ {
                     OptRelNodeTyp::Constant(_) => {
                         cast_node = ConstantExpr::new(ConstantExpr::from_rel_node(cast_expr_child).expect("we already checked that the type is Constant").value().convert_to_type(cast_expr_cast_to)).into_rel_node();
-                    }
+                        false
+                    },
                     OptRelNodeTyp::ColumnRef => {
                         let col_ref_expr = ColumnRefExpr::from_rel_node(cast_expr_child).expect("we already checked that the type is ColumnRef");
                         let col_ref_idx = col_ref_expr.index();
                         cast_node = col_ref_expr.into_rel_node();
-                        let field = &schema.fields[col_ref_idx];
-                        let field_data_type = field.typ.into_data_type();
-                        non_cast_node = CastExpr::new(Expr::from_rel_node(non_cast_node).unwrap(), field_data_type).into_rel_node();
+                        // The "invert" cast is to invert the cast so that we're casting the non_cast_node to
+                        // the column's original type.
+                        let invert_cast_data_type =  &schema.fields[col_ref_idx].typ.into_data_type();
+
+                        match non_cast_node.typ {
+                            OptRelNodeTyp::ColumnRef => {
+                                // In general, there's no way to remove the Cast here. We can't move the Cast to the
+                                // other ColumnRef because that would lead to an infinite loop. Thus, we just leave the
+                                // cast where it is and break.
+                                true
+                            },
+                            _ => {
+                                non_cast_node = CastExpr::new(Expr::from_rel_node(non_cast_node).unwrap(), invert_cast_data_type.clone()).into_rel_node();
+                                false
+                            }
+                        }
                     }
                     _ => todo!()
-                }
+                };
 
                 (uncasted_left, uncasted_right) = if is_left_cast {
                     (cast_node, non_cast_node)
                 } else {
                     (non_cast_node, cast_node)
+                };
+
+                if should_break {
+                    break;
                 }
             } else {
                 break;
@@ -515,7 +535,7 @@ mod tests {
     use optd_core::rel_node::Value;
 
     use crate::{
-        cost::base_cost::tests::*,
+        cost::base_cost::{tests::*, DEFAULT_EQ_SEL},
         plan_nodes::{BinOpType, ConstantType, LogOpType, UnOpType},
         properties::{column_ref::{ColumnRef, GroupColumnRefs}, schema::{Field, Schema}},
     };
@@ -1171,7 +1191,7 @@ mod tests {
     // I didn't test any non-unique cases with filter. The non-unique tests without filter should cover that
 
     #[test]
-    fn test_cast_value() {
+    fn test_colref_eq_cast_value() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
@@ -1199,7 +1219,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cast_colref() {
+    fn test_cast_colref_eq_value() {
         let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
             TestMostCommonValues::new(vec![(Value::Int32(1), 0.3)]),
             0,
@@ -1223,6 +1243,39 @@ mod tests {
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_filter_selectivity(expr_tree_rev, &schema, &column_refs),
             0.3
+        );
+    }
+
+    /// In this case, we should leave the Cast as is.
+    /// 
+    /// Note that the test only checks the selectivity and thus doesn't explicitly test that the
+    /// Cast is indeed left as is. However, if get_filter_selectivity() doesn't crash, that's a
+    /// pretty good signal that the Cast was left as is.
+    #[test]
+    fn test_cast_colref_eq_colref() {
+        let cost_model = create_one_column_cost_model(TestPerColumnStats::new(
+            TestMostCommonValues::new(vec![]),
+            0,
+            0.0,
+            Some(TestDistribution::empty()),
+        ));
+        let expr_tree = bin_op(BinOpType::Eq, cast(col_ref(0), DataType::Int64), col_ref(1));
+        let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), cast(col_ref(0), DataType::Int64));
+        let schema = Schema::new(vec![Field {name: String::from(""), typ: ConstantType::Int32, nullable: false}, Field {name: String::from(""), typ: ConstantType::Int64, nullable: false}]);
+        let column_refs = GroupColumnRefs::new_test(
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
+            None,
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree, &schema, &column_refs),
+            DEFAULT_EQ_SEL
+        );
+        assert_approx_eq::assert_approx_eq!(
+            cost_model.get_filter_selectivity(expr_tree_rev, &schema, &column_refs),
+            DEFAULT_EQ_SEL
         );
     }
 }

@@ -9,6 +9,7 @@ use std::{
 };
 
 use arrow_schema::DataType;
+use chrono::NaiveDate;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -193,12 +194,25 @@ impl Value {
         match typ {
             DataType::Int32 => {
                 Value::Int32(match self {
-                    Value::Int32(i) => *i,
-                    Value::Int64(i) => (*i).try_into().unwrap(),
-                    _ => panic!("Value can not be converted into an i32"),
+                    Value::Int32(i32) => *i32,
+                    Value::Int64(i64) => (*i64).try_into().unwrap(),
+                    _ => panic!("{self} could not be converted into an Int32"),
+                })
+            },
+            DataType::Date32 => {
+                Value::Date32(match self {
+                    Value::Date32(date32) => *date32,
+                    Value::String(str) => {
+                        let date = NaiveDate::parse_from_str(str, "%Y-%m-%d").unwrap();
+                        let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+                        let duration_since_epoch = date.signed_duration_since(epoch);
+                        let days_since_epoch: i32 = duration_since_epoch.num_days() as i32;
+                        days_since_epoch
+                    },
+                    _ => panic!("{self} could not be converted into an Date32"),
                 })
             }
-            _ => unimplemented!("Have not implemented convert_to_type for type {}", typ)
+            _ => unimplemented!("Have not implemented convert_to_type for DataType {typ}")
         }
     }
 }

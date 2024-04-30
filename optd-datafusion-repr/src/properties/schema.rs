@@ -4,7 +4,7 @@ use std::sync::Arc;
 use optd_core::property::PropertyBuilder;
 
 use super::DEFAULT_NAME;
-use crate::plan_nodes::{ConstantType, EmptyRelationData, FuncType, OptRelNodeTyp};
+use crate::plan_nodes::{CastExpr, ConstantType, EmptyRelationData, FuncType, OptRelNode, OptRelNodeTyp};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Field {
@@ -112,7 +112,24 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
                 let agg_schema = children[2].clone();
                 group_by_schema.fields.extend(agg_schema.fields);
                 group_by_schema
-            }
+            },
+            OptRelNodeTyp::Cast => Schema {
+                fields: children[0].fields.iter().map(|field| {
+                    Field {
+                        typ: children[1].fields[0].typ,
+                        ..field.clone()
+                    }
+                }).collect()
+            },
+            OptRelNodeTyp::DataType(data_type) => Schema {
+                fields: vec![Field {
+                    // name and nullable are just placeholders since
+                    // they'll be overwritten by Cast
+                    name: DEFAULT_NAME.to_string(),
+                    typ: ConstantType::from_data_type(data_type),
+                    nullable: true,
+                }]
+            },
             OptRelNodeTyp::Func(FuncType::Agg(_)) => Schema {
                 // TODO: this is just a place holder now.
                 // The real type should be the column type.

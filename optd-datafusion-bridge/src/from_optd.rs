@@ -34,9 +34,6 @@ use optd_datafusion_repr::{
 
 use crate::{physical_collector::CollectorExec, OptdPlanContext};
 
-// TODO: current DataType and ConstantType are not 1 to 1 mapping
-// optd schema stores constantType from data type in catalog.get
-// for decimal128, the precision is lost
 fn from_optd_schema(optd_schema: OptdSchema) -> Schema {
     let match_type = |typ: &ConstantType| typ.into_data_type();
     let mut fields = Vec::with_capacity(optd_schema.len());

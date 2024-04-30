@@ -163,7 +163,6 @@ impl PostgresDBMS {
         }
 
         // load the constraints and indexes
-        // TODO(phw2): constraints are currently broken
         let sql = fs::read_to_string(tpch_kit.constraints_fpath.to_str().unwrap())?;
         client.batch_execute(&sql).await?;
         let sql = fs::read_to_string(tpch_kit.indexes_fpath.to_str().unwrap())?;
