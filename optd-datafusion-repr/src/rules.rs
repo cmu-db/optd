@@ -23,5 +23,5 @@ pub use joins::{
 };
 pub use physical::PhysicalConversionRule;
 pub use subquery::{
-    DepInitialDistinct, DepJoinEliminateAtScan, DepJoinPastFilter, DepJoinPastProj,
+    DepInitialDistinct, DepJoinEliminateAtScan, DepJoinPastAgg, DepJoinPastFilter, DepJoinPastProj,
 };

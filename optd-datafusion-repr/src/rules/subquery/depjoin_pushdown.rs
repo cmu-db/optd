@@ -294,6 +294,81 @@ fn apply_dep_join_past_filter(
 }
 
 define_rule!(
+    DepJoinPastAgg,
+    apply_dep_join_past_agg,
+    (
+        DepJoin(JoinType::Cross),
+        left,
+        (Agg, right, [exprs], [groups]),
+        [cond],
+        [extern_cols]
+    )
+);
+
+/// Pushes a dependent join past an aggregation node
+/// We need to append the correlated columns into the aggregation node,
+/// and add a left outer join with the left side of the dependent join (the
+/// deduplicated set).
+/// For info on why we do the outer join, refer to the Unnesting Arbitrary Queries
+/// talk by Mark Raasveldt. The correlated columns are covered in the original paper.
+fn apply_dep_join_past_agg(
+    optimizer: &impl Optimizer<OptRelNodeTyp>,
+    DepJoinPastAggPicks {
+        left,
+        right,
+        exprs,
+        groups,
+        cond,
+        extern_cols,
+    }: DepJoinPastAggPicks,
+) -> Vec<RelNode<OptRelNodeTyp>> {
+    // Cross join should always have true cond
+    assert!(cond == *ConstantExpr::bool(true).into_rel_node());
+
+    // TODO: OUTER JOIN TRANSFORMATION
+
+    let extern_cols = ExprList::from_rel_node(extern_cols.into()).unwrap();
+    let correlated_col_indices = extern_cols
+        .to_vec()
+        .into_iter()
+        .map(|x| {
+            ColumnRefExpr::new(
+                ExternColumnRefExpr::from_rel_node(x.into_rel_node())
+                    .unwrap()
+                    .index(),
+            )
+            .into_expr()
+        })
+        .collect::<Vec<Expr>>();
+
+    let groups = ExprList::from_rel_node(groups.clone().into()).unwrap();
+
+    let new_groups = ExprList::new(
+        groups
+            .to_vec()
+            .into_iter()
+            .chain(correlated_col_indices.clone())
+            .collect(),
+    );
+
+    let new_dep_join = LogicalDependentJoin::new(
+        PlanNode::from_group(left.into()),
+        PlanNode::from_group(right.into()),
+        Expr::from_rel_node(cond.into()).unwrap(),
+        extern_cols,
+        JoinType::Cross,
+    );
+
+    let new_agg = LogicalAgg::new(
+        PlanNode::from_rel_node(new_dep_join.into_rel_node()).unwrap(),
+        ExprList::from_rel_node(exprs.into()).unwrap(),
+        new_groups,
+    );
+
+    vec![new_agg.into_rel_node().as_ref().clone()]
+}
+
+define_rule!(
     DepJoinEliminateAtScan,
     apply_dep_join_eliminate_at_scan, // TODO matching is all wrong
     (DepJoin(JoinType::Cross), left, right, [cond], [extern_cols])

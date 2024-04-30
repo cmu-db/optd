@@ -33,7 +33,10 @@ pub use optd_core::rel_node::Value;
 
 use crate::{
     plan_nodes::{OptRelNode, PlanNode},
-    rules::{DepInitialDistinct, DepJoinEliminateAtScan, DepJoinPastFilter, DepJoinPastProj},
+    rules::{
+        DepInitialDistinct, DepJoinEliminateAtScan, DepJoinPastAgg, DepJoinPastFilter,
+        DepJoinPastProj,
+    },
 };
 
 pub mod cost;
@@ -95,6 +98,7 @@ impl DatafusionOptimizer {
             Arc::new(DepInitialDistinct::new()),
             Arc::new(DepJoinPastProj::new()),
             Arc::new(DepJoinPastFilter::new()),
+            Arc::new(DepJoinPastAgg::new()),
         ]
     }
 
@@ -106,28 +110,28 @@ impl DatafusionOptimizer {
             rule_wrappers.push(RuleWrapper::new_cascades(rule));
         }
         // add all filter pushdown rules as heuristic rules
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            FilterProjectTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(FilterMergeRule::new())));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            FilterCrossJoinTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            FilterInnerJoinTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            FilterSortTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            FilterAggTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(HashJoinRule::new()))); // 17
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinCommuteRule::new()))); // 18
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinAssocRule::new())));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            ProjectionPullUpJoin::new(),
-        )));
+        // rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+        //     FilterProjectTransposeRule::new(),
+        // )));
+        // rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(FilterMergeRule::new())));
+        // rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+        //     FilterCrossJoinTransposeRule::new(),
+        // )));
+        // rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+        //     FilterInnerJoinTransposeRule::new(),
+        // )));
+        // rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+        //     FilterSortTransposeRule::new(),
+        // )));
+        // rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+        //     FilterAggTransposeRule::new(),
+        // )));
+        // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(HashJoinRule::new()))); // 17
+        // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinCommuteRule::new()))); // 18
+        // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinAssocRule::new())));
+        // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
+        //     ProjectionPullUpJoin::new(),
+        // )));
 
         rule_wrappers
     }
