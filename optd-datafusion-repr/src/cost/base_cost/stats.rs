@@ -380,7 +380,6 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         let nb_stats = comb_stat_types.len();
 
         // 1. FIRST PASS: hlls + mgs + null_cnts.
-        let now = std::time::Instant::now();
         let local_partial_stats: Vec<_> = first_batch_reader()
             .into_par_iter()
             .map(|group| {
@@ -419,10 +418,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
             },
         )?;
 
-        let first = now.elapsed();
-
         // 2. SECOND PASS: mcv + tdigest + row_cnts.
-        let now = std::time::Instant::now();
         let local_final_stats: Vec<_> = second_batch_reader()
             .into_par_iter()
             .map(|group| {
@@ -469,8 +465,6 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                 Ok(final_stats)
             },
         )?;
-
-        println!("First: {:?}, Second: {:?}", first, now.elapsed());
 
         // 3. ASSEMBLE STATS.
         let row_cnt = row_cnts[0];

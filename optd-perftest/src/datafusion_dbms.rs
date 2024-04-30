@@ -13,11 +13,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use datafusion::{
-    arrow::{
-        array::RecordBatch,
-        error::ArrowError,
-        util::display::{ArrayFormatter, FormatOptions},
-    },
+    arrow::util::display::{ArrayFormatter, FormatOptions},
     execution::{
         config::SessionConfig,
         context::{SessionContext, SessionState},
@@ -27,7 +23,6 @@ use datafusion::{
 };
 
 use datafusion_optd_cli::helper::unescape_input;
-use flume::Receiver;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::{
@@ -313,7 +308,7 @@ impl DatafusionDBMS {
         self.create_tpch_tables(&tpch_kit).await?;
 
         // Load the data by creating an external table first and copying the data to real tables.
-        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_vec(tpch_kit_config).unwrap();
+        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_vec(tpch_kit_config, "tbl").unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
             Self::execute(
@@ -358,7 +353,6 @@ impl DatafusionDBMS {
         tbl_fpath: PathBuf,
         num_row_groups: usize,
     ) -> impl FnOnce() -> Vec<ParquetRecordBatchReader> {
-        println!("{:#?}", num_row_groups);
         move || {
             let groups: Vec<ParquetRecordBatchReader> = (0..num_row_groups)
                 .map(|group_num| {
@@ -388,6 +382,9 @@ impl DatafusionDBMS {
             let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(tbl_fpath);
             let start = Instant::now();
 
+            // We get the schema from the Parquet file, to ensure there's no divergence between
+            // the context and the file we are going to read.
+            // Further rounds of refactoring should adapt the entry point of stat gen.
             let tbl_file = File::open(tbl_fpath).expect("Failed to open file");
             let parquet =
                 ParquetRecordBatchReaderBuilder::try_new(tbl_file.try_clone().unwrap()).unwrap();
@@ -440,8 +437,8 @@ impl DatafusionDBMS {
             Self::execute(&ctx, ddl).await?;
         }
 
-        // Compute base statistics.
-        let tbl_paths = tpch_kit.get_tbl_fpath_vec(tpch_kit_config)?;
+        // Compute base statistics on Parquet.
+        let tbl_paths = tpch_kit.get_tbl_fpath_vec(tpch_kit_config, "parquet")?;
         Self::gen_base_stats(tbl_paths)
     }
 
@@ -465,8 +462,8 @@ impl DatafusionDBMS {
             Self::execute(&ctx, ddl).await?;
         }
 
-        // Compute base statistics.
-        let tbl_paths = job_kit.get_tbl_fpath_vec("parquet").unwrap(); // TODO(Alexis): URGENT FIX make this modular!
+        // Compute base statistics on Parquet.
+        let tbl_paths = job_kit.get_tbl_fpath_vec("parquet").unwrap();
         Self::gen_base_stats(tbl_paths)
     }
 }
