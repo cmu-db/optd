@@ -1,13 +1,12 @@
-use std::{
-    collections::HashMap,
-    sync::{mpsc::Receiver, Arc},
-    thread::JoinHandle,
-};
+use std::{collections::HashMap, sync::Arc};
 
-use arrow_schema::{ArrowError, DataType, Schema, SchemaRef};
-use datafusion::arrow::array::{
-    Array, BooleanArray, Date32Array, Float32Array, Int16Array, Int32Array, Int8Array, RecordBatch,
-    StringArray, UInt16Array, UInt32Array, UInt8Array,
+use arrow_schema::{DataType, Schema, SchemaRef};
+use datafusion::{
+    arrow::array::{
+        Array, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array, Int32Array,
+        Int8Array, RecordBatch, StringArray, UInt16Array, UInt32Array, UInt8Array,
+    },
+    parquet::arrow::arrow_reader::ParquetRecordBatchReader,
 };
 use itertools::Itertools;
 use optd_core::rel_node::{SerializableOrderedF64, Value};
@@ -169,50 +168,43 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
 
     fn first_pass_stats_id(
         nb_stats: usize,
-    ) -> impl Fn() -> anyhow::Result<(
+    ) -> anyhow::Result<(
         Vec<HyperLogLog<ColumnCombValue>>,
         Vec<MisraGries<ColumnCombValue>>,
         Vec<i32>,
     )> {
-        move || {
-            Ok((
-                vec![HyperLogLog::<ColumnCombValue>::new(hyperloglog::DEFAULT_PRECISION); nb_stats],
-                vec![MisraGries::<ColumnCombValue>::new(misragries::DEFAULT_K_TO_TRACK); nb_stats],
-                vec![0; nb_stats],
-            ))
-        }
+        Ok((
+            vec![HyperLogLog::<ColumnCombValue>::new(hyperloglog::DEFAULT_PRECISION); nb_stats],
+            vec![MisraGries::<ColumnCombValue>::new(misragries::DEFAULT_K_TO_TRACK); nb_stats],
+            vec![0; nb_stats],
+        ))
     }
 
-    fn second_pass_stats_id<'a, 'b>(
-        comb_stat_types: &'a [(Vec<usize>, Vec<DataType>, StatType)],
-        mgs: &'a [MisraGries<ColumnCombValue>],
+    fn second_pass_stats_id(
+        comb_stat_types: &[(Vec<usize>, Vec<DataType>, StatType)],
+        mgs: &[MisraGries<ColumnCombValue>],
         nb_stats: usize,
-    ) -> impl Fn() -> anyhow::Result<(
+    ) -> anyhow::Result<(
         Vec<Option<TDigest<Value>>>,
         Vec<Counter<ColumnCombValue>>,
         Vec<i32>,
-    )> + 'b
-    where
-        'a: 'b,
-    {
-        move || {
-            Ok((
-                comb_stat_types
-                    .iter()
-                    .map(|(_, _, stat_type)| match stat_type {
-                        StatType::Full => Some(TDigest::new(tdigest::DEFAULT_COMPRESSION)),
-                        StatType::Partial => None,
-                    })
-                    .collect(),
-                mgs.iter()
-                    .map(|mg| {
-                        let mfk = mg.most_frequent_keys().into_iter().cloned().collect_vec();
-                        Counter::new(&mfk)
-                    })
-                    .collect(),
-                vec![0; nb_stats],
-            ))
-        }
+    )> {
+        Ok((
+            comb_stat_types
+                .iter()
+                .map(|(_, _, stat_type)| match stat_type {
+                    StatType::Full => Some(TDigest::new(tdigest::DEFAULT_COMPRESSION)),
+                    StatType::Partial => None,
+                })
+                .collect(),
+            mgs.iter()
+                .map(|mg| {
+                    let mfk = mg.most_frequent_keys().into_iter().cloned().collect_vec();
+                    Counter::new(&mfk)
+                })
+                .collect(),
+            vec![0; nb_stats],
+        ))
     }
 
     fn get_stats_types(
@@ -255,9 +247,9 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         }
 
         macro_rules! float_col_cast {
-            ({ $col:expr}) => {
+            ({ $col:expr, $array_type:path}) => {
                 $col.as_any()
-                    .downcast_ref::<Float32Array>()
+                    .downcast_ref::<$array_type>()
                     .unwrap()
                     .iter()
                     .map(|x| {
@@ -288,8 +280,8 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
             DataType::UInt8 => simple_col_cast!({col, UInt8Array, Value::UInt8}),
             DataType::UInt16 => simple_col_cast!({col, UInt16Array, Value::UInt16}),
             DataType::UInt32 => simple_col_cast!({col, UInt32Array, Value::UInt32}),
-            DataType::Float32 => float_col_cast!({ col }),
-            DataType::Float64 => float_col_cast!({ col }),
+            DataType::Float32 => float_col_cast!({ col, Float32Array }),
+            DataType::Float64 => float_col_cast!({ col, Float64Array }),
             DataType::Date32 => simple_col_cast!({col, Date32Array, Value::Date32}),
             DataType::Utf8 => utf8_col_cast!({ col }),
             _ => unreachable!(),
@@ -379,10 +371,8 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
     }
 
     pub fn from_record_batches(
-        first_batch_channel: impl FnOnce()
-            -> (JoinHandle<()>, Receiver<Result<RecordBatch, ArrowError>>),
-        second_batch_channel: impl FnOnce()
-            -> (JoinHandle<()>, Receiver<Result<RecordBatch, ArrowError>>),
+        first_batch_reader: impl FnOnce() -> Vec<ParquetRecordBatchReader>,
+        second_batch_reader: impl FnOnce() -> Vec<ParquetRecordBatchReader>,
         combinations: Vec<ColumnsIdx>,
         schema: Arc<Schema>,
     ) -> anyhow::Result<Self> {
@@ -391,98 +381,95 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
 
         // 1. FIRST PASS: hlls + mgs + null_cnts.
         let now = std::time::Instant::now();
-        let (handle, receiver) = first_batch_channel();
-
-        let (hlls, mgs, null_cnts) = receiver
-            .into_iter()
-            .par_bridge()
-            .fold(Self::first_pass_stats_id(nb_stats), |local_stats, batch| {
-                let mut local_stats = local_stats?;
-
-                match batch {
-                    Ok(batch) => {
-                        let (hlls, mgs, null_cnts) = &mut local_stats;
-                        let comb = Self::get_column_combs(&batch, &comb_stat_types);
-                        Self::generate_partial_stats(&comb, mgs, hlls, null_cnts);
-                        Ok(local_stats)
-                    }
-                    Err(e) => {
-                        println!("Err: {:?},, {:?}", e, comb_stat_types.len());
-                        Err(e.into())
-                    }
-                }
-            })
-            .reduce(
-                Self::first_pass_stats_id(nb_stats),
-                |final_stats, local_stats| {
-                    let mut final_stats = final_stats?;
-                    let local_stats = local_stats?;
-
-                    let (final_hlls, final_mgs, final_counts) = &mut final_stats;
-                    let (local_hlls, local_mgs, local_counts) = local_stats;
-
-                    for i in 0..nb_stats {
-                        final_hlls[i].merge(&local_hlls[i]);
-                        final_mgs[i].merge(&local_mgs[i]);
-                        final_counts[i] += local_counts[i];
-                    }
-
-                    Ok(final_stats)
-                },
-            )?;
-
-        let _ = handle.join();
-        let first = now.elapsed();
-
-        // 2. SECOND PASS: mcv + tdigest + row_cnts.
-        let now = std::time::Instant::now();
-        let (handle, receiver) = second_batch_channel();
-
-        let (distrs, cnts, row_cnts) = receiver
-            .into_iter()
-            .par_bridge()
-            .fold(
-                Self::second_pass_stats_id(&comb_stat_types, &mgs, nb_stats),
-                |local_stats, batch| {
+        let local_partial_stats: Vec<_> = first_batch_reader()
+            .into_par_iter()
+            .map(|group| {
+                group.fold(Self::first_pass_stats_id(nb_stats), |local_stats, batch| {
                     let mut local_stats = local_stats?;
 
                     match batch {
                         Ok(batch) => {
-                            let (distrs, cnts, row_cnts) = &mut local_stats;
+                            let (hlls, mgs, null_cnts) = &mut local_stats;
                             let comb = Self::get_column_combs(&batch, &comb_stat_types);
-                            Self::generate_full_stats(&comb, cnts, distrs, row_cnts);
+                            Self::generate_partial_stats(&comb, mgs, hlls, null_cnts);
                             Ok(local_stats)
                         }
                         Err(e) => Err(e.into()),
                     }
-                },
-            )
-            .reduce(
-                Self::second_pass_stats_id(&comb_stat_types, &mgs, nb_stats),
-                |final_stats, local_stats| {
-                    let mut final_stats = final_stats?;
-                    let local_stats = local_stats?;
+                })
+            })
+            .collect();
 
-                    let (final_distrs, final_cnts, final_counts) = &mut final_stats;
-                    let (local_distrs, local_cnts, local_counts) = local_stats;
+        let (hlls, mgs, null_cnts) = local_partial_stats.into_iter().fold(
+            Self::first_pass_stats_id(nb_stats),
+            |final_stats, local_stats| {
+                let mut final_stats = final_stats?;
+                let local_stats = local_stats?;
 
-                    for i in 0..nb_stats {
-                        final_cnts[i].merge(&local_cnts[i]);
-                        if let (Some(final_distr), Some(local_distr)) =
-                            (&mut final_distrs[i], &local_distrs[i])
-                        {
-                            final_distr.merge(local_distr);
-                            final_distr.norm_weight += local_distr.norm_weight;
+                let (final_hlls, final_mgs, final_counts) = &mut final_stats;
+                let (local_hlls, local_mgs, local_counts) = local_stats;
+
+                for i in 0..nb_stats {
+                    final_hlls[i].merge(&local_hlls[i]);
+                    final_mgs[i].merge(&local_mgs[i]);
+                    final_counts[i] += local_counts[i];
+                }
+
+                Ok(final_stats)
+            },
+        )?;
+
+        let first = now.elapsed();
+
+        // 2. SECOND PASS: mcv + tdigest + row_cnts.
+        let now = std::time::Instant::now();
+        let local_final_stats: Vec<_> = second_batch_reader()
+            .into_par_iter()
+            .map(|group| {
+                group.fold(
+                    Self::second_pass_stats_id(&comb_stat_types, &mgs, nb_stats),
+                    |local_stats, batch| {
+                        let mut local_stats = local_stats?;
+
+                        match batch {
+                            Ok(batch) => {
+                                let (distrs, cnts, row_cnts) = &mut local_stats;
+                                let comb = Self::get_column_combs(&batch, &comb_stat_types);
+                                Self::generate_full_stats(&comb, cnts, distrs, row_cnts);
+                                Ok(local_stats)
+                            }
+                            Err(e) => Err(e.into()),
                         }
+                    },
+                )
+            })
+            .collect();
 
-                        final_counts[i] += local_counts[i];
+        let (distrs, cnts, row_cnts) = local_final_stats.into_iter().fold(
+            Self::second_pass_stats_id(&comb_stat_types, &mgs, nb_stats),
+            |final_stats, local_stats| {
+                let mut final_stats = final_stats?;
+                let local_stats = local_stats?;
+
+                let (final_distrs, final_cnts, final_counts) = &mut final_stats;
+                let (local_distrs, local_cnts, local_counts) = local_stats;
+
+                for i in 0..nb_stats {
+                    final_cnts[i].merge(&local_cnts[i]);
+                    if let (Some(final_distr), Some(local_distr)) =
+                        (&mut final_distrs[i], &local_distrs[i])
+                    {
+                        final_distr.merge(local_distr);
+                        final_distr.norm_weight += local_distr.norm_weight;
                     }
 
-                    Ok(final_stats)
-                },
-            )?;
+                    final_counts[i] += local_counts[i];
+                }
 
-        let _ = handle.join();
+                Ok(final_stats)
+            },
+        )?;
+
         println!("First: {:?}, Second: {:?}", first, now.elapsed());
 
         // 3. ASSEMBLE STATS.

@@ -1,11 +1,7 @@
 use std::{
     fs::{self, File},
     path::{Path, PathBuf},
-    sync::{
-        mpsc::{self, Receiver},
-        Arc, Mutex,
-    },
-    thread::{self, JoinHandle},
+    sync::{Arc, Mutex},
     time::Instant,
 };
 
@@ -31,14 +27,16 @@ use datafusion::{
 };
 
 use datafusion_optd_cli::helper::unescape_input;
-use futures::executor::block_on;
+use flume::Receiver;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::{
     cost::{DataFusionBaseTableStats, DataFusionPerTableStats},
     DatafusionOptimizer,
 };
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use parquet::arrow::arrow_reader::{
+    ArrowReaderMetadata, ParquetRecordBatchReader, ParquetRecordBatchReaderBuilder,
+};
 use rayon::prelude::*;
 use regex::Regex;
 
@@ -356,10 +354,33 @@ impl DatafusionDBMS {
         Ok(())
     }
 
-    fn gen_base_stats(
-        tbl_paths: Vec<PathBuf>,
-        ctx: SessionContext,
-    ) -> anyhow::Result<DataFusionBaseTableStats> {
+    fn build_batch_reader(
+        tbl_fpath: PathBuf,
+        num_row_groups: usize,
+    ) -> impl FnOnce() -> Vec<ParquetRecordBatchReader> {
+        println!("{:#?}", num_row_groups);
+        move || {
+            let groups: Vec<ParquetRecordBatchReader> = (0..num_row_groups)
+                .map(|group_num| {
+                    let tbl_file = File::open(tbl_fpath.clone()).expect("Failed to open file");
+                    let metadata =
+                        ArrowReaderMetadata::load(&tbl_file, Default::default()).unwrap();
+
+                    ParquetRecordBatchReaderBuilder::new_with_metadata(
+                        tbl_file.try_clone().unwrap(),
+                        metadata.clone(),
+                    )
+                    .with_row_groups(vec![group_num])
+                    .build()
+                    .unwrap()
+                })
+                .collect();
+
+            groups
+        }
+    }
+
+    fn gen_base_stats(tbl_paths: Vec<PathBuf>) -> anyhow::Result<DataFusionBaseTableStats> {
         let base_table_stats = Mutex::new(DataFusionBaseTableStats::default());
         let now = Instant::now();
 
@@ -367,25 +388,19 @@ impl DatafusionDBMS {
             let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(tbl_fpath);
             let start = Instant::now();
 
-            let schema = block_on(async {
-                ctx.catalog("datafusion")
-                    .unwrap()
-                    .schema("public")
-                    .unwrap()
-                    .table(&tbl_name)
-                    .await
-                    .unwrap()
-                    .schema()
-            });
+            let tbl_file = File::open(tbl_fpath).expect("Failed to open file");
+            let parquet =
+                ParquetRecordBatchReaderBuilder::try_new(tbl_file.try_clone().unwrap()).unwrap();
+            let schema = parquet.schema();
 
             let nb_cols = schema.fields().len();
             let single_cols = (0..nb_cols).map(|v| vec![v]).collect::<Vec<_>>();
 
             let stats_result = DataFusionPerTableStats::from_record_batches(
-                Self::create_batch_channel(tbl_fpath.clone()),
-                Self::create_batch_channel(tbl_fpath.clone()),
+                Self::build_batch_reader(tbl_fpath.clone(), parquet.metadata().num_row_groups()),
+                Self::build_batch_reader(tbl_fpath.clone(), parquet.metadata().num_row_groups()),
                 single_cols,
-                schema,
+                schema.clone(),
             );
 
             if let Ok(per_table_stats) = stats_result {
@@ -403,35 +418,6 @@ impl DatafusionDBMS {
         println!("Total execution time {:?}...", now.elapsed());
 
         Ok(base_table_stats.into_inner()?)
-    }
-
-    fn create_batch_channel(
-        tbl_fpath: PathBuf,
-    ) -> impl FnOnce() -> (JoinHandle<()>, Receiver<Result<RecordBatch, ArrowError>>) {
-        move || {
-            let (sender, receiver) = mpsc::channel();
-
-            let handle = thread::spawn(move || {
-                // Get the number of row groups.
-                let tbl_file = File::open(tbl_fpath).expect("Failed to open file");
-                let builder =
-                    ParquetRecordBatchReaderBuilder::try_new(tbl_file.try_clone().unwrap())
-                        .unwrap();
-                let num_row_groups = builder.metadata().num_row_groups();
-
-                // Read row groups in parallel.
-                (0..num_row_groups).into_par_iter().for_each(|i| {
-                    ParquetRecordBatchReaderBuilder::try_new(tbl_file.try_clone().unwrap())
-                        .unwrap()
-                        .with_row_groups(vec![i])
-                        .build()
-                        .unwrap()
-                        .for_each(|batch| sender.send(batch).expect("Failed to send batch"))
-                });
-            });
-
-            (handle, receiver)
-        }
     }
 
     async fn get_tpch_stats(
@@ -456,7 +442,7 @@ impl DatafusionDBMS {
 
         // Compute base statistics.
         let tbl_paths = tpch_kit.get_tbl_fpath_vec(tpch_kit_config)?;
-        Self::gen_base_stats(tbl_paths, ctx)
+        Self::gen_base_stats(tbl_paths)
     }
 
     async fn get_job_stats(
@@ -480,8 +466,8 @@ impl DatafusionDBMS {
         }
 
         // Compute base statistics.
-        let tbl_paths = job_kit.get_tbl_fpath_vec("parquet").unwrap();
-        Self::gen_base_stats(tbl_paths, ctx)
+        let tbl_paths = job_kit.get_tbl_fpath_vec("parquet").unwrap(); // TODO(Alexis): URGENT FIX make this modular!
+        Self::gen_base_stats(tbl_paths)
     }
 }
 
