@@ -96,7 +96,7 @@ impl std::fmt::Display for Value {
 
 /// The `as_*()` functions do not perform conversions. This is *unlike* the `as`
 /// keyword in rust.
-/// 
+///
 /// If you want to perform conversions, use the `to_*()` functions.
 impl Value {
     pub fn as_u8(&self) -> u8 {
@@ -192,27 +192,23 @@ impl Value {
 
     pub fn convert_to_type(&self, typ: DataType) -> Value {
         match typ {
-            DataType::Int32 => {
-                Value::Int32(match self {
-                    Value::Int32(i32) => *i32,
-                    Value::Int64(i64) => (*i64).try_into().unwrap(),
-                    _ => panic!("{self} could not be converted into an Int32"),
-                })
-            },
-            DataType::Date32 => {
-                Value::Date32(match self {
-                    Value::Date32(date32) => *date32,
-                    Value::String(str) => {
-                        let date = NaiveDate::parse_from_str(str, "%Y-%m-%d").unwrap();
-                        let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-                        let duration_since_epoch = date.signed_duration_since(epoch);
-                        let days_since_epoch: i32 = duration_since_epoch.num_days() as i32;
-                        days_since_epoch
-                    },
-                    _ => panic!("{self} could not be converted into an Date32"),
-                })
-            }
-            _ => unimplemented!("Have not implemented convert_to_type for DataType {typ}")
+            DataType::Int32 => Value::Int32(match self {
+                Value::Int32(i32) => *i32,
+                Value::Int64(i64) => (*i64).try_into().unwrap(),
+                _ => panic!("{self} could not be converted into an Int32"),
+            }),
+            DataType::Date32 => Value::Date32(match self {
+                Value::Date32(date32) => *date32,
+                Value::String(str) => {
+                    let date = NaiveDate::parse_from_str(str, "%Y-%m-%d").unwrap();
+                    let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+                    let duration_since_epoch = date.signed_duration_since(epoch);
+                    let days_since_epoch: i32 = duration_since_epoch.num_days() as i32;
+                    days_since_epoch
+                }
+                _ => panic!("{self} could not be converted into an Date32"),
+            }),
+            _ => unimplemented!("Have not implemented convert_to_type for DataType {typ}"),
         }
     }
 }

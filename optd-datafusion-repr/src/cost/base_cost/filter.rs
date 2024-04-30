@@ -1,6 +1,5 @@
 use std::ops::Bound;
 
-use chrono::Local;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
     cost::Cost,
@@ -14,11 +13,13 @@ use crate::{
         UNIMPLEMENTED_SEL,
     },
     plan_nodes::{
-        BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType, Expr, InListExpr, LikeExpr, LogOpType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, UnOpType
+        BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType, Expr, InListExpr, LikeExpr,
+        LogOpType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, UnOpType,
     },
-    properties::{column_ref::{
-        BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, GroupColumnRefs,
-    }, schema::{Schema, SchemaPropertyBuilder}},
+    properties::{
+        column_ref::{BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, GroupColumnRefs},
+        schema::{Schema, SchemaPropertyBuilder},
+    },
 };
 
 use super::{
@@ -42,7 +43,8 @@ impl<
         let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
         let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
         let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
-            let schema = optimizer.get_property_by_group::<SchemaPropertyBuilder>(context.group_id, 0);
+            let schema =
+                optimizer.get_property_by_group::<SchemaPropertyBuilder>(context.group_id, 0);
             let column_refs =
                 optimizer.get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
             let expr_group_id = context.children_group_ids[1];
@@ -102,7 +104,13 @@ impl<
                 let right_child = expr_tree.child(1);
 
                 if bin_op_typ.is_comparison() {
-                    self.get_comp_op_selectivity(*bin_op_typ, left_child, right_child, schema, column_refs)
+                    self.get_comp_op_selectivity(
+                        *bin_op_typ,
+                        left_child,
+                        right_child,
+                        schema,
+                        column_refs,
+                    )
                 } else if bin_op_typ.is_numerical() {
                     panic!(
                         "the selectivity of operations that return numerical values is undefined"
@@ -200,13 +208,19 @@ impl<
         let mut uncasted_right = right;
         loop {
             // println!("loop {}, uncasted_left={:?}, uncasted_right={:?}", Local::now(), uncasted_left, uncasted_right);
-            if uncasted_left.as_ref().typ == OptRelNodeTyp::Cast && uncasted_right.as_ref().typ == OptRelNodeTyp::Cast {
-                let left_cast_expr = CastExpr::from_rel_node(uncasted_left).expect("we already checked that the type is Cast");
-                let right_cast_expr = CastExpr::from_rel_node(uncasted_right).expect("we already checked that the type is Cast");
+            if uncasted_left.as_ref().typ == OptRelNodeTyp::Cast
+                && uncasted_right.as_ref().typ == OptRelNodeTyp::Cast
+            {
+                let left_cast_expr = CastExpr::from_rel_node(uncasted_left)
+                    .expect("we already checked that the type is Cast");
+                let right_cast_expr = CastExpr::from_rel_node(uncasted_right)
+                    .expect("we already checked that the type is Cast");
                 assert!(left_cast_expr.cast_to() == right_cast_expr.cast_to());
                 uncasted_left = left_cast_expr.child().into_rel_node();
                 uncasted_right = right_cast_expr.child().into_rel_node();
-            } else if uncasted_left.as_ref().typ == OptRelNodeTyp::Cast || uncasted_right.as_ref().typ == OptRelNodeTyp::Cast {
+            } else if uncasted_left.as_ref().typ == OptRelNodeTyp::Cast
+                || uncasted_right.as_ref().typ == OptRelNodeTyp::Cast
+            {
                 let is_left_cast = uncasted_left.as_ref().typ == OptRelNodeTyp::Cast;
                 let (mut cast_node, mut non_cast_node) = if is_left_cast {
                     (uncasted_left, uncasted_right)
@@ -214,22 +228,31 @@ impl<
                     (uncasted_right, uncasted_left)
                 };
 
-                let cast_expr = CastExpr::from_rel_node(cast_node).expect("we already checked that the type is Cast");
+                let cast_expr = CastExpr::from_rel_node(cast_node)
+                    .expect("we already checked that the type is Cast");
                 let cast_expr_child = cast_expr.child().into_rel_node();
                 let cast_expr_cast_to = cast_expr.cast_to();
 
                 let should_break = match cast_expr_child.typ {
                     OptRelNodeTyp::Constant(_) => {
-                        cast_node = ConstantExpr::new(ConstantExpr::from_rel_node(cast_expr_child).expect("we already checked that the type is Constant").value().convert_to_type(cast_expr_cast_to)).into_rel_node();
+                        cast_node = ConstantExpr::new(
+                            ConstantExpr::from_rel_node(cast_expr_child)
+                                .expect("we already checked that the type is Constant")
+                                .value()
+                                .convert_to_type(cast_expr_cast_to),
+                        )
+                        .into_rel_node();
                         false
-                    },
+                    }
                     OptRelNodeTyp::ColumnRef => {
-                        let col_ref_expr = ColumnRefExpr::from_rel_node(cast_expr_child).expect("we already checked that the type is ColumnRef");
+                        let col_ref_expr = ColumnRefExpr::from_rel_node(cast_expr_child)
+                            .expect("we already checked that the type is ColumnRef");
                         let col_ref_idx = col_ref_expr.index();
                         cast_node = col_ref_expr.into_rel_node();
                         // The "invert" cast is to invert the cast so that we're casting the non_cast_node to
                         // the column's original type.
-                        let invert_cast_data_type =  &schema.fields[col_ref_idx].typ.into_data_type();
+                        let invert_cast_data_type =
+                            &schema.fields[col_ref_idx].typ.into_data_type();
 
                         match non_cast_node.typ {
                             OptRelNodeTyp::ColumnRef => {
@@ -237,14 +260,18 @@ impl<
                                 // other ColumnRef because that would lead to an infinite loop. Thus, we just leave the
                                 // cast where it is and break.
                                 true
-                            },
+                            }
                             _ => {
-                                non_cast_node = CastExpr::new(Expr::from_rel_node(non_cast_node).unwrap(), invert_cast_data_type.clone()).into_rel_node();
+                                non_cast_node = CastExpr::new(
+                                    Expr::from_rel_node(non_cast_node).unwrap(),
+                                    invert_cast_data_type.clone(),
+                                )
+                                .into_rel_node();
                                 false
                             }
                         }
                     }
-                    _ => todo!()
+                    _ => todo!(),
                 };
 
                 (uncasted_left, uncasted_right) = if is_left_cast {
@@ -269,10 +296,14 @@ impl<
                     ColumnRefExpr::from_rel_node(uncasted_left)
                         .expect("we already checked that the type is ColumnRef"),
                 );
-            },
+            }
             OptRelNodeTyp::Constant(_) => {
                 is_left_col_ref = false;
-                values.push(ConstantExpr::from_rel_node(uncasted_left).expect("we already checked that the type is Constant").value())
+                values.push(
+                    ConstantExpr::from_rel_node(uncasted_left)
+                        .expect("we already checked that the type is Constant")
+                        .value(),
+                )
             }
             _ => {
                 is_left_col_ref = false;
@@ -285,10 +316,12 @@ impl<
                     ColumnRefExpr::from_rel_node(uncasted_right)
                         .expect("we already checked that the type is ColumnRef"),
                 );
-            },
-            OptRelNodeTyp::Constant(_) => {
-                values.push(ConstantExpr::from_rel_node(uncasted_right).expect("we already checked that the type is Constant").value())
             }
+            OptRelNodeTyp::Constant(_) => values.push(
+                ConstantExpr::from_rel_node(uncasted_right)
+                    .expect("we already checked that the type is Constant")
+                    .value(),
+            ),
             _ => {
                 non_col_ref_exprs.push(uncasted_right);
             }
@@ -326,7 +359,9 @@ impl<
                 &column_refs[col_ref_idx]
             {
                 if values.len() == 1 {
-                    let value = values.first().expect("we just checked that values.len() == 1");
+                    let value = values
+                        .first()
+                        .expect("we just checked that values.len() == 1");
                     match comp_bin_op_typ {
                         BinOpType::Eq => {
                             self.get_column_equality_selectivity(table, *col_idx, value, true)
@@ -349,26 +384,25 @@ impl<
                                 (BinOpType::Geq, true) | (BinOpType::Lt, false) => Bound::Unbounded,
                                 _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
                             };
-                            self.get_column_range_selectivity(
-                                table,
-                                *col_idx,
-                                start,
-                                end,
-                            )
-                        },
-                        _ => unreachable!("all comparison BinOpTypes were enumerated. this should be unreachable"),
+                            self.get_column_range_selectivity(table, *col_idx, start, end)
+                        }
+                        _ => unreachable!(
+                            "all comparison BinOpTypes were enumerated. this should be unreachable"
+                        ),
                     }
                 } else {
-                    let non_col_ref_expr = non_col_ref_exprs
-                    .first()
-                    .expect("non_col_ref_exprs should have a value since col_ref_exprs.len() == 1");
+                    let non_col_ref_expr = non_col_ref_exprs.first().expect(
+                        "non_col_ref_exprs should have a value since col_ref_exprs.len() == 1",
+                    );
 
                     match non_col_ref_expr.as_ref().typ {
                         OptRelNodeTyp::BinOp(_) => {
                             Self::get_default_comparison_op_selectivity(comp_bin_op_typ)
                         }
                         OptRelNodeTyp::Cast => UNIMPLEMENTED_SEL,
-                        OptRelNodeTyp::Constant(_) => unreachable!("we should have handled this in the values.len() == 1 branch"),
+                        OptRelNodeTyp::Constant(_) => unreachable!(
+                            "we should have handled this in the values.len() == 1 branch"
+                        ),
                         _ => unimplemented!(
                             "unhandled case of comparing a column ref node to {}",
                             non_col_ref_expr.as_ref().typ
@@ -537,7 +571,10 @@ mod tests {
     use crate::{
         cost::base_cost::{tests::*, DEFAULT_EQ_SEL},
         plan_nodes::{BinOpType, ConstantType, LogOpType, UnOpType},
-        properties::{column_ref::{ColumnRef, GroupColumnRefs}, schema::{Field, Schema}},
+        properties::{
+            column_ref::{ColumnRef, GroupColumnRefs},
+            schema::{Field, Schema},
+        },
     };
 
     #[test]
@@ -1198,8 +1235,16 @@ mod tests {
             0.1,
             Some(TestDistribution::empty()),
         ));
-        let expr_tree = bin_op(BinOpType::Eq, col_ref(0), cast(cnst(Value::Int64(1)), DataType::Int32));
-        let expr_tree_rev = bin_op(BinOpType::Eq, cast(cnst(Value::Int64(1)), DataType::Int32), col_ref(0));
+        let expr_tree = bin_op(
+            BinOpType::Eq,
+            col_ref(0),
+            cast(cnst(Value::Int64(1)), DataType::Int32),
+        );
+        let expr_tree_rev = bin_op(
+            BinOpType::Eq,
+            cast(cnst(Value::Int64(1)), DataType::Int32),
+            col_ref(0),
+        );
         let schema = Schema::new(vec![]);
         let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
@@ -1226,9 +1271,21 @@ mod tests {
             0.1,
             Some(TestDistribution::empty()),
         ));
-        let expr_tree = bin_op(BinOpType::Eq, cast(col_ref(0), DataType::Int64), cnst(Value::Int64(1)));
-        let expr_tree_rev = bin_op(BinOpType::Eq, cnst(Value::Int64(1)), cast(col_ref(0), DataType::Int64));
-        let schema = Schema::new(vec![Field {name: String::from(""), typ: ConstantType::Int32, nullable: false}]);
+        let expr_tree = bin_op(
+            BinOpType::Eq,
+            cast(col_ref(0), DataType::Int64),
+            cnst(Value::Int64(1)),
+        );
+        let expr_tree_rev = bin_op(
+            BinOpType::Eq,
+            cnst(Value::Int64(1)),
+            cast(col_ref(0), DataType::Int64),
+        );
+        let schema = Schema::new(vec![Field {
+            name: String::from(""),
+            typ: ConstantType::Int32,
+            nullable: false,
+        }]);
         let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),
@@ -1247,7 +1304,7 @@ mod tests {
     }
 
     /// In this case, we should leave the Cast as is.
-    /// 
+    ///
     /// Note that the test only checks the selectivity and thus doesn't explicitly test that the
     /// Cast is indeed left as is. However, if get_filter_selectivity() doesn't crash, that's a
     /// pretty good signal that the Cast was left as is.
@@ -1261,7 +1318,18 @@ mod tests {
         ));
         let expr_tree = bin_op(BinOpType::Eq, cast(col_ref(0), DataType::Int64), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), cast(col_ref(0), DataType::Int64));
-        let schema = Schema::new(vec![Field {name: String::from(""), typ: ConstantType::Int32, nullable: false}, Field {name: String::from(""), typ: ConstantType::Int64, nullable: false}]);
+        let schema = Schema::new(vec![
+            Field {
+                name: String::from(""),
+                typ: ConstantType::Int32,
+                nullable: false,
+            },
+            Field {
+                name: String::from(""),
+                typ: ConstantType::Int64,
+                nullable: false,
+            },
+        ]);
         let column_refs = GroupColumnRefs::new_test(
             vec![ColumnRef::base_table_column_ref(
                 String::from(TABLE1_NAME),

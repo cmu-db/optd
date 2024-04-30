@@ -16,10 +16,13 @@ use crate::{
         BinOpType, ColumnRefExpr, Expr, ExprList, JoinType, LogOpExpr, LogOpType, OptRelNode,
         OptRelNodeRef, OptRelNodeTyp,
     },
-    properties::{column_ref::{
-        BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, EqBaseTableColumnSets,
-        EqPredicate, GroupColumnRefs, SemanticCorrelation,
-    }, schema::{Schema, SchemaPropertyBuilder}},
+    properties::{
+        column_ref::{
+            BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder, EqBaseTableColumnSets,
+            EqPredicate, GroupColumnRefs, SemanticCorrelation,
+        },
+        schema::{Schema, SchemaPropertyBuilder},
+    },
 };
 
 use super::{OptCostModel, DEFAULT_UNK_SEL};
@@ -40,7 +43,8 @@ impl<
         let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
         let (_, compute_cost, _) = Self::cost_tuple(&children[2]);
         let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
-            let schema = optimizer.get_property_by_group::<SchemaPropertyBuilder>(context.group_id, 0);
+            let schema =
+                optimizer.get_property_by_group::<SchemaPropertyBuilder>(context.group_id, 0);
             let column_refs =
                 optimizer.get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
             let expr_group_id = context.children_group_ids[2];
@@ -76,7 +80,8 @@ impl<
         let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
         let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
         let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
-            let schema = optimizer.get_property_by_group::<SchemaPropertyBuilder>(context.group_id, 0);
+            let schema =
+                optimizer.get_property_by_group::<SchemaPropertyBuilder>(context.group_id, 0);
             let column_refs =
                 optimizer.get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
             let left_keys_group_id = context.children_group_ids[2];
@@ -187,7 +192,9 @@ impl<
         // different tables. Currently, this doesn't affect the get_filter_selectivity() function, but this may change in
         // the future.
         let join_filter_selectivity = match filter_expr_tree {
-            Some(filter_expr_tree) => self.get_filter_selectivity(filter_expr_tree, schema, column_refs),
+            Some(filter_expr_tree) => {
+                self.get_filter_selectivity(filter_expr_tree, schema, column_refs)
+            }
             None => 1.0,
         };
         let inner_join_selectivity = join_on_selectivity * join_filter_selectivity;
@@ -504,10 +511,13 @@ mod tests {
     use crate::{
         cost::base_cost::{tests::*, DEFAULT_EQ_SEL},
         plan_nodes::{BinOpType, JoinType, LogOpType, OptRelNodeRef},
-        properties::{column_ref::{
-            BaseTableColumnRef, ColumnRef, EqBaseTableColumnSets, EqPredicate, GroupColumnRefs,
-            SemanticCorrelation,
-        }, schema::Schema},
+        properties::{
+            column_ref::{
+                BaseTableColumnRef, ColumnRef, EqBaseTableColumnSets, EqPredicate, GroupColumnRefs,
+                SemanticCorrelation,
+            },
+            schema::Schema,
+        },
     };
 
     /// A wrapper around get_join_selectivity_from_expr_tree that extracts the
@@ -597,7 +607,14 @@ mod tests {
             None,
         );
         assert_approx_eq::assert_approx_eq!(
-            test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &schema, &column_refs),
+            test_get_join_selectivity(
+                &cost_model,
+                false,
+                JoinType::Inner,
+                expr_tree,
+                &schema,
+                &column_refs
+            ),
             0.2
         );
         assert_approx_eq::assert_approx_eq!(
@@ -642,7 +659,14 @@ mod tests {
             None,
         );
         assert_approx_eq::assert_approx_eq!(
-            test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &schema, &column_refs),
+            test_get_join_selectivity(
+                &cost_model,
+                false,
+                JoinType::Inner,
+                expr_tree,
+                &schema,
+                &column_refs
+            ),
             0.2
         );
         assert_approx_eq::assert_approx_eq!(
@@ -687,7 +711,14 @@ mod tests {
             None,
         );
         assert_approx_eq::assert_approx_eq!(
-            test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &schema, &column_refs),
+            test_get_join_selectivity(
+                &cost_model,
+                false,
+                JoinType::Inner,
+                expr_tree,
+                &schema,
+                &column_refs
+            ),
             0.05
         );
         assert_approx_eq::assert_approx_eq!(
@@ -732,7 +763,14 @@ mod tests {
             None,
         );
         assert_approx_eq::assert_approx_eq!(
-            test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &schema, &column_refs),
+            test_get_join_selectivity(
+                &cost_model,
+                false,
+                JoinType::Inner,
+                expr_tree,
+                &schema,
+                &column_refs
+            ),
             0.2
         );
         assert_approx_eq::assert_approx_eq!(
@@ -774,7 +812,14 @@ mod tests {
             None,
         );
         assert_approx_eq::assert_approx_eq!(
-            test_get_join_selectivity(&cost_model, false, JoinType::Inner, expr_tree, &schema, &column_refs),
+            test_get_join_selectivity(
+                &cost_model,
+                false,
+                JoinType::Inner,
+                expr_tree,
+                &schema,
+                &column_refs
+            ),
             DEFAULT_EQ_SEL
         );
     }

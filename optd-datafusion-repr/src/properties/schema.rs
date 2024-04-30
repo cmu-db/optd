@@ -4,7 +4,7 @@ use std::sync::Arc;
 use optd_core::property::PropertyBuilder;
 
 use super::DEFAULT_NAME;
-use crate::plan_nodes::{CastExpr, ConstantType, EmptyRelationData, FuncType, OptRelNode, OptRelNodeTyp};
+use crate::plan_nodes::{ConstantType, EmptyRelationData, FuncType, OptRelNodeTyp};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Field {
@@ -31,9 +31,7 @@ pub struct Schema {
 
 impl Schema {
     pub fn new(fields: Vec<Field>) -> Self {
-        Self {
-            fields
-        }
+        Self { fields }
     }
 
     pub fn len(&self) -> usize {
@@ -112,14 +110,16 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
                 let agg_schema = children[2].clone();
                 group_by_schema.fields.extend(agg_schema.fields);
                 group_by_schema
-            },
+            }
             OptRelNodeTyp::Cast => Schema {
-                fields: children[0].fields.iter().map(|field| {
-                    Field {
+                fields: children[0]
+                    .fields
+                    .iter()
+                    .map(|field| Field {
                         typ: children[1].fields[0].typ,
                         ..field.clone()
-                    }
-                }).collect()
+                    })
+                    .collect(),
             },
             OptRelNodeTyp::DataType(data_type) => Schema {
                 fields: vec![Field {
@@ -128,7 +128,7 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
                     name: DEFAULT_NAME.to_string(),
                     typ: ConstantType::from_data_type(data_type),
                     nullable: true,
-                }]
+                }],
             },
             OptRelNodeTyp::Func(FuncType::Agg(_)) => Schema {
                 // TODO: this is just a place holder now.
