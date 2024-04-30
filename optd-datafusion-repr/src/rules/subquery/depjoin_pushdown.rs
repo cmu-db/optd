@@ -186,16 +186,12 @@ fn apply_dep_join_past_proj(
     let left_schema_len = optimizer
         .get_property::<SchemaPropertyBuilder>(left.clone().into(), 0)
         .len();
+    let right_schema_len = optimizer
+        .get_property::<SchemaPropertyBuilder>(right.clone().into(), 0)
+        .len();
 
-    let exprs = ExprList::from_rel_node(exprs.into()).unwrap();
-    let right_cols_proj = exprs
-        .to_vec()
-        .into_iter()
-        .map(|expr| {
-            expr.rewrite_column_refs(&mut |col| Some(col + left_schema_len))
-                .unwrap()
-        })
-        .collect::<Vec<Expr>>();
+    let right_cols_proj =
+        (0..right_schema_len).map(|x| ColumnRefExpr::new(x + left_schema_len).into_expr());
 
     let left_cols_proj = (0..left_schema_len).map(|x| ColumnRefExpr::new(x).into_expr());
     let new_proj_exprs = ExprList::new(
