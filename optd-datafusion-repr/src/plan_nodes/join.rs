@@ -71,7 +71,6 @@ impl LogicalJoin {
         left_schema_size: usize,
         right_schema_size: usize,
     ) -> usize {
-        dbg!(col_idx, left_schema_size, right_schema_size);
         assert!(col_idx < left_schema_size + right_schema_size);
         if col_idx < left_schema_size {
             col_idx

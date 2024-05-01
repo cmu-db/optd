@@ -110,28 +110,28 @@ impl DatafusionOptimizer {
             rule_wrappers.push(RuleWrapper::new_cascades(rule));
         }
         // add all filter pushdown rules as heuristic rules
-        // rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-        //     FilterProjectTransposeRule::new(),
-        // )));
-        // rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(FilterMergeRule::new())));
-        // rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-        //     FilterCrossJoinTransposeRule::new(),
-        // )));
-        // rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-        //     FilterInnerJoinTransposeRule::new(),
-        // )));
-        // rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-        //     FilterSortTransposeRule::new(),
-        // )));
-        // rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-        //     FilterAggTransposeRule::new(),
-        // )));
-        // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(HashJoinRule::new()))); // 17
-        // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinCommuteRule::new()))); // 18
-        // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinAssocRule::new())));
-        // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-        //     ProjectionPullUpJoin::new(),
-        // )));
+        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+            FilterProjectTransposeRule::new(),
+        )));
+        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(FilterMergeRule::new())));
+        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+            FilterCrossJoinTransposeRule::new(),
+        )));
+        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+            FilterInnerJoinTransposeRule::new(),
+        )));
+        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+            FilterSortTransposeRule::new(),
+        )));
+        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+            FilterAggTransposeRule::new(),
+        )));
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(HashJoinRule::new()))); // 17
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinCommuteRule::new()))); // 18
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinAssocRule::new())));
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
+            ProjectionPullUpJoin::new(),
+        )));
 
         rule_wrappers
     }
@@ -224,10 +224,11 @@ impl DatafusionOptimizer {
             .hueristic_optimizer
             .optimize(root_rel)
             .expect("heuristics returns error");
-        println!(
-            "{}",
-            PlanNode::from_group(res.clone()).explain_to_string(None)
-        );
+        // TODO: remove this
+        // println!(
+        //     "{}",
+        //     PlanNode::from_group(res.clone()).explain_to_string(None)
+        // );
         res
     }
 

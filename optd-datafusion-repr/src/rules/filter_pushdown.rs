@@ -11,6 +11,7 @@
 use std::collections::{HashMap, HashSet};
 use std::vec;
 
+use datafusion::physical_expr::unicode_expressions::right;
 use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 
@@ -62,7 +63,7 @@ fn determine_join_cond_dep(
             let index = col_ref.index();
             if index < left_schema_size {
                 left_col = true;
-            } else if index > left_schema_size && index < left_schema_size + right_schema_size {
+            } else if index >= left_schema_size && index < left_schema_size + right_schema_size {
                 right_col = true;
             }
         }
