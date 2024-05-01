@@ -399,7 +399,7 @@ dependencies = [
 [[package]]
 name = "arrow-tools"
 version = "0.18.0"
-source = "git+https://github.com/wangpatrick57/arrow-tools.git?branch=main#ceafc8e09e9acda077fa5be7c549ec024f005559"
+source = "git+https://github.com/wangpatrick57/arrow-tools.git?branch=main#c04460346d808268e7811b212212c3442428330c"
 
 [[package]]
 name = "assert_approx_eq"
@@ -1295,13 +1295,14 @@ dependencies = [
 [[package]]
 name = "csv2parquet"
 version = "0.18.0"
-source = "git+https://github.com/wangpatrick57/arrow-tools.git?branch=main#ceafc8e09e9acda077fa5be7c549ec024f005559"
+source = "git+https://github.com/wangpatrick57/arrow-tools.git?branch=main#c04460346d808268e7811b212212c3442428330c"
 dependencies = [
  "arrow",
  "arrow-schema",
  "arrow-tools",
  "clap 4.5.4",
  "parquet",
+ "regex",
  "serde_json",
 ]
 
