@@ -24,7 +24,6 @@ use datafusion::{
 };
 
 use datafusion_optd_cli::helper::unescape_input;
-use itertools::Itertools;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::{
@@ -483,29 +482,30 @@ impl DatafusionDBMS {
 
         let stats = base_table_stats.into_inner();
         let l = stats.unwrap();
-        l.iter().for_each(|(table_name, stats)| {
-            println!("Table: {} (num_rows: {})", table_name, stats.row_cnt);
-            stats
-                .column_comb_stats
-                .iter()
-                .sorted_by_key(|x| x.0[0])
-                .for_each(|x| {
-                    let sum_freq: f64 = x.1.mcvs.frequencies().values().copied().sum();
-                    println!(
-                        "Col: {} (n_distinct: {}) (n_frac: {}) (mcvs: {} {}) (tdigests: {:?} {:?} {:?} {:?} {:?})",
-                        x.0[0],
-                        x.1.ndistinct,
-                        x.1.null_frac,
-                        x.1.mcvs.frequencies().len(),
-                        sum_freq,
-                        x.1.distr.as_ref().map(|d| d.quantile(0.01)),
-                        x.1.distr.as_ref().map(|d| d.quantile(0.25)),
-                        x.1.distr.as_ref().map(|d| d.quantile(0.50)),
-                        x.1.distr.as_ref().map(|d| d.quantile(0.75)),
-                        x.1.distr.as_ref().map(|d| d.quantile(0.99)),
-                    );
-                });
-        });
+        // Useful for debugging stats so I kept it
+        // l.iter().for_each(|(table_name, stats)| {
+        //     println!("Table: {} (num_rows: {})", table_name, stats.row_cnt);
+        //     stats
+        //         .column_comb_stats
+        //         .iter()
+        //         .sorted_by_key(|x| x.0[0])
+        //         .for_each(|x| {
+        //             let sum_freq: f64 = x.1.mcvs.frequencies().values().copied().sum();
+        //             println!(
+        //                 "Col: {} (n_distinct: {}) (n_frac: {}) (mcvs: {} {}) (tdigests: {:?} {:?} {:?} {:?} {:?})",
+        //                 x.0[0],
+        //                 x.1.ndistinct,
+        //                 x.1.null_frac,
+        //                 x.1.mcvs.frequencies().len(),
+        //                 sum_freq,
+        //                 x.1.distr.as_ref().map(|d| d.quantile(0.01)),
+        //                 x.1.distr.as_ref().map(|d| d.quantile(0.25)),
+        //                 x.1.distr.as_ref().map(|d| d.quantile(0.50)),
+        //                 x.1.distr.as_ref().map(|d| d.quantile(0.75)),
+        //                 x.1.distr.as_ref().map(|d| d.quantile(0.99)),
+        //             );
+        //         });
+        // });
         // println!("{:#?}", stats);
 
         Ok(l)
