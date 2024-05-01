@@ -1,3 +1,6 @@
+// TODO: No push past join
+// TODO: support multiple depjoin (move to rewriting pass, probably)
+// TODO: Sideways information passing??
 use itertools::Itertools;
 use optd_core::rel_node::Value;
 use optd_core::rules::{Rule, RuleMatcher};
@@ -92,6 +95,10 @@ fn apply_dep_initial_distinct(
         .get_property::<SchemaPropertyBuilder>(left.clone().into(), 0)
         .len();
 
+    let right_schema_size = optimizer
+        .get_property::<SchemaPropertyBuilder>(right.clone().into(), 0)
+        .len();
+
     let correlated_col_indices = ExprList::from_rel_node(extern_cols.clone().into())
         .unwrap()
         .to_vec()
@@ -104,7 +111,7 @@ fn apply_dep_initial_distinct(
         .collect::<Vec<usize>>();
 
     // If we have no correlated columns, just emit a cross join instead
-    if (correlated_col_indices.is_empty()) {
+    if correlated_col_indices.is_empty() {
         let new_join = LogicalJoin::new(
             PlanNode::from_group(left.into()),
             PlanNode::from_group(right.into()),
@@ -142,12 +149,13 @@ fn apply_dep_initial_distinct(
     let join_cond = LogOpExpr::new(
         LogOpType::And,
         ExprList::new(
-            correlated_col_indices
+            (0..correlated_col_indices.len())
                 .into_iter()
-                .map(|x| {
+                .map(|i| {
+                    assert!(i + left_schema_size < left_schema_size + right_schema_size);
                     BinOpExpr::new(
-                        ColumnRefExpr::new(x).into_expr(),
-                        ColumnRefExpr::new(x + left_schema_size).into_expr(),
+                        ColumnRefExpr::new(i).into_expr(),
+                        ColumnRefExpr::new(i + left_schema_size).into_expr(),
                         BinOpType::Eq,
                     )
                     .into_expr()

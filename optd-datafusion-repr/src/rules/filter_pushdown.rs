@@ -8,6 +8,7 @@
 //! At a high level, filter pushdown is responsible for pushing the filter node
 //! further down the query plan whenever it is possible to do so.
 
+use core::panic;
 use std::collections::{HashMap, HashSet};
 use std::vec;
 
@@ -65,6 +66,10 @@ fn determine_join_cond_dep(
                 left_col = true;
             } else if index >= left_schema_size && index < left_schema_size + right_schema_size {
                 right_col = true;
+            } else {
+                panic!(
+                    "Column index {index} out of bounds {left_schema_size} + {right_schema_size}"
+                );
             }
         }
     }

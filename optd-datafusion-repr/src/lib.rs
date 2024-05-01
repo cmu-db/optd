@@ -225,10 +225,10 @@ impl DatafusionOptimizer {
             .optimize(root_rel)
             .expect("heuristics returns error");
         // TODO: remove this
-        println!(
-            "{}",
-            PlanNode::from_group(res.clone()).explain_to_string(None)
-        );
+        // println!(
+        //     "{}",
+        //     PlanNode::from_group(res.clone()).explain_to_string(None)
+        // );
         res
     }
 
