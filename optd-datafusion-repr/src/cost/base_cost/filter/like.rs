@@ -10,7 +10,7 @@ use crate::{
         OptCostModel,
     },
     plan_nodes::{ColumnRefExpr, ConstantExpr, LikeExpr, OptRelNode, OptRelNodeTyp},
-    properties::column_ref::{BaseTableColumnRef, ColumnRef, GroupColumnRefs},
+    properties::column_ref::{BaseTableColumnRef, BaseTableColumnRefs, ColumnRef},
 };
 
 // Used for estimating pattern selectivity character-by-character. These numbers
@@ -40,7 +40,7 @@ impl<
     pub(super) fn get_like_selectivity(
         &self,
         like_expr: &LikeExpr,
-        column_refs: &GroupColumnRefs,
+        column_refs: &BaseTableColumnRefs,
     ) -> f64 {
         let child = like_expr.child();
 
@@ -97,14 +97,15 @@ impl<
                 (0.0, 0.0)
             };
 
-            // Postgres clamps the result after histogram and before MCV. See Postgres `patternsel_common`.
-            let result = ((non_mcv_sel + mcv_freq) * (1.0 - null_frac)).clamp(0.0001, 0.9999);
+            let result = non_mcv_sel + mcv_freq;
 
             if like_expr.negated() {
                 1.0 - result - null_frac
             } else {
                 result
             }
+            // Postgres clamps the result after histogram and before MCV. See Postgres `patternsel_common`.
+            .clamp(0.0001, 0.9999)
         } else {
             UNIMPLEMENTED_SEL
         }
@@ -123,7 +124,7 @@ mod tests {
                 TestPerColumnStats, TABLE1_NAME,
             },
         },
-        properties::column_ref::{ColumnRef, GroupColumnRefs},
+        properties::column_ref::ColumnRef,
     };
 
     #[test]
@@ -137,13 +138,10 @@ mod tests {
             0.0,
             Some(TestDistribution::empty()),
         ));
-        let column_refs = GroupColumnRefs::new_test(
-            vec![ColumnRef::base_table_column_ref(
-                String::from(TABLE1_NAME),
-                0,
-            )],
-            None,
-        );
+        let column_refs = vec![ColumnRef::base_table_column_ref(
+            String::from(TABLE1_NAME),
+            0,
+        )];
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_like_selectivity(&like(0, "%abcd%", false), &column_refs),
             0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(4)
@@ -167,22 +165,18 @@ mod tests {
             null_frac,
             Some(TestDistribution::empty()),
         ));
-        let column_refs = GroupColumnRefs::new_test(
-            vec![ColumnRef::base_table_column_ref(
-                String::from(TABLE1_NAME),
-                0,
-            )],
-            None,
-        );
+        let column_refs = vec![ColumnRef::base_table_column_ref(
+            String::from(TABLE1_NAME),
+            0,
+        )];
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_like_selectivity(&like(0, "%abcd%", false), &column_refs),
-            (0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(4)) * null_frac
+            0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(4)
         );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_like_selectivity(&like(0, "%abcd%", true), &column_refs),
             1.0 - (0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(4))
-                * null_frac
-                - 0.5
+                - null_frac
         );
     }
 }

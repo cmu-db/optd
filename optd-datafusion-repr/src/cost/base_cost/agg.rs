@@ -64,7 +64,7 @@ impl<
                 let group_col_refs = optimizer
                     .get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
                 group_col_refs
-                    .column_refs()
+                    .base_table_column_refs()
                     .iter()
                     .take(group_by.len())
                     .map(|col_ref| match col_ref {

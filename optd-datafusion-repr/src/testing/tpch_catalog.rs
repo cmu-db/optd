@@ -10,6 +10,25 @@ pub struct TpchCatalog;
 impl Catalog for TpchCatalog {
     fn get(&self, name: &str) -> Schema {
         match name {
+            "region" => Schema {
+                fields: vec![
+                    Field {
+                        name: "regionkey".to_string(),
+                        typ: ConstantType::Int32,
+                        nullable: false,
+                    },
+                    Field {
+                        name: "name".to_string(),
+                        typ: ConstantType::Utf8String,
+                        nullable: false,
+                    },
+                    Field {
+                        name: "comment".to_string(),
+                        typ: ConstantType::Utf8String,
+                        nullable: false,
+                    },
+                ],
+            },
             "customer" => {
                 // Define the schema for the "customer" table
 

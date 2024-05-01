@@ -16,7 +16,7 @@ use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 
 use crate::plan_nodes::{
     ColumnRefExpr, Expr, ExprList, JoinType, LogOpExpr, LogOpType, LogicalAgg, LogicalFilter,
-    LogicalJoin, LogicalProjection, LogicalSort, OptRelNode, OptRelNodeTyp, PlanNode,
+    LogicalJoin, LogicalSort, OptRelNode, OptRelNodeTyp, PlanNode,
 };
 use crate::properties::schema::SchemaPropertyBuilder;
 
@@ -120,36 +120,6 @@ fn categorize_conds(mut categorization_fn: impl FnMut(Expr, &Vec<Expr>), cond: E
             categorize_indep_expr(cond);
         }
     }
-}
-
-define_rule!(
-    FilterProjectTransposeRule,
-    apply_filter_project_transpose,
-    (Filter, (Projection, child, [exprs]), [cond])
-);
-
-/// Datafusion only pushes filter past project when the project does not contain
-/// volatile (i.e. non-deterministic) expressions that are present in the filter
-/// Calcite only checks if the projection contains a windowing calculation
-/// We check neither of those things and do it always (which may be wrong)
-fn apply_filter_project_transpose(
-    optimizer: &impl Optimizer<OptRelNodeTyp>,
-    FilterProjectTransposeRulePicks { child, exprs, cond }: FilterProjectTransposeRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
-    let child_schema_len = optimizer
-        .get_property::<SchemaPropertyBuilder>(child.clone().into(), 0)
-        .len();
-
-    let child = PlanNode::from_group(child.into());
-    let cond_as_expr = Expr::from_rel_node(cond.into()).unwrap();
-    let exprs = ExprList::from_rel_node(exprs.into()).unwrap();
-
-    let proj_col_map = LogicalProjection::compute_column_mapping(&exprs).unwrap();
-    let rewritten_cond = proj_col_map.rewrite_condition(cond_as_expr.clone(), child_schema_len);
-
-    let new_filter_node = LogicalFilter::new(child, rewritten_cond);
-    let new_proj = LogicalProjection::new(new_filter_node.into_plan_node(), exprs);
-    vec![new_proj.into_rel_node().as_ref().clone()]
 }
 
 define_rule!(
@@ -451,12 +421,12 @@ mod tests {
     use crate::{
         plan_nodes::{
             BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ExprList, LogOpExpr, LogOpType,
-            LogicalAgg, LogicalFilter, LogicalJoin, LogicalProjection, LogicalScan, LogicalSort,
-            OptRelNode, OptRelNodeTyp,
+            LogicalAgg, LogicalFilter, LogicalJoin, LogicalScan, LogicalSort, OptRelNode,
+            OptRelNodeTyp,
         },
         rules::{
             FilterAggTransposeRule, FilterInnerJoinTransposeRule, FilterMergeRule,
-            FilterProjectTransposeRule, FilterSortTransposeRule,
+            FilterSortTransposeRule,
         },
         testing::new_test_optimizer,
     };
@@ -536,84 +506,6 @@ mod tests {
             ConstantExpr::from_rel_node(expr_2.right_child().clone().into_rel_node()).unwrap();
         assert_eq!(col_3.index(), 0);
         assert_eq!(col_4.value().as_i32(), 1);
-    }
-
-    #[test]
-    fn push_past_proj_basic() {
-        let mut test_optimizer = new_test_optimizer(Arc::new(FilterProjectTransposeRule::new()));
-
-        let scan = LogicalScan::new("customer".into());
-        let proj = LogicalProjection::new(scan.into_plan_node(), ExprList::new(vec![]));
-
-        let filter_expr = BinOpExpr::new(
-            ColumnRefExpr::new(0).into_expr(),
-            ConstantExpr::int32(5).into_expr(),
-            BinOpType::Eq,
-        )
-        .into_expr();
-
-        let filter = LogicalFilter::new(proj.into_plan_node(), filter_expr);
-        let plan = test_optimizer.optimize(filter.into_rel_node()).unwrap();
-
-        assert_eq!(plan.typ, OptRelNodeTyp::Projection);
-        assert!(matches!(plan.child(0).typ, OptRelNodeTyp::Filter));
-    }
-
-    #[test]
-    fn push_past_proj_adv() {
-        let mut test_optimizer = new_test_optimizer(Arc::new(FilterProjectTransposeRule::new()));
-
-        let scan = LogicalScan::new("customer".into());
-        let proj = LogicalProjection::new(
-            scan.into_plan_node(),
-            ExprList::new(vec![
-                ColumnRefExpr::new(0).into_expr(),
-                ColumnRefExpr::new(4).into_expr(),
-                ColumnRefExpr::new(5).into_expr(),
-                ColumnRefExpr::new(7).into_expr(),
-            ]),
-        );
-
-        let filter_expr = LogOpExpr::new(
-            LogOpType::And,
-            ExprList::new(vec![
-                BinOpExpr::new(
-                    // This one should be pushed to the left child
-                    ColumnRefExpr::new(1).into_expr(),
-                    ConstantExpr::int32(5).into_expr(),
-                    BinOpType::Eq,
-                )
-                .into_expr(),
-                BinOpExpr::new(
-                    // This one should be pushed to the right child
-                    ColumnRefExpr::new(3).into_expr(),
-                    ConstantExpr::int32(6).into_expr(),
-                    BinOpType::Eq,
-                )
-                .into_expr(),
-            ]),
-        );
-
-        let filter = LogicalFilter::new(proj.into_plan_node(), filter_expr.into_expr());
-
-        let plan = test_optimizer.optimize(filter.into_rel_node()).unwrap();
-
-        assert!(matches!(plan.typ, OptRelNodeTyp::Projection));
-        let plan_filter = LogicalFilter::from_rel_node(plan.child(0)).unwrap();
-        assert!(matches!(plan_filter.0.typ(), OptRelNodeTyp::Filter));
-        let plan_filter_expr =
-            LogOpExpr::from_rel_node(plan_filter.cond().into_rel_node()).unwrap();
-        assert!(matches!(plan_filter_expr.op_type(), LogOpType::And));
-        let op_0 = BinOpExpr::from_rel_node(plan_filter_expr.children()[0].clone().into_rel_node())
-            .unwrap();
-        let col_0 =
-            ColumnRefExpr::from_rel_node(op_0.left_child().clone().into_rel_node()).unwrap();
-        assert_eq!(col_0.index(), 4);
-        let op_1 = BinOpExpr::from_rel_node(plan_filter_expr.children()[1].clone().into_rel_node())
-            .unwrap();
-        let col_1 =
-            ColumnRefExpr::from_rel_node(op_1.left_child().clone().into_rel_node()).unwrap();
-        assert_eq!(col_1.index(), 7);
     }
 
     #[test]
