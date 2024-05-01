@@ -451,6 +451,7 @@ impl DatafusionDBMS {
             let parquet =
                 ParquetRecordBatchReaderBuilder::try_new(tbl_file.try_clone().unwrap()).unwrap();
             let schema = parquet.schema();
+            println!("Table {:?} schema: {:#?}", tbl_name, schema);
 
             let nb_cols = schema.fields().len();
             let single_cols = (0..nb_cols).map(|v| vec![v]).collect::<Vec<_>>();

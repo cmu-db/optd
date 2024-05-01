@@ -1,4 +1,4 @@
-use std::ops::Bound;
+use std::ops::{Bound, RangeBounds};
 
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
@@ -523,28 +523,40 @@ impl<
         end: Bound<&Value>,
     ) -> f64 {
         if let Some(column_stats) = self.get_column_comb_stats(table, &[col_idx]) {
-            let left_quantile = match start {
-                Bound::Unbounded => 0.0,
-                Bound::Included(value) => {
-                    self.get_column_lt_value_freq(column_stats, table, col_idx, value)
-                }
-                Bound::Excluded(value) => Self::get_column_leq_value_freq(column_stats, value),
+            // Look in the distribution.
+            let distr_quantile = {
+                let left_quantile = match start {
+                    Bound::Unbounded => 0.0,
+                    Bound::Included(value) => {
+                        self.get_column_lt_value_freq(column_stats, table, col_idx, value)
+                    }
+                    Bound::Excluded(value) => Self::get_column_leq_value_freq(column_stats, value),
+                };
+                let right_quantile = match end {
+                    Bound::Unbounded => 1.0,
+                    Bound::Included(value) => Self::get_column_leq_value_freq(column_stats, value),
+                    Bound::Excluded(value) => {
+                        self.get_column_lt_value_freq(column_stats, table, col_idx, value)
+                    }
+                };
+                assert!(
+                    left_quantile <= right_quantile,
+                    "left_quantile ({}) should be <= right_quantile ({})",
+                    left_quantile,
+                    right_quantile
+                );
+                right_quantile - left_quantile
             };
-            let right_quantile = match end {
-                Bound::Unbounded => 1.0,
-                Bound::Included(value) => Self::get_column_leq_value_freq(column_stats, value),
-                Bound::Excluded(value) => {
-                    self.get_column_lt_value_freq(column_stats, table, col_idx, value)
-                }
+            // Look in MCVs.
+            let mcv_freq = {
+                let range = (start.cloned(), end.cloned());
+                let pred = Box::new(move |val: &ColumnCombValue| {
+                    let val = val[0].as_ref().unwrap();
+                    range.contains(val)
+                });
+                column_stats.mcvs.freq_over_pred(pred)
             };
-            assert!(
-                left_quantile <= right_quantile,
-                "left_quantile ({}) should be <= right_quantile ({})",
-                left_quantile,
-                right_quantile
-            );
-            // `Distribution` does not account for NULL values, so the selectivity is smaller than frequency.
-            (right_quantile - left_quantile) * (1.0 - column_stats.null_frac)
+            distr_quantile + mcv_freq
         } else {
             DEFAULT_INEQ_SEL
         }
