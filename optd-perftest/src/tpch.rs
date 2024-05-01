@@ -1,7 +1,6 @@
 /// A wrapper around tpch-kit
 use csv2parquet::Opts;
 use datafusion::catalog::schema::SchemaProvider;
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde::{Deserialize, Serialize};
 
 use crate::shell;
@@ -150,7 +149,11 @@ impl TpchKit {
         Ok(())
     }
 
-    pub async fn make_parquet_files(&self, tpch_kit_config: &TpchKitConfig, schema_provider: Arc<dyn SchemaProvider>) -> io::Result<()> {
+    pub async fn make_parquet_files(
+        &self,
+        tpch_kit_config: &TpchKitConfig,
+        schema_provider: Arc<dyn SchemaProvider>,
+    ) -> io::Result<()> {
         let this_genned_tables_dpath = self.get_this_genned_tables_dpath(tpch_kit_config);
         let done_fpath = this_genned_tables_dpath.join("make_parquet_done");
 

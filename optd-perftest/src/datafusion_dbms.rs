@@ -490,14 +490,14 @@ impl DatafusionDBMS {
                 .iter()
                 .sorted_by_key(|x| x.0[0])
                 .for_each(|x| {
-                    let sum_freq: f64 = x.1.mcvs.frequencies().iter().map(|(_, v)| *v).sum();
+                    let sum_freq: f64 = x.1.mcvs.frequencies().values().copied().sum();
                     println!(
                         "Col: {} (n_distinct: {}) (n_frac: {}) (mcvs: {} {}) (tdigests: {:?} {:?} {:?} {:?} {:?})",
                         x.0[0],
                         x.1.ndistinct,
                         x.1.null_frac,
                         x.1.mcvs.frequencies().len(),
-                        sum_freq,                        
+                        sum_freq,
                         x.1.distr.as_ref().map(|d| d.quantile(0.01)),
                         x.1.distr.as_ref().map(|d| d.quantile(0.25)),
                         x.1.distr.as_ref().map(|d| d.quantile(0.50)),
@@ -560,15 +560,13 @@ impl DatafusionDBMS {
         let ctx = Self::new_session_ctx(None, self.adaptive, WITH_LOGICAL_FOR_TPCH).await?;
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         Self::create_tpch_tables(&ctx, &tpch_kit).await?;
-        let schema_provider = ctx
-            .catalog("datafusion")
-            .unwrap()
-            .schema("public")
-            .unwrap();
+        let schema_provider = ctx.catalog("datafusion").unwrap().schema("public").unwrap();
 
         // Generate the tables
         tpch_kit.gen_tables(tpch_kit_config)?;
-        tpch_kit.make_parquet_files(tpch_kit_config, schema_provider).await?;
+        tpch_kit
+            .make_parquet_files(tpch_kit_config, schema_provider)
+            .await?;
         // Compute base statistics on Parquet.
         let tbl_paths = tpch_kit.get_tbl_fpath_vec(tpch_kit_config, "parquet")?;
         assert!(tbl_paths.len() == tpch_kit.get_tbl_fpath_vec(tpch_kit_config, "tbl")?.len());
@@ -583,16 +581,14 @@ impl DatafusionDBMS {
         let ctx = Self::new_session_ctx(None, self.adaptive, WITH_LOGICAL_FOR_JOB).await?;
         let job_kit = JobKit::build(&self.workspace_dpath)?;
         Self::create_job_tables(&ctx, &job_kit).await?;
-        let schema_provider = ctx
-            .catalog("datafusion")
-            .unwrap()
-            .schema("public")
-            .unwrap();
+        let schema_provider = ctx.catalog("datafusion").unwrap().schema("public").unwrap();
 
         // Generate the tables.
         let job_kit = JobKit::build(&self.workspace_dpath)?;
         job_kit.download_tables(job_kit_config)?;
-        job_kit.make_parquet_files(job_kit_config, schema_provider).await?;
+        job_kit
+            .make_parquet_files(job_kit_config, schema_provider)
+            .await?;
 
         // To get the schema of each table.
         let ctx = Self::new_session_ctx(None, self.adaptive, WITH_LOGICAL_FOR_JOB).await?;

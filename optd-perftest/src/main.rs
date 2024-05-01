@@ -5,9 +5,8 @@ use optd_perftest::job::JobKitConfig;
 use optd_perftest::shell;
 use optd_perftest::tpch::{TpchKitConfig, TPCH_KIT_POSTGRES};
 use optd_perftest::{cardtest, job, tpch};
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use prettytable::{format, Table};
-use std::fs::{self, File};
+use std::fs;
 use std::path::Path;
 
 #[derive(Parser)]

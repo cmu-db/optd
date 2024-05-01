@@ -129,7 +129,11 @@ impl JobKit {
         Ok(())
     }
 
-    pub async fn make_parquet_files(&self, job_kit_config: &JobKitConfig, schema_provider: Arc<dyn SchemaProvider>) -> io::Result<()> {
+    pub async fn make_parquet_files(
+        &self,
+        job_kit_config: &JobKitConfig,
+        schema_provider: Arc<dyn SchemaProvider>,
+    ) -> io::Result<()> {
         let done_fpath = self.downloaded_tables_dpath.join("make_parquet_done");
         if !done_fpath.exists() {
             log::debug!("[start] making parquet for {}", job_kit_config);
