@@ -88,9 +88,9 @@ impl_byte_serializable_for_numeric!(usize, isize);
 impl_byte_serializable_for_numeric!(f64, f32);
 
 // Self-contained implementation of the HyperLogLog data structure.
-impl<T> HyperLogLog<T>
+impl<'a, T> HyperLogLog<T>
 where
-    T: ByteSerializable,
+    T: ByteSerializable + 'a,
 {
     /// Creates and initializes a new empty HyperLogLog.
     pub fn new(precision: u8) -> Self {
@@ -109,17 +109,23 @@ where
         }
     }
 
-    /// Digests an array of ByteSerializable data into the HLL.
-    pub fn aggregate(&mut self, data: &[T])
+    pub fn process(&mut self, element: &T)
     where
         T: ByteSerializable,
     {
-        for d in data {
-            let hash = murmur_hash(&d.to_bytes(), 0); // TODO: We ignore DoS attacks (seed).
-            let mask = (1 << (self.precision)) - 1;
-            let idx = (hash & mask) as usize; // LSB is bucket discriminator; MSB is zero streak.
-            self.registers[idx] = max(self.registers[idx], self.zeros(hash) + 1);
-        }
+        let hash = murmur_hash(&element.to_bytes(), 0); // TODO: We ignore DoS attacks (seed).
+        let mask = (1 << (self.precision)) - 1;
+        let idx = (hash & mask) as usize; // LSB is bucket discriminator; MSB is zero streak.
+        self.registers[idx] = max(self.registers[idx], self.zeros(hash) + 1);
+    }
+
+    /// Digests an array of ByteSerializable data into the HLL.
+    pub fn aggregate<I>(&mut self, data: I)
+    where
+        I: Iterator<Item = &'a T>,
+        T: ByteSerializable,
+    {
+        data.for_each(|e| self.process(e));
     }
 
     /// Merges two HLLs together and returns a new one.
@@ -191,8 +197,8 @@ mod tests {
     fn hll_small_strings() {
         let mut hll = HyperLogLog::new(12);
 
-        let data = vec!["a".to_string(), "b".to_string()];
-        hll.aggregate(&data);
+        let data = ["a".to_string(), "b".to_string()];
+        hll.aggregate(data.iter());
         assert_eq!(hll.n_distinct(), data.len() as u64);
     }
 
@@ -200,8 +206,8 @@ mod tests {
     fn hll_small_u64() {
         let mut hll = HyperLogLog::new(12);
 
-        let data = vec![1, 2];
-        hll.aggregate(&data);
+        let data = [1, 2];
+        hll.aggregate(data.iter());
         assert_eq!(hll.n_distinct(), data.len() as u64);
     }
 
@@ -239,7 +245,7 @@ mod tests {
         let relative_error = 0.05; // We allow a 5% relatative error rate.
 
         let strings = generate_random_strings(n_distinct, 100, 0);
-        hll.aggregate(&strings);
+        hll.aggregate(strings.iter());
 
         assert!(is_close(
             hll.n_distinct() as f64,
@@ -264,7 +270,7 @@ mod tests {
                     let curr_job_id = job_id.fetch_add(1, Ordering::SeqCst);
 
                     let strings = generate_random_strings(n_distinct, 100, curr_job_id);
-                    local_hll.aggregate(&strings);
+                    local_hll.aggregate(strings.iter());
 
                     assert!(is_close(
                         local_hll.n_distinct() as f64,

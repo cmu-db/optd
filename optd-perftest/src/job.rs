@@ -137,15 +137,30 @@ impl JobKit {
             .to_string()
     }
 
-    /// Get an iterator through all generated .tbl files of a given config
-    pub fn get_tbl_fpath_iter(&self) -> io::Result<impl Iterator<Item = PathBuf>> {
+    /// Get a vector of all generated .csv files in a given directory path
+    pub fn get_tbl_fpath_vec(&self, target_ext: &str) -> io::Result<Vec<PathBuf>> {
         let dirent_iter = fs::read_dir(&self.downloaded_tables_dpath)?;
-        // all results/options are fine to be unwrapped except for path.extension() because that could
-        // return None in various cases
-        let path_iter = dirent_iter.map(|dirent| dirent.unwrap().path());
-        let tbl_fpath_iter = path_iter
-            .filter(|path| path.extension().map(|ext| ext.to_str().unwrap()) == Some("csv"));
-        Ok(tbl_fpath_iter)
+
+        let entries: Vec<_> = dirent_iter.collect::<Result<Vec<_>, io::Error>>()?;
+
+        let tbl_fpaths: Vec<_> = entries
+            .into_iter()
+            .filter_map(|dirent| {
+                let path = dirent.path();
+                if path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext == target_ext)
+                    .unwrap_or(false)
+                {
+                    Some(path)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(tbl_fpaths)
     }
 
     /// Get an iterator through all generated .sql files _in order_ of a given config

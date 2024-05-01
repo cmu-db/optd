@@ -1,7 +1,8 @@
 use std::{
     fs::{self, File},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
+    time::Instant,
 };
 
 use crate::{
@@ -12,11 +13,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use datafusion::{
-    arrow::{
-        array::RecordBatchIterator,
-        csv::ReaderBuilder,
-        util::display::{ArrayFormatter, FormatOptions},
-    },
+    arrow::util::display::{ArrayFormatter, FormatOptions},
     execution::{
         config::SessionConfig,
         context::{SessionContext, SessionState},
@@ -25,6 +22,7 @@ use datafusion::{
     },
     sql::{parser::DFParser, sqlparser::dialect::GenericDialect},
 };
+
 use datafusion_optd_cli::helper::unescape_input;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
@@ -32,7 +30,12 @@ use optd_datafusion_repr::{
     cost::{DataFusionBaseTableStats, DataFusionPerTableStats},
     DatafusionOptimizer,
 };
+use parquet::arrow::arrow_reader::{
+    ArrowReaderMetadata, ParquetRecordBatchReader, ParquetRecordBatchReaderBuilder,
+};
+use rayon::prelude::*;
 use regex::Regex;
+
 pub struct DatafusionDBMS {
     workspace_dpath: PathBuf,
     rebuild_cached_stats: bool,
@@ -367,7 +370,7 @@ impl DatafusionDBMS {
         self.create_tpch_tables(&tpch_kit).await?;
 
         // Load the data by creating an external table first and copying the data to real tables.
-        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_iter(tpch_kit_config).unwrap();
+        let tbl_fpath_iter = tpch_kit.get_tbl_fpath_vec(tpch_kit_config, "tbl").unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
             Self::execute(
@@ -408,6 +411,74 @@ impl DatafusionDBMS {
         Ok(())
     }
 
+    fn build_batch_reader(
+        tbl_fpath: PathBuf,
+        num_row_groups: usize,
+    ) -> impl FnOnce() -> Vec<ParquetRecordBatchReader> {
+        move || {
+            let groups: Vec<ParquetRecordBatchReader> = (0..num_row_groups)
+                .map(|group_num| {
+                    let tbl_file = File::open(tbl_fpath.clone()).expect("Failed to open file");
+                    let metadata =
+                        ArrowReaderMetadata::load(&tbl_file, Default::default()).unwrap();
+
+                    ParquetRecordBatchReaderBuilder::new_with_metadata(
+                        tbl_file.try_clone().unwrap(),
+                        metadata.clone(),
+                    )
+                    .with_row_groups(vec![group_num])
+                    .build()
+                    .unwrap()
+                })
+                .collect();
+
+            groups
+        }
+    }
+
+    fn gen_base_stats(tbl_paths: Vec<PathBuf>) -> anyhow::Result<DataFusionBaseTableStats> {
+        let base_table_stats = Mutex::new(DataFusionBaseTableStats::default());
+        let now = Instant::now();
+
+        tbl_paths.par_iter().for_each(|tbl_fpath| {
+            let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(tbl_fpath);
+            let start = Instant::now();
+
+            // We get the schema from the Parquet file, to ensure there's no divergence between
+            // the context and the file we are going to read.
+            // Further rounds of refactoring should adapt the entry point of stat gen.
+            let tbl_file = File::open(tbl_fpath).expect("Failed to open file");
+            let parquet =
+                ParquetRecordBatchReaderBuilder::try_new(tbl_file.try_clone().unwrap()).unwrap();
+            let schema = parquet.schema();
+
+            let nb_cols = schema.fields().len();
+            let single_cols = (0..nb_cols).map(|v| vec![v]).collect::<Vec<_>>();
+
+            let stats_result = DataFusionPerTableStats::from_record_batches(
+                Self::build_batch_reader(tbl_fpath.clone(), parquet.metadata().num_row_groups()),
+                Self::build_batch_reader(tbl_fpath.clone(), parquet.metadata().num_row_groups()),
+                single_cols,
+                schema.clone(),
+            );
+
+            if let Ok(per_table_stats) = stats_result {
+                let mut stats = base_table_stats.lock().unwrap();
+                stats.insert(tbl_name.to_string(), per_table_stats);
+            }
+
+            println!(
+                "Table {:?} took in total {:?}...",
+                tbl_name,
+                start.elapsed()
+            );
+        });
+
+        println!("Total execution time {:?}...", now.elapsed());
+
+        Ok(base_table_stats.into_inner()?)
+    }
+
     // Load job data from a .csv file.
     async fn load_job_data_no_stats(
         &mut self,
@@ -423,7 +494,7 @@ impl DatafusionDBMS {
         Self::create_job_tables(&ctx, &job_kit).await?;
 
         // Load each table using register_csv()
-        let tbl_fpath_iter = job_kit.get_tbl_fpath_iter().unwrap();
+        let tbl_fpath_iter = job_kit.get_tbl_fpath_vec("csv").unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
             let schema = ctx
@@ -469,51 +540,16 @@ impl DatafusionDBMS {
             Self::execute(&ctx, ddl).await?;
         }
 
-        // Build the DataFusionBaseTableStats object.
-        let mut base_table_stats = DataFusionBaseTableStats::default();
-        for tbl_fpath in tpch_kit.get_tbl_fpath_iter(tpch_kit_config).unwrap() {
-            let tbl_name = TpchKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
-            let schema = ctx
-                .catalog("datafusion")
-                .unwrap()
-                .schema("public")
-                .unwrap()
-                .table(&tbl_name)
-                .await
-                .unwrap()
-                .schema();
-
-            let nb_cols = schema.fields().len();
-            let single_cols = (0..nb_cols).map(|v| vec![v]);
-            /*let pairwise_cols = iproduct!(0..nb_cols, 0..nb_cols)
-            .filter(|(i, j)| i != j)
-            .map(|(i, j)| vec![i, j]);*/
-
-            base_table_stats.insert(
-                tbl_name.to_string(),
-                DataFusionPerTableStats::from_record_batches(
-                    || {
-                        let tbl_file = fs::File::open(&tbl_fpath)?;
-                        let csv_reader1 = ReaderBuilder::new(schema.clone())
-                            .has_header(false)
-                            .with_delimiter(b'|')
-                            .build(tbl_file)
-                            .unwrap();
-                        Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))
-                    },
-                    single_cols.collect(),
-                )?,
-            );
-        }
-
-        Ok(base_table_stats)
+        // Compute base statistics on Parquet.
+        let tbl_paths = tpch_kit.get_tbl_fpath_vec(tpch_kit_config, "parquet")?;
+        Self::gen_base_stats(tbl_paths)
     }
 
     async fn get_job_stats(
         &mut self,
         job_kit_config: &JobKitConfig,
     ) -> anyhow::Result<DataFusionBaseTableStats> {
-        // Generate the tables
+        // Generate the tables.
         let job_kit = JobKit::build(&self.workspace_dpath)?;
         job_kit.download_tables(job_kit_config)?;
 
@@ -529,45 +565,9 @@ impl DatafusionDBMS {
             Self::execute(&ctx, ddl).await?;
         }
 
-        // Build the DataFusionBaseTableStats object.
-        let mut base_table_stats = DataFusionBaseTableStats::default();
-        for tbl_fpath in job_kit.get_tbl_fpath_iter().unwrap() {
-            let tbl_name = JobKit::get_tbl_name_from_tbl_fpath(&tbl_fpath);
-            let schema = ctx
-                .catalog("datafusion")
-                .unwrap()
-                .schema("public")
-                .unwrap()
-                .table(&tbl_name)
-                .await
-                .unwrap()
-                .schema();
-
-            let nb_cols = schema.fields().len();
-            let single_cols = (0..nb_cols).map(|v| vec![v]);
-            /*let pairwise_cols = iproduct!(0..nb_cols, 0..nb_cols)
-            .filter(|(i, j)| i != j)
-            .map(|(i, j)| vec![i, j]);*/
-
-            base_table_stats.insert(
-                tbl_name.to_string(),
-                DataFusionPerTableStats::from_record_batches(
-                    || {
-                        let tbl_file = fs::File::open(&tbl_fpath)?;
-                        let csv_reader1 = ReaderBuilder::new(schema.clone())
-                            .has_header(false)
-                            .with_delimiter(b',')
-                            .with_escape(b'\\')
-                            .build(tbl_file)
-                            .unwrap();
-                        Ok(RecordBatchIterator::new(csv_reader1, schema.clone()))
-                    },
-                    single_cols.collect(),
-                )?,
-            );
-        }
-
-        Ok(base_table_stats)
+        // Compute base statistics on Parquet.
+        let tbl_paths = job_kit.get_tbl_fpath_vec("parquet").unwrap();
+        Self::gen_base_stats(tbl_paths)
     }
 }
 

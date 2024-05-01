@@ -335,6 +335,30 @@ impl Expr {
             .unwrap(),
         )
     }
+
+    /// Recursively retrieves all column references in the expression
+    /// using a provided function.
+    /// The provided function will, given a ColumnRefExpr's index,
+    /// return a Vec<Expr> including the expr in col ref.
+    pub fn get_column_refs(&self) -> Vec<Expr> {
+        assert!(self.typ().is_expression());
+        if let OptRelNodeTyp::ColumnRef = self.typ() {
+            let col_ref = Expr::from_rel_node(self.0.clone()).unwrap();
+            return vec![col_ref];
+        }
+
+        let children = self.0.children.clone();
+        let children = children.into_iter().map(|child| {
+            if child.typ == OptRelNodeTyp::List {
+                // TODO: What should we do with List?
+                return vec![];
+            }
+            Expr::from_rel_node(child.clone())
+                .unwrap()
+                .get_column_refs()
+        });
+        children.collect_vec().concat()
+    }
 }
 
 impl OptRelNode for Expr {

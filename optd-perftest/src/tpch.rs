@@ -207,19 +207,27 @@ impl TpchKit {
             .to_string()
     }
 
-    /// Get an iterator through all generated .tbl files of a given config
-    pub fn get_tbl_fpath_iter(
+    /// Get a vector of all generated .tbl files of a given config
+    pub fn get_tbl_fpath_vec(
         &self,
         tpch_kit_config: &TpchKitConfig,
-    ) -> io::Result<impl Iterator<Item = PathBuf>> {
+        target_ext: &str,
+    ) -> io::Result<Vec<PathBuf>> {
         let this_genned_tables_dpath = self.get_this_genned_tables_dpath(tpch_kit_config);
         let dirent_iter = fs::read_dir(this_genned_tables_dpath)?;
-        // all results/options are fine to be unwrapped except for path.extension() because that could
-        // return None in various cases
-        let path_iter = dirent_iter.map(|dirent| dirent.unwrap().path());
-        let tbl_fpath_iter = path_iter
-            .filter(|path| path.extension().map(|ext| ext.to_str().unwrap()) == Some("tbl"));
-        Ok(tbl_fpath_iter)
+
+        let tbl_fpath_vec: Vec<PathBuf> = dirent_iter
+            .filter_map(|dirent| dirent.ok())
+            .map(|dirent| dirent.path())
+            .filter(|path| {
+                path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext == target_ext)
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        Ok(tbl_fpath_vec)
     }
 
     /// Get an iterator through all generated .sql files _in order_ of a given config

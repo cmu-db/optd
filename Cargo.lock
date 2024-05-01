@@ -25,9 +25,9 @@ checksum = "aae1277d39aeec15cb388266ecc24b11c80469deae6067e17a1a7aa9e5c1f234"
 
 [[package]]
 name = "ahash"
-version = "0.8.6"
+version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91429305e9f0a25f6205c5b8e0d2db09e0708a7a6df0f42212bb56c32c8ac97a"
+checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
 dependencies = [
  "cfg-if",
  "const-random",
@@ -958,9 +958,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "chrono"
-version = "0.4.31"
+version = "0.4.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f2c685bad3eb3d45a01354cedb7d5faa66194d1d58ba6e267a8de788f79db38"
+checksum = "a21f936df1771bf62b77f047b726c4625ff2e8aa607c01ec06e5a05bd8463401"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -968,7 +968,7 @@ dependencies = [
  "num-traits",
  "serde",
  "wasm-bindgen",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.0",
 ]
 
 [[package]]
@@ -2037,6 +2037,7 @@ checksum = "290f1a1d9242c78d09ce40a5e87e7554ee637af1351968159f4952f028f75604"
 dependencies = [
  "ahash",
  "allocator-api2",
+ "serde",
 ]
 
 [[package]]
@@ -2853,6 +2854,7 @@ dependencies = [
  "optd-gungnir",
  "ordered-float 4.2.0",
  "pretty-xmlish",
+ "rayon",
  "serde",
  "serde_with",
  "test-case",
@@ -2866,6 +2868,7 @@ name = "optd-gungnir"
 version = "0.1.0"
 dependencies = [
  "crossbeam",
+ "hashbrown 0.14.3",
  "itertools 0.11.0",
  "lazy_static",
  "optd-core",
@@ -2894,7 +2897,9 @@ dependencies = [
  "optd-datafusion-bridge",
  "optd-datafusion-repr",
  "optd-gungnir",
+ "parquet",
  "prettytable-rs",
+ "rayon",
  "regex",
  "serde",
  "serde_json",
@@ -3448,6 +3453,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cbf7e9e623549b0e21f6e97cf8ecf247c1a8fd2e8a992ae265314300b2455d5c"
 dependencies = [
  "rand_core 0.3.1",
+]
+
+[[package]]
+name = "rayon"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b418a60154510ca1a002a752ca9714984e21e4241e804d32555251faf8b78ffa"
+dependencies = [
+ "either",
+ "rayon-core",
+]
+
+[[package]]
+name = "rayon-core"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1465873a3dfdaa8ae7cb14b4383657caab0b3e8a0aa9ae8e04b044854c8dfce2"
+dependencies = [
+ "crossbeam-deque",
+ "crossbeam-utils",
 ]
 
 [[package]]
