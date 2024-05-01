@@ -1,3 +1,5 @@
+use csv2parquet::Opts;
+use datafusion::catalog::schema::SchemaProvider;
 /// A wrapper around job-kit
 use serde::{Deserialize, Serialize};
 
@@ -7,6 +9,7 @@ use std::fs;
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const JOB_KIT_REPO_URL: &str = "https://github.com/wangpatrick57/job-kit.git";
 const JOB_TABLES_URL: &str = "https://homepages.cwi.nl/~boncz/job/imdb.tgz";
@@ -126,7 +129,25 @@ impl JobKit {
         Ok(())
     }
 
-    pub fn make_parquet_files(&self, job_kit_config: &JobKitConfig) -> io::Result<()> {
+    pub async fn make_parquet_files(&self, job_kit_config: &JobKitConfig, schema_provider: Arc<dyn SchemaProvider>) -> io::Result<()> {
+        let done_fpath = self.downloaded_tables_dpath.join("make_parquet_done");
+        if !done_fpath.exists() {
+            log::debug!("[start] making parquet for {}", job_kit_config);
+            for csv_tbl_fpath in self.get_tbl_fpath_vec("csv").unwrap() {
+                let tbl_name = Self::get_tbl_name_from_tbl_fpath(&csv_tbl_fpath);
+                let schema = schema_provider.table(&tbl_name).await.unwrap().schema();
+                let mut parquet_tbl_fpath = csv_tbl_fpath.clone();
+                parquet_tbl_fpath.set_extension("parquet");
+                let mut opts = Opts::new(csv_tbl_fpath, parquet_tbl_fpath.clone());
+                opts.delimiter = ',';
+                opts.schema = Some(schema.as_ref().clone());
+                csv2parquet::convert(opts).unwrap();
+            }
+            File::create(done_fpath)?;
+            log::debug!("[end] making parquet for {}", job_kit_config);
+        } else {
+            log::debug!("[skip] making parquet for {}", job_kit_config);
+        }
         Ok(())
     }
 

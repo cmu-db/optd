@@ -1,5 +1,7 @@
 /// A wrapper around tpch-kit
 use csv2parquet::Opts;
+use datafusion::catalog::schema::SchemaProvider;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde::{Deserialize, Serialize};
 
 use crate::shell;
@@ -10,6 +12,7 @@ use std::fs;
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const TPCH_KIT_REPO_URL: &str = "https://github.com/wangpatrick57/tpch-kit.git";
 pub const TPCH_KIT_POSTGRES: &str = "POSTGRESQL";
@@ -147,17 +150,27 @@ impl TpchKit {
         Ok(())
     }
 
-    pub fn make_parquet_files(&self, tpch_kit_config: &TpchKitConfig) -> io::Result<()> {
-        // let csv_tbl_fpaths = self.get_tbl_fpath_vec(tpch_kit_config, "tbl").unwrap();
+    pub async fn make_parquet_files(&self, tpch_kit_config: &TpchKitConfig, schema_provider: Arc<dyn SchemaProvider>) -> io::Result<()> {
+        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(tpch_kit_config);
+        let done_fpath = this_genned_tables_dpath.join("make_parquet_done");
 
-        // for csv_tbl_fpath in csv_tbl_fpaths {
-        //     let mut parquet_tbl_fpath = csv_tbl_fpath.clone();
-        //     parquet_tbl_fpath.set_extension("parquet");
-        //     println!("csv_tbl_fpath={:?}, parquet_tbl_fpath={:?}", csv_tbl_fpath, parquet_tbl_fpath);
-        //     let mut opts = Opts::new(csv_tbl_fpath, parquet_tbl_fpath);
-        //     opts.delimiter = '|';
-        //     csv2parquet::convert(opts).unwrap();
-        // }
+        if !done_fpath.exists() {
+            log::debug!("[start] making parquet for {}", tpch_kit_config);
+            for csv_tbl_fpath in self.get_tbl_fpath_vec(tpch_kit_config, "tbl").unwrap() {
+                let tbl_name = Self::get_tbl_name_from_tbl_fpath(&csv_tbl_fpath);
+                let schema = schema_provider.table(&tbl_name).await.unwrap().schema();
+                let mut parquet_tbl_fpath = csv_tbl_fpath.clone();
+                parquet_tbl_fpath.set_extension("parquet");
+                let mut opts = Opts::new(csv_tbl_fpath, parquet_tbl_fpath.clone());
+                opts.delimiter = '|';
+                opts.schema = Some(schema.as_ref().clone());
+                csv2parquet::convert(opts).unwrap();
+            }
+            File::create(done_fpath)?;
+            log::debug!("[end] making parquet for {}", tpch_kit_config);
+        } else {
+            log::debug!("[skip] making parquet for {}", tpch_kit_config);
+        }
 
         Ok(())
     }
