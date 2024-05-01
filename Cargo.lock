@@ -614,7 +614,7 @@ dependencies = [
 [[package]]
 name = "arrow-tools"
 version = "0.18.0"
-source = "git+https://github.com/wangpatrick57/arrow-tools.git?branch=main#857393e949471d8e6d9e16281a3295cf16f2e155"
+source = "git+https://github.com/wangpatrick57/arrow-tools.git?branch=main#428e2375bdf0fb341d21b69aff81c15d9cb97d2d"
 
 [[package]]
 name = "assert_approx_eq"
@@ -1525,7 +1525,7 @@ dependencies = [
 [[package]]
 name = "csv2parquet"
 version = "0.18.0"
-source = "git+https://github.com/wangpatrick57/arrow-tools.git?branch=main#857393e949471d8e6d9e16281a3295cf16f2e155"
+source = "git+https://github.com/wangpatrick57/arrow-tools.git?branch=main#428e2375bdf0fb341d21b69aff81c15d9cb97d2d"
 dependencies = [
  "arrow 51.0.0",
  "arrow-schema 51.0.0",
