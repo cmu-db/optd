@@ -4,7 +4,10 @@ mod join;
 mod limit;
 pub(crate) mod stats;
 
-use crate::{plan_nodes::OptRelNodeTyp, properties::column_ref::ColumnRef};
+use crate::{
+    plan_nodes::OptRelNodeTyp,
+    properties::column_ref::{BaseTableColumnRef, ColumnRef},
+};
 use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
@@ -207,7 +210,7 @@ impl<
         &self,
         col_ref: &ColumnRef,
     ) -> Option<&ColumnCombValueStats<M, D>> {
-        if let ColumnRef::BaseTableColumnRef { table, col_idx } = col_ref {
+        if let ColumnRef::BaseTableColumnRef(BaseTableColumnRef { table, col_idx }) = col_ref {
             self.get_column_comb_stats(table, &[*col_idx])
         } else {
             None
@@ -230,6 +233,7 @@ impl<
 /// and optd-datafusion-repr
 #[cfg(test)]
 mod tests {
+    use arrow_schema::DataType;
     use itertools::Itertools;
     use optd_core::rel_node::Value;
     use serde::{Deserialize, Serialize};
@@ -238,8 +242,9 @@ mod tests {
     use crate::{
         cost::base_cost::stats::*,
         plan_nodes::{
-            BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, InListExpr,
-            LikeExpr, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
+            BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList,
+            InListExpr, LikeExpr, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr,
+            UnOpType,
         },
     };
 
@@ -314,6 +319,8 @@ mod tests {
 
     pub const TABLE1_NAME: &str = "table1";
     pub const TABLE2_NAME: &str = "table2";
+    pub const TABLE3_NAME: &str = "table3";
+    pub const TABLE4_NAME: &str = "table4";
 
     // one column is sufficient for all filter selectivity tests
     pub fn create_one_column_cost_model(per_column_stats: TestPerColumnStats) -> TestOptCostModel {
@@ -327,7 +334,7 @@ mod tests {
         )
     }
 
-    /// Two columns is sufficient for all join selectivity tests
+    /// Create a cost model with two columns, one for each table. Each column has 100 values.
     pub fn create_two_table_cost_model(
         tbl1_per_column_stats: TestPerColumnStats,
         tbl2_per_column_stats: TestPerColumnStats,
@@ -337,6 +344,84 @@ mod tests {
             tbl2_per_column_stats,
             100,
             100,
+        )
+    }
+
+    /// Create a cost model with three columns, one for each table. Each column has 100 values.
+    pub fn create_three_table_cost_model(
+        tbl1_per_column_stats: TestPerColumnStats,
+        tbl2_per_column_stats: TestPerColumnStats,
+        tbl3_per_column_stats: TestPerColumnStats,
+    ) -> TestOptCostModel {
+        OptCostModel::new(
+            vec![
+                (
+                    String::from(TABLE1_NAME),
+                    TableStats::new(
+                        100,
+                        vec![(vec![0], tbl1_per_column_stats)].into_iter().collect(),
+                    ),
+                ),
+                (
+                    String::from(TABLE2_NAME),
+                    TableStats::new(
+                        100,
+                        vec![(vec![0], tbl2_per_column_stats)].into_iter().collect(),
+                    ),
+                ),
+                (
+                    String::from(TABLE3_NAME),
+                    TableStats::new(
+                        100,
+                        vec![(vec![0], tbl3_per_column_stats)].into_iter().collect(),
+                    ),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        )
+    }
+
+    /// Create a cost model with three columns, one for each table. Each column has 100 values.
+    pub fn create_four_table_cost_model(
+        tbl1_per_column_stats: TestPerColumnStats,
+        tbl2_per_column_stats: TestPerColumnStats,
+        tbl3_per_column_stats: TestPerColumnStats,
+        tbl4_per_column_stats: TestPerColumnStats,
+    ) -> TestOptCostModel {
+        OptCostModel::new(
+            vec![
+                (
+                    String::from(TABLE1_NAME),
+                    TableStats::new(
+                        100,
+                        vec![(vec![0], tbl1_per_column_stats)].into_iter().collect(),
+                    ),
+                ),
+                (
+                    String::from(TABLE2_NAME),
+                    TableStats::new(
+                        100,
+                        vec![(vec![0], tbl2_per_column_stats)].into_iter().collect(),
+                    ),
+                ),
+                (
+                    String::from(TABLE3_NAME),
+                    TableStats::new(
+                        100,
+                        vec![(vec![0], tbl3_per_column_stats)].into_iter().collect(),
+                    ),
+                ),
+                (
+                    String::from(TABLE4_NAME),
+                    TableStats::new(
+                        100,
+                        vec![(vec![0], tbl4_per_column_stats)].into_iter().collect(),
+                    ),
+                ),
+            ]
+            .into_iter()
+            .collect(),
         )
     }
 
@@ -377,6 +462,14 @@ mod tests {
 
     pub fn cnst(value: Value) -> OptRelNodeRef {
         ConstantExpr::new(value).into_rel_node()
+    }
+
+    pub fn cast(child: OptRelNodeRef, cast_type: DataType) -> OptRelNodeRef {
+        CastExpr::new(
+            Expr::from_rel_node(child).expect("child should be an Expr"),
+            cast_type,
+        )
+        .into_rel_node()
     }
 
     pub fn bin_op(op_type: BinOpType, left: OptRelNodeRef, right: OptRelNodeRef) -> OptRelNodeRef {

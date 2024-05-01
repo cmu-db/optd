@@ -45,6 +45,8 @@ serde = "1.0"
 serde_json = "1.0"
 itertools = "0.12.1"
 test-case = "3.3"
+rayon = "1.10"
+parquet = "47.0.0"
 
 [dev_dependencies]
 assert_cmd = "2.0"

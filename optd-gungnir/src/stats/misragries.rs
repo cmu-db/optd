@@ -5,11 +5,11 @@
 //! For more details, refer to:
 //! https://people.csail.mit.edu/rrw/6.045-2017/encalgs-mg.pdf
 
-use std::{cmp::min, collections::HashMap, hash::Hash};
-
+use hashbrown::HashMap;
 use itertools::Itertools;
+use std::{cmp::min, hash::Hash};
 
-pub const DEFAULT_K_TO_TRACK: u16 = 100;
+pub const DEFAULT_K_TO_TRACK: u16 = 200;
 
 /// The Misra-Gries structure to approximate the k most frequent elements in
 /// a stream of N elements. It will always identify elements with frequency
@@ -18,12 +18,14 @@ pub const DEFAULT_K_TO_TRACK: u16 = 100;
 pub struct MisraGries<T: PartialEq + Eq + Hash + Clone> {
     frequencies: HashMap<T, i32>, // The approximated frequencies of an element T.
     k: u16,                       // The max size of our frequencies hashmap.
+
+    least_frequent: Option<(T, i32)>, // The least frequent element in frequencies.
 }
 
 // Self-contained implementation of the Misra-Gries data structure.
-impl<T> MisraGries<T>
+impl<'a, T> MisraGries<T>
 where
-    T: PartialEq + Eq + Hash + Clone,
+    T: PartialEq + Eq + Hash + Clone + 'a,
 {
     /// Creates and initializes a new empty Misra-Gries.
     pub fn new(k: u16) -> Self {
@@ -32,6 +34,8 @@ where
         MisraGries::<T> {
             frequencies: HashMap::with_capacity(k as usize),
             k,
+
+            least_frequent: None,
         }
     }
 
@@ -44,27 +48,44 @@ where
     }
 
     // Inserts an element occ times into the `self` Misra-Gries structure.
-    fn insert_element(&mut self, elem: T, occ: i32) {
-        match self.frequencies.get_mut(&elem) {
-            Some(freq) => *freq += occ, // Hit.
+    pub fn insert_element(&mut self, elem: &T, occ: i32) {
+        match self.frequencies.get_mut(elem) {
+            Some(freq) => {
+                *freq += occ; // Hit.
+                if *elem == self.least_frequent.as_ref().unwrap().0 {
+                    self.least_frequent = Some(self.find_least_frequent());
+                }
+            }
             None => {
                 if self.frequencies.len() < self.k as usize {
-                    self.frequencies.insert(elem, occ); // Discovery phase.
+                    self.frequencies.insert(elem.clone(), occ); // Discovery phase.
+
+                    match &self.least_frequent {
+                        Some(prev) => {
+                            if prev.1 > occ {
+                                self.least_frequent = Some((elem.clone(), occ));
+                            }
+                        }
+                        None => self.least_frequent = Some((elem.clone(), occ)),
+                    }
                 } else {
-                    // Check if there *will* be an evictable frequency; decrement & insert.
-                    let (smallest_freq_key, smallest_freq) = self.find_least_frequent();
+                    let smallest_freq = self.least_frequent.as_ref().unwrap().1;
 
                     let decr = min(smallest_freq, occ);
                     if decr > 0 {
                         for freq in self.frequencies.values_mut() {
                             *freq -= decr;
                         }
+                        self.least_frequent.as_mut().unwrap().1 -= decr;
                     }
 
                     let delta = smallest_freq - occ;
                     if delta < 0 {
-                        self.frequencies.remove(&smallest_freq_key);
-                        self.frequencies.insert(elem, -delta);
+                        self.frequencies
+                            .remove(&self.least_frequent.as_ref().unwrap().0);
+                        self.frequencies.insert(elem.clone(), -delta);
+
+                        self.least_frequent = Some(self.find_least_frequent());
                     }
                 }
             }
@@ -72,9 +93,11 @@ where
     }
 
     /// Digests an array of data into the Misra-Gries structure.
-    pub fn aggregate(&mut self, data: &[T]) {
-        data.iter()
-            .for_each(|key| self.insert_element(key.clone(), 1));
+    pub fn aggregate<I>(&mut self, data: I)
+    where
+        I: Iterator<Item = &'a T>,
+    {
+        data.for_each(|key| self.insert_element(key, 1));
     }
 
     /// Merges another MisraGries into the current one.
@@ -85,7 +108,7 @@ where
         other
             .frequencies
             .iter()
-            .for_each(|(key, occ)| self.insert_element(key.clone(), *occ));
+            .for_each(|(key, occ)| self.insert_element(key, *occ));
     }
 
     /// Returns all elements with frequency f >= (n/k),
@@ -108,10 +131,10 @@ mod tests {
 
     #[test]
     fn aggregate_simple() {
-        let data = vec![0, 1, 2, 3];
+        let data = [0, 1, 2, 3];
         let mut misra_gries = MisraGries::<i32>::new(data.len() as u16);
 
-        misra_gries.aggregate(&data);
+        misra_gries.aggregate(data.iter());
 
         for key in misra_gries.most_frequent_keys() {
             assert!(data.contains(key));
@@ -120,12 +143,12 @@ mod tests {
 
     #[test]
     fn aggregate_double() {
-        let data = vec![0, 1, 2, 3];
+        let data = [0, 1, 2, 3];
         let data_dup = [data.as_slice(), data.as_slice()].concat();
 
         let mut misra_gries = MisraGries::<i32>::new(data.len() as u16);
 
-        misra_gries.aggregate(&data_dup);
+        misra_gries.aggregate(data_dup.iter());
 
         for key in misra_gries.most_frequent_keys() {
             assert!(data.contains(key));
@@ -169,7 +192,7 @@ mod tests {
         let data = create_zipfian(n_distinct, 0);
         let mut misra_gries = MisraGries::<i32>::new(k as u16);
 
-        misra_gries.aggregate(&data);
+        misra_gries.aggregate(data.iter());
 
         check_zipfian(&misra_gries, n_distinct);
     }
@@ -189,7 +212,7 @@ mod tests {
                     let curr_job_id = job_id.fetch_add(1, Ordering::SeqCst);
 
                     let data = create_zipfian(n_distinct, curr_job_id as u64);
-                    local_misra_gries.aggregate(&data);
+                    local_misra_gries.aggregate(data.iter());
 
                     check_zipfian(&local_misra_gries, n_distinct);
 

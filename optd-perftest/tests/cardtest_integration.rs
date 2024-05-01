@@ -45,7 +45,6 @@ mod tests {
             "--workspace",
             WORKSPACE,
             "cardtest",
-            "--benchmark-name",
             benchmark_name,
             // make sure scale factor is low so the test runs fast
             "--scale-factor",

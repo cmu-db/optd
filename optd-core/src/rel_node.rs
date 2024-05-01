@@ -8,6 +8,8 @@ use std::{
     sync::Arc,
 };
 
+use arrow_schema::DataType;
+use chrono::NaiveDate;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -73,25 +75,29 @@ pub enum Value {
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UInt8(x) => write!(f, "{x}"),
-            Self::UInt16(x) => write!(f, "{x}"),
-            Self::UInt32(x) => write!(f, "{x}"),
-            Self::UInt64(x) => write!(f, "{x}"),
-            Self::Int8(x) => write!(f, "{x}"),
-            Self::Int16(x) => write!(f, "{x}"),
-            Self::Int32(x) => write!(f, "{x}"),
-            Self::Int64(x) => write!(f, "{x}"),
-            Self::Int128(x) => write!(f, "{x}"),
-            Self::Float(x) => write!(f, "{}", x.0),
+            Self::UInt8(x) => write!(f, "{x}(u8)"),
+            Self::UInt16(x) => write!(f, "{x}(u16)"),
+            Self::UInt32(x) => write!(f, "{x}(u32)"),
+            Self::UInt64(x) => write!(f, "{x}(u64)"),
+            Self::Int8(x) => write!(f, "{x}(i8)"),
+            Self::Int16(x) => write!(f, "{x}(i16)"),
+            Self::Int32(x) => write!(f, "{x}(i32)"),
+            Self::Int64(x) => write!(f, "{x}(i64)"),
+            Self::Int128(x) => write!(f, "{x}(i128)"),
+            Self::Float(x) => write!(f, "{}(float)", x.0),
             Self::String(x) => write!(f, "\"{x}\""),
             Self::Bool(x) => write!(f, "{x}"),
-            Self::Date32(x) => write!(f, "{x}"),
-            Self::Decimal128(x) => write!(f, "{x}"),
+            Self::Date32(x) => write!(f, "{x}(date32)"),
+            Self::Decimal128(x) => write!(f, "{x}(decimal128)"),
             Self::Serialized(x) => write!(f, "<len:{}>", x.len()),
         }
     }
 }
 
+/// The `as_*()` functions do not perform conversions. This is *unlike* the `as`
+/// keyword in rust.
+///
+/// If you want to perform conversions, use the `to_*()` functions.
 impl Value {
     pub fn as_u8(&self) -> u8 {
         match self {
@@ -181,6 +187,28 @@ impl Value {
         match self {
             Value::Serialized(i) => i.clone(),
             _ => panic!("Value is not a serialized"),
+        }
+    }
+
+    pub fn convert_to_type(&self, typ: DataType) -> Value {
+        match typ {
+            DataType::Int32 => Value::Int32(match self {
+                Value::Int32(i32) => *i32,
+                Value::Int64(i64) => (*i64).try_into().unwrap(),
+                _ => panic!("{self} could not be converted into an Int32"),
+            }),
+            DataType::Date32 => Value::Date32(match self {
+                Value::Date32(date32) => *date32,
+                Value::String(str) => {
+                    let date = NaiveDate::parse_from_str(str, "%Y-%m-%d").unwrap();
+                    let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+                    let duration_since_epoch = date.signed_duration_since(epoch);
+                    let days_since_epoch: i32 = duration_since_epoch.num_days() as i32;
+                    days_since_epoch
+                }
+                _ => panic!("{self} could not be converted into an Date32"),
+            }),
+            _ => unimplemented!("Have not implemented convert_to_type for DataType {typ}"),
         }
     }
 }

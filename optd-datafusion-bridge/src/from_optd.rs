@@ -1,10 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{bail, Context, Result};
-use arrow_schema::IntervalUnit;
 use async_recursion::async_recursion;
 use datafusion::{
-    arrow::datatypes::{DataType, Field, Schema, SchemaRef},
+    arrow::datatypes::{Field, Schema, SchemaRef},
     datasource::source_as_provider,
     logical_expr::Operator,
     physical_expr,
@@ -35,27 +34,8 @@ use optd_datafusion_repr::{
 
 use crate::{physical_collector::CollectorExec, OptdPlanContext};
 
-// TODO: current DataType and ConstantType are not 1 to 1 mapping
-// optd schema stores constantType from data type in catalog.get
-// for decimal128, the precision is lost
 fn from_optd_schema(optd_schema: OptdSchema) -> Schema {
-    let match_type = |typ: &ConstantType| match typ {
-        ConstantType::Any => unimplemented!(),
-        ConstantType::Bool => DataType::Boolean,
-        ConstantType::UInt8 => DataType::UInt8,
-        ConstantType::UInt16 => DataType::UInt16,
-        ConstantType::UInt32 => DataType::UInt32,
-        ConstantType::UInt64 => DataType::UInt64,
-        ConstantType::Int8 => DataType::Int8,
-        ConstantType::Int16 => DataType::Int16,
-        ConstantType::Int32 => DataType::Int32,
-        ConstantType::Int64 => DataType::Int64,
-        ConstantType::Float64 => DataType::Float64,
-        ConstantType::Date => DataType::Date32,
-        ConstantType::IntervalMonthDateNano => DataType::Interval(IntervalUnit::MonthDayNano),
-        ConstantType::Decimal => DataType::Float64,
-        ConstantType::Utf8String => DataType::Utf8,
-    };
+    let match_type = |typ: &ConstantType| typ.into_data_type();
     let mut fields = Vec::with_capacity(optd_schema.len());
     for field in optd_schema.fields {
         fields.push(Field::new(

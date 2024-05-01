@@ -9,7 +9,7 @@ use crate::{
         OptCostModel,
     },
     plan_nodes::{ColumnRefExpr, ConstantExpr, InListExpr, OptRelNode, OptRelNodeTyp},
-    properties::column_ref::{ColumnRef, GroupColumnRefs},
+    properties::column_ref::{BaseTableColumnRef, ColumnRef, GroupColumnRefs},
 };
 
 impl<
@@ -53,7 +53,9 @@ impl<
             .collect::<Vec<_>>();
         let negated = expr.negated();
 
-        if let ColumnRef::BaseTableColumnRef { table, col_idx } = &column_refs[col_ref_idx] {
+        if let ColumnRef::BaseTableColumnRef(BaseTableColumnRef { table, col_idx }) =
+            &column_refs[col_ref_idx]
+        {
             let in_sel = list_exprs
                 .iter()
                 .map(|expr| {
@@ -82,7 +84,7 @@ mod tests {
             create_one_column_cost_model, in_list, TestDistribution, TestMostCommonValues,
             TestPerColumnStats, TABLE1_NAME,
         },
-        properties::column_ref::ColumnRef,
+        properties::column_ref::{ColumnRef, GroupColumnRefs},
     };
 
     #[test]
@@ -93,10 +95,13 @@ mod tests {
             0.0,
             Some(TestDistribution::empty()),
         ));
-        let column_refs = vec![ColumnRef::BaseTableColumnRef {
-            table: String::from(TABLE1_NAME),
-            col_idx: 0,
-        }];
+        let column_refs = GroupColumnRefs::new_test(
+            vec![ColumnRef::base_table_column_ref(
+                String::from(TABLE1_NAME),
+                0,
+            )],
+            None,
+        );
         assert_approx_eq::assert_approx_eq!(
             cost_model
                 .get_in_list_selectivity(&in_list(0, vec![Value::Int32(1)], false), &column_refs),

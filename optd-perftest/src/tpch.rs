@@ -13,24 +13,23 @@ use std::path::{Path, PathBuf};
 const TPCH_KIT_REPO_URL: &str = "https://github.com/wangpatrick57/tpch-kit.git";
 pub const TPCH_KIT_POSTGRES: &str = "POSTGRESQL";
 const NUM_TPCH_QUERIES: usize = 22;
-pub const WORKING_QUERY_IDS: &[&str] = &[
-    "2", "3", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "17", "19",
-];
+pub const WORKING_QUERY_IDS: &[&str] =
+    &["2", "3", "5", "7", "8", "9", "10", "12", "13", "14", "17"];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TpchConfig {
+pub struct TpchKitConfig {
     pub dbms: String,
     pub scale_factor: f64,
     pub seed: i32,
     pub query_ids: Vec<String>,
 }
 
-impl Display for TpchConfig {
+impl Display for TpchKitConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         // Use write! macro to write formatted string to `f`
         write!(
             f,
-            "TpchConfig(dbms={}, scale_factor={}, seed={}, query_ids={:?})",
+            "TpchKitConfig(dbms={}, scale_factor={}, seed={}, query_ids={:?})",
             self.dbms, self.scale_factor, self.seed, self.query_ids
         )
     }
@@ -40,7 +39,7 @@ impl Display for TpchConfig {
 /// It does not actually execute the queries as it is meant to be DBMS-agnostic.
 /// Is essentially a wrapper around the tpch-kit repo.
 /// Since it's conceptually a wrapper around the repo, I chose _not_ to make
-///   TpchConfig an initialization parameter.
+///   TpchKitConfig an initialization parameter.
 pub struct TpchKit {
     _workspace_dpath: PathBuf,
 
@@ -127,40 +126,40 @@ impl TpchKit {
     }
 
     /// Generates the .tbl files for all tables of TPC-H
-    pub fn gen_tables(&self, tpch_config: &TpchConfig) -> io::Result<()> {
-        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(tpch_config);
+    pub fn gen_tables(&self, tpch_kit_config: &TpchKitConfig) -> io::Result<()> {
+        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(tpch_kit_config);
         let done_fpath = this_genned_tables_dpath.join("dbgen_done");
         if !done_fpath.exists() {
-            self.make(&tpch_config.dbms)?;
+            self.make(&tpch_kit_config.dbms)?;
             shell::make_into_empty_dir(&this_genned_tables_dpath)?;
             env::set_var("DSS_PATH", this_genned_tables_dpath.to_str().unwrap());
-            log::debug!("[start] generating tables for {}", tpch_config);
+            log::debug!("[start] generating tables for {}", tpch_kit_config);
             shell::run_command_with_status_check_in_dir(
-                &format!("./dbgen -s{}", tpch_config.scale_factor),
+                &format!("./dbgen -s{}", tpch_kit_config.scale_factor),
                 &self.dbgen_dpath,
             )?;
             File::create(done_fpath)?;
-            log::debug!("[end] generating tables for {}", tpch_config);
+            log::debug!("[end] generating tables for {}", tpch_kit_config);
         } else {
-            log::debug!("[skip] generating tables for {}", tpch_config);
+            log::debug!("[skip] generating tables for {}", tpch_kit_config);
         }
         Ok(())
     }
 
     /// Generates the .sql files for all queries of TPC-H, with one .sql file per query
-    pub fn gen_queries(&self, tpch_config: &TpchConfig) -> io::Result<()> {
-        let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_config);
+    pub fn gen_queries(&self, tpch_kit_config: &TpchKitConfig) -> io::Result<()> {
+        let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_kit_config);
         let done_fpath = this_genned_queries_dpath.join("qgen_done");
         if !done_fpath.exists() {
-            self.make(&tpch_config.dbms)?;
+            self.make(&tpch_kit_config.dbms)?;
             shell::make_into_empty_dir(&this_genned_queries_dpath)?;
-            log::debug!("[start] generating queries for {}", tpch_config);
+            log::debug!("[start] generating queries for {}", tpch_kit_config);
             // we don't use -d in qgen because -r controls the substitution values we use
             for query_i in 1..=NUM_TPCH_QUERIES {
                 let output = shell::run_command_with_status_check_in_dir(
                     &format!(
                         "./qgen -s{} -r{} {}",
-                        tpch_config.scale_factor, tpch_config.seed, query_i
+                        tpch_kit_config.scale_factor, tpch_kit_config.seed, query_i
                     ),
                     &self.dbgen_dpath,
                 )?;
@@ -169,27 +168,30 @@ impl TpchKit {
                 fs::write(&this_genned_queries_fpath, output.stdout)?;
             }
             File::create(done_fpath)?;
-            log::debug!("[end] generating queries for {}", tpch_config);
+            log::debug!("[end] generating queries for {}", tpch_kit_config);
         } else {
-            log::debug!("[skip] generating queries for {}", tpch_config);
+            log::debug!("[skip] generating queries for {}", tpch_kit_config);
         }
         Ok(())
     }
 
-    /// If two TpchConfig instances would always generate the same data, then their directory
+    /// If two TpchKitConfig instances would always generate the same data, then their directory
     ///   names must be the same.
-    /// If two TpchConfig instances would *not always* generate the same data, then their
+    /// If two TpchKitConfig instances would *not always* generate the same data, then their
     ///   directory names must be different.
-    fn get_this_genned_tables_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
-        let dname = format!("db{}_sf{}", tpch_config.dbms, tpch_config.scale_factor,);
+    fn get_this_genned_tables_dpath(&self, tpch_kit_config: &TpchKitConfig) -> PathBuf {
+        let dname = format!(
+            "db{}_sf{}",
+            tpch_kit_config.dbms, tpch_kit_config.scale_factor,
+        );
         self.genned_tables_dpath.join(dname)
     }
 
     /// Same comment as for get_this_genned_tables_dpath, but replace "data" with "queries"
-    fn get_this_genned_queries_dpath(&self, tpch_config: &TpchConfig) -> PathBuf {
+    fn get_this_genned_queries_dpath(&self, tpch_kit_config: &TpchKitConfig) -> PathBuf {
         let dname = format!(
             "db{}_sf{}_sd{}",
-            tpch_config.dbms, tpch_config.scale_factor, tpch_config.seed
+            tpch_kit_config.dbms, tpch_kit_config.scale_factor, tpch_kit_config.seed
         );
         self.genned_queries_dpath.join(dname)
     }
@@ -205,30 +207,38 @@ impl TpchKit {
             .to_string()
     }
 
-    /// Get an iterator through all generated .tbl files of a given config
-    pub fn get_tbl_fpath_iter(
+    /// Get a vector of all generated .tbl files of a given config
+    pub fn get_tbl_fpath_vec(
         &self,
-        tpch_config: &TpchConfig,
-    ) -> io::Result<impl Iterator<Item = PathBuf>> {
-        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(tpch_config);
+        tpch_kit_config: &TpchKitConfig,
+        target_ext: &str,
+    ) -> io::Result<Vec<PathBuf>> {
+        let this_genned_tables_dpath = self.get_this_genned_tables_dpath(tpch_kit_config);
         let dirent_iter = fs::read_dir(this_genned_tables_dpath)?;
-        // all results/options are fine to be unwrapped except for path.extension() because that could
-        // return None in various cases
-        let path_iter = dirent_iter.map(|dirent| dirent.unwrap().path());
-        let tbl_fpath_iter = path_iter
-            .filter(|path| path.extension().map(|ext| ext.to_str().unwrap()) == Some("tbl"));
-        Ok(tbl_fpath_iter)
+
+        let tbl_fpath_vec: Vec<PathBuf> = dirent_iter
+            .filter_map(|dirent| dirent.ok())
+            .map(|dirent| dirent.path())
+            .filter(|path| {
+                path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext == target_ext)
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        Ok(tbl_fpath_vec)
     }
 
     /// Get an iterator through all generated .sql files _in order_ of a given config
     /// It's important to iterate _in order_ due to the interface of CardtestRunnerDBMSHelper
     pub fn get_sql_fpath_ordered_iter(
         &self,
-        tpch_config: &TpchConfig,
+        tpch_kit_config: &TpchKitConfig,
     ) -> io::Result<impl Iterator<Item = (String, PathBuf)>> {
-        let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_config);
+        let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_kit_config);
         let sql_fpath_ordered_iter =
-            tpch_config
+            tpch_kit_config
                 .query_ids
                 .clone()
                 .into_iter()
