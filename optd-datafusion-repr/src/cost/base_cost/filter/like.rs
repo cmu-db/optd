@@ -97,14 +97,15 @@ impl<
                 (0.0, 0.0)
             };
 
-            // Postgres clamps the result after histogram and before MCV. See Postgres `patternsel_common`.
-            let result = ((non_mcv_sel + mcv_freq) * (1.0 - null_frac)).clamp(0.0001, 0.9999);
+            let result = non_mcv_sel + mcv_freq;
 
             if like_expr.negated() {
                 1.0 - result - null_frac
             } else {
                 result
             }
+            // Postgres clamps the result after histogram and before MCV. See Postgres `patternsel_common`.
+            .clamp(0.0001, 0.9999)
         } else {
             UNIMPLEMENTED_SEL
         }
@@ -170,13 +171,12 @@ mod tests {
         )];
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_like_selectivity(&like(0, "%abcd%", false), &column_refs),
-            (0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(4)) * null_frac
+            0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(4)
         );
         assert_approx_eq::assert_approx_eq!(
             cost_model.get_like_selectivity(&like(0, "%abcd%", true), &column_refs),
             1.0 - (0.1 + FULL_WILDCARD_SEL_FACTOR.powi(2) * FIXED_CHAR_SEL_FACTOR.powi(4))
-                * null_frac
-                - 0.5
+                - null_frac
         );
     }
 }
