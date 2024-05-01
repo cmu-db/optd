@@ -1,4 +1,5 @@
 /// A wrapper around tpch-kit
+use csv2parquet::Opts;
 use serde::{Deserialize, Serialize};
 
 use crate::shell;
@@ -147,8 +148,16 @@ impl TpchKit {
     }
 
     pub fn make_parquet_files(&self, tpch_kit_config: &TpchKitConfig) -> io::Result<()> {
-        println!("{}", csv2parquet::test::hi());
-        panic!();
+        let csv_tbl_fpaths = self.get_tbl_fpath_vec(tpch_kit_config, "tbl").unwrap();
+
+        for csv_tbl_fpath in csv_tbl_fpaths {
+            let mut parquet_tbl_fpath = csv_tbl_fpath.clone();
+            parquet_tbl_fpath.set_extension("parquet");
+            println!("csv_tbl_fpath={:?}, parquet_tbl_fpath={:?}", csv_tbl_fpath, parquet_tbl_fpath);
+            let opts = Opts::new(csv_tbl_fpath, parquet_tbl_fpath);
+            csv2parquet::convert(opts).unwrap();
+        }
+
         Ok(())
     }
 

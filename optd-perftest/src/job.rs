@@ -127,8 +127,6 @@ impl JobKit {
     }
 
     pub fn make_parquet_files(&self, job_kit_config: &JobKitConfig) -> io::Result<()> {
-        println!("{}", csv2parquet::test::hi());
-        panic!();
         Ok(())
     }
 
