@@ -103,6 +103,18 @@ fn apply_dep_initial_distinct(
         })
         .collect::<Vec<usize>>();
 
+    // If we have no correlated columns, just emit a cross join instead
+    if (correlated_col_indices.is_empty()) {
+        let new_join = LogicalJoin::new(
+            PlanNode::from_group(left.into()),
+            PlanNode::from_group(right.into()),
+            ConstantExpr::bool(true).into_expr(),
+            JoinType::Cross,
+        );
+
+        return vec![new_join.into_rel_node().as_ref().clone()];
+    }
+
     // An aggregate node that groups by all correlated columns allows us to
     // effectively get the domain
     let distinct_agg_node = LogicalAgg::new(
@@ -311,8 +323,11 @@ define_rule!(
 /// deduplicated set).
 /// For info on why we do the outer join, refer to the Unnesting Arbitrary Queries
 /// talk by Mark Raasveldt. The correlated columns are covered in the original paper.
+///
+/// TODO: the outer join is not implemented yet, so some edge cases won't work.
+///       Run SQList tests to catch these, I guess.
 fn apply_dep_join_past_agg(
-    optimizer: &impl Optimizer<OptRelNodeTyp>,
+    _optimizer: &impl Optimizer<OptRelNodeTyp>,
     DepJoinPastAggPicks {
         left,
         right,
