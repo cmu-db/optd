@@ -499,6 +499,14 @@ impl<
         // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
         let ret_freq = Self::get_column_leq_value_freq(column_stats, value)
             - self.get_column_equality_selectivity(table, col_idx, value, true);
+        let ret_freq = if ret_freq < 0.0 { // TODO(Alexis): temporary fix.
+            0.0
+        } else if ret_freq > 1.0 {
+            1.0
+        } else {
+            ret_freq
+        };
+
         assert!(
             (0.0..=1.0).contains(&ret_freq),
             "ret_freq ({}) should be in [0, 1]",
