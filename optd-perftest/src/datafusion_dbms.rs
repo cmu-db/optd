@@ -362,7 +362,7 @@ impl DatafusionDBMS {
         &mut self,
         tpch_kit_config: &TpchKitConfig,
     ) -> anyhow::Result<()> {
-        // Generate the tables.
+        // Generate the tables and convert them to Parquet.
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_kit_config)?;
 
@@ -486,14 +486,14 @@ impl DatafusionDBMS {
     ) -> anyhow::Result<()> {
         let ctx = Self::new_session_ctx(None, self.adaptive, WITH_LOGICAL_FOR_JOB).await?;
 
-        // Download the tables.
+        // Download the tables and convert them to Parquet.
         let job_kit = JobKit::build(&self.workspace_dpath)?;
         job_kit.download_tables(job_kit_config)?;
 
         // Create the tables.
         Self::create_job_tables(&ctx, &job_kit).await?;
 
-        // Load each table using register_csv()
+        // Load each table using register_csv().
         let tbl_fpath_iter = job_kit.get_tbl_fpath_vec("csv").unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
@@ -527,6 +527,7 @@ impl DatafusionDBMS {
         // Generate the tables
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_kit_config)?;
+        tpch_kit.make_parquet_files(tpch_kit_config)?;
 
         // To get the schema of each table.
         let ctx = Self::new_session_ctx(None, self.adaptive, WITH_LOGICAL_FOR_TPCH).await?;
@@ -552,6 +553,7 @@ impl DatafusionDBMS {
         // Generate the tables.
         let job_kit = JobKit::build(&self.workspace_dpath)?;
         job_kit.download_tables(job_kit_config)?;
+        job_kit.make_parquet_files(job_kit_config)?;
 
         // To get the schema of each table.
         let ctx = Self::new_session_ctx(None, self.adaptive, WITH_LOGICAL_FOR_JOB).await?;

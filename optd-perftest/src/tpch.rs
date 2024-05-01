@@ -146,6 +146,12 @@ impl TpchKit {
         Ok(())
     }
 
+    pub fn make_parquet_files(&self, tpch_kit_config: &TpchKitConfig) -> io::Result<()> {
+        println!("{}", csv2parquet::test::hi());
+        panic!();
+        Ok(())
+    }
+
     /// Generates the .sql files for all queries of TPC-H, with one .sql file per query
     pub fn gen_queries(&self, tpch_kit_config: &TpchKitConfig) -> io::Result<()> {
         let this_genned_queries_dpath = self.get_this_genned_queries_dpath(tpch_kit_config);

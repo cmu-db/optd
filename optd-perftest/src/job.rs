@@ -126,6 +126,12 @@ impl JobKit {
         Ok(())
     }
 
+    pub fn make_parquet_files(&self, job_kit_config: &JobKitConfig) -> io::Result<()> {
+        println!("{}", csv2parquet::test::hi());
+        panic!();
+        Ok(())
+    }
+
     /// Convert a tbl_fpath into the table name
     pub fn get_tbl_name_from_tbl_fpath<P: AsRef<Path>>(tbl_fpath: P) -> String {
         tbl_fpath
