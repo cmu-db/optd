@@ -16,8 +16,7 @@ use std::sync::Arc;
 const TPCH_KIT_REPO_URL: &str = "https://github.com/wangpatrick57/tpch-kit.git";
 pub const TPCH_KIT_POSTGRES: &str = "POSTGRESQL";
 const NUM_TPCH_QUERIES: usize = 22;
-pub const WORKING_QUERY_IDS: &[&str] =
-    &["2", "3", "5", "7", "8", "9", "10", "12", "13", "14", "17"];
+pub const WORKING_QUERY_IDS: &[&str] = &["2", "3", "5", "6", "7", "8", "9", "10", "12", "13", "14", "17", "19"];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TpchKitConfig {

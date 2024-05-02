@@ -1,5 +1,6 @@
 use std::ops::Bound;
 
+use num_traits::clamp;
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
     cost::Cost,
