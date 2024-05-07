@@ -5,10 +5,24 @@ use super::macros::define_plan_node;
 use super::{Expr, ExprList, JoinType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
 
 #[derive(Clone, Debug)]
-pub struct LogicalDependentJoin(pub PlanNode);
+pub struct RawDependentJoin(pub PlanNode);
 
 define_plan_node!(
-    LogicalDependentJoin : PlanNode,
+    RawDependentJoin : PlanNode,
+    RawDepJoin, [
+        { 0, left: PlanNode },
+        { 1, right: PlanNode }
+    ], [
+        { 2, cond: Expr },
+        { 3, extern_cols: ExprList }
+    ], { join_type: JoinType }
+);
+
+#[derive(Clone, Debug)]
+pub struct DependentJoin(pub PlanNode);
+
+define_plan_node!(
+    DependentJoin : PlanNode,
     DepJoin, [
         { 0, left: PlanNode },
         { 1, right: PlanNode }

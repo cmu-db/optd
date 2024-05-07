@@ -91,7 +91,8 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 .collect(),
             // Should account for all physical join types.
             OptRelNodeTyp::Join(_)
-            | OptRelNodeTyp::DepJoin(_) => {
+            | OptRelNodeTyp::DepJoin(_)
+            | OptRelNodeTyp::RawDepJoin(_) => {
                 // Concatenate left and right children properties.
                 Self::concat_children_properties(&children[0..2])
             }

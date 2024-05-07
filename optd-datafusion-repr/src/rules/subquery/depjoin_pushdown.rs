@@ -8,8 +8,8 @@ use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 use std::collections::HashMap;
 
 use crate::plan_nodes::{
-    BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, Expr, ExprList, ExternColumnRefExpr,
-    JoinType, LogOpExpr, LogOpType, LogicalAgg, LogicalDependentJoin, LogicalFilter, LogicalJoin,
+    BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, DependentJoin, Expr, ExprList,
+    ExternColumnRefExpr, JoinType, LogOpExpr, LogOpType, LogicalAgg, LogicalFilter, LogicalJoin,
     LogicalProjection, LogicalScan, OptRelNode, OptRelNodeTyp, PlanNode,
 };
 use crate::properties::schema::SchemaPropertyBuilder;
@@ -61,10 +61,14 @@ fn rewrite_extern_column_refs(
 define_rule!(
     DepInitialDistinct,
     apply_dep_initial_distinct,
-    (DepJoin(JoinType::Cross), left, right, [cond], [extern_cols])
+    (
+        RawDepJoin(JoinType::Cross),
+        left,
+        right,
+        [cond],
+        [extern_cols]
+    )
 );
-
-static mut HAS_RUN: bool = false; // TODO: remove
 
 /// Initial rule to generate a join above this dependent join, and push the dependent
 /// join further into the right side.
@@ -81,15 +85,6 @@ fn apply_dep_initial_distinct(
     }: DepInitialDistinctPicks,
 ) -> Vec<RelNode<OptRelNodeTyp>> {
     assert!(cond == *ConstantExpr::bool(true).into_rel_node());
-    unsafe {
-        // TODO: Awful approach here that doesn't work for more than 1 dep join in a query.
-        // Figure something better out! Maybe a bool in the dependent join node?
-        if HAS_RUN {
-            return vec![];
-        } else {
-            HAS_RUN = true;
-        }
-    }
 
     let left_schema_size = optimizer
         .get_property::<SchemaPropertyBuilder>(left.clone().into(), 0)
@@ -135,7 +130,7 @@ fn apply_dep_initial_distinct(
         ),
     );
 
-    let new_dep_join = LogicalDependentJoin::new(
+    let new_dep_join = DependentJoin::new(
         distinct_agg_node.into_plan_node(),
         PlanNode::from_group(right.into()),
         Expr::from_rel_node(cond.into()).unwrap(),
@@ -221,7 +216,7 @@ fn apply_dep_join_past_proj(
             .collect(),
     );
 
-    let new_dep_join = LogicalDependentJoin::new(
+    let new_dep_join = DependentJoin::new(
         PlanNode::from_group(left.into()),
         PlanNode::from_group(right.into()),
         Expr::from_rel_node(cond.into()).unwrap(),
@@ -292,7 +287,7 @@ fn apply_dep_join_past_filter(
     })
     .unwrap();
 
-    let new_dep_join = LogicalDependentJoin::new(
+    let new_dep_join = DependentJoin::new(
         PlanNode::from_group(left.into()),
         PlanNode::from_group(right.into()),
         Expr::from_rel_node(cond.into()).unwrap(),
@@ -374,7 +369,7 @@ fn apply_dep_join_past_agg(
             .collect(),
     );
 
-    let new_dep_join = LogicalDependentJoin::new(
+    let new_dep_join = DependentJoin::new(
         PlanNode::from_group(left.into()),
         PlanNode::from_group(right.into()),
         Expr::from_rel_node(cond.into()).unwrap(),

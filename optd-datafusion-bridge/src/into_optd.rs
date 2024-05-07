@@ -9,9 +9,9 @@ use optd_core::rel_node::RelNode;
 use optd_datafusion_repr::plan_nodes::{
     BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList,
     ExternColumnRefExpr, FuncExpr, FuncType, InListExpr, JoinType, LikeExpr, LogOpExpr, LogOpType,
-    LogicalAgg, LogicalDependentJoin, LogicalEmptyRelation, LogicalFilter, LogicalJoin,
-    LogicalLimit, LogicalProjection, LogicalScan, LogicalSort, OptRelNode, OptRelNodeRef,
-    OptRelNodeTyp, PlanNode, SortOrderExpr, SortOrderType,
+    LogicalAgg, LogicalEmptyRelation, LogicalFilter, LogicalJoin, LogicalLimit, LogicalProjection,
+    LogicalScan, LogicalSort, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode, RawDependentJoin,
+    SortOrderExpr, SortOrderType,
 };
 use optd_datafusion_repr::properties::schema::Schema as OptdSchema;
 
@@ -31,7 +31,7 @@ impl OptdPlanContext<'_> {
         } in subqueries.into_iter()
         {
             let subquery_root = self.conv_into_optd_plan_node(subquery, Some(input_schema))?;
-            let dep_join = LogicalDependentJoin::new(
+            let dep_join = RawDependentJoin::new(
                 node,
                 subquery_root,
                 ConstantExpr::bool(true).into_expr(),

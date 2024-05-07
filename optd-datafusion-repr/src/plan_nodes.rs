@@ -38,7 +38,7 @@ use pretty_xmlish::{Pretty, PrettyConfig};
 pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
 pub use sort::{LogicalSort, PhysicalSort};
-pub use subquery::{ExternColumnRefExpr, LogicalDependentJoin}; // Add missing import
+pub use subquery::{DependentJoin, ExternColumnRefExpr, RawDependentJoin}; // Add missing import
 
 use crate::properties::schema::{Schema, SchemaPropertyBuilder};
 
@@ -54,6 +54,7 @@ pub enum OptRelNodeTyp {
     Filter,
     Scan,
     Join(JoinType),
+    RawDepJoin(JoinType),
     DepJoin(JoinType),
     Sort,
     Agg,
@@ -94,6 +95,7 @@ impl OptRelNodeTyp {
                 | Self::Filter
                 | Self::Scan
                 | Self::Join(_)
+                | Self::RawDepJoin(_)
                 | Self::DepJoin(_)
                 | Self::Apply(_)
                 | Self::Sort
@@ -392,7 +394,10 @@ pub fn explain(rel_node: OptRelNodeRef, meta_map: Option<&RelNodeMetaMap>) -> Pr
         OptRelNodeTyp::Join(_) => LogicalJoin::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(meta_map),
-        OptRelNodeTyp::DepJoin(_) => LogicalDependentJoin::from_rel_node(rel_node)
+        OptRelNodeTyp::RawDepJoin(_) => RawDependentJoin::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::DepJoin(_) => DependentJoin::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(meta_map),
         OptRelNodeTyp::Scan => LogicalScan::from_rel_node(rel_node)
