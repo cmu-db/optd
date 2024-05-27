@@ -9,12 +9,12 @@ use anyhow::{self};
 use async_trait::async_trait;
 
 /// This struct performs cardinality testing across one or more DBMSs.
-/// Another design would be for the CardtestRunnerDBMSHelper trait to expose a function
+/// Another design would be for the CardbenchRunnerDBMSHelper trait to expose a function
 ///   to evaluate the Q-error. However, I chose not to do this design for reasons
-///   described in the comments of the CardtestRunnerDBMSHelper trait. This is why
-///   you would use CardtestRunner even for computing the Q-error of a single DBMS.
-pub struct CardtestRunner {
-    pub dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>>,
+///   described in the comments of the CardbenchRunnerDBMSHelper trait. This is why
+///   you would use CardbenchRunner even for computing the Q-error of a single DBMS.
+pub struct CardbenchRunner {
+    pub dbmss: Vec<Box<dyn CardbenchRunnerDBMSHelper>>,
     truecard_getter: Box<dyn TruecardGetter>,
 }
 
@@ -25,12 +25,12 @@ pub struct Cardinfo {
     pub truecard: usize,
 }
 
-impl CardtestRunner {
+impl CardbenchRunner {
     pub async fn new(
-        dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>>,
+        dbmss: Vec<Box<dyn CardbenchRunnerDBMSHelper>>,
         truecard_getter: Box<dyn TruecardGetter>,
     ) -> anyhow::Result<Self> {
-        Ok(CardtestRunner {
+        Ok(CardbenchRunner {
             dbmss,
             truecard_getter,
         })
@@ -57,7 +57,7 @@ impl CardtestRunner {
                 .into_iter()
                 .zip(truecards.iter())
                 .map(|(estcard, &truecard)| Cardinfo {
-                    qerror: CardtestRunner::calc_qerror(estcard, truecard),
+                    qerror: CardbenchRunner::calc_qerror(estcard, truecard),
                     estcard,
                     truecard,
                 })
@@ -90,8 +90,8 @@ impl CardtestRunner {
 /// When more performance tests are implemented, you would probably want to extract
 ///   get_name() into a generic "DBMS" trait.
 #[async_trait]
-pub trait CardtestRunnerDBMSHelper {
-    // get_name() has &self so that we're able to do Box<dyn CardtestRunnerDBMSHelper>
+pub trait CardbenchRunnerDBMSHelper {
+    // get_name() has &self so that we're able to do Box<dyn CardbenchRunnerDBMSHelper>
     fn get_name(&self) -> &str;
 
     // The order of queries in the returned vector has to be the same between all databases,
@@ -103,7 +103,7 @@ pub trait CardtestRunnerDBMSHelper {
 }
 
 /// The core logic of cardinality testing.
-pub async fn cardtest_core<P: AsRef<Path>>(
+pub async fn cardbench_core<P: AsRef<Path>>(
     workspace_dpath: P,
     rebuild_cached_optd_stats: bool,
     pguser: &str,
@@ -115,10 +115,10 @@ pub async fn cardtest_core<P: AsRef<Path>>(
     let truecard_getter = pg_dbms.clone();
     let df_dbms =
         Box::new(DatafusionDBMS::new(&workspace_dpath, rebuild_cached_optd_stats, adaptive).await?);
-    let dbmss: Vec<Box<dyn CardtestRunnerDBMSHelper>> = vec![pg_dbms, df_dbms];
+    let dbmss: Vec<Box<dyn CardbenchRunnerDBMSHelper>> = vec![pg_dbms, df_dbms];
 
-    let mut cardtest_runner = CardtestRunner::new(dbmss, truecard_getter).await?;
-    let cardinfos_alldbs = cardtest_runner
+    let mut cardbench_runner = CardbenchRunner::new(dbmss, truecard_getter).await?;
+    let cardinfos_alldbs = cardbench_runner
         .eval_benchmark_cardinfos_alldbs(&benchmark)
         .await?;
     Ok(cardinfos_alldbs)

@@ -29,7 +29,7 @@ You can also test the performance of the cost model with the "cardinality testin
 Before running this, you will need Postgres set up on your machine.
 Note that there is a CI script which tests this command before every merge into main, so it should be very reliable.
 ```
-cargo run --release --bin optd-perftest cardtest
+cargo run --release --bin optd-perftest cardbench
 ```
 
 ## Documentation

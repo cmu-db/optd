@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     benchmark::Benchmark,
-    cardtest::CardtestRunnerDBMSHelper,
+    cardbench::CardbenchRunnerDBMSHelper,
     job::{JobKit, JobKitConfig},
     tpch::{TpchKit, TpchKitConfig},
 };
@@ -47,7 +47,7 @@ const WITH_LOGICAL_FOR_TPCH: bool = true;
 const WITH_LOGICAL_FOR_JOB: bool = true;
 
 #[async_trait]
-impl CardtestRunnerDBMSHelper for DatafusionDBMS {
+impl CardbenchRunnerDBMSHelper for DatafusionDBMS {
     fn get_name(&self) -> &str {
         "DataFusion"
     }

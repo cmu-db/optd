@@ -164,7 +164,7 @@ impl JobKit {
     }
 
     /// Get an iterator through all generated .sql files _in order_ of a given config
-    /// It's important to iterate _in order_ due to the interface of CardtestRunnerDBMSHelper
+    /// It's important to iterate _in order_ due to the interface of CardbenchRunnerDBMSHelper
     pub fn get_sql_fpath_ordered_iter(
         &self,
         job_kit_config: &JobKitConfig,

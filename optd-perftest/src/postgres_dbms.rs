@@ -1,6 +1,6 @@
 use crate::{
     benchmark::Benchmark,
-    cardtest::CardtestRunnerDBMSHelper,
+    cardbench::CardbenchRunnerDBMSHelper,
     job::{JobKit, JobKitConfig},
     tpch::{TpchKit, TpchKitConfig},
     truecard::{TruecardCache, TruecardGetter},
@@ -404,7 +404,7 @@ impl PostgresDBMS {
 }
 
 #[async_trait]
-impl CardtestRunnerDBMSHelper for PostgresDBMS {
+impl CardbenchRunnerDBMSHelper for PostgresDBMS {
     fn get_name(&self) -> &str {
         POSTGRES_DBMS_NAME
     }

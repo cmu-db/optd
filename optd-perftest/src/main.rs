@@ -1,10 +1,10 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use optd_perftest::benchmark::Benchmark;
-use optd_perftest::cardtest::Cardinfo;
+use optd_perftest::cardbench::Cardinfo;
 use optd_perftest::job::JobKitConfig;
 use optd_perftest::shell;
 use optd_perftest::tpch::{TpchKitConfig, TPCH_KIT_POSTGRES};
-use optd_perftest::{cardtest, job, tpch};
+use optd_perftest::{cardbench, job, tpch};
 use prettytable::{format, Table};
 use std::fs;
 use std::path::Path;
@@ -31,7 +31,7 @@ enum BenchmarkName {
 
 #[derive(Subcommand)]
 enum Commands {
-    Cardtest {
+    Cardbench {
         #[clap(value_enum)]
         #[clap(default_value = "tpch")]
         benchmark_name: BenchmarkName,
@@ -87,10 +87,10 @@ fn percentile(sorted_v: &[f64], percentile: f64) -> f64 {
     sorted_v[idx]
 }
 
-/// cardtest::cardtest_core() expects sanitized inputs and returns outputs in their simplest form.
-/// This function wraps around cardtest::cardtest_core() to sanitize the inputs and print the outputs nicely.
+/// cardbench::cardbench_core() expects sanitized inputs and returns outputs in their simplest form.
+/// This function wraps around cardbench::cardbench_core() to sanitize the inputs and print the outputs nicely.
 #[allow(clippy::too_many_arguments)]
-async fn cardtest<P: AsRef<Path>>(
+async fn cardbench<P: AsRef<Path>>(
     workspace_dpath: P,
     benchmark_name: BenchmarkName,
     scale_factor: f64,
@@ -131,7 +131,7 @@ async fn cardtest<P: AsRef<Path>>(
         }),
     };
 
-    let cardinfo_alldbs = cardtest::cardtest_core(
+    let cardinfo_alldbs = cardbench::cardbench_core(
         &workspace_dpath,
         rebuild_cached_optd_stats,
         &pguser,
@@ -268,7 +268,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     match cli.command {
-        Commands::Cardtest {
+        Commands::Cardbench {
             benchmark_name,
             scale_factor,
             seed,
@@ -278,7 +278,7 @@ async fn main() -> anyhow::Result<()> {
             pgpassword,
             adaptive,
         } => {
-            cardtest(
+            cardbench(
                 workspace_dpath,
                 benchmark_name,
                 scale_factor,
