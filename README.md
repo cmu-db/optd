@@ -12,7 +12,7 @@ optd is a research project and is still evolving. It should not be used in produ
 
 ## Get Started
 
-There are two demos you can run with optd. More information available in the [docs](docs/).
+There are three demos you can run with optd. More information available in the [docs](docs/).
 
 ```
 cargo run --release --bin optd-adaptive-tpch-q8
@@ -23,6 +23,13 @@ You can also run the Datafusion cli to interactively experiment with optd.
 
 ```
 cargo run --bin datafusion-optd-cli
+```
+
+You can also test the performance of the cost model with the "cardinality testing" feature (more info in the [docs](docs/)).
+Before running this, you will need Postgres set up on your machine.
+Note that there is a CI script which tests this command before every merge into main, so it should be very reliable.
+```
+cargo run --release --bin optd-perftest cardtest
 ```
 
 ## Documentation
