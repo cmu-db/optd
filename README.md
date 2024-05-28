@@ -25,7 +25,7 @@ You can also run the Datafusion cli to interactively experiment with optd.
 cargo run --bin datafusion-optd-cli
 ```
 
-You can also test the performance of the cost model with the "cardinality testing" feature (more info in the [docs](docs/)).
+You can also test the performance of the cost model with the "cardinality benchmarking" feature (more info in the [docs](docs/)).
 Before running this, you will need to manually run Postgres on your machine.
 Note that there is a CI script which tests this command (TPC-H with scale factor 0.01) before every merge into main, so it should be very reliable.
 ```
@@ -45,7 +45,7 @@ The documentation is available in the mdbook format in the [docs](docs) director
 * `optd-adaptive-demo`: Demo of adaptive optimization capabilities of optd. More information available in the [docs](docs/).
 * `optd-sqlplannertest`: Planner test of optd based on [risinglightdb/sqlplannertest-rs](https://github.com/risinglightdb/sqlplannertest-rs).
 * `optd-gungnir`: Scalable, memory-efficient, and parallelizable statistical methods for cardinality estimation (e.g. TDigest, HyperLogLog).
-* `optd-perfbench`: A CLI program for testing performance (cardinality, throughput, etc.) against other databases.
+* `optd-perfbench`: A CLI program for benchmarking performance (cardinality, throughput, etc.) against other databases.
 
 
 # Related Works

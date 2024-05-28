@@ -3,14 +3,14 @@
 ## Overview
 You can benchmark the cardinality estimates of optd's cost model against other DBMSs using the optd-perfbench module.
 
-All aspects of benchmarking except for setting up comparison DBMSs–loading workload data, building statistics, gathering the true cardinality of workload queries, running explains on workload queries, and aggregating results–are handled automatically.
+All aspects of benchmarking (except for setting up comparison DBMSs) are handled automatically. This includes loading workload data, building statistics, gathering the true cardinality of workload queries, running explains on workload queries, and aggregating cardinality estimation results.
 
-We elected not to automate the installation and setup of the DBMS in order to accomodate the needs of all users. For instance, some users prefer installing Postgres on Homebrew, others choose to install the Mac application, while others wish to create a Postgres Docker container.
+We elected not to automate the installation and setup of the DBMS in order to accomodate the needs of all users. For instance, some users prefer installing Postgres on Homebrew, others choose to install the Mac application, while others wish to create a Postgres Docker container. However, it could be feasible in the future to standardize on Docker and automatically start a container. The only difficult part in that scenario is tuning Postgres/other DBMSs to the machine being run on, as this is currently done manually using PGTune.
 
 Additionally, our system provides **fine-grained, robust caching** for every single step of the process. After the first run of a workload, all subsequent runs will *only require running explains*, which takes in a matter of seconds for all workloads. We use "acknowledgement files" to ensure that the caching is robust in that we never cache incomplete results.
 
 ## Basic Operation
-First, you need to manually install, configure, and start the DBMS(s) being compared against. Currently, only Postgres is supported.
+First, you need to manually install, configure, and start the DBMS(s) being compared against. Currently, only Postgres is supported. To see an example of how Postgres is installed, configured, and started on a Mac, check the `patrick/` folder in the [gungnir-experiments](https://github.com/wangpatrick57/gungnir-experiments) repository.
 
 Once the DBMS(s) being compared against are set up, run this to quickly get started. It should take a few minutes on the first run and a few seconds on subsequent runs. This specific command that tests TPC-H with scale factor 0.01 is **run in a CI script** before every merge to main, so it should be very reliable.
 ```
