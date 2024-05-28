@@ -26,10 +26,10 @@ cargo run --bin datafusion-optd-cli
 ```
 
 You can also test the performance of the cost model with the "cardinality testing" feature (more info in the [docs](docs/)).
-Before running this, you will need Postgres set up on your machine.
-Note that there is a CI script which tests this command before every merge into main, so it should be very reliable.
+Before running this, you will need to manually run Postgres on your machine.
+Note that there is a CI script which tests this command (TPC-H with scale factor 0.01) before every merge into main, so it should be very reliable.
 ```
-cargo run --release --bin optd-perfbench cardbench
+cargo run --release --bin optd-perfbench cardbench tpch --scale-factor 0.01
 ```
 
 ## Documentation

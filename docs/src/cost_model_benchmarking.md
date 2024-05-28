@@ -12,7 +12,7 @@ Additionally, our system provides **fine-grained, robust caching** for every sin
 ## Basic Operation
 First, you need to manually install, configure, and start the DBMS(s) being compared against. Currently, only Postgres is supported.
 
-Once the DBMS(s) being compared against are set up, run this to quickly get started. It should take a few minutes on the first run and a few seconds on subsequent runs.
+Once the DBMS(s) being compared against are set up, run this to quickly get started. It should take a few minutes on the first run and a few seconds on subsequent runs. This specific command that tests TPC-H with scale factor 0.01 is **run in a CI script** before every merge to main, so it should be very reliable.
 ```
 cargo run --release --bin optd-perfbench cardbench tpch --scale-factor 0.01
 ```
