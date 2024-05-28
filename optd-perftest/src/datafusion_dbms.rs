@@ -322,7 +322,7 @@ impl DatafusionDBMS {
         match benchmark {
             Benchmark::Tpch(_) => {
                 let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
-                self.create_tpch_tables(&tpch_kit).await?;
+                Self::create_tpch_tables(self.get_ctx(), &tpch_kit).await?;
             }
             Benchmark::Job(_) | Benchmark::Joblight(_) => {
                 let job_kit = JobKit::build(&self.workspace_dpath)?;
@@ -332,7 +332,7 @@ impl DatafusionDBMS {
         Ok(())
     }
 
-    async fn create_tpch_tables(&mut self, tpch_kit: &TpchKit) -> anyhow::Result<()> {
+    async fn create_tpch_tables(ctx: &SessionContext, tpch_kit: &TpchKit) -> anyhow::Result<()> {
         let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
         let ddls = ddls
             .split(';')
@@ -340,7 +340,7 @@ impl DatafusionDBMS {
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>();
         for ddl in ddls {
-            Self::execute(self.get_ctx(), ddl).await?;
+            Self::execute(ctx, ddl).await?;
         }
         Ok(())
     }
@@ -362,12 +362,12 @@ impl DatafusionDBMS {
         &mut self,
         tpch_kit_config: &TpchKitConfig,
     ) -> anyhow::Result<()> {
-        // Generate the tables.
+        // Generate the tables and convert them to Parquet.
         let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
         tpch_kit.gen_tables(tpch_kit_config)?;
 
         // Create the tables.
-        self.create_tpch_tables(&tpch_kit).await?;
+        Self::create_tpch_tables(self.get_ctx(), &tpch_kit).await?;
 
         // Load the data by creating an external table first and copying the data to real tables.
         let tbl_fpath_iter = tpch_kit.get_tbl_fpath_vec(tpch_kit_config, "tbl").unwrap();
@@ -394,6 +394,10 @@ impl DatafusionDBMS {
                 .await
                 .unwrap()
                 .schema();
+
+            // DEBUG(phw2)
+            println!("schema={}", serde_json::to_string_pretty(&schema).unwrap());
+
             let projection_list = (1..=schema.fields().len())
                 .map(|i| format!("column_{}", i))
                 .collect::<Vec<_>>()
@@ -477,7 +481,35 @@ impl DatafusionDBMS {
 
         println!("Total execution time {:?}...", now.elapsed());
 
-        Ok(base_table_stats.into_inner()?)
+        let stats = base_table_stats.into_inner();
+        let l = stats.unwrap();
+        // Useful for debugging stats so I kept it
+        // l.iter().for_each(|(table_name, stats)| {
+        //     println!("Table: {} (num_rows: {})", table_name, stats.row_cnt);
+        //     stats
+        //         .column_comb_stats
+        //         .iter()
+        //         .sorted_by_key(|x| x.0[0])
+        //         .for_each(|x| {
+        //             let sum_freq: f64 = x.1.mcvs.frequencies().values().copied().sum();
+        //             println!(
+        //                 "Col: {} (n_distinct: {}) (n_frac: {}) (mcvs: {} {}) (tdigests: {:?} {:?} {:?} {:?} {:?})",
+        //                 x.0[0],
+        //                 x.1.ndistinct,
+        //                 x.1.null_frac,
+        //                 x.1.mcvs.frequencies().len(),
+        //                 sum_freq,
+        //                 x.1.distr.as_ref().map(|d| d.quantile(0.01)),
+        //                 x.1.distr.as_ref().map(|d| d.quantile(0.25)),
+        //                 x.1.distr.as_ref().map(|d| d.quantile(0.50)),
+        //                 x.1.distr.as_ref().map(|d| d.quantile(0.75)),
+        //                 x.1.distr.as_ref().map(|d| d.quantile(0.99)),
+        //             );
+        //         });
+        // });
+        // println!("{:#?}", stats);
+
+        Ok(l)
     }
 
     // Load job data from a .csv file.
@@ -487,14 +519,14 @@ impl DatafusionDBMS {
     ) -> anyhow::Result<()> {
         let ctx = Self::new_session_ctx(None, self.adaptive, WITH_LOGICAL_FOR_JOB).await?;
 
-        // Download the tables.
+        // Download the tables and convert them to Parquet.
         let job_kit = JobKit::build(&self.workspace_dpath)?;
         job_kit.download_tables(job_kit_config)?;
 
         // Create the tables.
         Self::create_job_tables(&ctx, &job_kit).await?;
 
-        // Load each table using register_csv()
+        // Load each table using register_csv().
         let tbl_fpath_iter = job_kit.get_tbl_fpath_vec("csv").unwrap();
         for tbl_fpath in tbl_fpath_iter {
             let tbl_name = tbl_fpath.file_stem().unwrap().to_str().unwrap();
@@ -525,24 +557,20 @@ impl DatafusionDBMS {
         &mut self,
         tpch_kit_config: &TpchKitConfig,
     ) -> anyhow::Result<DataFusionBaseTableStats> {
-        // Generate the tables
-        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
-        tpch_kit.gen_tables(tpch_kit_config)?;
-
-        // To get the schema of each table.
+        // Create tables in a temporary context to get the schema provider.
         let ctx = Self::new_session_ctx(None, self.adaptive, WITH_LOGICAL_FOR_TPCH).await?;
-        let ddls = fs::read_to_string(&tpch_kit.schema_fpath)?;
-        let ddls = ddls
-            .split(';')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>();
-        for ddl in ddls {
-            Self::execute(&ctx, ddl).await?;
-        }
+        let tpch_kit = TpchKit::build(&self.workspace_dpath)?;
+        Self::create_tpch_tables(&ctx, &tpch_kit).await?;
+        let schema_provider = ctx.catalog("datafusion").unwrap().schema("public").unwrap();
 
+        // Generate the tables
+        tpch_kit.gen_tables(tpch_kit_config)?;
+        tpch_kit
+            .make_parquet_files(tpch_kit_config, schema_provider)
+            .await?;
         // Compute base statistics on Parquet.
         let tbl_paths = tpch_kit.get_tbl_fpath_vec(tpch_kit_config, "parquet")?;
+        assert!(tbl_paths.len() == tpch_kit.get_tbl_fpath_vec(tpch_kit_config, "tbl")?.len());
         Self::gen_base_stats(tbl_paths)
     }
 
@@ -550,9 +578,18 @@ impl DatafusionDBMS {
         &mut self,
         job_kit_config: &JobKitConfig,
     ) -> anyhow::Result<DataFusionBaseTableStats> {
+        // Create tables in a temporary context to get the schema provider.
+        let ctx = Self::new_session_ctx(None, self.adaptive, WITH_LOGICAL_FOR_JOB).await?;
+        let job_kit = JobKit::build(&self.workspace_dpath)?;
+        Self::create_job_tables(&ctx, &job_kit).await?;
+        let schema_provider = ctx.catalog("datafusion").unwrap().schema("public").unwrap();
+
         // Generate the tables.
         let job_kit = JobKit::build(&self.workspace_dpath)?;
         job_kit.download_tables(job_kit_config)?;
+        job_kit
+            .make_parquet_files(job_kit_config, schema_provider)
+            .await?;
 
         // To get the schema of each table.
         let ctx = Self::new_session_ctx(None, self.adaptive, WITH_LOGICAL_FOR_JOB).await?;
@@ -568,6 +605,7 @@ impl DatafusionDBMS {
 
         // Compute base statistics on Parquet.
         let tbl_paths = job_kit.get_tbl_fpath_vec("parquet").unwrap();
+        assert!(tbl_paths.len() == job_kit.get_tbl_fpath_vec("csv")?.len());
         Self::gen_base_stats(tbl_paths)
     }
 }

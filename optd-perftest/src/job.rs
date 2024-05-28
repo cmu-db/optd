@@ -1,3 +1,5 @@
+use csv2parquet::Opts;
+use datafusion::catalog::schema::SchemaProvider;
 /// A wrapper around job-kit
 use serde::{Deserialize, Serialize};
 
@@ -7,18 +9,18 @@ use std::fs;
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const JOB_KIT_REPO_URL: &str = "https://github.com/wangpatrick57/job-kit.git";
 const JOB_TABLES_URL: &str = "https://homepages.cwi.nl/~boncz/job/imdb.tgz";
 pub const WORKING_JOB_QUERY_IDS: &[&str] = &[
-    "1a", "1b", "1c", "1d", "2a", "2b", "2c", "2d", "3a", "3b", "3c", "4a", "4b", "4c", "5a", "5b",
-    "5c", "6a", "6b", "6c", "6d", "6e", "6f", "7b", "8a", "8b", "8c", "8d", "9b", "9c", "9d",
-    "10a", "10b", "10c", "12a", "12b", "12c", "13a", "13b", "13c", "13d", "14a", "14b", "14c",
-    "15a", "15b", "15c", "15d", "16a", "16b", "16c", "16d", "17a", "17b", "17c", "17d", "17e",
-    "17f", "18a", "18c", "19b", "19c", "19d", "20a", "20b", "20c", "22a", "22b", "22c", "22d",
-    "23a", "23b", "23c", "24a", "24b", "25a", "25b", "25c", "26a", "26b", "26c", "28a", "28b",
-    "28c", "29a", "29b", "29c", "30a", "30b", "30c", "31a", "31b", "31c", "32a", "32b", "33a",
-    "33b", "33c",
+    "1a", "1b", "1c", "1d", "2a", "2b", "2d", "3a", "3b", "3c", "4a", "4b", "4c", "5c", "6a", "6b",
+    "6c", "6d", "6e", "6f", "7b", "8a", "8b", "8c", "8d", "9b", "9c", "9d", "10a", "10c", "12a",
+    "12b", "12c", "13a", "13b", "13c", "13d", "14a", "14b", "14c", "15a", "15b", "15c", "15d",
+    "16a", "16b", "16c", "16d", "17a", "17b", "17c", "17d", "17e", "17f", "18a", "18c", "19b",
+    "19c", "19d", "20a", "20b", "20c", "22a", "22b", "22c", "22d", "23a", "23b", "23c", "24a",
+    "24b", "25a", "25b", "25c", "26a", "26b", "26c", "28a", "28b", "28c", "29a", "29b", "29c",
+    "30a", "30b", "30c", "31a", "31b", "31c", "32b", "33a", "33b", "33c",
 ];
 pub const WORKING_JOBLIGHT_QUERY_IDS: &[&str] = &[
     "1a", "1b", "1c", "1d", "2a", "3a", "3b", "4a", "4b", "4c", "5a", "5b", "5c", "6a", "6b", "6c",
@@ -122,6 +124,32 @@ impl JobKit {
             log::debug!("[end] downloading tables for {}", job_kit_config);
         } else {
             log::debug!("[skip] downloading tables for {}", job_kit_config);
+        }
+        Ok(())
+    }
+
+    pub async fn make_parquet_files(
+        &self,
+        job_kit_config: &JobKitConfig,
+        schema_provider: Arc<dyn SchemaProvider>,
+    ) -> io::Result<()> {
+        let done_fpath = self.downloaded_tables_dpath.join("make_parquet_done");
+        if !done_fpath.exists() {
+            log::debug!("[start] making parquet for {}", job_kit_config);
+            for csv_tbl_fpath in self.get_tbl_fpath_vec("csv").unwrap() {
+                let tbl_name = Self::get_tbl_name_from_tbl_fpath(&csv_tbl_fpath);
+                let schema = schema_provider.table(&tbl_name).await.unwrap().schema();
+                let mut parquet_tbl_fpath = csv_tbl_fpath.clone();
+                parquet_tbl_fpath.set_extension("parquet");
+                let mut opts = Opts::new(csv_tbl_fpath, parquet_tbl_fpath.clone());
+                opts.delimiter = ',';
+                opts.schema = Some(schema.as_ref().clone());
+                csv2parquet::convert(opts).unwrap();
+            }
+            File::create(done_fpath)?;
+            log::debug!("[end] making parquet for {}", job_kit_config);
+        } else {
+            log::debug!("[skip] making parquet for {}", job_kit_config);
         }
         Ok(())
     }

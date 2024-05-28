@@ -31,7 +31,7 @@ tokio = { version = "1.24", features = [
 shlex = "1.3"
 tokio-postgres = "0.7"
 regex = "1.10"
-clap = { version = "4.5", features = [
+clap = { version = "4.5.4", features = [
     "derive",
 ] }
 log = "0.4"
@@ -47,6 +47,9 @@ itertools = "0.12.1"
 test-case = "3.3"
 rayon = "1.10"
 parquet = "47.0.0"
+csv2parquet = { git = "https://github.com/wangpatrick57/arrow-tools.git", branch = "main" }
+arrow-schema = { version = "47.0.0", features = ["serde"] }
+
 
 [dev_dependencies]
 assert_cmd = "2.0"
