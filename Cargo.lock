@@ -2907,7 +2907,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "optd-perftest"
+name = "optd-perfbench"
 version = "0.1.0"
 dependencies = [
  "anyhow",

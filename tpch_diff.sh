@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Directories to compare
-dir1="optd_perftest_workspace/tpch/genned_queries/dbPOSTGRESQL_sf1_sd15721"
-dir2="optd_perftest_workspace/tpch/genned_queries/dbPOSTGRESQL_sf0.01_sd15721"
+dir1="optd_perfbench_workspace/tpch/genned_queries/dbPOSTGRESQL_sf1_sd15721"
+dir2="optd_perfbench_workspace/tpch/genned_queries/dbPOSTGRESQL_sf0.01_sd15721"
 
 # Loop through the file numbers
 for i in {1..22}; do

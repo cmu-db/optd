@@ -24,7 +24,7 @@ fi
 successful_ids=()
 IFS=','
 for id in $all_ids; do
-    cargo run --release --bin optd-perftest cardbench $benchmark_name --query-ids $id &>/dev/null
+    cargo run --release --bin optd-perfbench cardbench $benchmark_name --query-ids $id &>/dev/null
 
     if [ $? -eq 0 ]; then
         echo >&2 $id succeeded

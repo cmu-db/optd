@@ -1,13 +1,13 @@
 #[cfg(test)]
 mod tests {
     use assert_cmd::prelude::CommandCargoExt;
-    use optd_perftest::shell;
+    use optd_perfbench::shell;
     use std::{
         fs,
         process::{Command, Stdio},
     };
 
-    const WORKSPACE: &str = "optd_perftest_integration_workspace";
+    const WORKSPACE: &str = "optd_perfbench_integration_workspace";
 
     /// Make sure Postgres is running before this test is run
     /// The reason I don't start Postgres automatically is because everyone has a different
@@ -39,7 +39,7 @@ mod tests {
     }
 
     fn create_cardbench_run_cmd(benchmark_name: &str, debug_print: bool) -> Command {
-        let mut cmd = Command::cargo_bin("optd-perftest").unwrap();
+        let mut cmd = Command::cargo_bin("optd-perfbench").unwrap();
         cmd.current_dir("..");
         cmd.args([
             "--workspace",

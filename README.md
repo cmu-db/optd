@@ -29,7 +29,7 @@ You can also test the performance of the cost model with the "cardinality testin
 Before running this, you will need Postgres set up on your machine.
 Note that there is a CI script which tests this command before every merge into main, so it should be very reliable.
 ```
-cargo run --release --bin optd-perftest cardbench
+cargo run --release --bin optd-perfbench cardbench
 ```
 
 ## Documentation
@@ -45,7 +45,7 @@ The documentation is available in the mdbook format in the [docs](docs) director
 * `optd-adaptive-demo`: Demo of adaptive optimization capabilities of optd. More information available in the [docs](docs/).
 * `optd-sqlplannertest`: Planner test of optd based on [risinglightdb/sqlplannertest-rs](https://github.com/risinglightdb/sqlplannertest-rs).
 * `optd-gungnir`: Scalable, memory-efficient, and parallelizable statistical methods for cardinality estimation (e.g. TDigest, HyperLogLog).
-* `optd-perftest`: A CLI program for testing performance (cardinality, throughput, etc.) against other databases.
+* `optd-perfbench`: A CLI program for testing performance (cardinality, throughput, etc.) against other databases.
 
 
 # Related Works
