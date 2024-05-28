@@ -25,7 +25,7 @@
 # Performance Benchmarking
 - [Cost Model Cardinality Benchmarking](./cost_model_benchmarking.md)
 
-# Correctness Testing
+# Functional Testing
 
 - [SQLPlannerTest](./sqlplannertest.md)
 - [Datafusion CLI](./datafusion_cli.md)
