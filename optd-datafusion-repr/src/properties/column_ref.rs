@@ -81,14 +81,17 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 // Concatentate the children properties.
                 Self::concat_children_properties(children)
             }
-            OptRelNodeTyp::Projection => children[1]
+            OptRelNodeTyp::Projection => {
+                children[1]
                 .iter()
-                .map(|p| match p {
+                .map(|p| {
+                    match p {
                     ColumnRef::ChildColumnRef { col_idx } => children[0][*col_idx].clone(),
                     ColumnRef::Derived => ColumnRef::Derived,
                     _ => panic!("projection expr must be Derived or ChildColumnRef"),
-                })
-                .collect(),
+                }})
+                .collect()
+            }
             // Should account for all physical join types.
             OptRelNodeTyp::Join(_)
             | OptRelNodeTyp::DepJoin(_)

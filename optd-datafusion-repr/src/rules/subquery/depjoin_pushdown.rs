@@ -1,5 +1,4 @@
 // TODO: No push past join
-// TODO: support multiple depjoin (move to rewriting pass, probably)
 // TODO: Sideways information passing??
 use itertools::Itertools;
 use optd_core::rel_node::Value;
@@ -167,7 +166,24 @@ fn apply_dep_initial_distinct(
         JoinType::Inner,
     );
 
-    vec![new_join.into_rel_node().as_ref().clone()]
+    // Ensure that the schema above the new_join is the same as it was before
+    // for correctness (Project the left side of the new join,
+    // plus the *right side of the right side*)
+    let new_proj = LogicalProjection::new(
+        PlanNode::from_rel_node(new_join.into_rel_node()).unwrap(),
+        ExprList::new(
+            (0..left_schema_size)
+                .chain(
+                    (left_schema_size + correlated_col_indices.len())
+                        ..(left_schema_size + correlated_col_indices.len() + right_schema_size),
+                )
+                .into_iter()
+                .map(|x| ColumnRefExpr::new(x).into_expr())
+                .collect(),
+        ),
+    );
+
+    vec![new_proj.into_rel_node().as_ref().clone()]
 }
 
 define_rule!(
@@ -365,7 +381,27 @@ fn apply_dep_join_past_agg(
         groups
             .to_vec()
             .into_iter()
-            .chain(correlated_col_indices.clone())
+            .map(|x| {
+                x.rewrite_column_refs(&mut |col| Some(col + correlated_col_indices.len()))
+                    .unwrap()
+            })
+            .chain(correlated_col_indices.iter().map(|x| {
+                x.rewrite_column_refs(&mut |col| Some(col + correlated_col_indices.len()))
+                    .unwrap()
+            }))
+            .collect(),
+    );
+
+    let exprs = ExprList::from_rel_node(exprs.into()).unwrap();
+
+    let new_exprs = ExprList::new(
+        exprs
+            .to_vec()
+            .into_iter()
+            .map(|x| {
+                x.rewrite_column_refs(&mut |col| Some(col + correlated_col_indices.len()))
+                    .unwrap()
+            })
             .collect(),
     );
 
@@ -379,7 +415,7 @@ fn apply_dep_join_past_agg(
 
     let new_agg = LogicalAgg::new(
         PlanNode::from_rel_node(new_dep_join.into_rel_node()).unwrap(),
-        ExprList::from_rel_node(exprs.into()).unwrap(),
+        new_exprs,
         new_groups,
     );
 

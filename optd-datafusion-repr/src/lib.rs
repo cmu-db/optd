@@ -220,6 +220,10 @@ impl DatafusionOptimizer {
     }
 
     pub fn heuristic_optimize(&mut self, root_rel: OptRelNodeRef) -> OptRelNodeRef {
+        println!(
+            "{}",
+            PlanNode::from_group(root_rel.clone()).explain_to_string(None)
+        );
         let res = self
             .hueristic_optimizer
             .optimize(root_rel)

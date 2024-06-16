@@ -322,8 +322,17 @@ impl Expr {
             .into_iter()
             .map(|child| {
                 if child.typ == OptRelNodeTyp::List {
-                    // TODO: What should we do with List?
-                    return Some(child);
+                    return Some(
+                        ExprList::new(
+                            ExprList::from_rel_node(child.clone())
+                                .unwrap()
+                                .to_vec()
+                                .into_iter()
+                                .map(|x| x.rewrite_column_refs(rewrite_fn).unwrap())
+                                .collect(),
+                        )
+                        .into_rel_node(),
+                    );
                 }
                 Expr::from_rel_node(child.clone())
                     .unwrap()
