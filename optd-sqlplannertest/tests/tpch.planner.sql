@@ -384,8 +384,7 @@ PhysicalLimit { skip: 0(u64), fetch: 100(u64) }
             │       │       │       │       │           └── PhysicalScan { table: part }
             │       │       │       │       └── PhysicalProjection { exprs: [ #0, #1, #3 ] }
             │       │       │       │           └── PhysicalScan { table: partsupp }
-            │       │       │       └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5, #6 ] }
-            │       │       │           └── PhysicalScan { table: supplier }
+            │       │       │       └── PhysicalScan { table: supplier }
             │       │       └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
             │       │           └── PhysicalScan { table: nation }
             │       └── PhysicalProjection { exprs: [ #0 ] }

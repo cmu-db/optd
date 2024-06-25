@@ -22,12 +22,7 @@ use properties::{
     schema::{Catalog, SchemaPropertyBuilder},
 };
 use rules::{
-    EliminateDuplicatedAggExprRule, EliminateDuplicatedSortExprRule, EliminateFilterRule,
-    EliminateJoinRule, EliminateLimitRule, FilterAggTransposeRule, FilterCrossJoinTransposeRule,
-    FilterInnerJoinTransposeRule, FilterMergeRule, FilterProjectTransposeRule,
-    FilterSortTransposeRule, HashJoinRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule,
-    ProjectFilterTransposeRule, ProjectMergeRule, ProjectionPullUpJoin, SimplifyFilterRule,
-    SimplifyJoinCondRule,
+    EliminateDuplicatedAggExprRule, EliminateDuplicatedSortExprRule, EliminateFilterRule, EliminateJoinRule, EliminateLimitRule, FilterAggTransposeRule, FilterCrossJoinTransposeRule, FilterInnerJoinTransposeRule, FilterMergeRule, FilterProjectTransposeRule, FilterSortTransposeRule, HashJoinRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule, ProjectFilterTransposeRule, ProjectMergeRule, ProjectRemoveRule, ProjectionPullUpJoin, ProjectionPushDownJoin, SimplifyFilterRule, SimplifyJoinCondRule
 };
 
 pub use optd_core::rel_node::Value;
@@ -90,6 +85,7 @@ impl DatafusionOptimizer {
             Arc::new(EliminateDuplicatedAggExprRule::new()),
             Arc::new(ProjectMergeRule::new()),
             Arc::new(FilterMergeRule::new()),
+            Arc::new(ProjectRemoveRule::new()),
         ]
     }
 
@@ -104,6 +100,9 @@ impl DatafusionOptimizer {
         rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
             ProjectFilterTransposeRule::new(),
         )));
+        // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
+        //     ProjectionPushDownJoin::new(),
+        // )));
         // add all filter pushdown rules as heuristic rules
         rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
             FilterProjectTransposeRule::new(),

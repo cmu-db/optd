@@ -22,6 +22,7 @@ pub use joins::{EliminateJoinRule, HashJoinRule, JoinAssocRule, JoinCommuteRule}
 pub use physical::PhysicalConversionRule;
 pub use project_transpose::{
     project_filter_transpose::{FilterProjectTransposeRule, ProjectFilterTransposeRule},
-    project_join_transpose::ProjectionPullUpJoin,
+    project_join_transpose::{ProjectionPullUpJoin, ProjectionPushDownJoin},
     project_merge::ProjectMergeRule,
+    project_remove::ProjectRemoveRule,
 };

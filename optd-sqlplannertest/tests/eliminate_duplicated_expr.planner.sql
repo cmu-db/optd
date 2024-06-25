@@ -12,8 +12,7 @@ select * from t1;
 /*
 LogicalProjection { exprs: [ #0, #1 ] }
 └── LogicalScan { table: t1 }
-PhysicalProjection { exprs: [ #0, #1 ] }
-└── PhysicalScan { table: t1 }
+PhysicalScan { table: t1 }
 0 0
 1 1
 5 2
@@ -45,8 +44,7 @@ PhysicalSort
 │   │   └── #0
 │   └── SortOrder { order: Asc }
 │       └── #1
-└── PhysicalProjection { exprs: [ #0, #1 ] }
-    └── PhysicalScan { table: t1 }
+└── PhysicalScan { table: t1 }
 0 0
 0 2
 1 1

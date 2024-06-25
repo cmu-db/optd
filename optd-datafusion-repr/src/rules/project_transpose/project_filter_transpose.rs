@@ -4,17 +4,11 @@ use std::vec;
 use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 
-use super::project_transpose_common::ProjectionMapping;
+use super::project_transpose_common::{ProjectionMapping, merge_exprs};
 use crate::plan_nodes::{
     Expr, ExprList, LogicalFilter, LogicalProjection, OptRelNode, OptRelNodeTyp, PlanNode,
 };
 use crate::rules::macros::define_rule;
-
-fn merge_exprs(first: ExprList, second: ExprList) -> ExprList {
-    let mut res_vec = first.to_vec();
-    res_vec.extend(second.to_vec());
-    ExprList::new(res_vec)
-}
 
 define_rule!(
     ProjectFilterTransposeRule,

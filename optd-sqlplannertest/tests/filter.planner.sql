@@ -27,8 +27,7 @@ select * from t1 where true;
 LogicalProjection { exprs: [ #0, #1 ] }
 └── LogicalFilter { cond: true }
     └── LogicalScan { table: t1 }
-PhysicalProjection { exprs: [ #0, #1 ] }
-└── PhysicalScan { table: t1 }
+PhysicalScan { table: t1 }
 0 0
 1 1
 2 2

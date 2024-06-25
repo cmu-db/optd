@@ -1,5 +1,34 @@
 use crate::plan_nodes::{ColumnRefExpr, Expr, ExprList, OptRelNode};
 
+pub fn merge_exprs(first: ExprList, second: ExprList) -> ExprList {
+    let mut res_vec = first.to_vec();
+    res_vec.extend(second.to_vec());
+    ExprList::new(res_vec)
+}
+
+pub fn split_exprs(exprs: ExprList, left_schema_len: usize) -> (ExprList, ExprList, bool) {
+    let mut left_vec = vec![];
+    let mut right_vec = vec![];
+    let mut reached_right = false;
+    let mut is_left_right_ordered = true;
+    for expr in exprs.to_vec() {
+        let col_ref = ColumnRefExpr::from_rel_node(expr.into_rel_node()).unwrap();
+        if col_ref.index() < left_schema_len {
+            // left expr
+            left_vec.push(col_ref.into_expr());
+            if reached_right {
+                is_left_right_ordered = false;
+            }
+        } else {
+            // right expr
+            let right_col_ref = ColumnRefExpr::new(col_ref.index() - left_schema_len);
+            right_vec.push(right_col_ref.into_expr());
+            reached_right = true;
+        }
+    }
+    (ExprList::new(left_vec), ExprList::new(right_vec), is_left_right_ordered)
+}
+
 /// This struct holds the mapping from original columns to projected columns.
 ///
 /// # Example
@@ -45,23 +74,40 @@ impl ProjectionMapping {
     }
 
     /// Remaps all column refs in the join condition based on a
-    /// removed bottom projection node
+    /// removed bottom projection node on the left child
     ///
     /// removed node:
     /// Join { cond: #0=#5 }
     ///      Projection { exprs: [#1, #0, #3, #5, #4] } --> has mapping
+    ///         Scan
+    ///      Scan
     /// ---->
     /// Join { cond: #1=#4 }
-    pub fn rewrite_join_cond(&self, cond: Expr, child_schema_len: usize) -> Expr {
-        let schema_size = self.forward.len();
-        cond.rewrite_column_refs(&|col_idx| {
-            if col_idx < schema_size {
-                self.projection_col_maps_to(col_idx)
-            } else {
-                Some(col_idx - schema_size + child_schema_len)
-            }
-        })
-        .unwrap()
+    ///     Scan
+    ///     Scan
+    pub fn rewrite_join_cond(&self, cond: Expr, left_schema_len: usize, is_added: bool, is_left_child: bool, new_left_schema_len: usize) -> Expr {
+        if is_added {
+            cond.rewrite_column_refs(&|col_idx| {
+                if is_left_child && col_idx < left_schema_len {
+                    self.original_col_maps_to(col_idx)
+                } else if !is_left_child && col_idx >= left_schema_len {
+                    Some(self.original_col_maps_to(col_idx - left_schema_len).unwrap() + new_left_schema_len)
+                } else {
+                    Some(col_idx)
+                }
+            })
+            .unwrap()
+        } else {
+            let schema_size = self.forward.len();
+            cond.rewrite_column_refs(&|col_idx| {
+                if col_idx < schema_size {
+                    self.projection_col_maps_to(col_idx)
+                } else {
+                    Some(col_idx - schema_size + left_schema_len)
+                }
+            })
+            .unwrap()    
+        }
     }
 
     /// Remaps all column refs in the filter condition based on an added or

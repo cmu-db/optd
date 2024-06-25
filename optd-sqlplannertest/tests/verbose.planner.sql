@@ -10,16 +10,14 @@ insert into t1 values (0), (1), (2), (3);
 select * from t1;
 
 /*
-PhysicalProjection { exprs: [ #0 ] }
-└── PhysicalScan { table: t1 }
+PhysicalScan { table: t1 }
 */
 
 -- Test verbose explain
 select * from t1;
 
 /*
-PhysicalProjection { exprs: [ #0 ], cost: weighted=1.06,row_cnt=1.00,compute=0.06,io=1.00 }
-└── PhysicalScan { table: t1, cost: weighted=1.00,row_cnt=1.00,compute=0.00,io=1.00 }
+PhysicalScan { table: t1, cost: weighted=1.00,row_cnt=1.00,compute=0.00,io=1.00 }
 */
 
 -- Test verbose explain with aggregation
