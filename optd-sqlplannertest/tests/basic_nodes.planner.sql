@@ -15,10 +15,10 @@ select * from t1 limit 3;
 select * from t1 limit 5;
 
 /*
-LogicalLimit { skip: 0, fetch: 1 }
+LogicalLimit { skip: 0(u64), fetch: 1(u64) }
 └── LogicalProjection { exprs: [ #0, #1 ] }
     └── LogicalScan { table: t1 }
-PhysicalLimit { skip: 0, fetch: 1 }
+PhysicalLimit { skip: 0(u64), fetch: 1(u64) }
 └── PhysicalProjection { exprs: [ #0, #1 ] }
     └── PhysicalScan { table: t1 }
 0 0

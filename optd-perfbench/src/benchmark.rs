@@ -1,14 +1,38 @@
-use crate::{job::JobConfig, tpch::TpchConfig};
+use crate::{job::JobKitConfig, tpch::TpchKitConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize)]
 pub enum Benchmark {
-    Tpch(TpchConfig),
-    Job(JobConfig),
+    Tpch(TpchKitConfig),
+    Job(JobKitConfig),
+    Joblight(JobKitConfig),
 }
 
 impl Benchmark {
-    /// Get a unique string that deterministically describes the "data" of this benchmark.
+    /// Get a string that deterministically describes the "data" and "queries" of this benchmark.
+    pub fn get_data_and_queries_name(&self) -> String {
+        match self {
+            Self::Tpch(tpch_kit_config) => {
+                format!("tpch_sf{}", tpch_kit_config.scale_factor)
+            }
+            Self::Job(_) => String::from("job"),
+            Self::Joblight(_) => String::from("joblight"),
+        }
+    }
+
+    /// Use this when you need a file name to deterministically describe the "data"
+    ///   of the benchmark. The rules for file names are different from the rules for
+    ///   database names, so this is a different function.
+    pub fn get_fname(&self) -> String {
+        match self {
+            Self::Tpch(tpch_kit_config) => {
+                format!("tpch_sf{}", tpch_kit_config.scale_factor)
+            }
+            Self::Job(_) | Self::Joblight(_) => String::from("job"),
+        }
+    }
+
+    /// Get a dbname that deterministically describes the "data" of this benchmark.
     /// Note that benchmarks consist of "data" and "queries". This name is only for the data
     /// For instance, if you have two TPC-H benchmarks with the same scale factor and seed
     ///   but different queries, they could both share the same database and would thus
@@ -31,22 +55,11 @@ impl Benchmark {
         dbname.to_lowercase()
     }
 
-    /// Use this when you need a unique file name to deterministically describe the "data"
-    ///   of the benchmark. The rules for file names are different from the rules for
-    ///   database names, so this is a different function.
-    pub fn get_fname(&self) -> String {
-        match self {
-            Self::Tpch(tpch_config) => {
-                format!("tpch_sf{}", tpch_config.scale_factor)
-            }
-            Self::Job(_) => String::from("job"),
-        }
-    }
-
     pub fn is_readonly(&self) -> bool {
         match self {
             Self::Tpch(_) => true,
             Self::Job(_) => true,
+            Self::Joblight(_) => true,
         }
     }
 }

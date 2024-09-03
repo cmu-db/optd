@@ -26,7 +26,8 @@ use rules::{
     EliminateJoinRule, EliminateLimitRule, FilterAggTransposeRule, FilterCrossJoinTransposeRule,
     FilterInnerJoinTransposeRule, FilterMergeRule, FilterProjectTransposeRule,
     FilterSortTransposeRule, HashJoinRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule,
-    ProjectionPullUpJoin, SimplifyFilterRule, SimplifyJoinCondRule,
+    ProjectFilterTransposeRule, ProjectMergeRule, ProjectionPullUpJoin, SimplifyFilterRule,
+    SimplifyJoinCondRule,
 };
 
 pub use optd_core::rel_node::Value;
@@ -46,6 +47,7 @@ pub mod properties;
 pub mod rules;
 #[cfg(test)]
 mod testing;
+// mod expand;
 
 pub struct DatafusionOptimizer {
     hueristic_optimizer: HeuristicsOptimizer<OptRelNodeTyp>,
@@ -99,6 +101,8 @@ impl DatafusionOptimizer {
             Arc::new(DepJoinPastProj::new()),
             Arc::new(DepJoinPastFilter::new()),
             Arc::new(DepJoinPastAgg::new()),
+            Arc::new(ProjectMergeRule::new()),
+            Arc::new(FilterMergeRule::new()),
         ]
     }
 
@@ -109,11 +113,14 @@ impl DatafusionOptimizer {
         for rule in rules {
             rule_wrappers.push(RuleWrapper::new_cascades(rule));
         }
+        // project transpose rules
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
+            ProjectFilterTransposeRule::new(),
+        )));
         // add all filter pushdown rules as heuristic rules
         rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
             FilterProjectTransposeRule::new(),
         )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(FilterMergeRule::new())));
         rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
             FilterCrossJoinTransposeRule::new(),
         )));

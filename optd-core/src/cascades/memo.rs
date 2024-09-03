@@ -297,6 +297,7 @@ impl<T: RelNodeTyp> Memo<T> {
                 }
                 let group_id = self.get_group_id_of_expr_id(new_expr_id);
                 let group_id = self.get_reduced_group_id(group_id);
+
                 self.merge_group_inner(replace_group_id, group_id);
                 return false;
             }

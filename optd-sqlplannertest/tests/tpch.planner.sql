@@ -127,17 +127,17 @@ LogicalSort
         │   │   └── Mul
         │   │       ├── #5
         │   │       └── Sub
-        │   │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │   │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
         │   │           └── #6
         │   ├── Agg(Sum)
         │   │   └── Mul
         │   │       ├── Mul
         │   │       │   ├── #5
         │   │       │   └── Sub
-        │   │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │   │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
         │   │       │       └── #6
         │   │       └── Add
-        │   │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │   │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
         │   │           └── #7
         │   ├── Agg(Avg)
         │   │   └── [ #4 ]
@@ -146,7 +146,7 @@ LogicalSort
         │   ├── Agg(Avg)
         │   │   └── [ #6 ]
         │   └── Agg(Count)
-        │       └── [ 1 ]
+        │       └── [ 1(u8) ]
         ├── groups: [ #8, #9 ]
         └── LogicalFilter
             ├── cond:Leq
@@ -172,17 +172,17 @@ PhysicalSort
         │   │   └── Mul
         │   │       ├── #5
         │   │       └── Sub
-        │   │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │   │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
         │   │           └── #6
         │   ├── Agg(Sum)
         │   │   └── Mul
         │   │       ├── Mul
         │   │       │   ├── #5
         │   │       │   └── Sub
-        │   │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │   │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
         │   │       │       └── #6
         │   │       └── Add
-        │   │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │   │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
         │   │           └── #7
         │   ├── Agg(Avg)
         │   │   └── [ #4 ]
@@ -191,7 +191,7 @@ PhysicalSort
         │   ├── Agg(Avg)
         │   │   └── [ #6 ]
         │   └── Agg(Count)
-        │       └── [ 1 ]
+        │       └── [ 1(u8) ]
         ├── groups: [ #8, #9 ]
         └── PhysicalFilter
             ├── cond:Leq
@@ -249,7 +249,7 @@ order by
 limit 100;
 
 /*
-LogicalLimit { skip: 0, fetch: 100 }
+LogicalLimit { skip: 0(u64), fetch: 100(u64) }
 └── LogicalSort
     ├── exprs:
     │   ┌── SortOrder { order: Desc }
@@ -299,7 +299,7 @@ LogicalLimit { skip: 0, fetch: 100 }
             │       │       │       │       │       ├── cond:And
             │       │       │       │       │       │   ├── Eq
             │       │       │       │       │       │   │   ├── #3
-            │       │       │       │       │       │   │   └── 4
+            │       │       │       │       │       │   │   └── 4(i32)
             │       │       │       │       │       │   └── Like { expr: #2, pattern: "%TIN", negated: false, case_insensitive: false }
             │       │       │       │       │       └── LogicalProjection { exprs: [ #0, #2, #4, #5 ] }
             │       │       │       │       │           └── LogicalScan { table: part }
@@ -352,7 +352,7 @@ LogicalLimit { skip: 0, fetch: 100 }
                                     │   └── "AFRICA"
                                     └── LogicalProjection { exprs: [ #0, #1 ] }
                                         └── LogicalScan { table: region }
-PhysicalLimit { skip: 0, fetch: 100 }
+PhysicalLimit { skip: 0(u64), fetch: 100(u64) }
 └── PhysicalSort
     ├── exprs:
     │   ┌── SortOrder { order: Desc }
@@ -379,7 +379,7 @@ PhysicalLimit { skip: 0, fetch: 100 }
             │       │       │       │       │           ├── cond:And
             │       │       │       │       │           │   ├── Eq
             │       │       │       │       │           │   │   ├── #5
-            │       │       │       │       │           │   │   └── 4
+            │       │       │       │       │           │   │   └── 4(i32)
             │       │       │       │       │           │   └── Like { expr: #4, pattern: "%TIN", negated: false, case_insensitive: false }
             │       │       │       │       │           └── PhysicalScan { table: part }
             │       │       │       │       └── PhysicalProjection { exprs: [ #0, #1, #3 ] }
@@ -446,7 +446,7 @@ ORDER BY
     o_orderdate LIMIT 10;
 
 /*
-LogicalLimit { skip: 0, fetch: 10 }
+LogicalLimit { skip: 0(u64), fetch: 10(u64) }
 └── LogicalSort
     ├── exprs:
     │   ┌── SortOrder { order: Desc }
@@ -459,7 +459,7 @@ LogicalLimit { skip: 0, fetch: 10 }
             │   └── Mul
             │       ├── #3
             │       └── Sub
-            │           ├── 1
+            │           ├── 1(float)
             │           └── #4
             ├── groups: [ #2, #0, #1 ]
             └── LogicalProjection { exprs: [ #1, #2, #3, #4, #5 ] }
@@ -484,17 +484,17 @@ LogicalLimit { skip: 0, fetch: 10 }
                     │       └── LogicalFilter
                     │           ├── cond:Lt
                     │           │   ├── #2
-                    │           │   └── 9218
+                    │           │   └── 9218(i64)
                     │           └── LogicalProjection { exprs: [ #0, #1, #4, #7 ] }
                     │               └── LogicalScan { table: orders }
                     └── LogicalProjection { exprs: [ #0, #1, #2 ] }
                         └── LogicalFilter
                             ├── cond:Gt
                             │   ├── #3
-                            │   └── 9218
+                            │   └── 9218(i64)
                             └── LogicalProjection { exprs: [ #0, #5, #6, #10 ] }
                                 └── LogicalScan { table: lineitem }
-PhysicalLimit { skip: 0, fetch: 10 }
+PhysicalLimit { skip: 0(u64), fetch: 10(u64) }
 └── PhysicalSort
     ├── exprs:
     │   ┌── SortOrder { order: Desc }
@@ -507,7 +507,7 @@ PhysicalLimit { skip: 0, fetch: 10 }
             │   └── Mul
             │       ├── #3
             │       └── Sub
-            │           ├── 1
+            │           ├── 1(float)
             │           └── #4
             ├── groups: [ #2, #0, #1 ]
             └── PhysicalProjection { exprs: [ #1, #2, #3, #4, #5 ] }
@@ -525,14 +525,14 @@ PhysicalLimit { skip: 0, fetch: 10 }
                     │           └── PhysicalFilter
                     │               ├── cond:Lt
                     │               │   ├── #4
-                    │               │   └── 9218
+                    │               │   └── 9218(i64)
                     │               └── PhysicalScan { table: orders }
                     └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
                         └── PhysicalProjection { exprs: [ #0, #5, #6, #10 ] }
                             └── PhysicalFilter
                                 ├── cond:Gt
                                 │   ├── #10
-                                │   └── 9218
+                                │   └── 9218(i64)
                                 └── PhysicalScan { table: lineitem }
 */
 
@@ -572,7 +572,7 @@ LogicalSort
         │   └── Mul
         │       ├── #22
         │       └── Sub
-        │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
         │           └── #23
         ├── groups: [ #41 ]
         └── LogicalFilter
@@ -624,27 +624,27 @@ PhysicalSort
         │   └── Mul
         │       ├── #22
         │       └── Sub
-        │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+        │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
         │           └── #23
         ├── groups: [ #41 ]
-        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #36 ], right_keys: [ #0 ] }
-            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #19, #3 ], right_keys: [ #0, #3 ] }
-            │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
-            │   │   ├── PhysicalScan { table: customer }
-            │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-            │   │       ├── PhysicalFilter
-            │   │       │   ├── cond:And
-            │   │       │   │   ├── Geq
-            │   │       │   │   │   ├── #4
-            │   │       │   │   │   └── Cast { cast_to: Date32, expr: "2023-01-01" }
-            │   │       │   │   └── Lt
-            │   │       │   │       ├── #4
-            │   │       │   │       └── Cast { cast_to: Date32, expr: "2024-01-01" }
-            │   │       │   └── PhysicalScan { table: orders }
-            │   │       └── PhysicalScan { table: lineitem }
-            │   └── PhysicalScan { table: supplier }
-            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
-                ├── PhysicalScan { table: nation }
+        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #19, #3 ], right_keys: [ #0, #3 ] }
+            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
+            │   ├── PhysicalScan { table: customer }
+            │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+            │       ├── PhysicalFilter
+            │       │   ├── cond:And
+            │       │   │   ├── Geq
+            │       │   │   │   ├── #4
+            │       │   │   │   └── Cast { cast_to: Date32, expr: "2023-01-01" }
+            │       │   │   └── Lt
+            │       │   │       ├── #4
+            │       │   │       └── Cast { cast_to: Date32, expr: "2024-01-01" }
+            │       │   └── PhysicalScan { table: orders }
+            │       └── PhysicalScan { table: lineitem }
+            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #9 ], right_keys: [ #0 ] }
+                ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #3 ], right_keys: [ #0 ] }
+                │   ├── PhysicalScan { table: supplier }
+                │   └── PhysicalScan { table: nation }
                 └── PhysicalFilter
                     ├── cond:Eq
                     │   ├── #1
@@ -679,10 +679,10 @@ LogicalProjection { exprs: [ #0 ] }
         │   ├── Lt
         │   │   ├── #10
         │   │   └── Cast { cast_to: Date32, expr: "2024-01-01" }
-        │   ├── Between { expr: Cast { cast_to: Decimal128(30, 15), expr: #6 }, lower: Cast { cast_to: Decimal128(30, 15), expr: 0.05 }, upper: Cast { cast_to: Decimal128(30, 15), expr: 0.07 } }
+        │   ├── Between { expr: Cast { cast_to: Decimal128(30, 15), expr: #6 }, lower: Cast { cast_to: Decimal128(30, 15), expr: 0.05(float) }, upper: Cast { cast_to: Decimal128(30, 15), expr: 0.07(float) } }
         │   └── Lt
         │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │       └── Cast { cast_to: Decimal128(22, 2), expr: 24 }
+        │       └── Cast { cast_to: Decimal128(22, 2), expr: 24(i64) }
         └── LogicalScan { table: lineitem }
 PhysicalProjection { exprs: [ #0 ] }
 └── PhysicalAgg
@@ -699,10 +699,10 @@ PhysicalProjection { exprs: [ #0 ] }
         │   ├── Lt
         │   │   ├── #10
         │   │   └── Cast { cast_to: Date32, expr: "2024-01-01" }
-        │   ├── Between { expr: Cast { cast_to: Decimal128(30, 15), expr: #6 }, lower: Cast { cast_to: Decimal128(30, 15), expr: 0.05 }, upper: Cast { cast_to: Decimal128(30, 15), expr: 0.07 } }
+        │   ├── Between { expr: Cast { cast_to: Decimal128(30, 15), expr: #6 }, lower: Cast { cast_to: Decimal128(30, 15), expr: 0.05(float) }, upper: Cast { cast_to: Decimal128(30, 15), expr: 0.07(float) } }
         │   └── Lt
         │       ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │       └── Cast { cast_to: Decimal128(22, 2), expr: 24 }
+        │       └── Cast { cast_to: Decimal128(22, 2), expr: 24(i64) }
         └── PhysicalScan { table: lineitem }
 */
 
@@ -770,7 +770,7 @@ LogicalSort
             │   └── Mul
             │       ├── #12
             │       └── Sub
-            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
             │           └── #13
             └── LogicalFilter
                 ├── cond:And
@@ -838,7 +838,7 @@ PhysicalSort
             │   └── Mul
             │       ├── #12
             │       └── Sub
-            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
             │           └── #13
             └── PhysicalNestedLoopJoin
                 ├── join_type: Inner
@@ -864,12 +864,12 @@ PhysicalSort
                 ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #3 ], right_keys: [ #0 ] }
                 │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #2 ] }
                 │   │   ├── PhysicalScan { table: supplier }
-                │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-                │   │       ├── PhysicalFilter { cond: Between { expr: #10, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } } }
-                │   │       │   └── PhysicalScan { table: lineitem }
-                │   │       └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-                │   │           ├── PhysicalScan { table: orders }
-                │   │           └── PhysicalScan { table: customer }
+                │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #17 ], right_keys: [ #0 ] }
+                │   │       ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+                │   │       │   ├── PhysicalFilter { cond: Between { expr: #10, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } } }
+                │   │       │   │   └── PhysicalScan { table: lineitem }
+                │   │       │   └── PhysicalScan { table: orders }
+                │   │       └── PhysicalScan { table: customer }
                 │   └── PhysicalScan { table: nation }
                 └── PhysicalScan { table: nation }
 */
@@ -932,7 +932,7 @@ LogicalSort
         │   │           │   ├── #2
         │   │           │   └── "IRAQ"
         │   │           ├── #1
-        │   │           └── Cast { cast_to: Decimal128(38, 4), expr: 0 }
+        │   │           └── Cast { cast_to: Decimal128(38, 4), expr: 0(i64) }
         │   └── Agg(Sum)
         │       └── [ #1 ]
         ├── groups: [ #0 ]
@@ -943,7 +943,7 @@ LogicalSort
             │   ├── Mul
             │   │   ├── #21
             │   │   └── Sub
-            │   │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │   │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
             │   │       └── #22
             │   └── #54
             └── LogicalFilter
@@ -1009,7 +1009,7 @@ PhysicalSort
         │   │           │   ├── #2
         │   │           │   └── "IRAQ"
         │   │           ├── #1
-        │   │           └── Cast { cast_to: Decimal128(38, 4), expr: 0 }
+        │   │           └── Cast { cast_to: Decimal128(38, 4), expr: 0(i64) }
         │   └── Agg(Sum)
         │       └── [ #1 ]
         ├── groups: [ #0 ]
@@ -1020,7 +1020,7 @@ PhysicalSort
             │   ├── Mul
             │   │   ├── #21
             │   │   └── Sub
-            │   │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │   │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
             │   │       └── #22
             │   └── #54
             └── PhysicalHashJoin { join_type: Inner, left_keys: [ #51 ], right_keys: [ #0 ] }
@@ -1033,14 +1033,14 @@ PhysicalSort
                 │   │   │   │   │   └── "ECONOMY ANODIZED STEEL"
                 │   │   │   │   └── PhysicalScan { table: part }
                 │   │   │   └── PhysicalScan { table: supplier }
-                │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-                │   │       ├── PhysicalScan { table: lineitem }
-                │   │       └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-                │   │           ├── PhysicalFilter { cond: Between { expr: #4, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } } }
-                │   │           │   └── PhysicalScan { table: orders }
-                │   │           └── PhysicalHashJoin { join_type: Inner, left_keys: [ #3 ], right_keys: [ #0 ] }
-                │   │               ├── PhysicalScan { table: customer }
-                │   │               └── PhysicalScan { table: nation }
+                │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #17 ], right_keys: [ #0 ] }
+                │   │       ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+                │   │       │   ├── PhysicalScan { table: lineitem }
+                │   │       │   └── PhysicalFilter { cond: Between { expr: #4, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } } }
+                │   │       │       └── PhysicalScan { table: orders }
+                │   │       └── PhysicalHashJoin { join_type: Inner, left_keys: [ #3 ], right_keys: [ #0 ] }
+                │   │           ├── PhysicalScan { table: customer }
+                │   │           └── PhysicalScan { table: nation }
                 │   └── PhysicalScan { table: nation }
                 └── PhysicalFilter
                     ├── cond:Eq
@@ -1104,7 +1104,7 @@ LogicalSort
             │       ├── Mul
             │       │   ├── #21
             │       │   └── Sub
-            │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
             │       │       └── #22
             │       └── Mul
             │           ├── #35
@@ -1161,7 +1161,7 @@ PhysicalSort
             │       ├── Mul
             │       │   ├── #21
             │       │   └── Sub
-            │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
             │       │       └── #22
             │       └── Mul
             │           ├── #35
@@ -1235,7 +1235,7 @@ LogicalSort
             │       ├── Mul
             │       │   ├── #21
             │       │   └── Sub
-            │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
             │       │       └── #22
             │       └── Mul
             │           ├── #35
@@ -1292,7 +1292,7 @@ PhysicalSort
             │       ├── Mul
             │       │   ├── #21
             │       │   └── Sub
-            │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │       │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
             │       │       └── #22
             │       └── Mul
             │           ├── #35
@@ -1346,7 +1346,7 @@ ORDER BY
 LIMIT 20;
 
 /*
-LogicalLimit { skip: 0, fetch: 20 }
+LogicalLimit { skip: 0(u64), fetch: 20(u64) }
 └── LogicalSort
     ├── exprs:SortOrder { order: Desc }
     │   └── #2
@@ -1356,7 +1356,7 @@ LogicalLimit { skip: 0, fetch: 20 }
             │   └── Mul
             │       ├── #22
             │       └── Sub
-            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
             │           └── #23
             ├── groups: [ #0, #1, #5, #4, #34, #2, #7 ]
             └── LogicalFilter
@@ -1388,7 +1388,7 @@ LogicalLimit { skip: 0, fetch: 20 }
                     │   │   └── LogicalScan { table: orders }
                     │   └── LogicalScan { table: lineitem }
                     └── LogicalScan { table: nation }
-PhysicalLimit { skip: 0, fetch: 20 }
+PhysicalLimit { skip: 0(u64), fetch: 20(u64) }
 └── PhysicalSort
     ├── exprs:SortOrder { order: Desc }
     │   └── #2
@@ -1398,7 +1398,7 @@ PhysicalLimit { skip: 0, fetch: 20 }
             │   └── Mul
             │       ├── #22
             │       └── Sub
-            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
             │           └── #23
             ├── groups: [ #0, #1, #5, #4, #34, #2, #7 ]
             └── PhysicalHashJoin { join_type: Inner, left_keys: [ #3 ], right_keys: [ #0 ] }
@@ -1497,7 +1497,7 @@ LogicalSort
             │   ├── cast_to: Decimal128(38, 15)
             │   ├── expr:Mul
             │   │   ├── Cast { cast_to: Float64, expr: #0 }
-            │   │   └── 0.0001
+            │   │   └── 0.0001(float)
 
             └── LogicalAgg
                 ├── exprs:Agg(Sum)
@@ -1543,7 +1543,7 @@ PhysicalSort
             │   │   ├── cast_to: Decimal128(38, 15)
             │   │   ├── expr:Mul
             │   │   │   ├── Cast { cast_to: Float64, expr: #0 }
-            │   │   │   └── 0.0001
+            │   │   │   └── 0.0001(float)
 
             │   └── PhysicalAgg
             │       ├── aggrs:Agg(Sum)
@@ -1630,8 +1630,8 @@ LogicalSort
         │   │           │   └── Eq
         │   │           │       ├── #5
         │   │           │       └── "2-HIGH"
-        │   │           ├── 1
-        │   │           └── 0
+        │   │           ├── 1(i64)
+        │   │           └── 0(i64)
         │   └── Agg(Sum)
         │       └── Case
         │           └── 
@@ -1642,8 +1642,8 @@ LogicalSort
         │               │   └── Neq
         │               │       ├── #5
         │               │       └── "2-HIGH"
-        │               ├── 1
-        │               └── 0
+        │               ├── 1(i64)
+        │               └── 0(i64)
         ├── groups: [ #23 ]
         └── LogicalFilter
             ├── cond:And
@@ -1682,8 +1682,8 @@ PhysicalSort
         │   │           │   └── Eq
         │   │           │       ├── #5
         │   │           │       └── "2-HIGH"
-        │   │           ├── 1
-        │   │           └── 0
+        │   │           ├── 1(i64)
+        │   │           └── 0(i64)
         │   └── Agg(Sum)
         │       └── Case
         │           └── 
@@ -1694,8 +1694,8 @@ PhysicalSort
         │               │   └── Neq
         │               │       ├── #5
         │               │       └── "2-HIGH"
-        │               ├── 1
-        │               └── 0
+        │               ├── 1(i64)
+        │               └── 0(i64)
         ├── groups: [ #23 ]
         └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
             ├── PhysicalScan { table: orders }
@@ -1734,7 +1734,7 @@ WHERE
 LogicalProjection
 ├── exprs:Div
 │   ├── Mul
-│   │   ├── 100
+│   │   ├── 100(float)
 │   │   └── Cast { cast_to: Float64, expr: #0 }
 │   └── Cast { cast_to: Float64, expr: #1 }
 └── LogicalAgg
@@ -1746,14 +1746,14 @@ LogicalProjection
     │   │           ├── Mul
     │   │           │   ├── #5
     │   │           │   └── Sub
-    │   │           │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+    │   │           │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
     │   │           │       └── #6
-    │   │           └── Cast { cast_to: Decimal128(38, 4), expr: 0 }
+    │   │           └── Cast { cast_to: Decimal128(38, 4), expr: 0(i64) }
     │   └── Agg(Sum)
     │       └── Mul
     │           ├── #5
     │           └── Sub
-    │               ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+    │               ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
     │               └── #6
     ├── groups: []
     └── LogicalFilter
@@ -1775,7 +1775,7 @@ LogicalProjection
 PhysicalProjection
 ├── exprs:Div
 │   ├── Mul
-│   │   ├── 100
+│   │   ├── 100(float)
 │   │   └── Cast { cast_to: Float64, expr: #0 }
 │   └── Cast { cast_to: Float64, expr: #1 }
 └── PhysicalAgg
@@ -1787,14 +1787,14 @@ PhysicalProjection
     │   │           ├── Mul
     │   │           │   ├── #5
     │   │           │   └── Sub
-    │   │           │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+    │   │           │       ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
     │   │           │       └── #6
-    │   │           └── Cast { cast_to: Decimal128(38, 4), expr: 0 }
+    │   │           └── Cast { cast_to: Decimal128(38, 4), expr: 0(i64) }
     │   └── Agg(Sum)
     │       └── Mul
     │           ├── #5
     │           └── Sub
-    │               ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+    │               ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
     │               └── #6
     ├── groups: []
     └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
@@ -1871,7 +1871,7 @@ LogicalSort
         │               │   └── Mul
         │               │       ├── #1
         │               │       └── Sub
-        │               │           ├── 1
+        │               │           ├── 1(float)
         │               │           └── #2
         │               ├── groups: [ #0 ]
         │               └── LogicalProjection { exprs: [ #0, #1, #2 ] }
@@ -1879,10 +1879,10 @@ LogicalSort
         │                       ├── cond:And
         │                       │   ├── Geq
         │                       │   │   ├── #3
-        │                       │   │   └── 8401
+        │                       │   │   └── 8401(i64)
         │                       │   └── Lt
         │                       │       ├── #3
-        │                       │       └── 8491
+        │                       │       └── 8491(i64)
         │                       └── LogicalProjection { exprs: [ #2, #5, #6, #10 ] }
         │                           └── LogicalScan { table: lineitem }
         └── LogicalAgg
@@ -1895,7 +1895,7 @@ LogicalSort
                     │   └── Mul
                     │       ├── #1
                     │       └── Sub
-                    │           ├── 1
+                    │           ├── 1(float)
                     │           └── #2
                     ├── groups: [ #0 ]
                     └── LogicalProjection { exprs: [ #0, #1, #2 ] }
@@ -1903,10 +1903,10 @@ LogicalSort
                             ├── cond:And
                             │   ├── Geq
                             │   │   ├── #3
-                            │   │   └── 8401
+                            │   │   └── 8401(i64)
                             │   └── Lt
                             │       ├── #3
-                            │       └── 8491
+                            │       └── 8491(i64)
                             └── LogicalProjection { exprs: [ #2, #5, #6, #10 ] }
                                 └── LogicalScan { table: lineitem }
 PhysicalSort
@@ -1930,7 +1930,7 @@ PhysicalSort
                         │           │   └── Mul
                         │           │       ├── #1
                         │           │       └── Sub
-                        │           │           ├── 1
+                        │           │           ├── 1(float)
                         │           │           └── #2
                         │           ├── groups: [ #0 ]
                         │           └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
@@ -1939,17 +1939,17 @@ PhysicalSort
                         │                       ├── cond:And
                         │                       │   ├── Geq
                         │                       │   │   ├── #10
-                        │                       │   │   └── 8401
+                        │                       │   │   └── 8401(i64)
                         │                       │   └── Lt
                         │                       │       ├── #10
-                        │                       │       └── 8491
+                        │                       │       └── 8491(i64)
                         │                       └── PhysicalScan { table: lineitem }
                         └── PhysicalAgg
                             ├── aggrs:Agg(Sum)
                             │   └── Mul
                             │       ├── #1
                             │       └── Sub
-                            │           ├── 1
+                            │           ├── 1(float)
                             │           └── #2
                             ├── groups: [ #0 ]
                             └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
@@ -1958,10 +1958,10 @@ PhysicalSort
                                         ├── cond:And
                                         │   ├── Geq
                                         │   │   ├── #10
-                                        │   │   └── 8401
+                                        │   │   └── 8401(i64)
                                         │   └── Lt
                                         │       ├── #10
-                                        │       └── 8491
+                                        │       └── 8491(i64)
                                         └── PhysicalScan { table: lineitem }
 */
 
@@ -1990,8 +1990,8 @@ LogicalProjection
 │   └── 
 │       ┌── Div
 │       │   ├── Cast { cast_to: Float64, expr: #0 }
-│       │   └── 7
-│       └── 16
+│       │   └── 7(float)
+│       └── 16(i64)
 └── LogicalAgg
     ├── exprs:Agg(Sum)
     │   └── [ #0 ]
@@ -2030,7 +2030,7 @@ LogicalProjection
                 │   ┌── Cast
                 │   │   ├── cast_to: Decimal128(30, 15)
                 │   │   ├── expr:Mul
-                │   │   │   ├── 0.2
+                │   │   │   ├── 0.2(float)
                 │   │   │   └── Cast { cast_to: Float64, expr: #1 }
 
                 │   └── #0
@@ -2045,8 +2045,8 @@ PhysicalProjection
 │   └── 
 │       ┌── Div
 │       │   ├── Cast { cast_to: Float64, expr: #0 }
-│       │   └── 7
-│       └── 16
+│       │   └── 7(float)
+│       └── 16(i64)
 └── PhysicalAgg
     ├── aggrs:Agg(Sum)
     │   └── [ #0 ]
@@ -2081,7 +2081,7 @@ PhysicalProjection
                 │   ┌── Cast
                 │   │   ├── cast_to: Decimal128(30, 15)
                 │   │   ├── expr:Mul
-                │   │   │   ├── 0.2
+                │   │   │   ├── 0.2(float)
                 │   │   │   └── Cast { cast_to: Float64, expr: #1 }
 
                 │   └── #0
@@ -2133,7 +2133,7 @@ LogicalProjection { exprs: [ #0 ] }
     │   └── Mul
     │       ├── #5
     │       └── Sub
-    │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+    │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
     │           └── #6
     ├── groups: []
     └── LogicalFilter
@@ -2148,11 +2148,11 @@ LogicalProjection { exprs: [ #0 ] }
         │   │   ├── InList { expr: #22, list: [ "SM CASE", "SM BOX", "SM PACK", "SM PKG" ], negated: false }
         │   │   ├── Geq
         │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 1 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 1(i64) }
         │   │   ├── Leq
         │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 11 }
-        │   │   ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 5 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 11(i64) }
+        │   │   ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1(i64), upper: 5(i64) }
         │   │   ├── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
         │   │   └── Eq
         │   │       ├── #13
@@ -2167,11 +2167,11 @@ LogicalProjection { exprs: [ #0 ] }
         │   │   ├── InList { expr: #22, list: [ "MED BAG", "MED BOX", "MED PKG", "MED PACK" ], negated: false }
         │   │   ├── Geq
         │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 10 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 10(i64) }
         │   │   ├── Leq
         │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 20 }
-        │   │   ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 10 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 20(i64) }
+        │   │   ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1(i64), upper: 10(i64) }
         │   │   ├── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
         │   │   └── Eq
         │   │       ├── #13
@@ -2186,11 +2186,11 @@ LogicalProjection { exprs: [ #0 ] }
         │       ├── InList { expr: #22, list: [ "LG CASE", "LG BOX", "LG PACK", "LG PKG" ], negated: false }
         │       ├── Geq
         │       │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │       │   └── Cast { cast_to: Decimal128(22, 2), expr: 20 }
+        │       │   └── Cast { cast_to: Decimal128(22, 2), expr: 20(i64) }
         │       ├── Leq
         │       │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │       │   └── Cast { cast_to: Decimal128(22, 2), expr: 30 }
-        │       ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 15 }
+        │       │   └── Cast { cast_to: Decimal128(22, 2), expr: 30(i64) }
+        │       ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1(i64), upper: 15(i64) }
         │       ├── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
         │       └── Eq
         │           ├── #13
@@ -2204,7 +2204,7 @@ PhysicalProjection { exprs: [ #0 ] }
     │   └── Mul
     │       ├── #5
     │       └── Sub
-    │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1 }
+    │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
     │           └── #6
     ├── groups: []
     └── PhysicalNestedLoopJoin
@@ -2220,11 +2220,11 @@ PhysicalProjection { exprs: [ #0 ] }
         │   │   ├── InList { expr: #22, list: [ "SM CASE", "SM BOX", "SM PACK", "SM PKG" ], negated: false }
         │   │   ├── Geq
         │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 1 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 1(i64) }
         │   │   ├── Leq
         │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 11 }
-        │   │   ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 5 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 11(i64) }
+        │   │   ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1(i64), upper: 5(i64) }
         │   │   ├── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
         │   │   └── Eq
         │   │       ├── #13
@@ -2239,11 +2239,11 @@ PhysicalProjection { exprs: [ #0 ] }
         │   │   ├── InList { expr: #22, list: [ "MED BAG", "MED BOX", "MED PKG", "MED PACK" ], negated: false }
         │   │   ├── Geq
         │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 10 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 10(i64) }
         │   │   ├── Leq
         │   │   │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 20 }
-        │   │   ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 10 }
+        │   │   │   └── Cast { cast_to: Decimal128(22, 2), expr: 20(i64) }
+        │   │   ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1(i64), upper: 10(i64) }
         │   │   ├── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
         │   │   └── Eq
         │   │       ├── #13
@@ -2258,11 +2258,11 @@ PhysicalProjection { exprs: [ #0 ] }
         │       ├── InList { expr: #22, list: [ "LG CASE", "LG BOX", "LG PACK", "LG PKG" ], negated: false }
         │       ├── Geq
         │       │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │       │   └── Cast { cast_to: Decimal128(22, 2), expr: 20 }
+        │       │   └── Cast { cast_to: Decimal128(22, 2), expr: 20(i64) }
         │       ├── Leq
         │       │   ├── Cast { cast_to: Decimal128(22, 2), expr: #4 }
-        │       │   └── Cast { cast_to: Decimal128(22, 2), expr: 30 }
-        │       ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1, upper: 15 }
+        │       │   └── Cast { cast_to: Decimal128(22, 2), expr: 30(i64) }
+        │       ├── Between { expr: Cast { cast_to: Int64, expr: #21 }, lower: 1(i64), upper: 15(i64) }
         │       ├── InList { expr: #14, list: [ "AIR", "AIR REG" ], negated: false }
         │       └── Eq
         │           ├── #13

@@ -22,7 +22,10 @@
 - [Three Join Demo](./demo_three_join.md)
 - [TPC-H Q8 Demo](./demo_tpch_q8.md)
 
-# Testing
+# Performance Benchmarking
+- [Cost Model Cardinality Benchmarking](./cost_model_benchmarking.md)
+
+# Functional Testing
 
 - [SQLPlannerTest](./sqlplannertest.md)
 - [Datafusion CLI](./datafusion_cli.md)

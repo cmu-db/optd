@@ -30,6 +30,10 @@ pub struct Schema {
 }
 
 impl Schema {
+    pub fn new(fields: Vec<Field>) -> Self {
+        Self { fields }
+    }
+
     pub fn len(&self) -> usize {
         self.fields.len()
     }
@@ -107,6 +111,25 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
                 group_by_schema.fields.extend(agg_schema.fields);
                 group_by_schema
             }
+            OptRelNodeTyp::Cast => Schema {
+                fields: children[0]
+                    .fields
+                    .iter()
+                    .map(|field| Field {
+                        typ: children[1].fields[0].typ,
+                        ..field.clone()
+                    })
+                    .collect(),
+            },
+            OptRelNodeTyp::DataType(data_type) => Schema {
+                fields: vec![Field {
+                    // name and nullable are just placeholders since
+                    // they'll be overwritten by Cast
+                    name: DEFAULT_NAME.to_string(),
+                    typ: ConstantType::from_data_type(data_type),
+                    nullable: true,
+                }],
+            },
             OptRelNodeTyp::Func(FuncType::Agg(_)) => Schema {
                 // TODO: this is just a place holder now.
                 // The real type should be the column type.

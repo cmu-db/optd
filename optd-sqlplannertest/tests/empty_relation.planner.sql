@@ -16,13 +16,13 @@ select 64 + 1 from t1;
 /*
 LogicalProjection
 ├── exprs:Add
-│   ├── 64
-│   └── 1
+│   ├── 64(i64)
+│   └── 1(i64)
 └── LogicalEmptyRelation { produce_one_row: true }
 PhysicalProjection
 ├── exprs:Add
-│   ├── 64
-│   └── 1
+│   ├── 64(i64)
+│   └── 1(i64)
 └── PhysicalEmptyRelation { produce_one_row: true }
 65
 65

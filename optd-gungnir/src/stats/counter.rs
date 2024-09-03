@@ -64,6 +64,11 @@ where
             .map(|(key, &value)| (key.clone(), value as f64 / self.total_count as f64))
             .collect()
     }
+
+    /// Whether the counter tracks the given key.
+    pub fn is_tracking(&self, key: &T) -> bool {
+        self.counts.contains_key(key)
+    }
 }
 
 // Start of unit testing section.
@@ -81,7 +86,7 @@ mod tests {
     // Generates hardcoded frequencies and returns them,
     // along with a flattened randomized array containing those frequencies.
     fn generate_frequencies() -> (HashMap<i32, i32>, Vec<i32>) {
-        let mut frequencies = std::collections::HashMap::new();
+        let mut frequencies = HashMap::new();
 
         frequencies.insert(0, 2);
         frequencies.insert(1, 4);
