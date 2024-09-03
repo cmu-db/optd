@@ -54,7 +54,7 @@ impl ProjectionMapping {
     /// Join { cond: #1=#4 }
     pub fn rewrite_join_cond(&self, cond: Expr, child_schema_len: usize) -> Expr {
         let schema_size = self.forward.len();
-        cond.rewrite_column_refs(&|col_idx| {
+        cond.rewrite_column_refs(&mut |col_idx| {
             if col_idx < schema_size {
                 self.projection_col_maps_to(col_idx)
             } else {
@@ -79,7 +79,7 @@ impl ProjectionMapping {
     /// ---->
     /// Filter { cond: #1=0 and #4=1 }
     pub fn rewrite_filter_cond(&self, cond: Expr, is_added: bool) -> Expr {
-        cond.rewrite_column_refs(&|col_idx| {
+        cond.rewrite_column_refs(&mut |col_idx| {
             if is_added {
                 self.original_col_maps_to(col_idx)
             } else {

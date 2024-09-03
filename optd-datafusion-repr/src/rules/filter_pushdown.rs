@@ -8,9 +8,11 @@
 //! At a high level, filter pushdown is responsible for pushing the filter node
 //! further down the query plan whenever it is possible to do so.
 
+use core::panic;
 use std::collections::{HashMap, HashSet};
 use std::vec;
 
+use datafusion::physical_expr::unicode_expressions::right;
 use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 
@@ -64,6 +66,10 @@ fn determine_join_cond_dep(
                 left_col = true;
             } else if index >= left_schema_size && index < left_schema_size + right_schema_size {
                 right_col = true;
+            } else {
+                panic!(
+                    "Column index {index} out of bounds {left_schema_size} + {right_schema_size}"
+                );
             }
         }
     }
@@ -238,7 +244,7 @@ fn filter_join_transpose(
         match location {
             JoinCondDependency::Left => left_conds.push(expr),
             JoinCondDependency::Right => right_conds.push(
-                expr.rewrite_column_refs(&|idx| {
+                expr.rewrite_column_refs(&mut |idx| {
                     Some(LogicalJoin::map_through_join(
                         idx,
                         left_schema_size,

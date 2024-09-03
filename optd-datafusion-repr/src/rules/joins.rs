@@ -29,7 +29,7 @@ fn apply_join_commute(
     let right_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(right.clone()), 0);
     let cond = Expr::from_rel_node(cond.into())
         .unwrap()
-        .rewrite_column_refs(&|idx| {
+        .rewrite_column_refs(&mut |idx| {
             Some(if idx < left_schema.len() {
                 idx + right_schema.len()
             } else {
@@ -129,7 +129,7 @@ fn apply_join_assoc(
 
     let cond2 = Expr::from_rel_node(cond2.into()).unwrap();
 
-    let Some(cond2) = cond2.rewrite_column_refs(&|idx| {
+    let Some(cond2) = cond2.rewrite_column_refs(&mut |idx| {
         if idx < a_schema.len() {
             None
         } else {

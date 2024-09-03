@@ -465,6 +465,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 GroupColumnRefs::new(column_refs, correlation)
             }
             OptRelNodeTyp::Constant(_)
+            | OptRelNodeTyp::ExternColumnRef // TODO Possibly very very wrong---consult cost model team
             | OptRelNodeTyp::Func(_)
             | OptRelNodeTyp::DataType(_)
             | OptRelNodeTyp::Between

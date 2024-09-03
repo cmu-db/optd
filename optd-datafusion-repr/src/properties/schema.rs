@@ -73,7 +73,7 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
             }
             OptRelNodeTyp::Projection => children[1].clone(),
             OptRelNodeTyp::Filter => children[0].clone(),
-            OptRelNodeTyp::Join(_) => {
+            OptRelNodeTyp::DepJoin(_) | OptRelNodeTyp::Join(_) => {
                 let mut schema = children[0].clone();
                 let schema2 = children[1].clone();
                 schema.fields.extend(schema2.fields);
