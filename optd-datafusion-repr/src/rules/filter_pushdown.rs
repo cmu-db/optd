@@ -8,6 +8,8 @@
 //! At a high level, filter pushdown is responsible for pushing the filter node
 //! further down the query plan whenever it is possible to do so.
 
+// TODO: Separate filter transpositions into several files like proj transpose
+
 use std::collections::{HashMap, HashSet};
 use std::vec;
 
@@ -92,7 +94,8 @@ fn categorize_conds(mut categorization_fn: impl FnMut(Expr, &Vec<Expr>), cond: E
             }
             _ => {
                 for child in &cond.clone().into_rel_node().children {
-                    if child.typ == OptRelNodeTyp::List {
+                    if child.typ == OptRelNodeTyp::List || child.typ == OptRelNodeTyp::PhysicalList
+                    {
                         // TODO: What should we do when we encounter a List?
                         continue;
                     }

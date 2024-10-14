@@ -15,6 +15,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{cascades::GroupId, cost::Cost};
 
+// TODO: Can we change this to RelNodeArc?
 pub type RelNodeRef<T> = Arc<RelNode<T>>;
 
 pub trait RelNodeTyp:

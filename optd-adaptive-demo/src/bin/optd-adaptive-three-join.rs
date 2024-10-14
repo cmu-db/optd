@@ -33,8 +33,9 @@ async fn main() -> Result<()> {
             BaseTableStats::default(),
             true,
         );
-        optimizer.optd_optimizer_mut().prop.partial_explore_iter = None;
-        optimizer.optd_optimizer_mut().prop.partial_explore_space = None;
+        // TODO
+        // optimizer.optd_optimizer_mut().prop.partial_explore_iter = None;
+        // optimizer.optd_optimizer_mut().prop.partial_explore_space = None;
         state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));
         SessionContext::new_with_state(state)
     };
@@ -51,8 +52,9 @@ async fn main() -> Result<()> {
             DatafusionOptimizer::new_alternative_physical_for_demo(Arc::new(
                 DatafusionCatalog::new(state.catalog_list()),
             ));
-        optimizer.optd_optimizer_mut().prop.partial_explore_iter = None;
-        optimizer.optd_optimizer_mut().prop.partial_explore_space = None;
+        // TODO
+        // optimizer.optd_optimizer_mut().prop.partial_explore_iter = None;
+        // optimizer.optd_optimizer_mut().prop.partial_explore_space = None;
         perfect_optimizer = Arc::new(OptdQueryPlanner::new(optimizer));
         state = state.with_query_planner(perfect_optimizer.clone());
         SessionContext::new_with_state(state)
@@ -166,8 +168,8 @@ async fn main() -> Result<()> {
         {
             let mut guard = perfect_optimizer.optimizer.lock().unwrap();
             let opt = guard.as_mut().unwrap();
-            opt.optd_optimizer_mut().disable_rule(1);
-            opt.optd_optimizer_mut().disable_rule(2);
+            opt.optd_optimizer_mut().disable_rule(1.into());
+            opt.optd_optimizer_mut().disable_rule(2.into());
         }
 
         // derive the best order using the alternative optimizer
@@ -216,8 +218,8 @@ async fn main() -> Result<()> {
         {
             let mut guard = perfect_optimizer.optimizer.lock().unwrap();
             let opt = guard.as_mut().unwrap();
-            opt.optd_optimizer_mut().enable_rule(1);
-            opt.optd_optimizer_mut().enable_rule(2);
+            opt.optd_optimizer_mut().enable_rule(1.into());
+            opt.optd_optimizer_mut().enable_rule(2.into());
         }
 
         let result =

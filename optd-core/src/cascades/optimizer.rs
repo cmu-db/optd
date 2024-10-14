@@ -1,54 +1,27 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     fmt::Display,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex, RwLock,
+    },
 };
 
 use anyhow::Result;
+use tracing::trace;
 
 use crate::{
     cost::CostModel,
     optimizer::Optimizer,
     property::{PropertyBuilder, PropertyBuilderAny},
-    rel_node::{RelNodeMetaMap, RelNodeRef, RelNodeTyp},
-    rules::RuleWrapper,
+    rel_node::{RelNodeMeta, RelNodeRef, RelNodeTyp},
+    rules::{Rule, RuleMatcher},
 };
 
 use super::{
-    memo::{GroupInfo, RelMemoNodeRef},
-    tasks::OptimizeGroupTask,
-    Memo, Task,
+    memo::{BindingType, GroupInfo, Memo, RelMemoNodeRef},
+    tasks::{get_initial_task, Task},
 };
-
-pub type RuleId = usize;
-
-#[derive(Default, Clone, Debug)]
-pub struct OptimizerContext {
-    pub upper_bound: Option<f64>,
-    pub budget_used: bool,
-    pub rules_applied: usize,
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct OptimizerProperties {
-    /// If the number of rules applied exceeds this number, we stop applying logical rules.
-    pub partial_explore_iter: Option<usize>,
-    /// Plan space can be expanded by this number of times before we stop applying logical rules.
-    pub partial_explore_space: Option<usize>,
-}
-
-pub struct CascadesOptimizer<T: RelNodeTyp> {
-    memo: Memo<T>,
-    pub(super) tasks: VecDeque<Box<dyn Task<T>>>,
-    explored_group: HashSet<GroupId>,
-    fired_rules: HashMap<ExprId, HashSet<RuleId>>,
-    rules: Arc<[Arc<RuleWrapper<T, Self>>]>,
-    disabled_rules: HashSet<usize>,
-    cost: Arc<dyn CostModel<T>>,
-    property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
-    pub ctx: OptimizerContext,
-    pub prop: OptimizerProperties,
-}
 
 /// `RelNode` only contains the representation of the plan nodes. Sometimes, we need more context, i.e., group id and
 /// expr id, during the optimization phase. All these information are collected in this struct.
@@ -59,8 +32,9 @@ pub struct RelNodeContext {
     pub children_group_ids: Vec<GroupId>,
 }
 
+// TODO: can these be somewhere else?
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
-pub struct GroupId(pub(super) usize);
+pub struct GroupId(pub usize);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
 pub struct ExprId(pub usize);
@@ -77,186 +51,207 @@ impl Display for ExprId {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
+pub struct RuleId(pub usize);
+
+impl Display for RuleId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "R{}", self.0)
+    }
+}
+
+impl From<usize> for RuleId {
+    fn from(id: usize) -> Self {
+        Self(id)
+    }
+}
+
+/// TODO: Docs
+struct CascadesOptimizerState<T: RelNodeTyp> {
+    pub memo: Memo<T>,
+    pub explored_groups: HashSet<GroupId>, // TODO: Should we move this information into the memo groupinfo?? (I think yes)
+    pub applied_rules: HashMap<ExprId, HashSet<RuleId>>, // TODO: Should this info be in the memo also?
+    pub disabled_rules: HashSet<RuleId>,
+}
+
+/// TODO: Docs
+pub struct CascadesOptimizer<T: RelNodeTyp> {
+    /// Tasks that are waiting to be executed
+    tasks: Mutex<Vec<Box<dyn Task<T>>>>,
+    /// Monotonically increasing counter for task invocations
+    task_counter: AtomicUsize,
+    /// Parts of the internal state of the optimizer, behind a RwLock
+    state: RwLock<CascadesOptimizerState<T>>,
+    /// Number of transformation rule applications that have ocurred thus far.
+    /// We can use this to terminate exploration early.
+    transformation_counter: AtomicUsize,
+    /// Transformation rules that may be used while exploring
+    /// (logical -> logical)
+    transformation_rules: Arc<[(RuleId, Arc<dyn Rule<T, Self>>)]>,
+    /// Implementation rules that may be used while optimizing
+    /// (logical -> physical)
+    implementation_rules: Arc<[(RuleId, Arc<dyn Rule<T, Self>>)]>,
+    /// Property builders which may be used to derive properties
+    property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
+    /// Cost model, used to determine the cost of a given plan
+    cost: Arc<dyn CostModel<T>>,
+}
+
 impl<T: RelNodeTyp> CascadesOptimizer<T> {
+    /// Create a new CascadesOptimizer object
     pub fn new(
-        rules: Vec<Arc<RuleWrapper<T, Self>>>,
-        cost: Box<dyn CostModel<T>>,
-        property_builders: Vec<Box<dyn PropertyBuilderAny<T>>>,
+        transformation_rules: Arc<[Arc<dyn Rule<T, Self>>]>,
+        implementation_rules: Arc<[Arc<dyn Rule<T, Self>>]>,
+        cost: Arc<dyn CostModel<T>>,
+        property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
     ) -> Self {
-        Self::new_with_prop(rules, cost, property_builders, Default::default())
-    }
+        // Assign rule IDs
+        let transformation_rules: Arc<[(RuleId, Arc<dyn Rule<T, Self>>)]> = transformation_rules
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| (RuleId(i), r.clone()))
+            .collect();
+        let implementation_rules = implementation_rules
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| (RuleId(i + transformation_rules.len()), r.clone()))
+            .collect();
 
-    pub fn new_with_prop(
-        rules: Vec<Arc<RuleWrapper<T, Self>>>,
-        cost: Box<dyn CostModel<T>>,
-        property_builders: Vec<Box<dyn PropertyBuilderAny<T>>>,
-        prop: OptimizerProperties,
-    ) -> Self {
-        let tasks = VecDeque::new();
-        let property_builders: Arc<[_]> = property_builders.into();
-        let memo = Memo::new(property_builders.clone());
+        // Create struct instance
         Self {
-            memo,
-            tasks,
-            explored_group: HashSet::new(),
-            fired_rules: HashMap::new(),
-            rules: rules.into(),
-            cost: cost.into(),
-            ctx: OptimizerContext::default(),
+            tasks: Mutex::default(),
+            task_counter: AtomicUsize::new(0),
+            state: RwLock::new(CascadesOptimizerState {
+                memo: Memo::new(property_builders.clone()),
+                explored_groups: HashSet::new(),
+                applied_rules: HashMap::new(),
+                disabled_rules: HashSet::new(),
+            }),
+            transformation_counter: AtomicUsize::new(0),
+            transformation_rules,
+            implementation_rules,
             property_builders,
-            prop,
-            disabled_rules: HashSet::new(),
+            cost,
         }
     }
 
-    pub fn cost(&self) -> Arc<dyn CostModel<T>> {
-        self.cost.clone()
+    pub fn push_task(&self, task: Box<dyn Task<T>>) {
+        self.tasks.lock().unwrap().push(task);
     }
 
-    pub(super) fn rules(&self) -> Arc<[Arc<RuleWrapper<T, Self>>]> {
-        self.rules.clone()
+    fn pop_task(&self) -> Option<Box<dyn Task<T>>> {
+        self.tasks.lock().unwrap().pop()
     }
 
-    pub fn disable_rule(&mut self, rule_id: usize) {
-        self.disabled_rules.insert(rule_id);
+    /// Returns if a given group ID has already been explored in this run
+    pub fn is_group_explored(&self, group_id: GroupId) -> bool {
+        self.state
+            .read()
+            .unwrap()
+            .explored_groups
+            .contains(&group_id)
     }
 
-    pub fn enable_rule(&mut self, rule_id: usize) {
-        self.disabled_rules.remove(&rule_id);
+    /// Marks a given group ID as having already been explored in this run
+    pub fn mark_group_explored(&self, group_id: GroupId) {
+        self.state.write().unwrap().explored_groups.insert(group_id);
     }
 
-    pub fn is_rule_disabled(&self, rule_id: usize) -> bool {
-        self.disabled_rules.contains(&rule_id)
-    }
-
-    pub fn dump(&self, group_id: Option<GroupId>) {
-        if let Some(group_id) = group_id {
-            fn dump_inner<T: RelNodeTyp>(this: &CascadesOptimizer<T>, group_id: GroupId) {
-                if let Some(ref winner) = this.memo.get_group_info(group_id).winner {
-                    let expr = this.memo.get_expr_memoed(winner.expr_id);
-                    assert!(!winner.impossible);
-                    if winner.cost.0[1] == 1.0 {
-                        return;
-                    }
-                    println!(
-                        "group_id={} winner={} cost={} {}",
-                        group_id,
-                        winner.expr_id,
-                        this.cost.explain(&winner.cost),
-                        expr
-                    );
-                    for child in &expr.children {
-                        dump_inner(this, *child);
-                    }
-                }
-            }
-            dump_inner(self, group_id);
-            return;
-        }
-        for group_id in self.memo.get_all_group_ids() {
-            let winner = if let Some(ref winner) = self.memo.get_group_info(group_id).winner {
-                if winner.impossible {
-                    "winner=<impossible>".to_string()
-                } else {
-                    format!(
-                        "winner={} cost={} {}",
-                        winner.expr_id,
-                        self.cost.explain(&winner.cost),
-                        self.memo.get_expr_memoed(winner.expr_id)
-                    )
-                }
-            } else {
-                "winner=None".to_string()
-            };
-            println!("group_id={} {}", group_id, winner);
-            let group = self.memo.get_group(group_id);
-            for (id, property) in self.property_builders.iter().enumerate() {
-                println!(
-                    "  {}={}",
-                    property.property_name(),
-                    property.display(group.properties[id].as_ref())
-                )
-            }
-            for expr_id in self.memo.get_all_exprs_in_group(group_id) {
-                let memo_node = self.memo.get_expr_memoed(expr_id);
-                println!("  expr_id={} | {}", expr_id, memo_node);
-                let bindings = self
-                    .memo
-                    .get_all_expr_bindings(expr_id, false, true, Some(1));
-                for binding in bindings {
-                    println!("    {}", binding);
-                }
-            }
-        }
-    }
-
-    /// Clear the memo table and all optimizer states.
-    pub fn step_clear(&mut self) {
-        self.memo = Memo::new(self.property_builders.clone());
-        self.fired_rules.clear();
-        self.explored_group.clear();
-    }
-
-    /// Clear the winner so that the optimizer can continue to explore the group.
-    pub fn step_clear_winner(&mut self) {
-        self.memo.clear_winner();
-    }
-
-    /// Optimize a `RelNode`.
-    pub fn step_optimize_rel(&mut self, root_rel: RelNodeRef<T>) -> Result<GroupId> {
-        let (group_id, _) = self.add_group_expr(root_rel, None);
-        self.fire_optimize_tasks(group_id)?;
-        Ok(group_id)
-    }
-
-    /// Gets the group binding.
-    pub fn step_get_optimize_rel(
+    pub fn get_all_group_bindings(
         &self,
         group_id: GroupId,
-        meta: &mut Option<RelNodeMetaMap>,
-    ) -> Result<RelNodeRef<T>> {
-        self.memo.get_best_group_binding(group_id, meta)
+        binding_type: BindingType,
+    ) -> Vec<RelNodeRef<T>> {
+        self.state.read().unwrap().memo.get_all_group_bindings(
+            group_id,
+            binding_type,
+            true,
+            Some(10),
+        )
     }
 
-    fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
-        self.tasks
-            .push_back(Box::new(OptimizeGroupTask::new(group_id)));
-        // get the task from the stack
-        self.ctx.budget_used = false;
-        let plan_space_begin = self.memo.compute_plan_space();
-        let mut iter = 0;
-        while let Some(task) = self.tasks.pop_back() {
-            let new_tasks = task.execute(self)?;
-            self.tasks.extend(new_tasks);
-            iter += 1;
-            if !self.ctx.budget_used {
-                let plan_space = self.memo.compute_plan_space();
-                if let Some(partial_explore_space) = self.prop.partial_explore_space {
-                    if plan_space - plan_space_begin > partial_explore_space {
-                        println!(
-                            "plan space size budget used, not applying logical rules any more. current plan space: {}",
-                            plan_space
-                        );
-                        self.ctx.budget_used = true;
-                    }
-                } else if let Some(partial_explore_iter) = self.prop.partial_explore_iter {
-                    if iter >= partial_explore_iter {
-                        println!(
-                            "plan explore iter budget used, not applying logical rules any more. current plan space: {}",
-                            plan_space
-                        );
-                        self.ctx.budget_used = true;
-                    }
-                }
-            }
-        }
-        Ok(())
+    // TODO: Consider introducing a distinction between getting physical and logical exprs?
+    pub fn get_all_exprs_in_group(&self, group_id: GroupId) -> Vec<ExprId> {
+        self.state
+            .read()
+            .unwrap()
+            .memo
+            .get_all_exprs_in_group(group_id)
     }
 
-    fn optimize_inner(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
-        let (group_id, _) = self.add_group_expr(root_rel, None);
-        self.fire_optimize_tasks(group_id)?;
-        self.memo.get_best_group_binding(group_id, &mut None)
+    pub fn get_all_expr_bindings(
+        &self,
+        expr_id: ExprId,
+        binding_type: BindingType,
+        level: Option<usize>,
+    ) -> Vec<RelNodeRef<T>> {
+        // TODO: expr_bindings is not descriptive
+        // Additionally, arguments (to this and memo table) are not easy to understand
+        self.state
+            .read()
+            .unwrap()
+            .memo
+            .get_all_expr_bindings(expr_id, binding_type, false, level)
+    }
+
+    pub fn get_expr_memoed(&self, expr_id: ExprId) -> RelMemoNodeRef<T> {
+        self.state.read().unwrap().memo.get_expr_memoed(expr_id)
+    }
+
+    pub fn transformation_rules(&self) -> &Arc<[(RuleId, Arc<dyn Rule<T, Self>>)]> {
+        &self.transformation_rules
+    }
+
+    pub fn implementation_rules(&self) -> &Arc<[(RuleId, Arc<dyn Rule<T, Self>>)]> {
+        &self.implementation_rules
+    }
+
+    pub fn is_rule_applied(&self, expr_id: ExprId, rule_id: RuleId) -> bool {
+        self.state
+            .read()
+            .unwrap()
+            .applied_rules
+            .get(&expr_id)
+            .map(|rules| rules.contains(&rule_id))
+            .unwrap_or(false)
+    }
+
+    pub fn mark_rule_applied(&self, expr_id: ExprId, rule_id: RuleId) {
+        self.state
+            .write()
+            .unwrap()
+            .applied_rules
+            .entry(expr_id)
+            .or_insert_with(HashSet::new)
+            .insert(rule_id);
+    }
+
+    pub fn get_next_task_id(&self) -> usize {
+        self.task_counter.fetch_add(1, Ordering::AcqRel) // TODO: think about ordering
+    }
+
+    pub fn reset_task_id(&self) {
+        self.task_counter.store(0, Ordering::Release); // TODO: think about ordering
+    }
+
+    pub fn add_expr_to_new_group(&self, expr: RelNodeRef<T>) -> (GroupId, ExprId) {
+        self.state
+            .write()
+            .unwrap()
+            .memo
+            .add_new_group_expr(expr, None)
+    }
+
+    pub fn add_expr_to_group(&self, expr: RelNodeRef<T>, group_id: GroupId) -> (GroupId, ExprId) {
+        self.state
+            .write()
+            .unwrap()
+            .memo
+            .add_new_group_expr(expr, Some(group_id))
+    }
+
+    pub fn get_expr_info(&self, expr: RelNodeRef<T>) -> (GroupId, ExprId) {
+        self.state.read().unwrap().memo.get_expr_info(expr)
     }
 
     pub fn resolve_group_id(&self, root_rel: RelNodeRef<T>) -> GroupId {
@@ -267,56 +262,20 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         group_id
     }
 
-    pub(super) fn get_all_exprs_in_group(&self, group_id: GroupId) -> Vec<ExprId> {
-        self.memo.get_all_exprs_in_group(group_id)
+    pub fn get_group_id(&self, expr_id: ExprId) -> GroupId {
+        self.state.read().unwrap().memo.get_group_id(expr_id)
     }
 
-    pub(super) fn get_expr_info(&self, expr: RelNodeRef<T>) -> (GroupId, ExprId) {
-        self.memo.get_expr_info(expr)
+    pub fn get_group_info(&self, group_id: GroupId) -> GroupInfo {
+        self.state.read().unwrap().memo.get_group_info(group_id)
     }
 
-    pub(super) fn add_group_expr(
-        &mut self,
-        expr: RelNodeRef<T>,
-        group_id: Option<GroupId>,
-    ) -> (GroupId, ExprId) {
-        self.memo.add_new_group_expr(expr, group_id)
-    }
-
-    pub(super) fn replace_group_expr(
-        &mut self,
-        expr: RelNodeRef<T>,
-        group_id: GroupId,
-        expr_id: ExprId,
-    ) {
-        let replaced = self.memo.replace_group_expr(expr_id, group_id, expr);
-        if replaced {
-            // the old expr is replaced, so we clear the fired rules for old expr
-            self.fired_rules.entry(expr_id).or_default().clear();
-            return;
-        }
-
-        // We can mark the expr as a deadend
-        // However, even some of the exprs cannot be the winner for the group
-        // We still need the physical form of those expr to start the optimizeInput task
-        // So we don't mark the impl rules as fired
-        for i in 0..self.rules.len() {
-            if !self.rules[i].rule().is_impl_rule() {
-                self.fired_rules.entry(expr_id).or_default().insert(i);
-            }
-        }
-    }
-
-    pub(super) fn get_group_info(&self, group_id: GroupId) -> GroupInfo {
-        self.memo.get_group_info(group_id)
-    }
-
-    pub(super) fn update_group_info(&mut self, group_id: GroupId, group_info: GroupInfo) {
-        self.memo.update_group_info(group_id, group_info)
-    }
-
-    pub(super) fn merge_group(&mut self, group_a: GroupId, group_b: GroupId) {
-        self.memo.merge_group(group_a, group_b);
+    pub fn update_group_info(&self, group_id: GroupId, new_info: GroupInfo) {
+        self.state
+            .write()
+            .unwrap()
+            .memo
+            .update_group_info(group_id, new_info);
     }
 
     /// Get the properties of a Cascades group
@@ -328,67 +287,92 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         group_id: GroupId,
         idx: usize,
     ) -> P::Prop {
-        self.memo.get_group(group_id).properties[idx]
+        self.state
+            .read()
+            .unwrap()
+            .memo
+            .get_group(group_id)
+            .properties[idx]
             .downcast_ref::<P::Prop>()
             .unwrap()
             .clone()
     }
 
-    pub(super) fn get_group_id(&self, expr_id: ExprId) -> GroupId {
-        self.memo.get_group_id(expr_id)
+    pub fn cost(&self) -> &Arc<dyn CostModel<T>> {
+        &self.cost
     }
 
-    pub(super) fn get_expr_memoed(&self, expr_id: ExprId) -> RelMemoNodeRef<T> {
-        self.memo.get_expr_memoed(expr_id)
+    pub fn incr_transformation_counter(&self) {
+        self.transformation_counter.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(super) fn get_all_expr_bindings(
-        &self,
-        expr_id: ExprId,
-        level: Option<usize>,
-    ) -> Vec<RelNodeRef<T>> {
-        self.memo
-            .get_all_expr_bindings(expr_id, false, false, level)
+    pub fn disable_rule(&mut self, rule_id: RuleId) {
+        self.state.write().unwrap().disabled_rules.insert(rule_id);
     }
 
-    pub fn get_all_group_bindings(
+    pub fn enable_rule(&mut self, rule_id: RuleId) {
+        self.state.write().unwrap().disabled_rules.remove(&rule_id);
+    }
+
+    /// Clear the optimizer state (including memo table)
+    pub fn step_clear(&mut self) {
+        *self.state.get_mut().unwrap() = CascadesOptimizerState {
+            memo: Memo::new(self.property_builders.clone()),
+            explored_groups: HashSet::new(),
+            applied_rules: HashMap::new(),
+            disabled_rules: HashSet::new(),
+        };
+    }
+
+    /// Clear the winner so that the optimizer can continue to explore the group.
+    pub fn step_clear_winner(&mut self) {
+        self.state.write().unwrap().memo.clear_winner();
+    }
+
+    pub fn step_get_winner(
         &self,
         group_id: GroupId,
-        physical_only: bool,
-    ) -> Vec<RelNodeRef<T>> {
-        self.memo
-            .get_all_group_bindings(group_id, physical_only, true, Some(10))
+        meta: &mut Option<HashMap<usize, RelNodeMeta>>,
+    ) -> Result<RelNodeRef<T>> {
+        self.state
+            .read()
+            .unwrap()
+            .memo
+            .get_best_group_binding(group_id, meta)
     }
 
-    pub(super) fn is_group_explored(&self, group_id: GroupId) -> bool {
-        self.explored_group.contains(&group_id)
+    pub fn step_optimize_group(&self, root_group_id: GroupId) -> Result<()> {
+        let tasks_empty = self.tasks.lock().unwrap().is_empty();
+
+        self.reset_task_id();
+
+        if tasks_empty {
+            self.push_task(get_initial_task(self.get_next_task_id(), root_group_id));
+        }
+
+        // Run single-threaded search
+        while let Some(task) = self.pop_task() {
+            task.execute(self);
+        }
+
+        Ok(())
     }
 
-    pub(super) fn mark_group_explored(&mut self, group_id: GroupId) {
-        self.explored_group.insert(group_id);
+    pub fn step_optimize_rel(&self, root_rel: RelNodeRef<T>) -> Result<GroupId> {
+        let root_rel_2 = root_rel.clone(); // todo remove
+        let (root_group_id, _) = self.add_expr_to_new_group(root_rel);
+        trace!("Optimizing query plan {}", root_rel_2);
+        self.step_optimize_group(root_group_id)?;
+        Ok(root_group_id)
     }
 
-    pub(super) fn is_rule_fired(&self, group_expr_id: ExprId, rule_id: RuleId) -> bool {
-        self.fired_rules
-            .get(&group_expr_id)
-            .map(|rules| rules.contains(&rule_id))
-            .unwrap_or(false)
-    }
-
-    pub(super) fn mark_rule_fired(&mut self, group_expr_id: ExprId, rule_id: RuleId) {
-        self.fired_rules
-            .entry(group_expr_id)
-            .or_default()
-            .insert(rule_id);
-    }
-
-    pub fn get_cost_of(&self, group_id: GroupId) -> f64 {
-        self.memo
-            .get_group_info(group_id)
-            .winner
-            .as_ref()
-            .map(|x| x.cost.0[0])
-            .unwrap_or(0.0)
+    fn optimize_inner(&self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
+        let root_group_id = self.step_optimize_rel(root_rel)?;
+        self.state
+            .read()
+            .unwrap()
+            .memo
+            .get_best_group_binding(root_group_id, &mut None)
     }
 }
 
@@ -399,5 +383,33 @@ impl<T: RelNodeTyp> Optimizer<T> for CascadesOptimizer<T> {
 
     fn get_property<P: PropertyBuilder<T>>(&self, root_rel: RelNodeRef<T>, idx: usize) -> P::Prop {
         self.get_property_by_group::<P>(self.resolve_group_id(root_rel), idx)
+    }
+}
+
+/// Execute task asynchronously
+/// TODO this is not tested or functional currently
+// fn execute_task<T: RelNodeTyp>(optimizer: &CascadesOptimizer<T>, task: Box<dyn Task<T>>) {
+//     tokio::spawn(async move {
+//         task.execute(optimizer);
+//     });
+// }
+
+pub fn rule_matches_expr<T: RelNodeTyp>(
+    rule: &Arc<dyn Rule<T, CascadesOptimizer<T>>>,
+    expr: &RelMemoNodeRef<T>,
+) -> bool {
+    let matcher = rule.matcher();
+    let typ_to_match = &expr.typ;
+    match matcher {
+        RuleMatcher::MatchAndPickNode { typ, .. } | RuleMatcher::MatchNode { typ, .. } => {
+            typ == typ_to_match
+        }
+        RuleMatcher::MatchDiscriminant {
+            typ_discriminant, ..
+        }
+        | RuleMatcher::MatchAndPickDiscriminant {
+            typ_discriminant, ..
+        } => *typ_discriminant == std::mem::discriminant(typ_to_match),
+        _ => panic!("IR should have root node of match"), // TODO: what does this mean? replace text
     }
 }

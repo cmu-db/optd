@@ -17,6 +17,7 @@ use datafusion::{
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
 use itertools::Itertools;
+use optd_core::cascades::BindingType;
 use optd_datafusion_repr::{
     plan_nodes::{
         ConstantType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalHashJoin,
@@ -269,7 +270,7 @@ impl OptdQueryPlanner {
             ));
             let bindings = optimizer
                 .optd_cascades_optimizer()
-                .get_all_group_bindings(group_id, true);
+                .get_all_group_bindings(group_id, BindingType::Physical);
             let mut join_orders = BTreeSet::new();
             let mut logical_join_orders = BTreeSet::new();
             for binding in bindings {

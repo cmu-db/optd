@@ -1,11 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use optd_core::{
-    cascades::CascadesOptimizer,
-    heuristics::HeuristicsOptimizer,
-    optimizer::Optimizer,
-    rel_node::Value,
-    rules::{Rule, RuleWrapper},
+    cascades::CascadesOptimizer, heuristics::HeuristicsOptimizer, optimizer::Optimizer,
+    rel_node::Value, rules::Rule,
 };
 use optd_datafusion_repr::{
     cost::{DataFusionPerTableStats, OptCostModel},
@@ -25,9 +22,11 @@ pub fn main() {
         .with_target(false)
         .init();
 
-    let rules: Vec<Arc<dyn Rule<OptRelNodeTyp, CascadesOptimizer<OptRelNodeTyp>>>> = vec![
+    let transform_rules: Vec<Arc<dyn Rule<OptRelNodeTyp, CascadesOptimizer<OptRelNodeTyp>>>> = vec![
         Arc::new(JoinCommuteRule::new()),
         Arc::new(JoinAssocRule::new()),
+    ];
+    let impl_rules: Vec<Arc<dyn Rule<OptRelNodeTyp, CascadesOptimizer<OptRelNodeTyp>>>> = vec![
         Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Scan)),
         Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Join(
             JoinType::Inner,
@@ -35,14 +34,11 @@ pub fn main() {
         Arc::new(PhysicalConversionRule::new(OptRelNodeTyp::Filter)),
         Arc::new(HashJoinRule::new()),
     ];
-    let mut rule_wrappers = Vec::new();
-    for rule in rules {
-        rule_wrappers.push(RuleWrapper::new_cascades(rule));
-    }
 
     let mut optimizer = CascadesOptimizer::new(
-        rule_wrappers,
-        Box::new(OptCostModel::new(
+        transform_rules.into(),
+        impl_rules.into(),
+        Arc::new(OptCostModel::new(
             [("t1", 1000), ("t2", 100), ("t3", 10000)]
                 .into_iter()
                 .map(|(x, y)| {
@@ -53,7 +49,7 @@ pub fn main() {
                 })
                 .collect(),
         )),
-        vec![],
+        vec![].into(),
     );
 
     // The plan: (filter (scan t1) #1=2) join (scan t2) join (scan t3)
@@ -70,7 +66,7 @@ pub fn main() {
     let join_filter = LogicalJoin::new(filter1.0, scan2.0, join_cond.clone().0, JoinType::Inner);
     let fnal = LogicalJoin::new(scan3.0, join_filter.0, join_cond.0, JoinType::Inner);
     let node = optimizer.optimize(fnal.0.clone().into_rel_node());
-    optimizer.dump(None);
+    // optimizer.dump(None); TODO: implement this function
     let node: Arc<optd_core::rel_node::RelNode<OptRelNodeTyp>> = node.unwrap();
     println!(
         "cost={}",

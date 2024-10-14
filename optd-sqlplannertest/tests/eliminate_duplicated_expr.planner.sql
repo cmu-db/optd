@@ -41,9 +41,9 @@ LogicalSort
     └── LogicalScan { table: t1 }
 PhysicalSort
 ├── exprs:
-│   ┌── SortOrder { order: Asc }
+│   ┌── PhysicalSortOrder { order: Asc }
 │   │   └── #0
-│   └── SortOrder { order: Asc }
+│   └── PhysicalSortOrder { order: Asc }
 │       └── #1
 └── PhysicalProjection { exprs: [ #0, #1 ] }
     └── PhysicalScan { table: t1 }
@@ -92,9 +92,9 @@ LogicalSort
         └── LogicalScan { table: t1 }
 PhysicalSort
 ├── exprs:
-│   ┌── SortOrder { order: Asc }
+│   ┌── PhysicalSortOrder { order: Asc }
 │   │   └── #0
-│   └── SortOrder { order: Asc }
+│   └── PhysicalSortOrder { order: Asc }
 │       └── #1
 └── PhysicalProjection { exprs: [ #0, #1 ] }
     └── PhysicalAgg { aggrs: [], groups: [ #0, #1 ] }

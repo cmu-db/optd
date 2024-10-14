@@ -1,3 +1,5 @@
+// TODO: can i remove reduced group id entirely?
+// TODO: Do we really need to have getters for all of these separate group fields instead of just getting everything? Maybe...
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     fmt::Display,
@@ -16,7 +18,16 @@ use crate::{
 
 use super::optimizer::{ExprId, GroupId};
 
+// TODO: What is a RelMemoNodeRef supposed to mean?
+// Can we call this a MemoExprRef, and MemoExpr instead?
 pub type RelMemoNodeRef<T> = Arc<RelMemoNode<T>>;
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum BindingType {
+    Both,
+    Logical,
+    Physical,
+}
 
 /// Equivalent to MExpr in Columbia/Cascades.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -109,36 +120,14 @@ impl<T: RelNodeTyp> Memo<T> {
         ExprId(id)
     }
 
-    fn merge_group_inner(
-        &mut self,
-        group_a: ReducedGroupId,
-        group_b: ReducedGroupId,
-    ) -> ReducedGroupId {
+    fn merge_group(&mut self, group_a: ReducedGroupId, group_b: ReducedGroupId) -> ReducedGroupId {
+        // TODO this impl is wrong!1
         if group_a == group_b {
             return group_a;
         }
-
-        // Copy all expressions from group a to group b
-        let group_a_exprs = self.get_all_exprs_in_group(group_a.as_group_id());
-        for expr_id in group_a_exprs {
-            let expr_node = self.expr_id_to_expr_node.get(&expr_id).unwrap();
-            self.add_expr_to_group(expr_id, group_b, expr_node.as_ref().clone());
-        }
-
         self.merged_groups
             .insert(group_a.as_group_id(), group_b.as_group_id());
-
-        // Remove all expressions from group a (so we don't accidentally access it)
-        self.clear_exprs_in_group(group_a);
-
         group_b
-    }
-
-    pub fn merge_group(&mut self, group_a: GroupId, group_b: GroupId) -> GroupId {
-        let group_a_reduced = self.get_reduced_group_id(group_a);
-        let group_b_reduced = self.get_reduced_group_id(group_b);
-        self.merge_group_inner(group_a_reduced, group_b_reduced)
-            .as_group_id()
     }
 
     fn get_group_id_of_expr_id(&self, expr_id: ExprId) -> GroupId {
@@ -152,6 +141,8 @@ impl<T: RelNodeTyp> Memo<T> {
         ReducedGroupId(group_id.0)
     }
 
+    // TODO: This API should be split into two functions, and add_expr_to_group should be deleted...
+
     /// Add or get an expression into the memo, returns the group id and the expr id. If `GroupId` is `None`,
     /// create a new group. Otherwise, add the expression to the group.
     pub fn add_new_group_expr(
@@ -159,10 +150,9 @@ impl<T: RelNodeTyp> Memo<T> {
         rel_node: RelNodeRef<T>,
         add_to_group_id: Option<GroupId>,
     ) -> (GroupId, ExprId) {
-        let node_current_group = rel_node.typ.extract_group();
-        if let (Some(grp_a), Some(grp_b)) = (add_to_group_id, node_current_group) {
-            self.merge_group(grp_a, grp_b);
-        };
+        if rel_node.typ.extract_group().is_some() {
+            unreachable!();
+        }
 
         let (group_id, expr_id) = self.add_new_group_expr_inner(
             rel_node,
@@ -249,68 +239,6 @@ impl<T: RelNodeTyp> Memo<T> {
         self.groups.insert(group_id, group);
     }
 
-    // return true: replace success, the expr_id is replaced by the new rel_node
-    // return false: replace failed as the new rel node already exists in other groups,
-    //             the old expr_id should be marked as all rules are fired for it
-    pub fn replace_group_expr(
-        &mut self,
-        expr_id: ExprId,
-        replace_group_id: GroupId,
-        rel_node: RelNodeRef<T>,
-    ) -> bool {
-        let replace_group_id = self.get_reduced_group_id(replace_group_id);
-
-        if let Entry::Occupied(mut entry) = self.groups.entry(replace_group_id) {
-            let group = entry.get_mut();
-            if !group.group_exprs.contains(&expr_id) {
-                unreachable!("expr not found in group in replace_group_expr");
-            }
-
-            let children_group_ids = rel_node
-                .children
-                .iter()
-                .map(|child| {
-                    if let Some(group) = child.typ.extract_group() {
-                        group
-                    } else {
-                        self.add_new_group_expr(child.clone(), None).0
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            let memo_node = RelMemoNode {
-                typ: rel_node.typ.clone(),
-                children: children_group_ids,
-                data: rel_node.data.clone(),
-            };
-
-            // if the new expr already in the memo table, merge the group and remove old expr
-            if let Some(&new_expr_id) = self.expr_node_to_expr_id.get(&memo_node) {
-                if new_expr_id == expr_id {
-                    // This is not acceptable, as it means the expr returned by a heuristic rule is exactly
-                    // the same as the original expr, which should not happen
-                    // TODO: we can silently ignore this case without marking the original one as a deadend
-                    // But the rule creators should follow the definition of the heuristic rule
-                    // and return an empty vec if their rule does not do the real transformation
-                    unreachable!("replace_group_expr: you're replacing the old expr with the same expr, please check your rules registered as heuristic
-                        and make sure if it does not do any transformation, it should return an empty vec!");
-                }
-                let group_id = self.get_group_id_of_expr_id(new_expr_id);
-                let group_id = self.get_reduced_group_id(group_id);
-
-                self.merge_group_inner(replace_group_id, group_id);
-                return false;
-            }
-
-            self.expr_id_to_expr_node
-                .insert(expr_id, memo_node.clone().into());
-            self.expr_node_to_expr_id.insert(memo_node.clone(), expr_id);
-
-            return true;
-        }
-        unreachable!("group not found in replace_group_expr");
-    }
-
     fn add_new_group_expr_inner(
         &mut self,
         rel_node: RelNodeRef<T>,
@@ -336,7 +264,7 @@ impl<T: RelNodeTyp> Memo<T> {
             let group_id = self.get_group_id_of_expr_id(expr_id);
             let group_id = self.get_reduced_group_id(group_id);
             if let Some(add_to_group_id) = add_to_group_id {
-                self.merge_group_inner(add_to_group_id, group_id);
+                self.merge_group(add_to_group_id, group_id);
             }
             return (group_id, expr_id);
         }
@@ -378,7 +306,7 @@ impl<T: RelNodeTyp> Memo<T> {
     pub fn get_all_group_bindings(
         &self,
         group_id: GroupId,
-        physical_only: bool,
+        binding_type: BindingType,
         exclude_placeholder: bool,
         level: Option<usize>,
     ) -> Vec<RelNodeRef<T>> {
@@ -387,9 +315,13 @@ impl<T: RelNodeTyp> Memo<T> {
         group
             .group_exprs
             .iter()
-            .filter(|x| !physical_only || !self.get_expr_memoed(**x).typ.is_logical())
+            .filter(|x| match binding_type {
+                BindingType::Both => true,
+                BindingType::Logical => self.get_expr_memoed(**x).typ.is_logical(),
+                BindingType::Physical => !self.get_expr_memoed(**x).typ.is_logical(),
+            })
             .map(|&expr_id| {
-                self.get_all_expr_bindings(expr_id, physical_only, exclude_placeholder, level)
+                self.get_all_expr_bindings(expr_id, binding_type, exclude_placeholder, level)
             })
             .concat()
     }
@@ -399,7 +331,7 @@ impl<T: RelNodeTyp> Memo<T> {
     pub fn get_all_expr_bindings(
         &self,
         expr_id: ExprId,
-        physical_only: bool,
+        binding_type: BindingType,
         exclude_placeholder: bool,
         level: Option<usize>,
     ) -> Vec<RelNodeRef<T>> {
@@ -427,7 +359,7 @@ impl<T: RelNodeTyp> Memo<T> {
         for child in &expr.children {
             let group_exprs = self.get_all_group_bindings(
                 *child,
-                physical_only,
+                binding_type,
                 exclude_placeholder,
                 level.map(|x| x - 1),
             );
@@ -489,6 +421,8 @@ impl<T: RelNodeTyp> Memo<T> {
             .unwrap()
     }
 
+    // TODO: I think the idea of a group info and the group cost/winner info should
+    // be separated
     pub fn update_group_info(&mut self, group_id: GroupId, group_info: GroupInfo) {
         if let Some(ref winner) = group_info.winner {
             if !winner.impossible {
@@ -506,7 +440,7 @@ impl<T: RelNodeTyp> Memo<T> {
     pub fn get_best_group_binding(
         &self,
         group_id: GroupId,
-        meta: &mut Option<RelNodeMetaMap>,
+        meta: &mut Option<RelNodeMetaMap>, // TODO: Document this?!
     ) -> Result<RelNodeRef<T>> {
         let info = self.get_group_info(group_id);
         if let Some(winner) = info.winner {

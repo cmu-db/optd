@@ -3,17 +3,14 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
-use cost::{
-    adaptive_cost::DataFusionAdaptiveCostModel, AdaptiveCostModel, DataFusionBaseTableStats,
-    RuntimeAdaptionStorage, DEFAULT_DECAY,
-};
+use cost::{AdaptiveCostModel, DataFusionBaseTableStats, RuntimeAdaptionStorage, DEFAULT_DECAY};
 use optd_core::{
-    cascades::{CascadesOptimizer, GroupId, OptimizerProperties},
+    cascades::{CascadesOptimizer, GroupId},
     heuristics::{ApplyOrder, HeuristicsOptimizer},
     optimizer::Optimizer,
     property::PropertyBuilderAny,
     rel_node::RelNodeMetaMap,
-    rules::{Rule, RuleWrapper},
+    rules::Rule,
 };
 
 use plan_nodes::{OptRelNodeRef, OptRelNodeTyp};
@@ -93,41 +90,30 @@ impl DatafusionOptimizer {
         ]
     }
 
-    pub fn default_cascades_rules(
-    ) -> Vec<Arc<RuleWrapper<OptRelNodeTyp, CascadesOptimizer<OptRelNodeTyp>>>> {
-        let rules = PhysicalConversionRule::all_conversions();
-        let mut rule_wrappers = vec![];
-        for rule in rules {
-            rule_wrappers.push(RuleWrapper::new_cascades(rule));
-        }
-        // project transpose rules
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            ProjectFilterTransposeRule::new(),
-        )));
-        // add all filter pushdown rules as heuristic rules
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            FilterProjectTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            FilterCrossJoinTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            FilterInnerJoinTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            FilterSortTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
-            FilterAggTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(HashJoinRule::new()))); // 17
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinCommuteRule::new()))); // 18
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinAssocRule::new())));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            ProjectionPullUpJoin::new(),
-        )));
+    pub fn default_cascades_rules() -> (
+        Vec<Arc<dyn Rule<OptRelNodeTyp, CascadesOptimizer<OptRelNodeTyp>>>>,
+        Vec<Arc<dyn Rule<OptRelNodeTyp, CascadesOptimizer<OptRelNodeTyp>>>>,
+    ) {
+        let mut transformation_rules: Vec<
+            Arc<dyn Rule<OptRelNodeTyp, CascadesOptimizer<OptRelNodeTyp>>>,
+        > = vec![];
+        // transformation_rules.push(Arc::new(ProjectFilterTransposeRule::new()));
+        // transformation_rules.push(Arc::new(FilterProjectTransposeRule::new()));
+        // transformation_rules.push(Arc::new(FilterCrossJoinTransposeRule::new()));
+        // transformation_rules.push(Arc::new(FilterInnerJoinTransposeRule::new()));
+        // transformation_rules.push(Arc::new(FilterSortTransposeRule::new()));
+        // transformation_rules.push(Arc::new(FilterAggTransposeRule::new()));
+        // transformation_rules.push(Arc::new(JoinAssocRule::new()));
+        transformation_rules.push(Arc::new(JoinCommuteRule::new()));
+        transformation_rules.push(Arc::new(ProjectionPullUpJoin::new()));
 
-        rule_wrappers
+        let mut implementation_rules: Vec<
+            Arc<dyn Rule<OptRelNodeTyp, CascadesOptimizer<OptRelNodeTyp>>>,
+        > = PhysicalConversionRule::all_conversions();
+
+        implementation_rules.push(Arc::new(HashJoinRule::new()));
+
+        (transformation_rules, implementation_rules)
     }
 
     /// Create an optimizer with partial explore (otherwise it's too slow).
@@ -136,7 +122,7 @@ impl DatafusionOptimizer {
         stats: DataFusionBaseTableStats,
         enable_adaptive: bool,
     ) -> Self {
-        let cascades_rules = Self::default_cascades_rules();
+        let (transformation_rules, implementation_rules) = Self::default_cascades_rules();
         let heuristic_rules = Self::default_heuristic_rules();
         let property_builders: Arc<[Box<dyn PropertyBuilderAny<OptRelNodeTyp>>]> = Arc::new([
             Box::new(SchemaPropertyBuilder::new(catalog.clone())),
@@ -145,22 +131,16 @@ impl DatafusionOptimizer {
         let cost_model = AdaptiveCostModel::new(DEFAULT_DECAY, stats);
         Self {
             runtime_statistics: cost_model.get_runtime_map(),
-            cascades_optimizer: CascadesOptimizer::new_with_prop(
-                cascades_rules,
-                Box::new(cost_model),
-                vec![
-                    Box::new(SchemaPropertyBuilder::new(catalog.clone())),
-                    Box::new(ColumnRefPropertyBuilder::new(catalog.clone())),
-                ],
-                OptimizerProperties {
-                    partial_explore_iter: Some(1 << 20),
-                    partial_explore_space: Some(1 << 10),
-                },
+            cascades_optimizer: CascadesOptimizer::new(
+                transformation_rules.into(),
+                implementation_rules.into(),
+                Arc::new(cost_model),
+                property_builders.clone(),
             ),
             hueristic_optimizer: HeuristicsOptimizer::new_with_rules(
                 heuristic_rules,
                 ApplyOrder::BottomUp,
-                property_builders.clone(),
+                property_builders,
             ),
             enable_adaptive,
             enable_heuristic: true,
@@ -169,48 +149,49 @@ impl DatafusionOptimizer {
 
     /// The optimizer settings for three-join demo as a perfect optimizer.
     pub fn new_alternative_physical_for_demo(catalog: Arc<dyn Catalog>) -> Self {
-        let rules = PhysicalConversionRule::all_conversions();
-        let mut rule_wrappers = Vec::new();
-        for rule in rules {
-            rule_wrappers.push(RuleWrapper::new_cascades(rule));
-        }
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(HashJoinRule::new())));
-        rule_wrappers.insert(
-            0,
-            RuleWrapper::new_cascades(Arc::new(JoinCommuteRule::new())),
-        );
-        rule_wrappers.insert(1, RuleWrapper::new_cascades(Arc::new(JoinAssocRule::new())));
-        rule_wrappers.insert(
-            2,
-            RuleWrapper::new_cascades(Arc::new(ProjectionPullUpJoin::new())),
-        );
-        rule_wrappers.insert(
-            3,
-            RuleWrapper::new_heuristic(Arc::new(EliminateFilterRule::new())),
-        );
+        todo!();
+        // let rules = PhysicalConversionRule::all_conversions();
+        // let mut rule_wrappers = Vec::new();
+        // for rule in rules {
+        //     rule_wrappers.push(RuleWrapper::new_cascades(rule));
+        // }
+        // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(HashJoinRule::new())));
+        // rule_wrappers.insert(
+        //     0,
+        //     RuleWrapper::new_cascades(Arc::new(JoinCommuteRule::new())),
+        // );
+        // rule_wrappers.insert(1, RuleWrapper::new_cascades(Arc::new(JoinAssocRule::new())));
+        // rule_wrappers.insert(
+        //     2,
+        //     RuleWrapper::new_cascades(Arc::new(ProjectionPullUpJoin::new())),
+        // );
+        // rule_wrappers.insert(
+        //     3,
+        //     RuleWrapper::new_heuristic(Arc::new(EliminateFilterRule::new())),
+        // );
 
-        let cost_model =
-            DataFusionAdaptiveCostModel::new(1000, DataFusionBaseTableStats::default()); // very large decay
-        let runtime_statistics = cost_model.get_runtime_map();
-        let optimizer = CascadesOptimizer::new(
-            rule_wrappers,
-            Box::new(cost_model),
-            vec![
-                Box::new(SchemaPropertyBuilder::new(catalog.clone())),
-                Box::new(ColumnRefPropertyBuilder::new(catalog)),
-            ],
-        );
-        Self {
-            runtime_statistics,
-            cascades_optimizer: optimizer,
-            enable_adaptive: true,
-            enable_heuristic: false,
-            hueristic_optimizer: HeuristicsOptimizer::new_with_rules(
-                vec![],
-                ApplyOrder::BottomUp,
-                Arc::new([]),
-            ),
-        }
+        // let cost_model =
+        //     DataFusionAdaptiveCostModel::new(1000, DataFusionBaseTableStats::default()); // very large decay
+        // let runtime_statistics = cost_model.get_runtime_map();
+        // let optimizer = CascadesOptimizer::new(
+        //     rule_wrappers,
+        //     Box::new(cost_model),
+        //     vec![
+        //         Box::new(SchemaPropertyBuilder::new(catalog.clone())),
+        //         Box::new(ColumnRefPropertyBuilder::new(catalog)),
+        //     ],
+        // );
+        // Self {
+        //     runtime_statistics,
+        //     cascades_optimizer: optimizer,
+        //     enable_adaptive: true,
+        //     enable_heuristic: false,
+        //     hueristic_optimizer: HeuristicsOptimizer::new_with_rules(
+        //         vec![],
+        //         ApplyOrder::BottomUp,
+        //         Arc::new([]),
+        //     ),
+        // }
     }
 
     pub fn heuristic_optimize(&mut self, root_rel: OptRelNodeRef) -> OptRelNodeRef {
@@ -235,12 +216,13 @@ impl DatafusionOptimizer {
         let mut meta = Some(HashMap::new());
         let optimized_rel = self
             .cascades_optimizer
-            .step_get_optimize_rel(group_id, &mut meta)?;
+            .step_get_winner(group_id, &mut meta)?;
 
         Ok((group_id, optimized_rel, meta.unwrap()))
     }
 
     pub fn dump(&self, group_id: Option<GroupId>) {
-        self.cascades_optimizer.dump(group_id)
+        todo!();
+        // self.cascades_optimizer.dump(group_id)
     }
 }

@@ -58,6 +58,8 @@ impl<T: RelNodeTyp, O: Optimizer<T>> RuleWrapper<T, O> {
     }
 }
 
+// TODO: docs, possible renames.
+// TODO: Why do we have all of these match types? Seems like possible overkill.
 pub trait Rule<T: RelNodeTyp, O: Optimizer<T>>: 'static + Send + Sync {
     fn matcher(&self) -> &RuleMatcher<T>;
     fn apply(&self, optimizer: &O, input: HashMap<usize, RelNode<T>>) -> Vec<RelNode<T>>;

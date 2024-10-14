@@ -19,6 +19,7 @@ use arrow_schema::DataType;
 use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId},
+    optimizer::Optimizer,
     rel_node::{RelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp},
 };
 
@@ -28,7 +29,10 @@ pub use empty_relation::{EmptyRelationData, LogicalEmptyRelation, PhysicalEmptyR
 pub use expr::{
     BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
     DataTypeExpr, ExprList, FuncExpr, FuncType, InListExpr, LikeExpr, LogOpExpr, LogOpType,
-    SortOrderExpr, SortOrderType, UnOpExpr, UnOpType,
+    PhysicalBetweenExpr, PhysicalBinOpExpr, PhysicalCastExpr, PhysicalColumnRefExpr,
+    PhysicalConstantExpr, PhysicalDataTypeExpr, PhysicalExprList, PhysicalFuncExpr,
+    PhysicalInListExpr, PhysicalLikeExpr, PhysicalLogOpExpr, PhysicalSortOrderExpr,
+    PhysicalUnOpExpr, SortOrderExpr, SortOrderType, UnOpExpr, UnOpType,
 };
 pub use filter::{LogicalFilter, PhysicalFilter};
 pub use join::{JoinType, LogicalJoin, PhysicalHashJoin, PhysicalNestedLoopJoin};
@@ -45,7 +49,6 @@ use crate::properties::schema::{Schema, SchemaPropertyBuilder};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OptRelNodeTyp {
     Placeholder(GroupId),
-    List,
     // Plan nodes
     // Developers: update `is_plan_node` function after adding new elements
     Projection,
@@ -68,6 +71,7 @@ pub enum OptRelNodeTyp {
     PhysicalEmptyRelation,
     PhysicalLimit,
     // Expressions
+    List,
     Constant(ConstantType),
     ColumnRef,
     UnOp(UnOpType),
@@ -80,6 +84,20 @@ pub enum OptRelNodeTyp {
     Like,
     DataType(DataType),
     InList,
+    // Physical Expressions
+    PhysicalList,
+    PhysicalConstant(ConstantType),
+    PhysicalColumnRef,
+    PhysicalUnOp(UnOpType),
+    PhysicalBinOp(BinOpType),
+    PhysicalLogOp(LogOpType),
+    PhysicalFunc(FuncType),
+    PhysicalSortOrder(SortOrderType),
+    PhysicalBetween,
+    PhysicalCast,
+    PhysicalLike,
+    PhysicalDataType(DataType),
+    PhysicalInList,
 }
 
 impl OptRelNodeTyp {
@@ -122,6 +140,20 @@ impl OptRelNodeTyp {
                 | Self::Like
                 | Self::DataType(_)
                 | Self::InList
+                | Self::List
+                | Self::PhysicalConstant(_)
+                | Self::PhysicalColumnRef
+                | Self::PhysicalUnOp(_)
+                | Self::PhysicalBinOp(_)
+                | Self::PhysicalLogOp(_)
+                | Self::PhysicalFunc(_)
+                | Self::PhysicalSortOrder(_)
+                | Self::PhysicalBetween
+                | Self::PhysicalCast
+                | Self::PhysicalLike
+                | Self::PhysicalDataType(_)
+                | Self::PhysicalInList
+                | Self::PhysicalList
         )
     }
 }
@@ -145,6 +177,19 @@ impl RelNodeTyp for OptRelNodeTyp {
                 | Self::Agg
                 | Self::EmptyRelation
                 | Self::Limit
+                | Self::List
+                | Self::Constant(_)
+                | Self::ColumnRef
+                | Self::UnOp(_)
+                | Self::BinOp(_)
+                | Self::LogOp(_)
+                | Self::Func(_)
+                | Self::SortOrder(_)
+                | Self::Between
+                | Self::Cast
+                | Self::Like
+                | Self::DataType(_)
+                | Self::InList
         )
     }
 
@@ -231,8 +276,7 @@ impl PlanNode {
     }
 
     pub fn schema(&self, optimizer: &CascadesOptimizer<OptRelNodeTyp>) -> Schema {
-        let group_id = optimizer.resolve_group_id(self.0.clone());
-        optimizer.get_property_by_group::<SchemaPropertyBuilder>(group_id, 0)
+        optimizer.get_property::<SchemaPropertyBuilder>(self.0.clone(), 0)
     }
 
     pub fn from_group(rel_node: OptRelNodeRef) -> Self {
@@ -437,6 +481,11 @@ pub fn explain(rel_node: OptRelNodeRef, meta_map: Option<&RelNodeMetaMap>) -> Pr
                 .unwrap()
                 .dispatch_explain(meta_map)
         }
+        OptRelNodeTyp::PhysicalList => {
+            PhysicalExprList::from_rel_node(rel_node) // ExprList is the only place that we will have list in the datafusion repr
+                .unwrap()
+                .dispatch_explain(meta_map)
+        }
         OptRelNodeTyp::Agg => LogicalAgg::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(meta_map),
@@ -483,6 +532,42 @@ pub fn explain(rel_node: OptRelNodeRef, meta_map: Option<&RelNodeMetaMap>) -> Pr
             .unwrap()
             .dispatch_explain(meta_map),
         OptRelNodeTyp::InList => InListExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::PhysicalConstant(_) => PhysicalConstantExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::PhysicalColumnRef => PhysicalColumnRefExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::PhysicalUnOp(_) => PhysicalUnOpExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::PhysicalBinOp(_) => PhysicalBinOpExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::PhysicalLogOp(_) => PhysicalLogOpExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::PhysicalFunc(_) => PhysicalFuncExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::PhysicalSortOrder(_) => PhysicalSortOrderExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::PhysicalBetween => PhysicalBetweenExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::PhysicalCast => PhysicalCastExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::PhysicalLike => PhysicalLikeExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::PhysicalDataType(_) => PhysicalDataTypeExpr::from_rel_node(rel_node)
+            .unwrap()
+            .dispatch_explain(meta_map),
+        OptRelNodeTyp::PhysicalInList => PhysicalInListExpr::from_rel_node(rel_node)
             .unwrap()
             .dispatch_explain(meta_map),
     }

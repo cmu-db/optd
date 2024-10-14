@@ -6,7 +6,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
     cost::base_cost::stats::{Distribution, MostCommonValues},
-    plan_nodes::{ConstantExpr, ConstantType, OptRelNode, OptRelNodeTyp},
+    plan_nodes::{ConstantType, OptRelNode, OptRelNodeTyp, PhysicalConstantExpr},
 };
 
 use super::{OptCostModel, DEFAULT_UNK_SEL};
@@ -23,21 +23,17 @@ impl<
     ) -> Cost {
         let (row_cnt, compute_cost, _) = Self::cost_tuple(&children[0]);
         let row_cnt = if let (Some(context), Some(optimizer)) = (context, optimizer) {
-            let mut fetch_expr =
-                optimizer.get_all_group_bindings(context.children_group_ids[2], false);
-            assert!(
-                fetch_expr.len() == 1,
-                "fetch expression should be the only expr in the group"
-            );
-            let fetch_expr = fetch_expr.pop().unwrap();
+            let fetch_expr = optimizer
+                .step_get_winner(context.children_group_ids[2], &mut None)
+                .unwrap();
             assert!(
                 matches!(
                     fetch_expr.typ,
-                    OptRelNodeTyp::Constant(ConstantType::UInt64)
+                    OptRelNodeTyp::PhysicalConstant(ConstantType::UInt64)
                 ),
                 "fetch type can only be UInt64"
             );
-            let fetch = ConstantExpr::from_rel_node(fetch_expr)
+            let fetch = PhysicalConstantExpr::from_rel_node(fetch_expr)
                 .unwrap()
                 .value()
                 .as_u64();

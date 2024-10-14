@@ -148,7 +148,7 @@ pub async fn main() -> Result<()> {
     let args = Args::parse();
 
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
+        .with_max_level(tracing::Level::TRACE)
         .with_target(false)
         .with_ansi(false)
         .init();

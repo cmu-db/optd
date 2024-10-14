@@ -10,7 +10,7 @@ use super::macros::{define_impl_rule, define_rule};
 use crate::plan_nodes::{
     BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, ConstantType, Expr, ExprList, JoinType,
     LogOpType, LogicalEmptyRelation, LogicalJoin, LogicalProjection, OptRelNode, OptRelNodeTyp,
-    PhysicalHashJoin, PlanNode,
+    PhysicalExprList, PhysicalHashJoin, PlanNode,
 };
 use crate::properties::schema::{Schema, SchemaPropertyBuilder};
 
@@ -201,8 +201,8 @@ fn apply_hash_join(
                 let node = PhysicalHashJoin::new(
                     PlanNode::from_group(left.into()),
                     PlanNode::from_group(right.into()),
-                    ExprList::new(vec![left_expr.into_expr()]),
-                    ExprList::new(vec![right_expr.into_expr()]),
+                    ExprList::new(vec![left_expr.into_expr()]).into_expr(),
+                    ExprList::new(vec![right_expr.into_expr()]).into_expr(),
                     JoinType::Inner,
                 );
                 return vec![node.into_rel_node().as_ref().clone()];
@@ -262,8 +262,8 @@ fn apply_hash_join(
             let node = PhysicalHashJoin::new(
                 PlanNode::from_group(left.into()),
                 PlanNode::from_group(right.into()),
-                ExprList::new(left_exprs),
-                ExprList::new(right_exprs),
+                ExprList::new(left_exprs).into_expr(),
+                ExprList::new(right_exprs).into_expr(),
                 JoinType::Inner,
             );
             return vec![node.into_rel_node().as_ref().clone()];
@@ -300,8 +300,8 @@ fn apply_hash_join(
             let node = PhysicalHashJoin::new(
                 PlanNode::from_group(left.into()),
                 PlanNode::from_group(right.into()),
-                ExprList::new(vec![left_expr.into_expr()]),
-                ExprList::new(vec![right_expr.into_expr()]),
+                ExprList::new(vec![left_expr.into_expr()]).into_expr(),
+                ExprList::new(vec![right_expr.into_expr()]).into_expr(),
                 JoinType::Inner,
             );
             return vec![node.into_rel_node().as_ref().clone()];
