@@ -32,12 +32,8 @@ use rules::{
 
 pub use optd_core::rel_node::Value;
 
-use crate::{
-    plan_nodes::{OptRelNode, PlanNode},
-    rules::{
-        DepInitialDistinct, DepJoinEliminateAtScan, DepJoinPastAgg, DepJoinPastFilter,
-        DepJoinPastProj,
-    },
+use crate::rules::{
+    DepInitialDistinct, DepJoinEliminateAtScan, DepJoinPastAgg, DepJoinPastFilter, DepJoinPastProj,
 };
 
 pub mod cost;
@@ -227,19 +223,10 @@ impl DatafusionOptimizer {
     }
 
     pub fn heuristic_optimize(&mut self, root_rel: OptRelNodeRef) -> OptRelNodeRef {
-        println!(
-            "{}",
-            PlanNode::from_group(root_rel.clone()).explain_to_string(None)
-        );
         let res = self
             .hueristic_optimizer
             .optimize(root_rel)
             .expect("heuristics returns error");
-        // TODO: remove this
-        println!(
-            "{}",
-            PlanNode::from_group(res.clone()).explain_to_string(None)
-        );
         res
     }
 

@@ -12,7 +12,6 @@ use core::panic;
 use std::collections::{HashMap, HashSet};
 use std::vec;
 
-use datafusion::physical_expr::unicode_expressions::right;
 use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 

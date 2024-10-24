@@ -1,7 +1,5 @@
 // TODO: No push past join
 // TODO: Sideways information passing??
-use itertools::Itertools;
-use optd_core::rel_node::Value;
 use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 use std::collections::HashMap;
@@ -9,7 +7,7 @@ use std::collections::HashMap;
 use crate::plan_nodes::{
     BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, DependentJoin, Expr, ExprList,
     ExternColumnRefExpr, JoinType, LogOpExpr, LogOpType, LogicalAgg, LogicalFilter, LogicalJoin,
-    LogicalProjection, LogicalScan, OptRelNode, OptRelNodeTyp, PlanNode,
+    LogicalProjection, OptRelNode, OptRelNodeTyp, PlanNode,
 };
 use crate::properties::schema::SchemaPropertyBuilder;
 use crate::rules::macros::define_rule;
@@ -206,7 +204,7 @@ fn apply_dep_join_past_proj(
     DepJoinPastProjPicks {
         left,
         right,
-        exprs,
+        exprs: _,
         cond,
         extern_cols,
     }: DepJoinPastProjPicks,
@@ -449,7 +447,7 @@ fn apply_dep_join_eliminate_at_scan(
         return vec![];
     }
 
-    let scan = LogicalScan::new("test".to_string()).into_rel_node();
+    // let scan = LogicalScan::new("test".to_string()).into_rel_node();
 
     let new_join = LogicalJoin::new(
         PlanNode::from_group(left.into()),

@@ -362,7 +362,7 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 GroupColumnRefs::new(column_refs, child.output_correlation.clone())
             }
             // Should account for all physical join types.
-            OptRelNodeTyp::Join(join_type) => {
+            OptRelNodeTyp::Join(join_type) | OptRelNodeTyp::RawDepJoin(join_type)  | OptRelNodeTyp::DepJoin(join_type)=> {
                 // Concatenate left and right children column refs.
                 let column_refs = Self::concat_children_col_refs(&children[0..2]);
                 // Merge the equal columns of two children as input correlation.
