@@ -46,7 +46,7 @@ fn rewrite_extern_column_refs(
         Expr::from_rel_node(
             RelNode {
                 typ: expr_rel.typ.clone(),
-                children: children,
+                children,
                 data: expr_rel.data.clone(),
             }
             .into(),
@@ -142,7 +142,6 @@ fn apply_dep_initial_distinct(
         LogOpType::And,
         ExprList::new(
             (0..correlated_col_indices.len())
-                .into_iter()
                 .map(|i| {
                     assert!(i + left_schema_size < left_schema_size + right_schema_size);
                     BinOpExpr::new(
@@ -175,7 +174,6 @@ fn apply_dep_initial_distinct(
                     (left_schema_size + correlated_col_indices.len())
                         ..(left_schema_size + correlated_col_indices.len() + right_schema_size),
                 )
-                .into_iter()
                 .map(|x| ColumnRefExpr::new(x).into_expr())
                 .collect(),
         ),

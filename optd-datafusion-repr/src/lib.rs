@@ -223,11 +223,9 @@ impl DatafusionOptimizer {
     }
 
     pub fn heuristic_optimize(&mut self, root_rel: OptRelNodeRef) -> OptRelNodeRef {
-        let res = self
-            .hueristic_optimizer
+        self.hueristic_optimizer
             .optimize(root_rel)
-            .expect("heuristics returns error");
-        res
+            .expect("heuristics returns error")
     }
 
     pub fn cascades_optimize(

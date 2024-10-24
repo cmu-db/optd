@@ -28,7 +28,7 @@ impl OptdPlanContext<'_> {
         for Subquery {
             subquery,
             outer_ref_columns,
-        } in subqueries.into_iter()
+        } in subqueries.iter()
         {
             let subquery_root = self.conv_into_optd_plan_node(subquery, Some(input_schema))?;
             let dep_join = RawDependentJoin::new(
@@ -40,12 +40,12 @@ impl OptdPlanContext<'_> {
                         .iter()
                         .filter_map(|col| {
                             if let datafusion_expr::Expr::OuterReferenceColumn(_, col) = col {
-                                return Some(
+                                Some(
                                     ExternColumnRefExpr::new(
                                         input_schema.index_of_column(col).unwrap(),
                                     )
                                     .into_expr(),
-                                );
+                                )
                             } else {
                                 None
                             }
