@@ -47,3 +47,9 @@ Currently we have the following options for the explain task:
 - `physical_datafusion`: datafusion's physical plan.
 - `join_orders`: physical join orders.
 - `logical_join_orders`: logical join orders.
+
+## Tracing a query
+
+```
+RUST_LOG=optd_core=trace cargo run -p optd-sqlplannertest --bin planner_test_apply -- pushdowns &> log
+```

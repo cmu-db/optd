@@ -7,6 +7,7 @@ use std::{
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use std::any::Any;
+use tracing::trace;
 
 use crate::{
     cost::Cost,
@@ -235,6 +236,7 @@ impl<T: RelNodeTyp> Memo<T> {
         group_id: ReducedGroupId,
         memo_node: RelMemoNode<T>,
     ) {
+        trace!(event = "add_expr_to_group", group_id = %group_id, expr_id = %expr_id, memo_node = %memo_node);
         if let Entry::Occupied(mut entry) = self.groups.entry(group_id) {
             let group = entry.get_mut();
             group.group_exprs.insert(expr_id);
@@ -252,6 +254,7 @@ impl<T: RelNodeTyp> Memo<T> {
     // return true: replace success, the expr_id is replaced by the new rel_node
     // return false: replace failed as the new rel node already exists in other groups,
     //             the old expr_id should be marked as all rules are fired for it
+    #[allow(dead_code)]
     pub fn replace_group_expr(
         &mut self,
         expr_id: ExprId,

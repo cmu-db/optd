@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
+use tracing::trace;
 
 use crate::{
     cost::CostModel,
@@ -228,6 +229,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
     }
 
     fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
+        trace!(event = "fire_optimize_tasks", root_group_id = %group_id);
         self.tasks
             .push_back(Box::new(OptimizeGroupTask::new(group_id)));
         // get the task from the stack
@@ -292,6 +294,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.memo.add_new_group_expr(expr, group_id)
     }
 
+    #[allow(dead_code)]
     pub(super) fn replace_group_expr(
         &mut self,
         expr: RelNodeRef<T>,
