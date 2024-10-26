@@ -31,6 +31,7 @@ pub struct OptimizerContext {
 
 #[derive(Default, Clone, Debug)]
 pub struct OptimizerProperties {
+    pub partial_explore_temporarily_disabled: bool,
     /// If the number of rules applied exceeds this number, we stop applying logical rules.
     pub partial_explore_iter: Option<usize>,
     /// Plan space can be expanded by this number of times before we stop applying logical rules.
@@ -86,6 +87,14 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         Self::new_with_prop(rules, cost, property_builders, Default::default())
     }
 
+    pub fn disable_explore_limit(&mut self) {
+        self.prop.partial_explore_temporarily_disabled = true;
+    }
+
+    pub fn enable_explore_limit(&mut self) {
+        self.prop.partial_explore_temporarily_disabled = false;
+    }
+
     pub fn new_with_prop(
         rules: Vec<Arc<RuleWrapper<T, Self>>>,
         cost: Box<dyn CostModel<T>>,
@@ -113,7 +122,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.cost.clone()
     }
 
-    pub(super) fn rules(&self) -> Arc<[Arc<RuleWrapper<T, Self>>]> {
+    pub fn rules(&self) -> Arc<[Arc<RuleWrapper<T, Self>>]> {
         self.rules.clone()
     }
 
@@ -229,7 +238,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             let new_tasks = task.execute(self)?;
             self.tasks.extend(new_tasks);
             iter += 1;
-            if !self.ctx.budget_used {
+            if !self.ctx.budget_used && !self.prop.partial_explore_temporarily_disabled {
                 let plan_space = self.memo.compute_plan_space();
                 if let Some(partial_explore_space) = self.prop.partial_explore_space {
                     if plan_space - plan_space_begin > partial_explore_space {

@@ -36,6 +36,7 @@ The `explain` and `execute` task will be run with datafusion's logical optimizer
 | -------------- | --------------------------------------- |
 | use_df_logical | Enable Datafusion's logical optimizer   |
 | verbose        | Display estimated cost in physical plan |
+| logical_rules  | Only enable these logical rules         |
 
 Currently we have the following options for the explain task:
 

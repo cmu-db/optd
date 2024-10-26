@@ -13,12 +13,13 @@ use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::cost::BaseTableStats;
 use optd_datafusion_repr::DatafusionOptimizer;
 use regex::Regex;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Result};
 use async_trait::async_trait;
 
 #[derive(Default)]
@@ -26,16 +27,19 @@ pub struct DatafusionDBMS {
     ctx: SessionContext,
     /// Context enabling datafusion's logical optimizer.
     use_df_logical_ctx: SessionContext,
+    /// Shared optd optimizer (for tweaking config)
+    optd_optimizer: Option<Arc<OptdQueryPlanner>>,
 }
 
 impl DatafusionDBMS {
     pub async fn new() -> Result<Self> {
-        let ctx = DatafusionDBMS::new_session_ctx(false, None).await?;
-        let use_df_logical_ctx =
+        let (ctx, optd_optimizer) = DatafusionDBMS::new_session_ctx(false, None).await?;
+        let (use_df_logical_ctx, _) =
             DatafusionDBMS::new_session_ctx(true, Some(ctx.state().catalog_list().clone())).await?;
         Ok(Self {
             ctx,
             use_df_logical_ctx,
+            optd_optimizer: Some(optd_optimizer),
         })
     }
 
@@ -43,7 +47,7 @@ impl DatafusionDBMS {
     async fn new_session_ctx(
         use_df_logical: bool,
         catalog: Option<Arc<dyn CatalogList>>,
-    ) -> Result<SessionContext> {
+    ) -> Result<(SessionContext, Arc<OptdQueryPlanner>)> {
         let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
         if !use_df_logical {
             session_config.options_mut().optimizer.max_passes = 0;
@@ -51,6 +55,7 @@ impl DatafusionDBMS {
 
         let rn_config = RuntimeConfig::new();
         let runtime_env = RuntimeEnv::new(rn_config.clone())?;
+        let optd_optimizer;
 
         let ctx = {
             let mut state = if let Some(catalog) = catalog {
@@ -73,20 +78,63 @@ impl DatafusionDBMS {
             }
             state = state.with_physical_optimizer_rules(vec![]);
             // use optd-bridge query planner
-            state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));
+            optd_optimizer = Arc::new(OptdQueryPlanner::new(optimizer));
+            state = state.with_query_planner(optd_optimizer.clone());
             SessionContext::new_with_state(state)
         };
         ctx.refresh_catalogs().await?;
-        Ok(ctx)
+        Ok((ctx, optd_optimizer))
     }
 
-    pub async fn execute(&self, sql: &str, use_df_logical: bool) -> Result<Vec<Vec<String>>> {
+    pub(crate) async fn execute(&self, sql: &str, flags: &TestFlags) -> Result<Vec<Vec<String>>> {
+        {
+            let mut guard = self
+                .optd_optimizer
+                .as_ref()
+                .unwrap()
+                .optimizer
+                .lock()
+                .unwrap();
+            let optimizer = guard.as_mut().unwrap().optd_optimizer_mut();
+            if flags.disable_explore_limit {
+                optimizer.disable_explore_limit();
+            } else {
+                optimizer.enable_explore_limit();
+            }
+            let rules = optimizer.rules();
+            if flags.enable_logical_rules.is_empty() {
+                for r in 0..rules.len() {
+                    optimizer.enable_rule(r);
+                }
+            } else {
+                for (rule_id, rule) in rules.as_ref().iter().enumerate() {
+                    if rule.rule.is_impl_rule() {
+                        optimizer.enable_rule(rule_id);
+                    } else {
+                        optimizer.disable_rule(rule_id);
+                    }
+                }
+                let mut rules_to_enable = flags
+                    .enable_logical_rules
+                    .iter()
+                    .map(|x| x.as_str())
+                    .collect::<HashSet<_>>();
+                for (rule_id, rule) in rules.as_ref().iter().enumerate() {
+                    if rules_to_enable.remove(rule.rule.name()) {
+                        optimizer.enable_rule(rule_id);
+                    }
+                }
+                if rules_to_enable.len() > 0 {
+                    bail!("Unknown logical rule: {:?}", rules_to_enable);
+                }
+            }
+        }
         let sql = unescape_input(sql)?;
         let dialect = Box::new(GenericDialect);
         let statements = DFParser::parse_sql_with_dialect(&sql, dialect.as_ref())?;
         let mut result = Vec::new();
         for statement in statements {
-            let df = if use_df_logical {
+            let df = if flags.enable_df_logical {
                 let plan = self
                     .use_df_logical_ctx
                     .state()
@@ -95,6 +143,7 @@ impl DatafusionDBMS {
                 self.use_df_logical_ctx.execute_logical_plan(plan).await?
             } else {
                 let plan = self.ctx.state().statement_to_plan(statement).await?;
+
                 self.ctx.execute_logical_plan(plan).await?
             };
 
@@ -123,10 +172,12 @@ impl DatafusionDBMS {
     }
 
     /// Executes the `execute` task.
-    async fn task_execute(&mut self, r: &mut String, sql: &str, flags: &[String]) -> Result<()> {
+    async fn task_execute(&mut self, r: &mut String, sql: &str, flags: &TestFlags) -> Result<()> {
         use std::fmt::Write;
-        let use_df_logical = flags.contains(&"use_df_logical".to_string());
-        let result = self.execute(sql, use_df_logical).await?;
+        if flags.verbose {
+            bail!("Verbose flag is not supported for execute task");
+        }
+        let result = self.execute(sql, &flags).await?;
         writeln!(r, "{}", result.into_iter().map(|x| x.join(" ")).join("\n"))?;
         writeln!(r)?;
         Ok(())
@@ -138,19 +189,18 @@ impl DatafusionDBMS {
         r: &mut String,
         sql: &str,
         task: &str,
-        flags: &[String],
+        flags: &TestFlags,
     ) -> Result<()> {
         use std::fmt::Write;
 
-        let use_df_logical = flags.contains(&"use_df_logical".to_string());
-        let verbose = flags.contains(&"verbose".to_string());
+        let verbose = flags.verbose;
         let explain_sql = if verbose {
             format!("explain verbose {}", &sql)
         } else {
             format!("explain {}", &sql)
         };
-        let result = self.execute(&explain_sql, use_df_logical).await?;
-        let subtask_start_pos = task.find(':').unwrap() + 1;
+        let result = self.execute(&explain_sql, &flags).await?;
+        let subtask_start_pos = task.rfind(':').unwrap() + 1;
         for subtask in task[subtask_start_pos..].split(',') {
             let subtask = subtask.trim();
             if subtask == "logical_datafusion" {
@@ -163,7 +213,7 @@ impl DatafusionDBMS {
                         .map(|x| &x[1])
                         .unwrap()
                 )?;
-            } else if subtask == "logical_optd_heuristic" {
+            } else if subtask == "logical_optd_heuristic" || subtask == "optimized_logical_optd" {
                 writeln!(
                     r,
                     "{}",
@@ -225,6 +275,8 @@ impl DatafusionDBMS {
                         .map(|x| &x[1])
                         .unwrap()
                 )?;
+            } else {
+                bail!("Unknown subtask: {}", subtask);
             }
         }
 
@@ -235,10 +287,8 @@ impl DatafusionDBMS {
 #[async_trait]
 impl sqlplannertest::PlannerTestRunner for DatafusionDBMS {
     async fn run(&mut self, test_case: &sqlplannertest::ParsedTestCase) -> Result<String> {
-        for before in &test_case.before_sql {
-            self.execute(before, true)
-                .await
-                .context("before execution error")?;
+        for _ in &test_case.before_sql {
+            panic!("before is not supported in optd-sqlplannertest, always specify the task type to run");
         }
 
         let mut result = String::new();
@@ -259,18 +309,42 @@ lazy_static! {
     static ref FLAGS_REGEX: Regex = Regex::new(r"\[(.*)\]").unwrap();
 }
 
+#[derive(Default, Debug)]
+struct TestFlags {
+    verbose: bool,
+    enable_df_logical: bool,
+    enable_logical_rules: Vec<String>,
+    disable_explore_limit: bool,
+}
+
 /// Extract the flags from a task. The flags are specified in square brackets.
 /// For example, the flags for the task `explain[use_df_logical, verbose]` are `["use_df_logical", "verbose"]`.
-fn extract_flags(task: &str) -> Result<Vec<String>> {
+fn extract_flags(task: &str) -> Result<TestFlags> {
     if let Some(captures) = FLAGS_REGEX.captures(task) {
-        Ok(captures
+        let flags = captures
             .get(1)
             .unwrap()
             .as_str()
             .split(',')
             .map(|x| x.trim().to_string())
-            .collect())
+            .collect_vec();
+        let mut options = TestFlags::default();
+        for flag in flags {
+            if flag == "verbose" {
+                options.verbose = true;
+            } else if flag == "use_df_logical" {
+                options.enable_df_logical = true;
+            } else if flag.starts_with("logical_rules") {
+                options.enable_logical_rules =
+                    flag.split('+').skip(1).map(|x| x.to_string()).collect();
+            } else if flag == "disable_explore_limit" {
+                options.disable_explore_limit = true;
+            } else {
+                bail!("Unknown flag: {}", flag);
+            }
+        }
+        Ok(options)
     } else {
-        Ok(vec![])
+        Ok(TestFlags::default())
     }
 }

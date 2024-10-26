@@ -1,0 +1,15 @@
+- sql: |
+    create table t1(t1v1 int, t1v2 int);
+    create table t2(t2v1 int, t2v3 int);
+    insert into t1 values (0, 0), (1, 1), (2, 2);
+    insert into t2 values (0, 200), (1, 201), (2, 202);
+  tasks:
+    - execute[use_df_logical]
+- sql: |
+    SELECT t1.t1v1, t1.t1v2, t2.t2v3
+      FROM t1, t2
+      WHERE t1.t1v1 = t2.t2v1;
+  desc: Test whether we can transpose filter and projection
+  tasks:
+    # - explain[logical_rules:filter_project_transpose_rule+project_filter_transpose_rule,disable_explore_limit]:logical_optd,physical_optd
+    - explain[logical_rules:filter_project_transpose_rule+project_filter_transpose_rule]:logical_optd,physical_optd

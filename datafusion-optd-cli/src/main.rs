@@ -137,7 +137,7 @@ struct Args {
     maxrows: MaxRows,
 
     #[clap(long, help = "Turn on datafusion logical optimizer before optd")]
-    enable_logical: bool,
+    enable_df_logical: bool,
 
     #[clap(long, help = "Turn on adaptive optimization")]
     enable_adaptive: bool,
@@ -164,7 +164,7 @@ pub async fn main() -> Result<()> {
 
     let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
 
-    if !args.enable_logical {
+    if !args.enable_df_logical {
         session_config.options_mut().optimizer.max_passes = 0;
     }
 
@@ -198,7 +198,7 @@ pub async fn main() -> Result<()> {
     let mut ctx = {
         let mut state =
             SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
-        if !args.enable_logical {
+        if !args.enable_df_logical {
             // clean up optimizer rules so that we can plug in our own optimizer
             state = state.with_optimizer_rules(vec![]);
             state = state.with_physical_optimizer_rules(vec![]);

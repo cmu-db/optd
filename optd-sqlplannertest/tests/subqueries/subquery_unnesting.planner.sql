@@ -28,6 +28,31 @@ LogicalProjection { exprs: [ #0, #1 ] }
                     │   ├── #0
                     │   └── Extern(#0)
                     └── LogicalScan { table: t2 }
+LogicalProjection { exprs: [ #0, #1 ] }
+└── LogicalFilter
+    ├── cond:Gt
+    │   ├── #2
+    │   └── 100(i64)
+    └── LogicalProjection { exprs: [ #0, #1, #3 ] }
+        └── LogicalJoin
+            ├── join_type: Inner
+            ├── cond:Eq
+            │   ├── #0
+            │   └── #2
+            ├── LogicalScan { table: t1 }
+            └── LogicalProjection { exprs: [ #0, #1 ] }
+                └── LogicalAgg
+                    ├── exprs:Agg(Sum)
+                    │   └── [ Cast { cast_to: Int64, expr: #2 } ]
+                    ├── groups: [ #1 ]
+                    └── LogicalFilter
+                        ├── cond:Eq
+                        │   ├── #1
+                        │   └── #0
+                        └── LogicalJoin { join_type: Inner, cond: true }
+                            ├── LogicalAgg { exprs: [], groups: [ #0 ] }
+                            │   └── LogicalScan { table: t1 }
+                            └── LogicalScan { table: t2 }
 PhysicalProjection { exprs: [ #0, #1 ] }
 └── PhysicalProjection { exprs: [ #0, #1, #3 ] }
     └── PhysicalProjection { exprs: [ #2, #3, #0, #1 ] }

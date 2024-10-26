@@ -162,6 +162,7 @@ impl DatafusionOptimizer {
                     Box::new(ColumnRefPropertyBuilder::new(catalog.clone())),
                 ],
                 OptimizerProperties {
+                    partial_explore_temporarily_disabled: false,
                     partial_explore_iter: Some(1 << 20),
                     partial_explore_space: Some(1 << 10),
                 },
