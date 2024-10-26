@@ -124,7 +124,7 @@ impl DatafusionDBMS {
                         optimizer.enable_rule(rule_id);
                     }
                 }
-                if rules_to_enable.len() > 0 {
+                if !rules_to_enable.is_empty() {
                     bail!("Unknown logical rule: {:?}", rules_to_enable);
                 }
             }
@@ -177,7 +177,7 @@ impl DatafusionDBMS {
         if flags.verbose {
             bail!("Verbose flag is not supported for execute task");
         }
-        let result = self.execute(sql, &flags).await?;
+        let result = self.execute(sql, flags).await?;
         writeln!(r, "{}", result.into_iter().map(|x| x.join(" ")).join("\n"))?;
         writeln!(r)?;
         Ok(())
@@ -199,7 +199,7 @@ impl DatafusionDBMS {
         } else {
             format!("explain {}", &sql)
         };
-        let result = self.execute(&explain_sql, &flags).await?;
+        let result = self.execute(&explain_sql, flags).await?;
         let subtask_start_pos = task.rfind(':').unwrap() + 1;
         for subtask in task[subtask_start_pos..].split(',') {
             let subtask = subtask.trim();
@@ -287,7 +287,7 @@ impl DatafusionDBMS {
 #[async_trait]
 impl sqlplannertest::PlannerTestRunner for DatafusionDBMS {
     async fn run(&mut self, test_case: &sqlplannertest::ParsedTestCase) -> Result<String> {
-        for _ in &test_case.before_sql {
+        if !test_case.before_sql.is_empty() {
             panic!("before is not supported in optd-sqlplannertest, always specify the task type to run");
         }
 
