@@ -56,7 +56,7 @@ fn cli_test_tpch() {
     let mut cmd = Command::cargo_bin("datafusion-optd-cli").unwrap();
     cmd.current_dir(".."); // all paths in `test.sql` assume we're in the base dir of the repo
     cmd.args([
-        "--enable-logical",
+        "--enable-df-logical",
         "--file",
         "datafusion-optd-cli/tpch-sf0_01/test.sql",
     ]);
