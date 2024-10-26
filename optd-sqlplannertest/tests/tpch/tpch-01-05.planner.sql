@@ -374,13 +374,13 @@ PhysicalLimit { skip: 0(u64), fetch: 100(u64) }
             │       │       │       ├── PhysicalProjection { exprs: [ #0, #1, #3, #4 ] }
             │       │       │       │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
             │       │       │       │       ├── PhysicalProjection { exprs: [ #0, #1 ] }
-            │       │       │       │       │   └── PhysicalProjection { exprs: [ #0, #2, #4, #5 ] }
-            │       │       │       │       │       └── PhysicalFilter
-            │       │       │       │       │           ├── cond:And
-            │       │       │       │       │           │   ├── Eq
-            │       │       │       │       │           │   │   ├── #5
-            │       │       │       │       │           │   │   └── 4(i32)
-            │       │       │       │       │           │   └── Like { expr: #4, pattern: "%TIN", negated: false, case_insensitive: false }
+            │       │       │       │       │   └── PhysicalFilter
+            │       │       │       │       │       ├── cond:And
+            │       │       │       │       │       │   ├── Eq
+            │       │       │       │       │       │   │   ├── #3
+            │       │       │       │       │       │   │   └── 4(i32)
+            │       │       │       │       │       │   └── Like { expr: #2, pattern: "%TIN", negated: false, case_insensitive: false }
+            │       │       │       │       │       └── PhysicalProjection { exprs: [ #0, #2, #4, #5 ] }
             │       │       │       │       │           └── PhysicalScan { table: part }
             │       │       │       │       └── PhysicalProjection { exprs: [ #0, #1, #3 ] }
             │       │       │       │           └── PhysicalScan { table: partsupp }
@@ -515,17 +515,17 @@ PhysicalLimit { skip: 0(u64), fetch: 10(u64) }
                     ├── PhysicalProjection { exprs: [ #1, #3, #4 ] }
                     │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
                     │       ├── PhysicalProjection { exprs: [ #0 ] }
-                    │       │   └── PhysicalProjection { exprs: [ #0, #6 ] }
-                    │       │       └── PhysicalFilter
-                    │       │           ├── cond:Eq
-                    │       │           │   ├── #6
-                    │       │           │   └── "FURNITURE"
+                    │       │   └── PhysicalFilter
+                    │       │       ├── cond:Eq
+                    │       │       │   ├── #1
+                    │       │       │   └── "FURNITURE"
+                    │       │       └── PhysicalProjection { exprs: [ #0, #6 ] }
                     │       │           └── PhysicalScan { table: customer }
-                    │       └── PhysicalProjection { exprs: [ #0, #1, #4, #7 ] }
-                    │           └── PhysicalFilter
-                    │               ├── cond:Lt
-                    │               │   ├── #4
-                    │               │   └── 9218(i64)
+                    │       └── PhysicalFilter
+                    │           ├── cond:Lt
+                    │           │   ├── #2
+                    │           │   └── 9218(i64)
+                    │           └── PhysicalProjection { exprs: [ #0, #1, #4, #7 ] }
                     │               └── PhysicalScan { table: orders }
                     └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
                         └── PhysicalProjection { exprs: [ #0, #5, #6, #10 ] }

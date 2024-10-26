@@ -114,19 +114,19 @@ impl DatafusionOptimizer {
             ProjectFilterTransposeRule::new(),
         )));
         // add all filter pushdown rules as heuristic rules
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
             FilterProjectTransposeRule::new(),
         )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
             FilterCrossJoinTransposeRule::new(),
         )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
             FilterInnerJoinTransposeRule::new(),
         )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
             FilterSortTransposeRule::new(),
         )));
-        rule_wrappers.push(RuleWrapper::new_heuristic(Arc::new(
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
             FilterAggTransposeRule::new(),
         )));
         rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(HashJoinRule::new()))); // 17
