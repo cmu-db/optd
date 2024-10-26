@@ -156,7 +156,7 @@
       limit 100;
   desc: TPC-H Q2
   tasks:
-      - explain[with_logical]:logical_optd,physical_optd
+      - explain[use_df_logical]:logical_optd,physical_optd
 - sql: |
       SELECT
           l_orderkey,
@@ -182,7 +182,7 @@
           o_orderdate LIMIT 10;
   desc: TPC-H Q3
   tasks:
-      - explain[with_logical]:logical_optd,physical_optd
+      - explain[use_df_logical]:logical_optd,physical_optd
 - sql: |
       SELECT
           n_name AS nation,
@@ -446,30 +446,30 @@
           value desc;
   desc: TPC-H Q11
   tasks:
-     - explain[with_logical]:logical_optd,physical_optd
+      - explain[use_df_logical]:logical_optd,physical_optd
 - sql: |
-       SELECT
-           l_shipmode,
-           sum(case when o_orderpriority = '1-URGENT'
-                    or o_orderpriority = '2-HIGH'
-                    then 1 else 0 end) as high_priority_orders,
-           sum(case when o_orderpriority <> '1-URGENT'
-                    and o_orderpriority <> '2-HIGH'
-                    then 1 else 0 end) as low_priority_orders
-       FROM
-           orders,
-           lineitem
-       WHERE
-           o_orderkey = l_orderkey
-           AND l_shipmode in ('MAIL', 'SHIP')
-           AND l_commitdate < l_receiptdate
-           AND l_shipdate < l_commitdate
-           AND l_receiptdate >= DATE '1994-01-01'
-           AND l_receiptdate < DATE '1995-01-01'
-       GROUP BY
-           l_shipmode
-       ORDER BY
-           l_shipmode;
+      SELECT
+          l_shipmode,
+          sum(case when o_orderpriority = '1-URGENT'
+                   or o_orderpriority = '2-HIGH'
+                   then 1 else 0 end) as high_priority_orders,
+          sum(case when o_orderpriority <> '1-URGENT'
+                   and o_orderpriority <> '2-HIGH'
+                   then 1 else 0 end) as low_priority_orders
+      FROM
+          orders,
+          lineitem
+      WHERE
+          o_orderkey = l_orderkey
+          AND l_shipmode in ('MAIL', 'SHIP')
+          AND l_commitdate < l_receiptdate
+          AND l_shipdate < l_commitdate
+          AND l_receiptdate >= DATE '1994-01-01'
+          AND l_receiptdate < DATE '1995-01-01'
+      GROUP BY
+          l_shipmode
+      ORDER BY
+          l_shipmode;
   desc: TPC-H Q12
   tasks:
       - explain:logical_optd,physical_optd
@@ -524,7 +524,7 @@
           s_suppkey;
   desc: TPC-H Q15
   tasks:
-      - explain[with_logical]:logical_optd,physical_optd
+      - explain[use_df_logical]:logical_optd,physical_optd
 - sql: |
       SELECT
           ROUND(SUM(l_extendedprice) / 7.0, 16) AS avg_yearly 
@@ -545,7 +545,7 @@
           );
   desc: TPC-H Q17
   tasks:
-      - explain[with_logical]:logical_optd,physical_optd
+      - explain[use_df_logical]:logical_optd,physical_optd
 - sql: |
       SELECT
           sum(l_extendedprice* (1 - l_discount)) as revenue

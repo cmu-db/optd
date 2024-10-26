@@ -25,27 +25,27 @@ use async_trait::async_trait;
 pub struct DatafusionDBMS {
     ctx: SessionContext,
     /// Context enabling datafusion's logical optimizer.
-    with_logical_ctx: SessionContext,
+    use_df_logical_ctx: SessionContext,
 }
 
 impl DatafusionDBMS {
     pub async fn new() -> Result<Self> {
         let ctx = DatafusionDBMS::new_session_ctx(false, None).await?;
-        let with_logical_ctx =
+        let use_df_logical_ctx =
             DatafusionDBMS::new_session_ctx(true, Some(ctx.state().catalog_list().clone())).await?;
         Ok(Self {
             ctx,
-            with_logical_ctx,
+            use_df_logical_ctx,
         })
     }
 
-    /// Creates a new session context. If the `with_logical` flag is set, datafusion's logical optimizer will be used.
+    /// Creates a new session context. If the `use_df_logical` flag is set, datafusion's logical optimizer will be used.
     async fn new_session_ctx(
-        with_logical: bool,
+        use_df_logical: bool,
         catalog: Option<Arc<dyn CatalogList>>,
     ) -> Result<SessionContext> {
         let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
-        if !with_logical {
+        if !use_df_logical {
             session_config.options_mut().optimizer.max_passes = 0;
         }
 
@@ -67,7 +67,7 @@ impl DatafusionDBMS {
                 BaseTableStats::default(),
                 false,
             );
-            if !with_logical {
+            if !use_df_logical {
                 // clean up optimizer rules so that we can plug in our own optimizer
                 state = state.with_optimizer_rules(vec![]);
             }
@@ -80,19 +80,19 @@ impl DatafusionDBMS {
         Ok(ctx)
     }
 
-    pub async fn execute(&self, sql: &str, with_logical: bool) -> Result<Vec<Vec<String>>> {
+    pub async fn execute(&self, sql: &str, use_df_logical: bool) -> Result<Vec<Vec<String>>> {
         let sql = unescape_input(sql)?;
         let dialect = Box::new(GenericDialect);
         let statements = DFParser::parse_sql_with_dialect(&sql, dialect.as_ref())?;
         let mut result = Vec::new();
         for statement in statements {
-            let df = if with_logical {
+            let df = if use_df_logical {
                 let plan = self
-                    .with_logical_ctx
+                    .use_df_logical_ctx
                     .state()
                     .statement_to_plan(statement)
                     .await?;
-                self.with_logical_ctx.execute_logical_plan(plan).await?
+                self.use_df_logical_ctx.execute_logical_plan(plan).await?
             } else {
                 let plan = self.ctx.state().statement_to_plan(statement).await?;
                 self.ctx.execute_logical_plan(plan).await?
@@ -125,8 +125,8 @@ impl DatafusionDBMS {
     /// Executes the `execute` task.
     async fn task_execute(&mut self, r: &mut String, sql: &str, flags: &[String]) -> Result<()> {
         use std::fmt::Write;
-        let with_logical = flags.contains(&"with_logical".to_string());
-        let result = self.execute(sql, with_logical).await?;
+        let use_df_logical = flags.contains(&"use_df_logical".to_string());
+        let result = self.execute(sql, use_df_logical).await?;
         writeln!(r, "{}", result.into_iter().map(|x| x.join(" ")).join("\n"))?;
         writeln!(r)?;
         Ok(())
@@ -142,14 +142,14 @@ impl DatafusionDBMS {
     ) -> Result<()> {
         use std::fmt::Write;
 
-        let with_logical = flags.contains(&"with_logical".to_string());
+        let use_df_logical = flags.contains(&"use_df_logical".to_string());
         let verbose = flags.contains(&"verbose".to_string());
         let explain_sql = if verbose {
             format!("explain verbose {}", &sql)
         } else {
             format!("explain {}", &sql)
         };
-        let result = self.execute(&explain_sql, with_logical).await?;
+        let result = self.execute(&explain_sql, use_df_logical).await?;
         let subtask_start_pos = task.find(':').unwrap() + 1;
         for subtask in task[subtask_start_pos..].split(',') {
             let subtask = subtask.trim();
@@ -260,7 +260,7 @@ lazy_static! {
 }
 
 /// Extract the flags from a task. The flags are specified in square brackets.
-/// For example, the flags for the task `explain[with_logical, verbose]` are `["with_logical", "verbose"]`.
+/// For example, the flags for the task `explain[use_df_logical, verbose]` are `["use_df_logical", "verbose"]`.
 fn extract_flags(task: &str) -> Result<Vec<String>> {
     if let Some(captures) = FLAGS_REGEX.captures(task) {
         Ok(captures
