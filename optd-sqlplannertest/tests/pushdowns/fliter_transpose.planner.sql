@@ -15,21 +15,7 @@ SELECT t1.t1v1, t1.t1v2, t2.t2v3
   WHERE t1.t1v1 = t2.t2v1;
 
 /*
-LogicalProjection { exprs: [ #0, #1, #3 ] }
-└── LogicalFilter
-    ├── cond:Eq
-    │   ├── #0
-    │   └── #2
-    └── LogicalJoin { join_type: Cross, cond: true }
-        ├── LogicalScan { table: t1 }
-        └── LogicalScan { table: t2 }
-PhysicalProjection { exprs: [ #0, #1, #3 ] }
-└── PhysicalFilter
-    ├── cond:Eq
-    │   ├── #0
-    │   └── #2
-    └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-        ├── PhysicalScan { table: t1 }
-        └── PhysicalScan { table: t2 }
+Error
+Unknown logical rule: {"project_filter_transpose_rule"}
 */
 

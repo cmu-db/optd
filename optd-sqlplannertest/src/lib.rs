@@ -106,6 +106,7 @@ impl DatafusionDBMS {
                 for r in 0..rules.len() {
                     optimizer.enable_rule(r);
                 }
+                guard.as_mut().unwrap().enable_heuristic(true);
             } else {
                 for (rule_id, rule) in rules.as_ref().iter().enumerate() {
                     if rule.rule.is_impl_rule() {
@@ -127,6 +128,7 @@ impl DatafusionDBMS {
                 if !rules_to_enable.is_empty() {
                     bail!("Unknown logical rule: {:?}", rules_to_enable);
                 }
+                guard.as_mut().unwrap().enable_heuristic(false);
             }
         }
         let sql = unescape_input(sql)?;
@@ -335,8 +337,11 @@ fn extract_flags(task: &str) -> Result<TestFlags> {
             } else if flag == "use_df_logical" {
                 options.enable_df_logical = true;
             } else if flag.starts_with("logical_rules") {
-                options.enable_logical_rules =
-                    flag.split('+').skip(1).map(|x| x.to_string()).collect();
+                if let Some((_, flag)) = flag.split_once(":") {
+                    options.enable_logical_rules = flag.split('+').map(|x| x.to_string()).collect();
+                } else {
+                    bail!("Failed to parse logical_rules flag: {}", flag);
+                }
             } else if flag == "disable_explore_limit" {
                 options.disable_explore_limit = true;
             } else {

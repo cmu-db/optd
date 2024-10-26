@@ -23,11 +23,11 @@ use properties::{
 };
 use rules::{
     EliminateDuplicatedAggExprRule, EliminateDuplicatedSortExprRule, EliminateFilterRule,
-    EliminateJoinRule, EliminateLimitRule, FilterAggTransposeRule, FilterCrossJoinTransposeRule,
-    FilterInnerJoinTransposeRule, FilterMergeRule, FilterProjectTransposeRule,
-    FilterSortTransposeRule, HashJoinRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule,
-    ProjectFilterTransposeRule, ProjectMergeRule, ProjectionPullUpJoin, SimplifyFilterRule,
-    SimplifyJoinCondRule,
+    EliminateJoinRule, EliminateLimitRule, EliminateProjectRule, FilterAggTransposeRule,
+    FilterCrossJoinTransposeRule, FilterInnerJoinTransposeRule, FilterMergeRule,
+    FilterProjectTransposeRule, FilterSortTransposeRule, HashJoinRule, JoinAssocRule,
+    JoinCommuteRule, PhysicalConversionRule, ProjectMergeRule, ProjectionPullUpJoin,
+    SimplifyFilterRule, SimplifyJoinCondRule,
 };
 
 pub use optd_core::rel_node::Value;
@@ -46,7 +46,7 @@ mod testing;
 // mod expand;
 
 pub struct DatafusionOptimizer {
-    hueristic_optimizer: HeuristicsOptimizer<OptRelNodeTyp>,
+    heuristic_optimizer: HeuristicsOptimizer<OptRelNodeTyp>,
     cascades_optimizer: CascadesOptimizer<OptRelNodeTyp>,
     pub runtime_statistics: RuntimeAdaptionStorage,
     enable_adaptive: bool,
@@ -75,7 +75,7 @@ impl DatafusionOptimizer {
     }
 
     pub fn optd_hueristic_optimizer(&self) -> &HeuristicsOptimizer<OptRelNodeTyp> {
-        &self.hueristic_optimizer
+        &self.heuristic_optimizer
     }
 
     pub fn optd_optimizer_mut(&mut self) -> &mut CascadesOptimizer<OptRelNodeTyp> {
@@ -90,6 +90,7 @@ impl DatafusionOptimizer {
             Arc::new(EliminateFilterRule::new()),
             Arc::new(EliminateJoinRule::new()),
             Arc::new(EliminateLimitRule::new()),
+            Arc::new(EliminateProjectRule::new()),
             Arc::new(EliminateDuplicatedSortExprRule::new()),
             Arc::new(EliminateDuplicatedAggExprRule::new()),
             Arc::new(DepJoinEliminateAtScan::new()),
@@ -109,10 +110,11 @@ impl DatafusionOptimizer {
         for rule in rules {
             rule_wrappers.push(RuleWrapper::new_cascades(rule));
         }
-        // project transpose rules
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            ProjectFilterTransposeRule::new(),
-        )));
+        // // project transpose rules
+        // only do filter-project one way for now to reduce search space
+        // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
+        //     ProjectFilterTransposeRule::new(),
+        // )));
         // add all filter pushdown rules as heuristic rules
         rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
             FilterProjectTransposeRule::new(),
@@ -129,13 +131,19 @@ impl DatafusionOptimizer {
         rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
             FilterAggTransposeRule::new(),
         )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(HashJoinRule::new()))); // 17
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinCommuteRule::new()))); // 18
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(HashJoinRule::new())));
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinCommuteRule::new())));
         rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(JoinAssocRule::new())));
         rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
             ProjectionPullUpJoin::new(),
         )));
-
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
+            EliminateProjectRule::new(),
+        )));
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(ProjectMergeRule::new())));
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
+            EliminateFilterRule::new(),
+        )));
         rule_wrappers
     }
 
@@ -167,7 +175,7 @@ impl DatafusionOptimizer {
                     partial_explore_space: Some(1 << 10),
                 },
             ),
-            hueristic_optimizer: HeuristicsOptimizer::new_with_rules(
+            heuristic_optimizer: HeuristicsOptimizer::new_with_rules(
                 heuristic_rules,
                 ApplyOrder::TopDown, // uhh TODO reconsider
                 property_builders.clone(),
@@ -215,7 +223,7 @@ impl DatafusionOptimizer {
             cascades_optimizer: optimizer,
             enable_adaptive: true,
             enable_heuristic: false,
-            hueristic_optimizer: HeuristicsOptimizer::new_with_rules(
+            heuristic_optimizer: HeuristicsOptimizer::new_with_rules(
                 vec![],
                 ApplyOrder::BottomUp,
                 Arc::new([]),
@@ -224,7 +232,7 @@ impl DatafusionOptimizer {
     }
 
     pub fn heuristic_optimize(&mut self, root_rel: OptRelNodeRef) -> OptRelNodeRef {
-        self.hueristic_optimizer
+        self.heuristic_optimizer
             .optimize(root_rel)
             .expect("heuristics returns error")
     }

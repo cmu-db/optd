@@ -24,7 +24,7 @@ pub use physical::PhysicalConversionRule;
 pub use project_transpose::{
     project_filter_transpose::{FilterProjectTransposeRule, ProjectFilterTransposeRule},
     project_join_transpose::ProjectionPullUpJoin,
-    project_merge::ProjectMergeRule,
+    project_merge::{EliminateProjectRule, ProjectMergeRule},
 };
 pub use subquery::{
     DepInitialDistinct, DepJoinEliminateAtScan, DepJoinPastAgg, DepJoinPastFilter, DepJoinPastProj,
