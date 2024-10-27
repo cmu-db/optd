@@ -234,18 +234,15 @@ PhysicalSort
         │       └── Cast { cast_to: Decimal128(10, 0), expr: #1 }
         ├── groups: [ #0 ]
         └── PhysicalProjection { exprs: [ #0, #2, #3 ] }
-            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #5 ], right_keys: [ #0 ] }
-                ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-                │   ├── PhysicalProjection { exprs: [ #0, #1, #2, #3 ] }
-                │   │   └── PhysicalScan { table: partsupp }
-                │   └── PhysicalProjection { exprs: [ #0, #3 ] }
-                │       └── PhysicalScan { table: supplier }
-                └── PhysicalProjection { exprs: [ #0 ] }
-                    └── PhysicalFilter
-                        ├── cond:Eq
-                        │   ├── #1
-                        │   └── "CHINA"
-                        └── PhysicalScan { table: nation }
+            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #4 ] }
+                ├── PhysicalScan { table: partsupp }
+                └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #3 ] }
+                    ├── PhysicalFilter
+                    │   ├── cond:Eq
+                    │   │   ├── #1
+                    │   │   └── "CHINA"
+                    │   └── PhysicalScan { table: nation }
+                    └── PhysicalScan { table: supplier }
 */
 
 -- TPC-H Q12

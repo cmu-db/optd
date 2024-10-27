@@ -174,28 +174,27 @@ PhysicalProjection
     ├── aggrs:Agg(Sum)
     │   └── [ #0 ]
     ├── groups: []
-    └── PhysicalProjection { exprs: [ #5 ] }
+    └── PhysicalProjection { exprs: [ #14 ] }
         └── PhysicalNestedLoopJoin
             ├── join_type: Inner
             ├── cond:And
             │   ├── Eq
-            │   │   ├── #16
-            │   │   └── #18
+            │   │   ├── #0
+            │   │   └── #0
             │   └── Lt
-            │       ├── Cast { cast_to: Decimal128(30, 15), expr: #4 }
-            │       └── #17
-            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-            │   ├── PhysicalScan { table: lineitem }
-            │   └── PhysicalProjection { exprs: [ #0 ] }
-            │       └── PhysicalFilter
-            │           ├── cond:And
-            │           │   ├── Eq
-            │           │   │   ├── #3
-            │           │   │   └── "Brand#13"
-            │           │   └── Eq
-            │           │       ├── #6
-            │           │       └── "JUMBO PKG"
-            │           └── PhysicalScan { table: part }
+            │       ├── Cast { cast_to: Decimal128(30, 15), expr: #13 }
+            │       └── #25
+            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
+            │   ├── PhysicalFilter
+            │   │   ├── cond:And
+            │   │   │   ├── Eq
+            │   │   │   │   ├── #3
+            │   │   │   │   └── "Brand#13"
+            │   │   │   └── Eq
+            │   │   │       ├── #6
+            │   │   │       └── "JUMBO PKG"
+            │   │   └── PhysicalScan { table: part }
+            │   └── PhysicalScan { table: lineitem }
             └── PhysicalProjection
                 ├── exprs:
                 │   ┌── Cast

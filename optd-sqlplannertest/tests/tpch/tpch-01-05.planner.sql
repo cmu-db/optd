@@ -362,27 +362,21 @@ PhysicalLimit { skip: 0(u64), fetch: 100(u64) }
     │   │   └── #1
     │   └── SortOrder { order: Asc }
     │       └── #3
-    └── PhysicalProjection { exprs: [ #6, #2, #10, #0, #1, #3, #5, #7 ] }
-        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0, #8 ], right_keys: [ #1, #0 ] }
-            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #11 ], right_keys: [ #0 ] }
-            │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #4 ], right_keys: [ #0 ] }
-            │   │   ├── PhysicalProjection { exprs: [ #0, #1, #5, #6, #7, #8, #9, #10, #3 ] }
-            │   │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
-            │   │   │       ├── PhysicalProjection { exprs: [ #0, #1, #3, #4 ] }
-            │   │   │       │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-            │   │   │       │       ├── PhysicalProjection { exprs: [ #0, #1 ] }
-            │   │   │       │       │   └── PhysicalFilter
-            │   │   │       │       │       ├── cond:And
-            │   │   │       │       │       │   ├── Eq
-            │   │   │       │       │       │   │   ├── #3
-            │   │   │       │       │       │   │   └── 4(i32)
-            │   │   │       │       │       │   └── Like { expr: #2, pattern: "%TIN", negated: false, case_insensitive: false }
-            │   │   │       │       │       └── PhysicalProjection { exprs: [ #0, #2, #4, #5 ] }
-            │   │   │       │       │           └── PhysicalScan { table: part }
-            │   │   │       │       └── PhysicalProjection { exprs: [ #0, #1, #3 ] }
-            │   │   │       │           └── PhysicalScan { table: partsupp }
-            │   │   │       └── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5, #6 ] }
-            │   │   │           └── PhysicalScan { table: supplier }
+    └── PhysicalProjection { exprs: [ #5, #1, #22, #7, #9, #2, #4, #6 ] }
+        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #7, #19 ], right_keys: [ #1, #0 ] }
+            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #23 ], right_keys: [ #0 ] }
+            │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #3 ], right_keys: [ #0 ] }
+            │   │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #10 ] }
+            │   │   │   ├── PhysicalScan { table: supplier }
+            │   │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+            │   │   │       ├── PhysicalFilter
+            │   │   │       │   ├── cond:And
+            │   │   │       │   │   ├── Eq
+            │   │   │       │   │   │   ├── #5
+            │   │   │       │   │   │   └── 4(i32)
+            │   │   │       │   │   └── Like { expr: #4, pattern: "%TIN", negated: false, case_insensitive: false }
+            │   │   │       │   └── PhysicalScan { table: part }
+            │   │   │       └── PhysicalScan { table: partsupp }
             │   │   └── PhysicalProjection { exprs: [ #0, #1, #2 ] }
             │   │       └── PhysicalScan { table: nation }
             │   └── PhysicalProjection { exprs: [ #0 ] }
@@ -505,28 +499,24 @@ PhysicalLimit { skip: 0(u64), fetch: 10(u64) }
             │           ├── 1(float)
             │           └── #4
             ├── groups: [ #2, #0, #1 ]
-            └── PhysicalProjection { exprs: [ #3, #4, #5, #6, #7 ] }
-                └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-                    ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
-                    │   ├── PhysicalProjection { exprs: [ #0 ] }
-                    │   │   └── PhysicalFilter
-                    │   │       ├── cond:Eq
-                    │   │       │   ├── #1
-                    │   │       │   └── "FURNITURE"
-                    │   │       └── PhysicalProjection { exprs: [ #0, #6 ] }
-                    │   │           └── PhysicalScan { table: customer }
-                    │   └── PhysicalFilter
-                    │       ├── cond:Lt
-                    │       │   ├── #2
-                    │       │   └── 9218(i64)
-                    │       └── PhysicalProjection { exprs: [ #0, #1, #4, #7 ] }
-                    │           └── PhysicalScan { table: orders }
-                    └── PhysicalProjection { exprs: [ #0, #5, #6 ] }
+            └── PhysicalProjection { exprs: [ #28, #31, #8, #13, #14 ] }
+                └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #17 ] }
+                    ├── PhysicalFilter
+                    │   ├── cond:Eq
+                    │   │   ├── #6
+                    │   │   └── "FURNITURE"
+                    │   └── PhysicalScan { table: customer }
+                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+                        ├── PhysicalFilter
+                        │   ├── cond:Gt
+                        │   │   ├── #10
+                        │   │   └── 9218(i64)
+                        │   └── PhysicalScan { table: lineitem }
                         └── PhysicalFilter
-                            ├── cond:Gt
-                            │   ├── #10
+                            ├── cond:Lt
+                            │   ├── #4
                             │   └── 9218(i64)
-                            └── PhysicalScan { table: lineitem }
+                            └── PhysicalScan { table: orders }
 */
 
 -- TPC-H Q5

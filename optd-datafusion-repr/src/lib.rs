@@ -111,7 +111,7 @@ impl DatafusionOptimizer {
         for rule in rules {
             rule_wrappers.push(RuleWrapper::new_cascades(rule));
         }
-        // // project transpose rules
+        // project transpose rules
         // only do filter-project one way for now to reduce search space
         // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
         //     ProjectFilterTransposeRule::new(),

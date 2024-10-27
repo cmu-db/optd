@@ -11,4 +11,4 @@
       WHERE t1.t1v1 = t2.t2v1;
   desc: Test whether we can transpose filter and projection
   tasks:
-    - explain[logical_rules:filter_project_transpose_rule+project_filter_transpose_rule,disable_explore_limit]:logical_optd,physical_optd
+    - explain[logical_rules:filter_project_transpose_rule+project_filter_transpose_rule]:logical_optd,physical_optd
