@@ -54,27 +54,24 @@ LogicalProjection { exprs: [ #0, #1 ] }
                             │   └── LogicalScan { table: t1 }
                             └── LogicalScan { table: t2 }
 PhysicalProjection { exprs: [ #0, #1 ] }
-└── PhysicalProjection { exprs: [ #0, #1, #3 ] }
-    └── PhysicalFilter
-        ├── cond:Gt
-        │   ├── #3
-        │   └── 100(i64)
-        └── PhysicalProjection { exprs: [ #2, #3, #0, #1 ] }
-            └── PhysicalProjection { exprs: [ #0, #1, #2, #3 ] }
-                └── PhysicalProjection { exprs: [ #2, #3, #0, #1 ] }
-                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-                        ├── PhysicalScan { table: t1 }
-                        └── PhysicalAgg
-                            ├── aggrs:Agg(Sum)
-                            │   └── [ Cast { cast_to: Int64, expr: #2 } ]
-                            ├── groups: [ #1 ]
-                            └── PhysicalFilter
-                                ├── cond:Eq
-                                │   ├── #1
-                                │   └── #0
-                                └── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
-                                    ├── PhysicalAgg { aggrs: [], groups: [ #0 ] }
-                                    │   └── PhysicalScan { table: t1 }
-                                    └── PhysicalScan { table: t2 }
+└── PhysicalFilter
+    ├── cond:Gt
+    │   ├── #3
+    │   └── 100(i64)
+    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+        ├── PhysicalScan { table: t1 }
+        └── PhysicalAgg
+            ├── aggrs:Agg(Sum)
+            │   └── [ Cast { cast_to: Int64, expr: #2 } ]
+            ├── groups: [ #1 ]
+            └── PhysicalProjection { exprs: [ #2, #0, #1 ] }
+                └── PhysicalFilter
+                    ├── cond:Eq
+                    │   ├── #0
+                    │   └── #2
+                    └── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
+                        ├── PhysicalScan { table: t2 }
+                        └── PhysicalAgg { aggrs: [], groups: [ #0 ] }
+                            └── PhysicalScan { table: t1 }
 */
 

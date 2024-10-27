@@ -256,40 +256,45 @@ impl OptdQueryPlanner {
                     .unwrap()
                     .explain_to_string(if verbose { Some(&meta) } else { None }),
             ));
-            let join_order = get_join_order(optimized_rel.clone());
-            explains.push(StringifiedPlan::new(
-                PlanType::OptimizedPhysicalPlan {
-                    optimizer_name: "optd-join-order".to_string(),
-                },
-                if let Some(join_order) = join_order {
-                    join_order.to_string()
-                } else {
-                    "None".to_string()
-                },
-            ));
-            let bindings = optimizer
-                .optd_cascades_optimizer()
-                .get_all_group_bindings(group_id, true);
-            let mut join_orders = BTreeSet::new();
-            let mut logical_join_orders = BTreeSet::new();
-            for binding in bindings {
-                if let Some(join_order) = get_join_order(binding) {
-                    logical_join_orders.insert(join_order.conv_into_logical_join_order());
-                    join_orders.insert(join_order);
+
+            const ENABLE_JOIN_ORDER: bool = false;
+
+            if ENABLE_JOIN_ORDER {
+                let join_order = get_join_order(optimized_rel.clone());
+                explains.push(StringifiedPlan::new(
+                    PlanType::OptimizedPhysicalPlan {
+                        optimizer_name: "optd-join-order".to_string(),
+                    },
+                    if let Some(join_order) = join_order {
+                        join_order.to_string()
+                    } else {
+                        "None".to_string()
+                    },
+                ));
+                let bindings = optimizer
+                    .optd_cascades_optimizer()
+                    .get_all_group_bindings(group_id, true);
+                let mut join_orders = BTreeSet::new();
+                let mut logical_join_orders = BTreeSet::new();
+                for binding in bindings {
+                    if let Some(join_order) = get_join_order(binding) {
+                        logical_join_orders.insert(join_order.conv_into_logical_join_order());
+                        join_orders.insert(join_order);
+                    }
                 }
+                explains.push(StringifiedPlan::new(
+                    PlanType::OptimizedPhysicalPlan {
+                        optimizer_name: "optd-all-join-orders".to_string(),
+                    },
+                    join_orders.iter().map(|x| x.to_string()).join("\n"),
+                ));
+                explains.push(StringifiedPlan::new(
+                    PlanType::OptimizedPhysicalPlan {
+                        optimizer_name: "optd-all-logical-join-orders".to_string(),
+                    },
+                    logical_join_orders.iter().map(|x| x.to_string()).join("\n"),
+                ));
             }
-            explains.push(StringifiedPlan::new(
-                PlanType::OptimizedPhysicalPlan {
-                    optimizer_name: "optd-all-join-orders".to_string(),
-                },
-                join_orders.iter().map(|x| x.to_string()).join("\n"),
-            ));
-            explains.push(StringifiedPlan::new(
-                PlanType::OptimizedPhysicalPlan {
-                    optimizer_name: "optd-all-logical-join-orders".to_string(),
-                },
-                logical_join_orders.iter().map(|x| x.to_string()).join("\n"),
-            ));
         }
         // println!(
         //     "{} cost={}",

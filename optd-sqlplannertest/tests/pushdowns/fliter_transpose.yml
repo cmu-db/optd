@@ -12,5 +12,3 @@
   desc: Test whether we can transpose filter and projection
   tasks:
     - explain[logical_rules:filter_project_transpose_rule+project_filter_transpose_rule,disable_explore_limit]:logical_optd,physical_optd
-    # also enable ProjectFilterTransposeRule to test it when uncommenting the below line
-    # - explain[logical_rules:filter_project_transpose_rule+project_filter_transpose_rule]:logical_optd,physical_optd

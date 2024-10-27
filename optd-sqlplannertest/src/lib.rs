@@ -337,7 +337,7 @@ fn extract_flags(task: &str) -> Result<TestFlags> {
             } else if flag == "use_df_logical" {
                 options.enable_df_logical = true;
             } else if flag.starts_with("logical_rules") {
-                if let Some((_, flag)) = flag.split_once(":") {
+                if let Some((_, flag)) = flag.split_once(':') {
                     options.enable_logical_rules = flag.split('+').map(|x| x.to_string()).collect();
                 } else {
                     bail!("Failed to parse logical_rules flag: {}", flag);
