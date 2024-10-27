@@ -73,7 +73,7 @@ fn apply_eliminate_project(
             return Vec::new();
         }
     }
-    return vec![child];
+    vec![child]
 }
 
 #[cfg(test)]
