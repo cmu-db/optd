@@ -96,10 +96,10 @@ impl DatafusionDBMS {
                 .lock()
                 .unwrap();
             let optimizer = guard.as_mut().unwrap().optd_optimizer_mut();
-            if flags.disable_explore_limit {
-                optimizer.disable_explore_limit();
+            if flags.panic_on_budget {
+                optimizer.panic_on_explore_limit(true);
             } else {
-                optimizer.enable_explore_limit();
+                optimizer.panic_on_explore_limit(false);
             }
             let rules = optimizer.rules();
             if flags.enable_logical_rules.is_empty() {
@@ -316,7 +316,7 @@ struct TestFlags {
     verbose: bool,
     enable_df_logical: bool,
     enable_logical_rules: Vec<String>,
-    disable_explore_limit: bool,
+    panic_on_budget: bool,
 }
 
 /// Extract the flags from a task. The flags are specified in square brackets.
@@ -342,8 +342,8 @@ fn extract_flags(task: &str) -> Result<TestFlags> {
                 } else {
                     bail!("Failed to parse logical_rules flag: {}", flag);
                 }
-            } else if flag == "disable_explore_limit" {
-                options.disable_explore_limit = true;
+            } else if flag == "panic_on_budget" {
+                options.panic_on_budget = true;
             } else {
                 bail!("Unknown flag: {}", flag);
             }

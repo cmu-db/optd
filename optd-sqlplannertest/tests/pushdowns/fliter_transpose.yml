@@ -11,4 +11,18 @@
       WHERE t1.t1v1 = t2.t2v1;
   desc: Test whether we can transpose filter and projection
   tasks:
-    - explain[logical_rules:filter_project_transpose_rule+project_filter_transpose_rule]:logical_optd,physical_optd
+    - explain[logical_rules:filter_project_transpose_rule+project_filter_transpose_rule+project_merge_rule,panic_on_budget]:logical_optd,physical_optd
+- sql: |
+    SELECT t1.t1v1, t1.t1v2, t2.t2v3
+      FROM t1, t2
+      WHERE t1.t1v1 = t2.t2v3;
+  desc: Test whether we can transpose filter and projection
+  tasks:
+    - explain[logical_rules:filter_project_transpose_rule+project_filter_transpose_rule+project_merge_rule,panic_on_budget]:logical_optd,physical_optd
+- sql: |
+    SELECT * FROM (
+      SELECT t1.t1v1, t1.t1v2, t2.t2v3 FROM t1, t2
+    ) WHERE t1.t1v1 = t2.t2v3;
+  desc: Test whether we can transpose filter and projection
+  tasks:
+    - explain[logical_rules:filter_project_transpose_rule+project_filter_transpose_rule+project_merge_rule,panic_on_budget]:logical_optd,physical_optd

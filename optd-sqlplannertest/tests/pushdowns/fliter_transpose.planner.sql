@@ -15,7 +15,70 @@ SELECT t1.t1v1, t1.t1v2, t2.t2v3
   WHERE t1.t1v1 = t2.t2v1;
 
 /*
-Error
-Unknown logical rule: {"project_filter_transpose_rule"}
+LogicalProjection { exprs: [ #0, #1, #3 ] }
+└── LogicalFilter
+    ├── cond:Eq
+    │   ├── #0
+    │   └── #2
+    └── LogicalJoin { join_type: Cross, cond: true }
+        ├── LogicalScan { table: t1 }
+        └── LogicalScan { table: t2 }
+PhysicalProjection { exprs: [ #0, #1, #3 ] }
+└── PhysicalFilter
+    ├── cond:Eq
+    │   ├── #0
+    │   └── #2
+    └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+        ├── PhysicalScan { table: t1 }
+        └── PhysicalScan { table: t2 }
+*/
+
+-- Test whether we can transpose filter and projection
+SELECT t1.t1v1, t1.t1v2, t2.t2v3
+  FROM t1, t2
+  WHERE t1.t1v1 = t2.t2v3;
+
+/*
+LogicalProjection { exprs: [ #0, #1, #3 ] }
+└── LogicalFilter
+    ├── cond:Eq
+    │   ├── #0
+    │   └── #3
+    └── LogicalJoin { join_type: Cross, cond: true }
+        ├── LogicalScan { table: t1 }
+        └── LogicalScan { table: t2 }
+PhysicalFilter
+├── cond:Eq
+│   ├── #0
+│   └── #2
+└── PhysicalProjection { exprs: [ #0, #1, #3 ] }
+    └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+        ├── PhysicalScan { table: t1 }
+        └── PhysicalScan { table: t2 }
+*/
+
+-- Test whether we can transpose filter and projection
+SELECT * FROM (
+  SELECT t1.t1v1, t1.t1v2, t2.t2v3 FROM t1, t2
+) WHERE t1.t1v1 = t2.t2v3;
+
+/*
+LogicalProjection { exprs: [ #0, #1, #2 ] }
+└── LogicalFilter
+    ├── cond:Eq
+    │   ├── #0
+    │   └── #2
+    └── LogicalProjection { exprs: [ #0, #1, #3 ] }
+        └── LogicalJoin { join_type: Cross, cond: true }
+            ├── LogicalScan { table: t1 }
+            └── LogicalScan { table: t2 }
+PhysicalFilter
+├── cond:Eq
+│   ├── #0
+│   └── #2
+└── PhysicalProjection { exprs: [ #0, #1, #3 ] }
+    └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+        ├── PhysicalScan { table: t1 }
+        └── PhysicalScan { table: t2 }
 */
 

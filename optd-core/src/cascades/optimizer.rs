@@ -32,7 +32,7 @@ pub struct OptimizerContext {
 
 #[derive(Default, Clone, Debug)]
 pub struct OptimizerProperties {
-    pub partial_explore_temporarily_disabled: bool,
+    pub panic_on_budget: bool,
     /// If the number of rules applied exceeds this number, we stop applying logical rules.
     pub partial_explore_iter: Option<usize>,
     /// Plan space can be expanded by this number of times before we stop applying logical rules.
@@ -88,12 +88,8 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         Self::new_with_prop(rules, cost, property_builders, Default::default())
     }
 
-    pub fn disable_explore_limit(&mut self) {
-        self.prop.partial_explore_temporarily_disabled = true;
-    }
-
-    pub fn enable_explore_limit(&mut self) {
-        self.prop.partial_explore_temporarily_disabled = false;
+    pub fn panic_on_explore_limit(&mut self, enabled: bool) {
+        self.prop.panic_on_budget = enabled;
     }
 
     pub fn new_with_prop(
@@ -241,7 +237,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             let new_tasks = task.execute(self)?;
             self.tasks.extend(new_tasks);
             iter += 1;
-            if !self.ctx.budget_used && !self.prop.partial_explore_temporarily_disabled {
+            if !self.ctx.budget_used {
                 let plan_space = self.memo.compute_plan_space();
                 if let Some(partial_explore_space) = self.prop.partial_explore_space {
                     if plan_space - plan_space_begin > partial_explore_space {
@@ -250,6 +246,9 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
                             plan_space
                         );
                         self.ctx.budget_used = true;
+                        if self.prop.panic_on_budget {
+                            panic!("plan space size budget used");
+                        }
                     }
                 } else if let Some(partial_explore_iter) = self.prop.partial_explore_iter {
                     if iter >= partial_explore_iter {
@@ -258,6 +257,9 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
                             plan_space
                         );
                         self.ctx.budget_used = true;
+                        if self.prop.panic_on_budget {
+                            panic!("plan space size budget used");
+                        }
                     }
                 }
             }
