@@ -117,9 +117,6 @@ impl OptimizeInputsTask {
 }
 
 impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
 
     fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
         if self.continue_from.is_none() {

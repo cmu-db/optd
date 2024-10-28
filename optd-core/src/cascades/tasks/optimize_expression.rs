@@ -36,9 +36,6 @@ fn top_matches<T: RelNodeTyp>(
 }
 
 impl<T: RelNodeTyp> Task<T> for OptimizeExpressionTask {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
 
     fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
         let expr = optimizer.get_expr_memoed(self.expr_id);
