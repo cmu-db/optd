@@ -16,7 +16,6 @@ use datafusion::{
     physical_plan::{displayable, explain::ExplainExec, ExecutionPlan},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
-use itertools::Itertools;
 use optd_datafusion_repr::{
     plan_nodes::{
         ConstantType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalHashJoin,
@@ -26,7 +25,7 @@ use optd_datafusion_repr::{
     DatafusionOptimizer,
 };
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::HashMap,
     sync::{Arc, Mutex},
 };
 
@@ -97,6 +96,7 @@ enum JoinOrder {
     NestedLoopJoin(Box<Self>, Box<Self>),
 }
 
+#[allow(dead_code)]
 impl JoinOrder {
     pub fn conv_into_logical_join_order(&self) -> LogicalJoinOrder {
         match self {
@@ -113,12 +113,14 @@ impl JoinOrder {
     }
 }
 
+#[allow(unused)]
 #[derive(Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 enum LogicalJoinOrder {
     Table(String),
     Join(Box<Self>, Box<Self>),
 }
 
+#[allow(dead_code)]
 fn get_join_order(rel_node: OptRelNodeRef) -> Option<JoinOrder> {
     match rel_node.typ {
         OptRelNodeTyp::PhysicalHashJoin(_) => {
@@ -245,7 +247,7 @@ impl OptdQueryPlanner {
             }
         }
 
-        let (group_id, optimized_rel, meta) = optimizer.cascades_optimize(optd_rel)?;
+        let (_, optimized_rel, meta) = optimizer.cascades_optimize(optd_rel)?;
 
         if let Some(explains) = &mut explains {
             explains.push(StringifiedPlan::new(
@@ -257,44 +259,44 @@ impl OptdQueryPlanner {
                     .explain_to_string(if verbose { Some(&meta) } else { None }),
             ));
 
-            const ENABLE_JOIN_ORDER: bool = false;
+            // const ENABLE_JOIN_ORDER: bool = false;
 
-            if ENABLE_JOIN_ORDER {
-                let join_order = get_join_order(optimized_rel.clone());
-                explains.push(StringifiedPlan::new(
-                    PlanType::OptimizedPhysicalPlan {
-                        optimizer_name: "optd-join-order".to_string(),
-                    },
-                    if let Some(join_order) = join_order {
-                        join_order.to_string()
-                    } else {
-                        "None".to_string()
-                    },
-                ));
-                let bindings = optimizer
-                    .optd_cascades_optimizer()
-                    .get_all_group_bindings(group_id, true);
-                let mut join_orders = BTreeSet::new();
-                let mut logical_join_orders = BTreeSet::new();
-                for binding in bindings {
-                    if let Some(join_order) = get_join_order(binding) {
-                        logical_join_orders.insert(join_order.conv_into_logical_join_order());
-                        join_orders.insert(join_order);
-                    }
-                }
-                explains.push(StringifiedPlan::new(
-                    PlanType::OptimizedPhysicalPlan {
-                        optimizer_name: "optd-all-join-orders".to_string(),
-                    },
-                    join_orders.iter().map(|x| x.to_string()).join("\n"),
-                ));
-                explains.push(StringifiedPlan::new(
-                    PlanType::OptimizedPhysicalPlan {
-                        optimizer_name: "optd-all-logical-join-orders".to_string(),
-                    },
-                    logical_join_orders.iter().map(|x| x.to_string()).join("\n"),
-                ));
-            }
+            // if ENABLE_JOIN_ORDER {
+            //     let join_order = get_join_order(optimized_rel.clone());
+            //     explains.push(StringifiedPlan::new(
+            //         PlanType::OptimizedPhysicalPlan {
+            //             optimizer_name: "optd-join-order".to_string(),
+            //         },
+            //         if let Some(join_order) = join_order {
+            //             join_order.to_string()
+            //         } else {
+            //             "None".to_string()
+            //         },
+            //     ));
+            //     let bindings = optimizer
+            //         .optd_cascades_optimizer()
+            //         .get_all_group_bindings(group_id, true);
+            //     let mut join_orders = BTreeSet::new();
+            //     let mut logical_join_orders = BTreeSet::new();
+            //     for binding in bindings {
+            //         if let Some(join_order) = get_join_order(binding) {
+            //             logical_join_orders.insert(join_order.conv_into_logical_join_order());
+            //             join_orders.insert(join_order);
+            //         }
+            //     }
+            //     explains.push(StringifiedPlan::new(
+            //         PlanType::OptimizedPhysicalPlan {
+            //             optimizer_name: "optd-all-join-orders".to_string(),
+            //         },
+            //         join_orders.iter().map(|x| x.to_string()).join("\n"),
+            //     ));
+            //     explains.push(StringifiedPlan::new(
+            //         PlanType::OptimizedPhysicalPlan {
+            //             optimizer_name: "optd-all-logical-join-orders".to_string(),
+            //         },
+            //         logical_join_orders.iter().map(|x| x.to_string()).join("\n"),
+            //     ));
+            // }
         }
         // println!(
         //     "{} cost={}",

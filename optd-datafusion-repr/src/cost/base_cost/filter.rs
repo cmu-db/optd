@@ -51,11 +51,10 @@ impl<
                 optimizer.get_property_by_group::<ColumnRefPropertyBuilder>(context.group_id, 1);
             let column_refs = column_refs.base_table_column_refs();
             let expr_group_id = context.children_group_ids[1];
-            let expr_trees = optimizer.get_all_group_bindings(expr_group_id, false);
-            // there may be more than one expression tree in a group (you can see this trivially as you can just swap the order of two subtrees for commutative operators)
-            // however, we just take an arbitrary expression tree from the group to compute selectivity
-            let expr_tree = expr_trees.first().expect("expression missing");
-            self.get_filter_selectivity(expr_tree.clone(), &schema, column_refs)
+            let expr_tree = optimizer
+                .get_predicate_binding(expr_group_id)
+                .expect("no expression??");
+            self.get_filter_selectivity(expr_tree, &schema, column_refs)
         } else {
             DEFAULT_UNK_SEL
         };

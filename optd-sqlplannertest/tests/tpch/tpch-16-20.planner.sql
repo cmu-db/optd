@@ -174,27 +174,27 @@ PhysicalProjection
     ├── aggrs:Agg(Sum)
     │   └── [ #0 ]
     ├── groups: []
-    └── PhysicalProjection { exprs: [ #14 ] }
+    └── PhysicalProjection { exprs: [ #5 ] }
         └── PhysicalNestedLoopJoin
             ├── join_type: Inner
             ├── cond:And
             │   ├── Eq
-            │   │   ├── #0
-            │   │   └── #0
+            │   │   ├── #16
+            │   │   └── #16
             │   └── Lt
-            │       ├── Cast { cast_to: Decimal128(30, 15), expr: #13 }
+            │       ├── Cast { cast_to: Decimal128(30, 15), expr: #4 }
             │       └── #25
-            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
-            │   ├── PhysicalFilter
-            │   │   ├── cond:And
-            │   │   │   ├── Eq
-            │   │   │   │   ├── #3
-            │   │   │   │   └── "Brand#13"
-            │   │   │   └── Eq
-            │   │   │       ├── #6
-            │   │   │       └── "JUMBO PKG"
-            │   │   └── PhysicalScan { table: part }
-            │   └── PhysicalScan { table: lineitem }
+            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
+            │   ├── PhysicalScan { table: lineitem }
+            │   └── PhysicalFilter
+            │       ├── cond:And
+            │       │   ├── Eq
+            │       │   │   ├── #3
+            │       │   │   └── "Brand#13"
+            │       │   └── Eq
+            │       │       ├── #6
+            │       │       └── "JUMBO PKG"
+            │       └── PhysicalScan { table: part }
             └── PhysicalProjection
                 ├── exprs:
                 │   ┌── Cast
