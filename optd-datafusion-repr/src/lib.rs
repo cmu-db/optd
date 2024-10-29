@@ -99,8 +99,7 @@ impl DatafusionOptimizer {
             Arc::new(DepJoinPastAgg::new()),
             Arc::new(ProjectMergeRule::new()),
             Arc::new(FilterMergeRule::new()),
-            // disabled due to logical properties are not implemented in heuristics
-            // Arc::new(EliminateProjectRule::new()),
+            Arc::new(EliminateProjectRule::new()),
         ]
     }
 
