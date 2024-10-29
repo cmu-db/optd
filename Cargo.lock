@@ -2899,6 +2899,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "optd-datafusion-repr-adv-cost"
+version = "0.1.0"
+dependencies = [
+ "optd-core",
+ "optd-datafusion-repr",
+]
+
+[[package]]
 name = "optd-gungnir"
 version = "0.1.0"
 dependencies = [
