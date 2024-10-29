@@ -43,7 +43,7 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
         data: &Option<Value>,
         children: &[Cost],
         context: Option<RelNodeContext>,
-        optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
+        _optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Cost {
         if let OptRelNodeTyp::PhysicalScan = node {
             let guard = self.runtime_row_cnt.lock().unwrap();

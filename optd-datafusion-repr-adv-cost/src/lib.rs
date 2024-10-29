@@ -2,10 +2,7 @@ use std::sync::Arc;
 
 use adaptive_cost::{AdaptiveCostModel, RuntimeAdaptionStorage, DEFAULT_DECAY};
 use adv_cost::stats::DataFusionBaseTableStats;
-use optd_core::{
-    cost,
-    heuristics::{ApplyOrder, HeuristicsOptimizer},
-};
+
 use optd_datafusion_repr::{properties::schema::Catalog, DatafusionOptimizer};
 
 pub mod adaptive_cost;

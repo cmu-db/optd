@@ -95,7 +95,7 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
         data: &Option<Value>,
         children: &[Cost],
         _context: Option<RelNodeContext>,
-        optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
+        _optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Cost {
         match node {
             OptRelNodeTyp::PhysicalScan => {

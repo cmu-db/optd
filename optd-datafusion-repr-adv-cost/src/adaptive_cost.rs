@@ -1,17 +1,16 @@
 use std::{
-    collections::HashMap,
     sync::{Arc, Mutex},
 };
 
 use crate::adv_cost::OptCostModel;
 use optd_core::{
-    cascades::{CascadesOptimizer, GroupId, RelNodeContext},
+    cascades::{CascadesOptimizer, RelNodeContext},
     cost::{Cost, CostModel},
     rel_node::{RelNode, Value},
 };
 use optd_datafusion_repr::{
     cost::adaptive_cost::RuntimeAdaptionStorageInner,
-    plan_nodes::{OptRelNodeTyp, PlanNode},
+    plan_nodes::{OptRelNodeTyp},
 };
 use serde::{de::DeserializeOwned, Serialize};
 
