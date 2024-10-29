@@ -58,6 +58,7 @@ tokio = { version = "1.24", features = [
 ] }
 url = "2.2"
 optd-datafusion-bridge = { path = "../optd-datafusion-bridge" }
+optd-datafusion-repr-adv-cost = { path = "../optd-datafusion-repr-adv-cost" }
 optd-datafusion-repr = { path = "../optd-datafusion-repr" }
 tracing-subscriber = "0.3"
 tracing = "0.1"
