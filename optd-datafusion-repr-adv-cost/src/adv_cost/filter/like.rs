@@ -1,14 +1,11 @@
 use datafusion::arrow::{array::StringArray, compute::like};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{
-    cost::{
-        base_cost::{
-            stats::{ColumnCombValue, Distribution, MostCommonValues},
-            UNIMPLEMENTED_SEL,
-        },
-        OptCostModel,
-    },
+use crate::adv_cost::{
+    stats::{ColumnCombValue, Distribution, MostCommonValues},
+    OptCostModel, UNIMPLEMENTED_SEL,
+};
+use optd_datafusion_repr::{
     plan_nodes::{ColumnRefExpr, ConstantExpr, LikeExpr, OptRelNode, OptRelNodeTyp},
     properties::column_ref::{BaseTableColumnRef, BaseTableColumnRefs, ColumnRef},
 };
@@ -116,16 +113,14 @@ impl<
 mod tests {
     use optd_core::rel_node::Value;
 
-    use crate::{
-        cost::base_cost::{
-            filter::like::{FIXED_CHAR_SEL_FACTOR, FULL_WILDCARD_SEL_FACTOR},
-            tests::{
-                create_one_column_cost_model, like, TestDistribution, TestMostCommonValues,
-                TestPerColumnStats, TABLE1_NAME,
-            },
+    use crate::adv_cost::{
+        filter::like::{FIXED_CHAR_SEL_FACTOR, FULL_WILDCARD_SEL_FACTOR},
+        tests::{
+            create_one_column_cost_model, like, TestDistribution, TestMostCommonValues,
+            TestPerColumnStats, TABLE1_NAME,
         },
-        properties::column_ref::ColumnRef,
     };
+    use optd_datafusion_repr::properties::column_ref::ColumnRef;
 
     #[test]
     fn test_like_no_nulls() {

@@ -2,7 +2,7 @@ mod agg;
 mod filter;
 mod join;
 mod limit;
-pub(crate) mod stats;
+pub mod stats;
 
 use itertools::Itertools;
 use optd_core::{
@@ -16,7 +16,7 @@ use optd_datafusion_repr::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 
-use super::base_cost::stats::{
+use super::adv_cost::stats::{
     BaseTableStats, ColumnCombValueStats, Distribution, MostCommonValues,
 };
 
@@ -236,19 +236,14 @@ mod tests {
     use arrow_schema::DataType;
     use itertools::Itertools;
     use optd_core::rel_node::Value;
+    use optd_datafusion_repr::plan_nodes::{
+        BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList, InListExpr,
+        LikeExpr, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
+    };
     use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
 
-    use crate::{
-        cost::base_cost::stats::*,
-        plan_nodes::{
-            BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList,
-            InListExpr, LikeExpr, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr,
-            UnOpType,
-        },
-    };
-
-    use super::*;
+    use super::{stats::*, *};
     pub type TestPerColumnStats = ColumnCombValueStats<TestMostCommonValues, TestDistribution>;
     pub type TestOptCostModel = OptCostModel<TestMostCommonValues, TestDistribution>;
 

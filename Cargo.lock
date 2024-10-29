@@ -2886,10 +2886,8 @@ dependencies = [
  "num-derive",
  "num-traits",
  "optd-core",
- "optd-gungnir",
  "ordered-float 4.2.0",
  "pretty-xmlish",
- "rayon",
  "serde",
  "serde_with",
  "test-case",
@@ -2902,8 +2900,21 @@ dependencies = [
 name = "optd-datafusion-repr-adv-cost"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "arrow-schema",
+ "assert_approx_eq",
+ "datafusion",
+ "itertools 0.11.0",
  "optd-core",
  "optd-datafusion-repr",
+ "optd-gungnir",
+ "ordered-float 4.2.0",
+ "rayon",
+ "serde",
+ "serde_with",
+ "test-case",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2941,6 +2952,7 @@ dependencies = [
  "log",
  "optd-datafusion-bridge",
  "optd-datafusion-repr",
+ "optd-datafusion-repr-adv-cost",
  "optd-gungnir",
  "parquet",
  "prettytable-rs",

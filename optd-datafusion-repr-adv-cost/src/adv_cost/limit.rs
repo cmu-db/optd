@@ -4,10 +4,8 @@ use optd_core::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{
-    cost::base_cost::stats::{Distribution, MostCommonValues},
-    plan_nodes::{ConstantExpr, ConstantType, OptRelNode, OptRelNodeTyp},
-};
+use crate::adv_cost::stats::{Distribution, MostCommonValues};
+use optd_datafusion_repr::plan_nodes::{ConstantExpr, ConstantType, OptRelNode, OptRelNodeTyp};
 
 use super::{OptCostModel, DEFAULT_UNK_SEL};
 

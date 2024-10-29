@@ -6,6 +6,7 @@ use anyhow::Result;
 use cost::{AdaptiveCostModel, RuntimeAdaptionStorage};
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId, OptimizerProperties},
+    cost::CostModel,
     heuristics::{ApplyOrder, HeuristicsOptimizer},
     optimizer::Optimizer,
     property::PropertyBuilderAny,
@@ -146,15 +147,25 @@ impl DatafusionOptimizer {
 
     /// Create an optimizer with partial explore (otherwise it's too slow).
     pub fn new_physical(catalog: Arc<dyn Catalog>, enable_adaptive: bool) -> Self {
+        let cost_model = AdaptiveCostModel::new(50);
+        let map = cost_model.get_runtime_map();
+        Self::new_physical_with_cost_model(catalog, enable_adaptive, cost_model, map)
+    }
+
+    pub fn new_physical_with_cost_model(
+        catalog: Arc<dyn Catalog>,
+        enable_adaptive: bool,
+        cost_model: impl CostModel<OptRelNodeTyp>,
+        runtime_map: RuntimeAdaptionStorage,
+    ) -> Self {
         let cascades_rules = Self::default_cascades_rules();
         let heuristic_rules = Self::default_heuristic_rules();
         let property_builders: Arc<[Box<dyn PropertyBuilderAny<OptRelNodeTyp>>]> = Arc::new([
             Box::new(SchemaPropertyBuilder::new(catalog.clone())),
             Box::new(ColumnRefPropertyBuilder::new(catalog.clone())),
         ]);
-        let cost_model = AdaptiveCostModel::new(50);
         Self {
-            runtime_statistics: cost_model.get_runtime_map(),
+            runtime_statistics: runtime_map,
             cascades_optimizer: CascadesOptimizer::new_with_prop(
                 cascades_rules,
                 Box::new(cost_model),

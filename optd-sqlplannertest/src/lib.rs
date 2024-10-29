@@ -10,7 +10,6 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
-use optd_datafusion_repr::cost::BaseTableStats;
 use optd_datafusion_repr::DatafusionOptimizer;
 use regex::Regex;
 use std::collections::HashSet;
@@ -69,7 +68,6 @@ impl DatafusionDBMS {
             };
             let optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical(
                 Arc::new(DatafusionCatalog::new(state.catalog_list())),
-                BaseTableStats::default(),
                 false,
             );
             if !use_df_logical {

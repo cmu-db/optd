@@ -54,7 +54,6 @@ pub struct SemanticCorrelation {
 }
 
 impl SemanticCorrelation {
-    #[cfg(test)]
     pub fn new(eq_columns: EqBaseTableColumnSets) -> Self {
         Self {
             eq_columns: EqColumns::EqBaseTableColumnSets(eq_columns),

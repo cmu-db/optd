@@ -3,15 +3,19 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::{cost::OptCostModel, plan_nodes::OptRelNodeTyp};
+use crate::adv_cost::OptCostModel;
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId, RelNodeContext},
     cost::{Cost, CostModel},
-    node::{PlanNode, Value},
+    rel_node::{RelNode, Value},
+};
+use optd_datafusion_repr::{
+    cost::adaptive_cost::RuntimeAdaptionStorageInner,
+    plan_nodes::{OptRelNodeTyp, PlanNode},
 };
 use serde::{de::DeserializeOwned, Serialize};
 
-use super::base_cost::stats::{
+use super::adv_cost::stats::{
     BaseTableStats, DataFusionDistribution, DataFusionMostCommonValues, Distribution,
     MostCommonValues,
 };
@@ -19,12 +23,6 @@ use super::base_cost::stats::{
 pub type RuntimeAdaptionStorage = Arc<Mutex<RuntimeAdaptionStorageInner>>;
 pub type DataFusionAdaptiveCostModel =
     AdaptiveCostModel<DataFusionMostCommonValues, DataFusionDistribution>;
-
-#[derive(Default, Debug)]
-pub struct RuntimeAdaptionStorageInner {
-    pub history: HashMap<GroupId, (usize, usize)>,
-    pub iter_cnt: usize,
-}
 
 pub const DEFAULT_DECAY: usize = 50;
 
@@ -90,7 +88,7 @@ impl<
         OptCostModel::<M, D>::cost(row_cnt, compute_cost, io_cost)
     }
 
-    fn compute_plan_node_cost(&self, node: &PlanNode<OptRelNodeTyp>) -> Cost {
+    fn compute_plan_node_cost(&self, node: &RelNode<OptRelNodeTyp>) -> Cost {
         self.base_model.compute_plan_node_cost(node)
     }
 }
