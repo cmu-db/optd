@@ -362,7 +362,9 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 GroupColumnRefs::new(column_refs, child.output_correlation.clone())
             }
             // Should account for all physical join types.
-            OptRelNodeTyp::Join(join_type) | OptRelNodeTyp::RawDepJoin(join_type)  | OptRelNodeTyp::DepJoin(join_type)=> {
+            OptRelNodeTyp::Join(join_type)
+            | OptRelNodeTyp::RawDepJoin(join_type)
+            | OptRelNodeTyp::DepJoin(join_type) => {
                 // Concatenate left and right children column refs.
                 let column_refs = Self::concat_children_col_refs(&children[0..2]);
                 // Merge the equal columns of two children as input correlation.
@@ -465,12 +467,14 @@ impl PropertyBuilder<OptRelNodeTyp> for ColumnRefPropertyBuilder {
                 GroupColumnRefs::new(column_refs, correlation)
             }
             OptRelNodeTyp::Constant(_)
-            | OptRelNodeTyp::ExternColumnRef // TODO Possibly very very wrong---consult cost model team
             | OptRelNodeTyp::Func(_)
             | OptRelNodeTyp::DataType(_)
             | OptRelNodeTyp::Between
             | OptRelNodeTyp::Like
-            | OptRelNodeTyp::InList => GroupColumnRefs::new(vec![ColumnRef::Derived], None),
+            | OptRelNodeTyp::InList
+            | OptRelNodeTyp::ExternColumnRef => {
+                GroupColumnRefs::new(vec![ColumnRef::Derived], None)
+            }
             _ => unimplemented!("Unsupported rel node type {:?}", typ),
         }
     }
