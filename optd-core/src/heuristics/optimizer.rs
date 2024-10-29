@@ -131,10 +131,9 @@ impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
     fn apply_rules(&mut self, mut root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
         for rule in self.rules.clone().as_ref() {
             // Properties only matter for applying rules, therefore applying it before each rule invoke.
-            self.infer_properties(root_rel.clone());
-
             let matcher = rule.matcher();
             if let Some(picks) = match_and_pick(matcher, root_rel.clone()) {
+                self.infer_properties(root_rel.clone());
                 let mut results = rule.apply(self, picks);
                 assert!(results.len() <= 1);
                 if !results.is_empty() {
