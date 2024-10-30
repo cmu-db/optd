@@ -451,6 +451,10 @@ impl<
         predicate: &EqPredicate,
         past_eq_columns: &mut EqBaseTableColumnSets,
     ) -> f64 {
+        if predicate.left == predicate.right {
+            // self-join, TODO: is this correct?
+            return 1.0;
+        }
         // To find the adjustment, we need to know the selectivity of the graph before `predicate` is added.
         //
         // There are two cases: (1) adding `predicate` does not change the # of connected components, and
