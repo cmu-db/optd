@@ -32,7 +32,7 @@ pub struct OptimizerContext {
 
 #[derive(Default, Clone, Debug)]
 pub struct OptimizerProperties {
-    pub partial_explore_temporarily_disabled: bool,
+    pub panic_on_budget: bool,
     /// If the number of rules applied exceeds this number, we stop applying logical rules.
     pub partial_explore_iter: Option<usize>,
     /// Plan space can be expanded by this number of times before we stop applying logical rules.
@@ -88,12 +88,8 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         Self::new_with_prop(rules, cost, property_builders, Default::default())
     }
 
-    pub fn disable_explore_limit(&mut self) {
-        self.prop.partial_explore_temporarily_disabled = true;
-    }
-
-    pub fn enable_explore_limit(&mut self) {
-        self.prop.partial_explore_temporarily_disabled = false;
+    pub fn panic_on_explore_limit(&mut self, enabled: bool) {
+        self.prop.panic_on_budget = enabled;
     }
 
     pub fn new_with_prop(
@@ -190,12 +186,13 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             for expr_id in self.memo.get_all_exprs_in_group(group_id) {
                 let memo_node = self.memo.get_expr_memoed(expr_id);
                 println!("  expr_id={} | {}", expr_id, memo_node);
-                let bindings = self
-                    .memo
-                    .get_all_expr_bindings(expr_id, false, true, Some(1));
-                for binding in bindings {
-                    println!("    {}", binding);
-                }
+                // We removed get all bindings functionality
+                // let bindings = self
+                //     .memo
+                //     .get_all_expr_bindings(expr_id, false, true, Some(1));
+                // for binding in bindings {
+                //     println!("    {}", binding);
+                // }
             }
         }
     }
@@ -214,7 +211,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
 
     /// Optimize a `RelNode`.
     pub fn step_optimize_rel(&mut self, root_rel: RelNodeRef<T>) -> Result<GroupId> {
-        let (group_id, _) = self.add_group_expr(root_rel, None);
+        let (group_id, _) = self.add_new_expr(root_rel);
         self.fire_optimize_tasks(group_id)?;
         Ok(group_id)
     }
@@ -240,7 +237,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             let new_tasks = task.execute(self)?;
             self.tasks.extend(new_tasks);
             iter += 1;
-            if !self.ctx.budget_used && !self.prop.partial_explore_temporarily_disabled {
+            if !self.ctx.budget_used {
                 let plan_space = self.memo.compute_plan_space();
                 if let Some(partial_explore_space) = self.prop.partial_explore_space {
                     if plan_space - plan_space_begin > partial_explore_space {
@@ -249,6 +246,9 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
                             plan_space
                         );
                         self.ctx.budget_used = true;
+                        if self.prop.panic_on_budget {
+                            panic!("plan space size budget used");
+                        }
                     }
                 } else if let Some(partial_explore_iter) = self.prop.partial_explore_iter {
                     if iter >= partial_explore_iter {
@@ -257,15 +257,21 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
                             plan_space
                         );
                         self.ctx.budget_used = true;
+                        if self.prop.panic_on_budget {
+                            panic!("plan space size budget used");
+                        }
                     }
                 }
             }
         }
+        // if self.ctx.budget_used {
+        //     self.dump(None);
+        // }
         Ok(())
     }
 
     fn optimize_inner(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
-        let (group_id, _) = self.add_group_expr(root_rel, None);
+        let (group_id, _) = self.add_new_expr(root_rel);
         self.fire_optimize_tasks(group_id)?;
         self.memo.get_best_group_binding(group_id, &mut None)
     }
@@ -286,37 +292,16 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.memo.get_expr_info(expr)
     }
 
-    pub(super) fn add_group_expr(
-        &mut self,
-        expr: RelNodeRef<T>,
-        group_id: Option<GroupId>,
-    ) -> (GroupId, ExprId) {
-        self.memo.add_new_group_expr(expr, group_id)
+    pub fn add_new_expr(&mut self, rel_node: RelNodeRef<T>) -> (GroupId, ExprId) {
+        self.memo.add_new_expr(rel_node)
     }
 
-    #[allow(dead_code)]
-    pub(super) fn replace_group_expr(
+    pub fn add_expr_to_group(
         &mut self,
-        expr: RelNodeRef<T>,
+        rel_node: RelNodeRef<T>,
         group_id: GroupId,
-        expr_id: ExprId,
-    ) {
-        let replaced = self.memo.replace_group_expr(expr_id, group_id, expr);
-        if replaced {
-            // the old expr is replaced, so we clear the fired rules for old expr
-            self.fired_rules.entry(expr_id).or_default().clear();
-            return;
-        }
-
-        // We can mark the expr as a deadend
-        // However, even some of the exprs cannot be the winner for the group
-        // We still need the physical form of those expr to start the optimizeInput task
-        // So we don't mark the impl rules as fired
-        for i in 0..self.rules.len() {
-            if !self.rules[i].rule().is_impl_rule() {
-                self.fired_rules.entry(expr_id).or_default().insert(i);
-            }
-        }
+    ) -> Option<ExprId> {
+        self.memo.add_expr_to_group(rel_node, group_id)
     }
 
     pub(super) fn get_group_info(&self, group_id: GroupId) -> GroupInfo {
@@ -325,10 +310,6 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
 
     pub(super) fn update_group_info(&mut self, group_id: GroupId, group_info: GroupInfo) {
         self.memo.update_group_info(group_id, group_info)
-    }
-
-    pub(super) fn merge_group(&mut self, group_a: GroupId, group_b: GroupId) {
-        self.memo.merge_group(group_a, group_b);
     }
 
     /// Get the properties of a Cascades group
@@ -354,22 +335,8 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.memo.get_expr_memoed(expr_id)
     }
 
-    pub(super) fn get_all_expr_bindings(
-        &self,
-        expr_id: ExprId,
-        level: Option<usize>,
-    ) -> Vec<RelNodeRef<T>> {
-        self.memo
-            .get_all_expr_bindings(expr_id, false, false, level)
-    }
-
-    pub fn get_all_group_bindings(
-        &self,
-        group_id: GroupId,
-        physical_only: bool,
-    ) -> Vec<RelNodeRef<T>> {
-        self.memo
-            .get_all_group_bindings(group_id, physical_only, true, Some(10))
+    pub fn get_predicate_binding(&self, group_id: GroupId) -> Option<RelNodeRef<T>> {
+        self.memo.get_predicate_binding(group_id)
     }
 
     pub(super) fn is_group_explored(&self, group_id: GroupId) -> bool {

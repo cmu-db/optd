@@ -1,6 +1,5 @@
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
-    fmt::Display,
     sync::Arc,
 };
 
@@ -58,29 +57,24 @@ pub(crate) struct Group {
     pub(crate) properties: Arc<[Box<dyn Any + Send + Sync + 'static>]>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
-struct ReducedGroupId(usize);
-
-impl ReducedGroupId {
-    pub fn as_group_id(self) -> GroupId {
-        GroupId(self.0)
-    }
-}
-
-impl Display for ReducedGroupId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
 pub struct Memo<T: RelNodeTyp> {
-    expr_id_to_group_id: HashMap<ExprId, GroupId>,
+    // Source of truth.
+    groups: HashMap<GroupId, Group>,
     expr_id_to_expr_node: HashMap<ExprId, RelMemoNodeRef<T>>,
-    expr_node_to_expr_id: HashMap<RelMemoNode<T>, ExprId>,
-    groups: HashMap<ReducedGroupId, Group>,
+
+    // Internal states.
     group_expr_counter: usize,
-    merged_groups: HashMap<GroupId, GroupId>,
     property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
+
+    // Indexes.
+    expr_node_to_expr_id: HashMap<RelMemoNode<T>, ExprId>,
+    expr_id_to_group_id: HashMap<ExprId, GroupId>,
+
+    // We update all group IDs in the memo table upon group merging, but
+    // there might be edge cases that some tasks still hold the old group ID.
+    // In this case, we need this mapping to redirect to the merged group ID.
+    merged_group_mapping: HashMap<GroupId, GroupId>,
+    dup_expr_mapping: HashMap<ExprId, ExprId>,
 }
 
 impl<T: RelNodeTyp> Memo<T> {
@@ -91,16 +85,17 @@ impl<T: RelNodeTyp> Memo<T> {
             expr_node_to_expr_id: HashMap::new(),
             groups: HashMap::new(),
             group_expr_counter: 0,
-            merged_groups: HashMap::new(),
+            merged_group_mapping: HashMap::new(),
             property_builders,
+            dup_expr_mapping: HashMap::new(),
         }
     }
 
     /// Get the next group id. Group id and expr id shares the same counter, so as to make it easier to debug...
-    fn next_group_id(&mut self) -> ReducedGroupId {
+    fn next_group_id(&mut self) -> GroupId {
         let id = self.group_expr_counter;
         self.group_expr_counter += 1;
-        ReducedGroupId(id)
+        GroupId(id)
     }
 
     /// Get the next expr id. Group id and expr id shares the same counter, so as to make it easier to debug...
@@ -110,68 +105,215 @@ impl<T: RelNodeTyp> Memo<T> {
         ExprId(id)
     }
 
-    fn merge_group_inner(
+    fn verify_integrity(&self) {
+        if cfg!(debug_assertions) {
+            let num_of_exprs = self.expr_id_to_expr_node.len();
+            assert_eq!(num_of_exprs, self.expr_node_to_expr_id.len());
+            assert_eq!(num_of_exprs, self.expr_id_to_group_id.len());
+
+            let mut valid_groups = HashSet::new();
+            for to in self.merged_group_mapping.values() {
+                assert_eq!(self.merged_group_mapping[to], *to);
+                valid_groups.insert(*to);
+            }
+            assert_eq!(valid_groups.len(), self.groups.len());
+
+            for (id, node) in self.expr_id_to_expr_node.iter() {
+                assert_eq!(self.expr_node_to_expr_id[node], *id);
+                for child in &node.children {
+                    assert!(
+                        valid_groups.contains(child),
+                        "invalid group used in expression {}, where {} does not exist any more",
+                        node,
+                        child
+                    );
+                }
+            }
+
+            let mut cnt = 0;
+            for (group_id, group) in &self.groups {
+                assert!(valid_groups.contains(group_id));
+                cnt += group.group_exprs.len();
+                assert!(!group.group_exprs.is_empty());
+                for expr in &group.group_exprs {
+                    assert_eq!(self.expr_id_to_group_id[expr], *group_id);
+                }
+            }
+            assert_eq!(cnt, num_of_exprs);
+        }
+    }
+
+    #[allow(dead_code)]
+    fn merge_group(&mut self, group_a: GroupId, group_b: GroupId) -> GroupId {
+        use std::cmp::Ordering;
+        let group_a = self.reduce_group(group_a);
+        let group_b = self.reduce_group(group_b);
+        let (merge_into, merge_from) = match group_a.0.cmp(&group_b.0) {
+            Ordering::Less => (group_a, group_b),
+            Ordering::Equal => return group_a,
+            Ordering::Greater => (group_b, group_a),
+        };
+        self.merge_group_inner(merge_into, merge_from);
+        self.verify_integrity();
+        merge_into
+    }
+
+    /// Add an expression into the memo, returns the group id and the expr id.
+    pub fn add_new_expr(&mut self, rel_node: RelNodeRef<T>) -> (GroupId, ExprId) {
+        let (group_id, expr_id) = self
+            .add_new_group_expr_inner(rel_node, None)
+            .expect("should not trigger merge group");
+        self.verify_integrity();
+        (group_id, expr_id)
+    }
+
+    /// Add an expression into the memo, returns the expr id if rel_node is NOT a group.
+    pub fn add_expr_to_group(
         &mut self,
-        group_a: ReducedGroupId,
-        group_b: ReducedGroupId,
-    ) -> ReducedGroupId {
-        if group_a == group_b {
-            return group_a;
+        rel_node: RelNodeRef<T>,
+        group_id: GroupId,
+    ) -> Option<ExprId> {
+        if let Some(input_group) = rel_node.typ.extract_group() {
+            let input_group = self.reduce_group(input_group);
+            let group_id = self.reduce_group(group_id);
+            self.merge_group_inner(input_group, group_id);
+            return None;
+        }
+        let reduced_group_id = self.reduce_group(group_id);
+        let (returned_group_id, expr_id) = self
+            .add_new_group_expr_inner(rel_node, Some(reduced_group_id))
+            .unwrap();
+        assert_eq!(returned_group_id, reduced_group_id);
+        self.verify_integrity();
+        Some(expr_id)
+    }
+
+    fn reduce_group(&self, group_id: GroupId) -> GroupId {
+        self.merged_group_mapping[&group_id]
+    }
+
+    fn merge_group_inner(&mut self, merge_into: GroupId, merge_from: GroupId) {
+        if merge_into == merge_from {
+            return;
+        }
+        trace!(event = "merge_group", merge_into = %merge_into, merge_from = %merge_from);
+        let group_merge_from = self.groups.remove(&merge_from).unwrap();
+        let group_merge_into = self.groups.get_mut(&merge_into).unwrap();
+        // TODO: update winner, cost and properties
+        for from_expr in group_merge_from.group_exprs {
+            let ret = self.expr_id_to_group_id.insert(from_expr, merge_into);
+            assert!(ret.is_some());
+            group_merge_into.group_exprs.insert(from_expr);
+        }
+        self.merged_group_mapping.insert(merge_from, merge_into);
+
+        // Update all indexes and other data structures
+        // 1. update merged group mapping -- could be optimized with union find
+        for (_, mapped_to) in self.merged_group_mapping.iter_mut() {
+            if *mapped_to == merge_from {
+                *mapped_to = merge_into;
+            }
         }
 
-        // Copy all expressions from group a to group b
-        let group_a_exprs = self.get_all_exprs_in_group(group_a.as_group_id());
-        for expr_id in group_a_exprs {
-            let expr_node = self.expr_id_to_expr_node.get(&expr_id).unwrap();
-            self.add_expr_to_group(expr_id, group_b, expr_node.as_ref().clone());
+        let mut pending_recursive_merge = Vec::new();
+        // 2. update all group expressions and indexes
+        for (group_id, group) in self.groups.iter_mut() {
+            let mut new_expr_list = HashSet::new();
+            for expr_id in group.group_exprs.iter() {
+                let expr = self.expr_id_to_expr_node[expr_id].clone();
+                if expr.children.contains(&merge_from) {
+                    // Create the new expr node
+                    let old_expr = expr.as_ref().clone();
+                    let mut new_expr = expr.as_ref().clone();
+                    new_expr.children.iter_mut().for_each(|x| {
+                        if *x == merge_from {
+                            *x = merge_into;
+                        }
+                    });
+                    // Update all existing entries and indexes
+                    self.expr_id_to_expr_node
+                        .insert(*expr_id, Arc::new(new_expr.clone()));
+                    self.expr_node_to_expr_id.remove(&old_expr);
+                    if let Some(dup_expr) = self.expr_node_to_expr_id.get(&new_expr) {
+                        // If new_expr == some_other_old_expr in the memo table, unless they belong to the same group,
+                        // we should merge the two groups. This should not happen. We should simply drop this expression.
+                        let dup_group_id = self.expr_id_to_group_id[dup_expr];
+                        if dup_group_id != *group_id {
+                            pending_recursive_merge.push((dup_group_id, *group_id));
+                        }
+                        self.expr_id_to_expr_node.remove(expr_id);
+                        self.expr_id_to_group_id.remove(expr_id);
+                        self.dup_expr_mapping.insert(*expr_id, *dup_expr);
+                        new_expr_list.insert(*dup_expr); // adding this temporarily -- should be removed once recursive merge finishes
+                    } else {
+                        self.expr_node_to_expr_id.insert(new_expr, *expr_id);
+                        new_expr_list.insert(*expr_id);
+                    }
+                } else {
+                    new_expr_list.insert(*expr_id);
+                }
+            }
+            assert!(!new_expr_list.is_empty());
+            group.group_exprs = new_expr_list;
         }
-
-        self.merged_groups
-            .insert(group_a.as_group_id(), group_b.as_group_id());
-
-        // Remove all expressions from group a (so we don't accidentally access it)
-        self.clear_exprs_in_group(group_a);
-
-        group_b
-    }
-
-    pub fn merge_group(&mut self, group_a: GroupId, group_b: GroupId) -> GroupId {
-        let group_a_reduced = self.get_reduced_group_id(group_a);
-        let group_b_reduced = self.get_reduced_group_id(group_b);
-        self.merge_group_inner(group_a_reduced, group_b_reduced)
-            .as_group_id()
-    }
-
-    fn get_group_id_of_expr_id(&self, expr_id: ExprId) -> GroupId {
-        self.expr_id_to_group_id[&expr_id]
-    }
-
-    fn get_reduced_group_id(&self, mut group_id: GroupId) -> ReducedGroupId {
-        while let Some(next_group_id) = self.merged_groups.get(&group_id) {
-            group_id = *next_group_id;
+        for (merge_from, merge_into) in pending_recursive_merge {
+            // We need to reduce because each merge would probably invalidate some groups in the last loop iteration.
+            let merge_from = self.reduce_group(merge_from);
+            let merge_into = self.reduce_group(merge_into);
+            self.merge_group_inner(merge_into, merge_from);
         }
-        ReducedGroupId(group_id.0)
     }
 
-    /// Add or get an expression into the memo, returns the group id and the expr id. If `GroupId` is `None`,
-    /// create a new group. Otherwise, add the expression to the group.
-    pub fn add_new_group_expr(
+    fn add_new_group_expr_inner(
         &mut self,
         rel_node: RelNodeRef<T>,
         add_to_group_id: Option<GroupId>,
-    ) -> (GroupId, ExprId) {
-        let node_current_group = rel_node.typ.extract_group();
-        if let (Some(grp_a), Some(grp_b)) = (add_to_group_id, node_current_group) {
-            self.merge_group(grp_a, grp_b);
+    ) -> anyhow::Result<(GroupId, ExprId)> {
+        assert!(rel_node.typ.extract_group().is_none());
+        let children_group_ids = rel_node
+            .children
+            .iter()
+            .map(|child| {
+                if let Some(group) = child.typ.extract_group() {
+                    self.reduce_group(group) // TODO: can I remove?
+                } else {
+                    // No merge / modification to the memo should occur for the following operation
+                    let (group, _) = self
+                        .add_new_group_expr_inner(child.clone(), None)
+                        .expect("should not trigger merge group");
+                    self.reduce_group(group) // TODO: can I remove?
+                }
+            })
+            .collect::<Vec<_>>();
+        let memo_node = RelMemoNode {
+            typ: rel_node.typ.clone(),
+            children: children_group_ids,
+            data: rel_node.data.clone(),
         };
-
-        let (group_id, expr_id) = self.add_new_group_expr_inner(
-            rel_node,
-            add_to_group_id.map(|x| self.get_reduced_group_id(x)),
-        );
-        (group_id.as_group_id(), expr_id)
+        if let Some(&expr_id) = self.expr_node_to_expr_id.get(&memo_node) {
+            let group_id = self.expr_id_to_group_id[&expr_id];
+            if let Some(add_to_group_id) = add_to_group_id {
+                let add_to_group_id = self.reduce_group(add_to_group_id);
+                self.merge_group_inner(add_to_group_id, group_id);
+                return Ok((add_to_group_id, expr_id));
+            }
+            return Ok((group_id, expr_id));
+        }
+        let expr_id = self.next_expr_id();
+        let group_id = if let Some(group_id) = add_to_group_id {
+            group_id
+        } else {
+            self.next_group_id()
+        };
+        self.expr_id_to_expr_node
+            .insert(expr_id, memo_node.clone().into());
+        self.expr_id_to_group_id.insert(expr_id, group_id);
+        self.expr_node_to_expr_id.insert(memo_node.clone(), expr_id);
+        self.append_expr_to_group(expr_id, group_id, memo_node);
+        Ok((group_id, expr_id))
     }
 
+    /// This is inefficient: usually the optimizer should have a MemoRef instead of passing the full rel node.
     pub fn get_expr_info(&self, rel_node: RelNodeRef<T>) -> (GroupId, ExprId) {
         let children_group_ids = rel_node
             .children
@@ -192,7 +334,7 @@ impl<T: RelNodeTyp> Memo<T> {
         let Some(&expr_id) = self.expr_node_to_expr_id.get(&memo_node) else {
             unreachable!("not found {}", memo_node)
         };
-        let group_id = self.get_group_id_of_expr_id(expr_id);
+        let group_id = self.expr_id_to_group_id[&expr_id];
         (group_id, expr_id)
     }
 
@@ -203,10 +345,7 @@ impl<T: RelNodeTyp> Memo<T> {
         let child_properties = memo_node
             .children
             .iter()
-            .map(|child| {
-                let group_id = self.get_reduced_group_id(*child);
-                self.groups[&group_id].properties.clone()
-            })
+            .map(|child| self.groups[child].properties.clone())
             .collect_vec();
         let mut props = Vec::with_capacity(self.property_builders.len());
         for (id, builder) in self.property_builders.iter().enumerate() {
@@ -224,16 +363,12 @@ impl<T: RelNodeTyp> Memo<T> {
         props
     }
 
-    fn clear_exprs_in_group(&mut self, group_id: ReducedGroupId) {
-        self.groups.remove(&group_id);
-    }
-
     /// If group_id exists, it adds expr_id to the existing group
     /// Otherwise, it creates a new group of that group_id and insert expr_id into the new group
-    fn add_expr_to_group(
+    fn append_expr_to_group(
         &mut self,
         expr_id: ExprId,
-        group_id: ReducedGroupId,
+        group_id: GroupId,
         memo_node: RelMemoNode<T>,
     ) {
         trace!(event = "add_expr_to_group", group_id = %group_id, expr_id = %expr_id, memo_node = %memo_node);
@@ -242,6 +377,7 @@ impl<T: RelNodeTyp> Memo<T> {
             group.group_exprs.insert(expr_id);
             return;
         }
+        // Create group and infer properties (only upon initializing a group).
         let mut group = Group {
             group_exprs: HashSet::new(),
             info: GroupInfo::default(),
@@ -249,247 +385,53 @@ impl<T: RelNodeTyp> Memo<T> {
         };
         group.group_exprs.insert(expr_id);
         self.groups.insert(group_id, group);
-    }
-
-    // return true: replace success, the expr_id is replaced by the new rel_node
-    // return false: replace failed as the new rel node already exists in other groups,
-    //             the old expr_id should be marked as all rules are fired for it
-    #[allow(dead_code)]
-    pub fn replace_group_expr(
-        &mut self,
-        expr_id: ExprId,
-        replace_group_id: GroupId,
-        rel_node: RelNodeRef<T>,
-    ) -> bool {
-        let replace_group_id = self.get_reduced_group_id(replace_group_id);
-
-        if let Entry::Occupied(mut entry) = self.groups.entry(replace_group_id) {
-            let group = entry.get_mut();
-            if !group.group_exprs.contains(&expr_id) {
-                unreachable!("expr not found in group in replace_group_expr");
-            }
-
-            let children_group_ids = rel_node
-                .children
-                .iter()
-                .map(|child| {
-                    if let Some(group) = child.typ.extract_group() {
-                        group
-                    } else {
-                        self.add_new_group_expr(child.clone(), None).0
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            let memo_node = RelMemoNode {
-                typ: rel_node.typ.clone(),
-                children: children_group_ids,
-                data: rel_node.data.clone(),
-            };
-
-            // if the new expr already in the memo table, merge the group and remove old expr
-            if let Some(&new_expr_id) = self.expr_node_to_expr_id.get(&memo_node) {
-                if new_expr_id == expr_id {
-                    // This is not acceptable, as it means the expr returned by a heuristic rule is exactly
-                    // the same as the original expr, which should not happen
-                    // TODO: we can silently ignore this case without marking the original one as a deadend
-                    // But the rule creators should follow the definition of the heuristic rule
-                    // and return an empty vec if their rule does not do the real transformation
-                    unreachable!("replace_group_expr: you're replacing the old expr with the same expr, please check your rules registered as heuristic
-                        and make sure if it does not do any transformation, it should return an empty vec!");
-                }
-                let group_id = self.get_group_id_of_expr_id(new_expr_id);
-                let group_id = self.get_reduced_group_id(group_id);
-
-                self.merge_group_inner(replace_group_id, group_id);
-                return false;
-            }
-
-            self.expr_id_to_expr_node
-                .insert(expr_id, memo_node.clone().into());
-            self.expr_node_to_expr_id.insert(memo_node.clone(), expr_id);
-
-            return true;
-        }
-        unreachable!("group not found in replace_group_expr");
-    }
-
-    fn add_new_group_expr_inner(
-        &mut self,
-        rel_node: RelNodeRef<T>,
-        add_to_group_id: Option<ReducedGroupId>,
-    ) -> (ReducedGroupId, ExprId) {
-        let children_group_ids = rel_node
-            .children
-            .iter()
-            .map(|child| {
-                if let Some(group) = child.typ.extract_group() {
-                    group
-                } else {
-                    self.add_new_group_expr(child.clone(), None).0
-                }
-            })
-            .collect::<Vec<_>>();
-        let memo_node = RelMemoNode {
-            typ: rel_node.typ.clone(),
-            children: children_group_ids,
-            data: rel_node.data.clone(),
-        };
-        if let Some(&expr_id) = self.expr_node_to_expr_id.get(&memo_node) {
-            let group_id = self.get_group_id_of_expr_id(expr_id);
-            let group_id = self.get_reduced_group_id(group_id);
-            if let Some(add_to_group_id) = add_to_group_id {
-                self.merge_group_inner(add_to_group_id, group_id);
-            }
-            return (group_id, expr_id);
-        }
-        let expr_id = self.next_expr_id();
-        let group_id = if let Some(group_id) = add_to_group_id {
-            group_id
-        } else {
-            self.next_group_id()
-        };
-        self.expr_id_to_expr_node
-            .insert(expr_id, memo_node.clone().into());
-        self.expr_id_to_group_id
-            .insert(expr_id, group_id.as_group_id());
-        self.expr_node_to_expr_id.insert(memo_node.clone(), expr_id);
-        self.add_expr_to_group(expr_id, group_id, memo_node);
-        (group_id, expr_id)
+        self.merged_group_mapping.insert(group_id, group_id);
     }
 
     /// Get the group id of an expression.
     /// The group id is volatile, depending on whether the groups are merged.
-    pub fn get_group_id(&self, expr_id: ExprId) -> GroupId {
-        let group_id = self
+    pub fn get_group_id(&self, mut expr_id: ExprId) -> GroupId {
+        while let Some(new_expr_id) = self.dup_expr_mapping.get(&expr_id) {
+            expr_id = *new_expr_id;
+        }
+        *self
             .expr_id_to_group_id
             .get(&expr_id)
-            .expect("expr not found in group mapping");
-        self.get_reduced_group_id(*group_id).as_group_id()
+            .expect("expr not found in group mapping")
     }
 
-    /// Get the memoized representation of a node.
-    pub fn get_expr_memoed(&self, expr_id: ExprId) -> RelMemoNodeRef<T> {
+    /// Get the memoized representation of a node, only for debugging purpose
+    pub(crate) fn get_expr_memoed(&self, mut expr_id: ExprId) -> RelMemoNodeRef<T> {
+        while let Some(new_expr_id) = self.dup_expr_mapping.get(&expr_id) {
+            expr_id = *new_expr_id;
+        }
         self.expr_id_to_expr_node
             .get(&expr_id)
             .expect("expr not found in expr mapping")
             .clone()
     }
 
-    /// Get all bindings of a group.
-    /// TODO: this is not efficient. Should decide whether to expand the rule based on the matcher.
-    pub fn get_all_group_bindings(
-        &self,
-        group_id: GroupId,
-        physical_only: bool,
-        exclude_placeholder: bool,
-        level: Option<usize>,
-    ) -> Vec<RelNodeRef<T>> {
-        let group_id = self.get_reduced_group_id(group_id);
-        let group = self.groups.get(&group_id).expect("group not found");
-        group
-            .group_exprs
-            .iter()
-            .filter(|x| !physical_only || !self.get_expr_memoed(**x).typ.is_logical())
-            .map(|&expr_id| {
-                self.get_all_expr_bindings(expr_id, physical_only, exclude_placeholder, level)
-            })
-            .concat()
-    }
-
-    /// Get all bindings of an expression.
-    /// TODO: this is not efficient. Should decide whether to expand the rule based on the matcher.
-    pub fn get_all_expr_bindings(
-        &self,
-        expr_id: ExprId,
-        physical_only: bool,
-        exclude_placeholder: bool,
-        level: Option<usize>,
-    ) -> Vec<RelNodeRef<T>> {
-        let expr = self.get_expr_memoed(expr_id);
-        if let Some(level) = level {
-            if level == 0 {
-                if exclude_placeholder {
-                    return vec![];
-                } else {
-                    let node = Arc::new(RelNode {
-                        typ: expr.typ.clone(),
-                        children: expr
-                            .children
-                            .iter()
-                            .map(|x| Arc::new(RelNode::new_group(*x)))
-                            .collect_vec(),
-                        data: expr.data.clone(),
-                    });
-                    return vec![node];
-                }
-            }
-        }
-        let mut children = vec![];
-        let mut cumulative = 1;
-        for child in &expr.children {
-            let group_exprs = self.get_all_group_bindings(
-                *child,
-                physical_only,
-                exclude_placeholder,
-                level.map(|x| x - 1),
-            );
-            cumulative *= group_exprs.len();
-            children.push(group_exprs);
-        }
-        let mut result = vec![];
-        for i in 0..cumulative {
-            let mut selected_nodes = vec![];
-            let mut ii = i;
-            for child in children.iter().rev() {
-                let idx = ii % child.len();
-                ii /= child.len();
-                selected_nodes.push(child[idx].clone());
-            }
-            selected_nodes.reverse();
-            let node = Arc::new(RelNode {
-                typ: expr.typ.clone(),
-                children: selected_nodes,
-                data: expr.data.clone(),
-            });
-            result.push(node);
-        }
-        result
-    }
-
-    pub fn get_all_exprs_in_group(&self, group_id: GroupId) -> Vec<ExprId> {
-        let group_id = self.get_reduced_group_id(group_id);
+    pub(crate) fn get_all_exprs_in_group(&self, group_id: GroupId) -> Vec<ExprId> {
         let group = self.groups.get(&group_id).expect("group not found");
         let mut exprs = group.group_exprs.iter().copied().collect_vec();
         exprs.sort();
         exprs
     }
 
-    pub fn get_all_group_ids(&self) -> Vec<GroupId> {
-        let mut ids = self
-            .groups
-            .keys()
-            .copied()
-            .map(|x| x.as_group_id())
-            .collect_vec();
+    pub(crate) fn get_all_group_ids(&self) -> Vec<GroupId> {
+        let mut ids = self.groups.keys().copied().collect_vec();
         ids.sort();
         ids
     }
 
-    pub fn get_group_info(&self, group_id: GroupId) -> GroupInfo {
-        self.groups
-            .get(&self.get_reduced_group_id(group_id))
-            .as_ref()
-            .unwrap()
-            .info
-            .clone()
+    pub(crate) fn get_group_info(&self, group_id: GroupId) -> GroupInfo {
+        let group_id = self.reduce_group(group_id);
+        self.groups.get(&group_id).as_ref().unwrap().info.clone()
     }
 
     pub(crate) fn get_group(&self, group_id: GroupId) -> &Group {
-        self.groups
-            .get(&self.get_reduced_group_id(group_id))
-            .as_ref()
-            .unwrap()
+        let group_id = self.reduce_group(group_id);
+        self.groups.get(&group_id).as_ref().unwrap()
     }
 
     pub fn update_group_info(&mut self, group_id: GroupId, group_info: GroupInfo) {
@@ -498,12 +440,43 @@ impl<T: RelNodeTyp> Memo<T> {
                 assert!(
                     winner.cost.0[0] != 0.0,
                     "{}",
-                    self.get_expr_memoed(winner.expr_id)
+                    self.expr_id_to_expr_node[&winner.expr_id]
                 );
             }
         }
-        let grp = self.groups.get_mut(&self.get_reduced_group_id(group_id));
+        let grp = self.groups.get_mut(&group_id);
         grp.unwrap().info = group_info;
+    }
+
+    /// Get all bindings of a predicate group. Will panic if the group contains more than one bindings.
+    pub fn get_predicate_binding(&self, group_id: GroupId) -> Option<RelNodeRef<T>> {
+        self.get_predicate_binding_group_inner(group_id)
+    }
+
+    fn get_predicate_binding_expr_inner(&self, expr_id: ExprId) -> Option<RelNodeRef<T>> {
+        let expr = self.expr_id_to_expr_node[&expr_id].clone();
+        let mut children = Vec::with_capacity(expr.children.len());
+        for child in expr.children.iter() {
+            if let Some(child) = self.get_predicate_binding_group_inner(*child) {
+                children.push(child);
+            } else {
+                return None;
+            }
+        }
+        Some(Arc::new(RelNode {
+            typ: expr.typ.clone(),
+            data: expr.data.clone(),
+            children,
+        }))
+    }
+
+    fn get_predicate_binding_group_inner(&self, group_id: GroupId) -> Option<RelNodeRef<T>> {
+        let exprs = &self.groups[&group_id].group_exprs;
+        match exprs.len() {
+            0 => None,
+            1 => self.get_predicate_binding_expr_inner(*exprs.iter().next().unwrap()),
+            len => panic!("group {group_id} has {len} expressions"),
+        }
     }
 
     pub fn get_best_group_binding(
@@ -515,7 +488,7 @@ impl<T: RelNodeTyp> Memo<T> {
         if let Some(winner) = info.winner {
             if !winner.impossible {
                 let expr_id = winner.expr_id;
-                let expr = self.get_expr_memoed(expr_id);
+                let expr = self.expr_id_to_expr_node[&expr_id].clone();
                 let mut children = Vec::with_capacity(expr.children.len());
                 for child in &expr.children {
                     children.push(self.get_best_group_binding(*child, meta)?);
@@ -547,5 +520,209 @@ impl<T: RelNodeTyp> Memo<T> {
     /// Return number of expressions in the memo table.
     pub fn compute_plan_space(&self) -> usize {
         self.expr_id_to_expr_node.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    enum MemoTestRelTyp {
+        Group(GroupId),
+        List,
+        Join,
+        Project,
+        Scan,
+        Expr,
+    }
+
+    impl std::fmt::Display for MemoTestRelTyp {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::Group(x) => write!(f, "{}", x),
+                other => write!(f, "{:?}", other),
+            }
+        }
+    }
+
+    impl RelNodeTyp for MemoTestRelTyp {
+        fn is_logical(&self) -> bool {
+            matches!(self, Self::Project | Self::Scan | Self::Join)
+        }
+
+        fn group_typ(group_id: GroupId) -> Self {
+            Self::Group(group_id)
+        }
+
+        fn list_typ() -> Self {
+            Self::List
+        }
+
+        fn extract_group(&self) -> Option<GroupId> {
+            if let Self::Group(group_id) = self {
+                Some(*group_id)
+            } else {
+                None
+            }
+        }
+    }
+
+    type MemoTestRelNode = RelNode<MemoTestRelTyp>;
+    type MemoTestRelNodeRef = RelNodeRef<MemoTestRelTyp>;
+
+    fn join(
+        left: impl Into<MemoTestRelNodeRef>,
+        right: impl Into<MemoTestRelNodeRef>,
+        cond: impl Into<MemoTestRelNodeRef>,
+    ) -> MemoTestRelNode {
+        RelNode {
+            typ: MemoTestRelTyp::Join,
+            children: vec![left.into(), right.into(), cond.into()],
+            data: None,
+        }
+    }
+
+    fn scan(table: &str) -> MemoTestRelNode {
+        RelNode {
+            typ: MemoTestRelTyp::Scan,
+            children: vec![],
+            data: Some(Value::String(table.to_string().into())),
+        }
+    }
+
+    fn project(
+        input: impl Into<MemoTestRelNodeRef>,
+        expr_list: impl Into<MemoTestRelNodeRef>,
+    ) -> MemoTestRelNode {
+        RelNode {
+            typ: MemoTestRelTyp::Project,
+            children: vec![input.into(), expr_list.into()],
+            data: None,
+        }
+    }
+
+    fn list(items: Vec<impl Into<MemoTestRelNodeRef>>) -> MemoTestRelNode {
+        RelNode {
+            typ: MemoTestRelTyp::List,
+            children: items.into_iter().map(|x| x.into()).collect(),
+            data: None,
+        }
+    }
+
+    fn expr(data: Value) -> MemoTestRelNode {
+        RelNode {
+            typ: MemoTestRelTyp::Expr,
+            children: vec![],
+            data: Some(data),
+        }
+    }
+
+    fn group(group_id: GroupId) -> MemoTestRelNode {
+        RelNode {
+            typ: MemoTestRelTyp::Group(group_id),
+            children: vec![],
+            data: None,
+        }
+    }
+
+    #[test]
+    fn group_merge_1() {
+        let mut memo = Memo::new(Arc::new([]));
+        let (group_id, _) =
+            memo.add_new_expr(join(scan("t1"), scan("t2"), expr(Value::Bool(true))).into());
+        memo.add_expr_to_group(
+            join(scan("t2"), scan("t1"), expr(Value::Bool(true))).into(),
+            group_id,
+        );
+        assert_eq!(memo.get_group(group_id).group_exprs.len(), 2);
+    }
+
+    #[test]
+    fn group_merge_2() {
+        let mut memo = Memo::new(Arc::new([]));
+        let (group_id_1, _) = memo.add_new_expr(
+            project(
+                join(scan("t1"), scan("t2"), expr(Value::Bool(true))),
+                list(vec![expr(Value::Int64(1))]),
+            )
+            .into(),
+        );
+        let (group_id_2, _) = memo.add_new_expr(
+            project(
+                join(scan("t1"), scan("t2"), expr(Value::Bool(true))),
+                list(vec![expr(Value::Int64(1))]),
+            )
+            .into(),
+        );
+        assert_eq!(group_id_1, group_id_2);
+    }
+
+    #[test]
+    fn group_merge_3() {
+        let mut memo = Memo::new(Arc::new([]));
+        let expr1 = Arc::new(project(scan("t1"), list(vec![expr(Value::Int64(1))])));
+        let expr2 = Arc::new(project(scan("t1-alias"), list(vec![expr(Value::Int64(1))])));
+        memo.add_new_expr(expr1.clone());
+        memo.add_new_expr(expr2.clone());
+        // merging two child groups causes parent to merge
+        let (group_id_expr, _) = memo.get_expr_info(scan("t1").into());
+        memo.add_expr_to_group(scan("t1-alias").into(), group_id_expr);
+        let (group_1, _) = memo.get_expr_info(expr1);
+        let (group_2, _) = memo.get_expr_info(expr2);
+        assert_eq!(group_1, group_2);
+    }
+
+    #[test]
+    fn group_merge_4() {
+        let mut memo = Memo::new(Arc::new([]));
+        let expr1 = Arc::new(project(
+            project(scan("t1"), list(vec![expr(Value::Int64(1))])),
+            list(vec![expr(Value::Int64(2))]),
+        ));
+        let expr2 = Arc::new(project(
+            project(scan("t1-alias"), list(vec![expr(Value::Int64(1))])),
+            list(vec![expr(Value::Int64(2))]),
+        ));
+        memo.add_new_expr(expr1.clone());
+        memo.add_new_expr(expr2.clone());
+        // merge two child groups, cascading merge
+        let (group_id_expr, _) = memo.get_expr_info(scan("t1").into());
+        memo.add_expr_to_group(scan("t1-alias").into(), group_id_expr);
+        let (group_1, _) = memo.get_expr_info(expr1.clone());
+        let (group_2, _) = memo.get_expr_info(expr2.clone());
+        assert_eq!(group_1, group_2);
+        let (group_1, _) = memo.get_expr_info(expr1.child(0));
+        let (group_2, _) = memo.get_expr_info(expr2.child(0));
+        assert_eq!(group_1, group_2);
+    }
+
+    #[test]
+    fn group_merge_5() {
+        let mut memo = Memo::new(Arc::new([]));
+        let expr1 = Arc::new(project(
+            project(scan("t1"), list(vec![expr(Value::Int64(1))])),
+            list(vec![expr(Value::Int64(2))]),
+        ));
+        let expr2 = Arc::new(project(
+            project(scan("t1-alias"), list(vec![expr(Value::Int64(1))])),
+            list(vec![expr(Value::Int64(2))]),
+        ));
+        let (_, expr1_id) = memo.add_new_expr(expr1.clone());
+        let (_, expr2_id) = memo.add_new_expr(expr2.clone());
+
+        // experimenting with group id in expr (i.e., when apply rules)
+        let (scan_t1, _) = memo.get_expr_info(scan("t1").into());
+        let (expr_middle_proj, _) = memo.get_expr_info(list(vec![expr(Value::Int64(1))]).into());
+        let proj_binding = project(group(scan_t1), group(expr_middle_proj));
+        let middle_proj_2 = memo.get_expr_memoed(expr2_id).children[0];
+
+        memo.add_expr_to_group(proj_binding.into(), middle_proj_2);
+
+        assert_eq!(
+            memo.get_expr_memoed(expr1_id),
+            memo.get_expr_memoed(expr2_id)
+        ); // these two expressions are merged
+        assert_eq!(memo.get_expr_info(expr1), memo.get_expr_info(expr2));
     }
 }
