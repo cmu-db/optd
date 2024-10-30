@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use optd_core::{
     cascades::CascadesOptimizer,
@@ -8,7 +8,6 @@ use optd_core::{
     rules::{Rule, RuleWrapper},
 };
 use optd_datafusion_repr::{
-    cost::OptCostModel,
     plan_nodes::{
         BinOpExpr, BinOpType, ColumnRefExpr, ConstantExpr, JoinType, LogicalFilter, LogicalJoin,
         LogicalScan, OptRelNode, OptRelNodeTyp, PlanNode,
@@ -16,6 +15,7 @@ use optd_datafusion_repr::{
     rules::{HashJoinRule, JoinAssocRule, JoinCommuteRule, PhysicalConversionRule},
 };
 
+use optd_datafusion_repr_adv_cost::adv_cost::{stats::DataFusionPerTableStats, OptCostModel};
 use tracing::Level;
 
 pub fn main() {
@@ -45,7 +45,12 @@ pub fn main() {
         Box::new(OptCostModel::new(
             [("t1", 1000), ("t2", 100), ("t3", 10000)]
                 .into_iter()
-                .map(|(x, y)| (x.to_string(), y))
+                .map(|(x, y)| {
+                    (
+                        x.to_string(),
+                        DataFusionPerTableStats::new(y, HashMap::new()),
+                    )
+                })
                 .collect(),
         )),
         vec![],

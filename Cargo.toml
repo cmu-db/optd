@@ -8,5 +8,6 @@ members = [
     "optd-adaptive-demo",
     "optd-gungnir",
     "optd-perfbench",
+    "optd-datafusion-repr-adv-cost",
 ]
 resolver = "2"

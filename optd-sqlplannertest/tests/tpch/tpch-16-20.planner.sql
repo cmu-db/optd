@@ -174,42 +174,42 @@ PhysicalProjection
     ├── aggrs:Agg(Sum)
     │   └── [ #0 ]
     ├── groups: []
-    └── PhysicalProjection { exprs: [ #5 ] }
+    └── PhysicalProjection { exprs: [ #15 ] }
         └── PhysicalNestedLoopJoin
             ├── join_type: Inner
             ├── cond:And
             │   ├── Eq
-            │   │   ├── #16
-            │   │   └── #16
+            │   │   ├── #1
+            │   │   └── #11
             │   └── Lt
-            │       ├── Cast { cast_to: Decimal128(30, 15), expr: #4 }
-            │       └── #25
-            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-            │   ├── PhysicalScan { table: lineitem }
-            │   └── PhysicalFilter
-            │       ├── cond:And
-            │       │   ├── Eq
-            │       │   │   ├── #3
-            │       │   │   └── "Brand#13"
-            │       │   └── Eq
-            │       │       ├── #6
-            │       │       └── "JUMBO PKG"
-            │       └── PhysicalScan { table: part }
-            └── PhysicalProjection
-                ├── exprs:
-                │   ┌── Cast
-                │   │   ├── cast_to: Decimal128(30, 15)
-                │   │   ├── expr:Mul
-                │   │   │   ├── 0.2(float)
-                │   │   │   └── Cast { cast_to: Float64, expr: #1 }
+            │       ├── Cast { cast_to: Decimal128(30, 15), expr: #14 }
+            │       └── #0
+            ├── PhysicalProjection
+            │   ├── exprs:
+            │   │   ┌── Cast
+            │   │   │   ├── cast_to: Decimal128(30, 15)
+            │   │   │   ├── expr:Mul
+            │   │   │   │   ├── 0.2(float)
+            │   │   │   │   └── Cast { cast_to: Float64, expr: #1 }
 
-                │   └── #0
-                └── PhysicalAgg
-                    ├── aggrs:Agg(Avg)
-                    │   └── [ #1 ]
-                    ├── groups: [ #0 ]
-                    └── PhysicalProjection { exprs: [ #1, #4 ] }
-                        └── PhysicalScan { table: lineitem }
+            │   │   └── #0
+            │   └── PhysicalAgg
+            │       ├── aggrs:Agg(Avg)
+            │       │   └── [ #1 ]
+            │       ├── groups: [ #0 ]
+            │       └── PhysicalProjection { exprs: [ #1, #4 ] }
+            │           └── PhysicalScan { table: lineitem }
+            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
+                ├── PhysicalFilter
+                │   ├── cond:And
+                │   │   ├── Eq
+                │   │   │   ├── #3
+                │   │   │   └── "Brand#13"
+                │   │   └── Eq
+                │   │       ├── #6
+                │   │       └── "JUMBO PKG"
+                │   └── PhysicalScan { table: part }
+                └── PhysicalScan { table: lineitem }
 */
 
 -- TPC-H Q19

@@ -7,11 +7,11 @@ use optd_core::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{
-    cost::base_cost::{
-        stats::{Distribution, MostCommonValues},
-        DEFAULT_NUM_DISTINCT,
-    },
+use crate::adv_cost::{
+    stats::{Distribution, MostCommonValues},
+    DEFAULT_NUM_DISTINCT,
+};
+use optd_datafusion_repr::{
     plan_nodes::{
         BinOpType, ColumnRefExpr, Expr, ExprList, JoinType, LogOpExpr, LogOpType, OptRelNode,
         OptRelNodeRef, OptRelNodeTyp,
@@ -548,8 +548,8 @@ mod tests {
 
     use optd_core::rel_node::Value;
 
-    use crate::{
-        cost::base_cost::{tests::*, DEFAULT_EQ_SEL},
+    use crate::adv_cost::{tests::*, DEFAULT_EQ_SEL};
+    use optd_datafusion_repr::{
         plan_nodes::{BinOpType, JoinType, LogOpType, OptRelNodeRef},
         properties::{
             column_ref::{

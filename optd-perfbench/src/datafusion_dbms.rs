@@ -26,9 +26,10 @@ use datafusion::{
 use datafusion_optd_cli::helper::unescape_input;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
-use optd_datafusion_repr::{
-    cost::{DataFusionBaseTableStats, DataFusionPerTableStats},
-    DatafusionOptimizer,
+use optd_datafusion_repr::DatafusionOptimizer;
+use optd_datafusion_repr_adv_cost::{
+    adv_cost::stats::{DataFusionBaseTableStats, DataFusionPerTableStats},
+    new_physical_adv_cost,
 };
 use parquet::arrow::arrow_reader::{
     ArrowReaderMetadata, ParquetRecordBatchReader, ParquetRecordBatchReaderBuilder,
@@ -127,7 +128,7 @@ impl DatafusionDBMS {
         let ctx = {
             let mut state =
                 SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
-            let optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical(
+            let optimizer: DatafusionOptimizer = new_physical_adv_cost(
                 Arc::new(DatafusionCatalog::new(state.catalog_list())),
                 stats.unwrap_or_default(),
                 adaptive,

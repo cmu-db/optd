@@ -7,11 +7,11 @@ use optd_core::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{
-    cost::base_cost::{
-        stats::{ColumnCombValueStats, Distribution, MostCommonValues},
-        UNIMPLEMENTED_SEL,
-    },
+use crate::adv_cost::{
+    stats::{ColumnCombValueStats, Distribution, MostCommonValues},
+    UNIMPLEMENTED_SEL,
+};
+use optd_datafusion_repr::{
     plan_nodes::{
         BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType, Expr, InListExpr, LikeExpr,
         LogOpType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, UnOpType,
@@ -570,8 +570,8 @@ mod tests {
     use arrow_schema::DataType;
     use optd_core::rel_node::Value;
 
-    use crate::{
-        cost::base_cost::{tests::*, DEFAULT_EQ_SEL},
+    use crate::adv_cost::{tests::*, DEFAULT_EQ_SEL};
+    use optd_datafusion_repr::{
         plan_nodes::{BinOpType, ConstantType, LogOpType, UnOpType},
         properties::{
             column_ref::ColumnRef,

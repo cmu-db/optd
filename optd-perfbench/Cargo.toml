@@ -15,6 +15,7 @@ datafusion = { version = "32.0.0", features = [
     "compression",
 ] }
 optd-datafusion-repr = { path = "../optd-datafusion-repr" }
+optd-datafusion-repr-adv-cost = { path = "../optd-datafusion-repr-adv-cost" }
 optd-datafusion-bridge = { path = "../optd-datafusion-bridge" }
 optd-gungnir = { path = "../optd-gungnir" }
 datafusion-optd-cli = { path = "../datafusion-optd-cli" }

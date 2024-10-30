@@ -3,12 +3,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
-use cost::{
-    adaptive_cost::DataFusionAdaptiveCostModel, AdaptiveCostModel, DataFusionBaseTableStats,
-    RuntimeAdaptionStorage, DEFAULT_DECAY,
-};
+use cost::{AdaptiveCostModel, RuntimeAdaptionStorage};
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId, OptimizerProperties},
+    cost::CostModel,
     heuristics::{ApplyOrder, HeuristicsOptimizer},
     optimizer::Optimizer,
     property::PropertyBuilderAny,
@@ -148,10 +146,17 @@ impl DatafusionOptimizer {
     }
 
     /// Create an optimizer with partial explore (otherwise it's too slow).
-    pub fn new_physical(
+    pub fn new_physical(catalog: Arc<dyn Catalog>, enable_adaptive: bool) -> Self {
+        let cost_model = AdaptiveCostModel::new(50);
+        let map = cost_model.get_runtime_map();
+        Self::new_physical_with_cost_model(catalog, enable_adaptive, cost_model, map)
+    }
+
+    pub fn new_physical_with_cost_model(
         catalog: Arc<dyn Catalog>,
-        stats: DataFusionBaseTableStats,
         enable_adaptive: bool,
+        cost_model: impl CostModel<OptRelNodeTyp>,
+        runtime_map: RuntimeAdaptionStorage,
     ) -> Self {
         let cascades_rules = Self::default_cascades_rules();
         let heuristic_rules = Self::default_heuristic_rules();
@@ -159,9 +164,8 @@ impl DatafusionOptimizer {
             Box::new(SchemaPropertyBuilder::new(catalog.clone())),
             Box::new(ColumnRefPropertyBuilder::new(catalog.clone())),
         ]);
-        let cost_model = AdaptiveCostModel::new(DEFAULT_DECAY, stats);
         Self {
-            runtime_statistics: cost_model.get_runtime_map(),
+            runtime_statistics: runtime_map,
             cascades_optimizer: CascadesOptimizer::new_with_prop(
                 cascades_rules,
                 Box::new(cost_model),
@@ -207,8 +211,7 @@ impl DatafusionOptimizer {
             RuleWrapper::new_heuristic(Arc::new(EliminateFilterRule::new())),
         );
 
-        let cost_model =
-            DataFusionAdaptiveCostModel::new(1000, DataFusionBaseTableStats::default()); // very large decay
+        let cost_model = AdaptiveCostModel::new(1000);
         let runtime_statistics = cost_model.get_runtime_map();
         let optimizer = CascadesOptimizer::new(
             rule_wrappers,

@@ -30,8 +30,8 @@ use datafusion_optd_cli::{
 };
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
-use optd_datafusion_repr::cost::BaseTableStats;
 use optd_datafusion_repr::DatafusionOptimizer;
+use optd_datafusion_repr_adv_cost::adv_cost::stats::BaseTableStats;
 use std::collections::HashMap;
 use std::env;
 use std::path::Path;
@@ -141,6 +141,9 @@ struct Args {
 
     #[clap(long, help = "Turn on adaptive optimization")]
     enable_adaptive: bool,
+
+    #[clap(long, help = "Use advanced cost model")]
+    adv_cost: bool,
 }
 
 #[tokio::main]
@@ -204,11 +207,18 @@ pub async fn main() -> Result<()> {
             state = state.with_physical_optimizer_rules(vec![]);
         }
         // use optd-bridge query planner
-        let optimizer = DatafusionOptimizer::new_physical(
-            Arc::new(DatafusionCatalog::new(state.catalog_list())),
-            BaseTableStats::default(),
-            args.enable_adaptive,
-        );
+        let optimizer = if args.adv_cost {
+            optd_datafusion_repr_adv_cost::new_physical_adv_cost(
+                Arc::new(DatafusionCatalog::new(state.catalog_list())),
+                BaseTableStats::default(),
+                args.enable_adaptive,
+            )
+        } else {
+            DatafusionOptimizer::new_physical(
+                Arc::new(DatafusionCatalog::new(state.catalog_list())),
+                args.enable_adaptive,
+            )
+        };
         state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));
         SessionContext::new_with_state(state)
     };

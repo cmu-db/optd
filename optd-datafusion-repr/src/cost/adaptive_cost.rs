@@ -9,16 +9,8 @@ use optd_core::{
     cost::{Cost, CostModel},
     rel_node::{RelNode, Value},
 };
-use serde::{de::DeserializeOwned, Serialize};
-
-use super::base_cost::stats::{
-    BaseTableStats, DataFusionDistribution, DataFusionMostCommonValues, Distribution,
-    MostCommonValues,
-};
 
 pub type RuntimeAdaptionStorage = Arc<Mutex<RuntimeAdaptionStorageInner>>;
-pub type DataFusionAdaptiveCostModel =
-    AdaptiveCostModel<DataFusionMostCommonValues, DataFusionDistribution>;
 
 #[derive(Default, Debug)]
 pub struct RuntimeAdaptionStorageInner {
@@ -26,22 +18,13 @@ pub struct RuntimeAdaptionStorageInner {
     pub iter_cnt: usize,
 }
 
-pub const DEFAULT_DECAY: usize = 50;
-
-pub struct AdaptiveCostModel<
-    M: MostCommonValues + Serialize + DeserializeOwned,
-    D: Distribution + Serialize + DeserializeOwned,
-> {
+pub struct AdaptiveCostModel {
     runtime_row_cnt: RuntimeAdaptionStorage,
-    base_model: OptCostModel<M, D>,
+    base_model: OptCostModel,
     decay: usize,
 }
 
-impl<
-        M: MostCommonValues + Serialize + DeserializeOwned,
-        D: Distribution + Serialize + DeserializeOwned,
-    > CostModel<OptRelNodeTyp> for AdaptiveCostModel<M, D>
-{
+impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
     fn explain(&self, cost: &Cost) -> String {
         self.base_model.explain(cost)
     }
@@ -60,23 +43,25 @@ impl<
         data: &Option<Value>,
         children: &[Cost],
         context: Option<RelNodeContext>,
-        optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
+        _optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Cost {
         if let OptRelNodeTyp::PhysicalScan = node {
             let guard = self.runtime_row_cnt.lock().unwrap();
-            if let Some((runtime_row_cnt, iter)) =
-                guard.history.get(&context.as_ref().unwrap().group_id)
-            {
+            if let Some((runtime_row_cnt, iter)) = guard.history.get(&context.unwrap().group_id) {
                 if *iter + self.decay >= guard.iter_cnt {
                     let runtime_row_cnt = (*runtime_row_cnt).max(1) as f64;
-                    return OptCostModel::<M, D>::cost(runtime_row_cnt, 0.0, runtime_row_cnt);
+                    return OptCostModel::cost(runtime_row_cnt, 0.0, runtime_row_cnt);
+                } else {
+                    return OptCostModel::cost(1.0, 0.0, 1.0);
                 }
+            } else {
+                return OptCostModel::cost(1.0, 0.0, 1.0);
             }
         }
-        let (mut row_cnt, compute_cost, io_cost) = OptCostModel::<M, D>::cost_tuple(
+        let (mut row_cnt, compute_cost, io_cost) = OptCostModel::cost_tuple(
             &self
                 .base_model
-                .compute_cost(node, data, children, context.clone(), optimizer),
+                .compute_cost(node, data, children, None, None),
         );
         if let Some(context) = context {
             let guard = self.runtime_row_cnt.lock().unwrap();
@@ -87,7 +72,7 @@ impl<
                 }
             }
         }
-        OptCostModel::<M, D>::cost(row_cnt, compute_cost, io_cost)
+        OptCostModel::cost(row_cnt, compute_cost, io_cost)
     }
 
     fn compute_plan_node_cost(&self, node: &RelNode<OptRelNodeTyp>) -> Cost {
@@ -95,15 +80,11 @@ impl<
     }
 }
 
-impl<
-        M: MostCommonValues + Serialize + DeserializeOwned,
-        D: Distribution + Serialize + DeserializeOwned,
-    > AdaptiveCostModel<M, D>
-{
-    pub fn new(decay: usize, stats: BaseTableStats<M, D>) -> Self {
+impl AdaptiveCostModel {
+    pub fn new(decay: usize) -> Self {
         Self {
-            runtime_row_cnt: RuntimeAdaptionStorage::default(),
-            base_model: OptCostModel::new(stats),
+            runtime_row_cnt: Arc::new(Mutex::new(RuntimeAdaptionStorageInner::default())),
+            base_model: OptCostModel::new(HashMap::new()),
             decay,
         }
     }

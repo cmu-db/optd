@@ -4,11 +4,11 @@ use optd_core::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::{
-    cost::base_cost::{
-        stats::{Distribution, MostCommonValues},
-        DEFAULT_NUM_DISTINCT,
-    },
+use crate::adv_cost::{
+    stats::{Distribution, MostCommonValues},
+    DEFAULT_NUM_DISTINCT,
+};
+use optd_datafusion_repr::{
     plan_nodes::{ExprList, OptRelNode, OptRelNodeTyp},
     properties::column_ref::{BaseTableColumnRef, ColumnRef, ColumnRefPropertyBuilder},
 };
