@@ -136,7 +136,11 @@ impl OptRelNodeTyp {
 
 impl std::fmt::Display for OptRelNodeTyp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        if let Self::Placeholder(group_id) = self {
+            write!(f, "{}", group_id)
+        } else {
+            write!(f, "{:?}", self)
+        }
     }
 }
 

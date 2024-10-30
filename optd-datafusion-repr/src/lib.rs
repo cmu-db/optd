@@ -36,14 +36,16 @@ use crate::rules::{
     DepInitialDistinct, DepJoinEliminateAtScan, DepJoinPastAgg, DepJoinPastFilter, DepJoinPastProj,
 };
 
+pub use memo_ext::{LogicalJoinOrder, MemoExt};
+
 pub mod cost;
 mod explain;
+mod memo_ext;
 pub mod plan_nodes;
 pub mod properties;
 pub mod rules;
 #[cfg(test)]
 mod testing;
-// mod expand;
 
 pub struct DatafusionOptimizer {
     heuristic_optimizer: HeuristicsOptimizer<OptRelNodeTyp>,

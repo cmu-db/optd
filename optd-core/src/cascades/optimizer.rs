@@ -369,6 +369,10 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             .map(|x| x.cost.0[0])
             .unwrap_or(0.0)
     }
+
+    pub fn memo(&self) -> &Memo<T> {
+        &self.memo
+    }
 }
 
 impl<T: RelNodeTyp> Optimizer<T> for CascadesOptimizer<T> {

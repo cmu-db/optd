@@ -13,6 +13,8 @@ insert into t2 values (0, 200), (1, 201), (2, 202);
 select * from t1 as a, t1 as b where a.t1v1 = b.t1v1;
 
 /*
+(Join t1 t1)
+
 LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
 └── LogicalFilter
     ├── cond:Eq

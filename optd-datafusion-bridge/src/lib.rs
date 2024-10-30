@@ -16,13 +16,11 @@ use datafusion::{
     physical_plan::{displayable, explain::ExplainExec, ExecutionPlan},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
+use itertools::Itertools;
 use optd_datafusion_repr::{
-    plan_nodes::{
-        ConstantType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalHashJoin,
-        PhysicalNestedLoopJoin, PlanNode,
-    },
+    plan_nodes::{ConstantType, OptRelNode, PlanNode},
     properties::schema::Catalog,
-    DatafusionOptimizer,
+    DatafusionOptimizer, MemoExt,
 };
 use std::{
     collections::HashMap,
@@ -87,93 +85,6 @@ impl Catalog for DatafusionCatalog {
 
 pub struct OptdQueryPlanner {
     pub optimizer: Arc<Mutex<Option<Box<DatafusionOptimizer>>>>,
-}
-
-#[derive(Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
-enum JoinOrder {
-    Table(String),
-    HashJoin(Box<Self>, Box<Self>),
-    NestedLoopJoin(Box<Self>, Box<Self>),
-}
-
-#[allow(dead_code)]
-impl JoinOrder {
-    pub fn conv_into_logical_join_order(&self) -> LogicalJoinOrder {
-        match self {
-            JoinOrder::Table(name) => LogicalJoinOrder::Table(name.clone()),
-            JoinOrder::HashJoin(left, right) => LogicalJoinOrder::Join(
-                Box::new(left.conv_into_logical_join_order()),
-                Box::new(right.conv_into_logical_join_order()),
-            ),
-            JoinOrder::NestedLoopJoin(left, right) => LogicalJoinOrder::Join(
-                Box::new(left.conv_into_logical_join_order()),
-                Box::new(right.conv_into_logical_join_order()),
-            ),
-        }
-    }
-}
-
-#[allow(unused)]
-#[derive(Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
-enum LogicalJoinOrder {
-    Table(String),
-    Join(Box<Self>, Box<Self>),
-}
-
-#[allow(dead_code)]
-fn get_join_order(rel_node: OptRelNodeRef) -> Option<JoinOrder> {
-    match rel_node.typ {
-        OptRelNodeTyp::PhysicalHashJoin(_) => {
-            let join = PhysicalHashJoin::from_rel_node(rel_node.clone()).unwrap();
-            let left = get_join_order(join.left().into_rel_node())?;
-            let right = get_join_order(join.right().into_rel_node())?;
-            Some(JoinOrder::HashJoin(Box::new(left), Box::new(right)))
-        }
-        OptRelNodeTyp::PhysicalNestedLoopJoin(_) => {
-            let join = PhysicalNestedLoopJoin::from_rel_node(rel_node.clone()).unwrap();
-            let left = get_join_order(join.left().into_rel_node())?;
-            let right = get_join_order(join.right().into_rel_node())?;
-            Some(JoinOrder::NestedLoopJoin(Box::new(left), Box::new(right)))
-        }
-        OptRelNodeTyp::PhysicalScan => {
-            let scan =
-                optd_datafusion_repr::plan_nodes::PhysicalScan::from_rel_node(rel_node).unwrap();
-            Some(JoinOrder::Table(scan.table().to_string()))
-        }
-        _ => {
-            for child in &rel_node.children {
-                if let Some(res) = get_join_order(child.clone()) {
-                    return Some(res);
-                }
-            }
-            None
-        }
-    }
-}
-
-impl std::fmt::Display for LogicalJoinOrder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LogicalJoinOrder::Table(name) => write!(f, "{}", name),
-            LogicalJoinOrder::Join(left, right) => {
-                write!(f, "(Join {} {})", left, right)
-            }
-        }
-    }
-}
-
-impl std::fmt::Display for JoinOrder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            JoinOrder::Table(name) => write!(f, "{}", name),
-            JoinOrder::HashJoin(left, right) => {
-                write!(f, "(HashJoin {} {})", left, right)
-            }
-            JoinOrder::NestedLoopJoin(left, right) => {
-                write!(f, "(NLJ {} {})", left, right)
-            }
-        }
-    }
 }
 
 impl OptdQueryPlanner {
@@ -247,7 +158,7 @@ impl OptdQueryPlanner {
             }
         }
 
-        let (_, optimized_rel, meta) = optimizer.cascades_optimize(optd_rel)?;
+        let (group_id, optimized_rel, meta) = optimizer.cascades_optimize(optd_rel)?;
 
         if let Some(explains) = &mut explains {
             explains.push(StringifiedPlan::new(
@@ -258,52 +169,17 @@ impl OptdQueryPlanner {
                     .unwrap()
                     .explain_to_string(if verbose { Some(&meta) } else { None }),
             ));
-
-            // const ENABLE_JOIN_ORDER: bool = false;
-
-            // if ENABLE_JOIN_ORDER {
-            //     let join_order = get_join_order(optimized_rel.clone());
-            //     explains.push(StringifiedPlan::new(
-            //         PlanType::OptimizedPhysicalPlan {
-            //             optimizer_name: "optd-join-order".to_string(),
-            //         },
-            //         if let Some(join_order) = join_order {
-            //             join_order.to_string()
-            //         } else {
-            //             "None".to_string()
-            //         },
-            //     ));
-            //     let bindings = optimizer
-            //         .optd_cascades_optimizer()
-            //         .get_all_group_bindings(group_id, true);
-            //     let mut join_orders = BTreeSet::new();
-            //     let mut logical_join_orders = BTreeSet::new();
-            //     for binding in bindings {
-            //         if let Some(join_order) = get_join_order(binding) {
-            //             logical_join_orders.insert(join_order.conv_into_logical_join_order());
-            //             join_orders.insert(join_order);
-            //         }
-            //     }
-            //     explains.push(StringifiedPlan::new(
-            //         PlanType::OptimizedPhysicalPlan {
-            //             optimizer_name: "optd-all-join-orders".to_string(),
-            //         },
-            //         join_orders.iter().map(|x| x.to_string()).join("\n"),
-            //     ));
-            //     explains.push(StringifiedPlan::new(
-            //         PlanType::OptimizedPhysicalPlan {
-            //             optimizer_name: "optd-all-logical-join-orders".to_string(),
-            //         },
-            //         logical_join_orders.iter().map(|x| x.to_string()).join("\n"),
-            //     ));
-            // }
+            let join_orders = optimizer
+                .optd_cascades_optimizer()
+                .memo()
+                .enumerate_join_order(group_id);
+            explains.push(StringifiedPlan::new(
+                PlanType::OptimizedPhysicalPlan {
+                    optimizer_name: "optd-all-logical-join-orders".to_string(),
+                },
+                join_orders.iter().map(|x| x.to_string()).join("\n"),
+            ));
         }
-        // println!(
-        //     "{} cost={}",
-        //     get_join_order(optimized_rel.clone()).unwrap(),
-        //     optimizer.optd_optimizer().get_cost_of(group_id)
-        // );
-        // optimizer.dump(Some(group_id));
         ctx.optimizer = Some(&optimizer);
         let physical_plan = ctx.conv_from_optd(optimized_rel, meta).await?;
         if let Some(explains) = &mut explains {

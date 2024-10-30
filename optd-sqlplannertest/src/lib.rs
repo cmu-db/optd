@@ -245,17 +245,6 @@ impl DatafusionDBMS {
                         .map(|x| &x[1])
                         .unwrap()
                 )?;
-            } else if subtask == "join_orders" {
-                writeln!(
-                    r,
-                    "{}",
-                    result
-                        .iter()
-                        .find(|x| x[0] == "physical_plan after optd-all-join-orders")
-                        .map(|x| &x[1])
-                        .unwrap()
-                )?;
-                writeln!(r)?;
             } else if subtask == "logical_join_orders" {
                 writeln!(
                     r,
