@@ -62,12 +62,10 @@ fn match_node<T: RelNodeTyp>(
             RuleMatcher::PickOne { pick_to, expand } => {
                 let group_id = node.children[idx];
                 let node = if *expand {
-                    let mut exprs = optimizer.get_all_exprs_in_group(group_id);
-                    assert_eq!(exprs.len(), 1, "can only expand expression");
-                    let expr = exprs.remove(0);
-                    let mut bindings = optimizer.get_all_expr_bindings(expr, None);
-                    assert_eq!(bindings.len(), 1, "can only expand expression");
-                    bindings.remove(0).as_ref().clone()
+                    let binding = optimizer
+                        .get_predicate_binding(group_id)
+                        .expect("empty group, what's going wrong?");
+                    binding.as_ref().clone()
                 } else {
                     RelNode::new_group(group_id)
                 };
@@ -205,23 +203,21 @@ impl<T: RelNodeTyp> Task<T> for ApplyRuleTask {
 
             for expr in applied {
                 trace!(event = "after_apply_rule", task = "apply_rule", binding=%expr);
-                let RelNode { typ, .. } = &expr;
-                if let Some(group_id_2) = typ.extract_group() {
-                    // If this is a group, merge the groups!
-                    optimizer.merge_group(group_id, group_id_2);
-                    continue;
-                }
-                let expr_typ = typ.clone();
-                let (_, expr_id) = optimizer.add_group_expr(expr.into(), Some(group_id));
-                trace!(event = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, new_expr_id = %expr_id);
-                if expr_typ.is_logical() {
-                    tasks.push(
-                        Box::new(OptimizeExpressionTask::new(expr_id, self.exploring))
-                            as Box<dyn Task<T>>,
-                    );
+                let expr_typ = expr.typ.clone();
+                if let Some(expr_id) = optimizer.add_expr_to_group(expr.into(), group_id) {
+                    if expr_typ.is_logical() {
+                        tasks.push(
+                            Box::new(OptimizeExpressionTask::new(expr_id, self.exploring))
+                                as Box<dyn Task<T>>,
+                        );
+                    } else {
+                        tasks
+                            .push(Box::new(OptimizeInputsTask::new(expr_id, true))
+                                as Box<dyn Task<T>>);
+                    }
+                    trace!(event = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, new_expr_id = %expr_id);
                 } else {
-                    tasks
-                        .push(Box::new(OptimizeInputsTask::new(expr_id, true)) as Box<dyn Task<T>>);
+                    trace!(event = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, "triggered group merge");
                 }
             }
         }

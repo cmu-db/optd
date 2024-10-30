@@ -24,8 +24,8 @@ use rules::{
     EliminateJoinRule, EliminateLimitRule, EliminateProjectRule, FilterAggTransposeRule,
     FilterCrossJoinTransposeRule, FilterInnerJoinTransposeRule, FilterMergeRule,
     FilterProjectTransposeRule, FilterSortTransposeRule, HashJoinRule, JoinAssocRule,
-    JoinCommuteRule, PhysicalConversionRule, ProjectMergeRule, ProjectionPullUpJoin,
-    SimplifyFilterRule, SimplifyJoinCondRule,
+    JoinCommuteRule, PhysicalConversionRule, ProjectFilterTransposeRule, ProjectMergeRule,
+    ProjectionPullUpJoin, SimplifyFilterRule, SimplifyJoinCondRule,
 };
 
 pub use optd_core::rel_node::Value;
@@ -108,11 +108,6 @@ impl DatafusionOptimizer {
         for rule in rules {
             rule_wrappers.push(RuleWrapper::new_cascades(rule));
         }
-        // project transpose rules
-        // only do filter-project one way for now to reduce search space
-        // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-        //     ProjectFilterTransposeRule::new(),
-        // )));
         // add all filter pushdown rules as heuristic rules
         rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
             FilterProjectTransposeRule::new(),
@@ -141,6 +136,9 @@ impl DatafusionOptimizer {
         rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(ProjectMergeRule::new())));
         rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
             EliminateFilterRule::new(),
+        )));
+        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
+            ProjectFilterTransposeRule::new(),
         )));
         rule_wrappers
     }
@@ -174,7 +172,7 @@ impl DatafusionOptimizer {
                     Box::new(ColumnRefPropertyBuilder::new(catalog.clone())),
                 ],
                 OptimizerProperties {
-                    partial_explore_temporarily_disabled: false,
+                    panic_on_budget: false,
                     partial_explore_iter: Some(1 << 20),
                     partial_explore_space: Some(1 << 10),
                 },

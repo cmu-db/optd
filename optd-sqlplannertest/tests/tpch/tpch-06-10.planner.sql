@@ -298,12 +298,12 @@ PhysicalSort
             ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #3 ], right_keys: [ #0 ] }
             │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #2 ] }
             │   │   ├── PhysicalScan { table: supplier }
-            │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #17 ], right_keys: [ #0 ] }
-            │   │       ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-            │   │       │   ├── PhysicalFilter { cond: Between { expr: #10, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } } }
-            │   │       │   │   └── PhysicalScan { table: lineitem }
-            │   │       │   └── PhysicalScan { table: orders }
-            │   │       └── PhysicalScan { table: customer }
+            │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+            │   │       ├── PhysicalFilter { cond: Between { expr: #10, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } } }
+            │   │       │   └── PhysicalScan { table: lineitem }
+            │   │       └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
+            │   │           ├── PhysicalScan { table: orders }
+            │   │           └── PhysicalScan { table: customer }
             │   └── PhysicalScan { table: nation }
             └── PhysicalScan { table: nation }
 */
@@ -468,12 +468,12 @@ PhysicalSort
                 │   │   │   │   └── PhysicalScan { table: part }
                 │   │   │   └── PhysicalScan { table: supplier }
                 │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #28 ], right_keys: [ #0 ] }
-                │   │       ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #17 ], right_keys: [ #0 ] }
-                │   │       │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-                │   │       │   │   ├── PhysicalScan { table: lineitem }
-                │   │       │   │   └── PhysicalFilter { cond: Between { expr: #4, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } } }
-                │   │       │   │       └── PhysicalScan { table: orders }
-                │   │       │   └── PhysicalScan { table: customer }
+                │   │       ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+                │   │       │   ├── PhysicalScan { table: lineitem }
+                │   │       │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
+                │   │       │       ├── PhysicalFilter { cond: Between { expr: #4, lower: Cast { cast_to: Date32, expr: "1995-01-01" }, upper: Cast { cast_to: Date32, expr: "1996-12-31" } } }
+                │   │       │       │   └── PhysicalScan { table: orders }
+                │   │       │       └── PhysicalScan { table: customer }
                 │   │       └── PhysicalScan { table: nation }
                 │   └── PhysicalScan { table: nation }
                 └── PhysicalFilter
