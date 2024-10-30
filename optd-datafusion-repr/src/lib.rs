@@ -85,6 +85,7 @@ impl DatafusionOptimizer {
     pub fn default_heuristic_rules(
     ) -> Vec<Arc<dyn Rule<OptRelNodeTyp, HeuristicsOptimizer<OptRelNodeTyp>>>> {
         vec![
+            Arc::new(EliminateProjectRule::new()),
             Arc::new(SimplifyFilterRule::new()),
             Arc::new(SimplifyJoinCondRule::new()),
             Arc::new(EliminateFilterRule::new()),
@@ -99,8 +100,6 @@ impl DatafusionOptimizer {
             Arc::new(DepJoinPastAgg::new()),
             Arc::new(ProjectMergeRule::new()),
             Arc::new(FilterMergeRule::new()),
-            // disabled due to logical properties are not implemented in heuristics
-            // Arc::new(EliminateProjectRule::new()),
         ]
     }
 

@@ -73,11 +73,20 @@ impl PropertyBuilder<OptRelNodeTyp> for SchemaPropertyBuilder {
             }
             OptRelNodeTyp::Projection => children[1].clone(),
             OptRelNodeTyp::Filter => children[0].clone(),
-            OptRelNodeTyp::DepJoin(_) | OptRelNodeTyp::Join(_) => {
-                let mut schema = children[0].clone();
-                let schema2 = children[1].clone();
-                schema.fields.extend(schema2.fields);
-                schema
+            OptRelNodeTyp::RawDepJoin(join_type)
+            | OptRelNodeTyp::Join(join_type)
+            | OptRelNodeTyp::DepJoin(join_type) => {
+                use crate::plan_nodes::JoinType::*;
+                match join_type {
+                    Inner | LeftOuter | RightOuter | FullOuter | Cross => {
+                        let mut schema = children[0].clone();
+                        let schema2 = children[1].clone();
+                        schema.fields.extend(schema2.fields);
+                        schema
+                    }
+                    LeftSemi | LeftAnti => children[0].clone(),
+                    RightSemi | RightAnti => children[1].clone(),
+                }
             }
             OptRelNodeTyp::EmptyRelation => {
                 let data = data.unwrap().as_slice();

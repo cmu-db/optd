@@ -39,6 +39,7 @@ LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
 └── LogicalJoin { join_type: Inner, cond: false }
     ├── LogicalScan { table: t1 }
     └── LogicalScan { table: t2 }
+LogicalEmptyRelation { produce_one_row: false }
 PhysicalEmptyRelation { produce_one_row: false }
 */
 
