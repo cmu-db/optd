@@ -62,12 +62,10 @@ fn match_node<T: RelNodeTyp>(
             RuleMatcher::PickOne { pick_to, expand } => {
                 let group_id = node.children[idx];
                 let node = if *expand {
-                    let mut exprs = optimizer.get_all_exprs_in_group(group_id);
-                    assert_eq!(exprs.len(), 1, "can only expand expression");
-                    let expr = exprs.remove(0);
-                    let mut bindings = optimizer.get_all_expr_bindings(expr, None);
-                    assert_eq!(bindings.len(), 1, "can only expand expression");
-                    bindings.remove(0).as_ref().clone()
+                    let binding = optimizer
+                        .get_predicate_binding(group_id)
+                        .expect("empty group, what's going wrong?");
+                    binding.as_ref().clone()
                 } else {
                     RelNode::new_group(group_id)
                 };
@@ -193,69 +191,30 @@ impl<T: RelNodeTyp> Task<T> for ApplyRuleTask {
         let mut tasks = vec![];
         let binding_exprs = match_and_pick_expr(rule.matcher(), self.expr_id, optimizer);
         for expr in binding_exprs {
+            trace!(event = "before_apply_rule", task = "apply_rule", binding = ?expr.iter().map(|(k, v)| format!("{}=>{}", k, v)).join(","));
             let applied = rule.apply(optimizer, expr);
 
             if rule_wrapper.optimize_type() == OptimizeType::Heuristics {
-                assert!(
-                    applied.len() <= 1,
-                    "rules registered as heuristics should always return equal or less than one expr"
-                );
-
-                if applied.is_empty() {
-                    continue;
-                }
-
-                let RelNode { typ, .. } = &applied[0];
-
-                assert!(
-                    !rule.is_impl_rule(),
-                    "impl rule registered should not be registered as heuristics"
-                );
-
-                if let Some(group_id_2) = typ.extract_group() {
-                    // If this is a group, merge the groups!
-                    optimizer.merge_group(group_id, group_id_2);
-                    // mark the old expr as a dead end
-                    (0..optimizer.rules().len())
-                        .for_each(|i| optimizer.mark_rule_fired(self.expr_id, i));
-                    continue;
-                }
-
-                for new_expr in applied {
-                    // replace the old expr with the new expr
-                    optimizer.replace_group_expr(new_expr.into(), group_id, self.expr_id);
-
-                    // expr replacement will treat the new expr as not explored, but we need to mark current rule fired
-                    optimizer.mark_rule_fired(self.expr_id, self.rule_id);
-
-                    trace!(event = "apply_rule replace", expr_id = %self.expr_id, rule_id = %self.rule_id);
-
-                    tasks.push(
-                        Box::new(OptimizeExpressionTask::new(self.expr_id, self.exploring))
-                            as Box<dyn Task<T>>,
-                    );
-                }
-                continue;
+                panic!("no more heuristics rule in cascades");
             }
 
             for expr in applied {
-                let RelNode { typ, .. } = &expr;
-                if let Some(group_id_2) = typ.extract_group() {
-                    // If this is a group, merge the groups!
-                    optimizer.merge_group(group_id, group_id_2);
-                    continue;
-                }
-                let expr_typ = typ.clone();
-                let (_, expr_id) = optimizer.add_group_expr(expr.into(), Some(group_id));
-                trace!(event = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, new_expr_id = %expr_id);
-                if expr_typ.is_logical() {
-                    tasks.push(
-                        Box::new(OptimizeExpressionTask::new(expr_id, self.exploring))
-                            as Box<dyn Task<T>>,
-                    );
+                trace!(event = "after_apply_rule", task = "apply_rule", binding=%expr);
+                let expr_typ = expr.typ.clone();
+                if let Some(expr_id) = optimizer.add_expr_to_group(expr.into(), group_id) {
+                    if expr_typ.is_logical() {
+                        tasks.push(
+                            Box::new(OptimizeExpressionTask::new(expr_id, self.exploring))
+                                as Box<dyn Task<T>>,
+                        );
+                    } else {
+                        tasks
+                            .push(Box::new(OptimizeInputsTask::new(expr_id, true))
+                                as Box<dyn Task<T>>);
+                    }
+                    trace!(event = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, new_expr_id = %expr_id);
                 } else {
-                    tasks
-                        .push(Box::new(OptimizeInputsTask::new(expr_id, true)) as Box<dyn Task<T>>);
+                    trace!(event = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, "triggered group merge");
                 }
             }
         }

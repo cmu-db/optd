@@ -17,10 +17,9 @@ LogicalProjection { exprs: [ #0, #1 ] }
 └── LogicalJoin { join_type: Cross, cond: true }
     ├── LogicalScan { table: t1 }
     └── LogicalScan { table: t2 }
-PhysicalProjection { exprs: [ #0, #1 ] }
-└── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-    ├── PhysicalScan { table: t1 }
-    └── PhysicalScan { table: t2 }
+PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+├── PhysicalScan { table: t1 }
+└── PhysicalScan { table: t2 }
 0 0
 0 1
 0 2

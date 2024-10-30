@@ -12,8 +12,7 @@ select * from t1;
 /*
 LogicalProjection { exprs: [ #0, #1 ] }
 └── LogicalScan { table: t1 }
-PhysicalProjection { exprs: [ #0, #1 ] }
-└── PhysicalScan { table: t1 }
+PhysicalScan { table: t1 }
 0 0
 1 1
 5 2
@@ -45,8 +44,7 @@ PhysicalSort
 │   │   └── #0
 │   └── SortOrder { order: Asc }
 │       └── #1
-└── PhysicalProjection { exprs: [ #0, #1 ] }
-    └── PhysicalScan { table: t1 }
+└── PhysicalScan { table: t1 }
 0 0
 0 2
 1 1
@@ -61,9 +59,8 @@ select * from t1 group by v1, v2, v1;
 LogicalProjection { exprs: [ #0, #1 ] }
 └── LogicalAgg { exprs: [], groups: [ #0, #1, #0 ] }
     └── LogicalScan { table: t1 }
-PhysicalProjection { exprs: [ #0, #1 ] }
-└── PhysicalAgg { aggrs: [], groups: [ #0, #1 ] }
-    └── PhysicalScan { table: t1 }
+PhysicalAgg { aggrs: [], groups: [ #0, #1 ] }
+└── PhysicalScan { table: t1 }
 0 0
 1 1
 5 2
@@ -96,9 +93,8 @@ PhysicalSort
 │   │   └── #0
 │   └── SortOrder { order: Asc }
 │       └── #1
-└── PhysicalProjection { exprs: [ #0, #1 ] }
-    └── PhysicalAgg { aggrs: [], groups: [ #0, #1 ] }
-        └── PhysicalScan { table: t1 }
+└── PhysicalAgg { aggrs: [], groups: [ #0, #1 ] }
+    └── PhysicalScan { table: t1 }
 0 0
 0 2
 1 1

@@ -3,7 +3,7 @@
     create table t2(t2v1 int, t2v3 int);
     create table t3(t3v2 int, t3v4 int);
   tasks:
-    - execute[with_logical]
+    - execute[use_df_logical]
 # - sql: |
 #     select * from t1 where t1v1 in (select t2v1 from t2);
 #   desc: Test whether the optimizer can unnest "in" subqueries. -- failing with unsupported expression
@@ -13,4 +13,4 @@
     select * from t1 where (select sum(t2v3) from t2 where t2v1 = t1v1) > 100;
   desc: Test whether the optimizer can unnest correlated subqueries.
   tasks:
-    - explain:logical_optd,physical_optd
+    - explain:logical_optd,optimized_logical_optd,physical_optd

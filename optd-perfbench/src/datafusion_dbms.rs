@@ -103,22 +103,22 @@ impl DatafusionDBMS {
         stats: Option<DataFusionBaseTableStats>,
         benchmark: &Benchmark,
     ) -> anyhow::Result<()> {
-        let with_logical = match benchmark {
+        let use_df_logical = match benchmark {
             Benchmark::Tpch(_) => WITH_LOGICAL_FOR_TPCH,
             Benchmark::Job(_) | Benchmark::Joblight(_) => WITH_LOGICAL_FOR_JOB,
         };
-        self.ctx = Some(Self::new_session_ctx(stats, self.adaptive, with_logical).await?);
+        self.ctx = Some(Self::new_session_ctx(stats, self.adaptive, use_df_logical).await?);
         Ok(())
     }
 
     async fn new_session_ctx(
         stats: Option<DataFusionBaseTableStats>,
         adaptive: bool,
-        with_logical: bool,
+        use_df_logical: bool,
     ) -> anyhow::Result<SessionContext> {
         let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
 
-        if !with_logical {
+        if !use_df_logical {
             session_config.options_mut().optimizer.max_passes = 0;
         }
 

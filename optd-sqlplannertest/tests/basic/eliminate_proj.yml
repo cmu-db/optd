@@ -1,0 +1,35 @@
+- sql: |
+    create table t1(v1 int, v2 int);
+    insert into t1 values (0, 0), (1, 1), (2, 2);
+    create table t2(v0 int, v1 int, v2 int, v3 int);
+    insert into t2 values (0, 0, 0, 0), (1, 1, 1, 1), (2, 2, 2, 2);
+  tasks:
+    - execute
+- sql: |
+    select v1 from (select v2, v1 from (select v1, v2 from t1 limit 5));
+  desc: Test MergeProjectRule with only the rule enabled
+  tasks:
+    - explain[logical_rules:project_merge_rule]:logical_optd,physical_optd
+- sql: |
+    select v1 from (select v2, v1 from (select v1, v2 from t1 limit 5));
+  desc: Test EliminateProjectRule with only the rule enabled
+  tasks:
+    - explain[logical_rules:eliminate_project_rule]:logical_optd,physical_optd
+- sql: |
+    select v1 from (select v2, v1 from (select v1, v2 from t1 limit 5));
+  desc: Test with all rules enabled
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select v1 from (select v2, v1 from (select v1, v2 from t1 limit 5));
+  desc: Test with all rules enabled
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
+    select v0, v2, v1, v3 from (select v0 as v0, v2 as v1, v1 as v2, v3 from t2);
+  desc: Test with all rules enabled
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute

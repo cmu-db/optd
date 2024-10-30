@@ -1772,6 +1772,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "escape8259"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5692dd7b5a1978a5aeb0ce83b7655c58ca8efdcb79d21036ea249da95afec2c6"
+
+[[package]]
 name = "fallible-iterator"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2461,11 +2467,12 @@ dependencies = [
 
 [[package]]
 name = "libtest-mimic"
-version = "0.5.2"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79529479c298f5af41375b0c1a77ef670d450b4c9cd7949d2b43af08121b20ec"
+checksum = "cc0bda45ed5b3a2904262c1bb91e526127aa70e7ef3758aba2ef93cf896b9b58"
 dependencies = [
- "clap 3.2.25",
+ "clap 4.5.4",
+ "escape8259",
  "termcolor",
  "threadpool",
 ]
@@ -2947,6 +2954,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "clap 4.5.4",
  "datafusion",
  "datafusion-optd-cli",
  "dirs",
@@ -4078,7 +4086,7 @@ dependencies = [
 [[package]]
 name = "sqlplannertest"
 version = "0.1.0"
-source = "git+https://github.com/risinglightdb/sqlplannertest-rs#3f92e1d7af3894f9a7fd319bb5b1757c748b4125"
+source = "git+https://github.com/risinglightdb/sqlplannertest-rs?branch=main#4a0a5f9de80842de8808169262a1d7e27094d225"
 dependencies = [
  "anyhow",
  "async-trait",

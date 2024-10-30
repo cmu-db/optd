@@ -1,5 +1,5 @@
 -- This is just used if you want to run really simple manual tests on the CLI. Feel free to delete the whole thing and write your own manual tests
--- Command: `cargo run --bin datafusion-optd-cli -- --enable-logical -f datafusion-optd-cli/tpch-sf0_01/simple_manual_test.sql`
+-- Command: `cargo run --bin datafusion-optd-cli -- --enable-df-logical -f datafusion-optd-cli/tpch-sf0_01/simple_manual_test.sql`
 CREATE TABLE NATION  (
     N_NATIONKEY  INT NOT NULL,
     N_NAME       CHAR(25) NOT NULL,
