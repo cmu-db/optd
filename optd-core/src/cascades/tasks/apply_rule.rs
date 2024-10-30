@@ -172,7 +172,6 @@ fn match_and_pick<T: RelNodeTyp>(
 }
 
 impl<T: RelNodeTyp> Task<T> for ApplyRuleTask {
-
     fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
         if optimizer.is_rule_fired(self.expr_id, self.rule_id) {
             return Ok(vec![]);

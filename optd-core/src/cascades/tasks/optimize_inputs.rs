@@ -117,7 +117,6 @@ impl OptimizeInputsTask {
 }
 
 impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
-
     fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
         if self.continue_from.is_none() {
             if optimizer.is_expr_explored(self.expr_id) {
