@@ -1,6 +1,4 @@
-use std::{
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use crate::adv_cost::OptCostModel;
 use optd_core::{
@@ -9,8 +7,7 @@ use optd_core::{
     rel_node::{RelNode, Value},
 };
 use optd_datafusion_repr::{
-    cost::adaptive_cost::RuntimeAdaptionStorageInner,
-    plan_nodes::{OptRelNodeTyp},
+    cost::adaptive_cost::RuntimeAdaptionStorageInner, plan_nodes::OptRelNodeTyp,
 };
 use serde::{de::DeserializeOwned, Serialize};
 

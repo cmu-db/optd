@@ -1,4 +1,4 @@
-use std::{sync::Arc};
+use std::sync::Arc;
 
 use optd_core::{
     cascades::CascadesOptimizer,
