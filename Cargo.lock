@@ -2767,6 +2767,7 @@ dependencies = [
  "datafusion-expr",
  "futures-lite",
  "futures-util",
+ "itertools",
  "optd-core",
  "optd-datafusion-repr",
 ]
