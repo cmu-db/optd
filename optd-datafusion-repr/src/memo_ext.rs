@@ -47,7 +47,7 @@ fn enumerate_join_order_expr_inner(
     match expr.typ {
         OptRelNodeTyp::Scan => {
             let scan = LogicalScan::from_rel_node(Arc::new(expr)).unwrap();
-            return vec![LogicalJoinOrder::Table(scan.table())];
+            vec![LogicalJoinOrder::Table(scan.table())]
         }
         OptRelNodeTyp::Join(_) | OptRelNodeTyp::DepJoin(_) | OptRelNodeTyp::RawDepJoin(_) => {
             // Assume child 0 == left, child 1 == right
