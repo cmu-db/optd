@@ -6,7 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arrow-schema = "47.0.0"
 datafusion = "32.0.0"
 datafusion-expr = "32.0.0"
 async-trait = "0.1"
@@ -16,5 +15,3 @@ anyhow = "1"
 async-recursion = "1"
 futures-lite = "2"
 futures-util = "0.3"
-tracing = "0.1"
-itertools = "0.11"

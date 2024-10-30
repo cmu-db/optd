@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 datafusion-optd-cli = { path = "../datafusion-optd-cli" }
 rand = "0.8"
-async-trait = "0.1.41"
 datafusion = { version = "32.0.0", features = [
     "avro",
     "crypto_expressions",
@@ -17,10 +16,7 @@ datafusion = { version = "32.0.0", features = [
     "unicode_expressions",
     "compression",
 ] }
-dirs = "4.0.0"
-env_logger = "0.9"
 mimalloc = { version = "0.1", default-features = false }
-regex = "1.8"
 tokio = { version = "1.24", features = [
     "macros",
     "rt",
@@ -28,9 +24,6 @@ tokio = { version = "1.24", features = [
     "sync",
     "parking_lot",
 ] }
-url = "2.2"
 optd-datafusion-bridge = { path = "../optd-datafusion-bridge" }
 optd-datafusion-repr = { path = "../optd-datafusion-repr" }
-tracing-subscriber = "0.3"
-tracing = "0.1"
 console = "0.15"
