@@ -4,42 +4,18 @@ mod join;
 mod limit;
 pub mod stats;
 
-use itertools::Itertools;
-use optd_core::{
-    cascades::{CascadesOptimizer, RelNodeContext},
-    cost::{Cost, CostModel},
-    rel_node::{RelNode, RelNodeTyp, Value},
-};
-use optd_datafusion_repr::{
-    plan_nodes::OptRelNodeTyp,
-    properties::column_ref::{BaseTableColumnRef, ColumnRef},
-};
+use optd_datafusion_repr::properties::column_ref::{BaseTableColumnRef, ColumnRef};
 use serde::{de::DeserializeOwned, Serialize};
 
-use super::adv_cost::stats::{
+use super::adv_stats::stats::{
     BaseTableStats, ColumnCombValueStats, Distribution, MostCommonValues,
 };
 
-fn compute_plan_node_cost<T: RelNodeTyp, C: CostModel<T>>(
-    model: &C,
-    node: &RelNode<T>,
-    total_cost: &mut Cost,
-) -> Cost {
-    let children = node
-        .children
-        .iter()
-        .map(|child| compute_plan_node_cost(model, child, total_cost))
-        .collect_vec();
-    let cost = model.compute_cost(&node.typ, &node.data, &children, None, None);
-    model.accumulate(total_cost, &cost);
-    cost
-}
-
-pub struct OptCostModel<
+pub struct AdvStats<
     M: MostCommonValues + Serialize + DeserializeOwned,
     D: Distribution + Serialize + DeserializeOwned,
 > {
-    per_table_stats_map: BaseTableStats<M, D>,
+    pub(crate) per_table_stats_map: BaseTableStats<M, D>,
 }
 
 // Default statistics. All are from selfuncs.h in Postgres unless specified otherwise
@@ -55,150 +31,10 @@ const DEFAULT_UNK_SEL: f64 = 0.005;
 // A placeholder for unimplemented!() for codepaths which are accessed by plannertest
 const UNIMPLEMENTED_SEL: f64 = 0.01;
 
-pub const ROW_COUNT: usize = 1;
-pub const COMPUTE_COST: usize = 2;
-pub const IO_COST: usize = 3;
-
 impl<
         M: MostCommonValues + Serialize + DeserializeOwned,
         D: Distribution + Serialize + DeserializeOwned,
-    > OptCostModel<M, D>
-{
-    pub fn row_cnt(Cost(cost): &Cost) -> f64 {
-        cost[ROW_COUNT]
-    }
-
-    pub fn compute_cost(Cost(cost): &Cost) -> f64 {
-        cost[COMPUTE_COST]
-    }
-
-    pub fn io_cost(Cost(cost): &Cost) -> f64 {
-        cost[IO_COST]
-    }
-
-    pub fn cost_tuple(Cost(cost): &Cost) -> (f64, f64, f64) {
-        (cost[ROW_COUNT], cost[COMPUTE_COST], cost[IO_COST])
-    }
-
-    pub fn weighted_cost(row_cnt: f64, compute_cost: f64, io_cost: f64) -> f64 {
-        let _ = row_cnt;
-        compute_cost + io_cost
-    }
-
-    pub fn cost(row_cnt: f64, compute_cost: f64, io_cost: f64) -> Cost {
-        Cost(vec![
-            Self::weighted_cost(row_cnt, compute_cost, io_cost),
-            row_cnt,
-            compute_cost,
-            io_cost,
-        ])
-    }
-}
-
-impl<
-        M: MostCommonValues + Serialize + DeserializeOwned,
-        D: Distribution + Serialize + DeserializeOwned,
-    > CostModel<OptRelNodeTyp> for OptCostModel<M, D>
-{
-    fn explain(&self, cost: &Cost) -> String {
-        format!(
-            "weighted={},row_cnt={},compute={},io={}",
-            cost.0[0],
-            Self::row_cnt(cost),
-            Self::compute_cost(cost),
-            Self::io_cost(cost)
-        )
-    }
-
-    fn accumulate(&self, total_cost: &mut Cost, cost: &Cost) {
-        // do not accumulate row count
-        total_cost.0[COMPUTE_COST] += Self::compute_cost(cost);
-        total_cost.0[IO_COST] += Self::io_cost(cost);
-        total_cost.0[0] = Self::weighted_cost(
-            total_cost.0[ROW_COUNT],
-            total_cost.0[COMPUTE_COST],
-            total_cost.0[IO_COST],
-        );
-    }
-
-    fn zero(&self) -> Cost {
-        Self::cost(0.0, 0.0, 0.0)
-    }
-
-    fn compute_cost(
-        &self,
-        node: &OptRelNodeTyp,
-        data: &Option<Value>,
-        children: &[Cost],
-        context: Option<RelNodeContext>,
-        optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
-    ) -> Cost {
-        match node {
-            OptRelNodeTyp::PhysicalScan => {
-                let table = data.as_ref().unwrap().as_str();
-                let row_cnt = self
-                    .per_table_stats_map
-                    .get(table.as_ref())
-                    .map(|per_table_stats| per_table_stats.row_cnt)
-                    .unwrap_or(1) as f64;
-                Self::cost(row_cnt, 0.0, row_cnt)
-            }
-            OptRelNodeTyp::PhysicalEmptyRelation => Self::cost(0.5, 0.01, 0.0),
-            OptRelNodeTyp::PhysicalLimit => Self::get_limit_cost(children, context, optimizer),
-            OptRelNodeTyp::PhysicalFilter => self.get_filter_cost(children, context, optimizer),
-            OptRelNodeTyp::PhysicalNestedLoopJoin(join_typ) => {
-                self.get_nlj_cost(*join_typ, children, context, optimizer)
-            }
-            OptRelNodeTyp::PhysicalProjection => {
-                let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
-                let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
-                Self::cost(row_cnt, compute_cost * row_cnt, 0.0)
-            }
-            OptRelNodeTyp::PhysicalHashJoin(join_typ) => {
-                self.get_hash_join_cost(*join_typ, children, context, optimizer)
-            }
-            OptRelNodeTyp::PhysicalSort => {
-                let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
-                Self::cost(row_cnt, row_cnt * row_cnt.ln_1p().max(1.0), 0.0)
-            }
-            OptRelNodeTyp::PhysicalAgg => self.get_agg_cost(children, context, optimizer),
-            OptRelNodeTyp::List => {
-                let compute_cost = children
-                    .iter()
-                    .map(|child| {
-                        let (_, compute_cost, _) = Self::cost_tuple(child);
-                        compute_cost
-                    })
-                    .sum::<f64>();
-                Self::cost(1.0, compute_cost + 0.01, 0.0)
-            }
-            OptRelNodeTyp::ColumnRef => Self::cost(1.0, 0.01, 0.0),
-            _ if node.is_expression() => {
-                let compute_cost = children
-                    .iter()
-                    .map(|child| {
-                        let (_, compute_cost, _) = Self::cost_tuple(child);
-                        compute_cost
-                    })
-                    .sum::<f64>();
-                Self::cost(1.0, compute_cost + 1.0, 0.0)
-            }
-            x => unimplemented!("cannot compute cost for {}", x),
-        }
-    }
-
-    fn compute_plan_node_cost(&self, node: &RelNode<OptRelNodeTyp>) -> Cost {
-        let mut cost = self.zero();
-        let top = compute_plan_node_cost(self, node, &mut cost);
-        cost.0[ROW_COUNT] = top.0[ROW_COUNT];
-        cost
-    }
-}
-
-impl<
-        M: MostCommonValues + Serialize + DeserializeOwned,
-        D: Distribution + Serialize + DeserializeOwned,
-    > OptCostModel<M, D>
+    > AdvStats<M, D>
 {
     pub fn new(per_table_stats_map: BaseTableStats<M, D>) -> Self {
         Self {
@@ -245,7 +81,7 @@ mod tests {
 
     use super::{stats::*, *};
     pub type TestPerColumnStats = ColumnCombValueStats<TestMostCommonValues, TestDistribution>;
-    pub type TestOptCostModel = OptCostModel<TestMostCommonValues, TestDistribution>;
+    pub type TestOptCostModel = AdvStats<TestMostCommonValues, TestDistribution>;
 
     #[derive(Serialize, Deserialize)]
     pub struct TestMostCommonValues {
@@ -319,7 +155,7 @@ mod tests {
 
     // one column is sufficient for all filter selectivity tests
     pub fn create_one_column_cost_model(per_column_stats: TestPerColumnStats) -> TestOptCostModel {
-        OptCostModel::new(
+        AdvStats::new(
             vec![(
                 String::from(TABLE1_NAME),
                 TableStats::new(100, vec![(vec![0], per_column_stats)].into_iter().collect()),
@@ -348,7 +184,7 @@ mod tests {
         tbl2_per_column_stats: TestPerColumnStats,
         tbl3_per_column_stats: TestPerColumnStats,
     ) -> TestOptCostModel {
-        OptCostModel::new(
+        AdvStats::new(
             vec![
                 (
                     String::from(TABLE1_NAME),
@@ -384,7 +220,7 @@ mod tests {
         tbl3_per_column_stats: TestPerColumnStats,
         tbl4_per_column_stats: TestPerColumnStats,
     ) -> TestOptCostModel {
-        OptCostModel::new(
+        AdvStats::new(
             vec![
                 (
                     String::from(TABLE1_NAME),
@@ -427,7 +263,7 @@ mod tests {
         tbl1_row_cnt: usize,
         tbl2_row_cnt: usize,
     ) -> TestOptCostModel {
-        OptCostModel::new(
+        AdvStats::new(
             vec![
                 (
                     String::from(TABLE1_NAME),
@@ -523,7 +359,7 @@ mod tests {
     /// The reason this isn't an associated function of PerColumnStats is because that would require
     ///   adding an empty() function to the trait definitions of MostCommonValues and Distribution,
     ///   which I wanted to avoid
-    pub fn get_empty_per_col_stats() -> TestPerColumnStats {
+    pub(crate) fn get_empty_per_col_stats() -> TestPerColumnStats {
         TestPerColumnStats::new(
             TestMostCommonValues::empty(),
             0,

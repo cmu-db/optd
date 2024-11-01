@@ -535,12 +535,20 @@ impl<T: RelNodeTyp> Memo<T> {
         group_id: GroupId,
         mut post_process: impl FnMut(Arc<RelNode<T>>, GroupId, &WinnerInfo),
     ) -> Result<RelNodeRef<T>> {
+        self.get_best_group_binding_inner(group_id, &mut post_process)
+    }
+
+    fn get_best_group_binding_inner(
+        &self,
+        group_id: GroupId,
+        post_process: &mut impl FnMut(Arc<RelNode<T>>, GroupId, &WinnerInfo),
+    ) -> Result<RelNodeRef<T>> {
         let info = self.get_group_info(group_id);
         if let Winner::Full(info @ WinnerInfo { expr_id, .. }) = info.winner {
             let expr = self.expr_id_to_expr_node[&expr_id].clone();
             let mut children = Vec::with_capacity(expr.children.len());
             for child in &expr.children {
-                children.push(self.get_best_group_binding(*child, &mut post_process)?);
+                children.push(self.get_best_group_binding_inner(*child, post_process)?);
             }
             let node = Arc::new(RelNode {
                 typ: expr.typ.clone(),

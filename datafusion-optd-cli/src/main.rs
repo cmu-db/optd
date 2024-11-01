@@ -31,7 +31,7 @@ use datafusion_optd_cli::{
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::DatafusionOptimizer;
-use optd_datafusion_repr_adv_cost::adv_cost::stats::BaseTableStats;
+use optd_datafusion_repr_adv_cost::adv_stats::stats::BaseTableStats;
 use std::collections::HashMap;
 use std::env;
 use std::path::Path;

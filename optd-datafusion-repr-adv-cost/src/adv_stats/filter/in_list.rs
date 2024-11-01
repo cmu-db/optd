@@ -1,8 +1,8 @@
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::adv_cost::{
+use crate::adv_stats::{
     stats::{Distribution, MostCommonValues},
-    OptCostModel, UNIMPLEMENTED_SEL,
+    AdvStats, UNIMPLEMENTED_SEL,
 };
 use optd_datafusion_repr::{
     plan_nodes::{ColumnRefExpr, ConstantExpr, InListExpr, OptRelNode, OptRelNodeTyp},
@@ -12,7 +12,7 @@ use optd_datafusion_repr::{
 impl<
         M: MostCommonValues + Serialize + DeserializeOwned,
         D: Distribution + Serialize + DeserializeOwned,
-    > OptCostModel<M, D>
+    > AdvStats<M, D>
 {
     /// Only support colA in (val1, val2, val3) where colA is a column ref and
     /// val1, val2, val3 are constants.
@@ -76,7 +76,7 @@ impl<
 mod tests {
     use optd_core::rel_node::Value;
 
-    use crate::adv_cost::tests::{
+    use crate::adv_stats::tests::{
         create_one_column_cost_model, in_list, TestDistribution, TestMostCommonValues,
         TestPerColumnStats, TABLE1_NAME,
     };

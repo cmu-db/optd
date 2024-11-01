@@ -2882,6 +2882,7 @@ dependencies = [
  "mimalloc",
  "optd-datafusion-bridge",
  "optd-datafusion-repr",
+ "optd-datafusion-repr-adv-cost",
  "regex",
  "sqlplannertest",
  "tokio",

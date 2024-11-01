@@ -2,12 +2,11 @@ use std::ops::Bound;
 
 use optd_core::{
     cascades::{CascadesOptimizer, RelNodeContext},
-    cost::Cost,
     rel_node::Value,
 };
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::adv_cost::{
+use crate::adv_stats::{
     stats::{ColumnCombValueStats, Distribution, MostCommonValues},
     UNIMPLEMENTED_SEL,
 };
@@ -24,9 +23,7 @@ use optd_datafusion_repr::{
     },
 };
 
-use super::{
-    stats::ColumnCombValue, OptCostModel, DEFAULT_EQ_SEL, DEFAULT_INEQ_SEL, DEFAULT_UNK_SEL,
-};
+use super::{stats::ColumnCombValue, AdvStats, DEFAULT_EQ_SEL, DEFAULT_INEQ_SEL, DEFAULT_UNK_SEL};
 
 mod in_list;
 mod like;
@@ -34,16 +31,14 @@ mod like;
 impl<
         M: MostCommonValues + Serialize + DeserializeOwned,
         D: Distribution + Serialize + DeserializeOwned,
-    > OptCostModel<M, D>
+    > AdvStats<M, D>
 {
-    pub(super) fn get_filter_cost(
+    pub(crate) fn get_filter_row_cnt(
         &self,
-        children: &[Cost],
+        child_row_cnt: f64,
         context: Option<RelNodeContext>,
         optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
-    ) -> Cost {
-        let (row_cnt, _, _) = Self::cost_tuple(&children[0]);
-        let (_, compute_cost, _) = Self::cost_tuple(&children[1]);
+    ) -> f64 {
         let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
             let schema =
                 optimizer.get_property_by_group::<SchemaPropertyBuilder>(context.group_id, 0);
@@ -58,11 +53,7 @@ impl<
         } else {
             DEFAULT_UNK_SEL
         };
-        Self::cost(
-            (row_cnt * selectivity).max(1.0),
-            row_cnt * compute_cost,
-            0.0,
-        )
+        (child_row_cnt * selectivity).max(1.0)
     }
 
     /// The expr_tree input must be a "mixed expression tree".
@@ -570,7 +561,7 @@ mod tests {
     use arrow_schema::DataType;
     use optd_core::rel_node::Value;
 
-    use crate::adv_cost::{tests::*, DEFAULT_EQ_SEL};
+    use crate::adv_stats::{tests::*, DEFAULT_EQ_SEL};
     use optd_datafusion_repr::{
         plan_nodes::{BinOpType, ConstantType, LogOpType, UnOpType},
         properties::{

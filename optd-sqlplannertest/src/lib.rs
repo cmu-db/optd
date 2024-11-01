@@ -11,6 +11,8 @@ use lazy_static::lazy_static;
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::DatafusionOptimizer;
+use optd_datafusion_repr_adv_cost::adv_stats::stats::DataFusionBaseTableStats;
+use optd_datafusion_repr_adv_cost::new_physical_adv_cost;
 use regex::Regex;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -32,9 +34,20 @@ pub struct DatafusionDBMS {
 
 impl DatafusionDBMS {
     pub async fn new() -> Result<Self> {
-        let (ctx, optd_optimizer) = DatafusionDBMS::new_session_ctx(false, None).await?;
+        let (ctx, optd_optimizer) = DatafusionDBMS::new_session_ctx(false, None, false).await?;
         let (use_df_logical_ctx, _) =
-            DatafusionDBMS::new_session_ctx(true, Some(ctx.state().catalog_list().clone())).await?;
+            Self::new_session_ctx(true, Some(ctx.state().catalog_list().clone()), false).await?;
+        Ok(Self {
+            ctx,
+            use_df_logical_ctx,
+            optd_optimizer: Some(optd_optimizer),
+        })
+    }
+
+    pub async fn new_advanced_cost() -> Result<Self> {
+        let (ctx, optd_optimizer) = DatafusionDBMS::new_session_ctx(false, None, true).await?;
+        let (use_df_logical_ctx, _) =
+            Self::new_session_ctx(true, Some(ctx.state().catalog_list().clone()), true).await?;
         Ok(Self {
             ctx,
             use_df_logical_ctx,
@@ -46,6 +59,7 @@ impl DatafusionDBMS {
     async fn new_session_ctx(
         use_df_logical: bool,
         catalog: Option<Arc<dyn CatalogList>>,
+        with_advanced_cost: bool,
     ) -> Result<(SessionContext, Arc<OptdQueryPlanner>)> {
         let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
         if !use_df_logical {
@@ -66,10 +80,18 @@ impl DatafusionDBMS {
             } else {
                 SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env))
             };
-            let optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical(
-                Arc::new(DatafusionCatalog::new(state.catalog_list())),
-                false,
-            );
+            let optimizer = if with_advanced_cost {
+                new_physical_adv_cost(
+                    Arc::new(DatafusionCatalog::new(state.catalog_list())),
+                    DataFusionBaseTableStats::default(),
+                    false,
+                )
+            } else {
+                DatafusionOptimizer::new_physical(
+                    Arc::new(DatafusionCatalog::new(state.catalog_list())),
+                    false,
+                )
+            };
             if !use_df_logical {
                 // clean up optimizer rules so that we can plug in our own optimizer
                 state = state.with_optimizer_rules(vec![]);

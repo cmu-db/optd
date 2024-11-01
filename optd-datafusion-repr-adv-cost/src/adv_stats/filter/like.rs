@@ -1,9 +1,9 @@
 use datafusion::arrow::{array::StringArray, compute::like};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::adv_cost::{
+use crate::adv_stats::{
     stats::{ColumnCombValue, Distribution, MostCommonValues},
-    OptCostModel, UNIMPLEMENTED_SEL,
+    AdvStats, UNIMPLEMENTED_SEL,
 };
 use optd_datafusion_repr::{
     plan_nodes::{ColumnRefExpr, ConstantExpr, LikeExpr, OptRelNode, OptRelNodeTyp},
@@ -21,7 +21,7 @@ const FIXED_CHAR_SEL_FACTOR: f64 = 0.2;
 impl<
         M: MostCommonValues + Serialize + DeserializeOwned,
         D: Distribution + Serialize + DeserializeOwned,
-    > OptCostModel<M, D>
+    > AdvStats<M, D>
 {
     /// Compute the selectivity of a (NOT) LIKE expression.
     ///
@@ -113,7 +113,7 @@ impl<
 mod tests {
     use optd_core::rel_node::Value;
 
-    use crate::adv_cost::{
+    use crate::adv_stats::{
         filter::like::{FIXED_CHAR_SEL_FACTOR, FULL_WILDCARD_SEL_FACTOR},
         tests::{
             create_one_column_cost_model, like, TestDistribution, TestMostCommonValues,

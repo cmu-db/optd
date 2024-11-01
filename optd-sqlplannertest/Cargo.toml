@@ -11,6 +11,7 @@ anyhow = { version = "1", features = ["backtrace"] }
 sqlplannertest = { git = "https://github.com/risinglightdb/sqlplannertest-rs", branch = "main" }
 async-trait = "0.1"
 datafusion-optd-cli = { path = "../datafusion-optd-cli" }
+optd-datafusion-repr-adv-cost = { path = "../optd-datafusion-repr-adv-cost" }
 datafusion = { version = "32.0.0", features = [
     "avro",
     "crypto_expressions",

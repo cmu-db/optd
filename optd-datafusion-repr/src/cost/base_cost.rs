@@ -109,7 +109,6 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                 let row_cnt_2 = Self::row_cnt(children[1]);
                 Self::stat(row_cnt_1.min(row_cnt_2).max(1.0))
             }
-
             OptRelNodeTyp::PhysicalSort
             | OptRelNodeTyp::PhysicalAgg
             | OptRelNodeTyp::PhysicalProjection => {
@@ -165,7 +164,6 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                 let row_cnt_2 = row_cnts[1];
                 Self::cost(row_cnt_1 * 2.0 + row_cnt_2, 0.0)
             }
-
             OptRelNodeTyp::PhysicalSort => {
                 let row_cnt = row_cnts[0];
                 Self::cost(row_cnt * row_cnt.ln_1p().max(1.0), 0.0)

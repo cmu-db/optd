@@ -28,7 +28,7 @@ use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::DatafusionOptimizer;
 use optd_datafusion_repr_adv_cost::{
-    adv_cost::stats::{DataFusionBaseTableStats, DataFusionPerTableStats},
+    adv_stats::stats::{DataFusionBaseTableStats, DataFusionPerTableStats},
     new_physical_adv_cost,
 };
 use parquet::arrow::arrow_reader::{

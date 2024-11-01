@@ -9,6 +9,8 @@ use clap::Parser;
 struct Cli {
     /// Optional list of directories to apply the test; if empty, apply all tests
     directories: Vec<String>,
+    #[clap(long)]
+    enable_advanced_cost: bool,
 }
 
 #[tokio::main]

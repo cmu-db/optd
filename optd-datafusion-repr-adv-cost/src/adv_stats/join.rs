@@ -1,13 +1,10 @@
 use std::collections::HashSet;
 
 use itertools::Itertools;
-use optd_core::{
-    cascades::{CascadesOptimizer, RelNodeContext},
-    cost::Cost,
-};
+use optd_core::cascades::{CascadesOptimizer, RelNodeContext};
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::adv_cost::{
+use crate::adv_stats::{
     stats::{Distribution, MostCommonValues},
     DEFAULT_NUM_DISTINCT,
 };
@@ -25,23 +22,21 @@ use optd_datafusion_repr::{
     },
 };
 
-use super::{OptCostModel, DEFAULT_UNK_SEL};
+use super::{AdvStats, DEFAULT_UNK_SEL};
 
 impl<
         M: MostCommonValues + Serialize + DeserializeOwned,
         D: Distribution + Serialize + DeserializeOwned,
-    > OptCostModel<M, D>
+    > AdvStats<M, D>
 {
-    pub(super) fn get_nlj_cost(
+    pub(crate) fn get_nlj_row_cnt(
         &self,
         join_typ: JoinType,
-        children: &[Cost],
+        left_row_cnt: f64,
+        right_row_cnt: f64,
         context: Option<RelNodeContext>,
         optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
-    ) -> Cost {
-        let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
-        let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
-        let (_, compute_cost, _) = Self::cost_tuple(&children[2]);
+    ) -> f64 {
         let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
             let schema =
                 optimizer.get_property_by_group::<SchemaPropertyBuilder>(context.group_id, 0);
@@ -59,28 +54,23 @@ impl<
                 &schema,
                 column_refs,
                 input_correlation,
-                row_cnt_1,
-                row_cnt_2,
+                left_row_cnt,
+                right_row_cnt,
             )
         } else {
             DEFAULT_UNK_SEL
         };
-        Self::cost(
-            (row_cnt_1 * row_cnt_2 * selectivity).max(1.0),
-            row_cnt_1 * row_cnt_2 * compute_cost + row_cnt_1,
-            0.0,
-        )
+        (left_row_cnt * right_row_cnt * selectivity).max(1.0)
     }
 
-    pub(super) fn get_hash_join_cost(
+    pub(crate) fn get_hash_join_row_cnt(
         &self,
         join_typ: JoinType,
-        children: &[Cost],
+        left_row_cnt: f64,
+        right_row_cnt: f64,
         context: Option<RelNodeContext>,
         optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
-    ) -> Cost {
-        let (row_cnt_1, _, _) = Self::cost_tuple(&children[0]);
-        let (row_cnt_2, _, _) = Self::cost_tuple(&children[1]);
+    ) -> f64 {
         let selectivity = if let (Some(context), Some(optimizer)) = (context, optimizer) {
             let schema =
                 optimizer.get_property_by_group::<SchemaPropertyBuilder>(context.group_id, 0);
@@ -111,18 +101,14 @@ impl<
                 &schema,
                 column_refs,
                 input_correlation,
-                row_cnt_1,
-                row_cnt_2,
+                left_row_cnt,
+                right_row_cnt,
                 left_col_cnt,
             )
         } else {
             DEFAULT_UNK_SEL
         };
-        Self::cost(
-            (row_cnt_1 * row_cnt_2 * selectivity).max(1.0),
-            row_cnt_1 * 2.0 + row_cnt_2,
-            0.0,
-        )
+        (left_row_cnt * right_row_cnt * selectivity).max(1.0)
     }
 
     fn get_input_correlation(
@@ -548,7 +534,7 @@ mod tests {
 
     use optd_core::rel_node::Value;
 
-    use crate::adv_cost::{tests::*, DEFAULT_EQ_SEL};
+    use crate::adv_stats::{tests::*, DEFAULT_EQ_SEL};
     use optd_datafusion_repr::{
         plan_nodes::{BinOpType, JoinType, LogOpType, OptRelNodeRef},
         properties::{

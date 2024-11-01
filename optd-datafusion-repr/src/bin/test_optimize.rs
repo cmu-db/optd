@@ -68,12 +68,6 @@ pub fn main() {
     optimizer.dump();
     let node: Arc<optd_core::rel_node::RelNode<OptRelNodeTyp>> = node.unwrap();
     println!(
-        "cost={}",
-        optimizer
-            .cost()
-            .explain(&optimizer.cost().compute_plan_node_cost(&node))
-    );
-    println!(
         "{}",
         PlanNode::from_rel_node(node)
             .unwrap()
