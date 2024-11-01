@@ -10,6 +10,8 @@ use optd_core::{
     rel_node::{RelNode, Value},
 };
 
+use super::base_cost::DEFAULT_TABLE_ROW_CNT;
+
 pub type RuntimeAdaptionStorage = Arc<Mutex<RuntimeAdaptionStorageInner>>;
 
 #[derive(Default, Debug)]
@@ -52,10 +54,10 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
                     let runtime_row_cnt = (*runtime_row_cnt).max(1) as f64;
                     return OptCostModel::cost(runtime_row_cnt, 0.0, runtime_row_cnt);
                 } else {
-                    return OptCostModel::cost(1.0, 0.0, 1.0);
+                    return OptCostModel::cost(DEFAULT_TABLE_ROW_CNT as f64, 0.0, 1.0);
                 }
             } else {
-                return OptCostModel::cost(1.0, 0.0, 1.0);
+                return OptCostModel::cost(DEFAULT_TABLE_ROW_CNT as f64, 0.0, 1.0);
             }
         }
         let (mut row_cnt, compute_cost, io_cost) = OptCostModel::cost_tuple(

@@ -31,6 +31,8 @@ pub const ROW_COUNT: usize = 1;
 pub const COMPUTE_COST: usize = 2;
 pub const IO_COST: usize = 3;
 
+pub(crate) const DEFAULT_TABLE_ROW_CNT: usize = 1000;
+
 impl OptCostModel {
     pub fn row_cnt(Cost(cost): &Cost) -> f64 {
         cost[ROW_COUNT]
@@ -104,7 +106,7 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                     .table_stat
                     .get(table_name.as_ref())
                     .copied()
-                    .unwrap_or(1) as f64;
+                    .unwrap_or(DEFAULT_TABLE_ROW_CNT) as f64;
                 Self::cost(row_cnt, 0.0, row_cnt)
             }
             OptRelNodeTyp::PhysicalLimit => {

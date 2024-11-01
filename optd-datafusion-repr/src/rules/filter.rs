@@ -22,7 +22,7 @@ define_rule!(
 //    - Replaces the Or operator with True if any operand is True
 //    - Replaces the And operator with False if any operand is False
 //    - Removes Duplicates
-fn simplify_log_expr(log_expr: OptRelNodeRef, changed: &mut bool) -> OptRelNodeRef {
+pub(crate) fn simplify_log_expr(log_expr: OptRelNodeRef, changed: &mut bool) -> OptRelNodeRef {
     let log_expr = LogOpExpr::from_rel_node(log_expr).unwrap();
     let op = log_expr.op_type();
     // we need a new children vec to output deterministic order

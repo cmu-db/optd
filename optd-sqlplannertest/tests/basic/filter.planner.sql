@@ -89,8 +89,7 @@ LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
     └── LogicalJoin { join_type: Cross, cond: true }
         ├── LogicalScan { table: t1 }
         └── LogicalScan { table: t2 }
-PhysicalNestedLoopJoin
-├── join_type: Inner
+PhysicalFilter
 ├── cond:Or
 │   ├── Eq
 │   │   ├── #0
@@ -98,8 +97,9 @@ PhysicalNestedLoopJoin
 │   └── Eq
 │       ├── #0
 │       └── #3
-├── PhysicalScan { table: t1 }
-└── PhysicalScan { table: t2 }
+└── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+    ├── PhysicalScan { table: t1 }
+    └── PhysicalScan { table: t2 }
 0 0 0 200
 1 1 1 201
 2 2 2 202
