@@ -6,8 +6,8 @@ use std::{
 use crate::{cost::OptCostModel, plan_nodes::OptRelNodeTyp};
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId, RelNodeContext},
-    cost::{Cost, CostModel},
-    rel_node::{RelNode, Value},
+    cost::{Cost, CostModel, Statistics},
+    rel_node::Value,
 };
 
 use super::base_cost::DEFAULT_TABLE_ROW_CNT;
@@ -26,9 +26,27 @@ pub struct AdaptiveCostModel {
     decay: usize,
 }
 
+impl AdaptiveCostModel {
+    fn get_row_cnt(&self, _: &Option<Value>, context: &Option<RelNodeContext>) -> f64 {
+        let guard = self.runtime_row_cnt.lock().unwrap();
+        if let Some((runtime_row_cnt, iter)) =
+            guard.history.get(&context.as_ref().unwrap().group_id)
+        {
+            if *iter + self.decay >= guard.iter_cnt {
+                return (*runtime_row_cnt).max(1) as f64;
+            }
+        }
+        DEFAULT_TABLE_ROW_CNT as f64
+    }
+}
+
 impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
-    fn explain(&self, cost: &Cost) -> String {
-        self.base_model.explain(cost)
+    fn explain_cost(&self, cost: &Cost) -> String {
+        self.base_model.explain_cost(cost)
+    }
+
+    fn explain_statistics(&self, cost: &Statistics) -> String {
+        self.base_model.explain_statistics(cost)
     }
 
     fn accumulate(&self, total_cost: &mut Cost, cost: &Cost) {
@@ -39,46 +57,47 @@ impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
         self.base_model.zero()
     }
 
-    fn compute_cost(
+    fn weighted_cost(&self, cost: &Cost) -> f64 {
+        self.base_model.weighted_cost(cost)
+    }
+
+    fn compute_operation_cost(
         &self,
         node: &OptRelNodeTyp,
         data: &Option<Value>,
-        children: &[Cost],
+        children: &[Option<&Statistics>],
+        children_cost: &[Cost],
         context: Option<RelNodeContext>,
-        _optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
+        optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Cost {
         if let OptRelNodeTyp::PhysicalScan = node {
-            let guard = self.runtime_row_cnt.lock().unwrap();
-            if let Some((runtime_row_cnt, iter)) = guard.history.get(&context.unwrap().group_id) {
-                if *iter + self.decay >= guard.iter_cnt {
-                    let runtime_row_cnt = (*runtime_row_cnt).max(1) as f64;
-                    return OptCostModel::cost(runtime_row_cnt, 0.0, runtime_row_cnt);
-                } else {
-                    return OptCostModel::cost(DEFAULT_TABLE_ROW_CNT as f64, 0.0, 1.0);
-                }
-            } else {
-                return OptCostModel::cost(DEFAULT_TABLE_ROW_CNT as f64, 0.0, 1.0);
-            }
+            let row_cnt = self.get_row_cnt(data, &context);
+            return OptCostModel::cost(0.0, row_cnt);
         }
-        let (mut row_cnt, compute_cost, io_cost) = OptCostModel::cost_tuple(
-            &self
-                .base_model
-                .compute_cost(node, data, children, None, None),
-        );
-        if let Some(context) = context {
-            let guard = self.runtime_row_cnt.lock().unwrap();
-            if let Some((runtime_row_cnt, iter)) = guard.history.get(&context.group_id) {
-                if *iter + self.decay >= guard.iter_cnt {
-                    let runtime_row_cnt = (*runtime_row_cnt).max(1) as f64;
-                    row_cnt = runtime_row_cnt;
-                }
-            }
-        }
-        OptCostModel::cost(row_cnt, compute_cost, io_cost)
+        self.base_model.compute_operation_cost(
+            node,
+            data,
+            children,
+            children_cost,
+            context,
+            optimizer,
+        )
     }
 
-    fn compute_plan_node_cost(&self, node: &RelNode<OptRelNodeTyp>) -> Cost {
-        self.base_model.compute_plan_node_cost(node)
+    fn derive_statistics(
+        &self,
+        node: &OptRelNodeTyp,
+        data: &Option<Value>,
+        children: &[&Statistics],
+        context: Option<RelNodeContext>,
+        optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
+    ) -> Statistics {
+        if let OptRelNodeTyp::PhysicalScan = node {
+            let row_cnt = self.get_row_cnt(data, &context);
+            return OptCostModel::stat(row_cnt);
+        }
+        self.base_model
+            .derive_statistics(node, data, children, context, optimizer)
     }
 }
 

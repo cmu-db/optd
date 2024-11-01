@@ -8,10 +8,11 @@ use anyhow::Result;
 use tracing::trace;
 
 use crate::{
+    cascades::memo::Winner,
     cost::CostModel,
     optimizer::Optimizer,
     property::{PropertyBuilder, PropertyBuilderAny},
-    rel_node::{RelNodeMetaMap, RelNodeRef, RelNodeTyp},
+    rel_node::{RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp},
     rules::RuleWrapper,
 };
 
@@ -137,46 +138,24 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.disabled_rules.contains(&rule_id)
     }
 
-    pub fn dump(&self, group_id: Option<GroupId>) {
-        if let Some(group_id) = group_id {
-            fn dump_inner<T: RelNodeTyp>(this: &CascadesOptimizer<T>, group_id: GroupId) {
-                if let Some(ref winner) = this.memo.get_group_info(group_id).winner {
-                    let expr = this.memo.get_expr_memoed(winner.expr_id);
-                    assert!(!winner.impossible);
-                    if winner.cost.0[1] == 1.0 {
-                        return;
-                    }
-                    println!(
-                        "group_id={} winner={} cost={} {}",
-                        group_id,
-                        winner.expr_id,
-                        this.cost.explain(&winner.cost),
-                        expr
-                    );
-                    for child in &expr.children {
-                        dump_inner(this, *child);
-                    }
-                }
-            }
-            dump_inner(self, group_id);
-            return;
-        }
+    pub fn dump(&self) {
         for group_id in self.memo.get_all_group_ids() {
-            let winner = if let Some(ref winner) = self.memo.get_group_info(group_id).winner {
-                if winner.impossible {
-                    "winner=<impossible>".to_string()
-                } else {
+            let winner_str = match self.memo.get_group_info(group_id).winner {
+                Winner::Impossible => "winner=<impossible>".to_string(),
+                Winner::Unknown => "winner=<unknown>".to_string(),
+                Winner::Full(winner) => {
+                    let expr = self.memo.get_expr_memoed(winner.expr_id);
                     format!(
-                        "winner={} cost={} {}",
+                        "winner={} weighted_cost={} cost={} stat={} | {}",
                         winner.expr_id,
-                        self.cost.explain(&winner.cost),
-                        self.memo.get_expr_memoed(winner.expr_id)
+                        winner.total_weighted_cost,
+                        self.cost.explain_cost(&winner.total_cost),
+                        self.cost.explain_statistics(&winner.statistics),
+                        expr
                     )
                 }
-            } else {
-                "winner=None".to_string()
             };
-            println!("group_id={} {}", group_id, winner);
+            println!("group_id={} {}", group_id, winner_str);
             let group = self.memo.get_group(group_id);
             for (id, property) in self.property_builders.iter().enumerate() {
                 println!(
@@ -185,16 +164,12 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
                     property.display(group.properties[id].as_ref())
                 )
             }
+            if let Some(predicate_binding) = self.memo.get_predicate_binding(group_id) {
+                println!("  predicate={}", predicate_binding);
+            }
             for expr_id in self.memo.get_all_exprs_in_group(group_id) {
                 let memo_node = self.memo.get_expr_memoed(expr_id);
                 println!("  expr_id={} | {}", expr_id, memo_node);
-                // We removed get all bindings functionality
-                // let bindings = self
-                //     .memo
-                //     .get_all_expr_bindings(expr_id, false, true, Some(1));
-                // for binding in bindings {
-                //     println!("    {}", binding);
-                // }
             }
         }
     }
@@ -226,7 +201,21 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         group_id: GroupId,
         meta: &mut Option<RelNodeMetaMap>,
     ) -> Result<RelNodeRef<T>> {
-        self.memo.get_best_group_binding(group_id, meta)
+        self.memo
+            .get_best_group_binding(group_id, |node, group_id, info| {
+                if let Some(meta) = meta {
+                    let node = node.as_ref() as *const _ as usize;
+                    let node_meta = RelNodeMeta::new(
+                        group_id,
+                        info.total_weighted_cost,
+                        info.total_cost.clone(),
+                        info.statistics.clone(),
+                        self.cost.explain_cost(&info.total_cost),
+                        self.cost.explain_statistics(&info.statistics),
+                    );
+                    meta.insert(node, node_meta);
+                }
+            })
     }
 
     fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
@@ -277,7 +266,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
     fn optimize_inner(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
         let (group_id, _) = self.add_new_expr(root_rel);
         self.fire_optimize_tasks(group_id)?;
-        self.memo.get_best_group_binding(group_id, &mut None)
+        self.memo.get_best_group_binding(group_id, |_, _, _| {})
     }
 
     pub fn resolve_group_id(&self, root_rel: RelNodeRef<T>) -> GroupId {
@@ -375,15 +364,6 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             .entry(group_expr_id)
             .or_default()
             .insert(rule_id);
-    }
-
-    pub fn get_cost_of(&self, group_id: GroupId) -> f64 {
-        self.memo
-            .get_group_info(group_id)
-            .winner
-            .as_ref()
-            .map(|x| x.cost.0[0])
-            .unwrap_or(0.0)
     }
 
     pub fn memo(&self) -> &Memo<T> {

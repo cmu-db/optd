@@ -13,7 +13,10 @@ use chrono::NaiveDate;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{cascades::GroupId, cost::Cost};
+use crate::{
+    cascades::GroupId,
+    cost::{Cost, Statistics},
+};
 
 pub type RelNodeRef<T> = Arc<RelNode<T>>;
 
@@ -264,17 +267,41 @@ impl<T: RelNodeTyp> RelNode<T> {
 }
 
 /// Metadata for a rel node.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct RelNodeMeta {
     /// The group (id) of the `RelNode`
     pub group_id: GroupId,
+    /// Weighted cost of the `RelNode`
+    pub weighted_cost: f64,
     /// Cost of the `RelNode`
     pub cost: Cost,
+    /// Statistics
+    pub stat: Arc<Statistics>,
+    /// Cost in display string
+    /// TODO: this should be lazily processed and generated
+    pub cost_display: String,
+    /// Statistics in display string
+    /// TODO: this should be lazily processed and generated
+    pub stat_display: String,
 }
 
 impl RelNodeMeta {
-    pub fn new(group_id: GroupId, cost: Cost) -> Self {
-        RelNodeMeta { group_id, cost }
+    pub fn new(
+        group_id: GroupId,
+        weighted_cost: f64,
+        cost: Cost,
+        stat: Arc<Statistics>,
+        cost_display: String,
+        stat_display: String,
+    ) -> Self {
+        RelNodeMeta {
+            group_id,
+            weighted_cost,
+            cost,
+            stat,
+            cost_display,
+            stat_display,
+        }
     }
 }
 
