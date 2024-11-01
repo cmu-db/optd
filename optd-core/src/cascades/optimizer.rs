@@ -43,6 +43,7 @@ pub struct CascadesOptimizer<T: RelNodeTyp> {
     memo: Memo<T>,
     pub(super) tasks: VecDeque<Box<dyn Task<T>>>,
     explored_group: HashSet<GroupId>,
+    explored_expr: HashSet<ExprId>,
     fired_rules: HashMap<ExprId, HashSet<RuleId>>,
     rules: Arc<[Arc<RuleWrapper<T, Self>>]>,
     disabled_rules: HashSet<usize>,
@@ -105,6 +106,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             memo,
             tasks,
             explored_group: HashSet::new(),
+            explored_expr: HashSet::new(),
             fired_rules: HashMap::new(),
             rules: rules.into(),
             cost: cost.into(),
@@ -202,11 +204,13 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.memo = Memo::new(self.property_builders.clone());
         self.fired_rules.clear();
         self.explored_group.clear();
+        self.explored_expr.clear();
     }
 
     /// Clear the winner so that the optimizer can continue to explore the group.
     pub fn step_clear_winner(&mut self) {
         self.memo.clear_winner();
+        self.explored_expr.clear();
     }
 
     /// Optimize a `RelNode`.
@@ -345,6 +349,18 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
 
     pub(super) fn mark_group_explored(&mut self, group_id: GroupId) {
         self.explored_group.insert(group_id);
+    }
+
+    pub(super) fn is_expr_explored(&self, expr_id: ExprId) -> bool {
+        self.explored_expr.contains(&expr_id)
+    }
+
+    pub(super) fn mark_expr_explored(&mut self, expr_id: ExprId) {
+        self.explored_expr.insert(expr_id);
+    }
+
+    pub(super) fn unmark_expr_explored(&mut self, expr_id: ExprId) {
+        self.explored_expr.remove(&expr_id);
     }
 
     pub(super) fn is_rule_fired(&self, group_expr_id: ExprId, rule_id: RuleId) -> bool {
