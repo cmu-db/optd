@@ -156,7 +156,7 @@
     limit 100;
   desc: TPC-H Q2
   tasks:
-    - explain[use_df_logical]:logical_optd,physical_optd
+    - explain:logical_optd,physical_optd
 - sql: |
     SELECT
         l_orderkey,

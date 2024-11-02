@@ -437,9 +437,6 @@ fn apply_dep_join_eliminate_at_scan(
         extern_cols: _,
     }: DepJoinEliminatePicks,
 ) -> Vec<RelNode<OptRelNodeTyp>> {
-    // TODO: Is there ever a situation we need to detect that we can convert earlier?
-    // Technically we can convert as soon as we clear the last externcolumnref...
-
     // Cross join should always have true cond
     assert!(cond == *ConstantExpr::bool(true).into_rel_node());
 
