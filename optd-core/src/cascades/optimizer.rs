@@ -17,9 +17,9 @@ use crate::{
 };
 
 use super::{
-    memo::{GroupInfo, RelMemoNodeRef},
+    memo::{GroupInfo, Memo, RelMemoNodeRef},
     tasks::OptimizeGroupTask,
-    Memo, Task,
+    NaiveMemo, Task,
 };
 
 pub type RuleId = usize;
@@ -41,7 +41,7 @@ pub struct OptimizerProperties {
 }
 
 pub struct CascadesOptimizer<T: RelNodeTyp> {
-    memo: Memo<T>,
+    memo: NaiveMemo<T>,
     pub(super) tasks: VecDeque<Box<dyn Task<T>>>,
     explored_group: HashSet<GroupId>,
     explored_expr: HashSet<ExprId>,
@@ -102,7 +102,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
     ) -> Self {
         let tasks = VecDeque::new();
         let property_builders: Arc<[_]> = property_builders.into();
-        let memo = Memo::new(property_builders.clone());
+        let memo = NaiveMemo::new(property_builders.clone());
         Self {
             memo,
             tasks,
@@ -140,7 +140,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
 
     pub fn dump(&self) {
         for group_id in self.memo.get_all_group_ids() {
-            let winner_str = match self.memo.get_group_info(group_id).winner {
+            let winner_str = match &self.memo.get_group_info(group_id).winner {
                 Winner::Impossible => "winner=<impossible>".to_string(),
                 Winner::Unknown => "winner=<unknown>".to_string(),
                 Winner::Full(winner) => {
@@ -176,7 +176,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
 
     /// Clear the memo table and all optimizer states.
     pub fn step_clear(&mut self) {
-        self.memo = Memo::new(self.property_builders.clone());
+        self.memo = NaiveMemo::new(self.property_builders.clone());
         self.fired_rules.clear();
         self.explored_group.clear();
         self.explored_expr.clear();
@@ -275,16 +275,11 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         if let Some(group_id) = T::extract_group(&root_rel.typ) {
             return group_id;
         }
-        let (group_id, _) = self.get_expr_info(root_rel);
-        group_id
+        panic!("This function is deprecated -- you should only pass group id instead of a full expression to this function.")
     }
 
     pub(super) fn get_all_exprs_in_group(&self, group_id: GroupId) -> Vec<ExprId> {
         self.memo.get_all_exprs_in_group(group_id)
-    }
-
-    pub(super) fn get_expr_info(&self, expr: RelNodeRef<T>) -> (GroupId, ExprId) {
-        self.memo.get_expr_info(expr)
     }
 
     pub fn add_new_expr(&mut self, rel_node: RelNodeRef<T>) -> (GroupId, ExprId) {
@@ -299,7 +294,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         self.memo.add_expr_to_group(rel_node, group_id)
     }
 
-    pub(super) fn get_group_info(&self, group_id: GroupId) -> GroupInfo {
+    pub(super) fn get_group_info(&self, group_id: GroupId) -> &GroupInfo {
         self.memo.get_group_info(group_id)
     }
 
@@ -368,7 +363,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             .insert(rule_id);
     }
 
-    pub fn memo(&self) -> &Memo<T> {
+    pub fn memo(&self) -> &NaiveMemo<T> {
         &self.memo
     }
 }

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use arrow_schema::DataType;
 use itertools::Itertools;
 use optd_core::{
-    cascades::{CascadesOptimizer, GroupId},
+    cascades::GroupId,
     rel_node::{RelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp},
 };
 
@@ -39,8 +39,6 @@ pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
 pub use sort::{LogicalSort, PhysicalSort};
 pub use subquery::{DependentJoin, ExternColumnRefExpr, RawDependentJoin}; // Add missing import
-
-use crate::properties::schema::{Schema, SchemaPropertyBuilder};
 
 /// OptRelNodeTyp FAQ:
 ///   - The define_plan_node!() macro defines what the children of each join node are
@@ -240,11 +238,6 @@ pub struct PlanNode(pub(crate) OptRelNodeRef);
 impl PlanNode {
     pub fn typ(&self) -> OptRelNodeTyp {
         self.0.typ.clone()
-    }
-
-    pub fn schema(&self, optimizer: &CascadesOptimizer<OptRelNodeTyp>) -> Schema {
-        let group_id = optimizer.resolve_group_id(self.0.clone());
-        optimizer.get_property_by_group::<SchemaPropertyBuilder>(group_id, 0)
     }
 
     pub fn from_group(rel_node: OptRelNodeRef) -> Self {

@@ -34,8 +34,8 @@ pub trait MemoExt {
     fn enumerate_join_order(&self, entry: GroupId) -> Vec<LogicalJoinOrder>;
 }
 
-fn enumerate_join_order_expr_inner(
-    memo: &Memo<OptRelNodeTyp>,
+fn enumerate_join_order_expr_inner<M: Memo<OptRelNodeTyp> + ?Sized>(
+    memo: &M,
     current: ExprId,
     visited: &mut HashMap<GroupId, Vec<LogicalJoinOrder>>,
 ) -> Vec<LogicalJoinOrder> {
@@ -91,8 +91,8 @@ fn enumerate_join_order_expr_inner(
     }
 }
 
-fn enumerate_join_order_group_inner(
-    memo: &Memo<OptRelNodeTyp>,
+fn enumerate_join_order_group_inner<M: Memo<OptRelNodeTyp> + ?Sized>(
+    memo: &M,
     current: GroupId,
     visited: &mut HashMap<GroupId, Vec<LogicalJoinOrder>>,
 ) -> Vec<LogicalJoinOrder> {
@@ -115,7 +115,7 @@ fn enumerate_join_order_group_inner(
     res
 }
 
-impl MemoExt for Memo<OptRelNodeTyp> {
+impl<M: Memo<OptRelNodeTyp>> MemoExt for M {
     fn enumerate_join_order(&self, entry: GroupId) -> Vec<LogicalJoinOrder> {
         let mut visited = HashMap::new();
         enumerate_join_order_group_inner(self, entry, &mut visited)
@@ -124,7 +124,10 @@ impl MemoExt for Memo<OptRelNodeTyp> {
 
 #[cfg(test)]
 mod tests {
-    use optd_core::rel_node::{RelNode, Value};
+    use optd_core::{
+        cascades::NaiveMemo,
+        rel_node::{RelNode, Value},
+    };
 
     use crate::plan_nodes::{
         ConstantExpr, ExprList, JoinType, LogicalJoin, LogicalProjection, PlanNode,
@@ -134,7 +137,7 @@ mod tests {
 
     #[test]
     fn enumerate_join_orders() {
-        let mut memo = Memo::<OptRelNodeTyp>::new(Arc::new([]));
+        let mut memo = NaiveMemo::<OptRelNodeTyp>::new(Arc::new([]));
         let (group, _) = memo.add_new_expr(
             LogicalJoin::new(
                 LogicalScan::new("t1".to_string()).into_plan_node(),
