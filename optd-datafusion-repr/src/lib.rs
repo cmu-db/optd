@@ -31,7 +31,7 @@ use rules::{
 pub use optd_core::rel_node::Value;
 
 use crate::rules::{
-    DepInitialDistinct, DepJoinEliminateAtScan, DepJoinPastAgg, DepJoinPastFilter, DepJoinPastProj,
+    DepInitialDistinct, DepJoinEliminate, DepJoinPastAgg, DepJoinPastFilter, DepJoinPastProj,
 };
 
 pub use memo_ext::{LogicalJoinOrder, MemoExt};
@@ -93,7 +93,7 @@ impl DatafusionOptimizer {
             Arc::new(EliminateLimitRule::new()),
             Arc::new(EliminateDuplicatedSortExprRule::new()),
             Arc::new(EliminateDuplicatedAggExprRule::new()),
-            Arc::new(DepJoinEliminateAtScan::new()),
+            Arc::new(DepJoinEliminate::new()),
             Arc::new(DepInitialDistinct::new()),
             Arc::new(DepJoinPastProj::new()),
             Arc::new(DepJoinPastFilter::new()),

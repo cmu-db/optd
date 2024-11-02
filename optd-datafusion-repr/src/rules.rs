@@ -27,5 +27,5 @@ pub use project_transpose::{
     project_merge::{EliminateProjectRule, ProjectMergeRule},
 };
 pub use subquery::{
-    DepInitialDistinct, DepJoinEliminateAtScan, DepJoinPastAgg, DepJoinPastFilter, DepJoinPastProj,
+    DepInitialDistinct, DepJoinEliminate, DepJoinPastAgg, DepJoinPastFilter, DepJoinPastProj,
 };

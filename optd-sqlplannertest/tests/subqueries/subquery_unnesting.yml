@@ -14,3 +14,8 @@
   desc: Test whether the optimizer can unnest correlated subqueries.
   tasks:
     - explain[verbose]:logical_optd,optimized_logical_optd,physical_optd
+- sql: |
+    select * from t1 where (select sum(t2v3) from (select * from t2, t3 where t2v1 = t1v1 and t2v3 = t3v2)) > 100;
+  desc: Test whether the optimizer can unnest correlated subqueries.
+  tasks:
+    - explain[verbose]:logical_optd,optimized_logical_optd,physical_optd

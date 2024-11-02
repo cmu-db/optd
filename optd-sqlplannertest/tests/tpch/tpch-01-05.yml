@@ -182,7 +182,7 @@
         o_orderdate LIMIT 10;
   desc: TPC-H Q3
   tasks:
-    - explain[use_df_logical]:logical_optd,physical_optd
+    - explain:logical_optd,physical_optd
 - sql: |
     SELECT
         n_name AS nation,

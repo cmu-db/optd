@@ -132,6 +132,7 @@ impl OptdQueryPlanner {
             }));
         }
         let mut optd_rel = ctx.conv_into_optd(logical_plan)?;
+
         if let Some(explains) = &mut explains {
             explains.push(StringifiedPlan::new(
                 PlanType::OptimizedLogicalPlan {
@@ -142,9 +143,17 @@ impl OptdQueryPlanner {
                     .explain_to_string(None),
             ));
         }
+
+        tracing::trace!(
+            optd_unoptimized_plan = %("\n".to_string()
+            + &PlanNode::from_rel_node(optd_rel.clone())
+                .unwrap()
+                .explain_to_string(None)));
+
         let mut optimizer = self.optimizer.lock().unwrap().take().unwrap();
 
         if optimizer.is_heuristic_enabled() {
+            // TODO: depjoin pushdown might need to run multiple times
             optd_rel = optimizer.heuristic_optimize(optd_rel);
             if let Some(explains) = &mut explains {
                 explains.push(StringifiedPlan::new(
@@ -156,6 +165,11 @@ impl OptdQueryPlanner {
                         .explain_to_string(None),
                 ))
             }
+            tracing::trace!(
+                optd_optimized_plan = %("\n".to_string()
+                + &PlanNode::from_rel_node(optd_rel.clone())
+                    .unwrap()
+                    .explain_to_string(None)));
         }
 
         let (group_id, optimized_rel, meta) = optimizer.cascades_optimize(optd_rel)?;
@@ -180,6 +194,13 @@ impl OptdQueryPlanner {
                 join_orders.iter().map(|x| x.to_string()).join("\n"),
             ));
         }
+
+        tracing::trace!(
+            optd_physical_plan = %("\n".to_string()
+            + &PlanNode::from_rel_node(optimized_rel.clone())
+                .unwrap()
+                .explain_to_string(None)));
+
         ctx.optimizer = Some(&optimizer);
         let physical_plan = ctx.conv_from_optd(optimized_rel, meta).await?;
         if let Some(explains) = &mut explains {

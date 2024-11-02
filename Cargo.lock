@@ -2780,6 +2780,7 @@ dependencies = [
  "itertools",
  "optd-core",
  "optd-datafusion-repr",
+ "tracing",
 ]
 
 [[package]]

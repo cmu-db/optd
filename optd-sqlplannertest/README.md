@@ -51,5 +51,5 @@ Currently we have the following options for the explain task:
 ## Tracing a query
 
 ```
-RUST_LOG=optd_core=trace cargo run -p optd-sqlplannertest --bin planner_test_apply -- pushdowns &> log
+RUST_BACKTRACE=1 RUST_LOG=optd_core=trace,optd_datafusion_bridge=trace cargo run -p optd-sqlplannertest --bin planner_test_apply -- pushdowns &> log
 ```

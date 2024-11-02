@@ -446,43 +446,33 @@ LogicalLimit { skip: 0(u64), fetch: 10(u64) }
         └── LogicalAgg
             ├── exprs:Agg(Sum)
             │   └── Mul
-            │       ├── #3
+            │       ├── #22
             │       └── Sub
-            │           ├── 1(float)
-            │           └── #4
-            ├── groups: [ #2, #0, #1 ]
-            └── LogicalProjection { exprs: [ #1, #2, #3, #4, #5 ] }
-                └── LogicalJoin
-                    ├── join_type: Inner
-                    ├── cond:Eq
-                    │   ├── #0
-                    │   └── #3
-                    ├── LogicalProjection { exprs: [ #1, #3, #4 ] }
-                    │   └── LogicalJoin
-                    │       ├── join_type: Inner
-                    │       ├── cond:Eq
-                    │       │   ├── #0
-                    │       │   └── #2
-                    │       ├── LogicalProjection { exprs: [ #0 ] }
-                    │       │   └── LogicalFilter
-                    │       │       ├── cond:Eq
-                    │       │       │   ├── #1
-                    │       │       │   └── "FURNITURE"
-                    │       │       └── LogicalProjection { exprs: [ #0, #6 ] }
-                    │       │           └── LogicalScan { table: customer }
-                    │       └── LogicalFilter
-                    │           ├── cond:Lt
-                    │           │   ├── #2
-                    │           │   └── 9218(i64)
-                    │           └── LogicalProjection { exprs: [ #0, #1, #4, #7 ] }
-                    │               └── LogicalScan { table: orders }
-                    └── LogicalProjection { exprs: [ #0, #1, #2 ] }
-                        └── LogicalFilter
-                            ├── cond:Gt
-                            │   ├── #3
-                            │   └── 9218(i64)
-                            └── LogicalProjection { exprs: [ #0, #5, #6, #10 ] }
-                                └── LogicalScan { table: lineitem }
+            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
+            │           └── #23
+            ├── groups: [ #17, #12, #15 ]
+            └── LogicalFilter
+                ├── cond:And
+                │   ├── Eq
+                │   │   ├── #6
+                │   │   └── "FURNITURE"
+                │   ├── Eq
+                │   │   ├── #0
+                │   │   └── #9
+                │   ├── Eq
+                │   │   ├── #17
+                │   │   └── #8
+                │   ├── Lt
+                │   │   ├── #12
+                │   │   └── Cast { cast_to: Date32, expr: "1995-03-29" }
+                │   └── Gt
+                │       ├── #27
+                │       └── Cast { cast_to: Date32, expr: "1995-03-29" }
+                └── LogicalJoin { join_type: Cross, cond: true }
+                    ├── LogicalJoin { join_type: Cross, cond: true }
+                    │   ├── LogicalScan { table: customer }
+                    │   └── LogicalScan { table: orders }
+                    └── LogicalScan { table: lineitem }
 PhysicalLimit { skip: 0(u64), fetch: 10(u64) }
 └── PhysicalSort
     ├── exprs:
@@ -494,29 +484,28 @@ PhysicalLimit { skip: 0(u64), fetch: 10(u64) }
         └── PhysicalAgg
             ├── aggrs:Agg(Sum)
             │   └── Mul
-            │       ├── #3
+            │       ├── #22
             │       └── Sub
-            │           ├── 1(float)
-            │           └── #4
-            ├── groups: [ #2, #0, #1 ]
-            └── PhysicalProjection { exprs: [ #28, #31, #8, #13, #14 ] }
-                └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #17 ] }
+            │           ├── Cast { cast_to: Decimal128(20, 0), expr: 1(i64) }
+            │           └── #23
+            ├── groups: [ #17, #12, #15 ]
+            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
+                ├── PhysicalFilter
+                │   ├── cond:Eq
+                │   │   ├── #6
+                │   │   └── "FURNITURE"
+                │   └── PhysicalScan { table: customer }
+                └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
                     ├── PhysicalFilter
-                    │   ├── cond:Eq
-                    │   │   ├── #6
-                    │   │   └── "FURNITURE"
-                    │   └── PhysicalScan { table: customer }
-                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-                        ├── PhysicalFilter
-                        │   ├── cond:Gt
-                        │   │   ├── #10
-                        │   │   └── 9218(i64)
-                        │   └── PhysicalScan { table: lineitem }
-                        └── PhysicalFilter
-                            ├── cond:Lt
-                            │   ├── #4
-                            │   └── 9218(i64)
-                            └── PhysicalScan { table: orders }
+                    │   ├── cond:Lt
+                    │   │   ├── #4
+                    │   │   └── Cast { cast_to: Date32, expr: "1995-03-29" }
+                    │   └── PhysicalScan { table: orders }
+                    └── PhysicalFilter
+                        ├── cond:Gt
+                        │   ├── #10
+                        │   └── Cast { cast_to: Date32, expr: "1995-03-29" }
+                        └── PhysicalScan { table: lineitem }
 */
 
 -- TPC-H Q5
