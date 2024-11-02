@@ -45,12 +45,14 @@ impl OptimizeInputsTask {
 
     fn update_winner_impossible<T: RelNodeTyp>(&self, optimizer: &mut CascadesOptimizer<T>) {
         let group_id = optimizer.get_group_id(self.expr_id);
-        optimizer.update_group_info(
-            group_id,
-            GroupInfo {
-                winner: Winner::Impossible,
-            },
-        );
+        if let Winner::Unknown = optimizer.get_group_info(group_id).winner {
+            optimizer.update_group_info(
+                group_id,
+                GroupInfo {
+                    winner: Winner::Impossible,
+                },
+            );
+        }
     }
 
     fn update_winner<T: RelNodeTyp>(
@@ -117,11 +119,12 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
             }
             optimizer.mark_expr_explored(self.expr_id);
         }
-        trace!(event = "task_begin", task = "optimize_inputs", expr_id = %self.expr_id, continue_from = ?self.continue_from);
         let expr = optimizer.get_expr_memoed(self.expr_id);
         let group_id = optimizer.get_group_id(self.expr_id);
         let children_group_ids = &expr.children;
         let cost = optimizer.cost();
+
+        trace!(event = "task_begin", task = "optimize_inputs", expr_id = %self.expr_id, continue_from = ?self.continue_from, total_children = %children_group_ids.len());
 
         if let Some(ContinueTask {
             next_group_idx,
@@ -168,12 +171,12 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
             );
             let total_cost = cost.sum(&operation_cost, &input_cost);
             if next_group_idx < children_group_ids.len() {
-                let group_id = children_group_ids[next_group_idx];
+                let child_group_id = children_group_ids[next_group_idx];
                 let group_idx = next_group_idx;
-                let group_info = optimizer.get_group_info(group_id);
+                let group_info = optimizer.get_group_info(child_group_id);
                 if !group_info.winner.has_full_winner() {
                     if !return_from_optimize_group {
-                        trace!(event = "task_yield", task = "optimize_inputs", expr_id = %self.expr_id, group_idx = %group_idx);
+                        trace!(event = "task_yield", task = "optimize_inputs", expr_id = %self.expr_id, group_idx = %group_idx, yield_to = "optimize_group", optimize_group_id = %child_group_id);
                         return Ok(vec![
                             Box::new(self.continue_from(
                                 ContinueTask {
@@ -182,15 +185,15 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                                 },
                                 self.pruning,
                             )) as Box<dyn Task<T>>,
-                            Box::new(OptimizeGroupTask::new(group_id)) as Box<dyn Task<T>>,
+                            Box::new(OptimizeGroupTask::new(child_group_id)) as Box<dyn Task<T>>,
                         ]);
                     } else {
                         self.update_winner_impossible(optimizer);
-                        trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id);
+                        trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id, "result" = "impossible");
                         return Ok(vec![]);
                     }
                 }
-                trace!(event = "task_yield", task = "optimize_inputs", expr_id = %self.expr_id, group_idx = %group_idx);
+                trace!(event = "task_yield", task = "optimize_inputs", expr_id = %self.expr_id, group_idx = %group_idx, yield_to = "next_optimize_input");
                 Ok(vec![Box::new(self.continue_from(
                     ContinueTask {
                         next_group_idx: group_idx + 1,
@@ -200,7 +203,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                 )) as Box<dyn Task<T>>])
             } else {
                 self.update_winner(input_statistics_ref, operation_cost, total_cost, optimizer);
-                trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id);
+                trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id, "result" = "optimized");
                 Ok(vec![])
             }
         } else {

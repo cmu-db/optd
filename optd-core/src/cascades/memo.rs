@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use itertools::Itertools;
 use std::any::Any;
 use tracing::trace;
@@ -501,14 +501,25 @@ impl<T: RelNodeTyp> Memo<T> {
 
     /// Get all bindings of a predicate group. Will panic if the group contains more than one bindings.
     pub fn get_predicate_binding(&self, group_id: GroupId) -> Option<RelNodeRef<T>> {
-        self.get_predicate_binding_group_inner(group_id)
+        self.get_predicate_binding_group_inner(group_id, true)
     }
 
-    fn get_predicate_binding_expr_inner(&self, expr_id: ExprId) -> Option<RelNodeRef<T>> {
+    /// Get all bindings of a predicate group. Will panic if the group contains more than one bindings.
+    pub fn try_get_predicate_binding(&self, group_id: GroupId) -> Option<RelNodeRef<T>> {
+        self.get_predicate_binding_group_inner(group_id, false)
+    }
+
+    fn get_predicate_binding_expr_inner(
+        &self,
+        expr_id: ExprId,
+        panic_on_invalid_group: bool,
+    ) -> Option<RelNodeRef<T>> {
         let expr = self.expr_id_to_expr_node[&expr_id].clone();
         let mut children = Vec::with_capacity(expr.children.len());
         for child in expr.children.iter() {
-            if let Some(child) = self.get_predicate_binding_group_inner(*child) {
+            if let Some(child) =
+                self.get_predicate_binding_group_inner(*child, panic_on_invalid_group)
+            {
                 children.push(child);
             } else {
                 return None;
@@ -521,12 +532,25 @@ impl<T: RelNodeTyp> Memo<T> {
         }))
     }
 
-    fn get_predicate_binding_group_inner(&self, group_id: GroupId) -> Option<RelNodeRef<T>> {
+    fn get_predicate_binding_group_inner(
+        &self,
+        group_id: GroupId,
+        panic_on_invalid_group: bool,
+    ) -> Option<RelNodeRef<T>> {
         let exprs = &self.groups[&group_id].group_exprs;
         match exprs.len() {
             0 => None,
-            1 => self.get_predicate_binding_expr_inner(*exprs.iter().next().unwrap()),
-            len => panic!("group {group_id} has {len} expressions"),
+            1 => self.get_predicate_binding_expr_inner(
+                *exprs.iter().next().unwrap(),
+                panic_on_invalid_group,
+            ),
+            len => {
+                if panic_on_invalid_group {
+                    panic!("group {group_id} has {len} expressions")
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -548,7 +572,10 @@ impl<T: RelNodeTyp> Memo<T> {
             let expr = self.expr_id_to_expr_node[&expr_id].clone();
             let mut children = Vec::with_capacity(expr.children.len());
             for child in &expr.children {
-                children.push(self.get_best_group_binding_inner(*child, post_process)?);
+                children.push(
+                    self.get_best_group_binding_inner(*child, post_process)
+                        .with_context(|| format!("when processing expr {}", expr_id))?,
+                );
             }
             let node = Arc::new(RelNode {
                 typ: expr.typ.clone(),

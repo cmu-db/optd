@@ -115,8 +115,9 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                 let row_cnt = Self::row_cnt(children[0]);
                 Self::stat(row_cnt)
             }
+            OptRelNodeTyp::List => Self::stat(1.0),
             _ if node.is_expression() => Self::stat(1.0),
-            x => unimplemented!("cannot compute cost for {}", x),
+            x => unimplemented!("cannot derive statistics for {}", x),
         }
     }
 
@@ -174,7 +175,8 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                 let (compute_cost_2, _) = Self::cost_tuple(&children_cost[2]);
                 Self::cost(row_cnt * (compute_cost_1 + compute_cost_2), 0.0)
             }
-            _ if node.is_expression() => {
+            // List and expressions are computed in the same way -- but list has much fewer cost
+            OptRelNodeTyp::List => {
                 let compute_cost = children_cost
                     .iter()
                     .map(|child| {
@@ -183,6 +185,16 @@ impl CostModel<OptRelNodeTyp> for OptCostModel {
                     })
                     .sum::<f64>();
                 Self::cost(compute_cost + 0.01, 0.0)
+            }
+            _ if node.is_expression() => {
+                let compute_cost = children_cost
+                    .iter()
+                    .map(|child| {
+                        let (compute_cost, _) = Self::cost_tuple(child);
+                        compute_cost
+                    })
+                    .sum::<f64>();
+                Self::cost(compute_cost + 1.0, 0.0)
             }
             x => unimplemented!("cannot compute cost for {}", x),
         }

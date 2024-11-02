@@ -8,14 +8,20 @@
   tasks:
     - execute
 - sql: |
+    select * from t2, t1 where t1v1 = t2v1;
+  desc: Test whether the optimizer enumerates all 2-join orders.
+  tasks:
+    - explain:logical_join_orders
+    - execute
+- sql: |
     select * from t2, t1, t3 where t1v1 = t2v1 and t1v2 = t3v2;
-  desc: Test whether the optimizer enumerates all join orders.
+  desc: Test whether the optimizer enumerates all 3-join orders.
   tasks:
     - explain:logical_join_orders
     - execute
 - sql: |
     select * from t1, t2, t3 where t1v1 = t2v1 and t1v2 = t3v2;
-  desc: Test whether the optimizer enumerates all join orders.
+  desc: Test whether the optimizer enumerates all 3-join orders.
   tasks:
     - explain:logical_join_orders
     - execute

@@ -53,21 +53,25 @@ LogicalProjection { exprs: [ #0, #1 ] }
                             ├── LogicalAgg { exprs: [], groups: [ #0 ] }
                             │   └── LogicalScan { table: t1 }
                             └── LogicalScan { table: t2 }
-PhysicalProjection { exprs: [ #2, #3 ] }
-└── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+PhysicalProjection { exprs: [ #2, #3 ], cost: {compute=9147.220000000001,io=3000}, stat: {row_cnt=1} }
+└── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ], cost: {compute=9139.2,io=3000}, stat: {row_cnt=1} }
     ├── PhysicalAgg
     │   ├── aggrs:Agg(Sum)
     │   │   └── [ Cast { cast_to: Int64, expr: #2 } ]
     │   ├── groups: [ #1 ]
-    │   └── PhysicalProjection { exprs: [ #2, #0, #1 ] }
-    │       └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+    │   ├── cost: {compute=8133.180000000001,io=2000}
+    │   ├── stat: {row_cnt=1}
+    │   └── PhysicalProjection { exprs: [ #2, #0, #1 ], cost: {compute=8045.06,io=2000}, stat: {row_cnt=1} }
+    │       └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ], cost: {compute=8033.04,io=2000}, stat: {row_cnt=1} }
     │           ├── PhysicalFilter
     │           │   ├── cond:Gt
     │           │   │   ├── #0
     │           │   │   └── 100(i64)
-    │           │   └── PhysicalScan { table: t2 }
-    │           └── PhysicalAgg { aggrs: [], groups: [ #0 ] }
-    │               └── PhysicalScan { table: t1 }
-    └── PhysicalScan { table: t1 }
+    │           │   ├── cost: {compute=5005,io=1000}
+    │           │   ├── stat: {row_cnt=1}
+    │           │   └── PhysicalScan { table: t2, cost: {compute=0,io=1000}, stat: {row_cnt=1000} }
+    │           └── PhysicalAgg { aggrs: [], groups: [ #0 ], cost: {compute=2022.0199999999995,io=1000}, stat: {row_cnt=1000} }
+    │               └── PhysicalScan { table: t1, cost: {compute=0,io=1000}, stat: {row_cnt=1000} }
+    └── PhysicalScan { table: t1, cost: {compute=0,io=1000}, stat: {row_cnt=1000} }
 */
 

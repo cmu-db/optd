@@ -164,7 +164,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
                     property.display(group.properties[id].as_ref())
                 )
             }
-            if let Some(predicate_binding) = self.memo.get_predicate_binding(group_id) {
+            if let Some(predicate_binding) = self.memo.try_get_predicate_binding(group_id) {
                 println!("  predicate={}", predicate_binding);
             }
             for expr_id in self.memo.get_all_exprs_in_group(group_id) {
@@ -201,7 +201,8 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         group_id: GroupId,
         meta: &mut Option<RelNodeMetaMap>,
     ) -> Result<RelNodeRef<T>> {
-        self.memo
+        let res = self
+            .memo
             .get_best_group_binding(group_id, |node, group_id, info| {
                 if let Some(meta) = meta {
                     let node = node.as_ref() as *const _ as usize;
@@ -215,7 +216,11 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
                     );
                     meta.insert(node, node_meta);
                 }
-            })
+            });
+        if res.is_err() && cfg!(debug_assertions) {
+            self.dump();
+        }
+        res
     }
 
     fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
@@ -257,9 +262,6 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
                 }
             }
         }
-        // if self.ctx.budget_used {
-        //     self.dump(None);
-        // }
         Ok(())
     }
 
