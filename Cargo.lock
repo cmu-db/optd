@@ -3886,7 +3886,7 @@ dependencies = [
 [[package]]
 name = "sqlplannertest"
 version = "0.1.0"
-source = "git+https://github.com/risinglightdb/sqlplannertest-rs?branch=main#4a0a5f9de80842de8808169262a1d7e27094d225"
+source = "git+https://github.com/risinglightdb/sqlplannertest-rs?branch=main#6122d5be20383c0a6a50327258ea9da8e2d72df5"
 dependencies = [
  "anyhow",
  "async-trait",

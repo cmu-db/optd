@@ -26,7 +26,6 @@ pub type RuleId = usize;
 
 #[derive(Default, Clone, Debug)]
 pub struct OptimizerContext {
-    pub upper_bound: Option<f64>,
     pub budget_used: bool,
     pub rules_applied: usize,
 }
