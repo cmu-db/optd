@@ -18,7 +18,10 @@ use datafusion::{
 };
 use itertools::Itertools;
 use optd_datafusion_repr::{
-    plan_nodes::{ConstantType, OptRelNode, PlanNode},
+    plan_nodes::{
+        ConstantType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalHashJoin,
+        PhysicalNestedLoopJoin, PlanNode,
+    },
     properties::schema::Catalog,
     DatafusionOptimizer, MemoExt,
 };
@@ -193,6 +196,17 @@ impl OptdQueryPlanner {
                 },
                 join_orders.iter().map(|x| x.to_string()).join("\n"),
             ));
+            let join_order = get_join_order(optimized_rel.clone());
+            explains.push(StringifiedPlan::new(
+                PlanType::OptimizedPhysicalPlan {
+                    optimizer_name: "optd-join-order".to_string(),
+                },
+                if let Some(join_order) = join_order {
+                    join_order.to_string()
+                } else {
+                    "None".to_string()
+                },
+            ));
         }
 
         tracing::trace!(
@@ -239,5 +253,56 @@ impl QueryPlanner for OptdQueryPlanner {
             .create_physical_plan_inner(logical_plan, session_state)
             .await
             .unwrap())
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+enum JoinOrder {
+    Table(String),
+    HashJoin(Box<Self>, Box<Self>),
+    NestedLoopJoin(Box<Self>, Box<Self>),
+}
+
+impl std::fmt::Display for JoinOrder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JoinOrder::Table(name) => write!(f, "{}", name),
+            JoinOrder::HashJoin(left, right) => {
+                write!(f, "(HashJoin {} {})", left, right)
+            }
+            JoinOrder::NestedLoopJoin(left, right) => {
+                write!(f, "(NLJ {} {})", left, right)
+            }
+        }
+    }
+}
+
+fn get_join_order(rel_node: OptRelNodeRef) -> Option<JoinOrder> {
+    match rel_node.typ {
+        OptRelNodeTyp::PhysicalHashJoin(_) => {
+            let join = PhysicalHashJoin::from_rel_node(rel_node.clone()).unwrap();
+            let left = get_join_order(join.left().into_rel_node())?;
+            let right = get_join_order(join.right().into_rel_node())?;
+            Some(JoinOrder::HashJoin(Box::new(left), Box::new(right)))
+        }
+        OptRelNodeTyp::PhysicalNestedLoopJoin(_) => {
+            let join = PhysicalNestedLoopJoin::from_rel_node(rel_node.clone()).unwrap();
+            let left = get_join_order(join.left().into_rel_node())?;
+            let right = get_join_order(join.right().into_rel_node())?;
+            Some(JoinOrder::NestedLoopJoin(Box::new(left), Box::new(right)))
+        }
+        OptRelNodeTyp::PhysicalScan => {
+            let scan =
+                optd_datafusion_repr::plan_nodes::PhysicalScan::from_rel_node(rel_node).unwrap();
+            Some(JoinOrder::Table(scan.table().to_string()))
+        }
+        _ => {
+            for child in &rel_node.children {
+                if let Some(res) = get_join_order(child.clone()) {
+                    return Some(res);
+                }
+            }
+            None
+        }
     }
 }

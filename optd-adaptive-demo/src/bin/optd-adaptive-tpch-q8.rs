@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     };
 
     exec_from_files(
-        vec!["tpch/populate.sql".to_string()],
+        vec!["datafusion-optd-cli/tpch-sf0_01/populate.sql".to_string()],
         &mut ctx,
         &slient_print_options,
     )
