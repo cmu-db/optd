@@ -2,7 +2,6 @@ use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result};
 use itertools::Itertools;
-use std::any::Any;
 
 use crate::{
     optimizer::Optimizer,
@@ -20,7 +19,7 @@ pub struct HeuristicsOptimizer<T: RelNodeTyp> {
     rules: Arc<[Arc<dyn Rule<T, Self>>]>,
     apply_order: ApplyOrder,
     property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
-    properties: HashMap<RelNodeRef<T>, Arc<[Box<dyn Any + Send + Sync + 'static>]>>,
+    properties: HashMap<RelNodeRef<T>, Vec<serde_json::Value>>,
 }
 
 fn match_node<T: RelNodeTyp>(
@@ -187,10 +186,7 @@ impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
             .collect_vec();
         let mut props = Vec::with_capacity(self.property_builders.len());
         for (id, builder) in self.property_builders.iter().enumerate() {
-            let child_properties = child_properties
-                .iter()
-                .map(|x| x[id].as_ref() as &dyn std::any::Any)
-                .collect::<Vec<_>>();
+            let child_properties = child_properties.iter().map(|x| &x[id]).collect::<Vec<_>>();
             let prop = builder.derive_any(
                 root_rel.typ.clone(),
                 root_rel.data.clone(),
@@ -198,7 +194,7 @@ impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
             );
             props.push(prop);
         }
-        self.properties.insert(root_rel.clone(), props.into());
+        self.properties.insert(root_rel.clone(), props);
     }
 }
 
@@ -217,8 +213,7 @@ impl<T: RelNodeTyp> Optimizer<T> for HeuristicsOptimizer<T> {
             .get(&root_rel)
             .with_context(|| format!("cannot obtain properties for {}", root_rel))
             .unwrap();
-        let prop = props[idx].as_ref();
-        prop.downcast_ref::<P::Prop>()
+        serde_json::from_value(props[idx].clone())
             .with_context(|| {
                 format!(
                     "cannot downcast property at idx {} into provided property instance",
@@ -226,6 +221,5 @@ impl<T: RelNodeTyp> Optimizer<T> for HeuristicsOptimizer<T> {
                 )
             })
             .unwrap()
-            .clone()
     }
 }

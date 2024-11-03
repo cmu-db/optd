@@ -5,7 +5,6 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use itertools::Itertools;
-use std::any::Any;
 use tracing::trace;
 
 use crate::{
@@ -101,7 +100,7 @@ pub struct GroupInfo {
 pub struct Group {
     pub(crate) group_exprs: HashSet<ExprId>,
     pub(crate) info: GroupInfo,
-    pub(crate) properties: Arc<[Box<dyn Any + Send + Sync + 'static>]>,
+    pub(crate) properties: Vec<serde_json::Value>,
 }
 
 /// Trait for memo table implementations.
@@ -550,10 +549,7 @@ impl<T: RelNodeTyp> NaiveMemo<T> {
         (group_id, expr_id)
     }
 
-    fn infer_properties(
-        &self,
-        memo_node: RelMemoNode<T>,
-    ) -> Vec<Box<dyn Any + 'static + Send + Sync>> {
+    fn infer_properties(&self, memo_node: RelMemoNode<T>) -> Vec<serde_json::Value> {
         let child_properties = memo_node
             .children
             .iter()
@@ -561,10 +557,7 @@ impl<T: RelNodeTyp> NaiveMemo<T> {
             .collect_vec();
         let mut props = Vec::with_capacity(self.property_builders.len());
         for (id, builder) in self.property_builders.iter().enumerate() {
-            let child_properties = child_properties
-                .iter()
-                .map(|x| x[id].as_ref() as &dyn std::any::Any)
-                .collect::<Vec<_>>();
+            let child_properties = child_properties.iter().map(|x| &x[id]).collect::<Vec<_>>();
             let prop = builder.derive_any(
                 memo_node.typ.clone(),
                 memo_node.data.clone(),
@@ -593,7 +586,7 @@ impl<T: RelNodeTyp> NaiveMemo<T> {
         let mut group = Group {
             group_exprs: HashSet::new(),
             info: GroupInfo::default(),
-            properties: self.infer_properties(memo_node).into(),
+            properties: self.infer_properties(memo_node),
         };
         group.group_exprs.insert(expr_id);
         self.groups.insert(group_id, group);

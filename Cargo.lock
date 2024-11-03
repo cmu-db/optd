@@ -2762,6 +2762,7 @@ dependencies = [
  "itertools",
  "ordered-float 4.2.0",
  "serde",
+ "serde_json",
  "tracing",
  "value-bag",
 ]

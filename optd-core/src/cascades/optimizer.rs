@@ -160,7 +160,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
                 println!(
                     "  {}={}",
                     property.property_name(),
-                    property.display(group.properties[id].as_ref())
+                    property.display(&group.properties[id])
                 )
             }
             if let Some(predicate_binding) = self.memo.try_get_predicate_binding(group_id) {
@@ -310,10 +310,7 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         group_id: GroupId,
         idx: usize,
     ) -> P::Prop {
-        self.memo.get_group(group_id).properties[idx]
-            .downcast_ref::<P::Prop>()
-            .unwrap()
-            .clone()
+        serde_json::from_value(self.memo.get_group(group_id).properties[idx].clone()).unwrap()
     }
 
     pub(super) fn get_group_id(&self, expr_id: ExprId) -> GroupId {

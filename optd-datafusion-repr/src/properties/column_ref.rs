@@ -4,6 +4,7 @@ use std::{ops::Deref, sync::Arc};
 use crate::plan_nodes::{BinOpType, EmptyRelationData, JoinType, LogOpType, OptRelNodeTyp};
 use anyhow::anyhow;
 use optd_core::property::PropertyBuilder;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use union_find::disjoint_sets::DisjointSets;
 use union_find::union_find::UnionFind;
 
@@ -12,13 +13,13 @@ use super::DEFAULT_NAME;
 
 pub type BaseTableColumnRefs = Vec<ColumnRef>;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct BaseTableColumnRef {
     pub table: String,
     pub col_idx: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ColumnRef {
     BaseTableColumnRef(BaseTableColumnRef),
     /// This variant is only used when building the property. It should NEVER
@@ -48,7 +49,7 @@ impl From<BaseTableColumnRef> for ColumnRef {
 /// `SemanticCorrelation` represents the semantic correlation between columns in a
 /// query. "Semantic" means that the columns are correlated based on the
 /// semantics of the query, not the statistics.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SemanticCorrelation {
     eq_columns: EqColumns,
 }
@@ -102,7 +103,7 @@ impl TryFrom<SemanticCorrelation> for EqBaseTableColumnSets {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum EqColumns {
     /// Equal columns denoted by disjoint sets of base table columns,
     /// e.g. {{ t1.c1 = t2.c1 = t3.c1 }, { t1.c2 = t2.c2 }}.
@@ -116,7 +117,7 @@ pub enum EqColumns {
     EqColumnIdxPairs(Vec<(usize, usize)>),
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct EqPredicate {
     pub left: BaseTableColumnRef,
     pub right: BaseTableColumnRef,
@@ -128,18 +129,41 @@ impl EqPredicate {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+struct SerializableDisjointSets<T>(DisjointSets<T>);
+
+impl<T> Serialize for SerializableDisjointSets<T>
+where
+    T: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        unimplemented!()
+    }
+}
+
+impl<'de, T> Deserialize<'de> for SerializableDisjointSets<T> {
+    fn deserialize<D>(deserializer: D) -> Result<SerializableDisjointSets<T>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        unimplemented!()
+    }
+}
 /// A disjoint set of base table columns with equal values in the same row,
 /// along with the predicates that define the equalities.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct EqBaseTableColumnSets {
-    disjoint_eq_col_sets: DisjointSets<BaseTableColumnRef>,
+    disjoint_eq_col_sets: SerializableDisjointSets<BaseTableColumnRef>,
     eq_predicates: HashSet<EqPredicate>,
 }
 
 impl EqBaseTableColumnSets {
     pub fn new() -> Self {
         Self {
-            disjoint_eq_col_sets: DisjointSets::new(),
+            disjoint_eq_col_sets: SerializableDisjointSets(DisjointSets::new()),
             eq_predicates: HashSet::new(),
         }
     }
@@ -149,18 +173,21 @@ impl EqBaseTableColumnSets {
         let right = &predicate.right;
 
         // Add the indices to the set if they do not exist.
-        if !self.disjoint_eq_col_sets.contains(left) {
+        if !self.disjoint_eq_col_sets.0.contains(left) {
             self.disjoint_eq_col_sets
+                .0
                 .make_set(left.clone())
                 .expect("just checked left column index does not exist");
         }
-        if !self.disjoint_eq_col_sets.contains(right) {
+        if !self.disjoint_eq_col_sets.0.contains(right) {
             self.disjoint_eq_col_sets
+                .0
                 .make_set(right.clone())
                 .expect("just checked right column index does not exist");
         }
         // Union the columns.
         self.disjoint_eq_col_sets
+            .0
             .union(left, right)
             .expect("both column indices should exist");
 
@@ -171,17 +198,18 @@ impl EqBaseTableColumnSets {
     /// Determine if two columns are in the same set.
     pub fn is_eq(&mut self, left: &BaseTableColumnRef, right: &BaseTableColumnRef) -> bool {
         self.disjoint_eq_col_sets
+            .0
             .same_set(left, right)
             .unwrap_or(false)
     }
 
     pub fn contains(&self, base_col_ref: &BaseTableColumnRef) -> bool {
-        self.disjoint_eq_col_sets.contains(base_col_ref)
+        self.disjoint_eq_col_sets.0.contains(base_col_ref)
     }
 
     /// Get the number of columns that are equal to `col`, including `col` itself.
     pub fn num_eq_columns(&mut self, col: &BaseTableColumnRef) -> usize {
-        self.disjoint_eq_col_sets.set_size(col).unwrap()
+        self.disjoint_eq_col_sets.0.set_size(col).unwrap()
     }
 
     /// Find the set of predicates that define the equality of the set of columns `col` belongs to.
@@ -193,8 +221,8 @@ impl EqBaseTableColumnSets {
         for predicate in &self.eq_predicates {
             let left = &predicate.left;
             let right = &predicate.right;
-            if (left != col && self.disjoint_eq_col_sets.same_set(col, left).unwrap())
-                || (right != col && self.disjoint_eq_col_sets.same_set(col, right).unwrap())
+            if (left != col && self.disjoint_eq_col_sets.0.same_set(col, left).unwrap())
+                || (right != col && self.disjoint_eq_col_sets.0.same_set(col, right).unwrap())
             {
                 predicates.push(predicate.clone());
             }
@@ -228,7 +256,7 @@ impl EqBaseTableColumnSets {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GroupColumnRefs {
     column_refs: BaseTableColumnRefs,
     /// Correlation of the output columns of the group.
