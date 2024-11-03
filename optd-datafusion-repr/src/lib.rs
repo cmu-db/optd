@@ -5,7 +5,7 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 use cost::{AdaptiveCostModel, RuntimeAdaptionStorage};
 use optd_core::{
-    cascades::{CascadesOptimizer, GroupId, OptimizerProperties},
+    cascades::{CascadesOptimizer, GroupId, NaiveMemo, OptimizerProperties},
     cost::CostModel,
     heuristics::{ApplyOrder, HeuristicsOptimizer},
     optimizer::Optimizer,
@@ -155,7 +155,7 @@ impl DatafusionOptimizer {
     pub fn new_physical_with_cost_model(
         catalog: Arc<dyn Catalog>,
         enable_adaptive: bool,
-        cost_model: impl CostModel<OptRelNodeTyp>,
+        cost_model: impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>>,
         runtime_map: RuntimeAdaptionStorage,
     ) -> Self {
         let cascades_rules = Self::default_cascades_rules();

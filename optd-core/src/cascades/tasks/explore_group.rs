@@ -5,6 +5,7 @@ use crate::{
     cascades::{
         optimizer::{CascadesOptimizer, GroupId},
         tasks::OptimizeExpressionTask,
+        Memo,
     },
     rel_node::RelNodeTyp,
 };
@@ -21,8 +22,8 @@ impl ExploreGroupTask {
     }
 }
 
-impl<T: RelNodeTyp> Task<T> for ExploreGroupTask {
-    fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
+impl<T: RelNodeTyp, M: Memo<T>> Task<T, M> for ExploreGroupTask {
+    fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) -> Result<Vec<Box<dyn Task<T, M>>>> {
         trace!(event = "task_begin", task = "explore_group", group_id = %self.group_id);
         let mut tasks = vec![];
         if optimizer.is_group_explored(self.group_id) {
@@ -34,7 +35,8 @@ impl<T: RelNodeTyp> Task<T> for ExploreGroupTask {
         for expr in exprs {
             let typ = optimizer.get_expr_memoed(expr).typ.clone();
             if typ.is_logical() {
-                tasks.push(Box::new(OptimizeExpressionTask::new(expr, true)) as Box<dyn Task<T>>);
+                tasks
+                    .push(Box::new(OptimizeExpressionTask::new(expr, true)) as Box<dyn Task<T, M>>);
             }
         }
         optimizer.mark_group_explored(self.group_id);

@@ -39,15 +39,15 @@ pub struct OptimizerProperties {
     pub partial_explore_space: Option<usize>,
 }
 
-pub struct CascadesOptimizer<T: RelNodeTyp> {
-    memo: NaiveMemo<T>,
-    pub(super) tasks: VecDeque<Box<dyn Task<T>>>,
+pub struct CascadesOptimizer<T: RelNodeTyp, M: Memo<T> = NaiveMemo<T>> {
+    memo: M,
+    pub(super) tasks: VecDeque<Box<dyn Task<T, M>>>,
     explored_group: HashSet<GroupId>,
     explored_expr: HashSet<ExprId>,
     fired_rules: HashMap<ExprId, HashSet<RuleId>>,
     rules: Arc<[Arc<RuleWrapper<T, Self>>]>,
     disabled_rules: HashSet<usize>,
-    cost: Arc<dyn CostModel<T>>,
+    cost: Arc<dyn CostModel<T, M>>,
     property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
     pub ctx: OptimizerContext,
     pub prop: OptimizerProperties,
@@ -80,22 +80,18 @@ impl Display for ExprId {
     }
 }
 
-impl<T: RelNodeTyp> CascadesOptimizer<T> {
+impl<T: RelNodeTyp> CascadesOptimizer<T, NaiveMemo<T>> {
     pub fn new(
         rules: Vec<Arc<RuleWrapper<T, Self>>>,
-        cost: Box<dyn CostModel<T>>,
+        cost: Box<dyn CostModel<T, NaiveMemo<T>>>,
         property_builders: Vec<Box<dyn PropertyBuilderAny<T>>>,
     ) -> Self {
         Self::new_with_prop(rules, cost, property_builders, Default::default())
     }
 
-    pub fn panic_on_explore_limit(&mut self, enabled: bool) {
-        self.prop.panic_on_budget = enabled;
-    }
-
     pub fn new_with_prop(
         rules: Vec<Arc<RuleWrapper<T, Self>>>,
-        cost: Box<dyn CostModel<T>>,
+        cost: Box<dyn CostModel<T, NaiveMemo<T>>>,
         property_builders: Vec<Box<dyn PropertyBuilderAny<T>>>,
         prop: OptimizerProperties,
     ) -> Self {
@@ -117,7 +113,27 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         }
     }
 
-    pub fn cost(&self) -> Arc<dyn CostModel<T>> {
+    /// Clear the memo table and all optimizer states.
+    pub fn step_clear(&mut self) {
+        self.memo = NaiveMemo::new(self.property_builders.clone());
+        self.fired_rules.clear();
+        self.explored_group.clear();
+        self.explored_expr.clear();
+    }
+
+    /// Clear the winner so that the optimizer can continue to explore the group.
+    pub fn step_clear_winner(&mut self) {
+        self.memo.clear_winner();
+        self.explored_expr.clear();
+    }
+}
+
+impl<T: RelNodeTyp, M: Memo<T>> CascadesOptimizer<T, M> {
+    pub fn panic_on_explore_limit(&mut self, enabled: bool) {
+        self.prop.panic_on_budget = enabled;
+    }
+
+    pub fn cost(&self) -> Arc<dyn CostModel<T, M>> {
         self.cost.clone()
     }
 
@@ -173,20 +189,6 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
         }
     }
 
-    /// Clear the memo table and all optimizer states.
-    pub fn step_clear(&mut self) {
-        self.memo = NaiveMemo::new(self.property_builders.clone());
-        self.fired_rules.clear();
-        self.explored_group.clear();
-        self.explored_expr.clear();
-    }
-
-    /// Clear the winner so that the optimizer can continue to explore the group.
-    pub fn step_clear_winner(&mut self) {
-        self.memo.clear_winner();
-        self.explored_expr.clear();
-    }
-
     /// Optimize a `RelNode`.
     pub fn step_optimize_rel(&mut self, root_rel: RelNodeRef<T>) -> Result<GroupId> {
         let (group_id, _) = self.add_new_expr(root_rel);
@@ -228,14 +230,14 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             .push_back(Box::new(OptimizeGroupTask::new(group_id)));
         // get the task from the stack
         self.ctx.budget_used = false;
-        let plan_space_begin = self.memo.compute_plan_space();
+        let plan_space_begin = self.memo.estimated_plan_space();
         let mut iter = 0;
         while let Some(task) = self.tasks.pop_back() {
             let new_tasks = task.execute(self)?;
             self.tasks.extend(new_tasks);
             iter += 1;
             if !self.ctx.budget_used {
-                let plan_space = self.memo.compute_plan_space();
+                let plan_space = self.memo.estimated_plan_space();
                 if let Some(partial_explore_space) = self.prop.partial_explore_space {
                     if plan_space - plan_space_begin > partial_explore_space {
                         println!(
@@ -362,12 +364,12 @@ impl<T: RelNodeTyp> CascadesOptimizer<T> {
             .insert(rule_id);
     }
 
-    pub fn memo(&self) -> &NaiveMemo<T> {
+    pub fn memo(&self) -> &M {
         &self.memo
     }
 }
 
-impl<T: RelNodeTyp> Optimizer<T> for CascadesOptimizer<T> {
+impl<T: RelNodeTyp, M: Memo<T>> Optimizer<T> for CascadesOptimizer<T, M> {
     fn optimize(&mut self, root_rel: RelNodeRef<T>) -> Result<RelNodeRef<T>> {
         self.optimize_inner(root_rel)
     }

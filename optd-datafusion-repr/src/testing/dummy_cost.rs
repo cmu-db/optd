@@ -1,6 +1,6 @@
 use crate::plan_nodes::OptRelNodeTyp;
 use optd_core::{
-    cascades::{CascadesOptimizer, RelNodeContext},
+    cascades::{CascadesOptimizer, NaiveMemo, RelNodeContext},
     cost::{Cost, CostModel, Statistics},
     rel_node::Value,
 };
@@ -10,7 +10,7 @@ use value_bag::ValueBag;
 /// Intended for testing with the cascades optimizer.
 pub struct DummyCostModel;
 
-impl CostModel<OptRelNodeTyp> for DummyCostModel {
+impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for DummyCostModel {
     /// Compute the cost of a single operation
     fn compute_operation_cost(
         &self,

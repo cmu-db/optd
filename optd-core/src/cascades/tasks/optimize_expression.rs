@@ -5,6 +5,7 @@ use crate::{
     cascades::{
         optimizer::{CascadesOptimizer, ExprId},
         tasks::{ApplyRuleTask, ExploreGroupTask},
+        Memo,
     },
     rel_node::{RelNodeTyp, Value},
     rules::RuleMatcher,
@@ -35,8 +36,8 @@ fn top_matches<T: RelNodeTyp>(
     }
 }
 
-impl<T: RelNodeTyp> Task<T> for OptimizeExpressionTask {
-    fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
+impl<T: RelNodeTyp, M: Memo<T>> Task<T, M> for OptimizeExpressionTask {
+    fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) -> Result<Vec<Box<dyn Task<T, M>>>> {
         let expr = optimizer.get_expr_memoed(self.expr_id);
         trace!(event = "task_begin", task = "optimize_expr", expr_id = %self.expr_id, expr = %expr);
         let mut tasks = vec![];
@@ -56,10 +57,12 @@ impl<T: RelNodeTyp> Task<T> for OptimizeExpressionTask {
             if top_matches(rule.matcher(), expr.typ.clone(), expr.data.clone()) {
                 tasks.push(
                     Box::new(ApplyRuleTask::new(rule_id, self.expr_id, self.exploring))
-                        as Box<dyn Task<T>>,
+                        as Box<dyn Task<T, M>>,
                 );
                 for &input_group_id in &expr.children {
-                    tasks.push(Box::new(ExploreGroupTask::new(input_group_id)) as Box<dyn Task<T>>);
+                    tasks.push(
+                        Box::new(ExploreGroupTask::new(input_group_id)) as Box<dyn Task<T, M>>
+                    );
                 }
             }
         }

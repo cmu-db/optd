@@ -6,7 +6,7 @@ use crate::{
         memo::{GroupInfo, Winner, WinnerInfo},
         optimizer::ExprId,
         tasks::OptimizeGroupTask,
-        CascadesOptimizer, RelNodeContext,
+        CascadesOptimizer, Memo, RelNodeContext,
     },
     cost::{Cost, Statistics},
     rel_node::RelNodeTyp,
@@ -60,7 +60,10 @@ impl OptimizeInputsTask {
         }
     }
 
-    fn update_winner_impossible<T: RelNodeTyp>(&self, optimizer: &mut CascadesOptimizer<T>) {
+    fn update_winner_impossible<T: RelNodeTyp, M: Memo<T>>(
+        &self,
+        optimizer: &mut CascadesOptimizer<T, M>,
+    ) {
         let group_id = optimizer.get_group_id(self.expr_id);
         if let Winner::Unknown = optimizer.get_group_info(group_id).winner {
             optimizer.update_group_info(
@@ -72,12 +75,12 @@ impl OptimizeInputsTask {
         }
     }
 
-    fn update_winner<T: RelNodeTyp>(
+    fn update_winner<T: RelNodeTyp, M: Memo<T>>(
         &self,
         input_statistics: Vec<Option<&Statistics>>,
         operation_cost: Cost,
         total_cost: Cost,
-        optimizer: &mut CascadesOptimizer<T>,
+        optimizer: &mut CascadesOptimizer<T, M>,
     ) {
         let group_id = optimizer.get_group_id(self.expr_id);
         let group_info = optimizer.get_group_info(group_id);
@@ -125,8 +128,8 @@ impl OptimizeInputsTask {
     }
 }
 
-impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
-    fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
+impl<T: RelNodeTyp, M: Memo<T>> Task<T, M> for OptimizeInputsTask {
+    fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) -> Result<Vec<Box<dyn Task<T, M>>>> {
         if self.continue_from.is_none() {
             if optimizer.is_expr_explored(self.expr_id) {
                 // skip optimize_inputs to avoid dead-loop: consider join commute being fired twice that produces
@@ -228,8 +231,8 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                                     return_from_optimize_group: true,
                                 },
                                 self.pruning,
-                            )) as Box<dyn Task<T>>,
-                            Box::new(OptimizeGroupTask::new(child_group_id)) as Box<dyn Task<T>>,
+                            )) as Box<dyn Task<T, M>>,
+                            Box::new(OptimizeGroupTask::new(child_group_id)) as Box<dyn Task<T, M>>,
                         ]);
                     } else {
                         self.update_winner_impossible(optimizer);
@@ -244,7 +247,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                         return_from_optimize_group: false,
                     },
                     self.pruning,
-                )) as Box<dyn Task<T>>])
+                )) as Box<dyn Task<T, M>>])
             } else {
                 self.update_winner(input_statistics_ref, operation_cost, total_cost, optimizer);
                 trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id, result = "optimized");
@@ -258,7 +261,7 @@ impl<T: RelNodeTyp> Task<T> for OptimizeInputsTask {
                     return_from_optimize_group: false,
                 },
                 self.pruning,
-            )) as Box<dyn Task<T>>])
+            )) as Box<dyn Task<T, M>>])
         }
     }
 

@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::rel_node::RelNodeTyp;
 
-use super::CascadesOptimizer;
+use super::{CascadesOptimizer, Memo};
 
 mod apply_rule;
 mod explore_group;
@@ -16,7 +16,7 @@ pub use optimize_expression::OptimizeExpressionTask;
 pub use optimize_group::OptimizeGroupTask;
 pub use optimize_inputs::OptimizeInputsTask;
 
-pub trait Task<T: RelNodeTyp>: 'static + Send + Sync {
-    fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>>;
+pub trait Task<T: RelNodeTyp, M: Memo<T>>: 'static + Send + Sync {
+    fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) -> Result<Vec<Box<dyn Task<T, M>>>>;
     fn describe(&self) -> String;
 }

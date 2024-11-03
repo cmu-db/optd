@@ -5,7 +5,7 @@ use crate::{
     cascades::{
         optimizer::GroupId,
         tasks::{optimize_expression::OptimizeExpressionTask, OptimizeInputsTask},
-        CascadesOptimizer,
+        CascadesOptimizer, Memo,
     },
     rel_node::RelNodeTyp,
 };
@@ -22,8 +22,8 @@ impl OptimizeGroupTask {
     }
 }
 
-impl<T: RelNodeTyp> Task<T> for OptimizeGroupTask {
-    fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
+impl<T: RelNodeTyp, M: Memo<T>> Task<T, M> for OptimizeGroupTask {
+    fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) -> Result<Vec<Box<dyn Task<T, M>>>> {
         trace!(event = "task_begin", task = "optimize_group", group_id = %self.group_id);
         let group_info = optimizer.get_group_info(self.group_id);
         if group_info.winner.has_decided() {
@@ -36,13 +36,13 @@ impl<T: RelNodeTyp> Task<T> for OptimizeGroupTask {
         for &expr in &exprs {
             let typ = optimizer.get_expr_memoed(expr).typ.clone();
             if typ.is_logical() {
-                tasks.push(Box::new(OptimizeExpressionTask::new(expr, false)) as Box<dyn Task<T>>);
+                tasks.push(Box::new(OptimizeExpressionTask::new(expr, false)) as Box<dyn Task<T, M>>);
             }
         }
         for &expr in &exprs {
             let typ = optimizer.get_expr_memoed(expr).typ.clone();
             if !typ.is_logical() {
-                tasks.push(Box::new(OptimizeInputsTask::new(expr, true)) as Box<dyn Task<T>>);
+                tasks.push(Box::new(OptimizeInputsTask::new(expr, true)) as Box<dyn Task<T, M>>);
             }
         }
         trace!(event = "task_finish", task = "optimize_group", group_id = %self.group_id, exprs_cnt = exprs_cnt);

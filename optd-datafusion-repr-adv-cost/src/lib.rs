@@ -17,7 +17,7 @@ pub mod adv_stats;
 use std::collections::HashMap;
 
 use optd_core::{
-    cascades::{CascadesOptimizer, RelNodeContext},
+    cascades::{CascadesOptimizer, NaiveMemo, RelNodeContext},
     cost::{Cost, CostModel, Statistics},
     rel_node::Value,
 };
@@ -35,7 +35,7 @@ impl AdvancedCostModel {
     }
 }
 
-impl CostModel<OptRelNodeTyp> for AdvancedCostModel {
+impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for AdvancedCostModel {
     fn explain_cost(&self, cost: &Cost) -> String {
         self.base_model.explain_cost(cost)
     }

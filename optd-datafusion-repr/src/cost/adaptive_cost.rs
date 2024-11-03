@@ -5,7 +5,7 @@ use std::{
 
 use crate::{cost::OptCostModel, plan_nodes::OptRelNodeTyp};
 use optd_core::{
-    cascades::{CascadesOptimizer, GroupId, RelNodeContext},
+    cascades::{CascadesOptimizer, GroupId, NaiveMemo, RelNodeContext},
     cost::{Cost, CostModel, Statistics},
     rel_node::Value,
 };
@@ -40,7 +40,7 @@ impl AdaptiveCostModel {
     }
 }
 
-impl CostModel<OptRelNodeTyp> for AdaptiveCostModel {
+impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for AdaptiveCostModel {
     fn explain_cost(&self, cost: &Cost) -> String {
         self.base_model.explain_cost(cost)
     }

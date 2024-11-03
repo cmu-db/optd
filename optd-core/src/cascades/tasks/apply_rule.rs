@@ -9,7 +9,7 @@ use crate::{
         memo::RelMemoNodeRef,
         optimizer::{CascadesOptimizer, ExprId, RuleId},
         tasks::{OptimizeExpressionTask, OptimizeInputsTask},
-        GroupId,
+        GroupId, Memo,
     },
     rel_node::{RelNode, RelNodeTyp},
     rules::{OptimizeType, RuleMatcher},
@@ -33,12 +33,12 @@ impl ApplyRuleTask {
     }
 }
 
-fn match_node<T: RelNodeTyp>(
+fn match_node<T: RelNodeTyp, M: Memo<T>>(
     typ: &T,
     children: &[RuleMatcher<T>],
     pick_to: Option<usize>,
     node: RelMemoNodeRef<T>,
-    optimizer: &CascadesOptimizer<T>,
+    optimizer: &CascadesOptimizer<T, M>,
 ) -> Vec<HashMap<usize, RelNode<T>>> {
     if let RuleMatcher::PickMany { .. } | RuleMatcher::IgnoreMany = children.last().unwrap() {
     } else {
@@ -123,19 +123,19 @@ fn match_node<T: RelNodeTyp>(
     picks
 }
 
-fn match_and_pick_expr<T: RelNodeTyp>(
+fn match_and_pick_expr<T: RelNodeTyp, M: Memo<T>>(
     matcher: &RuleMatcher<T>,
     expr_id: ExprId,
-    optimizer: &CascadesOptimizer<T>,
+    optimizer: &CascadesOptimizer<T, M>,
 ) -> Vec<HashMap<usize, RelNode<T>>> {
     let node = optimizer.get_expr_memoed(expr_id);
     match_and_pick(matcher, node, optimizer)
 }
 
-fn match_and_pick_group<T: RelNodeTyp>(
+fn match_and_pick_group<T: RelNodeTyp, M: Memo<T>>(
     matcher: &RuleMatcher<T>,
     group_id: GroupId,
-    optimizer: &CascadesOptimizer<T>,
+    optimizer: &CascadesOptimizer<T, M>,
 ) -> Vec<HashMap<usize, RelNode<T>>> {
     let mut matches = vec![];
     for expr_id in optimizer.get_all_exprs_in_group(group_id) {
@@ -145,10 +145,10 @@ fn match_and_pick_group<T: RelNodeTyp>(
     matches
 }
 
-fn match_and_pick<T: RelNodeTyp>(
+fn match_and_pick<T: RelNodeTyp, M: Memo<T>>(
     matcher: &RuleMatcher<T>,
     node: RelMemoNodeRef<T>,
-    optimizer: &CascadesOptimizer<T>,
+    optimizer: &CascadesOptimizer<T, M>,
 ) -> Vec<HashMap<usize, RelNode<T>>> {
     match matcher {
         RuleMatcher::MatchAndPickNode {
@@ -171,8 +171,8 @@ fn match_and_pick<T: RelNodeTyp>(
     }
 }
 
-impl<T: RelNodeTyp> Task<T> for ApplyRuleTask {
-    fn execute(&self, optimizer: &mut CascadesOptimizer<T>) -> Result<Vec<Box<dyn Task<T>>>> {
+impl<T: RelNodeTyp, M: Memo<T>> Task<T, M> for ApplyRuleTask {
+    fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) -> Result<Vec<Box<dyn Task<T, M>>>> {
         if optimizer.is_rule_fired(self.expr_id, self.rule_id) {
             return Ok(vec![]);
         }
@@ -204,12 +204,12 @@ impl<T: RelNodeTyp> Task<T> for ApplyRuleTask {
                     if expr_typ.is_logical() {
                         tasks.push(
                             Box::new(OptimizeExpressionTask::new(expr_id, self.exploring))
-                                as Box<dyn Task<T>>,
+                                as Box<dyn Task<T, M>>,
                         );
                     } else {
                         tasks
                             .push(Box::new(OptimizeInputsTask::new(expr_id, true))
-                                as Box<dyn Task<T>>);
+                                as Box<dyn Task<T, M>>);
                     }
                     optimizer.unmark_expr_explored(expr_id);
                     trace!(event = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, new_expr_id = %expr_id);
