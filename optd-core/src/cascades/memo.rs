@@ -118,7 +118,7 @@ pub trait Memo<T: RelNodeTyp> {
     /// The group id is volatile, depending on whether the groups are merged.
     fn get_group_id(&self, expr_id: ExprId) -> GroupId;
 
-    /// Get the memoized representation of a node, only for debugging purpose
+    /// Get the memoized representation of a node.
     fn get_expr_memoed(&self, expr_id: ExprId) -> RelMemoNodeRef<T>;
 
     /// Get all groups IDs in the memo table.
