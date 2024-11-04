@@ -11,3 +11,11 @@ members = [
     "optd-datafusion-repr-adv-cost",
 ]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+homepage = "https://github.com/cmu-db/optd"
+keywords = ["sql", "database", "optimizer", "datafusion"]
+license = "MIT"
+repository = "https://github.com/cmu-db/optd"
