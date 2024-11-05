@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, hash::Hash, sync::Arc};
 
 use itertools::Itertools;
 use tracing::trace;
@@ -10,7 +10,7 @@ use crate::{
         tasks::{explore_expr::ExploreExprTask, optimize_inputs::OptimizeInputsTask},
         CascadesOptimizer, GroupId,
     },
-    nodes::{NodeType, PlanNode, PlanNodeOrGroup},
+    nodes::{ArcPredNode, NodeType, PlanNode, PlanNodeOrGroup},
     rules::{Rule, RuleMatcher},
 };
 
@@ -22,10 +22,14 @@ use super::Task;
 fn match_node<T: NodeType>(
     typ: &T,
     children: &[RuleMatcher<T>],
+    predicates: &[RuleMatcher<T>],
     pick_to: Option<usize>,
     node: RelMemoNodeRef<T>,
     optimizer: &CascadesOptimizer<T>,
-) -> Vec<HashMap<usize, PlanNodeOrGroup<T>>> {
+) -> Vec<(
+    HashMap<usize, PlanNodeOrGroup<T>>,
+    HashMap<usize, ArcPredNode<T>>,
+)> {
     if let RuleMatcher::PickMany { .. } | RuleMatcher::IgnoreMany = children.last().unwrap() {
     } else {
         assert_eq!(
@@ -37,7 +41,7 @@ fn match_node<T: NodeType>(
     }
 
     let mut should_end = false;
-    let mut picks = vec![HashMap::new()];
+    let mut picks = vec![(HashMap::new(), HashMap::new())];
     for (idx, child) in children.iter().enumerate() {
         assert!(!should_end, "many matcher should be at the end");
         match child {
@@ -45,17 +49,10 @@ fn match_node<T: NodeType>(
             RuleMatcher::IgnoreMany => {
                 should_end = true;
             }
-            RuleMatcher::PickOne { pick_to, expand } => {
+            RuleMatcher::PickOne { pick_to } => {
                 let group_id = node.children[idx];
-                let node = if *expand {
-                    // TODO redesign
-                    // let binding = optimizer.get_pred_from_pred_id(group_id);
-                    // PlanNodeOrGroup::PlanNode(binding)
-                    todo!()
-                } else {
-                    PlanNodeOrGroup::Group(group_id)
-                };
-                for pick in &mut picks {
+                let node = PlanNodeOrGroup::Group(group_id);
+                for (pick, pred_pick) in &mut picks {
                     let res = pick.insert(*pick_to, node.clone());
                     assert!(res.is_none(), "dup pick");
                 }
@@ -79,19 +76,38 @@ fn match_node<T: NodeType>(
             _ => {
                 let new_picks = match_and_pick_group(child, node.children[idx], optimizer);
                 let mut merged_picks = vec![];
-                for old_pick in &picks {
-                    for new_picks in &new_picks {
+                for (old_pick, old_pred_pick) in &picks {
+                    for (new_pick, new_pred_pick) in &new_picks {
                         let mut pick = old_pick.clone();
-                        pick.extend(new_picks.iter().map(|(k, v)| (*k, v.clone())));
-                        merged_picks.push(pick);
+                        let mut pred_pick = old_pred_pick.clone();
+                        pick.extend(new_pick.iter().map(|(k, v)| (*k, v.clone())));
+                        pred_pick.extend(new_pred_pick.iter().map(|(k, v)| (*k, v.clone())));
+                        merged_picks.push((pick, pred_pick));
                     }
                 }
                 picks = merged_picks;
             }
         }
     }
+    for (idx, pred) in predicates.iter().enumerate() {
+        match pred {
+            RuleMatcher::PickPred { pick_to } => {
+                for (pick, pred_pick) in &mut picks {
+                    let res = pred_pick.insert(
+                        *pick_to,
+                        optimizer.get_pred_from_pred_id(node.predicates[idx].clone()),
+                    );
+                    assert!(res.is_none(), "dup pred pick?");
+                }
+            }
+            _ => {
+                panic!("only PickPred is supported for predicates");
+            }
+        }
+    }
+
     if let Some(pick_to) = pick_to {
-        for pick in &mut picks {
+        for (pick, _) in &mut picks {
             let res: Option<PlanNodeOrGroup<T>> = pick.insert(
                 pick_to,
                 PlanNodeOrGroup::PlanNode(
@@ -121,7 +137,10 @@ fn match_and_pick_expr<T: NodeType>(
     matcher: &RuleMatcher<T>,
     expr_id: ExprId,
     optimizer: &CascadesOptimizer<T>,
-) -> Vec<HashMap<usize, PlanNodeOrGroup<T>>> {
+) -> Vec<(
+    HashMap<usize, PlanNodeOrGroup<T>>,
+    HashMap<usize, ArcPredNode<T>>,
+)> {
     let node = optimizer.get_expr_memoed(expr_id);
     match_and_pick(matcher, node, optimizer)
 }
@@ -130,7 +149,10 @@ fn match_and_pick_group<T: NodeType>(
     matcher: &RuleMatcher<T>,
     group_id: GroupId,
     optimizer: &CascadesOptimizer<T>,
-) -> Vec<HashMap<usize, PlanNodeOrGroup<T>>> {
+) -> Vec<(
+    HashMap<usize, PlanNodeOrGroup<T>>,
+    HashMap<usize, ArcPredNode<T>>,
+)> {
     let mut matches = vec![];
     for expr_id in optimizer.get_all_exprs_in_group(group_id) {
         let node = optimizer.get_expr_memoed(expr_id);
@@ -143,42 +165,66 @@ fn match_and_pick<T: NodeType>(
     matcher: &RuleMatcher<T>,
     node: RelMemoNodeRef<T>,
     optimizer: &CascadesOptimizer<T>,
-) -> Vec<HashMap<usize, PlanNodeOrGroup<T>>> {
+) -> Vec<(
+    HashMap<usize, PlanNodeOrGroup<T>>,
+    HashMap<usize, ArcPredNode<T>>,
+)> {
     match matcher {
         RuleMatcher::MatchAndPickNode {
             typ,
             children,
+            predicates,
             pick_to,
         } => {
             if &node.typ != typ {
                 return vec![];
             }
-            match_node(typ, children, Some(*pick_to), node, optimizer)
+            match_node(typ, children, predicates, Some(*pick_to), node, optimizer)
         }
-        RuleMatcher::MatchNode { typ, children } => {
+        RuleMatcher::MatchNode {
+            typ,
+            children,
+            predicates,
+        } => {
             if &node.typ != typ {
                 return vec![];
             }
-            match_node(typ, children, None, node, optimizer)
+            match_node(typ, children, predicates, None, node, optimizer)
         }
         RuleMatcher::MatchDiscriminant {
             typ_discriminant,
             children,
+            predicates,
         } => {
             if std::mem::discriminant(&node.typ) != *typ_discriminant {
                 return vec![];
             }
-            match_node(&node.typ.clone(), children, None, node, optimizer)
+            match_node(
+                &node.typ.clone(),
+                children,
+                predicates,
+                None,
+                node,
+                optimizer,
+            )
         }
         RuleMatcher::MatchAndPickDiscriminant {
             typ_discriminant,
             children,
+            predicates,
             pick_to,
         } => {
             if std::mem::discriminant(&node.typ) != *typ_discriminant {
                 return vec![];
             }
-            match_node(&node.typ.clone(), children, Some(*pick_to), node, optimizer)
+            match_node(
+                &node.typ.clone(),
+                children,
+                predicates,
+                Some(*pick_to),
+                node,
+                optimizer,
+            )
         }
         _ => panic!("top node should be match node"),
     }
@@ -226,7 +272,9 @@ fn transform<T: NodeType>(
     } else {
         picked_datas
             .into_iter()
-            .map(|picked_data| rule.apply(optimizer, picked_data))
+            .map(|(picked_data, picked_pred_data)| {
+                rule.apply(optimizer, picked_data, picked_pred_data)
+            })
             .flatten()
             .collect()
     }

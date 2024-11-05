@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
-use crate::nodes::PlanNodeOrGroup;
+use crate::nodes::{ArcPredNode, PlanNodeOrGroup};
 use crate::{
     nodes::{NodeType, PlanNode},
     optimizer::Optimizer,
@@ -63,7 +63,12 @@ impl<T: NodeType, O: Optimizer<T>> RuleWrapper<T, O> {
 // TODO: Why do we have all of these match types? Seems like possible overkill.
 pub trait Rule<T: NodeType, O: Optimizer<T>>: 'static + Send + Sync {
     fn matcher(&self) -> &RuleMatcher<T>;
-    fn apply(&self, optimizer: &O, input: HashMap<usize, PlanNodeOrGroup<T>>) -> Vec<PlanNode<T>>;
+    fn apply(
+        &self,
+        optimizer: &O,
+        input: HashMap<usize, PlanNodeOrGroup<T>>,
+        pred_input: HashMap<usize, ArcPredNode<T>>,
+    ) -> Vec<PlanNode<T>>;
     fn name(&self) -> &'static str;
     fn is_impl_rule(&self) -> bool {
         false

@@ -6,10 +6,15 @@ pub enum RuleMatcher<T: NodeType> {
     MatchAndPickNode {
         typ: T,
         children: Vec<Self>,
+        predicates: Vec<Self>,
         pick_to: usize,
     },
     /// Match a node of type `typ`.
-    MatchNode { typ: T, children: Vec<Self> },
+    MatchNode {
+        typ: T,
+        children: Vec<Self>,
+        predicates: Vec<Self>,
+    },
     /// Match "discriminant" (Only check for variant matches---don't consider
     /// inner data).
     /// This may be useful when, for example, one has an enum variant such as
@@ -18,6 +23,7 @@ pub enum RuleMatcher<T: NodeType> {
     MatchAndPickDiscriminant {
         typ_discriminant: std::mem::Discriminant<T>,
         children: Vec<Self>,
+        predicates: Vec<Self>,
         pick_to: usize,
     },
     /// Match "discriminant" (Only check for variant matches---don't consider
@@ -28,9 +34,12 @@ pub enum RuleMatcher<T: NodeType> {
     MatchDiscriminant {
         typ_discriminant: std::mem::Discriminant<T>,
         children: Vec<Self>,
+        predicates: Vec<Self>,
     },
-    /// Match anything,
-    PickOne { pick_to: usize, expand: bool },
+    /// Match predicate (TODO consider more elegant design)
+    PickPred { pick_to: usize },
+    /// Match any plan node,
+    PickOne { pick_to: usize },
     /// Match all things in the group
     PickMany { pick_to: usize },
     /// Ignore one

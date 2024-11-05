@@ -5,7 +5,7 @@ use itertools::Itertools;
 use std::any::Any;
 
 use crate::{
-    nodes::{ArcPlanNode, NodeType, PlanNode, PlanNodeOrGroup},
+    nodes::{ArcPlanNode, ArcPredNode, NodeType, PlanNode, PlanNodeOrGroup, PredNode},
     optimizer::Optimizer,
     property::PropertyBuilderAny,
     rules::{Rule, RuleMatcher},
@@ -26,9 +26,13 @@ pub struct HeuristicsOptimizer<T: NodeType> {
 fn match_node<T: NodeType>(
     typ: &T,
     children: &[RuleMatcher<T>],
+    predicates: &[RuleMatcher<T>],
     pick_to: Option<usize>,
     node: ArcPlanNode<T>,
-) -> Option<HashMap<usize, PlanNode<T>>> {
+) -> Option<(
+    HashMap<usize, PlanNodeOrGroup<T>>,
+    HashMap<usize, ArcPredNode<T>>,
+)> {
     if let RuleMatcher::PickMany { .. } | RuleMatcher::IgnoreMany = children.last().unwrap() {
     } else {
         assert_eq!(
@@ -40,7 +44,7 @@ fn match_node<T: NodeType>(
     }
 
     let mut should_end = false;
-    let mut pick: HashMap<usize, PlanNode<T>> = HashMap::new();
+    let mut pick: HashMap<usize, PlanNodeOrGroup<T>> = HashMap::new();
     for (idx, child) in children.iter().enumerate() {
         assert!(!should_end, "many matcher should be at the end");
         match child {
@@ -48,12 +52,9 @@ fn match_node<T: NodeType>(
             RuleMatcher::IgnoreMany => {
                 should_end = true;
             }
-            RuleMatcher::PickOne { pick_to, expand: _ } => {
+            RuleMatcher::PickOne { pick_to } => {
                 // Heuristics always keep the full plan without group placeholders, therefore we can ignore expand property.
-                let res = pick.insert(
-                    *pick_to,
-                    Arc::unwrap_or_clone(node.child(idx).unwrap_plan_node()),
-                );
+                let res = pick.insert(*pick_to, node.child(idx));
                 assert!(res.is_none(), "dup pick");
             }
             RuleMatcher::PickMany { pick_to } => {
@@ -63,48 +64,79 @@ fn match_node<T: NodeType>(
                 // should_end = true;
             }
             _ => {
-                if let Some(new_picks) = match_and_pick(child, node.child(idx).unwrap_plan_node()) {
-                    pick.extend(new_picks.iter().map(|(k, v)| (*k, v.clone().into())));
+                if let Some((new_picks, new_pred_picks)) = match_and_pick(child, node.child(idx)) {
+                    pick.extend(new_picks.iter().map(|(k, v)| (*k, v.clone())));
                 } else {
                     return None;
                 }
             }
         }
     }
+    let mut pred_pick: HashMap<usize, ArcPredNode<T>> = HashMap::new();
+    for (idx, pred) in predicates.iter().enumerate() {
+        match pred {
+            RuleMatcher::PickPred { pick_to } => {
+                let res = pred_pick.insert(*pick_to, node.predicate(idx));
+                assert!(res.is_none(), "dup pick");
+            }
+            _ => {
+                panic!("only PickPred is supported for predicates");
+            }
+        }
+    }
     if let Some(pick_to) = pick_to {
-        let res: Option<PlanNode<T>> = pick.insert(
+        let res: Option<PlanNodeOrGroup<T>> = pick.insert(
             pick_to,
-            PlanNode {
-                typ: typ.clone(),
-                children: node.children.clone(),
-                predicates: node.predicates.clone(),
-            },
+            PlanNodeOrGroup::PlanNode(
+                PlanNode {
+                    typ: typ.clone(),
+                    children: node.children.clone(),
+                    predicates: node.predicates.clone(),
+                }
+                .into(),
+            ),
         );
         assert!(res.is_none(), "dup pick");
     }
-    Some(pick)
+    Some((pick, pred_pick))
 }
 
 fn match_and_pick<T: NodeType>(
     matcher: &RuleMatcher<T>,
-    node: ArcPlanNode<T>,
-) -> Option<HashMap<usize, PlanNode<T>>> {
+    node: PlanNodeOrGroup<T>,
+) -> Option<(
+    HashMap<usize, PlanNodeOrGroup<T>>,
+    HashMap<usize, ArcPredNode<T>>,
+)> {
     match matcher {
         RuleMatcher::MatchAndPickNode {
             typ,
             children,
+            predicates,
             pick_to,
         } => {
+            let node = match node {
+                PlanNodeOrGroup::PlanNode(node) => node,
+                PlanNodeOrGroup::Group(_) => return None,
+            };
             if &node.typ != typ {
                 return None;
             }
-            match_node(typ, children, Some(*pick_to), node)
+            match_node(typ, children, predicates, Some(*pick_to), node)
         }
-        RuleMatcher::MatchNode { typ, children } => {
+        RuleMatcher::MatchNode {
+            typ,
+            children,
+            predicates,
+        } => {
+            let node = match node {
+                PlanNodeOrGroup::PlanNode(node) => node,
+                PlanNodeOrGroup::Group(_) => return None,
+            };
             if &node.typ != typ {
                 return None;
             }
-            match_node(typ, children, None, node)
+            match_node(typ, children, predicates, None, node)
         }
         _ => panic!("top node should be match node"),
     }
@@ -137,13 +169,12 @@ impl<T: NodeType> HeuristicsOptimizer<T> {
         for rule in self.rules.clone().as_ref() {
             // Properties only matter for applying rules, therefore applying it before each rule invoke.
             let matcher = rule.matcher();
-            if let Some(picks) = match_and_pick(matcher, root_rel.clone()) {
-                let picks = picks
-                    .into_iter()
-                    .map(|(k, v)| (k, PlanNodeOrGroup::PlanNode(v.into())))
-                    .collect(); // This is kinda ugly, but it works for now
+            if let Some((picks, pick_preds)) =
+                match_and_pick(matcher, PlanNodeOrGroup::PlanNode(root_rel.clone()))
+            {
+                let picks = picks.into_iter().map(|(k, v)| (k, v)).collect(); // This is kinda ugly, but it works for now
                 self.infer_properties(root_rel.clone());
-                let mut results = rule.apply(self, picks);
+                let mut results = rule.apply(self, picks, pick_preds);
                 assert!(results.len() <= 1);
                 if !results.is_empty() {
                     root_rel = results.remove(0).into();
