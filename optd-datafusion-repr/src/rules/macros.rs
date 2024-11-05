@@ -36,7 +36,7 @@ macro_rules! define_picks {
 
     // Handle each child
     (@child $pick_one:ident ) => {
-        let $pick_one: PlanNode<DfNodeType>;
+        let $pick_one: PlanNodeOrGroup<DfNodeType>;
     };
 
     // Handle each predicate
