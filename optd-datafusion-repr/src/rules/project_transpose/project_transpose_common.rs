@@ -25,7 +25,7 @@ impl ProjectionMapping {
         let mut forward = vec![];
         let mut backward = vec![];
         for (i, expr) in exprs.to_vec().iter().enumerate() {
-            let col_expr = ColumnRefExpr::from_rel_node(expr.clone().into_rel_node())?;
+            let col_expr = ColumnRefExpr::try_interpret(expr.strip())?;
             let col_idx = col_expr.index();
             forward.push(col_idx);
             if col_idx >= backward.len() {
@@ -112,7 +112,7 @@ impl ProjectionMapping {
             }
         } else {
             for i in exprs.to_vec() {
-                let col_ref = ColumnRefExpr::from_rel_node(i.into_rel_node()).unwrap();
+                let col_ref = ColumnRefExpr::ensures_interpret(i.strip());
                 let col_idx = self.original_col_maps_to(col_ref.index()).unwrap();
                 let col: Expr = ColumnRefExpr::new(col_idx).into_expr();
                 new_projection_exprs.push(col);

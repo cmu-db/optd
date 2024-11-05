@@ -7,7 +7,7 @@ use crate::plan_nodes::{
     LogicalEmptyRelation, LogicalJoin, OptRelNode, OptRelNodeTyp, PlanNode,
 };
 use crate::properties::schema::SchemaPropertyBuilder;
-use optd_core::rel_node::MaybeRelNode;
+use optd_core::rel_node::{MaybeRelNode, RelNodeRef};
 use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 
@@ -23,10 +23,10 @@ define_rule!(
 //    - Replaces the And operator with False if any operand is False
 //    - Removes Duplicates
 pub(crate) fn simplify_log_expr(
-    log_expr: MaybeRelNode<OptRelNodeTyp>,
+    log_expr: RelNodeRef<OptRelNodeTyp>,
     changed: &mut bool,
 ) -> MaybeRelNode<OptRelNodeTyp> {
-    let log_expr = LogOpExpr::from_rel_node(log_expr).unwrap();
+    let log_expr = LogOpExpr::ensures_interpret(log_expr);
     let op = log_expr.op_type();
     // we need a new children vec to output deterministic order
     let mut new_children_set = HashSet::new();
@@ -35,11 +35,11 @@ pub(crate) fn simplify_log_expr(
     for child in log_expr.children() {
         let mut new_child = child;
         if let OptRelNodeTyp::LogOp(_) = new_child.typ() {
-            let new_expr = simplify_log_expr(new_child.into_rel_node().clone(), changed);
-            new_child = Expr::from_rel_node(new_expr).unwrap();
+            let new_expr = simplify_log_expr(new_child.unwrap_rel_node(), changed);
+            new_child = Expr::ensures_interpret(new_expr);
         }
         if let OptRelNodeTyp::Constant(ConstantType::Bool) = new_child.typ() {
-            let data = new_child.into_rel_node().data.clone().unwrap();
+            let data = new_child.unwrap_rel_node().data.clone().unwrap();
             *changed = true;
             // TrueExpr
             if data.as_bool() {
@@ -49,14 +49,14 @@ pub(crate) fn simplify_log_expr(
                 }
                 if op == LogOpType::Or {
                     // replace whole exprList with True
-                    return ConstantExpr::bool(true).into_rel_node().clone();
+                    return ConstantExpr::bool(true).strip().clone();
                 }
                 unreachable!("no other type in logOp");
             }
             // FalseExpr
             if op == LogOpType::And {
                 // replace whole exprList with False
-                return ConstantExpr::bool(false).into_rel_node().clone();
+                return ConstantExpr::bool(false).strip().clone();
             }
             if op == LogOpType::Or {
                 // skip False in Or
@@ -70,27 +70,22 @@ pub(crate) fn simplify_log_expr(
     }
     if new_children.is_empty() {
         if op == LogOpType::And {
-            return ConstantExpr::bool(true).into_rel_node().clone();
+            return ConstantExpr::bool(true).strip().clone();
         }
         if op == LogOpType::Or {
-            return ConstantExpr::bool(false).into_rel_node().clone();
+            return ConstantExpr::bool(false).strip().clone();
         }
         unreachable!("no other type in logOp");
     }
     if new_children.len() == 1 {
         *changed = true;
-        return new_children
-            .into_iter()
-            .next()
-            .unwrap()
-            .into_rel_node()
-            .clone();
+        return new_children.into_iter().next().unwrap().strip().clone();
     }
     if children_size != new_children.len() {
         *changed = true;
     }
     LogOpExpr::new(op, ExprList::new(new_children))
-        .into_rel_node()
+        .strip()
         .clone()
 }
 
@@ -103,10 +98,11 @@ fn apply_simplify_filter(
     _optimizer: &impl Optimizer<OptRelNodeTyp>,
     SimplifyFilterRulePicks { child, cond }: SimplifyFilterRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
+    let cond = cond.unwrap_rel_node();
     match cond.typ {
         OptRelNodeTyp::LogOp(_) => {
             let mut changed = false;
-            let new_log_expr = simplify_log_expr(Arc::new(cond), &mut changed);
+            let new_log_expr = simplify_log_expr(cond, &mut changed);
             if changed {
                 let filter_node = RelNode {
                     typ: OptRelNodeTyp::Filter,
@@ -114,7 +110,7 @@ fn apply_simplify_filter(
                     data: None,
                     predicates: Vec::new(), /* TODO: refactor */
                 };
-                return vec![filter_node];
+                return vec![filter_node.into()];
             }
             vec![]
         }
@@ -135,18 +131,19 @@ fn apply_simplify_join_cond(
     _optimizer: &impl Optimizer<OptRelNodeTyp>,
     SimplifyJoinCondRulePicks { left, right, cond }: SimplifyJoinCondRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
+    let cond = cond.unwrap_rel_node();
     match cond.typ {
         OptRelNodeTyp::LogOp(_) => {
             let mut changed = false;
-            let new_log_expr = simplify_log_expr(Arc::new(cond), &mut changed);
+            let new_log_expr = simplify_log_expr(cond, &mut changed);
             if changed {
                 let join_node = LogicalJoin::new(
                     PlanNode::from_group(left.into()),
                     PlanNode::from_group(right.into()),
-                    Expr::from_rel_node(new_log_expr).unwrap(),
+                    Expr::ensures_interpret(new_log_expr),
                     JoinType::Inner,
                 );
-                return vec![join_node.into_rel_node().as_ref().clone()];
+                return vec![join_node.strip()];
             }
             vec![]
         }
@@ -169,6 +166,7 @@ fn apply_eliminate_filter(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     EliminateFilterRulePicks { child, cond }: EliminateFilterRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
+    let cond = cond.unwrap_rel_node();
     if let OptRelNodeTyp::Constant(ConstantType::Bool) = cond.typ {
         if let Some(data) = cond.data {
             if data.as_bool() {
@@ -178,10 +176,9 @@ fn apply_eliminate_filter(
             } else {
                 // If the condition is false, replace this node with the empty relation,
                 // since it will never yield tuples.
-                let schema =
-                    optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(child.clone()), 0);
+                let schema = optimizer.get_property::<SchemaPropertyBuilder>(child, 0);
                 let node = LogicalEmptyRelation::new(false, schema);
-                return vec![node.into_rel_node().as_ref().clone()];
+                return vec![node.strip()];
             }
         }
     }

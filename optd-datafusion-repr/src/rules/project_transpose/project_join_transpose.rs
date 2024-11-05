@@ -38,10 +38,7 @@ fn apply_projection_pull_up_join(
         cond,
     }: ProjectionPullUpJoinPicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
-    let left = Arc::new(left.clone());
-    let right = Arc::new(right.clone());
-
-    let list = ExprList::from_rel_node(Arc::new(list)).unwrap();
+    let list = ExprList::ensures_interpret(list);
 
     let projection = LogicalProjection::new(PlanNode::from_group(left.clone()), list.clone());
 
@@ -61,14 +58,11 @@ fn apply_projection_pull_up_join(
         LogicalJoin::new(
             PlanNode::from_group(left),
             PlanNode::from_group(right),
-            mapping.rewrite_join_cond(
-                Expr::from_rel_node(Arc::new(cond)).unwrap(),
-                left_schema.len(),
-            ),
+            mapping.rewrite_join_cond(Expr::ensures_interpret(cond), left_schema.len()),
             JoinType::Inner,
         )
         .into_plan_node(),
         ExprList::new(new_projection_exprs),
     );
-    vec![node.into_rel_node().as_ref().clone()]
+    vec![node.strip()]
 }

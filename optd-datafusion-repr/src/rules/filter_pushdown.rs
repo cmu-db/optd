@@ -42,7 +42,7 @@ fn merge_conds(first: Expr, second: Expr) -> Expr {
         LogOpExpr::new_flattened_nested_logical(LogOpType::And, new_expr_list).into_expr();
     let mut changed = false;
     // TODO: such simplifications should be invoked from optd-core, instead of ad-hoc
-    Expr::from_rel_node(simplify_log_expr(flattened.into_rel_node(), &mut changed)).unwrap()
+    Expr::ensures_interpret(simplify_log_expr(flattened.strip(), &mut changed)).unwrap()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -65,7 +65,7 @@ fn determine_join_cond_dep(
     let mut right_col = false;
     for child in children {
         if child.typ() == OptRelNodeTyp::ColumnRef {
-            let col_ref = ColumnRefExpr::from_rel_node(child.clone().into_rel_node()).unwrap();
+            let col_ref = ColumnRefExpr::ensures_interpret(child.clone().strip()).unwrap();
             let index = col_ref.index();
             if index < left_schema_size {
                 left_col = true;
@@ -102,13 +102,13 @@ fn categorize_conds(mut categorization_fn: impl FnMut(Expr, &Vec<Expr>), cond: E
                 bottom_level_children.push(cond)
             }
             _ => {
-                for child in &cond.clone().into_rel_node().children {
+                for child in &cond.clone().strip().children {
                     if child.typ == OptRelNodeTyp::List {
                         // TODO: What should we do when we encounter a List?
                         continue;
                     }
                     categorize_conds_helper(
-                        Expr::from_rel_node(child.clone()).unwrap(),
+                        Expr::ensures_interpret(child.clone()).unwrap(),
                         bottom_level_children,
                     );
                 }
@@ -123,8 +123,8 @@ fn categorize_conds(mut categorization_fn: impl FnMut(Expr, &Vec<Expr>), cond: E
     };
     match cond.typ() {
         OptRelNodeTyp::LogOp(LogOpType::And) => {
-            for child in &cond.into_rel_node().children {
-                categorize_indep_expr(Expr::from_rel_node(child.clone()).unwrap());
+            for child in &cond.strip().children {
+                categorize_indep_expr(Expr::ensures_interpret(child.clone()).unwrap());
             }
         }
         _ => {
@@ -144,13 +144,13 @@ fn apply_filter_merge(
     FilterMergeRulePicks { child, cond1, cond }: FilterMergeRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let child = PlanNode::from_group(child.into());
-    let curr_cond = Expr::from_rel_node(cond.into()).unwrap();
-    let child_cond = Expr::from_rel_node(cond1.into()).unwrap();
+    let curr_cond = Expr::ensures_interpret(cond.into()).unwrap();
+    let child_cond = Expr::ensures_interpret(cond1.into()).unwrap();
 
     let merged_cond = merge_conds(curr_cond, child_cond);
 
     let new_filter = LogicalFilter::new(child, merged_cond);
-    vec![new_filter.into_rel_node().as_ref().clone()]
+    vec![new_filter.strip()]
 }
 
 // TODO: define_rule! should be able to match on any join type, ideally...
@@ -221,10 +221,10 @@ fn apply_filter_inner_join_transpose(
 fn filter_join_transpose(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     join_typ: JoinType,
-    join_child_a: RelNode<OptRelNodeTyp>,
-    join_child_b: RelNode<OptRelNodeTyp>,
-    join_cond: RelNode<OptRelNodeTyp>,
-    filter_cond: RelNode<OptRelNodeTyp>,
+    join_child_a: MaybeRelNode<OptRelNodeTyp>,
+    join_child_b: MaybeRelNode<OptRelNodeTyp>,
+    join_cond: MaybeRelNode<OptRelNodeTyp>,
+    filter_cond: MaybeRelNode<OptRelNodeTyp>,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let left_schema_size = optimizer
         .get_property::<SchemaPropertyBuilder>(join_child_a.clone().into(), 0)
@@ -235,8 +235,8 @@ fn filter_join_transpose(
 
     let join_child_a = PlanNode::from_group(join_child_a.into());
     let join_child_b = PlanNode::from_group(join_child_b.into());
-    let join_cond = Expr::from_rel_node(join_cond.into()).unwrap();
-    let filter_cond = Expr::from_rel_node(filter_cond.into()).unwrap();
+    let join_cond = Expr::ensures_interpret(join_cond.into()).unwrap();
+    let filter_cond = Expr::ensures_interpret(filter_cond.into()).unwrap();
     // TODO: Push existing join conditions down as well
 
     let mut left_conds = vec![];
@@ -305,9 +305,9 @@ fn filter_join_transpose(
     let new_filter = if !keep_conds.is_empty() {
         let new_filter_node =
             LogicalFilter::new(new_join.into_plan_node(), and_expr_list_to_expr(keep_conds));
-        new_filter_node.into_rel_node().as_ref().clone()
+        new_filter_node.strip()
     } else {
-        new_join.into_rel_node().as_ref().clone()
+        new_join.strip()
     };
 
     vec![new_filter]
@@ -325,13 +325,13 @@ fn apply_filter_sort_transpose(
     FilterSortTransposeRulePicks { child, exprs, cond }: FilterSortTransposeRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let child = PlanNode::from_group(child.into());
-    let exprs = ExprList::from_rel_node(exprs.into()).unwrap();
+    let exprs = ExprList::ensures_interpret(exprs.into()).unwrap();
 
-    let cond_as_expr = Expr::from_rel_node(cond.into()).unwrap();
+    let cond_as_expr = Expr::ensures_interpret(cond.into()).unwrap();
     let new_filter_node = LogicalFilter::new(child, cond_as_expr);
     // Exprs should be the same, no projections have occurred here.
     let new_sort = LogicalSort::new(new_filter_node.into_plan_node(), exprs);
-    vec![new_sort.into_rel_node().as_ref().clone()]
+    vec![new_sort.strip()]
 }
 
 define_rule!(
@@ -352,21 +352,23 @@ fn apply_filter_agg_transpose(
         cond,
     }: FilterAggTransposeRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
-    let exprs = ExprList::from_rel_node(exprs.into()).unwrap();
-    let groups = ExprList::from_rel_node(groups.into()).unwrap();
+    let exprs = ExprList::ensures_interpret(exprs.into()).unwrap();
+    let groups = ExprList::ensures_interpret(groups.into()).unwrap();
     let child = PlanNode::from_group(child.into());
 
     // Get top-level group-by columns. Does not cover cases where group-by exprs
     // are more complex than a top-level column reference.
     let group_cols = groups
         .clone()
-        .into_rel_node()
+        .strip()
         .children
         .iter()
         .filter_map(|expr| match expr.typ {
-            OptRelNodeTyp::ColumnRef => {
-                Some(ColumnRefExpr::from_rel_node(expr.clone()).unwrap().index())
-            }
+            OptRelNodeTyp::ColumnRef => Some(
+                ColumnRefExpr::ensures_interpret(expr.clone())
+                    .unwrap()
+                    .index(),
+            ),
             _ => None,
         })
         .collect::<HashSet<_>>();
@@ -379,7 +381,7 @@ fn apply_filter_agg_transpose(
         let mut group_by_cols_only = true;
         for child in children {
             if child.typ() == OptRelNodeTyp::ColumnRef {
-                let col_ref = ColumnRefExpr::from_rel_node(child.clone().into_rel_node()).unwrap();
+                let col_ref = ColumnRefExpr::ensures_interpret(child.clone().strip()).unwrap();
                 if !group_cols.contains(&col_ref.index()) {
                     group_by_cols_only = false;
                     break;
@@ -392,7 +394,10 @@ fn apply_filter_agg_transpose(
             keep_conds.push(expr);
         }
     };
-    categorize_conds(categorization_fn, Expr::from_rel_node(cond.into()).unwrap());
+    categorize_conds(
+        categorization_fn,
+        Expr::ensures_interpret(cond.into()).unwrap(),
+    );
 
     let new_child = if !push_conds.is_empty() {
         LogicalFilter::new(
@@ -413,11 +418,11 @@ fn apply_filter_agg_transpose(
             LogOpExpr::new_flattened_nested_logical(LogOpType::And, ExprList::new(keep_conds))
                 .into_expr(),
         )
-        .into_rel_node()
+        .strip()
         .as_ref()
         .clone()
     } else {
-        new_agg.into_rel_node().as_ref().clone()
+        new_agg.strip()
     };
 
     vec![new_filter]
@@ -458,7 +463,7 @@ mod tests {
 
         let filter = LogicalFilter::new(sort.into_plan_node(), filter_expr);
 
-        let plan = test_optimizer.optimize(filter.into_rel_node()).unwrap();
+        let plan = test_optimizer.optimize(filter.strip()).unwrap();
 
         assert!(matches!(plan.typ, OptRelNodeTyp::Sort));
         assert!(matches!(plan.child(0).typ, OptRelNodeTyp::Filter));
@@ -487,34 +492,30 @@ mod tests {
 
         let filter = LogicalFilter::new(filter_ch.into_plan_node(), filter_expr);
 
-        let plan = test_optimizer.optimize(filter.into_rel_node()).unwrap();
+        let plan = test_optimizer.optimize(filter.strip()).unwrap();
 
         assert!(matches!(plan.typ, OptRelNodeTyp::Filter));
-        let cond_log_op = LogOpExpr::from_rel_node(
-            LogicalFilter::from_rel_node(plan.clone())
+        let cond_log_op = LogOpExpr::ensures_interpret(
+            LogicalFilter::ensures_interpret(plan.clone())
                 .unwrap()
                 .cond()
-                .into_rel_node(),
+                .strip(),
         )
         .unwrap();
         assert!(matches!(cond_log_op.op_type(), LogOpType::And));
 
         let cond_exprs = cond_log_op.children();
         assert_eq!(cond_exprs.len(), 2);
-        let expr_1 = BinOpExpr::from_rel_node(cond_exprs[0].clone().into_rel_node()).unwrap();
-        let expr_2 = BinOpExpr::from_rel_node(cond_exprs[1].clone().into_rel_node()).unwrap();
+        let expr_1 = BinOpExpr::ensures_interpret(cond_exprs[0].clone().strip()).unwrap();
+        let expr_2 = BinOpExpr::ensures_interpret(cond_exprs[1].clone().strip()).unwrap();
         assert!(matches!(expr_1.op_type(), BinOpType::Eq));
         assert!(matches!(expr_2.op_type(), BinOpType::Eq));
-        let col_1 =
-            ColumnRefExpr::from_rel_node(expr_1.left_child().clone().into_rel_node()).unwrap();
-        let col_2 =
-            ConstantExpr::from_rel_node(expr_1.right_child().clone().into_rel_node()).unwrap();
+        let col_1 = ColumnRefExpr::ensures_interpret(expr_1.left_child().clone().strip()).unwrap();
+        let col_2 = ConstantExpr::ensures_interpret(expr_1.right_child().clone().strip()).unwrap();
         assert_eq!(col_1.index(), 1);
         assert_eq!(col_2.value().as_i32(), 6);
-        let col_3 =
-            ColumnRefExpr::from_rel_node(expr_2.left_child().clone().into_rel_node()).unwrap();
-        let col_4 =
-            ConstantExpr::from_rel_node(expr_2.right_child().clone().into_rel_node()).unwrap();
+        let col_3 = ColumnRefExpr::ensures_interpret(expr_2.left_child().clone().strip()).unwrap();
+        let col_4 = ConstantExpr::ensures_interpret(expr_2.right_child().clone().strip()).unwrap();
         assert_eq!(col_3.index(), 0);
         assert_eq!(col_4.value().as_i32(), 1);
     }
@@ -583,55 +584,54 @@ mod tests {
 
         let filter = LogicalFilter::new(join.into_plan_node(), filter_expr.into_expr());
 
-        let plan = test_optimizer.optimize(filter.into_rel_node()).unwrap();
+        let plan = test_optimizer.optimize(filter.strip()).unwrap();
 
         // Examine original filter + condition
-        let top_level_filter = LogicalFilter::from_rel_node(plan.clone()).unwrap();
+        let top_level_filter = LogicalFilter::ensures_interpret(plan.clone()).unwrap();
         let bin_op_0 =
-            BinOpExpr::from_rel_node(top_level_filter.cond().clone().into_rel_node()).unwrap();
+            BinOpExpr::ensures_interpret(top_level_filter.cond().clone().strip()).unwrap();
         assert!(matches!(bin_op_0.op_type(), BinOpType::Eq));
-        let col_0 =
-            ConstantExpr::from_rel_node(bin_op_0.left_child().clone().into_rel_node()).unwrap();
+        let col_0 = ConstantExpr::ensures_interpret(bin_op_0.left_child().clone().strip()).unwrap();
         let col_1 =
-            ConstantExpr::from_rel_node(bin_op_0.right_child().clone().into_rel_node()).unwrap();
+            ConstantExpr::ensures_interpret(bin_op_0.right_child().clone().strip()).unwrap();
         assert_eq!(col_0.value().as_i32(), 2);
         assert_eq!(col_1.value().as_i32(), 7);
 
         // Examine join node + condition
         let join_node =
-            LogicalJoin::from_rel_node(top_level_filter.child().clone().into_rel_node()).unwrap();
-        let join_conds = LogOpExpr::from_rel_node(join_node.cond().into_rel_node()).unwrap();
+            LogicalJoin::ensures_interpret(top_level_filter.child().clone().strip()).unwrap();
+        let join_conds = LogOpExpr::ensures_interpret(join_node.cond().strip()).unwrap();
         assert!(matches!(join_conds.op_type(), LogOpType::And));
         assert_eq!(join_conds.children().len(), 2);
         let bin_op_1 =
-            BinOpExpr::from_rel_node(join_conds.children()[0].clone().into_rel_node()).unwrap();
+            BinOpExpr::ensures_interpret(join_conds.children()[0].clone().strip()).unwrap();
         assert!(matches!(bin_op_1.op_type(), BinOpType::Eq));
         let col_2 =
-            ColumnRefExpr::from_rel_node(bin_op_1.left_child().clone().into_rel_node()).unwrap();
+            ColumnRefExpr::ensures_interpret(bin_op_1.left_child().clone().strip()).unwrap();
         let col_3 =
-            ColumnRefExpr::from_rel_node(bin_op_1.right_child().clone().into_rel_node()).unwrap();
+            ColumnRefExpr::ensures_interpret(bin_op_1.right_child().clone().strip()).unwrap();
         assert_eq!(col_2.index(), 2);
         assert_eq!(col_3.index(), 8);
 
         // Examine left child filter + condition
-        let filter_1 = LogicalFilter::from_rel_node(join_node.left().into_rel_node()).unwrap();
-        let bin_op_3 = BinOpExpr::from_rel_node(filter_1.cond().clone().into_rel_node()).unwrap();
+        let filter_1 = LogicalFilter::ensures_interpret(join_node.left().strip()).unwrap();
+        let bin_op_3 = BinOpExpr::ensures_interpret(filter_1.cond().clone().strip()).unwrap();
         assert!(matches!(bin_op_3.op_type(), BinOpType::Eq));
         let col_6 =
-            ColumnRefExpr::from_rel_node(bin_op_3.left_child().clone().into_rel_node()).unwrap();
+            ColumnRefExpr::ensures_interpret(bin_op_3.left_child().clone().strip()).unwrap();
         let col_7 =
-            ConstantExpr::from_rel_node(bin_op_3.right_child().clone().into_rel_node()).unwrap();
+            ConstantExpr::ensures_interpret(bin_op_3.right_child().clone().strip()).unwrap();
         assert_eq!(col_6.index(), 0);
         assert_eq!(col_7.value().as_i32(), 5);
 
         // Examine right child filter + condition
-        let filter_2 = LogicalFilter::from_rel_node(join_node.right().into_rel_node()).unwrap();
-        let bin_op_4 = BinOpExpr::from_rel_node(filter_2.cond().clone().into_rel_node()).unwrap();
+        let filter_2 = LogicalFilter::ensures_interpret(join_node.right().strip()).unwrap();
+        let bin_op_4 = BinOpExpr::ensures_interpret(filter_2.cond().clone().strip()).unwrap();
         assert!(matches!(bin_op_4.op_type(), BinOpType::Eq));
         let col_8 =
-            ColumnRefExpr::from_rel_node(bin_op_4.left_child().clone().into_rel_node()).unwrap();
+            ColumnRefExpr::ensures_interpret(bin_op_4.left_child().clone().strip()).unwrap();
         let col_9 =
-            ConstantExpr::from_rel_node(bin_op_4.right_child().clone().into_rel_node()).unwrap();
+            ConstantExpr::ensures_interpret(bin_op_4.right_child().clone().strip()).unwrap();
         assert_eq!(col_8.index(), 3);
         assert_eq!(col_9.value().as_i32(), 6);
     }
@@ -673,47 +673,42 @@ mod tests {
 
         let filter = LogicalFilter::new(agg.into_plan_node(), filter_expr.into_expr());
 
-        let plan = test_optimizer.optimize(filter.into_rel_node()).unwrap();
+        let plan = test_optimizer.optimize(filter.strip()).unwrap();
 
-        let plan_filter = LogicalFilter::from_rel_node(plan.clone()).unwrap();
+        let plan_filter = LogicalFilter::ensures_interpret(plan.clone()).unwrap();
         assert!(matches!(plan_filter.0.typ(), OptRelNodeTyp::Filter));
-        let plan_filter_expr =
-            LogOpExpr::from_rel_node(plan_filter.cond().into_rel_node()).unwrap();
+        let plan_filter_expr = LogOpExpr::ensures_interpret(plan_filter.cond().strip()).unwrap();
         assert!(matches!(plan_filter_expr.op_type(), LogOpType::And));
         assert_eq!(plan_filter_expr.children().len(), 1);
-        let op_0 = BinOpExpr::from_rel_node(plan_filter_expr.children()[0].clone().into_rel_node())
-            .unwrap();
-        let col_0 =
-            ColumnRefExpr::from_rel_node(op_0.left_child().clone().into_rel_node()).unwrap();
+        let op_0 =
+            BinOpExpr::ensures_interpret(plan_filter_expr.children()[0].clone().strip()).unwrap();
+        let col_0 = ColumnRefExpr::ensures_interpret(op_0.left_child().clone().strip()).unwrap();
         assert_eq!(col_0.index(), 1);
-        let col_1 =
-            ConstantExpr::from_rel_node(op_0.right_child().clone().into_rel_node()).unwrap();
+        let col_1 = ConstantExpr::ensures_interpret(op_0.right_child().clone().strip()).unwrap();
         assert_eq!(col_1.value().as_i32(), 6);
 
-        let plan_agg = LogicalAgg::from_rel_node(plan.child(0)).unwrap();
+        let plan_agg = LogicalAgg::ensures_interpret(plan.child(0)).unwrap();
         let plan_agg_groups = plan_agg.groups();
         assert_eq!(plan_agg_groups.len(), 1);
-        let group_col = ColumnRefExpr::from_rel_node(plan_agg_groups.child(0).into_rel_node())
+        let group_col = ColumnRefExpr::ensures_interpret(plan_agg_groups.child(0).strip())
             .unwrap()
             .index();
         assert_eq!(group_col, 0);
 
         let plan_agg_child_filter =
-            LogicalFilter::from_rel_node(plan_agg.child().into_rel_node()).unwrap();
+            LogicalFilter::ensures_interpret(plan_agg.child().strip()).unwrap();
         let plan_agg_child_filter_expr =
-            LogOpExpr::from_rel_node(plan_agg_child_filter.cond().into_rel_node()).unwrap();
+            LogOpExpr::ensures_interpret(plan_agg_child_filter.cond().strip()).unwrap();
         assert!(matches!(
             plan_agg_child_filter_expr.op_type(),
             LogOpType::And
         ));
         assert_eq!(plan_agg_child_filter_expr.children().len(), 1);
         let op_1 =
-            BinOpExpr::from_rel_node(plan_agg_child_filter_expr.child(0).into_rel_node()).unwrap();
-        let col_2 =
-            ColumnRefExpr::from_rel_node(op_1.left_child().clone().into_rel_node()).unwrap();
+            BinOpExpr::ensures_interpret(plan_agg_child_filter_expr.child(0).strip()).unwrap();
+        let col_2 = ColumnRefExpr::ensures_interpret(op_1.left_child().clone().strip()).unwrap();
         assert_eq!(col_2.index(), 0);
-        let col_3 =
-            ConstantExpr::from_rel_node(op_1.right_child().clone().into_rel_node()).unwrap();
+        let col_3 = ConstantExpr::ensures_interpret(op_1.right_child().clone().strip()).unwrap();
         assert_eq!(col_3.value().as_i32(), 5);
     }
 }

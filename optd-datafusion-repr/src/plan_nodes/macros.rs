@@ -75,14 +75,14 @@ macro_rules! define_plan_node {
 
             $(
                 pub fn $child_name(&self) -> $child_meta_typ {
-                    <$child_meta_typ>::ensures_interpret(self.0.unwrap_rel_node().child($child_id))
+                    <$child_meta_typ>::ensures_interpret(self.unwrap_rel_node().child($child_id))
                 }
             )*
 
 
             $(
                 pub fn $attr_name(&self) -> $attr_meta_typ {
-                    <$attr_meta_typ>::ensures_interpret(self.0.unwrap_rel_node().child($attr_id))
+                    <$attr_meta_typ>::ensures_interpret(self.unwrap_rel_node().child($attr_id))
                 }
             )*
 

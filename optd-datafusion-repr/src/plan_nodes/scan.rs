@@ -49,7 +49,7 @@ impl LogicalScan {
     }
 
     pub fn table(&self) -> Arc<str> {
-        self.0.unwrap_rel_node().data.as_ref().unwrap().as_str()
+        self.unwrap_rel_node().data.as_ref().unwrap().as_str()
     }
 }
 
@@ -88,6 +88,6 @@ impl PhysicalScan {
     }
 
     pub fn table(&self) -> Arc<str> {
-        self.0.unwrap_rel_node().data.as_ref().unwrap().as_str()
+        self.unwrap_rel_node().data.as_ref().unwrap().as_str()
     }
 }

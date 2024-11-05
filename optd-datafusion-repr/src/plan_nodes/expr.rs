@@ -231,7 +231,7 @@ impl ConstantExpr {
 
     /// Gets the constant value.
     pub fn value(&self) -> Value {
-        self.0 .0.unwrap_rel_node().data.clone().unwrap()
+        self.unwrap_rel_node().data.clone().unwrap()
     }
 
     pub fn constant_type(&self) -> ConstantType {
@@ -348,11 +348,11 @@ impl UnOpExpr {
     }
 
     pub fn child(&self) -> Expr {
-        Expr::interpret(self.0.unwrap_rel_node().child(0))
+        Expr::interpret(self.unwrap_rel_node().child(0))
     }
 
     pub fn op_type(&self) -> UnOpType {
-        if let OptRelNodeTyp::UnOp(op_type) = self.0.unwrap_rel_node().typ {
+        if let OptRelNodeTyp::UnOp(op_type) = self.unwrap_rel_node().typ {
             op_type
         } else {
             panic!("not a un op")
@@ -443,15 +443,15 @@ impl BinOpExpr {
     }
 
     pub fn left_child(&self) -> Expr {
-        Expr::interpret(self.0.unwrap_rel_node().child(0))
+        Expr::interpret(self.unwrap_rel_node().child(0))
     }
 
     pub fn right_child(&self) -> Expr {
-        Expr::interpret(self.0.unwrap_rel_node().child(1))
+        Expr::interpret(self.unwrap_rel_node().child(1))
     }
 
     pub fn op_type(&self) -> BinOpType {
-        if let OptRelNodeTyp::BinOp(op_type) = self.0.unwrap_rel_node().typ {
+        if let OptRelNodeTyp::BinOp(op_type) = self.unwrap_rel_node().typ {
             op_type
         } else {
             panic!("not a bin op")
@@ -535,7 +535,7 @@ impl FuncExpr {
 
     /// Gets the function id.
     pub fn func(&self) -> FuncType {
-        if let OptRelNodeTyp::Func(func_id) = &self.0.unwrap_rel_node().typ {
+        if let OptRelNodeTyp::Func(func_id) = &self.unwrap_rel_node().typ {
             func_id.clone()
         } else {
             panic!("not a function")
@@ -692,7 +692,7 @@ impl LogOpExpr {
     }
 
     pub fn op_type(&self) -> LogOpType {
-        if let OptRelNodeTyp::LogOp(op_type) = self.0.unwrap_rel_node().typ {
+        if let OptRelNodeTyp::LogOp(op_type) = self.unwrap_rel_node().typ {
             op_type
         } else {
             panic!("not a log op")

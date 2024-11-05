@@ -31,9 +31,9 @@ fn apply_projection_filter_transpose(
     ProjectFilterTransposeRulePicks { child, cond, exprs }: ProjectFilterTransposeRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     // get columns out of cond
-    let exprs = ExprList::from_rel_node(exprs.into()).unwrap();
+    let exprs = ExprList::ensures_interpret(exprs);
     let exprs_vec = exprs.clone().to_vec();
-    let cond_as_expr = Expr::from_rel_node(cond.into()).unwrap();
+    let cond_as_expr = Expr::ensures_interpret(cond);
     let cond_col_refs = cond_as_expr.get_column_refs();
     let mut dedup_cond_col_refs = Vec::new();
 
@@ -57,7 +57,7 @@ fn apply_projection_filter_transpose(
 
     if dedup_cond_col_refs.is_empty() {
         // can push proj past filter and remove top proj node
-        return vec![new_filter_node.into_rel_node().as_ref().clone()];
+        return vec![new_filter_node.strip()];
     }
 
     // have column ref expressions of cond cols
@@ -66,7 +66,7 @@ fn apply_projection_filter_transpose(
         return vec![];
     };
     let top_proj_node = LogicalProjection::new(new_filter_node.into_plan_node(), top_proj_exprs);
-    vec![top_proj_node.into_rel_node().as_ref().clone()]
+    vec![top_proj_node.strip()]
 }
 
 define_rule!(
@@ -83,16 +83,16 @@ fn apply_filter_project_transpose(
     _optimizer: &impl Optimizer<OptRelNodeTyp>,
     FilterProjectTransposeRulePicks { child, exprs, cond }: FilterProjectTransposeRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
-    let child = PlanNode::from_group(child.into());
-    let cond_as_expr = Expr::from_rel_node(cond.into()).unwrap();
-    let exprs = ExprList::from_rel_node(exprs.into()).unwrap();
+    let child = PlanNode::from_group(child);
+    let cond_as_expr = Expr::ensures_interpret(cond);
+    let exprs = ExprList::ensures_interpret(exprs);
 
     let proj_col_map = ProjectionMapping::build(&exprs).unwrap();
     let rewritten_cond = proj_col_map.rewrite_filter_cond(cond_as_expr.clone(), false);
 
     let new_filter_node = LogicalFilter::new(child, rewritten_cond);
     let new_proj = LogicalProjection::new(new_filter_node.into_plan_node(), exprs);
-    vec![new_proj.into_rel_node().as_ref().clone()]
+    vec![new_proj.strip()]
 }
 
 #[cfg(test)]
@@ -135,7 +135,7 @@ mod tests {
 
         let proj = LogicalProjection::new(filter.into_plan_node(), proj_exprs.clone());
 
-        let plan = test_optimizer.optimize(proj.into_rel_node()).unwrap();
+        let plan = test_optimizer.optimize(proj.unwrap_rel_node()).unwrap();
 
         let res_filter_expr = BinOpExpr::new(
             ColumnRefExpr::new(1).into_expr(),
@@ -143,13 +143,16 @@ mod tests {
             BinOpType::Eq,
         )
         .into_expr()
-        .into_rel_node();
+        .strip();
 
         assert_eq!(plan.child(1), res_filter_expr);
         assert_eq!(plan.typ, OptRelNodeTyp::Filter);
-        assert!(matches!(plan.child(0).typ, OptRelNodeTyp::Projection));
-        assert_eq!(plan.child(0).child(1), proj_exprs.into_rel_node());
-        assert!(matches!(plan.child(0).child(0).typ, OptRelNodeTyp::Scan));
+        assert!(matches!(plan.child_rel(0).typ, OptRelNodeTyp::Projection));
+        assert_eq!(plan.child_rel(0).child(1), proj_exprs.strip());
+        assert!(matches!(
+            plan.child_rel(0).child_rel(0).typ,
+            OptRelNodeTyp::Scan
+        ));
     }
 
     #[test]
@@ -172,41 +175,40 @@ mod tests {
 
         let proj_exprs = ExprList::new(vec![ColumnRefExpr::new(1).into_expr()]);
 
-        let res_filter_expr: Arc<optd_core::rel_node::RelNode<OptRelNodeTyp>> = BinOpExpr::new(
+        let res_filter_expr = BinOpExpr::new(
             ColumnRefExpr::new(1).into_expr(),
             ConstantExpr::int32(5).into_expr(),
             BinOpType::Eq,
         )
         .into_expr()
-        .into_rel_node();
+        .strip();
 
-        let res_top_proj_exprs: Arc<optd_core::rel_node::RelNode<OptRelNodeTyp>> =
-            ExprList::new(vec![ColumnRefExpr::new(0).into_expr()]).into_rel_node();
+        let res_top_proj_exprs = ExprList::new(vec![ColumnRefExpr::new(0).into_expr()]).strip();
 
         let res_bot_proj_exprs = ExprList::new(vec![
             ColumnRefExpr::new(1).into_expr(),
             ColumnRefExpr::new(2).into_expr(),
         ])
-        .into_rel_node();
+        .strip();
 
         let proj = LogicalProjection::new(filter.into_plan_node(), proj_exprs);
 
-        let plan = test_optimizer.optimize(proj.into_rel_node()).unwrap();
+        let plan = test_optimizer.optimize(proj.unwrap_rel_node()).unwrap();
 
         assert_eq!(plan.typ, OptRelNodeTyp::Projection);
         assert_eq!(plan.child(1), res_top_proj_exprs);
 
-        assert!(matches!(plan.child(0).typ, OptRelNodeTyp::Filter));
-        assert_eq!(plan.child(0).child(1), res_filter_expr);
+        assert!(matches!(plan.child_rel(0).typ, OptRelNodeTyp::Filter));
+        assert_eq!(plan.child_rel(0).child(1), res_filter_expr);
 
         assert!(matches!(
-            plan.child(0).child(0).typ,
+            plan.child_rel(0).child_rel(0).typ,
             OptRelNodeTyp::Projection
         ));
-        assert_eq!(plan.child(0).child(0).child(1), res_bot_proj_exprs);
+        assert_eq!(plan.child_rel(0).child_rel(0).child(1), res_bot_proj_exprs);
 
         assert!(matches!(
-            plan.child(0).child(0).child(0).typ,
+            plan.child_rel(0).child_rel(0).child_rel(0).typ,
             OptRelNodeTyp::Scan
         ));
     }
@@ -245,10 +247,9 @@ mod tests {
             ColumnRefExpr::new(7).into_expr(),
         ]);
 
-        let proj =
-            LogicalProjection::new(filter.into_plan_node(), proj_exprs.clone()).into_rel_node();
+        let proj = LogicalProjection::new(filter.into_plan_node(), proj_exprs.clone()).strip();
 
-        let plan = test_optimizer.optimize(proj).unwrap();
+        let plan = test_optimizer.optimize(proj.unwrap_rel_node()).unwrap();
 
         let res_filter_expr = LogOpExpr::new(
             LogOpType::And,
@@ -268,13 +269,13 @@ mod tests {
             ]),
         )
         .into_expr()
-        .into_rel_node();
+        .strip();
 
         assert!(matches!(plan.typ, OptRelNodeTyp::Filter));
         assert_eq!(plan.child(1), res_filter_expr);
 
-        assert!(matches!(plan.child(0).typ, OptRelNodeTyp::Projection));
-        assert_eq!(plan.child(0).child(1), proj_exprs.into_rel_node());
+        assert!(matches!(plan.child_rel(0).typ, OptRelNodeTyp::Projection));
+        assert_eq!(plan.child_rel(0).child(1), proj_exprs.strip());
     }
 
     #[test]
@@ -311,10 +312,9 @@ mod tests {
             ColumnRefExpr::new(7).into_expr(),
         ]);
 
-        let proj =
-            LogicalProjection::new(filter.into_plan_node(), proj_exprs.clone()).into_rel_node();
+        let proj = LogicalProjection::new(filter.into_plan_node(), proj_exprs.clone()).strip();
 
-        let plan = test_optimizer.optimize(proj).unwrap();
+        let plan = test_optimizer.optimize(proj.unwrap_rel_node()).unwrap();
 
         let res_filter_expr = LogOpExpr::new(
             LogOpType::And,
@@ -334,7 +334,7 @@ mod tests {
             ]),
         )
         .into_expr()
-        .into_rel_node();
+        .strip();
 
         let top_proj_exprs = ExprList::new(vec![
             ColumnRefExpr::new(0).into_expr(),
@@ -342,7 +342,7 @@ mod tests {
             ColumnRefExpr::new(2).into_expr(),
             ColumnRefExpr::new(3).into_expr(),
         ])
-        .into_rel_node();
+        .strip();
 
         let bot_proj_exprs = ExprList::new(vec![
             ColumnRefExpr::new(0).into_expr(),
@@ -351,19 +351,19 @@ mod tests {
             ColumnRefExpr::new(7).into_expr(),
             ColumnRefExpr::new(2).into_expr(),
         ])
-        .into_rel_node();
+        .strip();
 
         assert!(matches!(plan.typ, OptRelNodeTyp::Projection));
         assert_eq!(plan.child(1), top_proj_exprs);
 
-        assert!(matches!(plan.child(0).typ, OptRelNodeTyp::Filter));
-        assert_eq!(plan.child(0).child(1), res_filter_expr);
+        assert!(matches!(plan.child_rel(0).typ, OptRelNodeTyp::Filter));
+        assert_eq!(plan.child_rel(0).child(1), res_filter_expr);
 
         assert!(matches!(
-            plan.child(0).child(0).typ,
+            plan.child_rel(0).child_rel(0).typ,
             OptRelNodeTyp::Projection
         ));
-        assert_eq!(plan.child(0).child(0).child(1), bot_proj_exprs);
+        assert_eq!(plan.child_rel(0).child_rel(0).child(1), bot_proj_exprs);
     }
 
     // FilterProjectTransposeRule Tests
@@ -385,10 +385,12 @@ mod tests {
         .into_expr();
 
         let filter = LogicalFilter::new(proj.into_plan_node(), filter_expr);
-        let plan = test_optimizer.optimize(filter.into_rel_node()).unwrap();
+        let plan = test_optimizer
+            .optimize(filter.strip().unwrap_rel_node())
+            .unwrap();
 
         assert_eq!(plan.typ, OptRelNodeTyp::Projection);
-        assert!(matches!(plan.child(0).typ, OptRelNodeTyp::Filter));
+        assert!(matches!(plan.child_rel(0).typ, OptRelNodeTyp::Filter));
     }
 
     #[test]
@@ -428,23 +430,20 @@ mod tests {
 
         let filter = LogicalFilter::new(proj.into_plan_node(), filter_expr.into_expr());
 
-        let plan = test_optimizer.optimize(filter.into_rel_node()).unwrap();
+        let plan = test_optimizer
+            .optimize(filter.strip().unwrap_rel_node())
+            .unwrap();
 
         assert!(matches!(plan.typ, OptRelNodeTyp::Projection));
-        let plan_filter = LogicalFilter::from_rel_node(plan.child(0)).unwrap();
+        let plan_filter = LogicalFilter::ensures_interpret(plan.child(0));
         assert!(matches!(plan_filter.0.typ(), OptRelNodeTyp::Filter));
-        let plan_filter_expr =
-            LogOpExpr::from_rel_node(plan_filter.cond().into_rel_node()).unwrap();
+        let plan_filter_expr = LogOpExpr::ensures_interpret(plan_filter.cond().strip());
         assert!(matches!(plan_filter_expr.op_type(), LogOpType::And));
-        let op_0 = BinOpExpr::from_rel_node(plan_filter_expr.children()[0].clone().into_rel_node())
-            .unwrap();
-        let col_0 =
-            ColumnRefExpr::from_rel_node(op_0.left_child().clone().into_rel_node()).unwrap();
+        let op_0 = BinOpExpr::ensures_interpret(plan_filter_expr.children()[0].clone().strip());
+        let col_0 = ColumnRefExpr::ensures_interpret(op_0.left_child().clone().strip());
         assert_eq!(col_0.index(), 4);
-        let op_1 = BinOpExpr::from_rel_node(plan_filter_expr.children()[1].clone().into_rel_node())
-            .unwrap();
-        let col_1 =
-            ColumnRefExpr::from_rel_node(op_1.left_child().clone().into_rel_node()).unwrap();
+        let op_1 = BinOpExpr::ensures_interpret(plan_filter_expr.children()[1].clone().strip());
+        let col_1 = ColumnRefExpr::ensures_interpret(op_1.left_child().clone().strip());
         assert_eq!(col_1.index(), 7);
     }
 }

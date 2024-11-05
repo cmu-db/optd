@@ -25,20 +25,18 @@ fn apply_join_commute(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     JoinCommuteRulePicks { left, right, cond }: JoinCommuteRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
-    let left_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(left.clone()), 0);
-    let right_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(right.clone()), 0);
-    let cond = Expr::from_rel_node(cond.into())
-        .unwrap()
-        .rewrite_column_refs(&mut |idx| {
-            Some(if idx < left_schema.len() {
-                idx + right_schema.len()
-            } else {
-                idx - left_schema.len()
-            })
-        });
+    let left_schema = optimizer.get_property::<SchemaPropertyBuilder>(left.clone(), 0);
+    let right_schema = optimizer.get_property::<SchemaPropertyBuilder>(right.clone(), 0);
+    let cond = Expr::ensures_interpret(cond).rewrite_column_refs(&mut |idx| {
+        Some(if idx < left_schema.len() {
+            idx + right_schema.len()
+        } else {
+            idx - left_schema.len()
+        })
+    });
     let node = LogicalJoin::new(
-        PlanNode::from_group(right.into()),
-        PlanNode::from_group(left.into()),
+        PlanNode::interpret(right),
+        PlanNode::interpret(left),
         cond.unwrap(),
         JoinType::Inner,
     );
@@ -49,9 +47,8 @@ fn apply_join_commute(
     for i in 0..right_schema.len() {
         proj_expr.push(ColumnRefExpr::new(i).into_expr());
     }
-    let node =
-        LogicalProjection::new(node.into_plan_node(), ExprList::new(proj_expr)).into_rel_node();
-    vec![node.as_ref().clone()]
+    let node = LogicalProjection::new(node.into_plan_node(), ExprList::new(proj_expr));
+    vec![node.strip()]
 }
 
 define_rule!(
@@ -67,6 +64,7 @@ fn apply_eliminate_join(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     EliminateJoinRulePicks { left, right, cond }: EliminateJoinRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
+    let cond = cond.unwrap_rel_node();
     if let OptRelNodeTyp::Constant(const_type) = cond.typ {
         if const_type == ConstantType::Bool {
             if let Some(data) = cond.data {
@@ -78,22 +76,22 @@ fn apply_eliminate_join(
                         ConstantExpr::bool(true).into_expr(),
                         JoinType::Cross,
                     );
-                    return vec![node.into_rel_node().as_ref().clone()];
+                    return vec![node.strip()];
                 } else {
                     // No need to handle schema here, as all exprs in the same group
                     // will have same logical properties
                     let mut left_fields = optimizer
-                        .get_property::<SchemaPropertyBuilder>(Arc::new(left.clone()), 0)
+                        .get_property::<SchemaPropertyBuilder>(left.clone(), 0)
                         .fields;
                     let right_fields = optimizer
-                        .get_property::<SchemaPropertyBuilder>(Arc::new(right.clone()), 0)
+                        .get_property::<SchemaPropertyBuilder>(right.clone(), 0)
                         .fields;
                     left_fields.extend(right_fields);
                     let new_schema = Schema {
                         fields: left_fields,
                     };
                     let node = LogicalEmptyRelation::new(false, new_schema);
-                    return vec![node.into_rel_node().as_ref().clone()];
+                    return vec![node.strip()];
                 }
             }
         }
@@ -123,11 +121,11 @@ fn apply_join_assoc(
         cond2,
     }: JoinAssocRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
-    let a_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(a.clone()), 0);
-    let _b_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(b.clone()), 0);
-    let _c_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(c.clone()), 0);
+    let a_schema = optimizer.get_property::<SchemaPropertyBuilder>(a.clone(), 0);
+    let _b_schema = optimizer.get_property::<SchemaPropertyBuilder>(b.clone(), 0);
+    let _c_schema = optimizer.get_property::<SchemaPropertyBuilder>(c.clone(), 0);
 
-    let cond2 = Expr::from_rel_node(cond2.into()).unwrap();
+    let cond2 = Expr::ensures_interpret(cond2);
 
     let Some(cond2) = cond2.rewrite_column_refs(&mut |idx| {
         if idx < a_schema.len() {
@@ -145,7 +143,7 @@ fn apply_join_assoc(
             a.into(),
             RelNode {
                 typ: OptRelNodeTyp::Join(JoinType::Inner),
-                children: vec![b.into(), c.into(), cond2.into_rel_node()],
+                children: vec![b.into(), c.into(), cond2.strip()],
                 data: None,
                 predicates: Vec::new(), /* TODO: refactor */
             }
@@ -155,7 +153,7 @@ fn apply_join_assoc(
         data: None,
         predicates: Vec::new(), /* TODO: refactor */
     };
-    vec![node]
+    vec![node.into()]
 }
 
 define_impl_rule!(
@@ -168,21 +166,17 @@ fn apply_hash_join(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     HashJoinRulePicks { left, right, cond }: HashJoinRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
+    let cond = cond.unwrap_rel_node();
     match cond.typ {
         OptRelNodeTyp::BinOp(BinOpType::Eq) => {
-            let left_schema =
-                optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(left.clone()), 0);
-            // let right_schema =
-            //     optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(right.clone()), 0);
-            let op = BinOpExpr::from_rel_node(Arc::new(cond.clone())).unwrap();
-            let left_expr: Expr = op.left_child();
+            let left_schema = optimizer.get_property::<SchemaPropertyBuilder>(left.clone(), 0);
+            let op = BinOpExpr::ensures_interpret(cond.clone());
+            let left_expr = op.left_child();
             let right_expr = op.right_child();
-            let Some(mut left_expr) = ColumnRefExpr::from_rel_node(left_expr.into_rel_node())
-            else {
+            let Some(mut left_expr) = ColumnRefExpr::try_interpret(left_expr.strip()) else {
                 return vec![];
             };
-            let Some(mut right_expr) = ColumnRefExpr::from_rel_node(right_expr.into_rel_node())
-            else {
+            let Some(mut right_expr) = ColumnRefExpr::try_interpret(right_expr.strip()) else {
                 return vec![];
             };
             let can_convert = if left_expr.index() < left_schema.len()
@@ -207,14 +201,14 @@ fn apply_hash_join(
                     ExprList::new(vec![right_expr.into_expr()]),
                     JoinType::Inner,
                 );
-                return vec![node.into_rel_node().as_ref().clone()];
+                return vec![node.strip()];
             }
         }
         OptRelNodeTyp::LogOp(LogOpType::And) => {
             // currently only support consecutive equal queries
             let mut is_consecutive_eq = true;
             for child in cond.children.clone() {
-                if let OptRelNodeTyp::BinOp(BinOpType::Eq) = child.typ {
+                if let OptRelNodeTyp::BinOp(BinOpType::Eq) = child.unwrap_typ() {
                     continue;
                 } else {
                     is_consecutive_eq = false;
@@ -225,20 +219,17 @@ fn apply_hash_join(
                 return vec![];
             }
 
-            let left_schema =
-                optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(left.clone()), 0);
+            let left_schema = optimizer.get_property::<SchemaPropertyBuilder>(left.clone(), 0);
             let mut left_exprs = vec![];
             let mut right_exprs = vec![];
             for child in cond.children {
-                let bin_op = BinOpExpr::from_rel_node(child.clone()).unwrap();
+                let bin_op = BinOpExpr::ensures_interpret(child);
                 let left_expr: Expr = bin_op.left_child();
                 let right_expr = bin_op.right_child();
-                let Some(mut left_expr) = ColumnRefExpr::from_rel_node(left_expr.into_rel_node())
-                else {
+                let Some(mut left_expr) = ColumnRefExpr::try_interpret(left_expr.strip()) else {
                     return vec![];
                 };
-                let Some(mut right_expr) = ColumnRefExpr::from_rel_node(right_expr.into_rel_node())
-                else {
+                let Some(mut right_expr) = ColumnRefExpr::try_interpret(right_expr.strip()) else {
                     return vec![];
                 };
                 let can_convert = if left_expr.index() < left_schema.len()
@@ -268,22 +259,19 @@ fn apply_hash_join(
                 ExprList::new(right_exprs),
                 JoinType::Inner,
             );
-            return vec![node.into_rel_node().as_ref().clone()];
+            return vec![node.strip()];
         }
         _ => {}
     }
     if let OptRelNodeTyp::BinOp(BinOpType::Eq) = cond.typ {
-        let left_schema =
-            optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(left.clone()), 0);
-        // let right_schema =
-        //     optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(right.clone()), 0);
-        let op = BinOpExpr::from_rel_node(Arc::new(cond.clone())).unwrap();
+        let left_schema = optimizer.get_property::<SchemaPropertyBuilder>(left.clone(), 0);
+        let op = BinOpExpr::ensures_interpret(cond);
         let left_expr: Expr = op.left_child();
         let right_expr = op.right_child();
-        let Some(mut left_expr) = ColumnRefExpr::from_rel_node(left_expr.into_rel_node()) else {
+        let Some(mut left_expr) = ColumnRefExpr::try_interpret(left_expr.strip()) else {
             return vec![];
         };
-        let Some(mut right_expr) = ColumnRefExpr::from_rel_node(right_expr.into_rel_node()) else {
+        let Some(mut right_expr) = ColumnRefExpr::try_interpret(right_expr.strip()) else {
             return vec![];
         };
         let can_convert = if left_expr.index() < left_schema.len()
@@ -306,7 +294,7 @@ fn apply_hash_join(
                 ExprList::new(vec![right_expr.into_expr()]),
                 JoinType::Inner,
             );
-            return vec![node.into_rel_node().as_ref().clone()];
+            return vec![node.strip()];
         }
     }
     vec![]

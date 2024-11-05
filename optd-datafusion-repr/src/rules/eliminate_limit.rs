@@ -24,27 +24,22 @@ fn apply_eliminate_limit(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     EliminateLimitRulePicks { child, skip, fetch }: EliminateLimitRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
-    if let OptRelNodeTyp::Constant(ConstantType::UInt64) = skip.typ {
-        if let OptRelNodeTyp::Constant(ConstantType::UInt64) = fetch.typ {
-            let skip_val = ConstantExpr::ensures_interpret(skip.into())
-                .value()
-                .as_u64();
+    if let OptRelNodeTyp::Constant(ConstantType::UInt64) = skip.unwrap_typ() {
+        if let OptRelNodeTyp::Constant(ConstantType::UInt64) = fetch.unwrap_typ() {
+            let skip_val = ConstantExpr::ensures_interpret(skip).value().as_u64();
 
-            let fetch_val = ConstantExpr::ensures_interpret(fetch.into())
-                .value()
-                .as_u64();
+            let fetch_val = ConstantExpr::ensures_interpret(fetch).value().as_u64();
 
             // Bad convention to have u64 max represent None
             let fetch_is_none = fetch_val == u64::MAX;
 
-            let schema =
-                optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(child.clone()), 0);
+            let schema = optimizer.get_property::<SchemaPropertyBuilder>(child, 0);
 
             if fetch_is_none && skip_val == 0 {
                 return vec![child];
             } else if fetch_val == 0 {
                 let node = LogicalEmptyRelation::new(false, schema);
-                return vec![node.into_rel_node().as_ref().clone()];
+                return vec![node.strip()];
             }
         }
     }

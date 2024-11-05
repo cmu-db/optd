@@ -52,7 +52,7 @@ impl ExternColumnRefExpr {
     }
 
     fn get_data_usize(&self) -> usize {
-        self.0.unwrap_rel_node().data.as_ref().unwrap().as_u64() as usize
+        self.unwrap_rel_node().data.as_ref().unwrap().as_u64() as usize
     }
 
     /// Gets the column index.

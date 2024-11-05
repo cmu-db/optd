@@ -63,7 +63,7 @@ impl LogicalEmptyRelation {
     }
 
     fn get_data(&self) -> EmptyRelationData {
-        let serialized_data = self.0.unwrap_rel_node().data.as_ref().unwrap().as_slice();
+        let serialized_data = self.unwrap_rel_node().data.as_ref().unwrap().as_slice();
 
         bincode::deserialize(serialized_data.as_ref()).unwrap()
     }
@@ -114,7 +114,7 @@ impl PhysicalEmptyRelation {
     }
 
     fn get_data(&self) -> EmptyRelationData {
-        let serialized_data = self.0.unwrap_rel_node().data.as_ref().unwrap().as_slice();
+        let serialized_data = self.unwrap_rel_node().data.as_ref().unwrap().as_slice();
 
         bincode::deserialize(serialized_data.as_ref()).unwrap()
     }

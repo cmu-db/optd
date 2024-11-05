@@ -180,6 +180,19 @@ pub trait OptRelNode: 'static + Clone {
         Self::interpret(rel_node)
     }
 
+    /// Interpret an optd-core object as a datafusion-repr object with the type checked.
+    fn try_interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        let rel_node = rel_node.into();
+        let typ = rel_node.unwrap_rel_node().typ;
+        if !Self::is_typ(typ.clone()) {
+            return None;
+        }
+        Some(Self::interpret(rel_node))
+    }
+
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static>;
 
     fn explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -237,17 +250,17 @@ pub struct PlanNode(pub(crate) MaybeRelNode<OptRelNodeTyp>);
 
 impl PlanNode {
     pub fn typ(&self) -> OptRelNodeTyp {
-        self.0.unwrap_rel_node().typ
+        self.unwrap_rel_node().typ
     }
 
-    // TODO: rename
+    // TODO: remove this function and use `interpret` instead
     pub fn from_group(rel_node: MaybeRelNode<OptRelNodeTyp>) -> Self {
         Self(rel_node)
     }
 
     pub fn get_meta<'a>(&self, meta_map: &'a RelNodeMetaMap) -> &'a RelNodeMeta {
         meta_map
-            .get(&(self.0.unwrap_rel_node().as_ref() as *const _ as usize))
+            .get(&(self.unwrap_rel_node().as_ref() as *const _ as usize))
             .unwrap()
     }
 }
@@ -283,11 +296,11 @@ pub struct Expr(MaybeRelNode<OptRelNodeTyp>);
 
 impl Expr {
     pub fn typ(&self) -> OptRelNodeTyp {
-        self.0.unwrap_rel_node().typ.clone()
+        self.unwrap_rel_node().typ.clone()
     }
 
     pub fn child(&self, idx: usize) -> MaybeRelNode<OptRelNodeTyp> {
-        self.0.unwrap_rel_node().child(idx)
+        self.unwrap_rel_node().child(idx)
     }
 
     /// Recursively rewrite all column references in the expression.using a provided
@@ -334,7 +347,7 @@ impl Expr {
                     .map(|x| Expr::ensures_interpret(x.strip()))
             })
             .collect::<Option<Vec<_>>>()?;
-        let rel_node = self.0.unwrap_rel_node();
+        let rel_node = self.unwrap_rel_node();
         Some(Expr::ensures_interpret(RelNode {
             typ: rel_node.typ.clone(),
             children: children.into_iter().map(|e| e.strip()).collect_vec(),
@@ -353,7 +366,7 @@ impl Expr {
             return vec![self.clone()];
         }
 
-        let rel_node = self.0.unwrap_rel_node();
+        let rel_node = self.unwrap_rel_node();
         let children = rel_node.children.into_iter().map(|child| {
             let child = child.unwrap_rel_node();
             if child.typ == OptRelNodeTyp::List {

@@ -32,21 +32,22 @@ fn apply_eliminate_duplicated_sort_expr(
     _optimizer: &impl Optimizer<OptRelNodeTyp>,
     EliminateDuplicatedSortExprRulePicks { child, exprs }: EliminateDuplicatedSortExprRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
+    let exprs = exprs.unwrap_rel_node();
     let sort_keys: Vec<Expr> = exprs
         .children
         .iter()
-        .map(|x| Expr::from_rel_node(x.clone()).unwrap())
+        .map(|x| Expr::ensures_interpret(x.clone()))
         .collect_vec();
 
-    let normalized_sort_keys: Vec<Arc<RelNode<OptRelNodeTyp>>> = exprs
+    let normalized_sort_keys = exprs
         .children
         .iter()
-        .map(|x| match x.typ {
+        .map(|x| match x.unwrap_typ() {
             OptRelNodeTyp::SortOrder(_) => SortOrderExpr::new(
                 SortOrderType::Asc,
-                SortOrderExpr::from_rel_node(x.clone()).unwrap().child(),
+                SortOrderExpr::ensures_interpret(x.clone()).child(),
             )
-            .into_rel_node(),
+            .strip(),
             _ => x.clone(),
         })
         .collect_vec();
@@ -58,9 +59,10 @@ fn apply_eliminate_duplicated_sort_expr(
         .iter()
         .zip(normalized_sort_keys.iter())
         .for_each(|(expr, normalized_expr)| {
-            if !dedup_set.contains(normalized_expr) {
+            let normalized_expr = normalized_expr.unwrap_rel_node();
+            if !dedup_set.contains(&normalized_expr) {
                 dedup_expr.push(expr.clone());
-                dedup_set.insert(normalized_expr.to_owned());
+                dedup_set.insert(normalized_expr);
             }
         });
 
@@ -69,7 +71,7 @@ fn apply_eliminate_duplicated_sort_expr(
             PlanNode::from_group(child.into()),
             ExprList::new(dedup_expr),
         );
-        return vec![node.into_rel_node().as_ref().clone()];
+        return vec![node.strip()];
     }
     vec![]
 }
@@ -99,9 +101,11 @@ fn apply_eliminate_duplicated_agg_expr(
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let mut dedup_expr: Vec<Expr> = Vec::new();
     let mut dedup_set: HashSet<Arc<RelNode<OptRelNodeTyp>>> = HashSet::new();
+    let groups = groups.unwrap_rel_node();
     groups.children.iter().for_each(|expr| {
-        if !dedup_set.contains(expr) {
-            dedup_expr.push(Expr::from_rel_node(expr.clone()).unwrap());
+        let expr = expr.unwrap_rel_node();
+        if !dedup_set.contains(&expr) {
+            dedup_expr.push(Expr::ensures_interpret(expr.clone()));
             dedup_set.insert(expr.clone());
         }
     });
@@ -109,10 +113,10 @@ fn apply_eliminate_duplicated_agg_expr(
     if dedup_expr.len() != groups.children.len() {
         let node = LogicalAgg::new(
             PlanNode::from_group(child.into()),
-            ExprList::from_group(exprs.into()),
+            ExprList::ensures_interpret(exprs),
             ExprList::new(dedup_expr),
         );
-        return vec![node.into_rel_node().as_ref().clone()];
+        return vec![node.strip()];
     }
     vec![]
 }

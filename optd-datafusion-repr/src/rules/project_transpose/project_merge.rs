@@ -28,9 +28,9 @@ fn apply_projection_merge(
         exprs2,
     }: ProjectMergeRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
-    let child = PlanNode::from_group(child.into());
-    let exprs1 = ExprList::from_rel_node(exprs1.into()).unwrap();
-    let exprs2 = ExprList::from_rel_node(exprs2.into()).unwrap();
+    let child = PlanNode::from_group(child);
+    let exprs1 = ExprList::ensures_interpret(exprs1);
+    let exprs2 = ExprList::ensures_interpret(exprs2);
 
     let Some(mapping) = ProjectionMapping::build(&exprs1) else {
         return vec![];
@@ -42,7 +42,7 @@ fn apply_projection_merge(
 
     let node: LogicalProjection = LogicalProjection::new(child, res_exprs);
 
-    vec![node.into_rel_node().as_ref().clone()]
+    vec![node.strip()]
 }
 
 // Proj child [identical columns] -> eliminate
@@ -56,9 +56,9 @@ fn apply_eliminate_project(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     EliminateProjectRulePicks { child, expr }: EliminateProjectRulePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
-    let exprs = ExprList::from_rel_node(expr.into()).unwrap();
+    let exprs = ExprList::ensures_interpret(expr);
     let child_columns = optimizer
-        .get_property::<SchemaPropertyBuilder>(child.clone().into(), 0)
+        .get_property::<SchemaPropertyBuilder>(child.clone(), 0)
         .len();
     if child_columns != exprs.len() {
         return Vec::new();
@@ -66,7 +66,7 @@ fn apply_eliminate_project(
     for i in 0..exprs.len() {
         let child_expr = exprs.child(i);
         if child_expr.typ() == OptRelNodeTyp::ColumnRef {
-            let child_expr = ColumnRefExpr::from_rel_node(child_expr.into_rel_node()).unwrap();
+            let child_expr = ColumnRefExpr::ensures_interpret(child_expr.strip());
             if child_expr.index() != i {
                 return Vec::new();
             }
@@ -112,17 +112,19 @@ mod tests {
         let bot_proj = LogicalProjection::new(scan.into_plan_node(), bot_proj_exprs);
         let top_proj = LogicalProjection::new(bot_proj.into_plan_node(), top_proj_exprs);
 
-        let plan = test_optimizer.optimize(top_proj.into_rel_node()).unwrap();
+        let plan = test_optimizer
+            .optimize(top_proj.strip().unwrap_rel_node())
+            .unwrap();
 
         let res_proj_exprs = ExprList::new(vec![
             ColumnRefExpr::new(4).into_expr(),
             ColumnRefExpr::new(2).into_expr(),
         ])
-        .into_rel_node();
+        .strip();
 
         assert_eq!(plan.typ, OptRelNodeTyp::Projection);
         assert_eq!(plan.child(1), res_proj_exprs);
-        assert!(matches!(plan.child(0).typ, OptRelNodeTyp::Scan));
+        assert!(matches!(plan.child_rel(0).typ, OptRelNodeTyp::Scan));
     }
 
     #[test]
@@ -156,7 +158,9 @@ mod tests {
         let proj_3 = LogicalProjection::new(proj_2.into_plan_node(), proj_exprs_3);
 
         // needs to be called twice
-        let plan = test_optimizer.optimize(proj_3.into_rel_node()).unwrap();
+        let plan = test_optimizer
+            .optimize(proj_3.strip().unwrap_rel_node())
+            .unwrap();
         let plan = test_optimizer.optimize(plan).unwrap();
 
         let res_proj_exprs = ExprList::new(vec![
@@ -164,7 +168,7 @@ mod tests {
             ColumnRefExpr::new(0).into_expr(),
             ColumnRefExpr::new(3).into_expr(),
         ])
-        .into_rel_node();
+        .strip();
 
         assert_eq!(plan.typ, OptRelNodeTyp::Projection);
         assert_eq!(plan.child(1), res_proj_exprs);
@@ -209,7 +213,9 @@ mod tests {
         let proj_4 = LogicalProjection::new(proj_3.into_plan_node(), proj_exprs_4);
 
         // needs to be called three times
-        let plan = test_optimizer.optimize(proj_4.into_rel_node()).unwrap();
+        let plan = test_optimizer
+            .optimize(proj_4.strip().unwrap_rel_node())
+            .unwrap();
         let plan = test_optimizer.optimize(plan).unwrap();
         let plan = test_optimizer.optimize(plan).unwrap();
 
@@ -218,10 +224,10 @@ mod tests {
             ColumnRefExpr::new(0).into_expr(),
             ColumnRefExpr::new(3).into_expr(),
         ])
-        .into_rel_node();
+        .strip();
 
         assert_eq!(plan.typ, OptRelNodeTyp::Projection);
         assert_eq!(plan.child(1), res_proj_exprs);
-        assert!(matches!(plan.child(0).typ, OptRelNodeTyp::Scan));
+        assert!(matches!(plan.child_rel(0).typ, OptRelNodeTyp::Scan));
     }
 }

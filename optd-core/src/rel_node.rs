@@ -234,6 +234,13 @@ impl<T: RelNodeTyp> MaybeRelNode<T> {
         }
     }
 
+    pub fn unwrap_typ(&self) -> T {
+        match self {
+            Self::RelNode(node) => node.typ.clone(),
+            Self::Group(_) => panic!("Expected PlanNode, found Group"),
+        }
+    }
+
     pub fn unwrap_rel_node(&self) -> RelNodeRef<T> {
         match self {
             Self::RelNode(node) => node.clone(),

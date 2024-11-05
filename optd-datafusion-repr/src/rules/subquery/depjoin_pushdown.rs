@@ -18,43 +18,38 @@ fn rewrite_extern_column_refs(
     expr: &Expr,
     rewrite_fn: &mut impl FnMut(usize) -> Option<usize>,
 ) -> Option<Expr> {
-    let expr_rel = expr.clone().into_rel_node();
+    let expr_rel = expr.strip();
     assert!(expr.typ().is_expression());
     if let OptRelNodeTyp::ExternColumnRef = expr.typ() {
-        let col_ref = ExternColumnRefExpr::from_rel_node(expr_rel.clone()).unwrap();
+        let col_ref = ExternColumnRefExpr::ensures_interpret(expr_rel.clone());
         let rewritten = rewrite_fn(col_ref.index());
         return if let Some(rewritten_idx) = rewritten {
             let new_col_ref = ColumnRefExpr::new(rewritten_idx);
-            Some(Expr::from_rel_node(new_col_ref.into_rel_node()).unwrap())
+            Some(Expr::ensures_interpret(new_col_ref.strip()))
         } else {
             None
         };
     }
 
+    let expr_rel = expr_rel.unwrap_rel_node();
     let children = expr_rel.children.clone();
     let children = children
         .into_iter()
         .map(|child| {
-            if child.typ == OptRelNodeTyp::List {
+            if child.unwrap_typ() == OptRelNodeTyp::List {
                 // TODO: What should we do with List?
                 return Some(child);
             }
-            rewrite_extern_column_refs(&Expr::from_rel_node(child).unwrap(), rewrite_fn)
-                .map(|x| x.into_rel_node())
+            rewrite_extern_column_refs(&Expr::ensures_interpret(child), rewrite_fn)
+                .map(|x| x.strip())
         })
         .collect::<Option<Vec<_>>>()?;
-    Some(
-        Expr::from_rel_node(
-            RelNode {
-                typ: expr_rel.typ.clone(),
-                children,
-                data: expr_rel.data.clone(),
-                predicates: Vec::new(), /* TODO: refactor */
-            }
-            .into(),
-        )
-        .unwrap(),
-    )
+    Some(Expr::ensures_interpret(RelNode {
+        typ: expr_rel.typ.clone(),
+        children,
+        data: expr_rel.data.clone(),
+        predicates: Vec::new(), /* TODO: refactor */
+    }))
 }
 
 define_rule!(
@@ -83,7 +78,7 @@ fn apply_dep_initial_distinct(
         extern_cols,
     }: DepInitialDistinctPicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
-    assert!(cond == *ConstantExpr::bool(true).into_rel_node());
+    assert!(cond == ConstantExpr::bool(true).strip());
 
     let left_schema_size = optimizer
         .get_property::<SchemaPropertyBuilder>(left.clone().into(), 0)
@@ -93,15 +88,10 @@ fn apply_dep_initial_distinct(
         .get_property::<SchemaPropertyBuilder>(right.clone().into(), 0)
         .len();
 
-    let correlated_col_indices = ExprList::from_rel_node(extern_cols.clone().into())
-        .unwrap()
+    let correlated_col_indices = ExprList::ensures_interpret(extern_cols)
         .to_vec()
         .into_iter()
-        .map(|x| {
-            ExternColumnRefExpr::from_rel_node(x.into_rel_node())
-                .unwrap()
-                .index()
-        })
+        .map(|x| ExternColumnRefExpr::ensures_interpret(x.strip()).index())
         .collect::<Vec<usize>>();
 
     // If we have no correlated columns, just emit a cross join instead
@@ -113,7 +103,7 @@ fn apply_dep_initial_distinct(
             JoinType::Cross,
         );
 
-        return vec![new_join.into_rel_node().as_ref().clone()];
+        return vec![new_join.strip()];
     }
 
     // An aggregate node that groups by all correlated columns allows us to
@@ -132,8 +122,8 @@ fn apply_dep_initial_distinct(
     let new_dep_join = DependentJoin::new(
         distinct_agg_node.into_plan_node(),
         PlanNode::from_group(right.into()),
-        Expr::from_rel_node(cond.into()).unwrap(),
-        ExprList::from_rel_node(extern_cols.into()).unwrap(),
+        Expr::ensures_interpret(cond.into()),
+        ExprList::ensures_interpret(extern_cols.into()),
         JoinType::Cross,
     );
 
@@ -160,7 +150,7 @@ fn apply_dep_initial_distinct(
 
     let new_join = LogicalJoin::new(
         PlanNode::from_group(left.into()),
-        PlanNode::from_rel_node(new_dep_join.into_rel_node()).unwrap(),
+        PlanNode::ensures_interpret(new_dep_join.strip()),
         join_cond,
         JoinType::Inner,
     );
@@ -169,7 +159,7 @@ fn apply_dep_initial_distinct(
     // for correctness (Project the left side of the new join,
     // plus the *right side of the right side*)
     let new_proj = LogicalProjection::new(
-        PlanNode::from_rel_node(new_join.into_rel_node()).unwrap(),
+        PlanNode::ensures_interpret(new_join.strip()),
         ExprList::new(
             (0..left_schema_size)
                 .chain(
@@ -181,7 +171,7 @@ fn apply_dep_initial_distinct(
         ),
     );
 
-    vec![new_proj.into_rel_node().as_ref().clone()]
+    vec![new_proj.strip()]
 }
 
 define_rule!(
@@ -211,7 +201,7 @@ fn apply_dep_join_past_proj(
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     // TODO: can we have external columns in projection node? I don't think so?
     // Cross join should always have true cond
-    assert!(cond == *ConstantExpr::bool(true).into_rel_node());
+    assert!(cond == *ConstantExpr::bool(true).strip());
     let left_schema_len = optimizer
         .get_property::<SchemaPropertyBuilder>(left.clone().into(), 0)
         .len();
@@ -233,16 +223,16 @@ fn apply_dep_join_past_proj(
     let new_dep_join = DependentJoin::new(
         PlanNode::from_group(left.into()),
         PlanNode::from_group(right.into()),
-        Expr::from_rel_node(cond.into()).unwrap(),
-        ExprList::from_rel_node(extern_cols.into()).unwrap(),
+        Expr::ensures_interpret(cond.into()).unwrap(),
+        ExprList::ensures_interpret(extern_cols.into()).unwrap(),
         JoinType::Cross,
     );
     let new_proj = LogicalProjection::new(
-        PlanNode::from_rel_node(new_dep_join.into_rel_node()).unwrap(),
+        PlanNode::ensures_interpret(new_dep_join.strip()).unwrap(),
         new_proj_exprs,
     );
 
-    vec![new_proj.into_rel_node().as_ref().clone()]
+    vec![new_proj.strip()]
 }
 
 define_rule!(
@@ -271,23 +261,23 @@ fn apply_dep_join_past_filter(
     }: DepJoinPastFilterPicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     // Cross join should always have true cond
-    assert!(cond == *ConstantExpr::bool(true).into_rel_node());
+    assert!(cond == *ConstantExpr::bool(true).strip());
     let left_schema_len = optimizer
         .get_property::<SchemaPropertyBuilder>(left.clone().into(), 0)
         .len();
 
-    let correlated_col_indices = ExprList::from_rel_node(extern_cols.clone().into())
+    let correlated_col_indices = ExprList::ensures_interpret(extern_cols.clone().into())
         .unwrap()
         .to_vec()
         .into_iter()
         .map(|x| {
-            ExternColumnRefExpr::from_rel_node(x.into_rel_node())
+            ExternColumnRefExpr::ensures_interpret(x.strip())
                 .unwrap()
                 .index()
         })
         .collect::<Vec<usize>>();
 
-    let rewritten_expr = Expr::from_rel_node(filter_cond.into())
+    let rewritten_expr = Expr::ensures_interpret(filter_cond.into())
         .unwrap()
         .rewrite_column_refs(&mut |col| Some(col + left_schema_len))
         .unwrap();
@@ -304,7 +294,7 @@ fn apply_dep_join_past_filter(
     let new_dep_join = DependentJoin::new(
         PlanNode::from_group(left.into()),
         PlanNode::from_group(right.into()),
-        Expr::from_rel_node(cond.into()).unwrap(),
+        Expr::ensures_interpret(cond.into()).unwrap(),
         ExprList::new(
             correlated_col_indices
                 .into_iter()
@@ -315,11 +305,11 @@ fn apply_dep_join_past_filter(
     );
 
     let new_filter = LogicalFilter::new(
-        PlanNode::from_rel_node(new_dep_join.into_rel_node()).unwrap(),
+        PlanNode::ensures_interpret(new_dep_join.strip()).unwrap(),
         rewritten_expr,
     );
 
-    vec![new_filter.into_rel_node().as_ref().clone()]
+    vec![new_filter.strip()]
 }
 
 define_rule!(
@@ -355,17 +345,17 @@ fn apply_dep_join_past_agg(
     }: DepJoinPastAggPicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     // Cross join should always have true cond
-    assert!(cond == *ConstantExpr::bool(true).into_rel_node());
+    assert!(cond == *ConstantExpr::bool(true).strip());
 
     // TODO: OUTER JOIN TRANSFORMATION
 
-    let extern_cols = ExprList::from_rel_node(extern_cols.into()).unwrap();
+    let extern_cols = ExprList::ensures_interpret(extern_cols.into()).unwrap();
     let correlated_col_indices = extern_cols
         .to_vec()
         .into_iter()
         .map(|x| {
             ColumnRefExpr::new(
-                ExternColumnRefExpr::from_rel_node(x.into_rel_node())
+                ExternColumnRefExpr::ensures_interpret(x.strip())
                     .unwrap()
                     .index(),
             )
@@ -373,7 +363,7 @@ fn apply_dep_join_past_agg(
         })
         .collect::<Vec<Expr>>();
 
-    let groups = ExprList::from_rel_node(groups.clone().into()).unwrap();
+    let groups = ExprList::ensures_interpret(groups.clone().into()).unwrap();
 
     let new_groups = ExprList::new(
         groups
@@ -390,7 +380,7 @@ fn apply_dep_join_past_agg(
             .collect(),
     );
 
-    let exprs = ExprList::from_rel_node(exprs.into()).unwrap();
+    let exprs = ExprList::ensures_interpret(exprs.into()).unwrap();
 
     let new_exprs = ExprList::new(
         exprs
@@ -406,18 +396,18 @@ fn apply_dep_join_past_agg(
     let new_dep_join = DependentJoin::new(
         PlanNode::from_group(left.into()),
         PlanNode::from_group(right.into()),
-        Expr::from_rel_node(cond.into()).unwrap(),
+        Expr::ensures_interpret(cond.into()).unwrap(),
         extern_cols,
         JoinType::Cross,
     );
 
     let new_agg = LogicalAgg::new(
-        PlanNode::from_rel_node(new_dep_join.into_rel_node()).unwrap(),
+        PlanNode::ensures_interpret(new_dep_join.strip()).unwrap(),
         new_exprs,
         new_groups,
     );
 
-    vec![new_agg.into_rel_node().as_ref().clone()]
+    vec![new_agg.strip()]
 }
 
 // Heuristics-only rule. If we don't have references to the external columns on the right side,
@@ -440,7 +430,7 @@ fn apply_dep_join_eliminate_at_scan(
     }: DepJoinEliminatePicks,
 ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     // Cross join should always have true cond
-    assert!(cond == *ConstantExpr::bool(true).into_rel_node());
+    assert!(cond == *ConstantExpr::bool(true).strip());
 
     fn inspect(node: &RelNode<OptRelNodeTyp>) -> bool {
         if matches!(node.typ, OptRelNodeTyp::Placeholder(_)) {
@@ -464,7 +454,7 @@ fn apply_dep_join_eliminate_at_scan(
             ConstantExpr::bool(true).into_expr(),
             JoinType::Inner,
         );
-        vec![new_join.into_rel_node().as_ref().clone()]
+        vec![new_join.strip()]
     } else {
         vec![]
     }
