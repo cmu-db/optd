@@ -69,9 +69,9 @@ impl LogicalApply {
             RelNode {
                 typ: OptRelNodeTyp::Apply(apply_type),
                 children: vec![
-                    left.into_rel_node(),
-                    right.into_rel_node(),
-                    cond.into_rel_node(),
+                    left.into_rel_node().into(),
+                    right.into_rel_node().into(),
+                    cond.into_rel_node().into(),
                 ],
                 data: None,
                 predicates: Vec::new(), /* TODO: refactor */

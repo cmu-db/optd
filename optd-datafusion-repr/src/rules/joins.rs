@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::vec;
 
 use optd_core::optimizer::Optimizer;
-use optd_core::rel_node::RelNode;
+use optd_core::rel_node::{MaybeRelNode, RelNode};
 use optd_core::rules::{Rule, RuleMatcher};
 
 use super::macros::{define_impl_rule, define_rule};
@@ -24,7 +24,7 @@ define_rule!(
 fn apply_join_commute(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     JoinCommuteRulePicks { left, right, cond }: JoinCommuteRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let left_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(left.clone()), 0);
     let right_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(right.clone()), 0);
     let cond = Expr::from_rel_node(cond.into())
@@ -66,7 +66,7 @@ define_rule!(
 fn apply_eliminate_join(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     EliminateJoinRulePicks { left, right, cond }: EliminateJoinRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     if let OptRelNodeTyp::Constant(const_type) = cond.typ {
         if const_type == ConstantType::Bool {
             if let Some(data) = cond.data {
@@ -122,7 +122,7 @@ fn apply_join_assoc(
         cond1,
         cond2,
     }: JoinAssocRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let a_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(a.clone()), 0);
     let _b_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(b.clone()), 0);
     let _c_schema = optimizer.get_property::<SchemaPropertyBuilder>(Arc::new(c.clone()), 0);
@@ -167,7 +167,7 @@ define_impl_rule!(
 fn apply_hash_join(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     HashJoinRulePicks { left, right, cond }: HashJoinRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     match cond.typ {
         OptRelNodeTyp::BinOp(BinOpType::Eq) => {
             let left_schema =

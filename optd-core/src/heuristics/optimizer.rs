@@ -7,7 +7,7 @@ use std::any::Any;
 use crate::{
     optimizer::Optimizer,
     property::PropertyBuilderAny,
-    rel_node::{RelNode, RelNodeRef, RelNodeTyp},
+    rel_node::{MaybeRelNode, RelNode, RelNodeRef, RelNodeTyp},
     rules::{Rule, RuleMatcher},
 };
 
@@ -28,7 +28,7 @@ fn match_node<T: RelNodeTyp>(
     children: &[RuleMatcher<T>],
     pick_to: Option<usize>,
     node: RelNodeRef<T>,
-) -> Option<HashMap<usize, RelNode<T>>> {
+) -> Option<HashMap<usize, MaybeRelNode<T>>> {
     if let RuleMatcher::PickMany { .. } | RuleMatcher::IgnoreMany = children.last().unwrap() {
     } else {
         assert_eq!(
@@ -50,16 +50,19 @@ fn match_node<T: RelNodeTyp>(
             }
             RuleMatcher::PickOne { pick_to, expand: _ } => {
                 // Heuristics always keep the full plan without group placeholders, therefore we can ignore expand property.
-                let res = pick.insert(*pick_to, node.child(idx).as_ref().clone());
+                let res = pick.insert(*pick_to, node.child(idx));
                 assert!(res.is_none(), "dup pick");
             }
             RuleMatcher::PickMany { pick_to } => {
-                let res = pick.insert(*pick_to, RelNode::new_list(node.children[idx..].to_vec()));
+                let res = pick.insert(
+                    *pick_to,
+                    MaybeRelNode::RelNode(RelNode::new_list(node.children[idx..].to_vec()).into()),
+                );
                 assert!(res.is_none(), "dup pick");
                 should_end = true;
             }
             _ => {
-                if let Some(new_picks) = match_and_pick(child, node.child(idx)) {
+                if let Some(new_picks) = match_and_pick(child, node.child_rel(idx)) {
                     pick.extend(new_picks.iter().map(|(k, v)| (*k, v.clone())));
                 } else {
                     return None;
@@ -68,14 +71,17 @@ fn match_node<T: RelNodeTyp>(
         }
     }
     if let Some(pick_to) = pick_to {
-        let res: Option<RelNode<T>> = pick.insert(
+        let res: Option<MaybeRelNode<T>> = pick.insert(
             pick_to,
-            RelNode {
-                typ: typ.clone(),
-                children: node.children.clone(),
-                data: node.data.clone(),
-                predicates: node.predicates.clone(),
-            },
+            MaybeRelNode::RelNode(
+                RelNode {
+                    typ: typ.clone(),
+                    children: node.children.clone(),
+                    data: node.data.clone(),
+                    predicates: node.predicates.clone(),
+                }
+                .into(),
+            ),
         );
         assert!(res.is_none(), "dup pick");
     }
@@ -85,7 +91,7 @@ fn match_node<T: RelNodeTyp>(
 fn match_and_pick<T: RelNodeTyp>(
     matcher: &RuleMatcher<T>,
     node: RelNodeRef<T>,
-) -> Option<HashMap<usize, RelNode<T>>> {
+) -> Option<HashMap<usize, MaybeRelNode<T>>> {
     match matcher {
         RuleMatcher::MatchAndPickNode {
             typ,
@@ -121,10 +127,12 @@ impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
         }
     }
 
-    fn optimize_inputs(&mut self, inputs: &[RelNodeRef<T>]) -> Result<Vec<RelNodeRef<T>>> {
+    fn optimize_inputs(&mut self, inputs: &[MaybeRelNode<T>]) -> Result<Vec<MaybeRelNode<T>>> {
         let mut optimized_inputs = Vec::with_capacity(inputs.len());
         for input in inputs {
-            optimized_inputs.push(self.optimize_inner(input.clone())?);
+            optimized_inputs.push(MaybeRelNode::RelNode(
+                self.optimize_inner(input.clone().unwrap_rel_node())?,
+            ));
         }
         Ok(optimized_inputs)
     }
@@ -138,7 +146,7 @@ impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
                 let mut results = rule.apply(self, picks);
                 assert!(results.len() <= 1);
                 if !results.is_empty() {
-                    root_rel = results.remove(0).into();
+                    root_rel = results.remove(0).unwrap_rel_node();
                 }
             }
         }
@@ -184,8 +192,9 @@ impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
             .children
             .iter()
             .map(|child| {
-                self.infer_properties((*child).clone());
-                self.properties.get(child).unwrap().clone()
+                let child = (*child).clone().unwrap_rel_node();
+                self.infer_properties(child.clone());
+                self.properties.get(&child).unwrap().clone()
             })
             .collect_vec();
         let mut props = Vec::with_capacity(self.property_builders.len());
@@ -212,12 +221,12 @@ impl<T: RelNodeTyp> Optimizer<T> for HeuristicsOptimizer<T> {
 
     fn get_property<P: crate::property::PropertyBuilder<T>>(
         &self,
-        root_rel: RelNodeRef<T>,
+        root_rel: MaybeRelNode<T>,
         idx: usize,
     ) -> P::Prop {
         let props = self
             .properties
-            .get(&root_rel)
+            .get(&root_rel.unwrap_rel_node())
             .with_context(|| format!("cannot obtain properties for {}", root_rel))
             .unwrap();
         let prop = props[idx].as_ref();

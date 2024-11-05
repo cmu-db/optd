@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use anyhow::Result;
 use itertools::Itertools;
@@ -11,7 +11,7 @@ use crate::{
         tasks::{OptimizeExpressionTask, OptimizeInputsTask},
         GroupId, Memo,
     },
-    rel_node::{RelNode, RelNodeTyp},
+    rel_node::{MaybeRelNode, RelNode, RelNodeTyp},
     rules::{OptimizeType, RuleMatcher},
 };
 
@@ -39,7 +39,7 @@ fn match_node<T: RelNodeTyp, M: Memo<T>>(
     pick_to: Option<usize>,
     node: RelMemoNodeRef<T>,
     optimizer: &CascadesOptimizer<T, M>,
-) -> Vec<HashMap<usize, RelNode<T>>> {
+) -> Vec<HashMap<usize, MaybeRelNode<T>>> {
     if let RuleMatcher::PickMany { .. } | RuleMatcher::IgnoreMany = children.last().unwrap() {
     } else {
         assert_eq!(
@@ -65,9 +65,9 @@ fn match_node<T: RelNodeTyp, M: Memo<T>>(
                     let binding = optimizer
                         .get_predicate_binding(group_id)
                         .expect("empty group, what's going wrong?");
-                    binding.as_ref().clone()
+                    MaybeRelNode::RelNode(binding)
                 } else {
-                    RelNode::new_group(group_id)
+                    MaybeRelNode::Group(group_id)
                 };
                 for pick in &mut picks {
                     let res = pick.insert(*pick_to, node.clone());
@@ -78,11 +78,14 @@ fn match_node<T: RelNodeTyp, M: Memo<T>>(
                 for pick in &mut picks {
                     let res = pick.insert(
                         *pick_to,
-                        RelNode::new_list(
-                            node.children[idx..]
-                                .iter()
-                                .map(|x| Arc::new(RelNode::new_group(*x)))
-                                .collect_vec(),
+                        MaybeRelNode::RelNode(
+                            RelNode::new_list(
+                                node.children[idx..]
+                                    .iter()
+                                    .map(|x| MaybeRelNode::Group(*x))
+                                    .collect_vec(),
+                            )
+                            .into(),
                         ),
                     );
                     assert!(res.is_none(), "dup pick");
@@ -105,14 +108,14 @@ fn match_node<T: RelNodeTyp, M: Memo<T>>(
     }
     if let Some(pick_to) = pick_to {
         for pick in &mut picks {
-            let res: Option<RelNode<T>> = pick.insert(
+            let res: Option<MaybeRelNode<T>> = pick.insert(
                 pick_to,
                 RelNode {
                     typ: typ.clone(),
                     children: node
                         .children
                         .iter()
-                        .map(|x| RelNode::new_group(*x).into())
+                        .map(|x| MaybeRelNode::Group(*x))
                         .collect_vec(),
                     data: node.data.clone(),
                     // rule engine by default captures all predicates
@@ -121,7 +124,8 @@ fn match_node<T: RelNodeTyp, M: Memo<T>>(
                         .iter()
                         .map(|x| optimizer.get_pred(*x))
                         .collect(),
-                },
+                }
+                .into(),
             );
             assert!(res.is_none(), "dup pick");
         }
@@ -133,7 +137,7 @@ fn match_and_pick_expr<T: RelNodeTyp, M: Memo<T>>(
     matcher: &RuleMatcher<T>,
     expr_id: ExprId,
     optimizer: &CascadesOptimizer<T, M>,
-) -> Vec<HashMap<usize, RelNode<T>>> {
+) -> Vec<HashMap<usize, MaybeRelNode<T>>> {
     let node = optimizer.get_expr_memoed(expr_id);
     match_and_pick(matcher, node, optimizer)
 }
@@ -142,7 +146,7 @@ fn match_and_pick_group<T: RelNodeTyp, M: Memo<T>>(
     matcher: &RuleMatcher<T>,
     group_id: GroupId,
     optimizer: &CascadesOptimizer<T, M>,
-) -> Vec<HashMap<usize, RelNode<T>>> {
+) -> Vec<HashMap<usize, MaybeRelNode<T>>> {
     let mut matches = vec![];
     for expr_id in optimizer.get_all_exprs_in_group(group_id) {
         let node = optimizer.get_expr_memoed(expr_id);
@@ -155,7 +159,7 @@ fn match_and_pick<T: RelNodeTyp, M: Memo<T>>(
     matcher: &RuleMatcher<T>,
     node: RelMemoNodeRef<T>,
     optimizer: &CascadesOptimizer<T, M>,
-) -> Vec<HashMap<usize, RelNode<T>>> {
+) -> Vec<HashMap<usize, MaybeRelNode<T>>> {
     match matcher {
         RuleMatcher::MatchAndPickNode {
             typ,
@@ -205,9 +209,10 @@ impl<T: RelNodeTyp, M: Memo<T>> Task<T, M> for ApplyRuleTask {
 
             for expr in applied {
                 trace!(event = "after_apply_rule", task = "apply_rule", binding=%expr);
-                let expr_typ = expr.typ.clone();
-                if let Some(expr_id) = optimizer.add_expr_to_group(expr.into(), group_id) {
-                    if expr_typ.is_logical() {
+                // TODO: remove clone in the below line
+                if let Some(expr_id) = optimizer.add_expr_to_group(expr.clone().into(), group_id) {
+                    let typ = &expr.unwrap_rel_node().typ;
+                    if typ.is_logical() {
                         tasks.push(
                             Box::new(OptimizeExpressionTask::new(expr_id, self.exploring))
                                 as Box<dyn Task<T, M>>,

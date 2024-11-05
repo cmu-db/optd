@@ -1,6 +1,6 @@
 use super::macros::define_plan_node;
 
-use super::{Expr, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
+use super::{Expr, OptRelNode, OptRelNodeTyp, PlanNode};
 
 #[derive(Clone, Debug)]
 pub struct LogicalFilter(pub PlanNode);

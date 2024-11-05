@@ -1,8 +1,8 @@
-use optd_core::rel_node::{RelNode, RelNodeMetaMap, Value};
+use optd_core::rel_node::{MaybeRelNode, RelNode, RelNodeMetaMap, Value};
 use pretty_xmlish::Pretty;
 
 use super::macros::define_plan_node;
-use super::{Expr, ExprList, JoinType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
+use super::{Expr, ExprList, JoinType, OptRelNode, OptRelNodeTyp, PlanNode};
 
 #[derive(Clone, Debug)]
 pub struct RawDependentJoin(pub PlanNode);
@@ -52,7 +52,7 @@ impl ExternColumnRefExpr {
     }
 
     fn get_data_usize(&self) -> usize {
-        self.0 .0.data.as_ref().unwrap().as_u64() as usize
+        self.0.unwrap_rel_node().data.as_ref().unwrap().as_u64() as usize
     }
 
     /// Gets the column index.
@@ -62,15 +62,20 @@ impl ExternColumnRefExpr {
 }
 
 impl OptRelNode for ExternColumnRefExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(Expr::interpret(rel_node))
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if rel_node.typ != OptRelNodeTyp::ExternColumnRef {
-            return None;
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
+    }
+
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        if let OptRelNodeTyp::ExternColumnRef = typ {
+            true
+        } else {
+            false
         }
-        Expr::from_rel_node(rel_node).map(Self)
     }
 
     fn dispatch_explain(&self, _meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {

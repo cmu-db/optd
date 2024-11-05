@@ -1,13 +1,13 @@
 use pretty_xmlish::Pretty;
 
 use bincode;
-use optd_core::rel_node::{RelNode, RelNodeMetaMap, Value};
+use optd_core::rel_node::{MaybeRelNode, RelNode, RelNodeMetaMap, RelNodeRef, Value};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::explain::Insertable;
 
-use super::{replace_typ, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
+use super::{replace_typ, OptRelNode, OptRelNodeTyp, PlanNode};
 
 use crate::properties::schema::Schema;
 
@@ -15,17 +15,21 @@ use crate::properties::schema::Schema;
 pub struct LogicalEmptyRelation(pub PlanNode);
 
 impl OptRelNode for LogicalEmptyRelation {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
-    }
-
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if rel_node.typ != OptRelNodeTyp::EmptyRelation {
-            return None;
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        if let OptRelNodeTyp::EmptyRelation = typ {
+            true
+        } else {
+            false
         }
-        PlanNode::from_rel_node(rel_node).map(Self)
     }
 
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(PlanNode::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
+    }
     fn dispatch_explain(&self, _meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::childless_record(
             "LogicalEmptyRelation",
@@ -59,13 +63,7 @@ impl LogicalEmptyRelation {
     }
 
     fn get_data(&self) -> EmptyRelationData {
-        let serialized_data = self
-            .clone()
-            .into_rel_node()
-            .data
-            .as_ref()
-            .unwrap()
-            .as_slice();
+        let serialized_data = self.0.unwrap_rel_node().data.as_ref().unwrap().as_slice();
 
         bincode::deserialize(serialized_data.as_ref()).unwrap()
     }
@@ -85,15 +83,20 @@ impl LogicalEmptyRelation {
 pub struct PhysicalEmptyRelation(pub PlanNode);
 
 impl OptRelNode for PhysicalEmptyRelation {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        replace_typ(self.0.into_rel_node(), OptRelNodeTyp::PhysicalEmptyRelation)
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        if let OptRelNodeTyp::PhysicalEmptyRelation = typ {
+            true
+        } else {
+            false
+        }
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if rel_node.typ != OptRelNodeTyp::PhysicalEmptyRelation {
-            return None;
-        }
-        PlanNode::from_rel_node(rel_node).map(Self)
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(PlanNode::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -111,13 +114,7 @@ impl PhysicalEmptyRelation {
     }
 
     fn get_data(&self) -> EmptyRelationData {
-        let serialized_data = self
-            .clone()
-            .into_rel_node()
-            .data
-            .as_ref()
-            .unwrap()
-            .as_slice();
+        let serialized_data = self.0.unwrap_rel_node().data.as_ref().unwrap().as_slice();
 
         bincode::deserialize(serialized_data.as_ref()).unwrap()
     }

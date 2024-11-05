@@ -10,8 +10,8 @@ use optd_datafusion_repr::plan_nodes::{
     BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList,
     ExternColumnRefExpr, FuncExpr, FuncType, InListExpr, JoinType, LikeExpr, LogOpExpr, LogOpType,
     LogicalAgg, LogicalEmptyRelation, LogicalFilter, LogicalJoin, LogicalLimit, LogicalProjection,
-    LogicalScan, LogicalSort, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode, RawDependentJoin,
-    SortOrderExpr, SortOrderType,
+    LogicalScan, LogicalSort, OptRelNode, OptRelNodeTyp, PlanNode, RawDependentJoin, SortOrderExpr,
+    SortOrderType,
 };
 use optd_datafusion_repr::properties::schema::Schema as OptdSchema;
 
@@ -545,7 +545,10 @@ impl OptdPlanContext<'_> {
         Ok(node)
     }
 
-    pub fn conv_into_optd(&mut self, root_rel: &LogicalPlan) -> Result<OptRelNodeRef> {
+    pub fn conv_into_optd(
+        &mut self,
+        root_rel: &LogicalPlan,
+    ) -> Result<MaybeRelNode<OptRelNodeTyp>> {
         let res = self.conv_into_optd_plan_node(root_rel, None)?;
         Ok(res.into_rel_node())
     }

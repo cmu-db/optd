@@ -25,9 +25,9 @@ use optd_datafusion_repr::{
     plan_nodes::{
         BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
         Expr, ExprList, FuncExpr, FuncType, InListExpr, JoinType, LikeExpr, LogOpExpr, LogOpType,
-        OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalAgg, PhysicalEmptyRelation,
-        PhysicalFilter, PhysicalHashJoin, PhysicalLimit, PhysicalNestedLoopJoin,
-        PhysicalProjection, PhysicalScan, PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
+        OptRelNode, OptRelNodeTyp, PhysicalAgg, PhysicalEmptyRelation, PhysicalFilter,
+        PhysicalHashJoin, PhysicalLimit, PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan,
+        PhysicalSort, PlanNode, SortOrderExpr, SortOrderType,
     },
     properties::schema::Schema as OptdSchema,
 };
@@ -605,7 +605,7 @@ impl OptdPlanContext<'_> {
 
     pub async fn conv_from_optd(
         &mut self,
-        root_rel: OptRelNodeRef,
+        root_rel: MaybeRelNode<OptRelNodeTyp>,
         meta: RelNodeMetaMap,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         self.conv_from_optd_plan_node(PlanNode::from_rel_node(root_rel).unwrap(), &meta)

@@ -1,4 +1,4 @@
-use super::{macros::define_plan_node, Expr, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
+use super::{macros::define_plan_node, Expr, OptRelNode, OptRelNodeTyp, PlanNode};
 
 #[derive(Clone, Debug)]
 pub struct LogicalLimit(pub PlanNode);

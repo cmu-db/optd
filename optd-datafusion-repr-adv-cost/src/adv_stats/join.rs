@@ -11,7 +11,7 @@ use crate::adv_stats::{
 use optd_datafusion_repr::{
     plan_nodes::{
         BinOpType, ColumnRefExpr, Expr, ExprList, JoinType, LogOpExpr, LogOpType, OptRelNode,
-        OptRelNodeRef, OptRelNodeTyp,
+        OptRelNodeTyp,
     },
     properties::{
         column_ref::{
@@ -189,7 +189,7 @@ impl<
         &self,
         join_typ: JoinType,
         on_col_ref_pairs: Vec<(ColumnRefExpr, ColumnRefExpr)>,
-        filter_expr_tree: Option<OptRelNodeRef>,
+        filter_expr_tree: Option<MaybeRelNode<OptRelNodeTyp>>,
         schema: &Schema,
         column_refs: &BaseTableColumnRefs,
         input_correlation: Option<SemanticCorrelation>,
@@ -239,7 +239,7 @@ impl<
     fn get_join_selectivity_from_expr_tree(
         &self,
         join_typ: JoinType,
-        expr_tree: OptRelNodeRef,
+        expr_tree: MaybeRelNode<OptRelNodeTyp>,
         schema: &Schema,
         column_refs: &BaseTableColumnRefs,
         input_correlation: Option<SemanticCorrelation>,
@@ -317,7 +317,7 @@ impl<
     /// The reason the check and the info are in the same function is because their code is almost identical.
     /// It only picks out equality conditions between two column refs on different tables
     fn get_on_col_ref_pair(
-        expr_tree: OptRelNodeRef,
+        expr_tree: MaybeRelNode<OptRelNodeTyp>,
         column_refs: &BaseTableColumnRefs,
     ) -> Option<(ColumnRefExpr, ColumnRefExpr)> {
         // 1. Check that it's equality
@@ -536,7 +536,7 @@ mod tests {
 
     use crate::adv_stats::{tests::*, DEFAULT_EQ_SEL};
     use optd_datafusion_repr::{
-        plan_nodes::{BinOpType, JoinType, LogOpType, OptRelNodeRef},
+        plan_nodes::{BinOpType, JoinType, LogOpType},
         properties::{
             column_ref::{
                 BaseTableColumnRef, BaseTableColumnRefs, ColumnRef, EqBaseTableColumnSets,
@@ -552,7 +552,7 @@ mod tests {
         cost_model: &TestOptCostModel,
         reverse_tables: bool,
         join_typ: JoinType,
-        expr_tree: OptRelNodeRef,
+        expr_tree: MaybeRelNode<OptRelNodeTyp>,
         schema: &Schema,
         column_refs: &BaseTableColumnRefs,
         input_correlation: Option<SemanticCorrelation>,
@@ -854,8 +854,8 @@ mod tests {
     /// I made this helper function to avoid copying all eight lines over and over
     fn assert_outer_selectivities(
         cost_model: &TestOptCostModel,
-        expr_tree: OptRelNodeRef,
-        expr_tree_rev: OptRelNodeRef,
+        expr_tree: MaybeRelNode<OptRelNodeTyp>,
+        expr_tree_rev: MaybeRelNode<OptRelNodeTyp>,
         schema: &Schema,
         column_refs: &BaseTableColumnRefs,
         expected_table1_outer_sel: f64,

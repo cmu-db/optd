@@ -27,10 +27,6 @@ pub trait RelNodeTyp:
 
     fn is_logical(&self) -> bool;
 
-    fn group_typ(group_id: GroupId) -> Self;
-
-    fn extract_group(&self) -> Option<GroupId>;
-
     fn list_typ() -> Self;
 }
 
@@ -222,6 +218,46 @@ impl Value {
 
 pub type ArcPredNode<T> = Arc<PredNode<T>>;
 
+/// In RelNode, the child can either be a group ID or a materialized plan node.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+
+pub enum MaybeRelNode<T: RelNodeTyp> {
+    RelNode(RelNodeRef<T>),
+    Group(GroupId),
+}
+
+impl<T: RelNodeTyp> MaybeRelNode<T> {
+    pub fn is_materialized(&self) -> bool {
+        match self {
+            Self::RelNode(_) => true,
+            Self::Group(_) => false,
+        }
+    }
+
+    pub fn unwrap_rel_node(&self) -> RelNodeRef<T> {
+        match self {
+            Self::RelNode(node) => node.clone(),
+            Self::Group(_) => panic!("Expected PlanNode, found Group"),
+        }
+    }
+
+    pub fn unwrap_group(&self) -> GroupId {
+        match self {
+            Self::RelNode(_) => panic!("Expected Group, found PlanNode"),
+            Self::Group(group_id) => *group_id,
+        }
+    }
+}
+
+impl<T: RelNodeTyp> std::fmt::Display for MaybeRelNode<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MaybeRelNode::RelNode(node) => write!(f, "{}", node),
+            MaybeRelNode::Group(group_id) => write!(f, "{}", group_id),
+        }
+    }
+}
+
 /// A RelNode is consisted of a plan node type and some children.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct RelNode<T: RelNodeTyp> {
@@ -229,7 +265,7 @@ pub struct RelNode<T: RelNodeTyp> {
     pub typ: T,
     /// Child plan nodes, which may be materialized or placeholder group IDs
     /// based on how this node was initialized
-    pub children: Vec<RelNodeRef<T>>,
+    pub children: Vec<MaybeRelNode<T>>,
     /// Predicate nodes, which are always materialized
     pub predicates: Vec<ArcPredNode<T>>,
     /// The to-be-removed data field
@@ -250,11 +286,15 @@ impl<T: RelNodeTyp> std::fmt::Display for RelNode<T> {
 }
 
 impl<T: RelNodeTyp> RelNode<T> {
-    pub fn child(&self, idx: usize) -> RelNodeRef<T> {
+    pub fn child(&self, idx: usize) -> MaybeRelNode<T> {
         if idx >= self.children.len() {
             panic!("child index {} out of range: {}", idx, self);
         }
         self.children[idx].clone()
+    }
+
+    pub fn child_rel(&self, idx: usize) -> RelNodeRef<T> {
+        self.child(idx).unwrap_rel_node()
     }
 
     pub fn predicate(&self, idx: usize) -> ArcPredNode<T> {
@@ -270,17 +310,25 @@ impl<T: RelNodeTyp> RelNode<T> {
         }
     }
 
-    pub fn new_group(group_id: GroupId) -> Self {
-        Self::new_leaf(T::group_typ(group_id))
-    }
-
-    pub fn new_list(items: Vec<RelNodeRef<T>>) -> Self {
+    pub fn new_list(items: Vec<MaybeRelNode<T>>) -> Self {
         Self {
             typ: T::list_typ(),
             data: None,
             children: items,
             predicates: Vec::new(), /* TODO: refactor */
         }
+    }
+}
+
+impl<T: RelNodeTyp> From<RelNode<T>> for MaybeRelNode<T> {
+    fn from(value: RelNode<T>) -> Self {
+        MaybeRelNode::RelNode(Arc::new(value))
+    }
+}
+
+impl<T: RelNodeTyp> From<Arc<RelNode<T>>> for MaybeRelNode<T> {
+    fn from(value: Arc<RelNode<T>>) -> Self {
+        MaybeRelNode::RelNode(value)
     }
 }
 

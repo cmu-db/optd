@@ -5,56 +5,51 @@ use itertools::Itertools;
 use pretty_xmlish::Pretty;
 use serde::{Deserialize, Serialize};
 
-use optd_core::rel_node::{RelNode, RelNodeMetaMap, SerializableOrderedF64, Value};
+use optd_core::rel_node::{MaybeRelNode, RelNode, RelNodeMetaMap, SerializableOrderedF64, Value};
 
-use super::{Expr, OptRelNode, OptRelNodeRef, OptRelNodeTyp};
+use super::{Expr, OptRelNode, OptRelNodeTyp};
 
 #[derive(Clone, Debug)]
-pub struct ExprList(OptRelNodeRef);
+pub struct ExprList(MaybeRelNode<OptRelNodeTyp>);
 
 impl ExprList {
     pub fn new(exprs: Vec<Expr>) -> Self {
-        ExprList(
-            RelNode::new_list(exprs.into_iter().map(|x| x.into_rel_node()).collect_vec()).into(),
-        )
+        ExprList(RelNode::new_list(exprs.into_iter().map(|x| x.strip()).collect_vec()).into())
     }
 
     /// Gets number of expressions in the list
     pub fn len(&self) -> usize {
-        self.0.children.len()
+        self.unwrap_rel_node().children.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.children.is_empty()
+        self.unwrap_rel_node().children.is_empty()
     }
 
     pub fn child(&self, idx: usize) -> Expr {
-        Expr::from_rel_node(self.0.child(idx)).unwrap()
+        Expr::interpret(self.unwrap_rel_node().child(idx))
     }
 
     pub fn to_vec(&self) -> Vec<Expr> {
-        self.0
+        self.unwrap_rel_node()
             .children
             .iter()
-            .map(|x| Expr::from_rel_node(x.clone()).unwrap())
+            .map(|x| Expr::interpret(x.clone()))
             .collect_vec()
-    }
-
-    pub fn from_group(rel_node: OptRelNodeRef) -> Self {
-        Self(rel_node)
     }
 }
 
 impl OptRelNode for ExprList {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.clone()
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        matches!(typ, OptRelNodeTyp::List)
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if rel_node.typ != OptRelNodeTyp::List {
-            return None;
-        }
-        Some(ExprList(rel_node))
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(rel_node.into())
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0
     }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -236,7 +231,7 @@ impl ConstantExpr {
 
     /// Gets the constant value.
     pub fn value(&self) -> Value {
-        self.0 .0.data.clone().unwrap()
+        self.0 .0.unwrap_rel_node().data.clone().unwrap()
     }
 
     pub fn constant_type(&self) -> ConstantType {
@@ -249,15 +244,16 @@ impl ConstantExpr {
 }
 
 impl OptRelNode for ConstantExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        matches!(typ, OptRelNodeTyp::Constant(_))
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if let OptRelNodeTyp::Constant(_) = rel_node.typ {
-            return Expr::from_rel_node(rel_node).map(Self);
-        }
-        None
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(Expr::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, _meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -296,7 +292,7 @@ impl ColumnRefExpr {
     }
 
     fn get_data_usize(&self) -> usize {
-        self.0 .0.data.as_ref().unwrap().as_u64() as usize
+        self.0 .0.unwrap_rel_node().data.as_ref().unwrap().as_u64() as usize
     }
 
     /// Gets the column index.
@@ -306,15 +302,16 @@ impl ColumnRefExpr {
 }
 
 impl OptRelNode for ColumnRefExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        matches!(typ, OptRelNodeTyp::ColumnRef)
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if rel_node.typ != OptRelNodeTyp::ColumnRef {
-            return None;
-        }
-        Expr::from_rel_node(rel_node).map(Self)
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(Expr::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, _meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -342,7 +339,7 @@ impl UnOpExpr {
         UnOpExpr(Expr(
             RelNode {
                 typ: OptRelNodeTyp::UnOp(op_type),
-                children: vec![child.into_rel_node()],
+                children: vec![child.strip()],
                 data: None,
                 predicates: Vec::new(), /* TODO: refactor */
             }
@@ -351,11 +348,11 @@ impl UnOpExpr {
     }
 
     pub fn child(&self) -> Expr {
-        Expr::from_rel_node(self.clone().into_rel_node().child(0)).unwrap()
+        Expr::interpret(self.0.unwrap_rel_node().child(0))
     }
 
     pub fn op_type(&self) -> UnOpType {
-        if let OptRelNodeTyp::UnOp(op_type) = self.clone().into_rel_node().typ {
+        if let OptRelNodeTyp::UnOp(op_type) = self.0.unwrap_rel_node().typ {
             op_type
         } else {
             panic!("not a un op")
@@ -364,15 +361,16 @@ impl UnOpExpr {
 }
 
 impl OptRelNode for UnOpExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        matches!(typ, OptRelNodeTyp::UnOp(_))
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !matches!(rel_node.typ, OptRelNodeTyp::UnOp(_)) {
-            return None;
-        }
-        Expr::from_rel_node(rel_node).map(Self)
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(Expr::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -436,7 +434,7 @@ impl BinOpExpr {
         BinOpExpr(Expr(
             RelNode {
                 typ: OptRelNodeTyp::BinOp(op_type),
-                children: vec![left.into_rel_node(), right.into_rel_node()],
+                children: vec![left.strip(), right.strip()],
                 data: None,
                 predicates: Vec::new(), /* TODO: refactor */
             }
@@ -445,15 +443,15 @@ impl BinOpExpr {
     }
 
     pub fn left_child(&self) -> Expr {
-        Expr::from_rel_node(self.clone().into_rel_node().child(0)).unwrap()
+        Expr::interpret(self.0.unwrap_rel_node().child(0))
     }
 
     pub fn right_child(&self) -> Expr {
-        Expr::from_rel_node(self.clone().into_rel_node().child(1)).unwrap()
+        Expr::interpret(self.0.unwrap_rel_node().child(1))
     }
 
     pub fn op_type(&self) -> BinOpType {
-        if let OptRelNodeTyp::BinOp(op_type) = self.clone().into_rel_node().typ {
+        if let OptRelNodeTyp::BinOp(op_type) = self.0.unwrap_rel_node().typ {
             op_type
         } else {
             panic!("not a bin op")
@@ -462,15 +460,16 @@ impl BinOpExpr {
 }
 
 impl OptRelNode for BinOpExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(Expr::interpret(rel_node))
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !matches!(rel_node.typ, OptRelNodeTyp::BinOp(_)) {
-            return None;
-        }
-        Expr::from_rel_node(rel_node).map(Self)
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
+    }
+
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        matches!(typ, OptRelNodeTyp::BinOp(_))
     }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -516,7 +515,7 @@ impl FuncExpr {
         FuncExpr(Expr(
             RelNode {
                 typ: OptRelNodeTyp::Func(func_id),
-                children: vec![argv.into_rel_node()],
+                children: vec![argv.strip()],
                 data: None,
                 predicates: Vec::new(), /* TODO: refactor */
             }
@@ -531,12 +530,12 @@ impl FuncExpr {
 
     /// Get all children.
     pub fn children(&self) -> ExprList {
-        ExprList::from_rel_node(self.0.child(0)).unwrap()
+        ExprList::interpret(self.0.child(0))
     }
 
     /// Gets the function id.
     pub fn func(&self) -> FuncType {
-        if let OptRelNodeTyp::Func(func_id) = &self.clone().into_rel_node().typ {
+        if let OptRelNodeTyp::Func(func_id) = &self.0.unwrap_rel_node().typ {
             func_id.clone()
         } else {
             panic!("not a function")
@@ -545,15 +544,16 @@ impl FuncExpr {
 }
 
 impl OptRelNode for FuncExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        matches!(typ, OptRelNodeTyp::Func(_))
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !matches!(rel_node.typ, OptRelNodeTyp::Func(_)) {
-            return None;
-        }
-        Expr::from_rel_node(rel_node).map(Self)
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(Expr::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -585,7 +585,7 @@ impl SortOrderExpr {
         SortOrderExpr(Expr(
             RelNode {
                 typ: OptRelNodeTyp::SortOrder(order),
-                children: vec![child.into_rel_node()],
+                children: vec![child.strip()],
                 data: None,
                 predicates: Vec::new(), /* TODO: refactor */
             }
@@ -594,7 +594,7 @@ impl SortOrderExpr {
     }
 
     pub fn child(&self) -> Expr {
-        Expr::from_rel_node(self.0.child(0)).unwrap()
+        Expr::interpret(self.0.child(0))
     }
 
     pub fn order(&self) -> SortOrderType {
@@ -607,15 +607,16 @@ impl SortOrderExpr {
 }
 
 impl OptRelNode for SortOrderExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        matches!(typ, OptRelNodeTyp::SortOrder(_))
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !matches!(rel_node.typ, OptRelNodeTyp::SortOrder(_)) {
-            return None;
-        }
-        Expr::from_rel_node(rel_node).map(Self)
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(Expr::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -647,11 +648,7 @@ impl LogOpExpr {
         LogOpExpr(Expr(
             RelNode {
                 typ: OptRelNodeTyp::LogOp(op_type),
-                children: expr_list
-                    .to_vec()
-                    .into_iter()
-                    .map(|x| x.into_rel_node())
-                    .collect(),
+                children: expr_list.to_vec().into_iter().map(|x| x.strip()).collect(),
                 data: None,
                 predicates: Vec::new(), /* TODO: refactor */
             }
@@ -671,8 +668,7 @@ impl LogOpExpr {
         for child in expr_list.to_vec() {
             if let OptRelNodeTyp::LogOp(child_op) = child.typ() {
                 if child_op == op {
-                    let child_log_op_expr =
-                        LogOpExpr::from_rel_node(child.into_rel_node()).unwrap();
+                    let child_log_op_expr = LogOpExpr::interpret(child.strip());
                     new_expr_list.extend(child_log_op_expr.children().to_vec());
                     continue;
                 }
@@ -684,19 +680,19 @@ impl LogOpExpr {
 
     pub fn children(&self) -> Vec<Expr> {
         self.0
-             .0
+            .unwrap_rel_node()
             .children
             .iter()
-            .map(|x| Expr::from_rel_node(x.clone()).unwrap())
+            .map(|x| Expr::interpret(x.clone()))
             .collect()
     }
 
     pub fn child(&self, idx: usize) -> Expr {
-        Expr::from_rel_node(self.0.child(idx)).unwrap()
+        Expr::interpret(self.0.child(idx))
     }
 
     pub fn op_type(&self) -> LogOpType {
-        if let OptRelNodeTyp::LogOp(op_type) = self.clone().into_rel_node().typ {
+        if let OptRelNodeTyp::LogOp(op_type) = self.0.unwrap_rel_node().typ {
             op_type
         } else {
             panic!("not a log op")
@@ -705,15 +701,16 @@ impl LogOpExpr {
 }
 
 impl OptRelNode for LogOpExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        matches!(typ, OptRelNodeTyp::LogOp(_))
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !matches!(rel_node.typ, OptRelNodeTyp::LogOp(_)) {
-            return None;
-        }
-        Expr::from_rel_node(rel_node).map(Self)
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(Expr::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -736,11 +733,7 @@ impl BetweenExpr {
         BetweenExpr(Expr(
             RelNode {
                 typ: OptRelNodeTyp::Between,
-                children: vec![
-                    expr.into_rel_node(),
-                    lower.into_rel_node(),
-                    upper.into_rel_node(),
-                ],
+                children: vec![expr.strip(), lower.strip(), upper.strip()],
                 data: None,
                 predicates: Vec::new(), /* TODO: refactor */
             }
@@ -762,15 +755,16 @@ impl BetweenExpr {
 }
 
 impl OptRelNode for BetweenExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        matches!(typ, OptRelNodeTyp::Between)
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !matches!(rel_node.typ, OptRelNodeTyp::Between) {
-            return None;
-        }
-        Expr::from_rel_node(rel_node).map(Self)
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(Expr::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -812,15 +806,16 @@ impl DataTypeExpr {
 }
 
 impl OptRelNode for DataTypeExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        matches!(typ, OptRelNodeTyp::DataType(_))
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !matches!(rel_node.typ, OptRelNodeTyp::DataType(_)) {
-            return None;
-        }
-        Expr::from_rel_node(rel_node).map(Self)
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(Expr::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, _meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -836,10 +831,7 @@ impl CastExpr {
         CastExpr(Expr(
             RelNode {
                 typ: OptRelNodeTyp::Cast,
-                children: vec![
-                    expr.into_rel_node(),
-                    DataTypeExpr::new(cast_to).into_rel_node(),
-                ],
+                children: vec![expr.strip(), DataTypeExpr::new(cast_to).strip()],
                 data: None,
                 predicates: Vec::new(), /* TODO: refactor */
             }
@@ -852,22 +844,21 @@ impl CastExpr {
     }
 
     pub fn cast_to(&self) -> DataType {
-        DataTypeExpr::from_rel_node(self.0.child(1))
-            .unwrap()
-            .data_type()
+        DataTypeExpr::interpret(self.0.child(1)).data_type()
     }
 }
 
 impl OptRelNode for CastExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        matches!(typ, OptRelNodeTyp::Cast)
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !matches!(rel_node.typ, OptRelNodeTyp::Cast) {
-            return None;
-        }
-        Expr::from_rel_node(rel_node).map(Self)
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(Expr::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -893,7 +884,7 @@ impl LikeExpr {
         LikeExpr(Expr(
             RelNode {
                 typ: OptRelNodeTyp::Like,
-                children: vec![expr.into_rel_node(), pattern.into_rel_node()],
+                children: vec![expr.strip(), pattern.strip()],
                 data: Some(Value::Serialized(Arc::new([negated, case_insensitive]))),
                 predicates: Vec::new(), /* TODO: refactor */
             }
@@ -911,14 +902,14 @@ impl LikeExpr {
 
     /// `true` for `NOT LIKE`.
     pub fn negated(&self) -> bool {
-        match self.0 .0.data.as_ref().unwrap() {
+        match self.0 .0.unwrap_rel_node().data.as_ref().unwrap() {
             Value::Serialized(data) => data[0] != 0,
             _ => panic!("not a serialized value"),
         }
     }
 
     pub fn case_insensitive(&self) -> bool {
-        match self.0 .0.data.as_ref().unwrap() {
+        match self.0 .0.unwrap_rel_node().data.as_ref().unwrap() {
             Value::Serialized(data) => data[1] != 0,
             _ => panic!("not a serialized value"),
         }
@@ -926,15 +917,16 @@ impl LikeExpr {
 }
 
 impl OptRelNode for LikeExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        matches!(typ, OptRelNodeTyp::Like)
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !matches!(rel_node.typ, OptRelNodeTyp::Like) {
-            return None;
-        }
-        Expr::from_rel_node(rel_node).map(Self)
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(Expr::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -962,7 +954,7 @@ impl InListExpr {
         InListExpr(Expr(
             RelNode {
                 typ: OptRelNodeTyp::InList,
-                children: vec![expr.into_rel_node(), list.into_rel_node()],
+                children: vec![expr.strip(), list.strip()],
                 data: Some(Value::Bool(negated)),
                 predicates: Vec::new(), /* TODO: refactor */
             }
@@ -971,29 +963,30 @@ impl InListExpr {
     }
 
     pub fn child(&self) -> Expr {
-        Expr(self.0.child(0))
+        Expr::interpret(self.0.child(0))
     }
 
     pub fn list(&self) -> ExprList {
-        ExprList::from_rel_node(self.0.child(1)).unwrap()
+        ExprList::ensures_interpret(self.0.child(1))
     }
 
     /// `true` for `NOT IN`.
     pub fn negated(&self) -> bool {
-        self.0 .0.data.as_ref().unwrap().as_bool()
+        self.0 .0.unwrap_rel_node().data.as_ref().unwrap().as_bool()
     }
 }
 
 impl OptRelNode for InListExpr {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        matches!(typ, OptRelNodeTyp::InList)
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !matches!(rel_node.typ, OptRelNodeTyp::InList) {
-            return None;
-        }
-        Expr::from_rel_node(rel_node).map(Self)
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(Expr::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {

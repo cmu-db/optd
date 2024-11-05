@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::vec;
 
+use optd_core::rel_node::MaybeRelNode;
 use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 
@@ -28,7 +29,7 @@ define_rule!(
 fn apply_projection_filter_transpose(
     _optimizer: &impl Optimizer<OptRelNodeTyp>,
     ProjectFilterTransposeRulePicks { child, cond, exprs }: ProjectFilterTransposeRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     // get columns out of cond
     let exprs = ExprList::from_rel_node(exprs.into()).unwrap();
     let exprs_vec = exprs.clone().to_vec();
@@ -81,7 +82,7 @@ define_rule!(
 fn apply_filter_project_transpose(
     _optimizer: &impl Optimizer<OptRelNodeTyp>,
     FilterProjectTransposeRulePicks { child, exprs, cond }: FilterProjectTransposeRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let child = PlanNode::from_group(child.into());
     let cond_as_expr = Expr::from_rel_node(cond.into()).unwrap();
     let exprs = ExprList::from_rel_node(exprs.into()).unwrap();

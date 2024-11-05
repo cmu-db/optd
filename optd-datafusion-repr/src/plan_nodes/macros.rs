@@ -8,19 +8,6 @@ macro_rules! define_plan_node {
         $(, $data_name:ident: $data_typ: ty )?
     ) => {
         impl OptRelNode for $struct_name {
-            fn into_rel_node(self) -> OptRelNodeRef {
-                self.0.into_rel_node()
-            }
-
-            fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-                #[allow(unused_variables)]
-                if let OptRelNodeTyp :: $variant $( ($inner_name) )? = rel_node.typ {
-                    <$meta_typ>::from_rel_node(rel_node).map(Self)
-                } else {
-                    None
-                }
-            }
-
             fn dispatch_explain(&self, meta_map: Option<&crate::RelNodeMetaMap>) -> pretty_xmlish::Pretty<'static> {
                 use crate::explain::Insertable;
 
@@ -41,6 +28,23 @@ macro_rules! define_plan_node {
                     ],
                 )
             }
+
+            fn strip(self) -> optd_core::rel_node::MaybeRelNode<OptRelNodeTyp> {
+                self.0.strip()
+            }
+
+            fn interpret(rel_node: impl Into<optd_core::rel_node::MaybeRelNode<OptRelNodeTyp>>) -> Self {
+                Self(PlanNode::ensures_interpret(rel_node.into()))
+            }
+
+            fn is_typ(typ: crate::OptRelNodeTyp) -> bool {
+                #[allow(unused_variables)]
+                if let OptRelNodeTyp :: $variant $( ($inner_name) )? = typ {
+                    true
+                } else {
+                    false
+                }
+            }
         }
 
         impl $struct_name {
@@ -57,10 +61,10 @@ macro_rules! define_plan_node {
                 )*
                 $struct_name($meta_typ(
                     optd_core::rel_node::RelNode {
-                        typ: OptRelNodeTyp::$variant $( ($inner_name) )?,
+                        typ: crate::OptRelNodeTyp::$variant $( ($inner_name) )?,
                         children: vec![
-                            $($child_name.into_rel_node(),)*
-                            $($attr_name.into_rel_node()),*
+                            $($child_name.strip(),)*
+                            $($attr_name.strip()),*
                         ],
                         data,
                         predicates: Vec::new(), /* TODO: refactor */
@@ -71,20 +75,20 @@ macro_rules! define_plan_node {
 
             $(
                 pub fn $child_name(&self) -> $child_meta_typ {
-                    <$child_meta_typ>::from_rel_node(self.clone().into_rel_node().child($child_id)).unwrap()
+                    <$child_meta_typ>::ensures_interpret(self.0.unwrap_rel_node().child($child_id))
                 }
             )*
 
 
             $(
                 pub fn $attr_name(&self) -> $attr_meta_typ {
-                    <$attr_meta_typ>::from_rel_node(self.clone().into_rel_node().child($attr_id)).unwrap()
+                    <$attr_meta_typ>::ensures_interpret(self.0.unwrap_rel_node().child($attr_id))
                 }
             )*
 
             $(
                 pub fn $inner_name(&self) -> JoinType {
-                    if let OptRelNodeTyp :: $variant ($inner_name) = self.0 .0.typ {
+                    if let OptRelNodeTyp :: $variant ($inner_name) = self.unwrap_rel_node().typ {
                         return $inner_name;
                     } else {
                         unreachable!();
@@ -97,7 +101,7 @@ macro_rules! define_plan_node {
     (@expand_data_fields $self:ident, $struct_name:ident, $fields:ident) => {};
     // Expand explain fields with data.
     (@expand_data_fields $self:ident, $struct_name:ident, $fields:ident, $data_typ:ty) => {
-        let value = $self.0 .0.data.as_ref().unwrap();
+        let value = $self.unwrap_rel_node().data.as_ref().unwrap();
         $fields.extend($struct_name::explain_data(&value.into()));
     };
 }

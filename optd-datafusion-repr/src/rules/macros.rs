@@ -26,10 +26,10 @@ macro_rules! define_picks {
         $( crate::rules::macros::define_picks!($children); )*
     };
     ( [ $pick_one:ident ] ) => {
-        let $pick_one : RelNode<OptRelNodeTyp>;
+        let $pick_one : optd_core::rel_node::MaybeRelNode<OptRelNodeTyp>;
     };
     ( $pick_one:ident ) => {
-        let $pick_one : RelNode<OptRelNodeTyp>;
+        let $pick_one : optd_core::rel_node::MaybeRelNode<OptRelNodeTyp>;
     };
 }
 
@@ -96,14 +96,14 @@ macro_rules! define_picks_struct {
     ( @ $name:ident { [ $pick_one:ident ] } { $($rest:tt),* } -> ($($result:tt)*) ) => (
         crate::rules::macros::define_picks_struct!(@@ $name { $($rest),* } -> (
             $($result)*
-            pub $pick_one: RelNode<OptRelNodeTyp>,
+            pub $pick_one: optd_core::rel_node::MaybeRelNode<OptRelNodeTyp>,
         ));
     );
 
     ( @ $name:ident { $pick_one:ident } { $($rest:tt),* } -> ($($result:tt)*) ) => (
         crate::rules::macros::define_picks_struct!(@@ $name { $($rest),* } -> (
             $($result)*
-            pub $pick_one: RelNode<OptRelNodeTyp>,
+            pub $pick_one: optd_core::rel_node::MaybeRelNode<OptRelNodeTyp>,
         ));
     );
 
@@ -174,8 +174,8 @@ macro_rules! define_rule_inner {
             fn apply(
                 &self,
                 optimizer: &O,
-                mut input: HashMap<usize, RelNode<OptRelNodeTyp>>,
-            ) -> Vec<RelNode<OptRelNodeTyp>> {
+                mut input: HashMap<usize, optd_core::rel_node::MaybeRelNode<OptRelNodeTyp>>,
+            ) -> Vec<optd_core::rel_node::MaybeRelNode<OptRelNodeTyp>> {
 
                 crate::rules::macros::define_picks!( $($matcher)+ );
 

@@ -19,8 +19,7 @@ use datafusion::{
 use itertools::Itertools;
 use optd_datafusion_repr::{
     plan_nodes::{
-        ConstantType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PhysicalHashJoin,
-        PhysicalNestedLoopJoin, PlanNode,
+        ConstantType, OptRelNode, OptRelNodeTyp, PhysicalHashJoin, PhysicalNestedLoopJoin, PlanNode,
     },
     properties::schema::Catalog,
     DatafusionOptimizer, MemoExt,
@@ -277,7 +276,7 @@ impl std::fmt::Display for JoinOrder {
     }
 }
 
-fn get_join_order(rel_node: OptRelNodeRef) -> Option<JoinOrder> {
+fn get_join_order(rel_node: MaybeRelNode<OptRelNodeTyp>) -> Option<JoinOrder> {
     match rel_node.typ {
         OptRelNodeTyp::PhysicalHashJoin(_) => {
             let join = PhysicalHashJoin::from_rel_node(rel_node.clone()).unwrap();

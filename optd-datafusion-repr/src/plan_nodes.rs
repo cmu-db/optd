@@ -1,7 +1,6 @@
 //! Typed interface of plan nodes.
 
 mod agg;
-mod apply;
 mod empty_relation;
 mod expr;
 mod filter;
@@ -20,11 +19,10 @@ use arrow_schema::DataType;
 use itertools::Itertools;
 use optd_core::{
     cascades::GroupId,
-    rel_node::{RelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp},
+    rel_node::{MaybeRelNode, RelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp},
 };
 
 pub use agg::{LogicalAgg, PhysicalAgg};
-pub use apply::{ApplyType, LogicalApply};
 pub use empty_relation::{EmptyRelationData, LogicalEmptyRelation, PhysicalEmptyRelation};
 pub use expr::{
     BetweenExpr, BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType,
@@ -44,7 +42,6 @@ pub use subquery::{DependentJoin, ExternColumnRefExpr, RawDependentJoin}; // Add
 ///   - The define_plan_node!() macro defines what the children of each join node are
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OptRelNodeTyp {
-    Placeholder(GroupId),
     List,
     // Plan nodes
     // Developers: update `is_plan_node` function after adding new elements
@@ -56,7 +53,6 @@ pub enum OptRelNodeTyp {
     DepJoin(JoinType),
     Sort,
     Agg,
-    Apply(ApplyType),
     EmptyRelation,
     Limit,
     // Physical plan nodes
@@ -95,7 +91,6 @@ impl OptRelNodeTyp {
                 | Self::Join(_)
                 | Self::RawDepJoin(_)
                 | Self::DepJoin(_)
-                | Self::Apply(_)
                 | Self::Sort
                 | Self::Agg
                 | Self::EmptyRelation
@@ -134,11 +129,7 @@ impl OptRelNodeTyp {
 
 impl std::fmt::Display for OptRelNodeTyp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Self::Placeholder(group_id) = self {
-            write!(f, "{}", group_id)
-        } else {
-            write!(f, "{:?}", self)
-        }
+        write!(f, "{:?}", self)
     }
 }
 
@@ -152,7 +143,6 @@ impl RelNodeTyp for OptRelNodeTyp {
                 | Self::Filter
                 | Self::Scan
                 | Self::Join(_)
-                | Self::Apply(_)
                 | Self::Sort
                 | Self::Agg
                 | Self::EmptyRelation
@@ -160,36 +150,43 @@ impl RelNodeTyp for OptRelNodeTyp {
         )
     }
 
-    fn group_typ(group_id: GroupId) -> Self {
-        Self::Placeholder(group_id)
-    }
-
     fn list_typ() -> Self {
         Self::List
     }
-
-    fn extract_group(&self) -> Option<GroupId> {
-        if let Self::Placeholder(group_id) = self {
-            Some(*group_id)
-        } else {
-            None
-        }
-    }
 }
 
-pub type OptRelNodeRef = RelNodeRef<OptRelNodeTyp>;
-
 pub trait OptRelNode: 'static + Clone {
-    fn into_rel_node(self) -> OptRelNodeRef;
+    // Strip the datafusion-repr object into a optd-core object.
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp>;
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self>
+    /// Interpret an optd-core object as a datafusion-repr object.
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self
     where
         Self: Sized;
+
+    /// Interpret an optd-core object as a datafusion-repr object with the type checked.
+    fn is_typ(typ: OptRelNodeTyp) -> bool;
+
+    /// Interpret an optd-core object as a datafusion-repr object with the type checked.
+    fn ensures_interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self
+    where
+        Self: Sized,
+    {
+        let rel_node = rel_node.into();
+        let typ = rel_node.unwrap_rel_node().typ;
+        if !Self::is_typ(typ.clone()) {
+            panic!("unexpected type: {}", typ);
+        }
+        Self::interpret(rel_node)
+    }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static>;
 
     fn explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
-        explain(self.clone().into_rel_node(), meta_map)
+        match self.clone().strip() {
+            MaybeRelNode::RelNode(node) => explain(node, meta_map),
+            MaybeRelNode::Group(_) => unimplemented!("cannot explain a group"),
+        }
     }
 
     fn explain_to_string(&self, meta_map: Option<&RelNodeMetaMap>) -> String {
@@ -204,22 +201,23 @@ pub trait OptRelNode: 'static + Clone {
         out
     }
 
-    fn into_plan_node(self) -> PlanNode {
-        let rel_node = self.into_rel_node();
-        let typ = rel_node.typ.clone();
-        let Some(p) = PlanNode::from_rel_node(rel_node) else {
-            panic!("expect plan node, found {}", typ)
-        };
-        p
+    /// Unwrap this object as a rel node.
+    fn unwrap_rel_node(self) -> RelNodeRef<OptRelNodeTyp> {
+        self.strip().unwrap_rel_node()
     }
 
-    fn into_expr(self) -> Expr {
-        let node = self.into_rel_node();
-        let typ = node.typ.clone();
-        let Some(e) = Expr::from_rel_node(node) else {
-            panic!("expect expr, found {}", typ)
-        };
-        e
+    fn into_plan_node(self) -> PlanNode
+    where
+        Self: Sized,
+    {
+        PlanNode::ensures_interpret(self.strip())
+    }
+
+    fn into_expr(self) -> Expr
+    where
+        Self: Sized,
+    {
+        Expr::ensures_interpret(self.strip())
     }
 }
 
@@ -235,62 +233,61 @@ pub trait ExplainData<T>: OptRelNode {
 }
 
 #[derive(Clone, Debug)]
-pub struct PlanNode(pub(crate) OptRelNodeRef);
+pub struct PlanNode(pub(crate) MaybeRelNode<OptRelNodeTyp>);
 
 impl PlanNode {
     pub fn typ(&self) -> OptRelNodeTyp {
-        self.0.typ.clone()
+        self.0.unwrap_rel_node().typ
     }
 
-    pub fn from_group(rel_node: OptRelNodeRef) -> Self {
+    // TODO: rename
+    pub fn from_group(rel_node: MaybeRelNode<OptRelNodeTyp>) -> Self {
         Self(rel_node)
     }
 
     pub fn get_meta<'a>(&self, meta_map: &'a RelNodeMetaMap) -> &'a RelNodeMeta {
         meta_map
-            .get(&(self.0.as_ref() as *const _ as usize))
+            .get(&(self.0.unwrap_rel_node().as_ref() as *const _ as usize))
             .unwrap()
     }
 }
 
 impl OptRelNode for PlanNode {
-    fn into_rel_node(self) -> OptRelNodeRef {
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
         self.0
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !rel_node.typ.is_plan_node() {
-            return None;
-        }
-        Some(Self(rel_node))
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(rel_node.into())
+    }
+
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        typ.is_plan_node()
     }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::simple_record(
             "<PlanNode>",
-            vec![(
-                "node_type",
-                self.clone().into_rel_node().typ.to_string().into(),
-            )],
-            self.0
+            vec![("node_type", self.unwrap_rel_node().typ.to_string().into())],
+            self.unwrap_rel_node()
                 .children
                 .iter()
-                .map(|child| explain(child.clone(), meta_map))
+                .map(|child| explain(child.clone().unwrap_rel_node(), meta_map))
                 .collect(),
         )
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Expr(OptRelNodeRef);
+pub struct Expr(MaybeRelNode<OptRelNodeTyp>);
 
 impl Expr {
     pub fn typ(&self) -> OptRelNodeTyp {
-        self.0.typ.clone()
+        self.0.unwrap_rel_node().typ.clone()
     }
 
-    pub fn child(&self, idx: usize) -> OptRelNodeRef {
-        self.0.child(idx)
+    pub fn child(&self, idx: usize) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.unwrap_rel_node().child(idx)
     }
 
     /// Recursively rewrite all column references in the expression.using a provided
@@ -306,51 +303,44 @@ impl Expr {
     ) -> Option<Self> {
         assert!(self.typ().is_expression());
         if let OptRelNodeTyp::ColumnRef = self.typ() {
-            let col_ref = ColumnRefExpr::from_rel_node(self.0.clone()).unwrap();
+            let col_ref = ColumnRefExpr::ensures_interpret(self.0.clone());
             let rewritten = rewrite_fn(col_ref.index());
             return if let Some(rewritten_idx) = rewritten {
                 let new_col_ref = ColumnRefExpr::new(rewritten_idx);
-                Some(Self(new_col_ref.into_rel_node()))
+                Some(Expr::ensures_interpret(new_col_ref.strip()))
             } else {
                 None
             };
         }
-
-        let children = self.0.children.clone();
+        let children = self.unwrap_rel_node().children.clone();
         let children = children
             .into_iter()
             .map(|child| {
+                let child = child.unwrap_rel_node();
                 if child.typ == OptRelNodeTyp::List {
-                    return Some(
+                    return Some(Expr::ensures_interpret(
                         ExprList::new(
-                            ExprList::from_rel_node(child.clone())
-                                .unwrap()
+                            ExprList::ensures_interpret(child.clone())
                                 .to_vec()
                                 .into_iter()
                                 .map(|x| x.rewrite_column_refs(rewrite_fn).unwrap())
                                 .collect(),
                         )
-                        .into_rel_node(),
-                    );
+                        .strip(),
+                    ));
                 }
-                Expr::from_rel_node(child.clone())
-                    .unwrap()
+                Expr::ensures_interpret(child.clone())
                     .rewrite_column_refs(rewrite_fn)
-                    .map(|x| x.into_rel_node())
+                    .map(|x| Expr::ensures_interpret(x.strip()))
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(
-            Expr::from_rel_node(
-                RelNode {
-                    typ: self.0.typ.clone(),
-                    children: children.into_iter().collect_vec(),
-                    data: self.0.data.clone(),
-                    predicates: Vec::new(), /* TODO: refactor */
-                }
-                .into(),
-            )
-            .unwrap(),
-        )
+        let rel_node = self.0.unwrap_rel_node();
+        Some(Expr::ensures_interpret(RelNode {
+            typ: rel_node.typ.clone(),
+            children: children.into_iter().map(|e| e.strip()).collect_vec(),
+            data: rel_node.data.clone(),
+            predicates: Vec::new(), /* TODO: refactor */
+        }))
     }
 
     /// Recursively retrieves all column references in the expression
@@ -360,165 +350,150 @@ impl Expr {
     pub fn get_column_refs(&self) -> Vec<Expr> {
         assert!(self.typ().is_expression());
         if let OptRelNodeTyp::ColumnRef = self.typ() {
-            let col_ref = Expr::from_rel_node(self.0.clone()).unwrap();
-            return vec![col_ref];
+            return vec![self.clone()];
         }
 
-        let children = self.0.children.clone();
-        let children = children.into_iter().map(|child| {
+        let rel_node = self.0.unwrap_rel_node();
+        let children = rel_node.children.into_iter().map(|child| {
+            let child = child.unwrap_rel_node();
             if child.typ == OptRelNodeTyp::List {
                 // TODO: What should we do with List?
                 return vec![];
             }
-            Expr::from_rel_node(child.clone())
-                .unwrap()
-                .get_column_refs()
+            Expr::ensures_interpret(child).get_column_refs()
         });
         children.collect_vec().concat()
     }
 }
 
 impl OptRelNode for Expr {
-    fn into_rel_node(self) -> OptRelNodeRef {
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
         self.0
     }
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if !rel_node.typ.is_expression() {
-            return None;
-        }
-        Some(Self(rel_node))
+
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(rel_node.into())
     }
+
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        typ.is_expression()
+    }
+
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
         Pretty::simple_record(
             "<Expr>",
-            vec![(
-                "node_type",
-                self.clone().into_rel_node().typ.to_string().into(),
-            )],
-            self.0
+            vec![("node_type", self.unwrap_rel_node().typ.to_string().into())],
+            self.unwrap_rel_node()
                 .children
                 .iter()
-                .map(|child| explain(child.clone(), meta_map))
+                .map(|child| explain(child.unwrap_rel_node(), meta_map))
                 .collect(),
         )
     }
 }
 
-pub fn explain(rel_node: OptRelNodeRef, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
+pub fn explain(
+    rel_node: RelNodeRef<OptRelNodeTyp>,
+    meta_map: Option<&RelNodeMetaMap>,
+) -> Pretty<'static> {
     match rel_node.typ {
-        OptRelNodeTyp::ColumnRef => ColumnRefExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::ExternColumnRef => ExternColumnRefExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::Constant(_) => ConstantExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::UnOp(_) => UnOpExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::BinOp(_) => BinOpExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::Func(_) => FuncExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::Join(_) => LogicalJoin::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::RawDepJoin(_) => RawDependentJoin::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::DepJoin(_) => DependentJoin::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::Scan => LogicalScan::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::Filter => LogicalFilter::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::Apply(_) => LogicalApply::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::EmptyRelation => LogicalEmptyRelation::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::Limit => LogicalLimit::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::PhysicalFilter => PhysicalFilter::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::PhysicalScan => PhysicalScan::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::PhysicalNestedLoopJoin(_) => PhysicalNestedLoopJoin::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::Placeholder(_) => unreachable!("should not explain a placeholder"),
+        OptRelNodeTyp::ColumnRef => {
+            ColumnRefExpr::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::ExternColumnRef => {
+            ExternColumnRefExpr::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::Constant(_) => {
+            ConstantExpr::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::UnOp(_) => UnOpExpr::ensures_interpret(rel_node).dispatch_explain(meta_map),
+        OptRelNodeTyp::BinOp(_) => {
+            BinOpExpr::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::Func(_) => FuncExpr::ensures_interpret(rel_node).dispatch_explain(meta_map),
+        OptRelNodeTyp::Join(_) => {
+            LogicalJoin::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::RawDepJoin(_) => {
+            RawDependentJoin::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::DepJoin(_) => {
+            DependentJoin::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::Scan => LogicalScan::ensures_interpret(rel_node).dispatch_explain(meta_map),
+        OptRelNodeTyp::Filter => {
+            LogicalFilter::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::EmptyRelation => {
+            LogicalEmptyRelation::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::Limit => {
+            LogicalLimit::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::PhysicalFilter => {
+            PhysicalFilter::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::PhysicalScan => {
+            PhysicalScan::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::PhysicalNestedLoopJoin(_) => {
+            PhysicalNestedLoopJoin::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
         OptRelNodeTyp::List => {
-            ExprList::from_rel_node(rel_node) // ExprList is the only place that we will have list in the datafusion repr
-                .unwrap()
+            ExprList::ensures_interpret(rel_node) // ExprList is the only place that we will have list in the datafusion repr
                 .dispatch_explain(meta_map)
         }
-        OptRelNodeTyp::Agg => LogicalAgg::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::Sort => LogicalSort::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::Projection => LogicalProjection::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::PhysicalProjection => PhysicalProjection::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::PhysicalAgg => PhysicalAgg::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::PhysicalSort => PhysicalSort::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::PhysicalHashJoin(_) => PhysicalHashJoin::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::SortOrder(_) => SortOrderExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::LogOp(_) => LogOpExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::PhysicalEmptyRelation => PhysicalEmptyRelation::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::PhysicalLimit => PhysicalLimit::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::Between => BetweenExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::Cast => CastExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::Like => LikeExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::DataType(_) => DataTypeExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
-        OptRelNodeTyp::InList => InListExpr::from_rel_node(rel_node)
-            .unwrap()
-            .dispatch_explain(meta_map),
+        OptRelNodeTyp::Agg => LogicalAgg::ensures_interpret(rel_node).dispatch_explain(meta_map),
+        OptRelNodeTyp::Sort => LogicalSort::ensures_interpret(rel_node).dispatch_explain(meta_map),
+        OptRelNodeTyp::Projection => {
+            LogicalProjection::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::PhysicalProjection => {
+            PhysicalProjection::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::PhysicalAgg => {
+            PhysicalAgg::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::PhysicalSort => {
+            PhysicalSort::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::PhysicalHashJoin(_) => {
+            PhysicalHashJoin::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::SortOrder(_) => {
+            SortOrderExpr::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::LogOp(_) => {
+            LogOpExpr::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::PhysicalEmptyRelation => {
+            PhysicalEmptyRelation::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::PhysicalLimit => {
+            PhysicalLimit::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::Between => {
+            BetweenExpr::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::Cast => CastExpr::ensures_interpret(rel_node).dispatch_explain(meta_map),
+        OptRelNodeTyp::Like => LikeExpr::ensures_interpret(rel_node).dispatch_explain(meta_map),
+        OptRelNodeTyp::DataType(_) => {
+            DataTypeExpr::ensures_interpret(rel_node).dispatch_explain(meta_map)
+        }
+        OptRelNodeTyp::InList => InListExpr::ensures_interpret(rel_node).dispatch_explain(meta_map),
     }
 }
 
-fn replace_typ(node: OptRelNodeRef, target_type: OptRelNodeTyp) -> OptRelNodeRef {
+fn replace_typ(
+    node: MaybeRelNode<OptRelNodeTyp>,
+    target_type: OptRelNodeTyp,
+) -> MaybeRelNode<OptRelNodeTyp> {
+    let node = node.unwrap_rel_node();
     Arc::new(RelNode {
         typ: target_type,
         children: node.children.clone(),
         data: node.data.clone(),
         predicates: Vec::new(), /* TODO: refactor */
     })
+    .into()
 }

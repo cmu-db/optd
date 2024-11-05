@@ -1,6 +1,7 @@
 use crate::HashMap;
 use crate::Rule;
 
+use optd_core::rel_node::MaybeRelNode;
 use optd_core::rules::RuleMatcher;
 use std::sync::Arc;
 use std::vec;
@@ -36,7 +37,7 @@ fn apply_projection_pull_up_join(
         list,
         cond,
     }: ProjectionPullUpJoinPicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let left = Arc::new(left.clone());
     let right = Arc::new(right.clone());
 

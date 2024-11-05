@@ -12,6 +12,7 @@ use core::panic;
 use std::collections::{HashMap, HashSet};
 use std::vec;
 
+use optd_core::rel_node::MaybeRelNode;
 use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 
@@ -141,7 +142,7 @@ define_rule!(
 fn apply_filter_merge(
     _optimizer: &impl Optimizer<OptRelNodeTyp>,
     FilterMergeRulePicks { child, cond1, cond }: FilterMergeRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let child = PlanNode::from_group(child.into());
     let curr_cond = Expr::from_rel_node(cond.into()).unwrap();
     let child_cond = Expr::from_rel_node(cond1.into()).unwrap();
@@ -171,7 +172,7 @@ fn apply_filter_cross_join_transpose(
         join_cond,
         cond,
     }: FilterCrossJoinTransposeRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     filter_join_transpose(
         optimizer,
         JoinType::Cross,
@@ -200,7 +201,7 @@ fn apply_filter_inner_join_transpose(
         join_cond,
         cond,
     }: FilterInnerJoinTransposeRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     filter_join_transpose(
         optimizer,
         JoinType::Inner,
@@ -224,7 +225,7 @@ fn filter_join_transpose(
     join_child_b: RelNode<OptRelNodeTyp>,
     join_cond: RelNode<OptRelNodeTyp>,
     filter_cond: RelNode<OptRelNodeTyp>,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let left_schema_size = optimizer
         .get_property::<SchemaPropertyBuilder>(join_child_a.clone().into(), 0)
         .len();
@@ -322,7 +323,7 @@ define_rule!(
 fn apply_filter_sort_transpose(
     _optimizer: &impl Optimizer<OptRelNodeTyp>,
     FilterSortTransposeRulePicks { child, exprs, cond }: FilterSortTransposeRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let child = PlanNode::from_group(child.into());
     let exprs = ExprList::from_rel_node(exprs.into()).unwrap();
 
@@ -350,7 +351,7 @@ fn apply_filter_agg_transpose(
         groups,
         cond,
     }: FilterAggTransposeRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let exprs = ExprList::from_rel_node(exprs.into()).unwrap();
     let groups = ExprList::from_rel_node(groups.into()).unwrap();
     let child = PlanNode::from_group(child.into());

@@ -7,7 +7,7 @@ use crate::plan_nodes::{
     LogicalEmptyRelation, LogicalJoin, OptRelNode, OptRelNodeTyp, PlanNode,
 };
 use crate::properties::schema::SchemaPropertyBuilder;
-use crate::OptRelNodeRef;
+use optd_core::rel_node::MaybeRelNode;
 use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 
@@ -22,7 +22,10 @@ define_rule!(
 //    - Replaces the Or operator with True if any operand is True
 //    - Replaces the And operator with False if any operand is False
 //    - Removes Duplicates
-pub(crate) fn simplify_log_expr(log_expr: OptRelNodeRef, changed: &mut bool) -> OptRelNodeRef {
+pub(crate) fn simplify_log_expr(
+    log_expr: MaybeRelNode<OptRelNodeTyp>,
+    changed: &mut bool,
+) -> MaybeRelNode<OptRelNodeTyp> {
     let log_expr = LogOpExpr::from_rel_node(log_expr).unwrap();
     let op = log_expr.op_type();
     // we need a new children vec to output deterministic order
@@ -99,7 +102,7 @@ pub(crate) fn simplify_log_expr(log_expr: OptRelNodeRef, changed: &mut bool) -> 
 fn apply_simplify_filter(
     _optimizer: &impl Optimizer<OptRelNodeTyp>,
     SimplifyFilterRulePicks { child, cond }: SimplifyFilterRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     match cond.typ {
         OptRelNodeTyp::LogOp(_) => {
             let mut changed = false;
@@ -131,7 +134,7 @@ define_rule!(
 fn apply_simplify_join_cond(
     _optimizer: &impl Optimizer<OptRelNodeTyp>,
     SimplifyJoinCondRulePicks { left, right, cond }: SimplifyJoinCondRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     match cond.typ {
         OptRelNodeTyp::LogOp(_) => {
             let mut changed = false;
@@ -165,7 +168,7 @@ define_rule!(
 fn apply_eliminate_filter(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     EliminateFilterRulePicks { child, cond }: EliminateFilterRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     if let OptRelNodeTyp::Constant(ConstantType::Bool) = cond.typ {
         if let Some(data) = cond.data {
             if data.as_bool() {

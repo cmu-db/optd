@@ -8,7 +8,7 @@ use std::{
 use itertools::Itertools;
 use optd_core::{
     cascades::{ExprId, GroupId, Memo},
-    rel_node::RelNodeTyp,
+    rel_node::{MaybeRelNode, RelNodeTyp},
 };
 
 use crate::plan_nodes::{LogicalScan, OptRelNode, OptRelNodeTyp};
@@ -46,13 +46,13 @@ fn enumerate_join_order_expr_inner<M: Memo<OptRelNodeTyp> + ?Sized>(
         .into_rel_node();
     match expr.typ {
         OptRelNodeTyp::Scan => {
-            let scan = LogicalScan::from_rel_node(Arc::new(expr)).unwrap();
+            let scan = LogicalScan::ensures_interpret(Arc::new(expr));
             vec![LogicalJoinOrder::Table(scan.table())]
         }
         OptRelNodeTyp::Join(_) | OptRelNodeTyp::DepJoin(_) | OptRelNodeTyp::RawDepJoin(_) => {
             // Assume child 0 == left, child 1 == right
-            let left = expr.children[0].typ.extract_group().unwrap();
-            let right = expr.children[1].typ.extract_group().unwrap();
+            let left = expr.children[0].unwrap_group();
+            let right = expr.children[1].unwrap_group();
             let left_join_orders = enumerate_join_order_group_inner(memo, left, visited);
             let right_join_orders = enumerate_join_order_group_inner(memo, right, visited);
             let mut join_orders = BTreeSet::new();
@@ -69,11 +69,8 @@ fn enumerate_join_order_expr_inner<M: Memo<OptRelNodeTyp> + ?Sized>(
         typ if typ.is_logical() => {
             let mut join_orders = BTreeSet::new();
             for (idx, child) in expr.children.iter().enumerate() {
-                let child_join_orders = enumerate_join_order_group_inner(
-                    memo,
-                    child.typ.extract_group().unwrap(),
-                    visited,
-                );
+                let group = child.unwrap_group();
+                let child_join_orders = enumerate_join_order_group_inner(memo, group, visited);
                 if idx == 0 {
                     for child_join_order in child_join_orders {
                         join_orders.insert(child_join_order);
@@ -145,7 +142,7 @@ mod tests {
                 ConstantExpr::new(Value::Bool(true)).into_expr(),
                 JoinType::Inner,
             )
-            .into_rel_node(),
+            .unwrap_rel_node(),
         );
         // Add an alternative join order
         memo.add_expr_to_group(
@@ -159,16 +156,18 @@ mod tests {
                 .into_plan_node(),
                 ExprList::new(Vec::new()),
             )
-            .into_rel_node(),
+            .unwrap_rel_node()
+            .into(),
             group,
         );
         // Self-reference group
         memo.add_expr_to_group(
             LogicalProjection::new(
-                PlanNode::from_group(Arc::new(RelNode::new_group(group))),
+                PlanNode::from_group(MaybeRelNode::Group(group)),
                 ExprList::new(Vec::new()),
             )
-            .into_rel_node(),
+            .unwrap_rel_node()
+            .into(),
             group,
         );
         let orders = memo.enumerate_join_order(group);

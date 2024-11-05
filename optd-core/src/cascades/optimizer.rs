@@ -12,7 +12,7 @@ use crate::{
     cost::CostModel,
     optimizer::Optimizer,
     property::{PropertyBuilder, PropertyBuilderAny},
-    rel_node::{ArcPredNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp},
+    rel_node::{ArcPredNode, MaybeRelNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp},
     rules::RuleWrapper,
 };
 
@@ -281,11 +281,9 @@ impl<T: RelNodeTyp, M: Memo<T>> CascadesOptimizer<T, M> {
         self.memo.get_best_group_binding(group_id, |_, _, _| {})
     }
 
-    pub fn resolve_group_id(&self, root_rel: RelNodeRef<T>) -> GroupId {
-        if let Some(group_id) = T::extract_group(&root_rel.typ) {
-            return group_id;
-        }
-        panic!("This function is deprecated -- you should only pass group id instead of a full expression to this function.")
+    pub fn resolve_group_id(&self, root_rel: MaybeRelNode<T>) -> GroupId {
+        root_rel.unwrap_group()
+        // panic!("This function is deprecated -- you should only pass group id instead of a full expression to this function.")
     }
 
     pub(super) fn get_all_exprs_in_group(&self, group_id: GroupId) -> Vec<ExprId> {
@@ -298,7 +296,7 @@ impl<T: RelNodeTyp, M: Memo<T>> CascadesOptimizer<T, M> {
 
     pub fn add_expr_to_group(
         &mut self,
-        rel_node: RelNodeRef<T>,
+        rel_node: MaybeRelNode<T>,
         group_id: GroupId,
     ) -> Option<ExprId> {
         self.memo.add_expr_to_group(rel_node, group_id)
@@ -387,7 +385,11 @@ impl<T: RelNodeTyp, M: Memo<T>> Optimizer<T> for CascadesOptimizer<T, M> {
         self.optimize_inner(root_rel)
     }
 
-    fn get_property<P: PropertyBuilder<T>>(&self, root_rel: RelNodeRef<T>, idx: usize) -> P::Prop {
+    fn get_property<P: PropertyBuilder<T>>(
+        &self,
+        root_rel: MaybeRelNode<T>,
+        idx: usize,
+    ) -> P::Prop {
         self.get_property_by_group::<P>(self.resolve_group_id(root_rel), idx)
     }
 }

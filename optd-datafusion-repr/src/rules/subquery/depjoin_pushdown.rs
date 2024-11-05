@@ -1,3 +1,4 @@
+use optd_core::rel_node::MaybeRelNode;
 // TODO: No push past join
 // TODO: Sideways information passing??
 use optd_core::rules::{Rule, RuleMatcher};
@@ -81,7 +82,7 @@ fn apply_dep_initial_distinct(
         cond,
         extern_cols,
     }: DepInitialDistinctPicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     assert!(cond == *ConstantExpr::bool(true).into_rel_node());
 
     let left_schema_size = optimizer
@@ -207,7 +208,7 @@ fn apply_dep_join_past_proj(
         cond,
         extern_cols,
     }: DepJoinPastProjPicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     // TODO: can we have external columns in projection node? I don't think so?
     // Cross join should always have true cond
     assert!(cond == *ConstantExpr::bool(true).into_rel_node());
@@ -268,7 +269,7 @@ fn apply_dep_join_past_filter(
         cond,
         extern_cols,
     }: DepJoinPastFilterPicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     // Cross join should always have true cond
     assert!(cond == *ConstantExpr::bool(true).into_rel_node());
     let left_schema_len = optimizer
@@ -352,7 +353,7 @@ fn apply_dep_join_past_agg(
         cond,
         extern_cols,
     }: DepJoinPastAggPicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     // Cross join should always have true cond
     assert!(cond == *ConstantExpr::bool(true).into_rel_node());
 
@@ -437,7 +438,7 @@ fn apply_dep_join_eliminate_at_scan(
         cond,
         extern_cols: _,
     }: DepJoinEliminatePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     // Cross join should always have true cond
     assert!(cond == *ConstantExpr::bool(true).into_rel_node());
 

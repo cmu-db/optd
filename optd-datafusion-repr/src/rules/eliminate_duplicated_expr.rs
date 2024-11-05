@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use optd_core::rel_node::MaybeRelNode;
 use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 
@@ -30,7 +31,7 @@ define_rule!(
 fn apply_eliminate_duplicated_sort_expr(
     _optimizer: &impl Optimizer<OptRelNodeTyp>,
     EliminateDuplicatedSortExprRulePicks { child, exprs }: EliminateDuplicatedSortExprRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let sort_keys: Vec<Expr> = exprs
         .children
         .iter()
@@ -95,7 +96,7 @@ fn apply_eliminate_duplicated_agg_expr(
         exprs,
         groups,
     }: EliminateDuplicatedAggExprRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let mut dedup_expr: Vec<Expr> = Vec::new();
     let mut dedup_set: HashSet<Arc<RelNode<OptRelNodeTyp>>> = HashSet::new();
     groups.children.iter().for_each(|expr| {

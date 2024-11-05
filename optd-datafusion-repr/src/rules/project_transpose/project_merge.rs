@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use optd_core::rel_node::MaybeRelNode;
 use optd_core::rules::{Rule, RuleMatcher};
 use optd_core::{optimizer::Optimizer, rel_node::RelNode};
 
@@ -26,7 +27,7 @@ fn apply_projection_merge(
         exprs1,
         exprs2,
     }: ProjectMergeRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let child = PlanNode::from_group(child.into());
     let exprs1 = ExprList::from_rel_node(exprs1.into()).unwrap();
     let exprs2 = ExprList::from_rel_node(exprs2.into()).unwrap();
@@ -54,7 +55,7 @@ define_rule!(
 fn apply_eliminate_project(
     optimizer: &impl Optimizer<OptRelNodeTyp>,
     EliminateProjectRulePicks { child, expr }: EliminateProjectRulePicks,
-) -> Vec<RelNode<OptRelNodeTyp>> {
+) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
     let exprs = ExprList::from_rel_node(expr.into()).unwrap();
     let child_columns = optimizer
         .get_property::<SchemaPropertyBuilder>(child.clone().into(), 0)

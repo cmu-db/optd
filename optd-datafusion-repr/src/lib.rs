@@ -10,11 +10,11 @@ use optd_core::{
     heuristics::{ApplyOrder, HeuristicsOptimizer},
     optimizer::Optimizer,
     property::PropertyBuilderAny,
-    rel_node::RelNodeMetaMap,
+    rel_node::{MaybeRelNode, RelNodeMetaMap, RelNodeRef},
     rules::{Rule, RuleWrapper},
 };
 
-use plan_nodes::{OptRelNodeRef, OptRelNodeTyp};
+use plan_nodes::OptRelNodeTyp;
 use properties::{
     column_ref::ColumnRefPropertyBuilder,
     schema::{Catalog, SchemaPropertyBuilder},
@@ -234,16 +234,20 @@ impl DatafusionOptimizer {
         }
     }
 
-    pub fn heuristic_optimize(&mut self, root_rel: OptRelNodeRef) -> OptRelNodeRef {
+    pub fn heuristic_optimize(
+        &mut self,
+        root_rel: RelNodeRef<OptRelNodeTyp>,
+    ) -> RelNodeRef<OptRelNodeTyp> {
         self.heuristic_optimizer
             .optimize(root_rel)
             .expect("heuristics returns error")
+            .into()
     }
 
     pub fn cascades_optimize(
         &mut self,
-        root_rel: OptRelNodeRef,
-    ) -> Result<(GroupId, OptRelNodeRef, RelNodeMetaMap)> {
+        root_rel: RelNodeRef<OptRelNodeTyp>,
+    ) -> Result<(GroupId, RelNodeRef<OptRelNodeTyp>, RelNodeMetaMap)> {
         if self.enable_adaptive {
             self.runtime_statistics.lock().unwrap().iter_cnt += 1;
             self.cascades_optimizer.step_clear_winner();

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use optd_core::optimizer::Optimizer;
-use optd_core::rel_node::RelNode;
+use optd_core::rel_node::{MaybeRelNode, RelNode};
 use optd_core::rules::{Rule, RuleMatcher};
 
 use crate::plan_nodes::{JoinType, OptRelNodeTyp};
@@ -55,25 +55,20 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
     fn apply(
         &self,
         _optimizer: &O,
-        mut input: HashMap<usize, RelNode<OptRelNodeTyp>>,
-    ) -> Vec<RelNode<OptRelNodeTyp>> {
+        mut input: HashMap<usize, MaybeRelNode<OptRelNodeTyp>>,
+    ) -> Vec<MaybeRelNode<OptRelNodeTyp>> {
+        let MaybeRelNode::RelNode(rel) = input.remove(&0).unwrap() else {
+            return vec![];
+        };
+
         let RelNode {
             typ,
             data,
             children,
             predicates,
-        } = input.remove(&0).unwrap();
+        } = rel.as_ref().clone();
 
         match typ {
-            OptRelNodeTyp::Apply(x) => {
-                let node = RelNode {
-                    typ: OptRelNodeTyp::PhysicalNestedLoopJoin(x.to_join_type()),
-                    children,
-                    data,
-                    predicates,
-                };
-                vec![node]
-            }
             OptRelNodeTyp::Join(x) => {
                 let node = RelNode {
                     typ: OptRelNodeTyp::PhysicalNestedLoopJoin(x),
@@ -81,7 +76,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     data,
                     predicates,
                 };
-                vec![node]
+                vec![node.into()]
             }
             OptRelNodeTyp::Scan => {
                 let node = RelNode {
@@ -90,7 +85,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     data,
                     predicates,
                 };
-                vec![node]
+                vec![node.into()]
             }
             OptRelNodeTyp::Filter => {
                 let node = RelNode {
@@ -99,7 +94,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     data,
                     predicates,
                 };
-                vec![node]
+                vec![node.into()]
             }
             OptRelNodeTyp::Projection => {
                 let node = RelNode {
@@ -108,7 +103,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     data,
                     predicates,
                 };
-                vec![node]
+                vec![node.into()]
             }
             OptRelNodeTyp::Sort => {
                 let node = RelNode {
@@ -117,7 +112,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     data,
                     predicates,
                 };
-                vec![node]
+                vec![node.into()]
             }
             OptRelNodeTyp::Agg => {
                 let node = RelNode {
@@ -126,7 +121,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     data,
                     predicates,
                 };
-                vec![node]
+                vec![node.into()]
             }
             OptRelNodeTyp::EmptyRelation => {
                 let node = RelNode {
@@ -135,7 +130,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     data,
                     predicates,
                 };
-                vec![node]
+                vec![node.into()]
             }
             OptRelNodeTyp::Limit => {
                 let node = RelNode {
@@ -144,7 +139,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     data,
                     predicates,
                 };
-                vec![node]
+                vec![node.into()]
             }
             _ => vec![],
         }

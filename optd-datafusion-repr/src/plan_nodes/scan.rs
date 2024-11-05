@@ -5,21 +5,26 @@ use pretty_xmlish::Pretty;
 use crate::explain::Insertable;
 use optd_core::rel_node::{RelNode, RelNodeMetaMap, Value};
 
-use super::{replace_typ, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
+use super::{MaybeRelNode, OptRelNode, OptRelNodeTyp, PlanNode};
 
 #[derive(Clone, Debug)]
 pub struct LogicalScan(pub PlanNode);
 
 impl OptRelNode for LogicalScan {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        self.0.into_rel_node()
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        if let OptRelNodeTyp::Scan = typ {
+            true
+        } else {
+            false
+        }
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if rel_node.typ != OptRelNodeTyp::Scan {
-            return None;
-        }
-        PlanNode::from_rel_node(rel_node).map(Self)
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(PlanNode::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, _meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -44,7 +49,7 @@ impl LogicalScan {
     }
 
     pub fn table(&self) -> Arc<str> {
-        self.clone().into_rel_node().data.as_ref().unwrap().as_str()
+        self.0.unwrap_rel_node().data.as_ref().unwrap().as_str()
     }
 }
 
@@ -52,15 +57,20 @@ impl LogicalScan {
 pub struct PhysicalScan(pub PlanNode);
 
 impl OptRelNode for PhysicalScan {
-    fn into_rel_node(self) -> OptRelNodeRef {
-        replace_typ(self.0.into_rel_node(), OptRelNodeTyp::PhysicalScan)
+    fn is_typ(typ: OptRelNodeTyp) -> bool {
+        if let OptRelNodeTyp::PhysicalScan = typ {
+            true
+        } else {
+            false
+        }
     }
 
-    fn from_rel_node(rel_node: OptRelNodeRef) -> Option<Self> {
-        if rel_node.typ != OptRelNodeTyp::PhysicalScan {
-            return None;
-        }
-        PlanNode::from_rel_node(rel_node).map(Self)
+    fn interpret(rel_node: impl Into<MaybeRelNode<OptRelNodeTyp>>) -> Self {
+        Self(PlanNode::interpret(rel_node))
+    }
+
+    fn strip(self) -> MaybeRelNode<OptRelNodeTyp> {
+        self.0.strip()
     }
 
     fn dispatch_explain(&self, meta_map: Option<&RelNodeMetaMap>) -> Pretty<'static> {
@@ -78,6 +88,6 @@ impl PhysicalScan {
     }
 
     pub fn table(&self) -> Arc<str> {
-        self.clone().into_rel_node().data.as_ref().unwrap().as_str()
+        self.0.unwrap_rel_node().data.as_ref().unwrap().as_str()
     }
 }

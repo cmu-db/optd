@@ -1,7 +1,7 @@
 use super::expr::ExprList;
 use super::macros::define_plan_node;
 
-use super::{OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
+use super::{OptRelNode, OptRelNodeTyp, PlanNode};
 
 #[derive(Clone, Debug)]
 pub struct LogicalSort(pub PlanNode);

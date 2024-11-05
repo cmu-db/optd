@@ -13,7 +13,7 @@ use crate::adv_stats::{
 use optd_datafusion_repr::{
     plan_nodes::{
         BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, ConstantType, Expr, InListExpr, LikeExpr,
-        LogOpType, OptRelNode, OptRelNodeRef, OptRelNodeTyp, UnOpType,
+        LogOpType, OptRelNode, OptRelNodeTyp, UnOpType,
     },
     properties::{
         column_ref::{
@@ -71,7 +71,7 @@ impl<
     /// This is why the function only takes in a single schema.
     pub(super) fn get_filter_selectivity(
         &self,
-        expr_tree: OptRelNodeRef,
+        expr_tree: MaybeRelNode<OptRelNodeTyp>,
         schema: &Schema,
         column_refs: &BaseTableColumnRefs,
     ) -> f64 {
@@ -138,7 +138,7 @@ impl<
         }
     }
 
-    fn get_constant_selectivity(const_node: OptRelNodeRef) -> f64 {
+    fn get_constant_selectivity(const_node: MaybeRelNode<OptRelNodeTyp>) -> f64 {
         if let OptRelNodeTyp::Constant(const_typ) = const_node.typ {
             if matches!(const_typ, ConstantType::Bool) {
                 let value = const_node
@@ -168,7 +168,7 @@ impl<
     fn get_log_op_selectivity(
         &self,
         log_op_typ: LogOpType,
-        children: &[OptRelNodeRef],
+        children: &[MaybeRelNode<OptRelNodeTyp>],
         schema: &Schema,
         column_refs: &BaseTableColumnRefs,
     ) -> f64 {
@@ -187,10 +187,15 @@ impl<
     /// This is convenient to avoid repeating the same logic just with "left" and "right" swapped.
     /// The last return value is true when the input node (left) is a ColumnRefExpr.
     fn get_semantic_nodes(
-        left: OptRelNodeRef,
-        right: OptRelNodeRef,
+        left: MaybeRelNode<OptRelNodeTyp>,
+        right: MaybeRelNode<OptRelNodeTyp>,
         schema: &Schema,
-    ) -> (Vec<ColumnRefExpr>, Vec<Value>, Vec<OptRelNodeRef>, bool) {
+    ) -> (
+        Vec<ColumnRefExpr>,
+        Vec<Value>,
+        Vec<MaybeRelNode<OptRelNodeTyp>>,
+        bool,
+    ) {
         let mut col_ref_exprs = vec![];
         let mut values = vec![];
         let mut non_col_ref_exprs = vec![];
@@ -328,8 +333,8 @@ impl<
     fn get_comp_op_selectivity(
         &self,
         comp_bin_op_typ: BinOpType,
-        left: OptRelNodeRef,
-        right: OptRelNodeRef,
+        left: MaybeRelNode<OptRelNodeTyp>,
+        right: MaybeRelNode<OptRelNodeTyp>,
         schema: &Schema,
         column_refs: &BaseTableColumnRefs,
     ) -> f64 {

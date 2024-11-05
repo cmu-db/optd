@@ -2,7 +2,7 @@ use core::fmt;
 use std::fmt::Display;
 
 use super::macros::define_plan_node;
-use super::{Expr, ExprList, OptRelNode, OptRelNodeRef, OptRelNodeTyp, PlanNode};
+use super::{Expr, ExprList, OptRelNode, OptRelNodeTyp, PlanNode};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum JoinType {

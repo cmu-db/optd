@@ -74,7 +74,7 @@ mod tests {
     use optd_core::rel_node::Value;
     use optd_datafusion_repr::plan_nodes::{
         BinOpExpr, BinOpType, CastExpr, ColumnRefExpr, ConstantExpr, Expr, ExprList, InListExpr,
-        LikeExpr, LogOpExpr, LogOpType, OptRelNode, OptRelNodeRef, UnOpExpr, UnOpType,
+        LikeExpr, LogOpExpr, LogOpType, OptRelNode, UnOpExpr, UnOpType,
     };
     use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
@@ -285,17 +285,20 @@ mod tests {
         )
     }
 
-    pub fn col_ref(idx: u64) -> OptRelNodeRef {
+    pub fn col_ref(idx: u64) -> MaybeRelNode<OptRelNodeTyp> {
         // this conversion is always safe because idx was originally a usize
         let idx_as_usize = idx as usize;
         ColumnRefExpr::new(idx_as_usize).into_rel_node()
     }
 
-    pub fn cnst(value: Value) -> OptRelNodeRef {
+    pub fn cnst(value: Value) -> MaybeRelNode<OptRelNodeTyp> {
         ConstantExpr::new(value).into_rel_node()
     }
 
-    pub fn cast(child: OptRelNodeRef, cast_type: DataType) -> OptRelNodeRef {
+    pub fn cast(
+        child: MaybeRelNode<OptRelNodeTyp>,
+        cast_type: DataType,
+    ) -> MaybeRelNode<OptRelNodeTyp> {
         CastExpr::new(
             Expr::from_rel_node(child).expect("child should be an Expr"),
             cast_type,
@@ -303,7 +306,11 @@ mod tests {
         .into_rel_node()
     }
 
-    pub fn bin_op(op_type: BinOpType, left: OptRelNodeRef, right: OptRelNodeRef) -> OptRelNodeRef {
+    pub fn bin_op(
+        op_type: BinOpType,
+        left: MaybeRelNode<OptRelNodeTyp>,
+        right: MaybeRelNode<OptRelNodeTyp>,
+    ) -> MaybeRelNode<OptRelNodeTyp> {
         BinOpExpr::new(
             Expr::from_rel_node(left).expect("left should be an Expr"),
             Expr::from_rel_node(right).expect("right should be an Expr"),
@@ -312,7 +319,10 @@ mod tests {
         .into_rel_node()
     }
 
-    pub fn log_op(op_type: LogOpType, children: Vec<OptRelNodeRef>) -> OptRelNodeRef {
+    pub fn log_op(
+        op_type: LogOpType,
+        children: Vec<MaybeRelNode<OptRelNodeTyp>>,
+    ) -> MaybeRelNode<OptRelNodeTyp> {
         LogOpExpr::new(
             op_type,
             ExprList::new(
@@ -327,7 +337,10 @@ mod tests {
         .into_rel_node()
     }
 
-    pub fn un_op(op_type: UnOpType, child: OptRelNodeRef) -> OptRelNodeRef {
+    pub fn un_op(
+        op_type: UnOpType,
+        child: MaybeRelNode<OptRelNodeTyp>,
+    ) -> MaybeRelNode<OptRelNodeTyp> {
         UnOpExpr::new(
             Expr::from_rel_node(child).expect("child should be an Expr"),
             op_type,
