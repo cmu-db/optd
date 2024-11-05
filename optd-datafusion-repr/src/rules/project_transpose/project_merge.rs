@@ -172,7 +172,7 @@ mod tests {
 
         assert_eq!(plan.typ, OptRelNodeTyp::Projection);
         assert_eq!(plan.child(1), res_proj_exprs);
-        assert!(matches!(plan.child(0).typ, OptRelNodeTyp::Scan));
+        assert!(matches!(plan.child_rel(0).typ, OptRelNodeTyp::Scan));
     }
 
     #[test]

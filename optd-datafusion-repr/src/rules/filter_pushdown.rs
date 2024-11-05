@@ -42,7 +42,7 @@ fn merge_conds(first: Expr, second: Expr) -> Expr {
         LogOpExpr::new_flattened_nested_logical(LogOpType::And, new_expr_list).into_expr();
     let mut changed = false;
     // TODO: such simplifications should be invoked from optd-core, instead of ad-hoc
-    Expr::ensures_interpret(simplify_log_expr(flattened.strip(), &mut changed)).unwrap()
+    Expr::ensures_interpret(simplify_log_expr(flattened.unwrap_rel_node(), &mut changed))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -65,7 +65,7 @@ fn determine_join_cond_dep(
     let mut right_col = false;
     for child in children {
         if child.typ() == OptRelNodeTyp::ColumnRef {
-            let col_ref = ColumnRefExpr::ensures_interpret(child.clone().strip()).unwrap();
+            let col_ref = ColumnRefExpr::ensures_interpret(child.clone().strip());
             let index = col_ref.index();
             if index < left_schema_size {
                 left_col = true;
