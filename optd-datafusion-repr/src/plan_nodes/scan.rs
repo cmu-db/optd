@@ -37,6 +37,7 @@ impl LogicalScan {
                 typ: OptRelNodeTyp::Scan,
                 children: vec![],
                 data: Some(Value::String(table.into())),
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))

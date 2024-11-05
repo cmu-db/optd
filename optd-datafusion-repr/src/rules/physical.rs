@@ -61,6 +61,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
             typ,
             data,
             children,
+            predicates,
         } = input.remove(&0).unwrap();
 
         match typ {
@@ -69,6 +70,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     typ: OptRelNodeTyp::PhysicalNestedLoopJoin(x.to_join_type()),
                     children,
                     data,
+                    predicates,
                 };
                 vec![node]
             }
@@ -77,6 +79,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     typ: OptRelNodeTyp::PhysicalNestedLoopJoin(x),
                     children,
                     data,
+                    predicates,
                 };
                 vec![node]
             }
@@ -85,6 +88,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     typ: OptRelNodeTyp::PhysicalScan,
                     children,
                     data,
+                    predicates,
                 };
                 vec![node]
             }
@@ -93,6 +97,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     typ: OptRelNodeTyp::PhysicalFilter,
                     children,
                     data,
+                    predicates,
                 };
                 vec![node]
             }
@@ -101,6 +106,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     typ: OptRelNodeTyp::PhysicalProjection,
                     children,
                     data,
+                    predicates,
                 };
                 vec![node]
             }
@@ -109,6 +115,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     typ: OptRelNodeTyp::PhysicalSort,
                     children,
                     data,
+                    predicates,
                 };
                 vec![node]
             }
@@ -117,6 +124,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     typ: OptRelNodeTyp::PhysicalAgg,
                     children,
                     data,
+                    predicates,
                 };
                 vec![node]
             }
@@ -125,6 +133,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     typ: OptRelNodeTyp::PhysicalEmptyRelation,
                     children,
                     data,
+                    predicates,
                 };
                 vec![node]
             }
@@ -133,6 +142,7 @@ impl<O: Optimizer<OptRelNodeTyp>> Rule<OptRelNodeTyp, O> for PhysicalConversionR
                     typ: OptRelNodeTyp::PhysicalLimit,
                     children,
                     data,
+                    predicates,
                 };
                 vec![node]
             }

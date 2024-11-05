@@ -163,6 +163,7 @@ impl ConstantExpr {
                 typ: OptRelNodeTyp::Constant(typ),
                 children: vec![],
                 data: Some(value),
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))
@@ -288,6 +289,7 @@ impl ColumnRefExpr {
                 typ: OptRelNodeTyp::ColumnRef,
                 children: vec![],
                 data: Some(Value::UInt64(u64_column_idx)),
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))
@@ -342,6 +344,7 @@ impl UnOpExpr {
                 typ: OptRelNodeTyp::UnOp(op_type),
                 children: vec![child.into_rel_node()],
                 data: None,
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))
@@ -435,6 +438,7 @@ impl BinOpExpr {
                 typ: OptRelNodeTyp::BinOp(op_type),
                 children: vec![left.into_rel_node(), right.into_rel_node()],
                 data: None,
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))
@@ -514,6 +518,7 @@ impl FuncExpr {
                 typ: OptRelNodeTyp::Func(func_id),
                 children: vec![argv.into_rel_node()],
                 data: None,
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))
@@ -582,6 +587,7 @@ impl SortOrderExpr {
                 typ: OptRelNodeTyp::SortOrder(order),
                 children: vec![child.into_rel_node()],
                 data: None,
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))
@@ -647,6 +653,7 @@ impl LogOpExpr {
                     .map(|x| x.into_rel_node())
                     .collect(),
                 data: None,
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))
@@ -735,6 +742,7 @@ impl BetweenExpr {
                     upper.into_rel_node(),
                 ],
                 data: None,
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))
@@ -788,6 +796,7 @@ impl DataTypeExpr {
                 typ: OptRelNodeTyp::DataType(typ),
                 children: vec![],
                 data: None,
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))
@@ -832,6 +841,7 @@ impl CastExpr {
                     DataTypeExpr::new(cast_to).into_rel_node(),
                 ],
                 data: None,
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))
@@ -885,6 +895,7 @@ impl LikeExpr {
                 typ: OptRelNodeTyp::Like,
                 children: vec![expr.into_rel_node(), pattern.into_rel_node()],
                 data: Some(Value::Serialized(Arc::new([negated, case_insensitive]))),
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))
@@ -953,6 +964,7 @@ impl InListExpr {
                 typ: OptRelNodeTyp::InList,
                 children: vec![expr.into_rel_node(), list.into_rel_node()],
                 data: Some(Value::Bool(negated)),
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))

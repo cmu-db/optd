@@ -45,6 +45,7 @@ impl ExternColumnRefExpr {
                 typ: OptRelNodeTyp::ExternColumnRef,
                 children: vec![],
                 data: Some(Value::UInt64(u64_column_idx)),
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))

@@ -52,6 +52,7 @@ impl LogicalEmptyRelation {
                 typ: OptRelNodeTyp::EmptyRelation,
                 children: vec![],
                 data: Some(Value::Serialized(serialized_data)),
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))

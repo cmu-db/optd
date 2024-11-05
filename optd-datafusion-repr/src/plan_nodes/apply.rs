@@ -74,6 +74,7 @@ impl LogicalApply {
                     cond.into_rel_node(),
                 ],
                 data: None,
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         ))

@@ -23,6 +23,8 @@ pub type RelNodeRef<T> = Arc<RelNode<T>>;
 pub trait RelNodeTyp:
     PartialEq + Eq + Hash + Clone + 'static + Display + Debug + Send + Sync
 {
+    type PredType: PartialEq + Eq + Hash + Clone + 'static + Display + Debug + Send + Sync;
+
     fn is_logical(&self) -> bool;
 
     fn group_typ(group_id: GroupId) -> Self;
@@ -56,6 +58,8 @@ impl<'de> Deserialize<'de> for SerializableOrderedF64 {
     }
 }
 
+// TODO: why not use arrow types here? Do we really need to define our own Value type?
+// Shouldn't we at least remove this from the core/engine?
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 pub enum Value {
     UInt8(u8),
@@ -216,11 +220,19 @@ impl Value {
     }
 }
 
+pub type ArcPredNode<T> = Arc<PredNode<T>>;
+
 /// A RelNode is consisted of a plan node type and some children.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct RelNode<T: RelNodeTyp> {
+    /// A generic plan node type
     pub typ: T,
+    /// Child plan nodes, which may be materialized or placeholder group IDs
+    /// based on how this node was initialized
     pub children: Vec<RelNodeRef<T>>,
+    /// Predicate nodes, which are always materialized
+    pub predicates: Vec<ArcPredNode<T>>,
+    /// The to-be-removed data field
     pub data: Option<Value>,
 }
 
@@ -245,11 +257,16 @@ impl<T: RelNodeTyp> RelNode<T> {
         self.children[idx].clone()
     }
 
+    pub fn predicate(&self, idx: usize) -> ArcPredNode<T> {
+        self.predicates[idx].clone()
+    }
+
     pub fn new_leaf(typ: T) -> Self {
         Self {
             typ,
             data: None,
             children: Vec::new(),
+            predicates: Vec::new(), /* TODO: refactor */
         }
     }
 
@@ -262,7 +279,28 @@ impl<T: RelNodeTyp> RelNode<T> {
             typ: T::list_typ(),
             data: None,
             children: items,
+            predicates: Vec::new(), /* TODO: refactor */
         }
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct PredNode<T: RelNodeTyp> {
+    /// A generic predicate node type
+    pub typ: T::PredType,
+    /// Child predicate nodes, always materialized
+    pub children: Vec<ArcPredNode<T>>,
+    /// Data associated with the predicate, if any
+    pub data: Option<Value>,
+}
+
+impl<T: RelNodeTyp> PredNode<T> {
+    pub fn child(&self, idx: usize) -> ArcPredNode<T> {
+        self.children[idx].clone()
+    }
+
+    pub fn unwrap_data(&self) -> Value {
+        self.data.clone().unwrap()
     }
 }
 

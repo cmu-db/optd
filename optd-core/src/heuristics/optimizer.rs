@@ -74,6 +74,7 @@ fn match_node<T: RelNodeTyp>(
                 typ: typ.clone(),
                 children: node.children.clone(),
                 data: node.data.clone(),
+                predicates: node.predicates.clone(),
             },
         );
         assert!(res.is_none(), "dup pick");
@@ -153,6 +154,7 @@ impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
                         typ: root_rel.typ.clone(),
                         children: optimized_children,
                         data: root_rel.data.clone(),
+                        predicates: root_rel.predicates.clone(),
                     }
                     .into(),
                 )?;
@@ -165,6 +167,7 @@ impl<T: RelNodeTyp> HeuristicsOptimizer<T> {
                     typ: root_rel.typ.clone(),
                     children: optimized_children,
                     data: root_rel.data.clone(),
+                    predicates: root_rel.predicates.clone(),
                 }
                 .into();
                 Ok(node)

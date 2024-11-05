@@ -115,6 +115,12 @@ fn match_node<T: RelNodeTyp, M: Memo<T>>(
                         .map(|x| RelNode::new_group(*x).into())
                         .collect_vec(),
                     data: node.data.clone(),
+                    // rule engine by default captures all predicates
+                    predicates: node
+                        .predicates
+                        .iter()
+                        .map(|x| optimizer.get_predicate(*x))
+                        .collect(),
                 },
             );
             assert!(res.is_none(), "dup pick");

@@ -147,11 +147,13 @@ fn apply_join_assoc(
                 typ: OptRelNodeTyp::Join(JoinType::Inner),
                 children: vec![b.into(), c.into(), cond2.into_rel_node()],
                 data: None,
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
             cond1.into(),
         ],
         data: None,
+        predicates: Vec::new(), /* TODO: refactor */
     };
     vec![node]
 }

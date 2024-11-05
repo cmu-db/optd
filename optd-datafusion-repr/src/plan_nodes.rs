@@ -143,6 +143,8 @@ impl std::fmt::Display for OptRelNodeTyp {
 }
 
 impl RelNodeTyp for OptRelNodeTyp {
+    type PredType = usize; /* TODO: refactor */
+
     fn is_logical(&self) -> bool {
         matches!(
             self,
@@ -343,6 +345,7 @@ impl Expr {
                     typ: self.0.typ.clone(),
                     children: children.into_iter().collect_vec(),
                     data: self.0.data.clone(),
+                    predicates: Vec::new(), /* TODO: refactor */
                 }
                 .into(),
             )
@@ -516,5 +519,6 @@ fn replace_typ(node: OptRelNodeRef, target_type: OptRelNodeTyp) -> OptRelNodeRef
         typ: target_type,
         children: node.children.clone(),
         data: node.data.clone(),
+        predicates: Vec::new(), /* TODO: refactor */
     })
 }

@@ -109,6 +109,7 @@ fn apply_simplify_filter(
                     typ: OptRelNodeTyp::Filter,
                     children: vec![child.into(), new_log_expr],
                     data: None,
+                    predicates: Vec::new(), /* TODO: refactor */
                 };
                 return vec![filter_node];
             }

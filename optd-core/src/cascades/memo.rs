@@ -11,10 +11,10 @@ use tracing::trace;
 use crate::{
     cost::{Cost, Statistics},
     property::PropertyBuilderAny,
-    rel_node::{RelNode, RelNodeRef, RelNodeTyp, Value},
+    rel_node::{ArcPredNode, RelNode, RelNodeRef, RelNodeTyp, Value},
 };
 
-use super::optimizer::{ExprId, GroupId};
+use super::optimizer::{ExprId, GroupId, PredId};
 
 pub type RelMemoNodeRef<T> = Arc<RelMemoNode<T>>;
 
@@ -24,6 +24,7 @@ pub struct RelMemoNode<T: RelNodeTyp> {
     pub typ: T,
     pub children: Vec<GroupId>,
     pub data: Option<Value>,
+    pub predicates: Vec<PredId>,
 }
 
 impl<T: RelNodeTyp> RelMemoNode<T> {
@@ -36,6 +37,7 @@ impl<T: RelNodeTyp> RelMemoNode<T> {
                 .map(|x| Arc::new(RelNode::new_group(x)))
                 .collect(),
             data: self.data,
+            predicates: Vec::new(), /* TODO: refactor */
         }
     }
 }
@@ -48,6 +50,9 @@ impl<T: RelNodeTyp> std::fmt::Display for RelMemoNode<T> {
         }
         for child in &self.children {
             write!(f, " {}", child)?;
+        }
+        for pred in &self.predicates {
+            write!(f, " {}", pred)?;
         }
         write!(f, ")")
     }
@@ -114,6 +119,9 @@ pub trait Memo<T: RelNodeTyp>: 'static + Send + Sync {
     /// it will add the expression to the group. Returns the expr id if the expression is not a group.
     fn add_expr_to_group(&mut self, rel_node: RelNodeRef<T>, group_id: GroupId) -> Option<ExprId>;
 
+    /// Add a new predicate into the memo table.
+    fn add_new_pred(&mut self, pred_node: ArcPredNode<T>) -> PredId;
+
     /// Get the group id of an expression.
     /// The group id is volatile, depending on whether the groups are merged.
     fn get_group_id(&self, expr_id: ExprId) -> GroupId;
@@ -126,6 +134,9 @@ pub trait Memo<T: RelNodeTyp>: 'static + Send + Sync {
 
     /// Get a group by ID
     fn get_group(&self, group_id: GroupId) -> &Group;
+
+    /// Get a predicate by ID
+    fn get_pred(&self, pred_id: PredId) -> ArcPredNode<T>;
 
     /// Update the group info.
     fn update_group_info(&mut self, group_id: GroupId, group_info: GroupInfo);
@@ -159,7 +170,10 @@ pub trait Memo<T: RelNodeTyp>: 'static + Send + Sync {
         get_best_group_binding_inner(self, group_id, &mut post_process)
     }
 
-    /// Get all bindings of a predicate group. Will panic if the group contains more than one bindings.
+    /// Get all bindings of a predicate group. Will panic if the group contains more than one bindings. Note that we
+    /// are currently in the refactor process of having predicates as a separate entity. If the representation stores
+    /// predicates in the rel node children, the repr should use this function to get the predicate binding. Otherwise,
+    /// use `ger_pred` for those predicates stored within the `predicates` field.
     fn get_predicate_binding(&self, group_id: GroupId) -> Option<RelNodeRef<T>> {
         get_predicate_binding_group_inner(self, group_id, true)
     }
@@ -189,6 +203,7 @@ fn get_best_group_binding_inner<M: Memo<T> + ?Sized, T: RelNodeTyp>(
             typ: expr.typ.clone(),
             children,
             data: expr.data.clone(),
+            predicates: expr.predicates.iter().map(|x| this.get_pred(*x)).collect(),
         });
         post_process(node.clone(), group_id, info);
         return Ok(node);
@@ -215,6 +230,7 @@ fn get_predicate_binding_expr_inner<M: Memo<T> + ?Sized, T: RelNodeTyp>(
         typ: expr.typ.clone(),
         data: expr.data.clone(),
         children,
+        predicates: expr.predicates.iter().map(|x| this.get_pred(*x)).collect(),
     }))
 }
 
@@ -246,6 +262,10 @@ pub struct NaiveMemo<T: RelNodeTyp> {
     // Source of truth.
     groups: HashMap<GroupId, Group>,
     expr_id_to_expr_node: HashMap<ExprId, RelMemoNodeRef<T>>,
+
+    // Predicate stuff. We don't find logically equivalent predicates. Duplicate predicates
+    // will have different IDs.
+    pred_id_to_pred_node: HashMap<PredId, ArcPredNode<T>>,
 
     // Internal states.
     group_expr_counter: usize,
@@ -285,6 +305,16 @@ impl<T: RelNodeTyp> Memo<T> for NaiveMemo<T> {
         assert_eq!(returned_group_id, reduced_group_id);
         self.verify_integrity();
         Some(expr_id)
+    }
+
+    fn add_new_pred(&mut self, pred_node: ArcPredNode<T>) -> PredId {
+        let pred_id = self.next_pred_id();
+        self.pred_id_to_pred_node.insert(pred_id, pred_node);
+        pred_id
+    }
+
+    fn get_pred(&self, pred_id: PredId) -> ArcPredNode<T> {
+        self.pred_id_to_pred_node[&pred_id].clone()
     }
 
     fn get_group_id(&self, mut expr_id: ExprId) -> GroupId {
@@ -346,6 +376,7 @@ impl<T: RelNodeTyp> NaiveMemo<T> {
             expr_id_to_group_id: HashMap::new(),
             expr_id_to_expr_node: HashMap::new(),
             expr_node_to_expr_id: HashMap::new(),
+            pred_id_to_pred_node: HashMap::new(),
             groups: HashMap::new(),
             group_expr_counter: 0,
             merged_group_mapping: HashMap::new(),
@@ -366,6 +397,13 @@ impl<T: RelNodeTyp> NaiveMemo<T> {
         let id = self.group_expr_counter;
         self.group_expr_counter += 1;
         ExprId(id)
+    }
+
+    /// Get the next pred id. Group id and expr id shares the same counter, so as to make it easier to debug...
+    fn next_pred_id(&mut self) -> PredId {
+        let id = self.group_expr_counter;
+        self.group_expr_counter += 1;
+        PredId(id)
     }
 
     fn verify_integrity(&self) {
@@ -507,6 +545,11 @@ impl<T: RelNodeTyp> NaiveMemo<T> {
             typ: rel_node.typ.clone(),
             children: children_group_ids,
             data: rel_node.data.clone(),
+            predicates: rel_node
+                .predicates
+                .iter()
+                .map(|x| self.add_new_pred(x.clone()))
+                .collect(),
         };
         if let Some(&expr_id) = self.expr_node_to_expr_id.get(&memo_node) {
             let group_id = self.expr_id_to_group_id[&expr_id];
@@ -550,6 +593,7 @@ impl<T: RelNodeTyp> NaiveMemo<T> {
             typ: rel_node.typ.clone(),
             children: children_group_ids,
             data: rel_node.data.clone(),
+            predicates: Vec::new(), /* TODO: refactor */
         };
         let Some(&expr_id) = self.expr_node_to_expr_id.get(&memo_node) else {
             unreachable!("not found {}", memo_node)
@@ -617,6 +661,8 @@ impl<T: RelNodeTyp> NaiveMemo<T> {
 
 #[cfg(test)]
 mod tests {
+    use crate::rel_node::PredNode;
+
     use super::*;
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -629,6 +675,12 @@ mod tests {
         Expr,
     }
 
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    enum MemoTestPredTyp {
+        Add,
+        Minus,
+    }
+
     impl std::fmt::Display for MemoTestRelTyp {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
@@ -638,7 +690,15 @@ mod tests {
         }
     }
 
+    impl std::fmt::Display for MemoTestPredTyp {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{:?}", self)
+        }
+    }
+
     impl RelNodeTyp for MemoTestRelTyp {
+        type PredType = MemoTestPredTyp;
+
         fn is_logical(&self) -> bool {
             matches!(self, Self::Project | Self::Scan | Self::Join)
         }
@@ -672,6 +732,7 @@ mod tests {
             typ: MemoTestRelTyp::Join,
             children: vec![left.into(), right.into(), cond.into()],
             data: None,
+            predicates: Vec::new(), /* TODO: refactor */
         }
     }
 
@@ -680,6 +741,7 @@ mod tests {
             typ: MemoTestRelTyp::Scan,
             children: vec![],
             data: Some(Value::String(table.to_string().into())),
+            predicates: Vec::new(), /* TODO: refactor */
         }
     }
 
@@ -691,6 +753,7 @@ mod tests {
             typ: MemoTestRelTyp::Project,
             children: vec![input.into(), expr_list.into()],
             data: None,
+            predicates: Vec::new(), /* TODO: refactor */
         }
     }
 
@@ -699,6 +762,7 @@ mod tests {
             typ: MemoTestRelTyp::List,
             children: items.into_iter().map(|x| x.into()).collect(),
             data: None,
+            predicates: Vec::new(), /* TODO: refactor */
         }
     }
 
@@ -707,6 +771,7 @@ mod tests {
             typ: MemoTestRelTyp::Expr,
             children: vec![],
             data: Some(data),
+            predicates: Vec::new(), /* TODO: refactor */
         }
     }
 
@@ -715,7 +780,23 @@ mod tests {
             typ: MemoTestRelTyp::Group(group_id),
             children: vec![],
             data: None,
+            predicates: Vec::new(), /* TODO: refactor */
         }
+    }
+
+    #[test]
+    fn add_predicate() {
+        let mut memo = NaiveMemo::<MemoTestRelTyp>::new(Arc::new([]));
+        let pred_node = Arc::new(PredNode {
+            typ: MemoTestPredTyp::Add,
+            children: vec![Arc::new(PredNode {
+                typ: MemoTestPredTyp::Minus,
+                children: vec![],
+                data: None,
+            })],
+            data: None,
+        });
+        memo.add_new_pred(pred_node);
     }
 
     #[test]

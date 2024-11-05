@@ -394,6 +394,7 @@ impl OptdPlanContext<'_> {
                 typ: rel_node.typ.clone(),
                 children,
                 data: rel_node.data.clone(),
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         )

@@ -48,6 +48,7 @@ fn rewrite_extern_column_refs(
                 typ: expr_rel.typ.clone(),
                 children,
                 data: expr_rel.data.clone(),
+                predicates: Vec::new(), /* TODO: refactor */
             }
             .into(),
         )

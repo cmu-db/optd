@@ -12,7 +12,7 @@ use crate::{
     cost::CostModel,
     optimizer::Optimizer,
     property::{PropertyBuilder, PropertyBuilderAny},
-    rel_node::{RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp},
+    rel_node::{ArcPredNode, RelNodeMeta, RelNodeMetaMap, RelNodeRef, RelNodeTyp},
     rules::RuleWrapper,
 };
 
@@ -68,6 +68,9 @@ pub struct GroupId(pub(super) usize);
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
 pub struct ExprId(pub usize);
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
+pub struct PredId(pub usize);
+
 impl Display for GroupId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "!{}", self.0)
@@ -77,6 +80,12 @@ impl Display for GroupId {
 impl Display for ExprId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl Display for PredId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "P{}", self.0)
     }
 }
 
@@ -328,6 +337,10 @@ impl<T: RelNodeTyp, M: Memo<T>> CascadesOptimizer<T, M> {
 
     pub fn get_predicate_binding(&self, group_id: GroupId) -> Option<RelNodeRef<T>> {
         self.memo.get_predicate_binding(group_id)
+    }
+
+    pub fn get_predicate(&self, pred_id: PredId) -> ArcPredNode<T> {
+        self.memo.get_pred(pred_id)
     }
 
     pub(super) fn is_group_explored(&self, group_id: GroupId) -> bool {

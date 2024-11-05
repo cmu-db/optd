@@ -63,6 +63,7 @@ macro_rules! define_plan_node {
                             $($attr_name.into_rel_node()),*
                         ],
                         data,
+                        predicates: Vec::new(), /* TODO: refactor */
                     }
                     .into(),
                 ))
