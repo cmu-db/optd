@@ -2,7 +2,7 @@ use crate::plan_nodes::OptRelNodeTyp;
 use optd_core::{
     cascades::{CascadesOptimizer, NaiveMemo, RelNodeContext},
     cost::{Cost, CostModel, Statistics},
-    rel_node::Value,
+    rel_node::{ArcPredNode, Value},
 };
 use value_bag::ValueBag;
 
@@ -16,6 +16,7 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for DummyCostModel {
         &self,
         _: &OptRelNodeTyp,
         _: &Option<Value>,
+        _: &[ArcPredNode<OptRelNodeTyp>],
         _: &[Option<&Statistics>],
         _: &[Cost],
         _: Option<RelNodeContext>,
@@ -29,6 +30,7 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for DummyCostModel {
         &self,
         _: &OptRelNodeTyp,
         _: &Option<Value>,
+        _: &[ArcPredNode<OptRelNodeTyp>],
         _: &[&Statistics],
         _: Option<RelNodeContext>,
         _: Option<&CascadesOptimizer<OptRelNodeTyp>>,

@@ -5,7 +5,7 @@ use itertools::Itertools;
 use optd_core::{
     cascades::{CascadesOptimizer, NaiveMemo, RelNodeContext},
     cost::{Cost, CostModel, Statistics},
-    rel_node::Value,
+    rel_node::{ArcPredNode, Value},
 };
 use value_bag::ValueBag;
 
@@ -78,7 +78,8 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for OptCostModel {
         &self,
         node: &OptRelNodeTyp,
         data: &Option<Value>,
-        children: &[&Statistics],
+        _predicates: &[ArcPredNode<OptRelNodeTyp>],
+        children_stats: &[&Statistics],
         _context: Option<RelNodeContext>,
         _optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Statistics {
@@ -88,31 +89,31 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for OptCostModel {
                 Self::stat(row_cnt)
             }
             OptRelNodeTyp::PhysicalLimit => {
-                let row_cnt = Self::row_cnt(children[0]);
+                let row_cnt = Self::row_cnt(children_stats[0]);
                 let selectivity = 0.001;
                 Self::stat((row_cnt * selectivity).max(1.0))
             }
             OptRelNodeTyp::PhysicalEmptyRelation => Self::stat(0.01),
             OptRelNodeTyp::PhysicalFilter => {
-                let row_cnt = Self::row_cnt(children[0]);
+                let row_cnt = Self::row_cnt(children_stats[0]);
                 let selectivity = 0.001;
                 Self::stat((row_cnt * selectivity).max(1.0))
             }
             OptRelNodeTyp::PhysicalNestedLoopJoin(_) => {
-                let row_cnt_1 = Self::row_cnt(children[0]);
-                let row_cnt_2 = Self::row_cnt(children[1]);
+                let row_cnt_1 = Self::row_cnt(children_stats[0]);
+                let row_cnt_2 = Self::row_cnt(children_stats[1]);
                 let selectivity = 0.01;
                 Self::stat((row_cnt_1 * row_cnt_2 * selectivity).max(1.0))
             }
             OptRelNodeTyp::PhysicalHashJoin(_) => {
-                let row_cnt_1 = Self::row_cnt(children[0]);
-                let row_cnt_2 = Self::row_cnt(children[1]);
+                let row_cnt_1 = Self::row_cnt(children_stats[0]);
+                let row_cnt_2 = Self::row_cnt(children_stats[1]);
                 Self::stat(row_cnt_1.min(row_cnt_2).max(1.0))
             }
             OptRelNodeTyp::PhysicalSort
             | OptRelNodeTyp::PhysicalAgg
             | OptRelNodeTyp::PhysicalProjection => {
-                let row_cnt = Self::row_cnt(children[0]);
+                let row_cnt = Self::row_cnt(children_stats[0]);
                 Self::stat(row_cnt)
             }
             OptRelNodeTyp::List => Self::stat(1.0),
@@ -125,12 +126,13 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for OptCostModel {
         &self,
         node: &OptRelNodeTyp,
         data: &Option<Value>,
-        children: &[Option<&Statistics>],
-        children_cost: &[Cost],
+        _predicates: &[ArcPredNode<OptRelNodeTyp>],
+        children_stats: &[Option<&Statistics>],
+        children_costs: &[Cost],
         _context: Option<RelNodeContext>,
         _optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Cost {
-        let row_cnts = children
+        let row_cnts = children_stats
             .iter()
             .map(|child| child.map(Self::row_cnt).unwrap_or(0 as f64))
             .collect_vec();
@@ -146,18 +148,18 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for OptCostModel {
             OptRelNodeTyp::PhysicalEmptyRelation => Self::cost(0.01, 0.0),
             OptRelNodeTyp::PhysicalFilter => {
                 let row_cnt = row_cnts[0];
-                let (compute_cost, _) = Self::cost_tuple(&children_cost[1]);
+                let (compute_cost, _) = Self::cost_tuple(&children_costs[1]);
                 Self::cost(row_cnt * compute_cost, 0.0)
             }
             OptRelNodeTyp::PhysicalNestedLoopJoin(_) => {
                 let row_cnt_1 = row_cnts[0];
                 let row_cnt_2 = row_cnts[1];
-                let (compute_cost, _) = Self::cost_tuple(&children_cost[2]);
+                let (compute_cost, _) = Self::cost_tuple(&children_costs[2]);
                 Self::cost(row_cnt_1 * row_cnt_2 * compute_cost + row_cnt_1, 0.0)
             }
             OptRelNodeTyp::PhysicalProjection => {
                 let row_cnt = row_cnts[0];
-                let (compute_cost, _) = Self::cost_tuple(&children_cost[1]);
+                let (compute_cost, _) = Self::cost_tuple(&children_costs[1]);
                 Self::cost(row_cnt * compute_cost, 0.0)
             }
             OptRelNodeTyp::PhysicalHashJoin(_) => {
@@ -171,13 +173,13 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for OptCostModel {
             }
             OptRelNodeTyp::PhysicalAgg => {
                 let row_cnt = row_cnts[0];
-                let (compute_cost_1, _) = Self::cost_tuple(&children_cost[1]);
-                let (compute_cost_2, _) = Self::cost_tuple(&children_cost[2]);
+                let (compute_cost_1, _) = Self::cost_tuple(&children_costs[1]);
+                let (compute_cost_2, _) = Self::cost_tuple(&children_costs[2]);
                 Self::cost(row_cnt * (compute_cost_1 + compute_cost_2), 0.0)
             }
             // List and expressions are computed in the same way -- but list has much fewer cost
             OptRelNodeTyp::List => {
-                let compute_cost = children_cost
+                let compute_cost = children_costs
                     .iter()
                     .map(|child| {
                         let (compute_cost, _) = Self::cost_tuple(child);
@@ -187,7 +189,7 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for OptCostModel {
                 Self::cost(compute_cost + 0.01, 0.0)
             }
             _ if node.is_expression() => {
-                let compute_cost = children_cost
+                let compute_cost = children_costs
                     .iter()
                     .map(|child| {
                         let (compute_cost, _) = Self::cost_tuple(child);

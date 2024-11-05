@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use optd_core::{
     cascades::{CascadesOptimizer, NaiveMemo, RelNodeContext},
     cost::{Cost, CostModel, Statistics},
-    rel_node::Value,
+    rel_node::{ArcPredNode, Value},
 };
 
 pub struct AdvancedCostModel {
@@ -60,16 +60,18 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for AdvancedCostModel {
         &self,
         node: &OptRelNodeTyp,
         data: &Option<Value>,
-        children: &[Option<&Statistics>],
-        children_cost: &[Cost],
+        predicates: &[ArcPredNode<OptRelNodeTyp>],
+        children_stats: &[Option<&Statistics>],
+        children_costs: &[Cost],
         context: Option<RelNodeContext>,
         optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Cost {
         self.base_model.compute_operation_cost(
             node,
             data,
-            children,
-            children_cost,
+            predicates,
+            children_stats,
+            children_costs,
             context,
             optimizer,
         )
@@ -79,11 +81,12 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for AdvancedCostModel {
         &self,
         node: &OptRelNodeTyp,
         data: &Option<Value>,
-        children: &[&Statistics],
+        predicates: &[ArcPredNode<OptRelNodeTyp>],
+        children_stats: &[&Statistics],
         context: Option<RelNodeContext>,
         optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Statistics {
-        let row_cnts = children
+        let row_cnts = children_stats
             .iter()
             .map(|child| OptCostModel::row_cnt(child))
             .collect::<Vec<f64>>();
@@ -134,9 +137,14 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for AdvancedCostModel {
                 let row_cnt = self.stats.get_agg_row_cnt(context, optimizer, row_cnts[0]);
                 OptCostModel::stat(row_cnt)
             }
-            _ => self
-                .base_model
-                .derive_statistics(node, data, children, context, optimizer),
+            _ => self.base_model.derive_statistics(
+                node,
+                data,
+                predicates,
+                children_stats,
+                context,
+                optimizer,
+            ),
         }
     }
 }

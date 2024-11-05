@@ -1,4 +1,5 @@
 use anyhow::Result;
+use itertools::Itertools;
 use tracing::trace;
 
 use crate::{
@@ -97,9 +98,15 @@ impl OptimizeInputsTask {
         }
         if update_cost {
             let expr = optimizer.get_expr_memoed(self.expr_id);
+            let preds = expr
+                .predicates
+                .iter()
+                .map(|pred_id| optimizer.get_pred(*pred_id))
+                .collect_vec();
             let statistics = cost.derive_statistics(
                 &expr.typ,
                 &expr.data,
+                &preds,
                 &input_statistics
                     .iter()
                     .map(|x| x.expect("child winner should always have statistics?"))
@@ -181,9 +188,15 @@ impl<T: RelNodeTyp, M: Memo<T>> Task<T, M> for OptimizeInputsTask {
                         .unwrap_or_else(|| cost.zero())
                 })
                 .collect::<Vec<_>>();
+            let preds = expr
+                .predicates
+                .iter()
+                .map(|pred_id| optimizer.get_pred(*pred_id))
+                .collect_vec();
             let operation_cost = cost.compute_operation_cost(
                 &expr.typ,
                 &expr.data,
+                &preds,
                 &input_statistics_ref,
                 &input_cost,
                 Some(context.clone()),

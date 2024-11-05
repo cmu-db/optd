@@ -119,7 +119,7 @@ fn match_node<T: RelNodeTyp, M: Memo<T>>(
                     predicates: node
                         .predicates
                         .iter()
-                        .map(|x| optimizer.get_predicate(*x))
+                        .map(|x| optimizer.get_pred(*x))
                         .collect(),
                 },
             );

@@ -7,7 +7,7 @@ use crate::{cost::OptCostModel, plan_nodes::OptRelNodeTyp};
 use optd_core::{
     cascades::{CascadesOptimizer, GroupId, NaiveMemo, RelNodeContext},
     cost::{Cost, CostModel, Statistics},
-    rel_node::Value,
+    rel_node::{ArcPredNode, Value},
 };
 
 use super::base_cost::DEFAULT_TABLE_ROW_CNT;
@@ -65,8 +65,9 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for AdaptiveCostModel {
         &self,
         node: &OptRelNodeTyp,
         data: &Option<Value>,
-        children: &[Option<&Statistics>],
-        children_cost: &[Cost],
+        predicates: &[ArcPredNode<OptRelNodeTyp>],
+        children_stats: &[Option<&Statistics>],
+        children_costs: &[Cost],
         context: Option<RelNodeContext>,
         optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Cost {
@@ -77,8 +78,9 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for AdaptiveCostModel {
         self.base_model.compute_operation_cost(
             node,
             data,
-            children,
-            children_cost,
+            predicates,
+            children_stats,
+            children_costs,
             context,
             optimizer,
         )
@@ -88,7 +90,8 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for AdaptiveCostModel {
         &self,
         node: &OptRelNodeTyp,
         data: &Option<Value>,
-        children: &[&Statistics],
+        predicates: &[ArcPredNode<OptRelNodeTyp>],
+        children_stats: &[&Statistics],
         context: Option<RelNodeContext>,
         optimizer: Option<&CascadesOptimizer<OptRelNodeTyp>>,
     ) -> Statistics {
@@ -96,8 +99,14 @@ impl CostModel<OptRelNodeTyp, NaiveMemo<OptRelNodeTyp>> for AdaptiveCostModel {
             let row_cnt = self.get_row_cnt(data, &context);
             return OptCostModel::stat(row_cnt);
         }
-        self.base_model
-            .derive_statistics(node, data, children, context, optimizer)
+        self.base_model.derive_statistics(
+            node,
+            data,
+            predicates,
+            children_stats,
+            context,
+            optimizer,
+        )
     }
 }
 

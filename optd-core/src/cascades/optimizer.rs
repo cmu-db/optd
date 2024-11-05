@@ -339,7 +339,7 @@ impl<T: RelNodeTyp, M: Memo<T>> CascadesOptimizer<T, M> {
         self.memo.get_predicate_binding(group_id)
     }
 
-    pub fn get_predicate(&self, pred_id: PredId) -> ArcPredNode<T> {
+    pub fn get_pred(&self, pred_id: PredId) -> ArcPredNode<T> {
         self.memo.get_pred(pred_id)
     }
 
