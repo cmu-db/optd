@@ -1,18 +1,12 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
-use crate::{
-    cost::DfCostModel,
-    plan_nodes::{ArcDfPredNode, DfNodeType},
-};
-use optd_core::{
-    cascades::{CascadesOptimizer, GroupId, NaiveMemo, RelNodeContext},
-    cost::{Cost, CostModel, Statistics},
-};
+use optd_core::cascades::{CascadesOptimizer, GroupId, NaiveMemo, RelNodeContext};
+use optd_core::cost::{Cost, CostModel, Statistics};
 
 use super::base_cost::DEFAULT_TABLE_ROW_CNT;
+use crate::cost::DfCostModel;
+use crate::plan_nodes::{ArcDfPredNode, DfNodeType};
 
 pub type RuntimeAdaptionStorage = Arc<Mutex<RuntimeAdaptionStorageInner>>;
 

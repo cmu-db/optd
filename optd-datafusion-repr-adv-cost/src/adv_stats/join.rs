@@ -1,28 +1,21 @@
 use std::collections::HashSet;
 
 use itertools::Itertools;
-
-use serde::{de::DeserializeOwned, Serialize};
-
-use crate::adv_stats::{
-    stats::{Distribution, MostCommonValues},
-    DEFAULT_NUM_DISTINCT,
+use optd_datafusion_repr::plan_nodes::{
+    ArcDfPredNode, BinOpType, ColumnRefPred, DfPredType, DfReprPredNode, JoinType, ListPred,
+    LogOpPred, LogOpType,
 };
-use optd_datafusion_repr::{
-    plan_nodes::{
-        ArcDfPredNode, BinOpType, ColumnRefPred, DfPredType, DfReprPredNode, JoinType, ListPred,
-        LogOpPred, LogOpType,
-    },
-    properties::{
-        column_ref::{
-            BaseTableColumnRef, BaseTableColumnRefs, ColumnRef, EqBaseTableColumnSets, EqPredicate,
-            GroupColumnRefs, SemanticCorrelation,
-        },
-        schema::Schema,
-    },
+use optd_datafusion_repr::properties::column_ref::{
+    BaseTableColumnRef, BaseTableColumnRefs, ColumnRef, EqBaseTableColumnSets, EqPredicate,
+    GroupColumnRefs, SemanticCorrelation,
 };
+use optd_datafusion_repr::properties::schema::Schema;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 use super::AdvStats;
+use crate::adv_stats::stats::{Distribution, MostCommonValues};
+use crate::adv_stats::DEFAULT_NUM_DISTINCT;
 
 impl<
         M: MostCommonValues + Serialize + DeserializeOwned,
@@ -179,9 +172,9 @@ impl<
         // Currently, there is no difference in how we handle a join filter and a select filter,
         // so we use the same function.
         //
-        // One difference (that we *don't* care about right now) is that join filters can contain expressions from multiple
-        // different tables. Currently, this doesn't affect the get_filter_selectivity() function, but this may change in
-        // the future.
+        // One difference (that we *don't* care about right now) is that join filters can contain
+        // expressions from multiple different tables. Currently, this doesn't affect the
+        // get_filter_selectivity() function, but this may change in the future.
         let join_filter_selectivity = match filter_expr_tree {
             Some(filter_expr_tree) => {
                 self.get_filter_selectivity(filter_expr_tree, schema, column_refs)
@@ -204,7 +197,8 @@ impl<
         }
     }
 
-    /// The expr_tree input must be a "mixed expression tree", just like with `get_filter_selectivity`.
+    /// The expr_tree input must be a "mixed expression tree", just like with
+    /// `get_filter_selectivity`.
     ///
     /// This is a "wrapper" to separate the equality conditions from the filter conditions before
     /// calling the "main" `get_join_selectivity_core` function.
@@ -281,8 +275,9 @@ impl<
     }
 
     /// Check if an expr_tree is a join condition, returning the join on col ref pair if it is.
-    /// The reason the check and the info are in the same function is because their code is almost identical.
-    /// It only picks out equality conditions between two column refs on different tables
+    /// The reason the check and the info are in the same function is because their code is almost
+    /// identical. It only picks out equality conditions between two column refs on different
+    /// tables
     fn get_on_col_ref_pair(
         expr_tree: ArcDfPredNode,
         column_refs: &BaseTableColumnRefs,
@@ -293,7 +288,8 @@ impl<
             let right_child = expr_tree.child(1);
             // 2. Check that both sides are column refs
             if left_child.typ == DfPredType::ColumnRef && right_child.typ == DfPredType::ColumnRef {
-                // 3. Check that both sides don't belong to the same table (if we don't know, that means they don't belong)
+                // 3. Check that both sides don't belong to the same table (if we don't know, that
+                //    means they don't belong)
                 let left_col_ref_expr = ColumnRefPred::from_pred_node(left_child)
                     .expect("we already checked that the type is ColumnRef");
                 let right_col_ref_expr = ColumnRefPred::from_pred_node(right_child)
@@ -377,24 +373,26 @@ impl<
             .product()
     }
 
-    /// A predicate set defines a "multi-equality graph", which is an unweighted undirected graph. The
-    /// nodes are columns while edges are predicates. The old graph is defined by `past_eq_columns`
-    /// while the `predicate` is the new addition to this graph. This unweighted undirected graph
-    /// consists of a number of connected components, where each connected component represents columns
-    /// that are set to be equal to each other. Single nodes not connected to anything are considered
-    /// standalone connected components.
+    /// A predicate set defines a "multi-equality graph", which is an unweighted undirected graph.
+    /// The nodes are columns while edges are predicates. The old graph is defined by
+    /// `past_eq_columns` while the `predicate` is the new addition to this graph. This
+    /// unweighted undirected graph consists of a number of connected components, where each
+    /// connected component represents columns that are set to be equal to each other. Single
+    /// nodes not connected to anything are considered standalone connected components.
     ///
-    /// The selectivity of each connected component of N nodes is equal to the product of 1/ndistinct of
-    /// the N-1 nodes with the highest ndistinct values. You can see this if you imagine that all columns
-    /// being joined are unique columns and that they follow the inclusion principle (every element of the
-    /// smaller tables is present in the larger tables). When these assumptions are not true, the selectivity
-    /// may not be completely accurate. However, it is still fairly accurate.
+    /// The selectivity of each connected component of N nodes is equal to the product of
+    /// 1/ndistinct of the N-1 nodes with the highest ndistinct values. You can see this if you
+    /// imagine that all columns being joined are unique columns and that they follow the
+    /// inclusion principle (every element of the smaller tables is present in the larger
+    /// tables). When these assumptions are not true, the selectivity may not be completely
+    /// accurate. However, it is still fairly accurate.
     ///
-    /// However, we cannot simply add `predicate` to the multi-equality graph and compute the selectivity of
-    /// the entire connected component, because this would be "double counting" a lot of nodes. The join(s)
-    /// before this join would already have a selectivity value. Thus, we compute the selectivity of the
-    /// join(s) before this join (the first block of the function) and then the selectivity of the connected
-    /// component after this join. The quotient is the "adjustment" factor.
+    /// However, we cannot simply add `predicate` to the multi-equality graph and compute the
+    /// selectivity of the entire connected component, because this would be "double counting" a
+    /// lot of nodes. The join(s) before this join would already have a selectivity value. Thus,
+    /// we compute the selectivity of the join(s) before this join (the first block of the
+    /// function) and then the selectivity of the connected component after this join. The
+    /// quotient is the "adjustment" factor.
     ///
     /// NOTE: This function modifies `past_eq_columns` by adding `predicate` to it.
     fn get_join_selectivity_adjustment_when_adding_to_multi_equality_graph(
@@ -406,11 +404,13 @@ impl<
             // self-join, TODO: is this correct?
             return 1.0;
         }
-        // To find the adjustment, we need to know the selectivity of the graph before `predicate` is added.
+        // To find the adjustment, we need to know the selectivity of the graph before `predicate`
+        // is added.
         //
-        // There are two cases: (1) adding `predicate` does not change the # of connected components, and
-        // (2) adding `predicate` reduces the # of connected by 1. Note that columns not involved in any
-        // predicates are considered a part of the graph and are a connected component on their own.
+        // There are two cases: (1) adding `predicate` does not change the # of connected
+        // components, and (2) adding `predicate` reduces the # of connected by 1. Note that
+        // columns not involved in any predicates are considered a part of the graph and are
+        // a connected component on their own.
         let children_pred_sel = {
             if past_eq_columns.is_eq(&predicate.left, &predicate.right) {
                 self.get_join_selectivity_from_most_selective_columns(
@@ -435,7 +435,8 @@ impl<
             }
         };
 
-        // Add predicate to past_eq_columns and compute the selectivity of the connected component it creates.
+        // Add predicate to past_eq_columns and compute the selectivity of the connected component
+        // it creates.
         past_eq_columns.add_predicate(predicate.clone());
         let new_pred_sel = {
             let cols = past_eq_columns.find_cols_for_eq_column_set(&predicate.left);
@@ -453,11 +454,12 @@ impl<
     ///
     /// We also check if each predicate is correlated with any of the previous predicates.
     ///
-    /// More specifically, we are checking if the predicate can be expressed with other existing predicates.
-    /// E.g. if we have a predicate like A = B and B = C is equivalent to A = C.
+    /// More specifically, we are checking if the predicate can be expressed with other existing
+    /// predicates. E.g. if we have a predicate like A = B and B = C is equivalent to A = C.
     //
-    /// However, we don't just throw away A = C, because we want to pick the most selective predicates.
-    /// For details on how we do this, see `get_join_selectivity_from_redundant_predicates`.
+    /// However, we don't just throw away A = C, because we want to pick the most selective
+    /// predicates. For details on how we do this, see
+    /// `get_join_selectivity_from_redundant_predicates`.
     fn get_join_on_selectivity(
         &self,
         on_col_ref_pairs: &[(ColumnRefPred, ColumnRefPred)],
@@ -498,18 +500,15 @@ mod tests {
     use std::collections::HashSet;
 
     use optd_core::nodes::Value;
-
-    use crate::adv_stats::{tests::*, DEFAULT_EQ_SEL};
-    use optd_datafusion_repr::{
-        plan_nodes::{ArcDfPredNode, BinOpType, JoinType, LogOpType},
-        properties::{
-            column_ref::{
-                BaseTableColumnRef, BaseTableColumnRefs, ColumnRef, EqBaseTableColumnSets,
-                EqPredicate, SemanticCorrelation,
-            },
-            schema::Schema,
-        },
+    use optd_datafusion_repr::plan_nodes::{ArcDfPredNode, BinOpType, JoinType, LogOpType};
+    use optd_datafusion_repr::properties::column_ref::{
+        BaseTableColumnRef, BaseTableColumnRefs, ColumnRef, EqBaseTableColumnSets, EqPredicate,
+        SemanticCorrelation,
     };
+    use optd_datafusion_repr::properties::schema::Schema;
+
+    use crate::adv_stats::tests::*;
+    use crate::adv_stats::DEFAULT_EQ_SEL;
 
     /// A wrapper around get_join_selectivity_from_expr_tree that extracts the
     /// table row counts from the cost model.
@@ -814,7 +813,8 @@ mod tests {
         );
     }
 
-    // We don't test joinsel or with oncond because if there is an oncond (on condition), the top-level operator must be an AND
+    // We don't test joinsel or with oncond because if there is an oncond (on condition), the
+    // top-level operator must be an AND
 
     /// I made this helper function to avoid copying all eight lines over and over
     fn assert_outer_selectivities(
@@ -927,8 +927,8 @@ mod tests {
     }
 
     /// Unique oncond means an oncondition on columns which are unique in both tables
-    /// There's only one case if both columns are unique and have different row counts: the inner will be < 1 / row count
-    ///   of one table and = 1 / row count of another
+    /// There's only one case if both columns are unique and have different row counts: the inner
+    /// will be < 1 / row count   of one table and = 1 / row count of another
     #[test]
     fn test_outer_unique_oncond() {
         let cost_model = create_two_table_cost_model_custom_row_cnts(
@@ -947,7 +947,8 @@ mod tests {
             5,
             4,
         );
-        // the left/right of the join refers to the tables, not the order of columns in the predicate
+        // the left/right of the join refers to the tables, not the order of columns in the
+        // predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let schema = Schema::new(vec![]);
@@ -994,7 +995,8 @@ mod tests {
     }
 
     /// Non-unique oncond means the column is not unique in either table
-    /// Inner always >= row count means that the inner join result is >= 1 / the row count of both tables
+    /// Inner always >= row count means that the inner join result is >= 1 / the row count of both
+    /// tables
     #[test]
     fn test_outer_nonunique_oncond_inner_always_geq_rowcnt() {
         let cost_model = create_two_table_cost_model_custom_row_cnts(
@@ -1013,7 +1015,8 @@ mod tests {
             10,
             8,
         );
-        // the left/right of the join refers to the tables, not the order of columns in the predicate
+        // the left/right of the join refers to the tables, not the order of columns in the
+        // predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let schema = Schema::new(vec![]);
@@ -1060,8 +1063,9 @@ mod tests {
     }
 
     /// Non-unique oncond means the column is not unique in either table
-    /// Inner sometimes < row count means that the inner join result < 1 / the row count of exactly one table.
-    ///   Note that without a join filter, it's impossible to be less than the row count of both tables
+    /// Inner sometimes < row count means that the inner join result < 1 / the row count of exactly
+    /// one table.   Note that without a join filter, it's impossible to be less than the row
+    /// count of both tables
     #[test]
     fn test_outer_nonunique_oncond_inner_sometimes_lt_rowcnt() {
         let cost_model = create_two_table_cost_model_custom_row_cnts(
@@ -1080,7 +1084,8 @@ mod tests {
             20,
             4,
         );
-        // the left/right of the join refers to the tables, not the order of columns in the predicate
+        // the left/right of the join refers to the tables, not the order of columns in the
+        // predicate
         let expr_tree = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let expr_tree_rev = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let schema = Schema::new(vec![]);
@@ -1148,12 +1153,14 @@ mod tests {
             50,
             4,
         );
-        // the left/right of the join refers to the tables, not the order of columns in the predicate
+        // the left/right of the join refers to the tables, not the order of columns in the
+        // predicate
         let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let eq1and0 = bin_op(BinOpType::Eq, col_ref(1), col_ref(0));
         let filter = bin_op(BinOpType::Leq, col_ref(0), cnst(Value::Int32(128)));
         let expr_tree = log_op(LogOpType::And, vec![eq0and1, filter.clone()]);
-        // inner rev means its the inner expr (the eq op) whose children are being reversed, as opposed to the and op
+        // inner rev means its the inner expr (the eq op) whose children are being reversed, as
+        // opposed to the and op
         let expr_tree_inner_rev = log_op(LogOpType::And, vec![eq1and0, filter.clone()]);
         let schema = Schema::new(vec![]);
         let column_refs = vec![
@@ -1199,9 +1206,9 @@ mod tests {
     }
 
     /// Test all possible permutations of three-table joins.
-    /// A three-table join consists of at least two joins. `join1_on_cond` is the condition of the first
-    ///   join. There can only be one condition because only two tables are involved at the time of the
-    ///   first join.
+    /// A three-table join consists of at least two joins. `join1_on_cond` is the condition of the
+    /// first   join. There can only be one condition because only two tables are involved at
+    /// the time of the   first join.
     #[test_case::test_case(&[(0, 1)])]
     #[test_case::test_case(&[(0, 2)])]
     #[test_case::test_case(&[(1, 2)])]
@@ -1285,7 +1292,8 @@ mod tests {
         let column_refs = col_refs;
         let input_correlation = Some(semantic_correlation);
 
-        // Try all join conditions of the final join which would lead to all three tables being joined.
+        // Try all join conditions of the final join which would lead to all three tables being
+        // joined.
         let eq0and1 = bin_op(BinOpType::Eq, col_ref(0), col_ref(1));
         let eq0and2 = bin_op(BinOpType::Eq, col_ref(0), col_ref(2));
         let eq1and2 = bin_op(BinOpType::Eq, col_ref(1), col_ref(2));

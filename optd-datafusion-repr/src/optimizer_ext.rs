@@ -1,12 +1,9 @@
-use optd_core::{nodes::PlanNodeOrGroup, optimizer::Optimizer};
+use optd_core::nodes::PlanNodeOrGroup;
+use optd_core::optimizer::Optimizer;
 
-use crate::{
-    plan_nodes::DfNodeType,
-    properties::{
-        column_ref::{ColumnRefPropertyBuilder, GroupColumnRefs},
-        schema::{Schema, SchemaPropertyBuilder},
-    },
-};
+use crate::plan_nodes::DfNodeType;
+use crate::properties::column_ref::{ColumnRefPropertyBuilder, GroupColumnRefs};
+use crate::properties::schema::{Schema, SchemaPropertyBuilder};
 
 pub trait OptimizerExt {
     fn get_schema_of(&self, root_rel: PlanNodeOrGroup<DfNodeType>) -> Schema;

@@ -1,17 +1,16 @@
+use std::env::consts::OS;
+use std::fmt::{self, Display, Formatter};
+use std::fs::File;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::{env, fs, io};
+
 /// A wrapper around tpch-kit
 use csv2parquet::Opts;
 use datafusion::catalog::schema::SchemaProvider;
 use serde::{Deserialize, Serialize};
 
 use crate::shell;
-use std::env;
-use std::env::consts::OS;
-use std::fmt::{self, Display, Formatter};
-use std::fs;
-use std::fs::File;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 const TPCH_KIT_REPO_URL: &str = "https://github.com/wangpatrick57/tpch-kit.git";
 pub const TPCH_KIT_POSTGRES: &str = "POSTGRESQL";

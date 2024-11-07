@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 
-use crate::plan_nodes::{ArcDfPredNode, ConstantPred, DfNodeType, DfReprPredNode};
 use itertools::Itertools;
-use optd_core::{
-    cascades::{CascadesOptimizer, NaiveMemo, RelNodeContext},
-    cost::{Cost, CostModel, Statistics},
-};
+use optd_core::cascades::{CascadesOptimizer, NaiveMemo, RelNodeContext};
+use optd_core::cost::{Cost, CostModel, Statistics};
 use value_bag::ValueBag;
+
+use crate::plan_nodes::{ArcDfPredNode, ConstantPred, DfNodeType, DfReprPredNode};
 
 pub struct DfCostModel {
     table_stat: HashMap<String, usize>,

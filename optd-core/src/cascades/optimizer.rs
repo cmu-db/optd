@@ -1,26 +1,21 @@
-use std::{
-    collections::{BTreeSet, HashMap, HashSet, VecDeque},
-    fmt::Display,
-    sync::Arc,
-};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::fmt::Display;
+use std::sync::Arc;
 
 use anyhow::Result;
 use tracing::trace;
 
-use crate::{
-    cascades::memo::Winner,
-    cost::CostModel,
-    nodes::{ArcPlanNode, ArcPredNode, NodeType, PlanNodeMeta, PlanNodeMetaMap, PlanNodeOrGroup},
-    optimizer::Optimizer,
-    property::{PropertyBuilder, PropertyBuilderAny},
-    rules::RuleWrapper,
+use super::memo::{ArcMemoPlanNode, GroupInfo, Memo};
+use super::tasks::OptimizeGroupTask;
+use super::{NaiveMemo, Task};
+use crate::cascades::memo::Winner;
+use crate::cost::CostModel;
+use crate::nodes::{
+    ArcPlanNode, ArcPredNode, NodeType, PlanNodeMeta, PlanNodeMetaMap, PlanNodeOrGroup,
 };
-
-use super::{
-    memo::{ArcMemoPlanNode, GroupInfo, Memo},
-    tasks::OptimizeGroupTask,
-    NaiveMemo, Task,
-};
+use crate::optimizer::Optimizer;
+use crate::property::{PropertyBuilder, PropertyBuilderAny};
+use crate::rules::RuleWrapper;
 
 pub type RuleId = usize;
 
@@ -55,8 +50,9 @@ pub struct CascadesOptimizer<T: NodeType, M: Memo<T> = NaiveMemo<T>> {
     pub prop: OptimizerProperties,
 }
 
-/// `RelNode` only contains the representation of the plan nodes. Sometimes, we need more context, i.e., group id and
-/// expr id, during the optimization phase. All these information are collected in this struct.
+/// `RelNode` only contains the representation of the plan nodes. Sometimes, we need more context,
+/// i.e., group id and expr id, during the optimization phase. All these information are collected
+/// in this struct.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
 pub struct RelNodeContext {
     pub group_id: GroupId,

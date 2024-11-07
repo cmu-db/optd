@@ -3,10 +3,10 @@ use pretty_xmlish::Pretty;
 
 use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
 
-/// The pattern of storing numerical, comparison, and logical operators in the same type with is_*() functions
-///     to distinguish between them matches how datafusion::logical_expr::Operator does things
-/// I initially thought about splitting BinOpType into three "subenums". However, having two nested levels of
-///     types leads to some really confusing code
+/// The pattern of storing numerical, comparison, and logical operators in the same type with is_*()
+/// functions     to distinguish between them matches how datafusion::logical_expr::Operator does
+/// things I initially thought about splitting BinOpType into three "subenums". However, having two
+/// nested levels of     types leads to some really confusing code
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum BinOpType {
     // numerical

@@ -1,24 +1,21 @@
 use std::ops::Bound;
 
-use serde::{de::DeserializeOwned, Serialize};
-
-use crate::adv_stats::{
-    stats::{ColumnCombValueStats, Distribution, MostCommonValues},
-    UNIMPLEMENTED_SEL,
+use optd_datafusion_repr::plan_nodes::{
+    ArcDfPredNode, BinOpType, CastPred, ColumnRefPred, ConstantPred, ConstantType, DfPredType,
+    DfReprPredNode, InListPred, LikePred, LogOpType, UnOpType,
 };
-use optd_datafusion_repr::{
-    plan_nodes::{
-        ArcDfPredNode, BinOpType, CastPred, ColumnRefPred, ConstantPred, ConstantType, DfPredType,
-        DfReprPredNode, InListPred, LikePred, LogOpType, UnOpType,
-    },
-    properties::{
-        column_ref::{BaseTableColumnRef, BaseTableColumnRefs, ColumnRef, GroupColumnRefs},
-        schema::Schema,
-    },
-    Value,
+use optd_datafusion_repr::properties::column_ref::{
+    BaseTableColumnRef, BaseTableColumnRefs, ColumnRef, GroupColumnRefs,
 };
+use optd_datafusion_repr::properties::schema::Schema;
+use optd_datafusion_repr::Value;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
-use super::{stats::ColumnCombValue, AdvStats, DEFAULT_EQ_SEL, DEFAULT_INEQ_SEL};
+use super::stats::ColumnCombValue;
+use super::{AdvStats, DEFAULT_EQ_SEL, DEFAULT_INEQ_SEL};
+use crate::adv_stats::stats::{ColumnCombValueStats, Distribution, MostCommonValues};
+use crate::adv_stats::UNIMPLEMENTED_SEL;
 
 mod in_list;
 mod like;
@@ -46,15 +43,16 @@ impl<
     ///
     /// - An "expression node" refers to a RelNode that returns true for is_expression()
     /// - A "full expression tree" is where every node in the tree is an expression node
-    /// - A "mixed expression tree" is where every base-case node and all its parents are expression nodes
+    /// - A "mixed expression tree" is where every base-case node and all its parents are expression
+    ///   nodes
     /// - A "base-case node" is a node that doesn't lead to further recursion (such as a BinOp(Eq))
     ///
     /// The schema input is the schema the predicate represented by the expr_tree is applied on.
     ///
     /// The output will be the selectivity of the expression tree if it were a "filter predicate".
     ///
-    /// A "filter predicate" operates on one input node, unlike a "join predicate" which operates on two input nodes.
-    /// This is why the function only takes in a single schema.
+    /// A "filter predicate" operates on one input node, unlike a "join predicate" which operates on
+    /// two input nodes. This is why the function only takes in a single schema.
     pub(super) fn get_filter_selectivity(
         &self,
         expr_tree: ArcDfPredNode,
@@ -68,8 +66,9 @@ impl<
                 assert!(expr_tree.children.len() == 1);
                 let child = expr_tree.child(0);
                 match un_op_typ {
-                    // not doesn't care about nulls so there's no complex logic. it just reverses the selectivity
-                    // for instance, != _will not_ include nulls but "NOT ==" _will_ include nulls
+                    // not doesn't care about nulls so there's no complex logic. it just reverses
+                    // the selectivity for instance, != _will not_ include nulls
+                    // but "NOT ==" _will_ include nulls
                     UnOpType::Not => 1.0 - self.get_filter_selectivity(child, schema, column_refs),
                     UnOpType::Neg => panic!(
                         "the selectivity of operations that return numerical values is undefined"
@@ -185,7 +184,8 @@ impl<
         let mut uncasted_left = left;
         let mut uncasted_right = right;
         loop {
-            // println!("loop {}, uncasted_left={:?}, uncasted_right={:?}", Local::now(), uncasted_left, uncasted_right);
+            // println!("loop {}, uncasted_left={:?}, uncasted_right={:?}", Local::now(),
+            // uncasted_left, uncasted_right);
             if uncasted_left.as_ref().typ == DfPredType::Cast
                 && uncasted_right.as_ref().typ == DfPredType::Cast
             {
@@ -227,16 +227,17 @@ impl<
                             .expect("we already checked that the type is ColumnRef");
                         let col_ref_idx = col_ref_expr.index();
                         cast_node = col_ref_expr.into_pred_node();
-                        // The "invert" cast is to invert the cast so that we're casting the non_cast_node to
-                        // the column's original type.
+                        // The "invert" cast is to invert the cast so that we're casting the
+                        // non_cast_node to the column's original type.
                         let invert_cast_data_type =
                             &schema.fields[col_ref_idx].typ.into_data_type();
 
                         match non_cast_node.typ {
                             DfPredType::ColumnRef => {
-                                // In general, there's no way to remove the Cast here. We can't move the Cast to the
-                                // other ColumnRef because that would lead to an infinite loop. Thus, we just leave the
-                                // cast where it is and break.
+                                // In general, there's no way to remove the Cast here. We can't move
+                                // the Cast to the other ColumnRef
+                                // because that would lead to an infinite loop. Thus, we just leave
+                                // the cast where it is and break.
                                 true
                             }
                             _ => {
@@ -318,7 +319,8 @@ impl<
     ) -> f64 {
         assert!(comp_bin_op_typ.is_comparison());
 
-        // I intentionally performed moves on left and right. This way, we don't accidentally use them after this block
+        // I intentionally performed moves on left and right. This way, we don't accidentally use
+        // them after this block
         let (col_ref_exprs, values, non_col_ref_exprs, is_left_col_ref) =
             Self::get_semantic_nodes(left, right, schema);
 
@@ -395,11 +397,11 @@ impl<
         }
     }
 
-    /// Get the selectivity of an expression of the form "column equals value" (or "value equals column")
-    /// Will handle the case of statistics missing
-    /// Equality predicates are handled entirely differently from range predicates so this is its own function
-    /// Also, get_column_equality_selectivity is a subroutine when computing range selectivity, which is another
-    ///     reason for separating these into two functions
+    /// Get the selectivity of an expression of the form "column equals value" (or "value equals
+    /// column") Will handle the case of statistics missing
+    /// Equality predicates are handled entirely differently from range predicates so this is its
+    /// own function Also, get_column_equality_selectivity is a subroutine when computing range
+    /// selectivity, which is another     reason for separating these into two functions
     /// is_eq means whether it's == or !=
     fn get_column_equality_selectivity(
         &self,
@@ -419,7 +421,8 @@ impl<
                 if non_mcv_cnt == 0 {
                     return 0.0;
                 }
-                // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt - 1 if null_frac > 0
+                // note that nulls are not included in ndistinct so we don't need to do non_mcv_cnt
+                // - 1 if null_frac > 0
                 (non_mcv_freq - column_stats.null_frac) / (non_mcv_cnt as f64)
             };
             if is_eq {
@@ -448,8 +451,9 @@ impl<
         per_column_stats: &ColumnCombValueStats<M, D>,
         value: &Value,
     ) -> f64 {
-        // because distr does not include the values in MCVs, we need to compute the CDFs there as well
-        // because nulls return false in any comparison, they are never included when computing range selectivity
+        // because distr does not include the values in MCVs, we need to compute the CDFs there as
+        // well because nulls return false in any comparison, they are never included when
+        // computing range selectivity
         let distr_leq_freq = per_column_stats.distr.as_ref().unwrap().cdf(value);
         let value = value.clone();
         let pred = Box::new(move |val: &ColumnCombValue| *val[0].as_ref().unwrap() <= value);
@@ -471,8 +475,9 @@ impl<
         col_idx: usize,
         value: &Value,
     ) -> f64 {
-        // depending on whether value is in mcvs or not, we use different logic to turn total_lt_cdf into total_leq_cdf
-        // this logic just so happens to be the exact same logic as get_column_equality_selectivity implements
+        // depending on whether value is in mcvs or not, we use different logic to turn total_lt_cdf
+        // into total_leq_cdf this logic just so happens to be the exact same logic as
+        // get_column_equality_selectivity implements
         let ret_freq = Self::get_column_leq_value_freq(column_stats, value)
             - self.get_column_equality_selectivity(table, col_idx, value, true);
         assert!(
@@ -483,10 +488,10 @@ impl<
         ret_freq
     }
 
-    /// Get the selectivity of an expression of the form "column </<=/>=/> value" (or "value </<=/>=/> column").
-    /// Computes selectivity based off of statistics.
-    /// Range predicates are handled entirely differently from equality predicates so this is its own function.
-    /// If it is unable to find the statistics, it returns DEFAULT_INEQ_SEL.
+    /// Get the selectivity of an expression of the form "column </<=/>=/> value" (or "value
+    /// </<=/>=/> column"). Computes selectivity based off of statistics.
+    /// Range predicates are handled entirely differently from equality predicates so this is its
+    /// own function. If it is unable to find the statistics, it returns DEFAULT_INEQ_SEL.
     /// The selectivity is computed as quantile of the right bound minus quantile of the left bound.
     fn get_column_range_selectivity(
         &self,
@@ -543,15 +548,12 @@ impl<
 mod tests {
     use arrow_schema::DataType;
     use optd_core::nodes::Value;
+    use optd_datafusion_repr::plan_nodes::{BinOpType, ConstantType, LogOpType, UnOpType};
+    use optd_datafusion_repr::properties::column_ref::ColumnRef;
+    use optd_datafusion_repr::properties::schema::{Field, Schema};
 
-    use crate::adv_stats::{tests::*, DEFAULT_EQ_SEL};
-    use optd_datafusion_repr::{
-        plan_nodes::{BinOpType, ConstantType, LogOpType, UnOpType},
-        properties::{
-            column_ref::ColumnRef,
-            schema::{Field, Schema},
-        },
-    };
+    use crate::adv_stats::tests::*;
+    use crate::adv_stats::DEFAULT_EQ_SEL;
 
     #[test]
     fn test_const() {
@@ -777,7 +779,8 @@ mod tests {
                 .into_iter()
                 .collect(),
             },
-            11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
+            11, /* there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each
+                 * remaining value has freq 0.1 */
             0.0,
             Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
@@ -811,7 +814,8 @@ mod tests {
                 .into_iter()
                 .collect(),
             },
-            11, // there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each remaining value has freq 0.1
+            11, /* there are 4 MCVs which together add up to 0.3. With 11 total ndistinct, each
+                 * remaining value has freq 0.1 */
             0.0,
             Some(TestDistribution::new(vec![(Value::Int32(15), 0.7)])),
         ));
@@ -989,7 +993,8 @@ mod tests {
         );
     }
 
-    // I didn't test any non-unique cases with filter. The non-unique tests without filter should cover that
+    // I didn't test any non-unique cases with filter. The non-unique tests without filter should
+    // cover that
 
     #[test]
     fn test_colref_eq_cast_value() {

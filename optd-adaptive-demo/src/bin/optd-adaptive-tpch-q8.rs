@@ -1,18 +1,16 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use datafusion::error::Result;
 use datafusion::execution::context::{SessionConfig, SessionState};
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
 use datafusion::prelude::SessionContext;
-use datafusion_optd_cli::exec::{exec_from_commands_collect, exec_from_files};
-use datafusion_optd_cli::{
-    exec::exec_from_commands,
-    print_format::PrintFormat,
-    print_options::{MaxRows, PrintOptions},
-};
+use datafusion_optd_cli::exec::{exec_from_commands, exec_from_commands_collect, exec_from_files};
+use datafusion_optd_cli::print_format::PrintFormat;
+use datafusion_optd_cli::print_options::{MaxRows, PrintOptions};
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::DatafusionOptimizer;
-use std::sync::Arc;
-use std::time::Duration;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;

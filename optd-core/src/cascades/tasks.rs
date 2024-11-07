@@ -1,8 +1,7 @@
 use anyhow::Result;
 
-use crate::nodes::NodeType;
-
 use super::{CascadesOptimizer, Memo};
+use crate::nodes::NodeType;
 
 mod apply_rule;
 mod explore_group;

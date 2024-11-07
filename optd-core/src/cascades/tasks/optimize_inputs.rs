@@ -2,18 +2,13 @@ use anyhow::Result;
 use itertools::Itertools;
 use tracing::trace;
 
-use crate::{
-    cascades::{
-        memo::{GroupInfo, Winner, WinnerInfo},
-        optimizer::ExprId,
-        tasks::OptimizeGroupTask,
-        CascadesOptimizer, Memo, RelNodeContext,
-    },
-    cost::{Cost, Statistics},
-    nodes::NodeType,
-};
-
 use super::Task;
+use crate::cascades::memo::{GroupInfo, Winner, WinnerInfo};
+use crate::cascades::optimizer::ExprId;
+use crate::cascades::tasks::OptimizeGroupTask;
+use crate::cascades::{CascadesOptimizer, Memo, RelNodeContext};
+use crate::cost::{Cost, Statistics};
+use crate::nodes::NodeType;
 
 #[derive(Debug, Clone)]
 struct ContinueTask {
@@ -138,8 +133,9 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeInputsTask {
     fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) -> Result<Vec<Box<dyn Task<T, M>>>> {
         if self.continue_from.is_none() {
             if optimizer.is_expr_explored(self.expr_id) {
-                // skip optimize_inputs to avoid dead-loop: consider join commute being fired twice that produces
-                // two projections, therefore having groups like projection1 -> projection2 -> join = projection1.
+                // skip optimize_inputs to avoid dead-loop: consider join commute being fired twice
+                // that produces two projections, therefore having groups like
+                // projection1 -> projection2 -> join = projection1.
                 trace!(event = "task_skip", task = "optimize_inputs", expr_id = %self.expr_id);
                 return Ok(vec![]);
             }

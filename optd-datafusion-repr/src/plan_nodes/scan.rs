@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
+use optd_core::nodes::PlanNodeMetaMap;
 use pretty_xmlish::Pretty;
 
-use crate::explain::Insertable;
-use optd_core::nodes::PlanNodeMetaMap;
-
 use super::{ArcDfPlanNode, ConstantPred, DfNodeType, DfPlanNode, DfReprPlanNode, DfReprPredNode};
+use crate::explain::Insertable;
 
 #[derive(Clone, Debug)]
 pub struct LogicalScan(pub ArcDfPlanNode);

@@ -5,10 +5,12 @@
 //! We modified it by hashing objects into 64-bit values instead of 32-bit ones to reduce the
 //! number of collisions and eliminate the need for a large range correction estimator.
 
+use std::cmp::max;
+use std::marker::PhantomData;
+
 use optd_core::nodes::Value;
 
 use crate::stats::murmur2::murmur_hash;
-use std::{cmp::max, marker::PhantomData};
 
 pub const DEFAULT_PRECISION: u8 = 16;
 
@@ -184,14 +186,15 @@ fn compute_alpha(m: usize) -> f64 {
 // Start of unit testing section.
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
-    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    use crossbeam::thread;
+    use rand::distributions::Alphanumeric;
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
 
     use super::HyperLogLog;
-    use crossbeam::thread;
-    use rand::{distributions::Alphanumeric, rngs::StdRng, Rng, SeedableRng};
 
     #[test]
     fn hll_small_strings() {

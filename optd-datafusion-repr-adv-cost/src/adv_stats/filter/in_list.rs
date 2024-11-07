@@ -1,13 +1,14 @@
-use serde::{de::DeserializeOwned, Serialize};
+use optd_datafusion_repr::plan_nodes::{
+    ColumnRefPred, ConstantPred, DfPredType, DfReprPredNode, InListPred,
+};
+use optd_datafusion_repr::properties::column_ref::{
+    BaseTableColumnRef, BaseTableColumnRefs, ColumnRef,
+};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
-use crate::adv_stats::{
-    stats::{Distribution, MostCommonValues},
-    AdvStats, UNIMPLEMENTED_SEL,
-};
-use optd_datafusion_repr::{
-    plan_nodes::{ColumnRefPred, ConstantPred, DfPredType, DfReprPredNode, InListPred},
-    properties::column_ref::{BaseTableColumnRef, BaseTableColumnRefs, ColumnRef},
-};
+use crate::adv_stats::stats::{Distribution, MostCommonValues};
+use crate::adv_stats::{AdvStats, UNIMPLEMENTED_SEL};
 
 impl<
         M: MostCommonValues + Serialize + DeserializeOwned,
@@ -72,11 +73,13 @@ impl<
 
 #[cfg(test)]
 mod tests {
+    use optd_datafusion_repr::properties::column_ref::ColumnRef;
+    use optd_datafusion_repr::Value;
+
     use crate::adv_stats::tests::{
         create_one_column_cost_model, in_list, TestDistribution, TestMostCommonValues,
         TestPerColumnStats, TABLE1_NAME,
     };
-    use optd_datafusion_repr::{properties::column_ref::ColumnRef, Value};
 
     #[test]
     fn test_in_list() {

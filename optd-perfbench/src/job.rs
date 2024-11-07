@@ -1,15 +1,15 @@
+use std::fmt::{self, Display, Formatter};
+use std::fs::File;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::{fs, io};
+
 use csv2parquet::Opts;
 use datafusion::catalog::schema::SchemaProvider;
 /// A wrapper around job-kit
 use serde::{Deserialize, Serialize};
 
 use crate::shell;
-use std::fmt::{self, Display, Formatter};
-use std::fs;
-use std::fs::File;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 const JOB_KIT_REPO_URL: &str = "https://github.com/wangpatrick57/job-kit.git";
 const JOB_TABLES_URL: &str = "https://homepages.cwi.nl/~boncz/job/imdb.tgz";

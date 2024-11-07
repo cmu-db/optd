@@ -105,16 +105,15 @@ fn apply_filter_project_transpose(
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        plan_nodes::{
-            BinOpPred, BinOpType, ColumnRefPred, ConstantPred, LogOpPred, LogOpType, LogicalScan,
-        },
-        testing::new_test_optimizer,
-    };
     use std::sync::Arc;
 
-    use super::*;
     use optd_core::optimizer::Optimizer;
+
+    use super::*;
+    use crate::plan_nodes::{
+        BinOpPred, BinOpType, ColumnRefPred, ConstantPred, LogOpPred, LogOpType, LogicalScan,
+    };
+    use crate::testing::new_test_optimizer;
 
     // ProjectFilterTransposeRule Tests
     #[test]

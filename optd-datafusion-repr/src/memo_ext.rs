@@ -1,15 +1,11 @@
 //! Memo table extensions
 
-use std::{
-    collections::{BTreeSet, HashMap},
-    sync::Arc,
-};
+use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 
 use itertools::Itertools;
-use optd_core::{
-    cascades::{ExprId, GroupId, Memo},
-    nodes::NodeType,
-};
+use optd_core::cascades::{ExprId, GroupId, Memo};
+use optd_core::nodes::NodeType;
 
 use crate::plan_nodes::{ConstantPred, DfNodeType, DfReprPredNode};
 
@@ -42,7 +38,7 @@ fn enumerate_join_order_expr_inner<M: Memo<DfNodeType> + ?Sized>(
     let expr = memo.get_expr_memoed(current);
     match expr.typ {
         DfNodeType::Scan => {
-            let table = memo.get_pred(expr.predicates[0]); /* TODO: use unified repr */
+            let table = memo.get_pred(expr.predicates[0]); // TODO: use unified repr
             let table = ConstantPred::from_pred_node(table)
                 .unwrap()
                 .value()
@@ -95,8 +91,9 @@ fn enumerate_join_order_group_inner<M: Memo<DfNodeType> + ?Sized>(
     if let Some(result) = visited.get(&current) {
         return result.clone();
     }
-    // If the current node is processed again before the result gets populated, simply return an empty list, as another
-    // search path will eventually return a correct for it, and then get combined with this empty list.
+    // If the current node is processed again before the result gets populated, simply return an
+    // empty list, as another search path will eventually return a correct for it, and then get
+    // combined with this empty list.
     visited.insert(current, Vec::new());
     let group_exprs = memo.get_all_exprs_in_group(current);
     let mut join_orders = BTreeSet::new();
@@ -120,17 +117,14 @@ impl<M: Memo<DfNodeType>> MemoExt for M {
 
 #[cfg(test)]
 mod tests {
-    use optd_core::{
-        cascades::NaiveMemo,
-        nodes::{PlanNodeOrGroup, Value},
-    };
+    use optd_core::cascades::NaiveMemo;
+    use optd_core::nodes::{PlanNodeOrGroup, Value};
 
+    use super::*;
     use crate::plan_nodes::{
         ConstantPred, DfReprPlanNode, DfReprPredNode, JoinType, ListPred, LogicalJoin,
         LogicalProjection, LogicalScan,
     };
-
-    use super::*;
 
     #[test]
     fn enumerate_join_orders() {

@@ -4,31 +4,27 @@ mod from_optd;
 mod into_optd;
 mod physical_collector;
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use async_trait::async_trait;
-use datafusion::{
-    arrow::datatypes::DataType,
-    catalog::CatalogList,
-    error::Result,
-    execution::context::{QueryPlanner, SessionState},
-    logical_expr::{
-        Explain, LogicalPlan, PlanType, StringifiedPlan, TableSource, ToStringifiedPlan,
-    },
-    physical_plan::{displayable, explain::ExplainExec, ExecutionPlan},
-    physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
+use datafusion::arrow::datatypes::DataType;
+use datafusion::catalog::CatalogList;
+use datafusion::error::Result;
+use datafusion::execution::context::{QueryPlanner, SessionState};
+use datafusion::logical_expr::{
+    Explain, LogicalPlan, PlanType, StringifiedPlan, TableSource, ToStringifiedPlan,
 };
+use datafusion::physical_plan::explain::ExplainExec;
+use datafusion::physical_plan::{displayable, ExecutionPlan};
+use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
 use itertools::Itertools;
-use optd_datafusion_repr::{
-    plan_nodes::{
-        dispatch_plan_explain_to_string, ArcDfPlanNode, ConstantType, DfNodeType, DfReprPlanNode,
-        PhysicalHashJoin, PhysicalNestedLoopJoin,
-    },
-    properties::schema::Catalog,
-    DatafusionOptimizer, MemoExt,
+use optd_datafusion_repr::plan_nodes::{
+    dispatch_plan_explain_to_string, ArcDfPlanNode, ConstantType, DfNodeType, DfReprPlanNode,
+    PhysicalHashJoin, PhysicalNestedLoopJoin,
 };
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use optd_datafusion_repr::properties::schema::Catalog;
+use optd_datafusion_repr::{DatafusionOptimizer, MemoExt};
 
 pub struct OptdPlanContext<'a> {
     tables: HashMap<String, Arc<dyn TableSource>>,

@@ -1,14 +1,16 @@
-use datafusion::arrow::{array::StringArray, compute::like};
-use serde::{de::DeserializeOwned, Serialize};
+use datafusion::arrow::array::StringArray;
+use datafusion::arrow::compute::like;
+use optd_datafusion_repr::plan_nodes::{
+    ColumnRefPred, ConstantPred, DfPredType, DfReprPredNode, LikePred,
+};
+use optd_datafusion_repr::properties::column_ref::{
+    BaseTableColumnRef, BaseTableColumnRefs, ColumnRef,
+};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
-use crate::adv_stats::{
-    stats::{ColumnCombValue, Distribution, MostCommonValues},
-    AdvStats, UNIMPLEMENTED_SEL,
-};
-use optd_datafusion_repr::{
-    plan_nodes::{ColumnRefPred, ConstantPred, DfPredType, DfReprPredNode, LikePred},
-    properties::column_ref::{BaseTableColumnRef, BaseTableColumnRefs, ColumnRef},
-};
+use crate::adv_stats::stats::{ColumnCombValue, Distribution, MostCommonValues};
+use crate::adv_stats::{AdvStats, UNIMPLEMENTED_SEL};
 
 // Used for estimating pattern selectivity character-by-character. These numbers
 // are not used on their own. Depending on the characters in the pattern, the
@@ -25,15 +27,16 @@ impl<
 {
     /// Compute the selectivity of a (NOT) LIKE expression.
     ///
-    /// The logic is somewhat similar to Postgres but different. Postgres first estimates the histogram part of the
-    /// population and then add up data for any MCV values. If the histogram is large enough, it just uses the number
-    /// of matches in the histogram, otherwise it estimates the fixed prefix and remainder of pattern separately and
+    /// The logic is somewhat similar to Postgres but different. Postgres first estimates the
+    /// histogram part of the population and then add up data for any MCV values. If the
+    /// histogram is large enough, it just uses the number of matches in the histogram,
+    /// otherwise it estimates the fixed prefix and remainder of pattern separately and
     /// combine them.
     ///
-    /// Our approach is simpler and less selective. Firstly, we don't use histogram. The selectivity is composed of MCV
-    /// frequency and non-MCV selectivity. MCV frequency is computed by adding up frequencies of MCVs that match the
-    /// pattern. Non-MCV  selectivity is computed in the same way that Postgres computes selectivity for the wildcard
-    /// part of the pattern.
+    /// Our approach is simpler and less selective. Firstly, we don't use histogram. The selectivity
+    /// is composed of MCV frequency and non-MCV selectivity. MCV frequency is computed by
+    /// adding up frequencies of MCVs that match the pattern. Non-MCV  selectivity is computed
+    /// in the same way that Postgres computes selectivity for the wildcard part of the pattern.
     pub(super) fn get_like_selectivity(
         &self,
         like_expr: &LikePred,
@@ -99,7 +102,8 @@ impl<
             } else {
                 result
             }
-            // Postgres clamps the result after histogram and before MCV. See Postgres `patternsel_common`.
+            // Postgres clamps the result after histogram and before MCV. See Postgres
+            // `patternsel_common`.
             .clamp(0.0001, 0.9999)
         } else {
             UNIMPLEMENTED_SEL
@@ -109,14 +113,14 @@ impl<
 
 #[cfg(test)]
 mod tests {
-    use crate::adv_stats::{
-        filter::like::{FIXED_CHAR_SEL_FACTOR, FULL_WILDCARD_SEL_FACTOR},
-        tests::{
-            create_one_column_cost_model, like, TestDistribution, TestMostCommonValues,
-            TestPerColumnStats, TABLE1_NAME,
-        },
+    use optd_datafusion_repr::properties::column_ref::ColumnRef;
+    use optd_datafusion_repr::Value;
+
+    use crate::adv_stats::filter::like::{FIXED_CHAR_SEL_FACTOR, FULL_WILDCARD_SEL_FACTOR};
+    use crate::adv_stats::tests::{
+        create_one_column_cost_model, like, TestDistribution, TestMostCommonValues,
+        TestPerColumnStats, TABLE1_NAME,
     };
-    use optd_datafusion_repr::{properties::column_ref::ColumnRef, Value};
 
     #[test]
     fn test_like_no_nulls() {

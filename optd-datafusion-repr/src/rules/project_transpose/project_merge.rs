@@ -2,13 +2,12 @@ use optd_core::nodes::PlanNodeOrGroup;
 use optd_core::optimizer::Optimizer;
 use optd_core::rules::{Rule, RuleMatcher};
 
+use super::project_transpose_common::ProjectionMapping;
 use crate::plan_nodes::{
     ArcDfPlanNode, ColumnRefPred, DfNodeType, DfReprPlanNode, DfReprPredNode, LogicalProjection,
 };
 use crate::rules::macros::define_rule;
 use crate::OptimizerExt;
-
-use super::project_transpose_common::ProjectionMapping;
 
 // Proj (Proj A) -> Proj A
 // merges projections
@@ -77,11 +76,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-
-    use crate::{
-        plan_nodes::{ListPred, LogicalScan},
-        testing::new_test_optimizer,
-    };
+    use crate::plan_nodes::{ListPred, LogicalScan};
+    use crate::testing::new_test_optimizer;
 
     #[test]
     fn proj_merge_basic() {

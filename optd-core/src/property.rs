@@ -1,8 +1,7 @@
+use std::any::Any;
+use std::fmt::{Debug, Display};
+
 use crate::nodes::{ArcPredNode, NodeType};
-use std::{
-    any::Any,
-    fmt::{Debug, Display},
-};
 
 pub trait PropertyBuilderAny<T: NodeType>: 'static + Send + Sync {
     fn derive_any(

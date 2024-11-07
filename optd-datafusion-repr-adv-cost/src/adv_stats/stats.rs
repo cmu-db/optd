@@ -1,24 +1,22 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use arrow_schema::{DataType, Schema, SchemaRef};
-use datafusion::{
-    arrow::array::{
-        Array, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array, Int32Array,
-        Int8Array, RecordBatch, StringArray, UInt16Array, UInt32Array, UInt8Array,
-    },
-    parquet::arrow::arrow_reader::ParquetRecordBatchReader,
+use datafusion::arrow::array::{
+    Array, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array, Int32Array,
+    Int8Array, RecordBatch, StringArray, UInt16Array, UInt32Array, UInt8Array,
 };
+use datafusion::parquet::arrow::arrow_reader::ParquetRecordBatchReader;
 use itertools::Itertools;
 use optd_core::nodes::{SerializableOrderedF64, Value};
-use optd_gungnir::stats::{
-    counter::Counter,
-    hyperloglog::{self, HyperLogLog},
-    misragries::{self, MisraGries},
-    tdigest::{self, TDigest},
-};
+use optd_gungnir::stats::counter::Counter;
+use optd_gungnir::stats::hyperloglog::{self, HyperLogLog};
+use optd_gungnir::stats::misragries::{self, MisraGries};
+use optd_gungnir::stats::tdigest::{self, TDigest};
 use ordered_float::OrderedFloat;
 use rayon::prelude::*;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 // The "standard" concrete types that optd currently uses.
 // All of optd (except unit tests) must use the same types.
@@ -33,9 +31,10 @@ pub type DataFusionPerTableStats = TableStats<DataFusionMostCommonValues, DataFu
 //.
 /// This more general interface is still compatible with histograms but allows
 /// more powerful statistics like TDigest.
-/// Ideally, MostCommonValues would have trait bounds for Serialize and Deserialize. However, I have not figured
-//    out how to both have Deserialize as a trait bound and utilize the Deserialize macro, because the Deserialize
-//    trait involves lifetimes.
+/// Ideally, MostCommonValues would have trait bounds for Serialize and Deserialize. However, I have
+/// not figured
+//    out how to both have Deserialize as a trait bound and utilize the Deserialize macro, because
+// the Deserialize    trait involves lifetimes.
 pub trait Distribution: 'static + Send + Sync {
     // Give the probability of a random value sampled from the distribution being <= `value`
     fn cdf(&self, value: &Value) -> f64;
@@ -57,15 +56,15 @@ pub type ColumnsIdx = Vec<usize>;
 pub type ColumnsType = Vec<DataType>;
 pub type ColumnCombValue = Vec<Option<Value>>;
 
-/// Ideally, MostCommonValues would have trait bounds for Serialize and Deserialize. However, I have not figured
-///   out how to both have Deserialize as a trait bound and utilize the Deserialize macro, because the Deserialize
-///   trait involves lifetimes.
+/// Ideally, MostCommonValues would have trait bounds for Serialize and Deserialize. However, I have
+/// not figured   out how to both have Deserialize as a trait bound and utilize the Deserialize
+/// macro, because the Deserialize   trait involves lifetimes.
 pub trait MostCommonValues: 'static + Send + Sync {
-    // it is true that we could just expose freq_over_pred() and use that for freq() and total_freq()
-    // however, freq() and total_freq() each have potential optimizations (freq() is O(1) instead of
-    //     O(n) and total_freq() can be cached)
-    // additionally, it makes sense to return an Option<f64> for freq() instead of just 0 if value doesn't exist
-    // thus, I expose three different functions
+    // it is true that we could just expose freq_over_pred() and use that for freq() and
+    // total_freq() however, freq() and total_freq() each have potential optimizations (freq()
+    // is O(1) instead of     O(n) and total_freq() can be cached)
+    // additionally, it makes sense to return an Option<f64> for freq() instead of just 0 if value
+    // doesn't exist thus, I expose three different functions
     fn freq(&self, value: &ColumnCombValue) -> Option<f64>;
     fn total_freq(&self) -> f64;
     fn freq_over_pred(&self, pred: Box<dyn Fn(&ColumnCombValue) -> bool>) -> f64;
@@ -238,7 +237,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
 
     fn to_typed_column(col: &Arc<dyn Array>, col_type: &DataType) -> Vec<Option<Value>> {
         macro_rules! simple_col_cast {
-            ({ $col:expr, $array_type:path, $value_type:path}) => {
+            ({ $col:expr, $array_type:path, $value_type:path }) => {
                 $col.as_any()
                     .downcast_ref::<$array_type>()
                     .unwrap()
@@ -249,7 +248,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         }
 
         macro_rules! float_col_cast {
-            ({ $col:expr, $array_type:path}) => {
+            ({ $col:expr, $array_type:path }) => {
                 $col.as_any()
                     .downcast_ref::<$array_type>()
                     .unwrap()
@@ -264,7 +263,7 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
         }
 
         macro_rules! utf8_col_cast {
-            ({ $col:expr}) => {
+            ({ $col:expr }) => {
                 col.as_any()
                     .downcast_ref::<StringArray>()
                     .unwrap()
@@ -306,7 +305,8 @@ impl TableStats<Counter<ColumnCombValue>, TDigest<Value>> {
                     for (row_values, value) in
                         column_comb_values.iter_mut().zip(column_values.iter())
                     {
-                        // This redundant copy is faster than making to_typed_column return an iterator!
+                        // This redundant copy is faster than making to_typed_column return an
+                        // iterator!
                         row_values.push(value.clone());
                     }
                 }

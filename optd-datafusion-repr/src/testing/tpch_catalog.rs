@@ -1,9 +1,7 @@
 use core::panic;
 
-use crate::{
-    plan_nodes::ConstantType,
-    properties::schema::{Catalog, Field, Schema},
-};
+use crate::plan_nodes::ConstantType;
+use crate::properties::schema::{Catalog, Field, Schema};
 
 pub struct TpchCatalog;
 

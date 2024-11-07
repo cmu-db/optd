@@ -1,9 +1,9 @@
 use optd_datafusion_repr::plan_nodes::{ArcDfPredNode, ConstantPred, DfReprPredNode};
-use serde::{de::DeserializeOwned, Serialize};
-
-use crate::adv_stats::stats::{Distribution, MostCommonValues};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 use super::AdvStats;
+use crate::adv_stats::stats::{Distribution, MostCommonValues};
 
 impl<
         M: MostCommonValues + Serialize + DeserializeOwned,

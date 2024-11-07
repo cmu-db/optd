@@ -1,16 +1,12 @@
 use anyhow::Result;
 use tracing::trace;
 
-use crate::{
-    cascades::{
-        optimizer::GroupId,
-        tasks::{optimize_expression::OptimizeExpressionTask, OptimizeInputsTask},
-        CascadesOptimizer, Memo,
-    },
-    nodes::NodeType,
-};
-
 use super::Task;
+use crate::cascades::optimizer::GroupId;
+use crate::cascades::tasks::optimize_expression::OptimizeExpressionTask;
+use crate::cascades::tasks::OptimizeInputsTask;
+use crate::cascades::{CascadesOptimizer, Memo};
+use crate::nodes::NodeType;
 
 pub struct OptimizeGroupTask {
     group_id: GroupId,

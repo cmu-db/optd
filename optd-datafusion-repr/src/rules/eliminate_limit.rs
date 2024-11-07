@@ -1,13 +1,13 @@
-use crate::plan_nodes::{
-    ArcDfPlanNode, ConstantPred, ConstantType, DfNodeType, DfPredType, DfReprPlanNode,
-    DfReprPredNode, LogicalEmptyRelation, LogicalLimit,
-};
-use crate::OptimizerExt;
 use optd_core::nodes::PlanNodeOrGroup;
 use optd_core::optimizer::Optimizer;
 use optd_core::rules::{Rule, RuleMatcher};
 
 use super::macros::define_rule;
+use crate::plan_nodes::{
+    ArcDfPlanNode, ConstantPred, ConstantType, DfNodeType, DfPredType, DfReprPlanNode,
+    DfReprPredNode, LogicalEmptyRelation, LogicalLimit,
+};
+use crate::OptimizerExt;
 
 define_rule!(EliminateLimitRule, apply_eliminate_limit, (Limit, child));
 

@@ -52,8 +52,8 @@ define_rule!(
 
 /// Initial rule to generate a join above this dependent join, and push the dependent
 /// join further into the right side.
-/// This is valuable because the left side of the dependent join will be a set, with only distinct values.
-/// This makes later transformations valid, and has to happen first.
+/// This is valuable because the left side of the dependent join will be a set, with only distinct
+/// values. This makes later transformations valid, and has to happen first.
 /// More information can be found in the "Unnesting Arbitrary Queries" paper.
 fn apply_dep_initial_distinct(
     optimizer: &impl Optimizer<DfNodeType>,

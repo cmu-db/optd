@@ -1,19 +1,16 @@
-use crate::plan_nodes::ArcDfPlanNode;
-use crate::plan_nodes::DfReprPredNode;
-use crate::Rule;
-
-use optd_core::nodes::PlanNodeOrGroup;
-use optd_core::rules::RuleMatcher;
 use std::vec;
 
-use crate::rules::macros::define_rule;
+use optd_core::nodes::PlanNodeOrGroup;
 use optd_core::optimizer::Optimizer;
+use optd_core::rules::RuleMatcher;
 
 use super::project_transpose_common::ProjectionMapping;
 use crate::plan_nodes::{
-    ColumnRefPred, DfNodeType, DfReprPlanNode, JoinType, ListPred, LogicalJoin, LogicalProjection,
+    ArcDfPlanNode, ColumnRefPred, DfNodeType, DfReprPlanNode, DfReprPredNode, JoinType, ListPred,
+    LogicalJoin, LogicalProjection,
 };
-use crate::OptimizerExt;
+use crate::rules::macros::define_rule;
+use crate::{OptimizerExt, Rule};
 
 // (Proj A) join B -> (Proj (A join B))
 define_rule!(

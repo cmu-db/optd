@@ -1,5 +1,7 @@
-use crate::{job::JobKitConfig, tpch::TpchKitConfig};
 use serde::{Deserialize, Serialize};
+
+use crate::job::JobKitConfig;
+use crate::tpch::TpchKitConfig;
 
 #[derive(Deserialize, Serialize)]
 pub enum Benchmark {
@@ -43,10 +45,10 @@ impl Benchmark {
     /// Postgres' rules:
     ///   - The name can only contain A-Z a-z 0-9 _ and cannot start with 0-9.
     ///   - There is a weird behavior where if you use CREATE DATABASE to create a database,
-    ///     Postgres will convert uppercase letters to lowercase. However, if you use psql to
-    ///     then connect to the database, Postgres will *not* convert capital letters to
-    ///     lowercase. To resolve the inconsistency, the names output by this function will
-    ///     *not* contain uppercase letters.
+    ///     Postgres will convert uppercase letters to lowercase. However, if you use psql to then
+    ///     connect to the database, Postgres will *not* convert capital letters to lowercase. To
+    ///     resolve the inconsistency, the names output by this function will *not* contain
+    ///     uppercase letters.
     pub fn get_dbname(&self) -> String {
         let fname = self.get_fname();
         // since Postgres names cannot contain periods

@@ -1,9 +1,11 @@
 //! A hash-based Counter implementation that will track exact frequencies for
 //! an array of prespecified elements.
 
-use std::{collections::HashMap, hash::Hash};
+use std::collections::HashMap;
+use std::hash::Hash;
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 /// The Counter structure to track exact frequencies of fixed elements.
 #[serde_with::serde_as]
@@ -78,8 +80,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use crossbeam::thread;
+    use rand::rngs::StdRng;
     use rand::seq::SliceRandom;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::SeedableRng;
 
     use super::Counter;
 

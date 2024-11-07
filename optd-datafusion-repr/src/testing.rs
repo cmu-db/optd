@@ -3,14 +3,12 @@ mod tpch_catalog;
 
 use std::sync::Arc;
 
-use optd_core::{
-    heuristics::{ApplyOrder, HeuristicsOptimizer},
-    rules::Rule,
-};
-
-use crate::{plan_nodes::DfNodeType, properties::schema::SchemaPropertyBuilder};
+use optd_core::heuristics::{ApplyOrder, HeuristicsOptimizer};
+use optd_core::rules::Rule;
 
 use self::tpch_catalog::TpchCatalog;
+use crate::plan_nodes::DfNodeType;
+use crate::properties::schema::SchemaPropertyBuilder;
 
 /// Create a "dummy" optimizer preloaded with the TPC-H catalog for testing
 /// Note: Only provides the schema property currently

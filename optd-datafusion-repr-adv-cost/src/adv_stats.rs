@@ -5,7 +5,8 @@ mod limit;
 pub mod stats;
 
 use optd_datafusion_repr::properties::column_ref::{BaseTableColumnRef, ColumnRef};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 use super::adv_stats::stats::{
     BaseTableStats, ColumnCombValueStats, Distribution, MostCommonValues,
@@ -65,25 +66,24 @@ impl<
     }
 }
 
-/// I thought about using the system's own parser and planner to generate these expression trees, but
-/// this is not currently feasible because it would create a cyclic dependency between optd-datafusion-bridge
-/// and optd-datafusion-repr
+/// I thought about using the system's own parser and planner to generate these expression trees,
+/// but this is not currently feasible because it would create a cyclic dependency between
+/// optd-datafusion-bridge and optd-datafusion-repr
 #[cfg(test)]
 mod tests {
-    use arrow_schema::DataType;
-    use itertools::Itertools;
-    use optd_datafusion_repr::{
-        plan_nodes::{
-            ArcDfPredNode, BinOpPred, BinOpType, CastPred, ColumnRefPred, ConstantPred,
-            DfReprPredNode, InListPred, LikePred, ListPred, LogOpPred, LogOpType, UnOpPred,
-            UnOpType,
-        },
-        Value,
-    };
-    use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
 
-    use super::{stats::*, *};
+    use arrow_schema::DataType;
+    use itertools::Itertools;
+    use optd_datafusion_repr::plan_nodes::{
+        ArcDfPredNode, BinOpPred, BinOpType, CastPred, ColumnRefPred, ConstantPred, DfReprPredNode,
+        InListPred, LikePred, ListPred, LogOpPred, LogOpType, UnOpPred, UnOpType,
+    };
+    use optd_datafusion_repr::Value;
+    use serde::{Deserialize, Serialize};
+
+    use super::stats::*;
+    use super::*;
     pub type TestPerColumnStats = ColumnCombValueStats<TestMostCommonValues, TestDistribution>;
     pub type TestOptCostModel = AdvStats<TestMostCommonValues, TestDistribution>;
 

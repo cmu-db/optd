@@ -3,10 +3,10 @@ mod ir;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
-use crate::nodes::{ArcPlanNode, PlanNodeOrGroup};
-use crate::{nodes::NodeType, optimizer::Optimizer};
-
 pub use ir::RuleMatcher;
+
+use crate::nodes::{ArcPlanNode, NodeType, PlanNodeOrGroup};
+use crate::optimizer::Optimizer;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum OptimizeType {

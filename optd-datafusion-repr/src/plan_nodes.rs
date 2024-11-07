@@ -14,29 +14,27 @@ mod subquery;
 
 use std::fmt::Debug;
 
-use arrow_schema::DataType;
-use optd_core::nodes::{
-    ArcPlanNode, ArcPredNode, NodeType, PlanNode, PlanNodeMeta, PlanNodeMetaMap, PredNode,
-};
-
 pub use agg::{LogicalAgg, PhysicalAgg};
+use arrow_schema::DataType;
 pub use empty_relation::{
     decode_empty_relation_schema, LogicalEmptyRelation, PhysicalEmptyRelation,
 };
 pub use filter::{LogicalFilter, PhysicalFilter};
 pub use join::{JoinType, LogicalJoin, PhysicalHashJoin, PhysicalNestedLoopJoin};
 pub use limit::{LogicalLimit, PhysicalLimit};
-pub use projection::{LogicalProjection, PhysicalProjection};
-pub use scan::{LogicalScan, PhysicalScan};
-pub use sort::{LogicalSort, PhysicalSort};
-pub use subquery::{DependentJoin, RawDependentJoin}; // Add missing import
-
+use optd_core::nodes::{
+    ArcPlanNode, ArcPredNode, NodeType, PlanNode, PlanNodeMeta, PlanNodeMetaMap, PredNode,
+};
 pub use predicates::{
     BetweenPred, BinOpPred, BinOpType, CastPred, ColumnRefPred, ConstantPred, ConstantType,
     DataTypePred, ExternColumnRefPred, FuncPred, FuncType, InListPred, LikePred, ListPred,
     LogOpPred, LogOpType, PredExt, SortOrderPred, SortOrderType, UnOpPred, UnOpType,
 };
 use pretty_xmlish::{Pretty, PrettyConfig};
+pub use projection::{LogicalProjection, PhysicalProjection};
+pub use scan::{LogicalScan, PhysicalScan};
+pub use sort::{LogicalSort, PhysicalSort};
+pub use subquery::{DependentJoin, RawDependentJoin}; // Add missing import
 
 use crate::explain::{explain_plan_node, explain_pred_node};
 

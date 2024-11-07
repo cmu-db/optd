@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::postgres_dbms::PostgresDBMS;
-use crate::truecard::TruecardGetter;
-use crate::{benchmark::Benchmark, datafusion_dbms::DatafusionDBMS};
-
 use anyhow::{self};
 use async_trait::async_trait;
+
+use crate::benchmark::Benchmark;
+use crate::datafusion_dbms::DatafusionDBMS;
+use crate::postgres_dbms::PostgresDBMS;
+use crate::truecard::TruecardGetter;
 
 /// This struct performs cardinality testing across one or more DBMSs.
 /// Another design would be for the CardbenchRunnerDBMSHelper trait to expose a function
@@ -38,9 +39,9 @@ impl CardbenchRunner {
 
     /// Get the Q-error of a query using the cost models of all DBMSs being tested
     /// Q-error is defined in [Leis 2015](https://15721.courses.cs.cmu.edu/spring2024/papers/16-costmodels/p204-leis.pdf)
-    /// One detail not specified in the paper is that Q-error is based on the ratio of true and estimated cardinality
-    ///   of the entire query, not of a subtree of the query. This detail is specified in Section 7.1 of
-    ///   [Yang 2020](https://arxiv.org/pdf/2006.08109.pdf)
+    /// One detail not specified in the paper is that Q-error is based on the ratio of true and
+    /// estimated cardinality   of the entire query, not of a subtree of the query. This detail
+    /// is specified in Section 7.1 of   [Yang 2020](https://arxiv.org/pdf/2006.08109.pdf)
     pub async fn eval_benchmark_cardinfos_alldbs(
         &mut self,
         benchmark: &Benchmark,

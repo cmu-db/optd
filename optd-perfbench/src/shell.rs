@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::str;
-use std::{fs, io};
+use std::{fs, io, str};
 
 /// Runs a command, exiting the program immediately if the command fails
 pub fn run_command_with_status_check(cmd_str: &str) -> io::Result<Output> {
@@ -17,8 +16,9 @@ pub fn run_command_with_status_check_in_dir<P: AsRef<Path>>(
     run_command_with_status_check_core::<P>(cmd_str, Some(in_path))
 }
 
-/// This function exposes all the different ways to run a command, but the interface is not ergonomic.
-/// The ergonomic wrappers above are a workaround for Rust not having default values on parameters.
+/// This function exposes all the different ways to run a command, but the interface is not
+/// ergonomic. The ergonomic wrappers above are a workaround for Rust not having default values on
+/// parameters.
 pub fn run_command_with_status_check_core<P: AsRef<Path>>(
     cmd_str: &str,
     in_path: Option<P>,
@@ -78,7 +78,8 @@ pub fn get_optd_root() -> io::Result<PathBuf> {
     Ok(toplevel_dpath)
 }
 
-/// Can be an absolute path or a relative path. Regardless of where this CLI is run, relative paths are evaluated relative to the optd repo root.
+/// Can be an absolute path or a relative path. Regardless of where this CLI is run, relative paths
+/// are evaluated relative to the optd repo root.
 pub fn parse_pathstr(pathstr: &str) -> io::Result<PathBuf> {
     let path = PathBuf::from(pathstr);
     let path = if path.is_relative() {

@@ -1,6 +1,5 @@
 use super::macros::define_plan_node;
 use super::predicates::ListPred;
-
 use super::{ArcDfPlanNode, DfNodeType, DfPlanNode, DfReprPlanNode};
 
 #[derive(Clone, Debug)]

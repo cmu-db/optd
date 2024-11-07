@@ -1,15 +1,14 @@
-use std::{collections::HashMap, sync::Arc};
+use std::any::Any;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use itertools::Itertools;
-use std::any::Any;
 
-use crate::{
-    nodes::{ArcPlanNode, NodeType, PlanNode, PlanNodeOrGroup},
-    optimizer::Optimizer,
-    property::PropertyBuilderAny,
-    rules::{Rule, RuleMatcher},
-};
+use crate::nodes::{ArcPlanNode, NodeType, PlanNode, PlanNodeOrGroup};
+use crate::optimizer::Optimizer;
+use crate::property::PropertyBuilderAny;
+use crate::rules::{Rule, RuleMatcher};
 
 pub enum ApplyOrder {
     TopDown,
@@ -109,7 +108,8 @@ impl<T: NodeType> HeuristicsOptimizer<T> {
 
     fn apply_rules(&mut self, mut root_rel: ArcPlanNode<T>) -> Result<ArcPlanNode<T>> {
         for rule in self.rules.clone().as_ref() {
-            // Properties only matter for applying rules, therefore applying it before each rule invoke.
+            // Properties only matter for applying rules, therefore applying it before each rule
+            // invoke.
             let matcher = rule.matcher();
             if let Some(binding) = match_and_pick(matcher, root_rel.clone()) {
                 self.infer_properties(root_rel.clone());

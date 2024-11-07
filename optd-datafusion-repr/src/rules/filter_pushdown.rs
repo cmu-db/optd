@@ -18,15 +18,14 @@ use optd_core::nodes::PlanNodeOrGroup;
 use optd_core::optimizer::Optimizer;
 use optd_core::rules::{Rule, RuleMatcher};
 
+use super::filter::simplify_log_expr;
+use super::macros::define_rule;
 use crate::plan_nodes::{
     ArcDfPlanNode, ArcDfPredNode, ColumnRefPred, DfNodeType, DfPredType, DfReprPlanNode,
     DfReprPredNode, JoinType, ListPred, LogOpPred, LogOpType, LogicalAgg, LogicalFilter,
     LogicalJoin, LogicalSort, PredExt,
 };
 use crate::OptimizerExt;
-
-use super::filter::simplify_log_expr;
-use super::macros::define_rule;
 
 /// Emits a LogOpExpr AND if the list has more than one element
 /// Otherwise, returns the single element
@@ -92,9 +91,8 @@ fn determine_join_cond_dep(
 ///     building a list of bottom-level exprs for each separable expr
 ///
 /// # Arguments
-/// * `categorization_fn` - Function, called with a list of each bottom-level
-///     expression, along with the top-level expression node that will be
-///     categorized.
+/// * `categorization_fn` - Function, called with a list of each bottom-level expression, along with
+///   the top-level expression node that will be categorized.
 /// * `cond` - The top-level expression node to begin separating
 fn categorize_conds(
     mut categorization_fn: impl FnMut(ArcDfPredNode, &[ArcDfPredNode]),
@@ -389,10 +387,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{
-        plan_nodes::{BinOpPred, BinOpType, ConstantPred, LogicalScan},
-        testing::new_test_optimizer,
-    };
+    use crate::plan_nodes::{BinOpPred, BinOpType, ConstantPred, LogicalScan};
+    use crate::testing::new_test_optimizer;
 
     #[test]
     fn push_past_sort() {

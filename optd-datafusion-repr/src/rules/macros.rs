@@ -65,7 +65,4 @@ macro_rules! define_impl_rule {
     };
 }
 
-pub(crate) use define_impl_rule;
-pub(crate) use define_matcher;
-pub(crate) use define_rule;
-pub(crate) use define_rule_inner;
+pub(crate) use {define_impl_rule, define_matcher, define_rule, define_rule_inner};

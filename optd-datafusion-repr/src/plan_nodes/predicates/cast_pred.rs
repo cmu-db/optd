@@ -2,9 +2,8 @@ use arrow_schema::DataType;
 use optd_core::nodes::PlanNodeMetaMap;
 use pretty_xmlish::Pretty;
 
-use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
-
 use super::data_type_pred::DataTypePred;
+use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
 
 #[derive(Clone, Debug)]
 pub struct CastPred(pub ArcDfPredNode);

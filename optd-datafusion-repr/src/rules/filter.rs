@@ -1,16 +1,16 @@
 use std::collections::HashSet;
 
+use optd_core::nodes::PlanNodeOrGroup;
+use optd_core::optimizer::Optimizer;
+use optd_core::rules::{Rule, RuleMatcher};
+
 use super::macros::define_rule;
 use crate::plan_nodes::{
     ArcDfPredNode, ConstantPred, ConstantType, DfNodeType, DfPredType, DfReprPlanNode,
     DfReprPredNode, JoinType, LogOpPred, LogOpType, LogicalEmptyRelation, LogicalFilter,
     LogicalJoin,
 };
-use crate::ArcDfPlanNode;
-use crate::OptimizerExt;
-use optd_core::nodes::PlanNodeOrGroup;
-use optd_core::optimizer::Optimizer;
-use optd_core::rules::{Rule, RuleMatcher};
+use crate::{ArcDfPlanNode, OptimizerExt};
 
 // simplify_log_expr simplifies the Filters operator in several possible
 //  ways:

@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+use std::sync::Arc;
+
 use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
 use datafusion::catalog::CatalogList;
 use datafusion::execution::context::{SessionConfig, SessionState};
@@ -14,8 +17,6 @@ use optd_datafusion_repr::DatafusionOptimizer;
 use optd_datafusion_repr_adv_cost::adv_stats::stats::DataFusionBaseTableStats;
 use optd_datafusion_repr_adv_cost::new_physical_adv_cost;
 use regex::Regex;
-use std::collections::HashSet;
-use std::sync::Arc;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -55,7 +56,8 @@ impl DatafusionDBMS {
         })
     }
 
-    /// Creates a new session context. If the `use_df_logical` flag is set, datafusion's logical optimizer will be used.
+    /// Creates a new session context. If the `use_df_logical` flag is set, datafusion's logical
+    /// optimizer will be used.
     async fn new_session_ctx(
         use_df_logical: bool,
         catalog: Option<Arc<dyn CatalogList>>,
@@ -347,7 +349,8 @@ struct TestFlags {
 }
 
 /// Extract the flags from a task. The flags are specified in square brackets.
-/// For example, the flags for the task `explain[use_df_logical, verbose]` are `["use_df_logical", "verbose"]`.
+/// For example, the flags for the task `explain[use_df_logical, verbose]` are `["use_df_logical",
+/// "verbose"]`.
 fn extract_flags(task: &str) -> Result<TestFlags> {
     if let Some(captures) = FLAGS_REGEX.captures(task) {
         let flags = captures

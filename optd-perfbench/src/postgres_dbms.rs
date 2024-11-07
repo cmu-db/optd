@@ -1,23 +1,20 @@
-use crate::{
-    benchmark::Benchmark,
-    cardbench::CardbenchRunnerDBMSHelper,
-    job::{JobKit, JobKitConfig},
-    tpch::{TpchKit, TpchKitConfig},
-    truecard::{TruecardCache, TruecardGetter},
-};
+use std::fs;
+use std::io::Cursor;
+use std::path::{Path, PathBuf};
+
 use async_trait::async_trait;
 use futures::Sink;
 use lazy_static::lazy_static;
 use regex::Regex;
-
-use std::{
-    fs,
-    io::Cursor,
-    path::{Path, PathBuf},
-};
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio_postgres::{Client, NoTls, Row};
+
+use crate::benchmark::Benchmark;
+use crate::cardbench::CardbenchRunnerDBMSHelper;
+use crate::job::{JobKit, JobKitConfig};
+use crate::tpch::{TpchKit, TpchKitConfig};
+use crate::truecard::{TruecardCache, TruecardGetter};
 
 /// The name of the Postgres DBMS (as opposed to the DataFusion DBMS for instance)
 pub const POSTGRES_DBMS_NAME: &str = "Postgres";
@@ -80,7 +77,8 @@ impl PostgresDBMS {
 
     async fn load_benchmark_data(&self, benchmark: &Benchmark) -> anyhow::Result<()> {
         let dbname = benchmark.get_dbname();
-        // since we don't know whether dbname exists at this point, we have to connect to the default database
+        // since we don't know whether dbname exists at this point, we have to connect to the
+        // default database
         let defaultdb_client = self.connect_to_db(DEFAULT_DBNAME).await?;
         let pgdata_dones_dpath = self.workspace_dpath.join("pgdata_dones");
         if !pgdata_dones_dpath.exists() {
@@ -92,15 +90,15 @@ impl PostgresDBMS {
         let should_load = if benchmark.is_readonly() {
             // if the db doesn't even exist then we clearly need to load it
             if !Self::get_does_db_exist(&defaultdb_client, &dbname).await? {
-                // there may be a done_fpath left over from before. we need to make sure to delete it since it's
-                // now known to be inaccurate
+                // there may be a done_fpath left over from before. we need to make sure to delete
+                // it since it's now known to be inaccurate
                 if done_fpath.exists() {
                     fs::remove_file(&done_fpath)?;
                 }
                 true
             } else {
-                // if the db does exist, we use done_fpath to determine if we need to load it since it's possible
-                // for the db to be created but only partially loaded
+                // if the db does exist, we use done_fpath to determine if we need to load it since
+                // it's possible for the db to be created but only partially loaded
                 !done_fpath.exists()
             }
         } else {
@@ -108,7 +106,8 @@ impl PostgresDBMS {
         };
         if should_load {
             log::debug!("[start] loading benchmark data");
-            // it's possible for the db to exist or not after we have determined we should load the data
+            // it's possible for the db to exist or not after we have determined we should load the
+            // data
             let does_db_exist = Self::get_does_db_exist(&defaultdb_client, &dbname).await?;
             if does_db_exist {
                 defaultdb_client
@@ -169,8 +168,9 @@ impl PostgresDBMS {
         client.batch_execute(&sql).await?;
 
         // create stats
-        // you need to do VACUUM FULL ANALYZE and not just ANALYZE to make sure the stats are created in a deterministic way
-        // this is standard practice for postgres benchmarking
+        // you need to do VACUUM FULL ANALYZE and not just ANALYZE to make sure the stats are
+        // created in a deterministic way this is standard practice for postgres
+        // benchmarking
         client.query("VACUUM FULL ANALYZE", &[]).await?;
 
         Ok(())
@@ -201,15 +201,17 @@ impl PostgresDBMS {
         client.batch_execute(&sql).await?;
 
         // create stats
-        // you need to do VACUUM FULL ANALYZE and not just ANALYZE to make sure the stats are created in a deterministic way
-        // this is standard practice for postgres benchmarking
+        // you need to do VACUUM FULL ANALYZE and not just ANALYZE to make sure the stats are
+        // created in a deterministic way this is standard practice for postgres
+        // benchmarking
         client.query("VACUUM FULL ANALYZE", &[]).await?;
 
         Ok(())
     }
 
     /// Load a file into Postgres by sending the bytes through the network
-    /// Unlike COPY ... FROM, COPY ... FROM STDIN works even if the Postgres process is on another machine or container
+    /// Unlike COPY ... FROM, COPY ... FROM STDIN works even if the Postgres process is on another
+    /// machine or container
     async fn copy_from_stdin<P: AsRef<Path>>(
         client: &tokio_postgres::Client,
         tbl_fpath: P,
@@ -218,7 +220,8 @@ impl PostgresDBMS {
     ) -> anyhow::Result<()> {
         // Setup
         let mut file = File::open(&tbl_fpath).await?;
-        // Internally, File::read() seems to read at most 2MB at a time, so I set BUFFER_SIZE to be that.
+        // Internally, File::read() seems to read at most 2MB at a time, so I set BUFFER_SIZE to be
+        // that.
         const BUFFER_SIZE: usize = 2 * 1024 * 1024;
         let mut extra_bytes_buffer = vec![];
 
@@ -226,7 +229,8 @@ impl PostgresDBMS {
         // BUFFER_SIZE must be < 1GB because sending a single statement that is >1GB in size
         //   causes Postgres to cancel the transaction.
         loop {
-            // Add the extra bytes from last time and then read from the file to fill the buffer to at most BUFFER_SIZE
+            // Add the extra bytes from last time and then read from the file to fill the buffer to
+            // at most BUFFER_SIZE
             let mut buffer = vec![0u8; BUFFER_SIZE];
             let num_extra_bytes = extra_bytes_buffer.len();
             buffer.splice(0..num_extra_bytes, extra_bytes_buffer);
@@ -243,14 +247,15 @@ impl PostgresDBMS {
             // Find the last newline in the buffer. Copy the extra data out and truncate the buffer.
             extra_bytes_buffer = vec![];
             let last_newline_idx = buffer.iter().rposition(|&x| x == b'\n');
-            // It's possible that the buffer doesn't contain any newlines if it only has the very last line of the file.
-            // In that case, we'll just assume it's the last line of the file and not truncate the buffer.
-            // It's also possible that we have a line that's too long, but it's easier to just let Postgres throw an
+            // It's possible that the buffer doesn't contain any newlines if it only has the very
+            // last line of the file. In that case, we'll just assume it's the last line
+            // of the file and not truncate the buffer. It's also possible that we have
+            // a line that's too long, but it's easier to just let Postgres throw an
             //   error if this happens.
             if let Some(last_newline_idx) = last_newline_idx {
                 let extra_bytes_start_idx = last_newline_idx + 1;
-                // Since we truncated buffer earlier, &buffer[extra_bytes_start_idx..] will not contain
-                //   any bytes *not* in the file.
+                // Since we truncated buffer earlier, &buffer[extra_bytes_start_idx..] will not
+                // contain   any bytes *not* in the file.
                 extra_bytes_buffer.extend_from_slice(&buffer[extra_bytes_start_idx..]);
                 buffer.truncate(extra_bytes_start_idx);
             }

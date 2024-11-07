@@ -4,12 +4,11 @@ use optd_core::nodes::PlanNodeOrGroup;
 use optd_core::optimizer::Optimizer;
 use optd_core::rules::{Rule, RuleMatcher};
 
+use super::macros::define_rule;
 use crate::plan_nodes::{
     ArcDfPlanNode, DfNodeType, DfReprPlanNode, DfReprPredNode, ListPred, LogicalAgg, LogicalSort,
     SortOrderPred,
 };
-
-use super::macros::define_rule;
 
 define_rule!(
     EliminateDuplicatedSortExprRule,

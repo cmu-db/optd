@@ -1,9 +1,8 @@
 use optd_core::nodes::{PlanNodeMetaMap, Value};
 use pretty_xmlish::Pretty;
 
-use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
-
 use super::ListPred;
+use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
 
 #[derive(Clone, Debug)]
 pub struct InListPred(pub ArcDfPredNode);

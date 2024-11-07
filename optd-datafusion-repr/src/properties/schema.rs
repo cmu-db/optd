@@ -1,8 +1,8 @@
-use itertools::Itertools;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use itertools::Itertools;
 use optd_core::property::PropertyBuilder;
+use serde::{Deserialize, Serialize};
 
 use super::DEFAULT_NAME;
 use crate::plan_nodes::{

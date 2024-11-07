@@ -1,8 +1,6 @@
-use std::{
-    collections::HashMap,
-    fs::{self, File},
-    path::{Path, PathBuf},
-};
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 

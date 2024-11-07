@@ -1,15 +1,13 @@
-use serde::{de::DeserializeOwned, Serialize};
-
-use crate::adv_stats::{
-    stats::{Distribution, MostCommonValues},
-    DEFAULT_NUM_DISTINCT,
+use optd_datafusion_repr::plan_nodes::{ArcDfPredNode, DfReprPredNode, ListPred};
+use optd_datafusion_repr::properties::column_ref::{
+    BaseTableColumnRef, ColumnRef, GroupColumnRefs,
 };
-use optd_datafusion_repr::{
-    plan_nodes::{ArcDfPredNode, DfReprPredNode, ListPred},
-    properties::column_ref::{BaseTableColumnRef, ColumnRef, GroupColumnRefs},
-};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 use super::AdvStats;
+use crate::adv_stats::stats::{Distribution, MostCommonValues};
+use crate::adv_stats::DEFAULT_NUM_DISTINCT;
 
 impl<
         M: MostCommonValues + Serialize + DeserializeOwned,

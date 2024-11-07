@@ -1,10 +1,7 @@
 use std::collections::HashSet;
-use std::{ops::Deref, sync::Arc};
+use std::ops::Deref;
+use std::sync::Arc;
 
-use crate::plan_nodes::{
-    decode_empty_relation_schema, ArcDfPredNode, BinOpType, ConstantPred, DfNodeType, DfPredType,
-    DfReprPredNode, JoinType, LogOpType,
-};
 use anyhow::anyhow;
 use itertools::Itertools;
 use optd_core::property::PropertyBuilder;
@@ -13,6 +10,10 @@ use union_find::union_find::UnionFind;
 
 use super::schema::Catalog;
 use super::DEFAULT_NAME;
+use crate::plan_nodes::{
+    decode_empty_relation_schema, ArcDfPredNode, BinOpType, ConstantPred, DfNodeType, DfPredType,
+    DfReprPredNode, JoinType, LogOpType,
+};
 
 pub type BaseTableColumnRefs = Vec<ColumnRef>;
 
@@ -287,7 +288,8 @@ impl ColumnRefPropertyBuilder {
         match predicate.typ {
             DfPredType::ColumnRef => {
                 let col_ref_idx = data.as_ref().unwrap().as_u64();
-                // this is always safe since col_ref_idx was initially a usize in ColumnRefExpr::new()
+                // this is always safe since col_ref_idx was initially a usize in
+                // ColumnRefExpr::new()
                 let usize_col_ref_idx = col_ref_idx as usize;
                 let column_refs = vec![ColumnRef::ChildColumnRef {
                     col_idx: usize_col_ref_idx,
@@ -460,7 +462,8 @@ impl PropertyBuilder<DfNodeType> for ColumnRefPropertyBuilder {
                 // Otherwise be conservative and discard all correlations.
                 let output_correlation = match join_type {
                     JoinType::Inner | JoinType::Cross => {
-                        // Merge the equal columns in the join condition into the those from the children.
+                        // Merge the equal columns in the join condition into the those from the
+                        // children.
                         if let Some(SemanticCorrelation {
                             eq_columns: EqColumns::EqColumnIdxPairs(pairs),
                         }) =
@@ -502,7 +505,8 @@ impl PropertyBuilder<DfNodeType> for ColumnRefPropertyBuilder {
                             child.column_refs[col_idx].clone()
                         })
                         .collect();
-                // Then the aggregate expressions. These columns, (e.g. SUM, COUNT, etc.) are derived columns.
+                // Then the aggregate expressions. These columns, (e.g. SUM, COUNT, etc.) are
+                // derived columns.
                 let agg_expr_cnt = Self::derive_for_predicate(predicates[0].clone())
                     .column_refs
                     .len();

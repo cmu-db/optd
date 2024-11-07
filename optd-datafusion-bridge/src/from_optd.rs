@@ -1,39 +1,31 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use async_recursion::async_recursion;
-use datafusion::{
-    arrow::datatypes::{Field, Schema, SchemaRef},
-    datasource::source_as_provider,
-    logical_expr::Operator,
-    physical_expr,
-    physical_plan::{
-        self,
-        aggregates::AggregateMode,
-        expressions::create_aggregate_expr,
-        joins::{
-            utils::{ColumnIndex, JoinFilter},
-            CrossJoinExec, PartitionMode,
-        },
-        projection::ProjectionExec,
-        AggregateExpr, ExecutionPlan, PhysicalExpr,
-    },
-    scalar::ScalarValue,
-};
+use datafusion::arrow::datatypes::{Field, Schema, SchemaRef};
+use datafusion::datasource::source_as_provider;
+use datafusion::logical_expr::Operator;
+use datafusion::physical_expr;
+use datafusion::physical_plan::aggregates::AggregateMode;
+use datafusion::physical_plan::expressions::create_aggregate_expr;
+use datafusion::physical_plan::joins::utils::{ColumnIndex, JoinFilter};
+use datafusion::physical_plan::joins::{CrossJoinExec, PartitionMode};
+use datafusion::physical_plan::projection::ProjectionExec;
+use datafusion::physical_plan::{self, AggregateExpr, ExecutionPlan, PhysicalExpr};
+use datafusion::scalar::ScalarValue;
 use optd_core::nodes::{PlanNodeMetaMap, PlanNodeOrGroup};
-use optd_datafusion_repr::{
-    plan_nodes::{
-        ArcDfPlanNode, ArcDfPredNode, BetweenPred, BinOpPred, BinOpType, CastPred, ColumnRefPred,
-        ConstantPred, ConstantType, DfNodeType, DfPredType, DfReprPlanNode, DfReprPredNode,
-        FuncPred, FuncType, InListPred, JoinType, LikePred, LogOpPred, LogOpType, PhysicalAgg,
-        PhysicalEmptyRelation, PhysicalFilter, PhysicalHashJoin, PhysicalLimit,
-        PhysicalNestedLoopJoin, PhysicalProjection, PhysicalScan, PhysicalSort, SortOrderPred,
-        SortOrderType,
-    },
-    properties::schema::Schema as OptdSchema,
+use optd_datafusion_repr::plan_nodes::{
+    ArcDfPlanNode, ArcDfPredNode, BetweenPred, BinOpPred, BinOpType, CastPred, ColumnRefPred,
+    ConstantPred, ConstantType, DfNodeType, DfPredType, DfReprPlanNode, DfReprPredNode, FuncPred,
+    FuncType, InListPred, JoinType, LikePred, LogOpPred, LogOpType, PhysicalAgg,
+    PhysicalEmptyRelation, PhysicalFilter, PhysicalHashJoin, PhysicalLimit, PhysicalNestedLoopJoin,
+    PhysicalProjection, PhysicalScan, PhysicalSort, SortOrderPred, SortOrderType,
 };
+use optd_datafusion_repr::properties::schema::Schema as OptdSchema;
 
-use crate::{physical_collector::CollectorExec, OptdPlanContext};
+use crate::physical_collector::CollectorExec;
+use crate::OptdPlanContext;
 
 fn from_optd_schema(optd_schema: OptdSchema) -> Schema {
     let match_type = |typ: &ConstantType| typ.into_data_type();

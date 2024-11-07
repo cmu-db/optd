@@ -1,22 +1,18 @@
 //! The RelNode is the basic data structure of the optimizer. It is dynamically typed and is
 //! the internal representation of the plan nodes.
 
-use std::{
-    collections::HashMap,
-    fmt::{Debug, Display},
-    hash::Hash,
-    sync::Arc,
-};
+use std::collections::HashMap;
+use std::fmt::{Debug, Display};
+use std::hash::Hash;
+use std::sync::Arc;
 
 use arrow_schema::DataType;
 use chrono::NaiveDate;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{
-    cascades::GroupId,
-    cost::{Cost, Statistics},
-};
+use crate::cascades::GroupId;
+use crate::cost::{Cost, Statistics};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SerializableOrderedF64(pub OrderedFloat<f64>);

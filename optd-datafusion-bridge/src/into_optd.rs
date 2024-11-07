@@ -1,9 +1,7 @@
 use anyhow::{bail, Result};
-use datafusion::{
-    common::DFSchema,
-    logical_expr::{self, logical_plan, LogicalPlan, Operator},
-    scalar::ScalarValue,
-};
+use datafusion::common::DFSchema;
+use datafusion::logical_expr::{self, logical_plan, LogicalPlan, Operator};
+use datafusion::scalar::ScalarValue;
 use datafusion_expr::Subquery;
 use optd_core::nodes::PredNode;
 use optd_datafusion_repr::plan_nodes::{

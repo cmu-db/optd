@@ -3,10 +3,13 @@
 //! "Computing Extremely Accurate Quantiles Using t-Digests" (2019).
 //! For more details, refer to: https://arxiv.org/pdf/1902.04023.pdf
 
+use std::f64::consts::PI;
+use std::hash::Hash;
+use std::marker::PhantomData;
+
 use itertools::Itertools;
 use optd_core::nodes::Value;
 use serde::{Deserialize, Serialize};
-use std::{f64::consts::PI, hash::Hash, marker::PhantomData};
 
 use crate::utils::arith_encoder;
 
@@ -21,7 +24,8 @@ pub trait IntoFloat {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct TDigest<T: IntoFloat + Eq + Hash + Clone> {
     /// A sorted array of Centroids, according to their mean.
-    pub centroids: Vec<Centroid>, // TODO(Alexis): Temporary fix to normalize the stats in stats.rs [pub].
+    pub centroids: Vec<Centroid>, /* TODO(Alexis): Temporary fix to normalize the stats in
+                                   * stats.rs [pub]. */
     /// Compression factor: higher is more precise, but has higher memory requirements.
     compression: f64,
     /// Number of values in the TDigest (sum of all centroids).
@@ -242,15 +246,15 @@ fn lerp(a: f64, b: f64, f: f64) -> f64 {
 // Start of unit testing section.
 #[cfg(test)]
 mod tests {
-    use super::{IntoFloat, TDigest};
+    use std::sync::{Arc, Mutex};
+
     use crossbeam::thread;
     use ordered_float::OrderedFloat;
-    use rand::{
-        distributions::{Distribution, Uniform, WeightedIndex},
-        rngs::StdRng,
-        SeedableRng,
-    };
-    use std::sync::{Arc, Mutex};
+    use rand::distributions::{Distribution, Uniform, WeightedIndex};
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    use super::{IntoFloat, TDigest};
 
     impl IntoFloat for OrderedFloat<f64> {
         fn to_float(&self) -> f64 {

@@ -1,6 +1,5 @@
-use super::{
-    macros::define_plan_node, ArcDfPlanNode, ArcDfPredNode, DfNodeType, DfPlanNode, DfReprPlanNode,
-};
+use super::macros::define_plan_node;
+use super::{ArcDfPlanNode, ArcDfPredNode, DfNodeType, DfPlanNode, DfReprPlanNode};
 
 #[derive(Clone, Debug)]
 pub struct LogicalLimit(pub ArcDfPlanNode);

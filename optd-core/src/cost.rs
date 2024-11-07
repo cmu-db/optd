@@ -1,7 +1,5 @@
-use crate::{
-    cascades::{CascadesOptimizer, Memo, RelNodeContext},
-    nodes::{ArcPredNode, NodeType},
-};
+use crate::cascades::{CascadesOptimizer, Memo, RelNodeContext};
+use crate::nodes::{ArcPredNode, NodeType};
 
 /// The statistics of a group.
 #[derive(Clone, Debug)]

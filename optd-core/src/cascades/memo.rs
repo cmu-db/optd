@@ -1,24 +1,21 @@
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    sync::Arc,
-};
+use std::any::Any;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use itertools::Itertools;
-use std::any::Any;
 use tracing::trace;
 
-use crate::{
-    cost::{Cost, Statistics},
-    nodes::{ArcPlanNode, ArcPredNode, NodeType, PlanNode, PlanNodeOrGroup},
-    property::PropertyBuilderAny,
-};
-
 use super::optimizer::{ExprId, GroupId, PredId};
+use crate::cost::{Cost, Statistics};
+use crate::nodes::{ArcPlanNode, ArcPredNode, NodeType, PlanNode, PlanNodeOrGroup};
+use crate::property::PropertyBuilderAny;
 
 pub type ArcMemoPlanNode<T> = Arc<MemoPlanNode<T>>;
 
-/// The RelNode representation in the memo table. Store children as group IDs. Equivalent to MExpr in Columbia/Cascades.
+/// The RelNode representation in the memo table. Store children as group IDs. Equivalent to MExpr
+/// in Columbia/Cascades.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MemoPlanNode<T: NodeType> {
     pub typ: T,
@@ -92,12 +89,13 @@ pub struct Group {
 
 /// Trait for memo table implementations.
 pub trait Memo<T: NodeType>: 'static + Send + Sync {
-    /// Add an expression to the memo table. If the expression already exists, it will return the existing group id and
-    /// expr id. Otherwise, a new group and expr will be created.
+    /// Add an expression to the memo table. If the expression already exists, it will return the
+    /// existing group id and expr id. Otherwise, a new group and expr will be created.
     fn add_new_expr(&mut self, rel_node: ArcPlanNode<T>) -> (GroupId, ExprId);
 
-    /// Add a new expression to an existing gruop. If the expression is a group, it will merge the two groups. Otherwise,
-    /// it will add the expression to the group. Returns the expr id if the expression is not a group.
+    /// Add a new expression to an existing gruop. If the expression is a group, it will merge the
+    /// two groups. Otherwise, it will add the expression to the group. Returns the expr id if
+    /// the expression is not a group.
     fn add_expr_to_group(
         &mut self,
         rel_node: PlanNodeOrGroup<T>,
@@ -126,8 +124,8 @@ pub trait Memo<T: NodeType>: 'static + Send + Sync {
     /// Update the group info.
     fn update_group_info(&mut self, group_id: GroupId, group_info: GroupInfo);
 
-    /// Estimated plan space for the memo table, only useful when plan exploration budget is enabled.
-    /// Returns number of expressions in the memo table.
+    /// Estimated plan space for the memo table, only useful when plan exploration budget is
+    /// enabled. Returns number of expressions in the memo table.
     fn estimated_plan_space(&self) -> usize;
 
     // The below functions can be overwritten by the memo table implementation if there
@@ -155,15 +153,17 @@ pub trait Memo<T: NodeType>: 'static + Send + Sync {
         get_best_group_binding_inner(self, group_id, &mut post_process)
     }
 
-    /// Get all bindings of a predicate group. Will panic if the group contains more than one bindings. Note that we
-    /// are currently in the refactor process of having predicates as a separate entity. If the representation stores
-    /// predicates in the rel node children, the repr should use this function to get the predicate binding. Otherwise,
-    /// use `ger_pred` for those predicates stored within the `predicates` field.
+    /// Get all bindings of a predicate group. Will panic if the group contains more than one
+    /// bindings. Note that we are currently in the refactor process of having predicates as a
+    /// separate entity. If the representation stores predicates in the rel node children, the
+    /// repr should use this function to get the predicate binding. Otherwise, use `ger_pred`
+    /// for those predicates stored within the `predicates` field.
     fn get_predicate_binding(&self, group_id: GroupId) -> Option<ArcPlanNode<T>> {
         get_predicate_binding_group_inner(self, group_id, true)
     }
 
-    /// Get all bindings of a predicate group. Returns None if the group contains zero or more than one bindings.
+    /// Get all bindings of a predicate group. Returns None if the group contains zero or more than
+    /// one bindings.
     fn try_get_predicate_binding(&self, group_id: GroupId) -> Option<ArcPlanNode<T>> {
         get_predicate_binding_group_inner(self, group_id, false)
     }
@@ -381,21 +381,24 @@ impl<T: NodeType> NaiveMemo<T> {
         }
     }
 
-    /// Get the next group id. Group id and expr id shares the same counter, so as to make it easier to debug...
+    /// Get the next group id. Group id and expr id shares the same counter, so as to make it easier
+    /// to debug...
     fn next_group_id(&mut self) -> GroupId {
         let id = self.group_expr_counter;
         self.group_expr_counter += 1;
         GroupId(id)
     }
 
-    /// Get the next expr id. Group id and expr id shares the same counter, so as to make it easier to debug...
+    /// Get the next expr id. Group id and expr id shares the same counter, so as to make it easier
+    /// to debug...
     fn next_expr_id(&mut self) -> ExprId {
         let id = self.group_expr_counter;
         self.group_expr_counter += 1;
         ExprId(id)
     }
 
-    /// Get the next pred id. Group id and expr id shares the same counter, so as to make it easier to debug...
+    /// Get the next pred id. Group id and expr id shares the same counter, so as to make it easier
+    /// to debug...
     fn next_pred_id(&mut self) -> PredId {
         let id = self.group_expr_counter;
         self.group_expr_counter += 1;
@@ -487,8 +490,9 @@ impl<T: NodeType> NaiveMemo<T> {
                         .insert(*expr_id, Arc::new(new_expr.clone()));
                     self.expr_node_to_expr_id.remove(&old_expr);
                     if let Some(dup_expr) = self.expr_node_to_expr_id.get(&new_expr) {
-                        // If new_expr == some_other_old_expr in the memo table, unless they belong to the same group,
-                        // we should merge the two groups. This should not happen. We should simply drop this expression.
+                        // If new_expr == some_other_old_expr in the memo table, unless they belong
+                        // to the same group, we should merge the two
+                        // groups. This should not happen. We should simply drop this expression.
                         let dup_group_id = self.expr_id_to_group_id[dup_expr];
                         if dup_group_id != *group_id {
                             pending_recursive_merge.push((dup_group_id, *group_id));
@@ -496,7 +500,8 @@ impl<T: NodeType> NaiveMemo<T> {
                         self.expr_id_to_expr_node.remove(expr_id);
                         self.expr_id_to_group_id.remove(expr_id);
                         self.dup_expr_mapping.insert(*expr_id, *dup_expr);
-                        new_expr_list.insert(*dup_expr); // adding this temporarily -- should be removed once recursive merge finishes
+                        new_expr_list.insert(*dup_expr); // adding this temporarily -- should be
+                                                         // removed once recursive merge finishes
                     } else {
                         self.expr_node_to_expr_id.insert(new_expr, *expr_id);
                         new_expr_list.insert(*expr_id);
@@ -509,7 +514,8 @@ impl<T: NodeType> NaiveMemo<T> {
             group.group_exprs = new_expr_list;
         }
         for (merge_from, merge_into) in pending_recursive_merge {
-            // We need to reduce because each merge would probably invalidate some groups in the last loop iteration.
+            // We need to reduce because each merge would probably invalidate some groups in the
+            // last loop iteration.
             let merge_from = self.reduce_group(merge_from);
             let merge_into = self.reduce_group(merge_into);
             self.merge_group_inner(merge_into, merge_from);
@@ -526,9 +532,11 @@ impl<T: NodeType> NaiveMemo<T> {
             .iter()
             .map(|child| {
                 match child {
-                    PlanNodeOrGroup::Group(group) => self.reduce_group(*group), // TODO: can I remove reduce?
+                    // TODO: can I remove reduce?
+                    PlanNodeOrGroup::Group(group) => self.reduce_group(*group),
                     PlanNodeOrGroup::PlanNode(child) => {
-                        // No merge / modification to the memo should occur for the following operation
+                        // No merge / modification to the memo should occur for the following
+                        // operation
                         let (group, _) = self
                             .add_new_group_expr_inner(child.clone(), None)
                             .expect("should not trigger merge group");
@@ -569,8 +577,8 @@ impl<T: NodeType> NaiveMemo<T> {
         Ok((group_id, expr_id))
     }
 
-    /// This is inefficient: usually the optimizer should have a MemoRef instead of passing the full rel node. Should
-    /// be only used for debugging purpose.
+    /// This is inefficient: usually the optimizer should have a MemoRef instead of passing the full
+    /// rel node. Should be only used for debugging purpose.
     #[cfg(test)]
     pub(crate) fn get_expr_info(&self, rel_node: ArcPlanNode<T>) -> (GroupId, ExprId) {
         let children_group_ids = rel_node
@@ -662,9 +670,8 @@ impl<T: NodeType> NaiveMemo<T> {
 #[cfg(test)]
 mod tests {
 
-    use crate::nodes::{PredNode, Value};
-
     use super::*;
+    use crate::nodes::{PredNode, Value};
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     enum MemoTestRelTyp {

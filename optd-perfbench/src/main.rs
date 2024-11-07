@@ -1,13 +1,13 @@
+use std::fs;
+use std::path::Path;
+
 use clap::{Parser, Subcommand, ValueEnum};
 use optd_perfbench::benchmark::Benchmark;
 use optd_perfbench::cardbench::Cardinfo;
 use optd_perfbench::job::JobKitConfig;
-use optd_perfbench::shell;
 use optd_perfbench::tpch::{TpchKitConfig, TPCH_KIT_POSTGRES};
-use optd_perfbench::{cardbench, job, tpch};
+use optd_perfbench::{cardbench, job, shell, tpch};
 use prettytable::{format, Table};
-use std::fs;
-use std::path::Path;
 
 #[derive(Parser)]
 struct Cli {
@@ -88,7 +88,8 @@ fn percentile(sorted_v: &[f64], percentile: f64) -> f64 {
 }
 
 /// cardbench::cardbench_core() expects sanitized inputs and returns outputs in their simplest form.
-/// This function wraps around cardbench::cardbench_core() to sanitize the inputs and print the outputs nicely.
+/// This function wraps around cardbench::cardbench_core() to sanitize the inputs and print the
+/// outputs nicely.
 #[allow(clippy::too_many_arguments)]
 async fn cardbench<P: AsRef<Path>>(
     workspace_dpath: P,

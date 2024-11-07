@@ -1,5 +1,4 @@
 use super::macros::define_plan_node;
-
 use super::{ArcDfPlanNode, DfNodeType, DfPlanNode, DfReprPlanNode, ListPred};
 
 #[derive(Clone, Debug)]

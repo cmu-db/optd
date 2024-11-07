@@ -1,9 +1,8 @@
-use crate::plan_nodes::{ArcDfPredNode, DfNodeType};
-use optd_core::{
-    cascades::{CascadesOptimizer, NaiveMemo, RelNodeContext},
-    cost::{Cost, CostModel, Statistics},
-};
+use optd_core::cascades::{CascadesOptimizer, NaiveMemo, RelNodeContext};
+use optd_core::cost::{Cost, CostModel, Statistics};
 use value_bag::ValueBag;
+
+use crate::plan_nodes::{ArcDfPredNode, DfNodeType};
 
 /// Dummy cost model that returns a 0 cost in all cases.
 /// Intended for testing with the cascades optimizer.

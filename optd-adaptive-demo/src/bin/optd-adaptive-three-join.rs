@@ -1,20 +1,17 @@
+use std::sync::Arc;
+
+use console::Style;
 use datafusion::error::Result;
 use datafusion::execution::context::{SessionConfig, SessionState};
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
 use datafusion::prelude::SessionContext;
-use datafusion_optd_cli::exec::exec_from_commands_collect;
-use datafusion_optd_cli::{
-    exec::exec_from_commands,
-    print_format::PrintFormat,
-    print_options::{MaxRows, PrintOptions},
-};
+use datafusion_optd_cli::exec::{exec_from_commands, exec_from_commands_collect};
+use datafusion_optd_cli::print_format::PrintFormat;
+use datafusion_optd_cli::print_options::{MaxRows, PrintOptions};
 use mimalloc::MiMalloc;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::DatafusionOptimizer;
 use rand::{thread_rng, Rng};
-use std::sync::Arc;
-
-use console::Style;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -247,8 +244,8 @@ async fn main() -> Result<()> {
         //             (select count(*) from t3) as t3cnt,
         //             (select count(*) from (select * from t1, t2 where t1v1 = t2v1)) as t1t2cnt,
         //             (select count(*) from (select * from t1, t3 where t1v2 = t3v2)) as t1t3cnt,
-        //             (select count(*) from (select * from t1, t2, t3 where t1v1 = t2v1 and t1v2 = t3v2)) as out_cnt;"#
-        //         .to_string()],
+        //             (select count(*) from (select * from t1, t2, t3 where t1v1 = t2v1 and t1v2 =
+        // t3v2)) as out_cnt;"#         .to_string()],
         // )
         // .await;
     }

@@ -3,9 +3,8 @@ use std::fmt::Display;
 use optd_core::nodes::PlanNodeMetaMap;
 use pretty_xmlish::Pretty;
 
-use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
-
 use super::ListPred;
+use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum LogOpType {
@@ -34,8 +33,8 @@ impl LogOpPred {
         )
     }
 
-    /// flatten_nested_logical is a helper function to flatten nested logical operators with same op type
-    /// eg. (a AND (b AND c)) => ExprList([a, b, c])
+    /// flatten_nested_logical is a helper function to flatten nested logical operators with same op
+    /// type eg. (a AND (b AND c)) => ExprList([a, b, c])
     ///    (a OR (b OR c)) => ExprList([a, b, c])
     /// It assume the children of the input expr_list are already flattened
     ///  and can only be used in bottom up manner

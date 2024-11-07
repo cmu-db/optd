@@ -1,16 +1,14 @@
-use pretty_xmlish::Pretty;
+use std::sync::Arc;
 
 use bincode;
 use optd_core::nodes::PlanNodeMetaMap;
-use std::sync::Arc;
-
-use crate::explain::Insertable;
+use pretty_xmlish::Pretty;
 
 use super::{
     ArcDfPlanNode, ArcDfPredNode, ConstantPred, DfNodeType, DfPlanNode, DfReprPlanNode,
     DfReprPredNode,
 };
-
+use crate::explain::Insertable;
 use crate::properties::schema::Schema;
 
 #[derive(Clone, Debug)]

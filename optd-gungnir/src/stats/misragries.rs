@@ -5,9 +5,11 @@
 //! For more details, refer to:
 //! https://people.csail.mit.edu/rrw/6.045-2017/encalgs-mg.pdf
 
+use std::cmp::min;
+use std::hash::Hash;
+
 use hashbrown::HashMap;
 use itertools::Itertools;
-use std::{cmp::min, hash::Hash};
 
 pub const DEFAULT_K_TO_TRACK: u16 = 200;
 
@@ -124,10 +126,12 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use super::MisraGries;
     use crossbeam::thread;
+    use rand::rngs::StdRng;
     use rand::seq::SliceRandom;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::SeedableRng;
+
+    use super::MisraGries;
 
     #[test]
     fn aggregate_simple() {

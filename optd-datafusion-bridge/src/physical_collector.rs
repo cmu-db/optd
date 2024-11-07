@@ -1,16 +1,13 @@
-use std::{
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use datafusion::{
-    arrow::{datatypes::SchemaRef, record_batch::RecordBatch},
-    error::{DataFusionError, Result},
-    execution::TaskContext,
-    physical_plan::{
-        internal_err, DisplayAs, DisplayFormatType, ExecutionPlan, RecordBatchStream,
-        SendableRecordBatchStream,
-    },
+use datafusion::arrow::datatypes::SchemaRef;
+use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::error::{DataFusionError, Result};
+use datafusion::execution::TaskContext;
+use datafusion::physical_plan::{
+    internal_err, DisplayAs, DisplayFormatType, ExecutionPlan, RecordBatchStream,
+    SendableRecordBatchStream,
 };
 use futures_lite::Stream;
 use futures_util::stream::StreamExt;

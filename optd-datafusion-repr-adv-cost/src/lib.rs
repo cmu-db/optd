@@ -1,25 +1,21 @@
 use std::sync::{Arc, Mutex};
 
-use adv_stats::{
-    stats::{DataFusionBaseTableStats, DataFusionDistribution, DataFusionMostCommonValues},
-    AdvStats,
+use adv_stats::stats::{
+    DataFusionBaseTableStats, DataFusionDistribution, DataFusionMostCommonValues,
 };
-
-use optd_datafusion_repr::{
-    cost::{adaptive_cost::RuntimeAdaptionStorageInner, DfCostModel, RuntimeAdaptionStorage},
-    plan_nodes::{ArcDfPredNode, DfNodeType, DfReprPredNode, ListPred},
-    properties::schema::Catalog,
-    DatafusionOptimizer, OptimizerExt,
-};
+use adv_stats::AdvStats;
+use optd_datafusion_repr::cost::adaptive_cost::RuntimeAdaptionStorageInner;
+use optd_datafusion_repr::cost::{DfCostModel, RuntimeAdaptionStorage};
+use optd_datafusion_repr::plan_nodes::{ArcDfPredNode, DfNodeType, DfReprPredNode, ListPred};
+use optd_datafusion_repr::properties::schema::Catalog;
+use optd_datafusion_repr::{DatafusionOptimizer, OptimizerExt};
 
 pub mod adv_stats;
 
 use std::collections::HashMap;
 
-use optd_core::{
-    cascades::{CascadesOptimizer, NaiveMemo, RelNodeContext},
-    cost::{Cost, CostModel, Statistics},
-};
+use optd_core::cascades::{CascadesOptimizer, NaiveMemo, RelNodeContext};
+use optd_core::cost::{Cost, CostModel, Statistics};
 
 pub struct AdvancedCostModel {
     base_model: DfCostModel,

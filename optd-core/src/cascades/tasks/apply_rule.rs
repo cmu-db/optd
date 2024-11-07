@@ -4,18 +4,13 @@ use anyhow::Result;
 use itertools::Itertools;
 use tracing::trace;
 
-use crate::{
-    cascades::{
-        memo::ArcMemoPlanNode,
-        optimizer::{CascadesOptimizer, ExprId, RuleId},
-        tasks::{OptimizeExpressionTask, OptimizeInputsTask},
-        GroupId, Memo,
-    },
-    nodes::{ArcPlanNode, NodeType, PlanNode, PlanNodeOrGroup},
-    rules::{OptimizeType, RuleMatcher},
-};
-
 use super::Task;
+use crate::cascades::memo::ArcMemoPlanNode;
+use crate::cascades::optimizer::{CascadesOptimizer, ExprId, RuleId};
+use crate::cascades::tasks::{OptimizeExpressionTask, OptimizeInputsTask};
+use crate::cascades::{GroupId, Memo};
+use crate::nodes::{ArcPlanNode, NodeType, PlanNode, PlanNodeOrGroup};
+use crate::rules::{OptimizeType, RuleMatcher};
 
 pub struct ApplyRuleTask {
     rule_id: RuleId,

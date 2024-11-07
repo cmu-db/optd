@@ -1,9 +1,8 @@
 use optd_core::nodes::PlanNodeMetaMap;
 use pretty_xmlish::Pretty;
 
-use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
-
 use super::ListPred;
+use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum FuncType {

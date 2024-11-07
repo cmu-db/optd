@@ -1,11 +1,10 @@
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::process::{Command, Stdio};
+
     use assert_cmd::prelude::CommandCargoExt;
     use optd_perfbench::shell;
-    use std::{
-        fs,
-        process::{Command, Stdio},
-    };
 
     const WORKSPACE: &str = "optd_perfbench_integration_workspace";
 

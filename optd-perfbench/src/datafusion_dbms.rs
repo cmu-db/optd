@@ -1,41 +1,34 @@
-use std::{
-    fs::{self, File},
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-    time::Instant,
-};
+use std::fs::{self, File};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
-use crate::{
-    benchmark::Benchmark,
-    cardbench::CardbenchRunnerDBMSHelper,
-    job::{JobKit, JobKitConfig},
-    tpch::{TpchKit, TpchKitConfig},
-};
 use async_trait::async_trait;
-use datafusion::{
-    arrow::util::display::{ArrayFormatter, FormatOptions},
-    execution::{
-        config::SessionConfig,
-        context::{SessionContext, SessionState},
-        options::CsvReadOptions,
-        runtime_env::{RuntimeConfig, RuntimeEnv},
-    },
-    sql::{parser::DFParser, sqlparser::dialect::GenericDialect},
-};
-
+use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
+use datafusion::execution::config::SessionConfig;
+use datafusion::execution::context::{SessionContext, SessionState};
+use datafusion::execution::options::CsvReadOptions;
+use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::sql::parser::DFParser;
+use datafusion::sql::sqlparser::dialect::GenericDialect;
 use datafusion_optd_cli::helper::unescape_input;
 use lazy_static::lazy_static;
 use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
 use optd_datafusion_repr::DatafusionOptimizer;
-use optd_datafusion_repr_adv_cost::{
-    adv_stats::stats::{DataFusionBaseTableStats, DataFusionPerTableStats},
-    new_physical_adv_cost,
+use optd_datafusion_repr_adv_cost::adv_stats::stats::{
+    DataFusionBaseTableStats, DataFusionPerTableStats,
 };
+use optd_datafusion_repr_adv_cost::new_physical_adv_cost;
 use parquet::arrow::arrow_reader::{
     ArrowReaderMetadata, ParquetRecordBatchReader, ParquetRecordBatchReaderBuilder,
 };
 use rayon::prelude::*;
 use regex::Regex;
+
+use crate::benchmark::Benchmark;
+use crate::cardbench::CardbenchRunnerDBMSHelper;
+use crate::job::{JobKit, JobKitConfig};
+use crate::tpch::{TpchKit, TpchKitConfig};
 
 pub struct DatafusionDBMS {
     workspace_dpath: PathBuf,
@@ -62,12 +55,13 @@ impl CardbenchRunnerDBMSHelper for DatafusionDBMS {
         self.clear_state(Some(base_table_stats), benchmark).await?;
 
         if self.adaptive {
-            // We need to load the stats if we're doing adaptivity because that involves executing the queries in datafusion.
-            // This function also calls create_tables().
+            // We need to load the stats if we're doing adaptivity because that involves executing
+            // the queries in datafusion. This function also calls create_tables().
             self.load_benchmark_data_no_stats(benchmark).await?;
         } else {
-            // We only create the tables so that the optimizer doesn't work. However, we can save on the time of loading
-            //   the data if we're not doing adaptivity because we won't be executing queries.
+            // We only create the tables so that the optimizer doesn't work. However, we can save on
+            // the time of loading   the data if we're not doing adaptivity because we
+            // won't be executing queries.
             self.create_benchmark_tables(benchmark).await?;
         }
 
@@ -494,8 +488,8 @@ impl DatafusionDBMS {
         //         .for_each(|x| {
         //             let sum_freq: f64 = x.1.mcvs.frequencies().values().copied().sum();
         //             println!(
-        //                 "Col: {} (n_distinct: {}) (n_frac: {}) (mcvs: {} {}) (tdigests: {:?} {:?} {:?} {:?} {:?})",
-        //                 x.0[0],
+        //                 "Col: {} (n_distinct: {}) (n_frac: {}) (mcvs: {} {}) (tdigests: {:?} {:?}
+        // {:?} {:?} {:?})",                 x.0[0],
         //                 x.1.ndistinct,
         //                 x.1.null_frac,
         //                 x.1.mcvs.frequencies().len(),

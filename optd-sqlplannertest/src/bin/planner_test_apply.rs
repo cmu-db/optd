@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use anyhow::Result;
-
 use clap::Parser;
 use sqlplannertest::PlannerTestApplyOptions;
 
