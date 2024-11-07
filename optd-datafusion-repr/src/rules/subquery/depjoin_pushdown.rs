@@ -1,3 +1,8 @@
+// Copyright (c) 2023-2024 CMU Database Group
+//
+// Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
+
 use optd_core::nodes::{PlanNodeOrGroup, PredNode};
 // TODO: No push past join
 // TODO: Sideways information passing??

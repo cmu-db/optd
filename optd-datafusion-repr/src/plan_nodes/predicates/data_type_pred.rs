@@ -1,3 +1,8 @@
+// Copyright (c) 2023-2024 CMU Database Group
+//
+// Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
+
 use arrow_schema::DataType;
 use optd_core::nodes::PlanNodeMetaMap;
 use pretty_xmlish::Pretty;

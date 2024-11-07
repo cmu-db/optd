@@ -1,3 +1,8 @@
+// Copyright (c) 2023-2024 CMU Database Group
+//
+// Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
+
 //! This rule is designed to be applied heuristically (read: all the time, blindly).
 //! However, pushing a filter is not *always* better (but it usually is). If cost is
 //! to be taken into account, each transposition step can be done separately

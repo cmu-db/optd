@@ -1,3 +1,8 @@
+// Copyright (c) 2023-2024 CMU Database Group
+//
+// Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
+
 //! Implementation of the MurmurHash2 function, for 64b outputs, by Austin Appleby (2008).
 //! Note: Assumes little-endian machines.
 

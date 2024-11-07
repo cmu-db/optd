@@ -1,3 +1,8 @@
+// Copyright (c) 2023-2024 CMU Database Group
+//
+// Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
+
 //! Implementation of the HyperLogLog data structure as described in Flajolet et al. paper:
 //! "HyperLogLog: the analysis of a near-optimal cardinality estimation algorithm" (2007).
 //! For more details, refer to:

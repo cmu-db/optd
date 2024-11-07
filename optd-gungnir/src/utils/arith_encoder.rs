@@ -1,3 +1,8 @@
+// Copyright (c) 2023-2024 CMU Database Group
+//
+// Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
+
 //! This module provides an encoder that converts alpha-numeric strings
 //! into f64 values, designed to maintain the natural ordering of strings.
 //!

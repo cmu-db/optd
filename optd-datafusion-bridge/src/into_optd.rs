@@ -1,3 +1,8 @@
+// Copyright (c) 2023-2024 CMU Database Group
+//
+// Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
+
 use anyhow::{bail, Result};
 use datafusion::common::DFSchema;
 use datafusion::logical_expr::{self, logical_plan, LogicalPlan, Operator};
