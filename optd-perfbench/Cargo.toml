@@ -43,6 +43,5 @@ rayon = "1.10"
 parquet = "47.0.0"
 csv2parquet = { git = "https://github.com/wangpatrick57/arrow-tools.git", branch = "main" }
 
-
-[dev_dependencies]
+[dev-dependencies]
 assert_cmd = "2.0"

@@ -85,7 +85,7 @@ pub async fn exec_from_lines(
     reader: &mut BufReader<File>,
     print_options: &PrintOptions,
 ) {
-    let mut query = "".to_owned();
+    let mut query = String::new();
 
     for line in reader.lines() {
         match line {
@@ -100,7 +100,7 @@ pub async fn exec_from_lines(
                         Ok(_) => {}
                         Err(err) => eprintln!("{err}"),
                     }
-                    query = "".to_owned();
+                    query = String::new();
                 } else {
                     query.push('\n');
                 }

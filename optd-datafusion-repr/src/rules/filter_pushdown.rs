@@ -191,6 +191,7 @@ fn apply_filter_inner_join_transpose(
 /// - Push down to the left child (only involves keys from the left child)
 /// - Push down to the right child (only involves keys from the right child)
 /// - Push into the join condition (involves keys from both children)
+///
 /// We will consider each part of the conjunction separately, and push down
 /// only the relevant parts.
 fn filter_join_transpose(

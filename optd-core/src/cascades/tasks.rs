@@ -22,5 +22,7 @@ pub use optimize_inputs::OptimizeInputsTask;
 
 pub trait Task<T: NodeType, M: Memo<T>>: 'static + Send + Sync {
     fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) -> Result<Vec<Box<dyn Task<T, M>>>>;
+
+    #[allow(dead_code)]
     fn describe(&self) -> String;
 }
