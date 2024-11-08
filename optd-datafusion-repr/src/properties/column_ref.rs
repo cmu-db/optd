@@ -10,14 +10,15 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use optd_core::property::PropertyBuilder;
-use union_find::disjoint_sets::DisjointSets;
-use union_find::union_find::UnionFind;
 
 use super::schema::Catalog;
 use super::DEFAULT_NAME;
-use crate::plan_nodes::{
-    decode_empty_relation_schema, ArcDfPredNode, BinOpType, ConstantPred, DfNodeType, DfPredType,
-    DfReprPredNode, JoinType, LogOpType,
+use crate::{
+    plan_nodes::{
+        decode_empty_relation_schema, ArcDfPredNode, BinOpType, ConstantPred, DfNodeType,
+        DfPredType, DfReprPredNode, JoinType, LogOpType,
+    },
+    utils::DisjointSets,
 };
 
 pub type BaseTableColumnRefs = Vec<ColumnRef>;
