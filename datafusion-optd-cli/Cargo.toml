@@ -19,12 +19,11 @@
 name = "datafusion-optd-cli"
 description = "Command Line Client for DataFusion query engine."
 version = "32.0.0"
-authors = ["Apache Arrow <dev@arrow.apache.org>"]
 edition = "2021"
 keywords = ["arrow", "datafusion", "query", "sql"]
 license = "Apache-2.0"
-homepage = "https://github.com/apache/arrow-datafusion"
-repository = "https://github.com/apache/arrow-datafusion"
+homepage = "https://github.com/cmu-db/optd"
+repository = "https://github.com/cmu-db/optd"
 rust-version = "1.70"
 readme = "README.md"
 
@@ -57,9 +56,9 @@ tokio = { version = "1.24", features = [
     "parking_lot",
 ] }
 url = "2.2"
-optd-datafusion-bridge = { path = "../optd-datafusion-bridge" }
-optd-datafusion-repr-adv-cost = { path = "../optd-datafusion-repr-adv-cost" }
-optd-datafusion-repr = { path = "../optd-datafusion-repr" }
+optd-datafusion-bridge = { path = "../optd-datafusion-bridge", version = "0.1" }
+optd-datafusion-repr-adv-cost = { path = "../optd-datafusion-repr-adv-cost", version = "0.1" }
+optd-datafusion-repr = { path = "../optd-datafusion-repr", version = "0.1" }
 tracing-subscriber = "0.3"
 tracing = "0.1"
 
