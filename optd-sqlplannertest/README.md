@@ -1,19 +1,44 @@
-# Usage
+# SQL PLanner Tests
 
-## Update the test cases
-
-```shell
-cargo run -p optd-sqlplannertest --bin planner_test_apply
-# or, supply a list of directories to scan from
-cargo run -p optd-sqlplannertest --bin planner_test_apply -- subqueries
-```
-
-## Verify the test cases
+## Execute Test Cases
 
 ```shell
 cargo test -p optd-sqlplannertest
 # or use nextest
 cargo nextest run -p optd-sqlplannertest
+```
+## Add New Test Case
+
+To add a SQL query tests, create a YAML file in a subdir in "tests".
+Each file can contain multiple tests that are executed in sequential order from top to bottom.
+
+```yaml
+- sql: |
+    CREATE TABLE xxx (a INTEGER, b INTEGER);
+    INSERT INTO xxx VALUES (0, 0), (1, 1), (2, 2);
+    SELECT * FROM xxx WHERE a = 0;
+  tasks:
+    - execute
+  desc: Simple Test
+```
+| Name       | Description                                                        |
+| ---------- | ------------------------------------------------------------------ |
+| `sql`      | List of SQL statements to execute separate by newlines             |
+| `tasks`    | How to execute the SQL statements. See [Tasks](#tasks) below       |
+| `desc`     | (Optional) Text description of what the test cases represents      |
+
+After adding the YAML file, you then need to use the update command to automatically create the matching SQL file that contains the expected output of the test cases.
+
+## Regenerate Test Case Output
+
+If you change the output of optd's `EXPLAIN` syntax, then you need to update all of the expected output files for each test cases.
+The following commands will automatically update all of them for you. You should try to avoid this doing this often since if you introduce a bug, all the outputs will get overwritten and the tests will report false negatives.
+
+```shell
+# Update all test cases
+cargo run -p optd-sqlplannertest --bin planner_test_apply
+# or, supply a list of directories to update
+cargo run -p optd-sqlplannertest --bin planner_test_apply -- subqueries
 ```
 
 ## Tasks
@@ -24,19 +49,19 @@ The `explain` and `execute` task will be run with datafusion's logical optimizer
 
 #### Flags
 
-| Name           | Description                           |
-| -------------- | ------------------------------------- |
-| use_df_logical | Enable Datafusion's logical optimizer |
+| Name             | Description                           |
+| ---------------- | ------------------------------------- |
+| `use_df_logical` | Enable Datafusion's logical optimizer |
 
 ### Explain Task
 
 #### Flags
 
-| Name           | Description                                                        |
-| -------------- | ------------------------------------------------------------------ |
-| use_df_logical | Enable Datafusion's logical optimizer                              |
-| verbose        | Display estimated cost in physical plan                            |
-| logical_rules  | Only enable these logical rules (also disable heuristic optimizer) |
+| Name             | Description                                                        |
+| ---------------- | ------------------------------------------------------------------ |
+| `use_df_logical` | Enable Datafusion's logical optimizer                              |
+| `verbose`        | Display estimated cost in physical plan                            |
+| `logical_rules`  | Only enable these logical rules (also disable heuristic optimizer) |
 
 Currently we have the following options for the explain task:
 

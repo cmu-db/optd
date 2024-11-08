@@ -1,0 +1,12 @@
+- sql: |
+    CREATE TABLE xxx (a INTEGER, b INTEGER);
+    INSERT INTO xxx VALUES (0, 0), (1, 1), (2, 2);
+    SELECT * FROM xxx WHERE a = 0;
+  tasks:
+    - execute
+  desc: Setup Test Table
+- sql: |
+    SELECT * FROM xxx WHERE a + 0 = b + 0;
+  tasks:
+    - execute
+    - explain:logical_optd,physical_optd
