@@ -31,6 +31,7 @@ mod optimizer_ext;
 pub mod plan_nodes;
 pub mod properties;
 pub mod rules;
+mod utils;
 
 #[cfg(test)]
 mod testing;

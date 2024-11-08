@@ -2968,7 +2968,6 @@ dependencies = [
  "serde",
  "tracing",
  "tracing-subscriber",
- "union-find",
  "value-bag",
 ]
 
@@ -4767,11 +4766,6 @@ name = "unicode-width"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
-
-[[package]]
-name = "union-find"
-version = "0.1.0"
-source = "git+https://github.com/Gun9niR/union-find-rs.git?rev=794821514f7daefcbb8d5f38ef04e62fc18b5665#794821514f7daefcbb8d5f38ef04e62fc18b5665"
 
 [[package]]
 name = "unsafe-libyaml"
