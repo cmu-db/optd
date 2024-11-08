@@ -11,13 +11,13 @@ arrow-schema = "47.0.0"
 assert_approx_eq = "1.1.0"
 datafusion = "32.0.0"
 ordered-float = "4"
-optd-datafusion-repr = { path = "../optd-datafusion-repr" }
-optd-core = { path = "../optd-core" }
+optd-datafusion-repr = { path = "../optd-datafusion-repr", version = "0.1" }
+optd-core = { path = "../optd-core", version = "0.1" }
 serde = { version = "1.0", features = ["derive"] }
 rayon = "1.10"
 itertools = "0.13"
 test-case = "3.3"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-optd-gungnir = { path = "../optd-gungnir" }
+optd-gungnir = { path = "../optd-gungnir", version = "0.1" }
 serde_with = { version = "3.7.0", features = ["json"] }
