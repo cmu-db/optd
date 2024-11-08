@@ -141,7 +141,7 @@ impl DatafusionDBMS {
                 guard.as_mut().unwrap().enable_heuristic(true);
             } else {
                 for (rule_id, rule) in rules.as_ref().iter().enumerate() {
-                    if rule.rule.is_impl_rule() {
+                    if rule.is_impl_rule() {
                         optimizer.enable_rule(rule_id);
                     } else {
                         optimizer.disable_rule(rule_id);
@@ -153,7 +153,7 @@ impl DatafusionDBMS {
                     .map(|x| x.as_str())
                     .collect::<HashSet<_>>();
                 for (rule_id, rule) in rules.as_ref().iter().enumerate() {
-                    if rules_to_enable.remove(rule.rule.name()) {
+                    if rules_to_enable.remove(rule.name()) {
                         optimizer.enable_rule(rule_id);
                     }
                 }

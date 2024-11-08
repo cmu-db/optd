@@ -15,7 +15,7 @@ use crate::cascades::optimizer::{CascadesOptimizer, ExprId, RuleId};
 use crate::cascades::tasks::{OptimizeExpressionTask, OptimizeInputsTask};
 use crate::cascades::{GroupId, Memo};
 use crate::nodes::{ArcPlanNode, NodeType, PlanNode, PlanNodeOrGroup};
-use crate::rules::{OptimizeType, RuleMatcher};
+use crate::rules::RuleMatcher;
 
 pub struct ApplyRuleTask {
     rule_id: RuleId,
@@ -164,20 +164,15 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for ApplyRuleTask {
             return Ok(vec![]);
         }
 
-        let rule_wrapper = optimizer.rules()[self.rule_id].clone();
-        let rule = rule_wrapper.rule();
+        let rule = optimizer.rules()[self.rule_id].clone();
 
-        trace!(event = "task_begin", task = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, rule = %rule.name(), optimize_type=%rule_wrapper.optimize_type());
+        trace!(event = "task_begin", task = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, rule = %rule.name());
         let group_id = optimizer.get_group_id(self.expr_id);
         let mut tasks = vec![];
         let binding_exprs = match_and_pick_expr(rule.matcher(), self.expr_id, optimizer);
         for binding in binding_exprs {
             trace!(event = "before_apply_rule", task = "apply_rule", input_binding=%binding);
             let applied = rule.apply(optimizer, binding);
-
-            if rule_wrapper.optimize_type() == OptimizeType::Heuristics {
-                panic!("no more heuristics rule in cascades");
-            }
 
             for expr in applied {
                 trace!(event = "after_apply_rule", task = "apply_rule", output_binding=%expr);

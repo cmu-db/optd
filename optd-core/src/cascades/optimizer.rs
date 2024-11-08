@@ -20,7 +20,7 @@ use crate::nodes::{
 };
 use crate::optimizer::Optimizer;
 use crate::property::{PropertyBuilder, PropertyBuilderAny};
-use crate::rules::RuleWrapper;
+use crate::rules::Rule;
 
 pub type RuleId = usize;
 
@@ -47,7 +47,7 @@ pub struct CascadesOptimizer<T: NodeType, M: Memo<T> = NaiveMemo<T>> {
     explored_group: HashSet<GroupId>,
     explored_expr: HashSet<ExprId>,
     fired_rules: HashMap<ExprId, HashSet<RuleId>>,
-    rules: Arc<[Arc<RuleWrapper<T, Self>>]>,
+    rules: Arc<[Arc<dyn Rule<T, Self>>]>,
     disabled_rules: HashSet<usize>,
     cost: Arc<dyn CostModel<T, M>>,
     property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
@@ -94,7 +94,7 @@ impl Display for PredId {
 
 impl<T: NodeType> CascadesOptimizer<T, NaiveMemo<T>> {
     pub fn new(
-        rules: Vec<Arc<RuleWrapper<T, Self>>>,
+        rules: Vec<Arc<dyn Rule<T, Self>>>,
         cost: Box<dyn CostModel<T, NaiveMemo<T>>>,
         property_builders: Vec<Box<dyn PropertyBuilderAny<T>>>,
     ) -> Self {
@@ -102,7 +102,7 @@ impl<T: NodeType> CascadesOptimizer<T, NaiveMemo<T>> {
     }
 
     pub fn new_with_prop(
-        rules: Vec<Arc<RuleWrapper<T, Self>>>,
+        rules: Vec<Arc<dyn Rule<T, Self>>>,
         cost: Box<dyn CostModel<T, NaiveMemo<T>>>,
         property_builders: Vec<Box<dyn PropertyBuilderAny<T>>>,
         prop: OptimizerProperties,
@@ -153,7 +153,7 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
         self.cost.clone()
     }
 
-    pub fn rules(&self) -> Arc<[Arc<RuleWrapper<T, Self>>]> {
+    pub fn rules(&self) -> Arc<[Arc<dyn Rule<T, Self>>]> {
         self.rules.clone()
     }
 

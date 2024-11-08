@@ -39,8 +39,7 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeExpressionTask {
         let expr = optimizer.get_expr_memoed(self.expr_id);
         trace!(event = "task_begin", task = "optimize_expr", expr_id = %self.expr_id, expr = %expr);
         let mut tasks = vec![];
-        for (rule_id, rule_wrapper) in optimizer.rules().iter().enumerate() {
-            let rule = rule_wrapper.rule();
+        for (rule_id, rule) in optimizer.rules().iter().enumerate() {
             if optimizer.is_rule_fired(self.expr_id, rule_id) {
                 continue;
             }

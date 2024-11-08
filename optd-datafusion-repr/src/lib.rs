@@ -18,7 +18,7 @@ use optd_core::nodes::PlanNodeMetaMap;
 pub use optd_core::nodes::Value;
 use optd_core::optimizer::Optimizer;
 use optd_core::property::PropertyBuilderAny;
-use optd_core::rules::{Rule, RuleWrapper};
+use optd_core::rules::Rule;
 pub use optimizer_ext::OptimizerExt;
 use plan_nodes::{ArcDfPlanNode, DfNodeType};
 use properties::column_ref::ColumnRefPropertyBuilder;
@@ -94,58 +94,28 @@ impl DatafusionOptimizer {
         ]
     }
 
-    pub fn default_cascades_rules(
-    ) -> Vec<Arc<RuleWrapper<DfNodeType, CascadesOptimizer<DfNodeType>>>> {
+    pub fn default_cascades_rules() -> Vec<Arc<dyn Rule<DfNodeType, CascadesOptimizer<DfNodeType>>>>
+    {
         let rules = rules::PhysicalConversionRule::all_conversions();
         let mut rule_wrappers = vec![];
         for rule in rules {
-            rule_wrappers.push(RuleWrapper::new_cascades(rule));
+            rule_wrappers.push(rule);
         }
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::FilterProjectTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::FilterCrossJoinTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::FilterInnerJoinTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::FilterSortTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::FilterAggTransposeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::HashJoinRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::JoinCommuteRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::JoinAssocRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::ProjectionPullUpJoin::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::EliminateProjectRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::ProjectMergeRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::EliminateLimitRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::EliminateJoinRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::EliminateFilterRule::new(),
-        )));
-        rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(
-            rules::ProjectFilterTransposeRule::new(),
-        )));
+        rule_wrappers.push(Arc::new(rules::FilterProjectTransposeRule::new()));
+        rule_wrappers.push(Arc::new(rules::FilterCrossJoinTransposeRule::new()));
+        rule_wrappers.push(Arc::new(rules::FilterInnerJoinTransposeRule::new()));
+        rule_wrappers.push(Arc::new(rules::FilterSortTransposeRule::new()));
+        rule_wrappers.push(Arc::new(rules::FilterAggTransposeRule::new()));
+        rule_wrappers.push(Arc::new(rules::HashJoinRule::new()));
+        rule_wrappers.push(Arc::new(rules::JoinCommuteRule::new()));
+        rule_wrappers.push(Arc::new(rules::JoinAssocRule::new()));
+        rule_wrappers.push(Arc::new(rules::ProjectionPullUpJoin::new()));
+        rule_wrappers.push(Arc::new(rules::EliminateProjectRule::new()));
+        rule_wrappers.push(Arc::new(rules::ProjectMergeRule::new()));
+        rule_wrappers.push(Arc::new(rules::EliminateLimitRule::new()));
+        rule_wrappers.push(Arc::new(rules::EliminateJoinRule::new()));
+        rule_wrappers.push(Arc::new(rules::EliminateFilterRule::new()));
+        rule_wrappers.push(Arc::new(rules::ProjectFilterTransposeRule::new()));
         rule_wrappers
     }
 
@@ -199,22 +169,13 @@ impl DatafusionOptimizer {
         let rules = rules::PhysicalConversionRule::all_conversions();
         let mut rule_wrappers = Vec::new();
         for rule in rules {
-            rule_wrappers.push(RuleWrapper::new_cascades(rule));
+            rule_wrappers.push(rule);
         }
-        // rule_wrappers.push(RuleWrapper::new_cascades(Arc::new(HashJoinRule::new())));
-        // rule_wrappers.insert(
-        //     0,
-        //     RuleWrapper::new_cascades(Arc::new(JoinCommuteRule::new())),
-        // );
-        // rule_wrappers.insert(1, RuleWrapper::new_cascades(Arc::new(JoinAssocRule::new())));
-        // rule_wrappers.insert(
-        //     2,
-        //     RuleWrapper::new_cascades(Arc::new(ProjectionPullUpJoin::new())),
-        // );
-        // rule_wrappers.insert(
-        //     3,
-        //     RuleWrapper::new_heuristic(Arc::new(EliminateFilterRule::new())),
-        // );
+        rule_wrappers.push(Arc::new(rules::HashJoinRule::new()));
+        rule_wrappers.insert(0, Arc::new(rules::JoinCommuteRule::new()));
+        rule_wrappers.insert(1, Arc::new(rules::JoinAssocRule::new()));
+        rule_wrappers.insert(2, Arc::new(rules::ProjectionPullUpJoin::new()));
+        rule_wrappers.insert(3, Arc::new(rules::EliminateFilterRule::new()));
 
         let cost_model = AdaptiveCostModel::new(1000);
         let runtime_statistics = cost_model.get_runtime_map();
