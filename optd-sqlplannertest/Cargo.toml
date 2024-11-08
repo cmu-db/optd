@@ -8,10 +8,10 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.5.4", features = ["derive"] }
 anyhow = { version = "1", features = ["backtrace"] }
-sqlplannertest = { git = "https://github.com/risinglightdb/sqlplannertest-rs", branch = "main" }
+sqlplannertest = "0.2"
 async-trait = "0.1"
-datafusion-optd-cli = { path = "../datafusion-optd-cli" }
-optd-datafusion-repr-adv-cost = { path = "../optd-datafusion-repr-adv-cost" }
+datafusion-optd-cli = { path = "../datafusion-optd-cli", version = "32.0.0" }
+optd-datafusion-repr-adv-cost = { path = "../optd-datafusion-repr-adv-cost", version = "0.1" }
 datafusion = { version = "32.0.0", features = [
     "avro",
     "crypto_expressions",
@@ -30,8 +30,8 @@ tokio = { version = "1.24", features = [
     "sync",
     "parking_lot",
 ] }
-optd-datafusion-bridge = { path = "../optd-datafusion-bridge" }
-optd-datafusion-repr = { path = "../optd-datafusion-repr" }
+optd-datafusion-bridge = { path = "../optd-datafusion-bridge", version = "0.1" }
+optd-datafusion-repr = { path = "../optd-datafusion-repr", version = "0.1" }
 itertools = "0.13"
 lazy_static = "1.4.0"
 
