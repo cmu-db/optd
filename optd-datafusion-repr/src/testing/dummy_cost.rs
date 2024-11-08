@@ -35,7 +35,7 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for DummyCostModel {
         _: Option<RelNodeContext>,
         _: Option<&CascadesOptimizer<DfNodeType>>,
     ) -> Statistics {
-        Statistics(ValueBag::empty().to_owned())
+        Statistics(Box::new(()))
     }
 
     fn explain_cost(&self, _: &Cost) -> String {
