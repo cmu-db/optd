@@ -2924,7 +2924,7 @@ dependencies = [
 
 [[package]]
 name = "optd-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arrow-schema",
@@ -2938,7 +2938,7 @@ dependencies = [
 
 [[package]]
 name = "optd-datafusion-bridge"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-recursion",
@@ -2955,7 +2955,7 @@ dependencies = [
 
 [[package]]
 name = "optd-datafusion-repr"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arrow-schema",
@@ -2993,7 +2993,7 @@ dependencies = [
 
 [[package]]
 name = "optd-gungnir"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crossbeam",
  "hashbrown 0.14.5",

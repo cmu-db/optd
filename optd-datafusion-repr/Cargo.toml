@@ -17,7 +17,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 pretty-xmlish = "0.1"
 itertools = "0.13"
-optd-core = { path = "../optd-core" }
+optd-core = { path = "../optd-core", version = "0.1" }
 camelpaste = "0.1"
 datafusion-expr = "32.0.0"
 serde = { version = "1.0", features = ["derive"] }
