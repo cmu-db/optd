@@ -20,3 +20,4 @@ serde_with = { version = "3.7.0", features = ["json"] }
 ordered-float = "4"
 optd-core = { path = "../optd-core", version = "0.1.0" }
 hashbrown = { version = "0.14", features = ["serde"] }
+murmur2 = "0.1"

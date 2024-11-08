@@ -8,37 +8,7 @@
 
 /// Returns the MurmurHash2 (u64) given a stream of bytes and a seed.
 pub fn murmur_hash(bytes: &[u8], seed: u64) -> u64 {
-    const M: u64 = 0xc6a4a7935bd1e995;
-    const R: u8 = 47;
-
-    let mut hash = seed ^ (bytes.len() as u64).wrapping_mul(M);
-
-    let div = bytes.len() / 8;
-    let rem = bytes.len() % 8;
-
-    let whole_part: &[u64] =
-        unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const u64, div) };
-
-    for batch in whole_part {
-        let mut k = batch.wrapping_mul(M);
-        k ^= k >> R;
-        k = k.wrapping_mul(M);
-
-        hash ^= k;
-        hash = hash.wrapping_mul(M);
-    }
-
-    if rem > 0 {
-        for i in 0..rem {
-            hash ^= (bytes[div * 8 + i] as u64) << (i * 8);
-        }
-        hash = hash.wrapping_mul(M);
-    }
-
-    hash ^= hash >> R;
-    hash = hash.wrapping_mul(M);
-    hash ^= hash >> R;
-    hash
+    murmur2::murmur64a(bytes, seed)
 }
 
 // Start of unit testing section.
