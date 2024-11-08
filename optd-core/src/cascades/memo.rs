@@ -140,6 +140,8 @@ pub trait Memo<T: NodeType>: 'static + Send + Sync {
     fn get_all_exprs_in_group(&self, group_id: GroupId) -> Vec<ExprId> {
         let group = self.get_group(group_id);
         let mut exprs = group.group_exprs.iter().copied().collect_vec();
+        // Sort so that we can get a stable processing order for the expressions, therefore making regression test
+        // yield a stable result across different platforms.
         exprs.sort();
         exprs
     }
@@ -163,6 +165,9 @@ pub trait Memo<T: NodeType>: 'static + Send + Sync {
     /// separate entity. If the representation stores predicates in the rel node children, the
     /// repr should use this function to get the predicate binding. Otherwise, use `ger_pred`
     /// for those predicates stored within the `predicates` field.
+    ///
+    /// TODO: this can be removed after the predicate refactor, unless someone comes up with a
+    /// plan representation that embeds predicates in the plan node.
     fn get_predicate_binding(&self, group_id: GroupId) -> Option<ArcPlanNode<T>> {
         get_predicate_binding_group_inner(self, group_id, true)
     }
@@ -676,7 +681,10 @@ impl<T: NodeType> NaiveMemo<T> {
 mod tests {
 
     use super::*;
-    use crate::nodes::{PredNode, Value};
+    use crate::{
+        nodes::{PredNode, Value},
+        property::PropertyBuilder,
+    };
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     enum MemoTestRelTyp {
@@ -872,5 +880,65 @@ mod tests {
             memo.get_expr_memoed(expr2_id)
         ); // these two expressions are merged
         assert_eq!(memo.get_expr_info(expr1), memo.get_expr_info(expr2));
+    }
+
+    struct TestPropertyBuilder;
+
+    #[derive(Clone, Debug)]
+    struct TestProp(Vec<String>);
+    impl std::fmt::Display for TestProp {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{:?}", self.0)
+        }
+    }
+    impl PropertyBuilder<MemoTestRelTyp> for TestPropertyBuilder {
+        type Prop = TestProp;
+        fn derive(
+            &self,
+            typ: MemoTestRelTyp,
+            pred: &[ArcPredNode<MemoTestRelTyp>],
+            children: &[&Self::Prop],
+        ) -> Self::Prop {
+            match typ {
+                MemoTestRelTyp::Join => {
+                    let mut a = children[0].0.clone();
+                    let b = children[1].0.clone();
+                    a.extend(b);
+                    TestProp(a)
+                }
+                MemoTestRelTyp::Project => {
+                    let preds = &pred[0].children;
+                    TestProp(
+                        preds
+                            .iter()
+                            .map(|x| x.data.as_ref().unwrap().as_i64().to_string())
+                            .collect(),
+                    )
+                }
+                MemoTestRelTyp::Scan => TestProp(vec!["scan_col".to_string()]),
+            }
+        }
+        fn property_name(&self) -> &'static str {
+            "test"
+        }
+    }
+
+    #[test]
+    fn logical_property() {
+        let mut memo = NaiveMemo::new(Arc::new([Box::new(TestPropertyBuilder)]));
+        let (group_id, _) = memo.add_new_expr(join(
+            scan("t1"),
+            project(
+                scan("t2"),
+                list(vec![expr(Value::Int64(1)), expr(Value::Int64(2))]),
+            ),
+            expr(Value::Bool(true)),
+        ));
+        let group = memo.get_group(group_id);
+        assert_eq!(group.properties.len(), 1);
+        assert_eq!(
+            group.properties[0].downcast_ref::<TestProp>().unwrap().0,
+            vec!["scan_col", "1", "2"]
+        );
     }
 }
