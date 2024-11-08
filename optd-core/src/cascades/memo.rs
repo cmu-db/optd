@@ -41,7 +41,7 @@ impl<T: NodeType> std::fmt::Display for MemoPlanNode<T> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WinnerInfo {
     pub expr_id: ExprId,
     pub total_weighted_cost: f64,
@@ -51,7 +51,7 @@ pub struct WinnerInfo {
     pub statistics: Arc<Statistics>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Winner {
     Unknown,
     Impossible,
@@ -81,7 +81,7 @@ impl Default for Winner {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Clone)]
 pub struct GroupInfo {
     pub winner: Winner,
 }

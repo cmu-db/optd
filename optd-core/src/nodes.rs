@@ -358,7 +358,7 @@ impl<T: NodeType> PredNode<T> {
 }
 
 /// Metadata for a rel node.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PlanNodeMeta {
     /// The group (id) of the `RelNode`
     pub group_id: GroupId,

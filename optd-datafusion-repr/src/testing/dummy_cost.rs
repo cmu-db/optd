@@ -5,7 +5,6 @@
 
 use optd_core::cascades::{CascadesOptimizer, NaiveMemo, RelNodeContext};
 use optd_core::cost::{Cost, CostModel, Statistics};
-use value_bag::ValueBag;
 
 use crate::plan_nodes::{ArcDfPredNode, DfNodeType};
 

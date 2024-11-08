@@ -8,9 +8,13 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use optd_core::cascades::{CascadesOptimizer, NaiveMemo, RelNodeContext};
 use optd_core::cost::{Cost, CostModel, Statistics};
-use value_bag::ValueBag;
 
 use crate::plan_nodes::{ArcDfPredNode, ConstantPred, DfNodeType, DfReprPredNode};
+
+#[derive(Debug, Clone)]
+pub struct DfStatistics {
+    row_cnt: f64,
+}
 
 pub struct DfCostModel {
     table_stat: HashMap<String, usize>,
@@ -31,7 +35,7 @@ impl DfCostModel {
     }
 
     pub fn row_cnt(Statistics(stat): &Statistics) -> f64 {
-        stat.by_ref().as_f64()
+        stat.downcast_ref::<DfStatistics>().unwrap().row_cnt
     }
 
     pub fn cost(compute_cost: f64, io_cost: f64) -> Cost {
@@ -39,7 +43,7 @@ impl DfCostModel {
     }
 
     pub fn stat(row_cnt: f64) -> Statistics {
-        Statistics(ValueBag::from_f64(row_cnt).to_owned())
+        Statistics(Box::new(DfStatistics { row_cnt }))
     }
 
     pub fn cost_tuple(Cost(cost): &Cost) -> (f64, f64) {

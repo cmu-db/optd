@@ -7,8 +7,7 @@ use crate::cascades::{CascadesOptimizer, Memo, RelNodeContext};
 use crate::nodes::{ArcPredNode, NodeType};
 
 /// The statistics of a group.
-#[derive(Clone, Debug)]
-pub struct Statistics(pub value_bag::OwnedValueBag);
+pub struct Statistics(pub Box<dyn std::any::Any + Send + Sync + 'static>);
 
 /// The cost of an operation. The cost is represented as a vector of double values.
 /// For example, it can be represented as `[compute_cost, io_cost]`.
