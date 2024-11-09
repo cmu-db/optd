@@ -4,7 +4,7 @@
 // https://opensource.org/licenses/MIT.
 
 use crate::{
-    heuristics::{ApplyOrder, HeuristicsOptimizer},
+    heuristics::{ApplyOrder, HeuristicsOptimizer, HeuristicsOptimizerOptions},
     nodes::Value,
     optimizer::Optimizer,
     physical_property::PhysicalPropertyBuilderAny,
@@ -20,7 +20,23 @@ use pretty_assertions::assert_eq;
 fn get_optimizer() -> HeuristicsOptimizer<MemoTestRelTyp> {
     HeuristicsOptimizer::new_with_rules(
         vec![],
-        ApplyOrder::TopDown,
+        HeuristicsOptimizerOptions {
+            apply_order: ApplyOrder::TopDown,
+            enable_physical_prop_passthrough: true,
+        },
+        vec![].into(),
+        vec![Box::new(SortPropertyBuilder) as Box<dyn PhysicalPropertyBuilderAny<MemoTestRelTyp>>]
+            .into(),
+    )
+}
+
+fn get_optimizer_no_passthrough() -> HeuristicsOptimizer<MemoTestRelTyp> {
+    HeuristicsOptimizer::new_with_rules(
+        vec![],
+        HeuristicsOptimizerOptions {
+            apply_order: ApplyOrder::TopDown,
+            enable_physical_prop_passthrough: false,
+        },
         vec![].into(),
         vec![Box::new(SortPropertyBuilder) as Box<dyn PhysicalPropertyBuilderAny<MemoTestRelTyp>>]
             .into(),
@@ -213,5 +229,20 @@ fn required_property_stream_agg_cannot_passthrough() {
     )
 }
 
-// TODO: currently, we always passthrough the requried properties all the way down in heuristics optimizer. Should
-// we add a new mode that doesn't passthrough but only try to satisfy the required properties at the top level?
+#[test]
+fn no_passthrough_all_the_way() {
+    // Test that the optimizer can passthrough properties across multiple plan nodes to satisfy a required sort property
+    // without passthrough
+    let mut optimizer = get_optimizer_no_passthrough();
+    let plan = physical_filter(physical_scan("t1"), expr(Value::Bool(true)));
+    let optimized_plan = optimizer
+        .optimize_with_required_props(plan, &[&SortProp(vec!["x".to_string()])])
+        .unwrap();
+    assert_eq!(
+        optimized_plan,
+        physical_sort(
+            physical_filter(physical_scan("t1"), expr(Value::Bool(true))),
+            list(vec![column_ref("x")])
+        ),
+    )
+}

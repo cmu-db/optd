@@ -182,6 +182,21 @@ impl<T: NodeType> PhysicalPropertyBuilders<T> {
     }
 
     /// Returns children_len x props_len (required properties for each child)
+    pub fn require_many_no_passthrough(
+        &self,
+        typ: T,
+        predicates: &[ArcPredNode<T>],
+        children_len: usize,
+    ) -> Vec<PhysicalPropertySet> {
+        let required_prop = self
+            .0
+            .iter()
+            .map(|builder| builder.default_any())
+            .collect_vec();
+        self.require_many(typ, predicates, required_prop, children_len)
+    }
+
+    /// Returns children_len x props_len (required properties for each child)
     pub fn require_many<X, Y>(
         &self,
         typ: T,

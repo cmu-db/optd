@@ -13,7 +13,7 @@ use cost::{AdaptiveCostModel, RuntimeAdaptionStorage};
 pub use memo_ext::{LogicalJoinOrder, MemoExt};
 use optd_core::cascades::{CascadesOptimizer, GroupId, NaiveMemo, OptimizerProperties};
 use optd_core::cost::CostModel;
-use optd_core::heuristics::{ApplyOrder, HeuristicsOptimizer};
+use optd_core::heuristics::{ApplyOrder, HeuristicsOptimizer, HeuristicsOptimizerOptions};
 use optd_core::logical_property::LogicalPropertyBuilderAny;
 use optd_core::nodes::PlanNodeMetaMap;
 pub use optd_core::nodes::Value;
@@ -156,7 +156,10 @@ impl DatafusionOptimizer {
             ),
             heuristic_optimizer: HeuristicsOptimizer::new_with_rules(
                 heuristic_rules,
-                ApplyOrder::TopDown, // uhh TODO reconsider
+                HeuristicsOptimizerOptions {
+                    apply_order: ApplyOrder::TopDown, // uhh TODO reconsider
+                    enable_physical_prop_passthrough: true,
+                },
                 property_builders.clone(),
                 Arc::new([]),
             ),
@@ -195,7 +198,10 @@ impl DatafusionOptimizer {
             enable_heuristic: false,
             heuristic_optimizer: HeuristicsOptimizer::new_with_rules(
                 vec![],
-                ApplyOrder::BottomUp,
+                HeuristicsOptimizerOptions {
+                    apply_order: ApplyOrder::BottomUp,
+                    enable_physical_prop_passthrough: true,
+                },
                 Arc::new([]),
                 Arc::new([]),
             ),

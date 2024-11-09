@@ -23,9 +23,14 @@ pub enum ApplyOrder {
     BottomUp,
 }
 
+pub struct HeuristicsOptimizerOptions {
+    pub apply_order: ApplyOrder,
+    pub enable_physical_prop_passthrough: bool,
+}
+
 pub struct HeuristicsOptimizer<T: NodeType> {
     rules: Arc<[Arc<dyn Rule<T, Self>>]>,
-    apply_order: ApplyOrder,
+    options: HeuristicsOptimizerOptions,
     logical_property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>,
     physical_property_builders: PhysicalPropertyBuilders<T>,
     logical_properties_cache: HashMap<ArcPlanNode<T>, Arc<[Box<dyn LogicalProperty>]>>,
@@ -91,13 +96,13 @@ fn match_and_pick<T: NodeType>(
 impl<T: NodeType> HeuristicsOptimizer<T> {
     pub fn new_with_rules(
         rules: Vec<Arc<dyn Rule<T, Self>>>,
-        apply_order: ApplyOrder,
+        options: HeuristicsOptimizerOptions,
         logical_property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>,
         physical_property_builders: Arc<[Box<dyn PhysicalPropertyBuilderAny<T>>]>,
     ) -> Self {
         Self {
             rules: rules.into(),
-            apply_order,
+            options,
             logical_property_builders,
             logical_properties_cache: HashMap::new(),
             physical_property_builders: PhysicalPropertyBuilders(physical_property_builders),
@@ -135,7 +140,7 @@ impl<T: NodeType> HeuristicsOptimizer<T> {
     }
 
     fn optimize_inner(&mut self, root_rel: ArcPlanNode<T>) -> Result<ArcPlanNode<T>> {
-        match self.apply_order {
+        match self.options.apply_order {
             ApplyOrder::BottomUp => {
                 let optimized_children = self.optimize_inputs(&root_rel.children)?;
                 let node = self.apply_rules(
@@ -204,12 +209,23 @@ impl<T: NodeType> HeuristicsOptimizer<T> {
         Y: AsRef<[X]>,
     {
         let required_props = required_props.as_ref();
-        let children_required_props = self.physical_property_builders.require_many(
-            root_rel.typ.clone(),
-            &root_rel.predicates,
-            required_props,
-            root_rel.children.len(),
-        );
+        let children_required_props = if self.options.enable_physical_prop_passthrough {
+            // If physical property passthrough is enabled, we pass the required properties to the children.
+            self.physical_property_builders.require_many(
+                root_rel.typ.clone(),
+                &root_rel.predicates,
+                required_props,
+                root_rel.children.len(),
+            )
+        } else {
+            // Otherwise, we do not pass any required property of the current node, and therefore, it only generates
+            // the properties required by the node type.
+            self.physical_property_builders.require_many_no_passthrough(
+                root_rel.typ.clone(),
+                &root_rel.predicates,
+                root_rel.children.len(),
+            )
+        };
         let mut children = Vec::with_capacity(root_rel.children.len());
         let mut children_output_properties = Vec::with_capacity(root_rel.children.len());
         for (child, required_properties) in root_rel

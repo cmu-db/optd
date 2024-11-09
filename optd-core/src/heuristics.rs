@@ -5,4 +5,4 @@
 
 mod optimizer;
 
-pub use optimizer::{ApplyOrder, HeuristicsOptimizer};
+pub use optimizer::{ApplyOrder, HeuristicsOptimizer, HeuristicsOptimizerOptions};
