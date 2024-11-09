@@ -70,7 +70,10 @@ fn simple_required_physical_property_satisfied() {
         .unwrap();
     assert_eq!(
         optimized_plan,
-        physical_sort(physical_scan("t1"), list(vec![column_ref("x")]))
+        physical_sort(
+            physical_scan("t1"),
+            list(vec![column_ref("x"), column_ref("y")])
+        )
     )
 }
 
