@@ -5,12 +5,20 @@
 
 use anyhow::Result;
 
+use crate::logical_property::LogicalPropertyBuilder;
 use crate::nodes::{ArcPlanNode, NodeType, PlanNodeOrGroup};
-use crate::property::PropertyBuilder;
+use crate::physical_property::PhysicalProperty;
 
 pub trait Optimizer<T: NodeType> {
     fn optimize(&mut self, root_rel: ArcPlanNode<T>) -> Result<ArcPlanNode<T>>;
-    fn get_property<P: PropertyBuilder<T>>(
+
+    fn optimize_with_required_props(
+        &mut self,
+        root_rel: ArcPlanNode<T>,
+        required_props: &[&dyn PhysicalProperty],
+    ) -> Result<ArcPlanNode<T>>;
+
+    fn get_logical_property<P: LogicalPropertyBuilder<T>>(
         &self,
         root_rel: PlanNodeOrGroup<T>,
         idx: usize,

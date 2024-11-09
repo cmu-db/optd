@@ -8,35 +8,42 @@ use std::fmt::{Debug, Display};
 
 use crate::nodes::{ArcPredNode, NodeType};
 
-pub trait PropertyBuilderAny<T: NodeType>: 'static + Send + Sync {
+pub trait LogicalProperty: 'static + Any + Send + Sync + Debug + Display {
+    fn as_any(&self) -> &dyn Any;
+}
+
+pub trait LogicalPropertyBuilderAny<T: NodeType>: 'static + Send + Sync {
     fn derive_any(
         &self,
         typ: T,
         predicates: &[ArcPredNode<T>],
-        children: &[&dyn Any],
-    ) -> Box<dyn Any + Send + Sync + 'static>;
-    fn display(&self, prop: &dyn Any) -> String;
+        children: &[&dyn LogicalProperty],
+    ) -> Box<dyn LogicalProperty>;
     fn property_name(&self) -> &'static str;
 }
 
-pub trait PropertyBuilder<T: NodeType>: 'static + Send + Sync + Sized {
-    type Prop: 'static + Send + Sync + Sized + Clone + Debug + Display;
+pub trait LogicalPropertyBuilder<T: NodeType>: 'static + Send + Sync + Sized {
+    type Prop: LogicalProperty + Sized + Clone;
+
+    /// Derive the output logical property based on the input logical properties and the current plan node information.
     fn derive(&self, typ: T, predicates: &[ArcPredNode<T>], children: &[&Self::Prop])
         -> Self::Prop;
+
     fn property_name(&self) -> &'static str;
 }
 
-impl<T: NodeType, P: PropertyBuilder<T>> PropertyBuilderAny<T> for P {
+impl<T: NodeType, P: LogicalPropertyBuilder<T>> LogicalPropertyBuilderAny<T> for P {
     fn derive_any(
         &self,
         typ: T,
         predicates: &[ArcPredNode<T>],
-        children: &[&dyn Any],
-    ) -> Box<dyn Any + Send + Sync + 'static> {
+        children: &[&dyn LogicalProperty],
+    ) -> Box<dyn LogicalProperty> {
         let children: Vec<&P::Prop> = children
             .iter()
             .map(|child| {
                 child
+                    .as_any()
                     .downcast_ref::<P::Prop>()
                     .expect("Failed to downcast child")
             })
@@ -44,14 +51,7 @@ impl<T: NodeType, P: PropertyBuilder<T>> PropertyBuilderAny<T> for P {
         Box::new(self.derive(typ, predicates, &children))
     }
 
-    fn display(&self, prop: &dyn Any) -> String {
-        let prop = prop
-            .downcast_ref::<P::Prop>()
-            .expect("Failed to downcast property");
-        prop.to_string()
-    }
-
     fn property_name(&self) -> &'static str {
-        PropertyBuilder::property_name(self)
+        LogicalPropertyBuilder::property_name(self)
     }
 }

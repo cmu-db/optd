@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use optd_core::property::PropertyBuilder;
+use optd_core::logical_property::{LogicalProperty, LogicalPropertyBuilder};
 
 use super::schema::Catalog;
 use super::DEFAULT_NAME;
@@ -395,7 +395,13 @@ impl std::fmt::Display for GroupColumnRefs {
     }
 }
 
-impl PropertyBuilder<DfNodeType> for ColumnRefPropertyBuilder {
+impl LogicalProperty for GroupColumnRefs {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl LogicalPropertyBuilder<DfNodeType> for ColumnRefPropertyBuilder {
     type Prop = GroupColumnRefs;
 
     fn derive(

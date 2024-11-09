@@ -26,5 +26,6 @@ pub fn new_test_optimizer(
         vec![rule],
         ApplyOrder::TopDown,
         Arc::new([Box::new(SchemaPropertyBuilder::new(dummy_catalog))]),
+        Arc::new([]),
     )
 }

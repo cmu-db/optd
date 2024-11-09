@@ -3,7 +3,6 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
-use std::any::Any;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -14,8 +13,8 @@ use tracing::trace;
 
 use super::optimizer::{ExprId, GroupId, PredId};
 use crate::cost::{Cost, Statistics};
+use crate::logical_property::{LogicalProperty, LogicalPropertyBuilderAny};
 use crate::nodes::{ArcPlanNode, ArcPredNode, NodeType, PlanNode, PlanNodeOrGroup};
-use crate::property::PropertyBuilderAny;
 
 pub type ArcMemoPlanNode<T> = Arc<MemoPlanNode<T>>;
 
@@ -89,7 +88,7 @@ pub struct GroupInfo {
 pub struct Group {
     pub(crate) group_exprs: HashSet<ExprId>,
     pub(crate) info: GroupInfo,
-    pub(crate) properties: Arc<[Box<dyn Any + Send + Sync + 'static>]>,
+    pub(crate) properties: Arc<[Box<dyn LogicalProperty>]>,
 }
 
 /// Trait for memo table implementations.
@@ -262,7 +261,7 @@ pub struct NaiveMemo<T: NodeType> {
 
     // Internal states.
     group_expr_counter: usize,
-    property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
+    property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>,
 
     // Indexes.
     expr_node_to_expr_id: HashMap<MemoPlanNode<T>, ExprId>,
@@ -376,7 +375,7 @@ impl<T: NodeType> Memo<T> for NaiveMemo<T> {
 }
 
 impl<T: NodeType> NaiveMemo<T> {
-    pub fn new(property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>) -> Self {
+    pub fn new(property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>) -> Self {
         Self {
             expr_id_to_group_id: HashMap::new(),
             expr_id_to_expr_node: HashMap::new(),
@@ -615,10 +614,7 @@ impl<T: NodeType> NaiveMemo<T> {
         (group_id, expr_id)
     }
 
-    fn infer_properties(
-        &self,
-        memo_node: MemoPlanNode<T>,
-    ) -> Vec<Box<dyn Any + 'static + Send + Sync>> {
+    fn infer_properties(&self, memo_node: MemoPlanNode<T>) -> Vec<Box<dyn LogicalProperty>> {
         let child_properties = memo_node
             .children
             .iter()
@@ -628,7 +624,7 @@ impl<T: NodeType> NaiveMemo<T> {
         for (id, builder) in self.property_builders.iter().enumerate() {
             let child_properties = child_properties
                 .iter()
-                .map(|x| x[id].as_ref() as &dyn std::any::Any)
+                .map(|x| x[id].as_ref())
                 .collect::<Vec<_>>();
             let child_predicates = memo_node
                 .predicates
@@ -682,8 +678,8 @@ mod tests {
 
     use super::*;
     use crate::{
+        logical_property::LogicalPropertyBuilder,
         nodes::{PredNode, Value},
-        property::PropertyBuilder,
     };
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -891,7 +887,12 @@ mod tests {
             write!(f, "{:?}", self.0)
         }
     }
-    impl PropertyBuilder<MemoTestRelTyp> for TestPropertyBuilder {
+    impl LogicalProperty for TestProp {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+    impl LogicalPropertyBuilder<MemoTestRelTyp> for TestPropertyBuilder {
         type Prop = TestProp;
         fn derive(
             &self,
@@ -937,7 +938,11 @@ mod tests {
         let group = memo.get_group(group_id);
         assert_eq!(group.properties.len(), 1);
         assert_eq!(
-            group.properties[0].downcast_ref::<TestProp>().unwrap().0,
+            group.properties[0]
+                .as_any()
+                .downcast_ref::<TestProp>()
+                .unwrap()
+                .0,
             vec!["scan_col", "1", "2"]
         );
     }
