@@ -13,3 +13,6 @@ pub mod nodes;
 pub mod optimizer;
 pub mod physical_property;
 pub mod rules;
+
+#[cfg(test)]
+pub(crate) mod tests;

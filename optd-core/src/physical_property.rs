@@ -200,7 +200,15 @@ impl<T: NodeType> PhysicalPropertyBuilders<T> {
         for i in 0..self.0.len() {
             let builder = &self.0[i];
             let required = builder.require_any(typ.clone(), predicates, required[i].borrow());
-            assert_eq!(required.len(), children_len);
+            assert_eq!(
+                required.len(),
+                children_len,
+                "required properties length mismatch: passthrough {} != children_num {} for property {} and plan node typ {}",
+                required.len(),
+                children_len,
+                builder.property_name(),
+                typ
+            );
             for (child_idx, child_prop) in required.into_iter().enumerate() {
                 required_prop[child_idx].push(child_prop);
             }
@@ -246,7 +254,9 @@ impl<T: NodeType> PhysicalPropertyBuilders<T> {
                     predicates,
                     children: vec![child],
                 }));
-                // TODO: check if the new plan node really enfoced the property by deriving
+                // TODO: check if the new plan node really enforced the property by deriving in the very end;
+                // enforcing new properties might cause the old properties to be lost. For example, order matters
+                // when enforcing gather + sort.
                 new_props[i] = required_prop.to_boxed();
             }
         }

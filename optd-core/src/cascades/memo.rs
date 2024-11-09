@@ -674,106 +674,14 @@ impl<T: NodeType> NaiveMemo<T> {
 }
 
 #[cfg(test)]
-mod tests {
-
+pub(crate) mod tests {
     use super::*;
     use crate::{
-        logical_property::LogicalPropertyBuilder,
-        nodes::{PredNode, Value},
+        nodes::Value,
+        tests::common::{
+            expr, group, join, list, project, scan, MemoTestRelTyp, TestProp, TestPropertyBuilder,
+        },
     };
-
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-    enum MemoTestRelTyp {
-        Join,
-        Project,
-        Scan,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-    enum MemoTestPredTyp {
-        List,
-        Expr,
-        TableName,
-    }
-
-    impl std::fmt::Display for MemoTestRelTyp {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{:?}", self)
-        }
-    }
-
-    impl std::fmt::Display for MemoTestPredTyp {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{:?}", self)
-        }
-    }
-
-    impl NodeType for MemoTestRelTyp {
-        type PredType = MemoTestPredTyp;
-
-        fn is_logical(&self) -> bool {
-            matches!(self, Self::Project | Self::Scan | Self::Join)
-        }
-    }
-
-    fn join(
-        left: impl Into<PlanNodeOrGroup<MemoTestRelTyp>>,
-        right: impl Into<PlanNodeOrGroup<MemoTestRelTyp>>,
-        cond: ArcPredNode<MemoTestRelTyp>,
-    ) -> ArcPlanNode<MemoTestRelTyp> {
-        Arc::new(PlanNode {
-            typ: MemoTestRelTyp::Join,
-            children: vec![left.into(), right.into()],
-            predicates: vec![cond],
-        })
-    }
-
-    fn scan(table: &str) -> ArcPlanNode<MemoTestRelTyp> {
-        Arc::new(PlanNode {
-            typ: MemoTestRelTyp::Scan,
-            children: vec![],
-            predicates: vec![table_name(table)],
-        })
-    }
-
-    fn table_name(table: &str) -> ArcPredNode<MemoTestRelTyp> {
-        Arc::new(PredNode {
-            typ: MemoTestPredTyp::TableName,
-            children: vec![],
-            data: Some(Value::String(table.to_string().into())),
-        })
-    }
-
-    fn project(
-        input: impl Into<PlanNodeOrGroup<MemoTestRelTyp>>,
-        expr_list: ArcPredNode<MemoTestRelTyp>,
-    ) -> ArcPlanNode<MemoTestRelTyp> {
-        Arc::new(PlanNode {
-            typ: MemoTestRelTyp::Project,
-            children: vec![input.into()],
-            predicates: vec![expr_list],
-        })
-    }
-
-    fn list(items: Vec<ArcPredNode<MemoTestRelTyp>>) -> ArcPredNode<MemoTestRelTyp> {
-        Arc::new(PredNode {
-            typ: MemoTestPredTyp::List,
-            children: items,
-            data: None,
-        })
-    }
-
-    fn expr(data: Value) -> ArcPredNode<MemoTestRelTyp> {
-        Arc::new(PredNode {
-            typ: MemoTestPredTyp::Expr,
-            children: vec![],
-            data: Some(data),
-        })
-    }
-
-    fn group(group_id: GroupId) -> PlanNodeOrGroup<MemoTestRelTyp> {
-        PlanNodeOrGroup::Group(group_id)
-    }
 
     #[test]
     fn add_predicate() {
@@ -878,54 +786,8 @@ mod tests {
         assert_eq!(memo.get_expr_info(expr1), memo.get_expr_info(expr2));
     }
 
-    struct TestPropertyBuilder;
-
-    #[derive(Clone, Debug)]
-    struct TestProp(Vec<String>);
-    impl std::fmt::Display for TestProp {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{:?}", self.0)
-        }
-    }
-    impl LogicalProperty for TestProp {
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
-    }
-    impl LogicalPropertyBuilder<MemoTestRelTyp> for TestPropertyBuilder {
-        type Prop = TestProp;
-        fn derive(
-            &self,
-            typ: MemoTestRelTyp,
-            pred: &[ArcPredNode<MemoTestRelTyp>],
-            children: &[&Self::Prop],
-        ) -> Self::Prop {
-            match typ {
-                MemoTestRelTyp::Join => {
-                    let mut a = children[0].0.clone();
-                    let b = children[1].0.clone();
-                    a.extend(b);
-                    TestProp(a)
-                }
-                MemoTestRelTyp::Project => {
-                    let preds = &pred[0].children;
-                    TestProp(
-                        preds
-                            .iter()
-                            .map(|x| x.data.as_ref().unwrap().as_i64().to_string())
-                            .collect(),
-                    )
-                }
-                MemoTestRelTyp::Scan => TestProp(vec!["scan_col".to_string()]),
-            }
-        }
-        fn property_name(&self) -> &'static str {
-            "test"
-        }
-    }
-
     #[test]
-    fn logical_property() {
+    fn derive_logical_property() {
         let mut memo = NaiveMemo::new(Arc::new([Box::new(TestPropertyBuilder)]));
         let (group_id, _) = memo.add_new_expr(join(
             scan("t1"),
