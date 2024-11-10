@@ -1,0 +1,31 @@
+include _tpch_tables.slt.part
+
+query
+SELECT
+    n_name AS nation,
+    SUM(l_extendedprice * (1 - l_discount)) AS revenue
+FROM
+    customer,
+    orders,
+    lineitem,
+    supplier,
+    nation,
+    region
+WHERE
+    c_custkey = o_custkey
+    AND l_orderkey = o_orderkey
+    AND l_suppkey = s_suppkey
+    AND c_nationkey = s_nationkey
+    AND s_nationkey = n_nationkey
+    AND n_regionkey = r_regionkey
+    AND r_name = 'AFRICA' -- Specified region
+    AND o_orderdate >= DATE '1993-01-01'
+    AND o_orderdate < DATE '1994-01-01'
+GROUP BY
+    n_name
+ORDER BY
+    revenue DESC;
+----
+MOROCCO 119356.5868
+ETHIOPIA 62766.6740
+KENYA 3014.4444

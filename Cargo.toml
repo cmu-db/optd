@@ -9,6 +9,7 @@ members = [
     "optd-gungnir",
     "optd-perfbench",
     "optd-datafusion-repr-adv-cost",
+    "optd-sqllogictest",
 ]
 resolver = "2"
 
