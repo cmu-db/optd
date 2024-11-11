@@ -211,7 +211,7 @@ impl<T: NodeType> HeuristicsOptimizer<T> {
         let required_props = required_props.as_ref();
         let children_required_props = if self.options.enable_physical_prop_passthrough {
             // If physical property passthrough is enabled, we pass the required properties to the children.
-            self.physical_property_builders.require_many(
+            self.physical_property_builders.passthrough_many(
                 root_rel.typ.clone(),
                 &root_rel.predicates,
                 required_props,
@@ -220,11 +220,12 @@ impl<T: NodeType> HeuristicsOptimizer<T> {
         } else {
             // Otherwise, we do not pass any required property of the current node, and therefore, it only generates
             // the properties required by the node type.
-            self.physical_property_builders.require_many_no_passthrough(
-                root_rel.typ.clone(),
-                &root_rel.predicates,
-                root_rel.children.len(),
-            )
+            self.physical_property_builders
+                .passthrough_many_no_required_property(
+                    root_rel.typ.clone(),
+                    &root_rel.predicates,
+                    root_rel.children.len(),
+                )
         };
         let mut children = Vec::with_capacity(root_rel.children.len());
         let mut children_output_properties = Vec::with_capacity(root_rel.children.len());

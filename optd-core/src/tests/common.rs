@@ -334,7 +334,7 @@ impl PhysicalPropertyBuilder<MemoTestRelTyp> for SortPropertyBuilder {
         }
     }
 
-    fn require(
+    fn passthrough(
         &self,
         typ: MemoTestRelTyp,
         predicates: &[ArcPredNode<MemoTestRelTyp>],

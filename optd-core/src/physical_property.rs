@@ -25,7 +25,7 @@ pub trait PhysicalPropertyBuilderAny<T: NodeType>: 'static + Send + Sync {
         children: &[&dyn PhysicalProperty],
     ) -> Box<dyn PhysicalProperty>;
 
-    fn require_any(
+    fn passthrough_any(
         &self,
         typ: T,
         predicates: &[ArcPredNode<T>],
@@ -48,9 +48,9 @@ pub trait PhysicalPropertyBuilder<T: NodeType>: 'static + Send + Sync + Sized {
     fn derive(&self, typ: T, predicates: &[ArcPredNode<T>], children: &[&Self::Prop])
         -> Self::Prop;
 
-    /// Get the children property requirements based on the required output physical property and the current plan
-    /// node information.
-    fn require(
+    /// Passsthrough the `required` properties to the children if possible. Returns the derived properties for each child.
+    /// If nothing can be passthroughed, simply return the default properties for each child.
+    fn passthrough(
         &self,
         typ: T,
         predicates: &[ArcPredNode<T>],
@@ -88,7 +88,7 @@ impl<T: NodeType, P: PhysicalPropertyBuilder<T>> PhysicalPropertyBuilderAny<T> f
         Box::new(self.derive(typ, predicates, &children))
     }
 
-    fn require_any(
+    fn passthrough_any(
         &self,
         typ: T,
         predicates: &[ArcPredNode<T>],
@@ -98,7 +98,7 @@ impl<T: NodeType, P: PhysicalPropertyBuilder<T>> PhysicalPropertyBuilderAny<T> f
             .as_any()
             .downcast_ref::<P::Prop>()
             .expect("Failed to downcast required property");
-        self.require(typ, predicates, required)
+        self.passthrough(typ, predicates, required)
             .into_iter()
             .map(|prop| Box::new(prop) as Box<dyn PhysicalProperty>)
             .collect()
@@ -182,7 +182,7 @@ impl<T: NodeType> PhysicalPropertyBuilders<T> {
     }
 
     /// Returns children_len x props_len (required properties for each child)
-    pub fn require_many_no_passthrough(
+    pub fn passthrough_many_no_required_property(
         &self,
         typ: T,
         predicates: &[ArcPredNode<T>],
@@ -193,11 +193,11 @@ impl<T: NodeType> PhysicalPropertyBuilders<T> {
             .iter()
             .map(|builder| builder.default_any())
             .collect_vec();
-        self.require_many(typ, predicates, required_prop, children_len)
+        self.passthrough_many(typ, predicates, required_prop, children_len)
     }
 
     /// Returns children_len x props_len (required properties for each child)
-    pub fn require_many<X, Y>(
+    pub fn passthrough_many<X, Y>(
         &self,
         typ: T,
         predicates: &[ArcPredNode<T>],
@@ -214,7 +214,7 @@ impl<T: NodeType> PhysicalPropertyBuilders<T> {
         required_prop.resize_with(children_len, Vec::new);
         for i in 0..self.0.len() {
             let builder = &self.0[i];
-            let required = builder.require_any(typ.clone(), predicates, required[i].borrow());
+            let required = builder.passthrough_any(typ.clone(), predicates, required[i].borrow());
             assert_eq!(
                 required.len(),
                 children_len,
