@@ -133,28 +133,31 @@ impl DatafusionDBMS {
             } else {
                 optimizer.disable_pruning(false);
             }
-            let rules = optimizer.rules();
+            let t_rules = optimizer.transformation_rules();
+            let i_rules = optimizer.transformation_rules();
             if flags.enable_logical_rules.is_empty() {
-                for r in 0..rules.len() {
-                    optimizer.enable_rule(r);
+                for (r_id, _) in t_rules.iter() {
+                    optimizer.enable_rule(*r_id);
+                }
+                for (r_id, _) in i_rules.iter() {
+                    optimizer.enable_rule(*r_id);
                 }
                 guard.as_mut().unwrap().enable_heuristic(true);
             } else {
-                for (rule_id, rule) in rules.as_ref().iter().enumerate() {
-                    if rule.is_impl_rule() {
-                        optimizer.enable_rule(rule_id);
-                    } else {
-                        optimizer.disable_rule(rule_id);
-                    }
+                for (rule_id, _) in t_rules.iter() {
+                    optimizer.disable_rule(*rule_id);
+                }
+                for (rule_id, _) in i_rules.iter() {
+                    optimizer.enable_rule(*rule_id);
                 }
                 let mut rules_to_enable = flags
                     .enable_logical_rules
                     .iter()
                     .map(|x| x.as_str())
                     .collect::<HashSet<_>>();
-                for (rule_id, rule) in rules.as_ref().iter().enumerate() {
+                for (rule_id, rule) in t_rules.iter().chain(i_rules.iter()) {
                     if rules_to_enable.remove(rule.name()) {
-                        optimizer.enable_rule(rule_id);
+                        optimizer.enable_rule(*rule_id);
                     }
                 }
                 if !rules_to_enable.is_empty() {

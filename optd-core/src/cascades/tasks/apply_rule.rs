@@ -1,37 +1,20 @@
-// Copyright (c) 2023-2024 CMU Database Group
-//
-// Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
-// https://opensource.org/licenses/MIT.
-
 use std::sync::Arc;
 
-use anyhow::Result;
 use itertools::Itertools;
 use tracing::trace;
 
+use crate::{
+    cascades::{
+        memo::ArcMemoPlanNode,
+        optimizer::{rule_matches_expr, ExprId, RuleId},
+        tasks::{explore_expr::ExploreExprTask, optimize_inputs::OptimizeInputsTask},
+        CascadesOptimizer, GroupId, Memo,
+    },
+    nodes::{ArcPlanNode, NodeType, PlanNode, PlanNodeOrGroup},
+    rules::{Rule, RuleMatcher},
+};
+
 use super::Task;
-use crate::cascades::memo::ArcMemoPlanNode;
-use crate::cascades::optimizer::{CascadesOptimizer, ExprId, RuleId};
-use crate::cascades::tasks::{OptimizeExpressionTask, OptimizeInputsTask};
-use crate::cascades::{GroupId, Memo};
-use crate::nodes::{ArcPlanNode, NodeType, PlanNode, PlanNodeOrGroup};
-use crate::rules::RuleMatcher;
-
-pub struct ApplyRuleTask {
-    rule_id: RuleId,
-    expr_id: ExprId,
-    exploring: bool,
-}
-
-impl ApplyRuleTask {
-    pub fn new(rule_id: RuleId, expr_id: ExprId, exploring: bool) -> Self {
-        Self {
-            rule_id,
-            expr_id,
-            exploring,
-        }
-    }
-}
 
 // Pick/match logic, to get pieces of info to pass to the rule apply function
 // TODO: I would like to see this moved elsewhere
@@ -153,60 +136,115 @@ fn match_and_pick_group<T: NodeType, M: Memo<T>>(
     matches
 }
 
-impl<T: NodeType, M: Memo<T>> Task<T, M> for ApplyRuleTask {
-    fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) -> Result<Vec<Box<dyn Task<T, M>>>> {
-        if optimizer.is_rule_fired(self.expr_id, self.rule_id) {
-            return Ok(vec![]);
+pub struct ApplyRuleTask<T: NodeType, M: Memo<T>> {
+    parent_task_id: Option<usize>,
+    task_id: usize,
+    expr_id: ExprId,
+    rule_id: RuleId,
+    rule: Arc<dyn Rule<T, CascadesOptimizer<T, M>>>,
+    // TODO: Promise here? Maybe it can be part of the Rule trait.
+    cost_limit: Option<isize>,
+}
+
+impl<T: NodeType, M: Memo<T>> ApplyRuleTask<T, M> {
+    pub fn new(
+        parent_task_id: Option<usize>,
+        task_id: usize,
+        expr_id: ExprId,
+        rule_id: RuleId,
+        rule: Arc<dyn Rule<T, CascadesOptimizer<T, M>>>,
+        cost_limit: Option<isize>,
+    ) -> Self {
+        Self {
+            parent_task_id,
+            task_id,
+            expr_id,
+            rule_id,
+            rule,
+            cost_limit,
         }
+    }
+}
 
-        if optimizer.is_rule_disabled(self.rule_id) {
-            optimizer.mark_rule_fired(self.expr_id, self.rule_id);
-            return Ok(vec![]);
+fn transform<T: NodeType, M: Memo<T>>(
+    optimizer: &CascadesOptimizer<T, M>,
+    expr_id: ExprId,
+    rule: &Arc<dyn Rule<T, CascadesOptimizer<T, M>>>,
+) -> Vec<PlanNodeOrGroup<T>> {
+    let picked_datas = match_and_pick_expr(rule.matcher(), expr_id, optimizer);
+
+    if picked_datas.is_empty() {
+        vec![]
+    } else {
+        picked_datas
+            .into_iter()
+            .flat_map(|picked_data| rule.apply(optimizer, picked_data))
+            .collect()
+    }
+}
+
+fn update_memo<T: NodeType, M: Memo<T>>(
+    optimizer: &mut CascadesOptimizer<T, M>,
+    group_id: GroupId,
+    new_exprs: Vec<PlanNodeOrGroup<T>>,
+) -> Vec<ExprId> {
+    let mut expr_ids = vec![];
+    for new_expr in new_exprs {
+        if let Some(expr_id) = optimizer.add_expr_to_group(new_expr, group_id) {
+            expr_ids.push(expr_id);
         }
+    }
+    expr_ids
+}
 
-        let rule = optimizer.rules()[self.rule_id].clone();
+/// TODO
+///
+/// Pseudocode:
+/// function ApplyRule(expr, rule, promise, limit)
+///     newExprs ← Transform(expr,rule)
+///     UpdateMemo(newExprs)
+///     Sort exprs by promise
+///     for newExpr ∈ newExprs do
+///         if Rule is a transformation rule then
+///             tasks.Push(ExplExpr(newExpr, limit))
+///         else
+///             // Can fail if the cost limit becomes 0 or negative
+///             limit ← UpdateCostLimit(newExpr, limit)
+///             tasks.Push(OptInputs(newExpr, limit))
+impl<T: NodeType, M: Memo<T>> Task<T, M> for ApplyRuleTask<T, M> {
+    fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) {
+        let expr = optimizer.get_expr_memoed(self.expr_id);
 
-        trace!(event = "task_begin", task = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, rule = %rule.name());
+        trace!(task_id = self.task_id, parent_task_id = self.parent_task_id, event = "task_begin", task = "apply_rule", rule_id = %self.rule_id, rule = %self.rule.name(), expr_id = %self.expr_id, expr = %expr);
+
         let group_id = optimizer.get_group_id(self.expr_id);
-        let mut tasks = vec![];
-        let binding_exprs = match_and_pick_expr(rule.matcher(), self.expr_id, optimizer);
-        for binding in binding_exprs {
-            trace!(event = "before_apply_rule", task = "apply_rule", input_binding=%binding);
-            let applied = rule.apply(optimizer, binding);
 
-            for expr in applied {
-                trace!(event = "after_apply_rule", task = "apply_rule", output_binding=%expr);
-                // TODO: remove clone in the below line
-                if let Some(expr_id) = optimizer.add_expr_to_group(expr.clone(), group_id) {
-                    let typ = expr.unwrap_typ();
-                    if typ.is_logical() {
-                        tasks.push(
-                            Box::new(OptimizeExpressionTask::new(expr_id, self.exploring))
-                                as Box<dyn Task<T, M>>,
-                        );
-                    } else {
-                        tasks.push(Box::new(OptimizeInputsTask::new(
-                            expr_id,
-                            !optimizer.prop.disable_pruning,
-                        )) as Box<dyn Task<T, M>>);
-                    }
-                    optimizer.unmark_expr_explored(expr_id);
-                    trace!(event = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, new_expr_id = %expr_id);
-                } else {
-                    trace!(event = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id, "triggered group merge");
-                }
+        debug_assert!(rule_matches_expr(&self.rule, &expr));
+
+        let new_exprs = transform(optimizer, self.expr_id, &self.rule);
+        let new_expr_ids = update_memo(optimizer, group_id, new_exprs);
+        // TODO sort exprs by promise
+        for new_expr_id in new_expr_ids {
+            let is_transformation_rule = !self.rule.is_impl_rule();
+            if is_transformation_rule {
+                // TODO: Increment transformation count
+                optimizer.push_task(Box::new(ExploreExprTask::new(
+                    Some(self.task_id),
+                    optimizer.get_next_task_id(),
+                    new_expr_id,
+                    self.cost_limit,
+                )));
+            } else {
+                // TODO: Also, make cost limit optional with parameters struct like before
+                let new_limit = None; // TODO: How do we update cost limit
+                optimizer.push_task(Box::new(OptimizeInputsTask::new(
+                    Some(self.task_id),
+                    optimizer.get_next_task_id(),
+                    new_expr_id,
+                    new_limit,
+                )));
             }
         }
-        optimizer.mark_rule_fired(self.expr_id, self.rule_id);
-
-        trace!(event = "task_end", task = "apply_rule", expr_id = %self.expr_id, rule_id = %self.rule_id);
-        Ok(tasks)
-    }
-
-    fn describe(&self) -> String {
-        format!(
-            "apply_rule {{ rule_id: {}, expr_id: {}, exploring: {} }}",
-            self.rule_id, self.expr_id, self.exploring
-        )
+        trace!(task_id = self.task_id, parent_task_id = self.parent_task_id, event = "task_finish", task = "apply_rule", rule_id = %self.rule_id, rule = %self.rule.name(), expr_id = %self.expr_id, expr = %expr);
     }
 }

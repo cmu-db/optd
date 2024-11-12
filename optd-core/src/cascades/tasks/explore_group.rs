@@ -1,55 +1,57 @@
-// Copyright (c) 2023-2024 CMU Database Group
-//
-// Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
-// https://opensource.org/licenses/MIT.
-
-use anyhow::Result;
 use tracing::trace;
 
-use super::Task;
-use crate::cascades::optimizer::{CascadesOptimizer, GroupId};
-use crate::cascades::tasks::OptimizeExpressionTask;
-use crate::cascades::Memo;
-use crate::nodes::NodeType;
+use crate::{
+    cascades::{CascadesOptimizer, GroupId, Memo},
+    nodes::NodeType,
+};
+
+use super::{explore_expr::ExploreExprTask, Task};
 
 pub struct ExploreGroupTask {
+    parent_task_id: Option<usize>,
+    task_id: usize,
     group_id: GroupId,
+    cost_limit: Option<isize>,
 }
 
 impl ExploreGroupTask {
-    pub fn new(group_id: GroupId) -> Self {
-        Self { group_id }
+    pub fn new(
+        parent_task_id: Option<usize>,
+        task_id: usize,
+        group_id: GroupId,
+        cost_limit: Option<isize>,
+    ) -> Self {
+        Self {
+            parent_task_id,
+            task_id,
+            group_id,
+            cost_limit,
+        }
     }
 }
 
+/// ExploreGroup will apply transformation rules to generate more logical
+/// expressions (or "explore" more logical expressions). It does this by
+/// invoking the ExploreExpr task on every expression in the group.
+/// (Recall "transformation rules" are logical -> logical)
+///
+/// Pseudocode:
+/// function ExplGrp(grp, limit)
+///     grp.Explored ← true
+///     for expr ∈ grp.Expressions do
+///         tasks.Push(ExplExpr(expr, limit))
 impl<T: NodeType, M: Memo<T>> Task<T, M> for ExploreGroupTask {
-    fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) -> Result<Vec<Box<dyn Task<T, M>>>> {
-        trace!(event = "task_begin", task = "explore_group", group_id = %self.group_id);
-        let mut tasks = vec![];
-        if optimizer.is_group_explored(self.group_id) {
-            trace!(target: "task_finish", task = "explore_group", result = "already explored, skipping", group_id = %self.group_id);
-            return Ok(vec![]);
-        }
-        let exprs = optimizer.get_all_exprs_in_group(self.group_id);
-        let exprs_cnt = exprs.len();
-        for expr in exprs {
-            let typ = optimizer.get_expr_memoed(expr).typ.clone();
-            if typ.is_logical() {
-                tasks
-                    .push(Box::new(OptimizeExpressionTask::new(expr, true)) as Box<dyn Task<T, M>>);
-            }
-        }
+    fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) {
+        trace!(task_id = self.task_id, parent_task_id = self.parent_task_id, event = "task_begin", task = "explore_group", group_id = %self.group_id);
         optimizer.mark_group_explored(self.group_id);
-        trace!(
-            event = "task_finish",
-            task = "explore_group",
-            result = "expand group",
-            exprs_cnt = exprs_cnt
-        );
-        Ok(tasks)
-    }
-
-    fn describe(&self) -> String {
-        format!("explore_group {}", self.group_id)
+        for expr in optimizer.get_all_exprs_in_group(self.group_id) {
+            optimizer.push_task(Box::new(ExploreExprTask::new(
+                Some(self.task_id),
+                optimizer.get_next_task_id(),
+                expr,
+                self.cost_limit,
+            )));
+        }
+        trace!(task_id = self.task_id, parent_task_id = self.parent_task_id, event = "task_finish", task = "explore_group", group_id = %self.group_id);
     }
 }

@@ -1,59 +1,85 @@
-// Copyright (c) 2023-2024 CMU Database Group
-//
-// Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
-// https://opensource.org/licenses/MIT.
-
-use anyhow::Result;
 use tracing::trace;
 
-use super::Task;
-use crate::cascades::optimizer::GroupId;
-use crate::cascades::tasks::optimize_expression::OptimizeExpressionTask;
-use crate::cascades::tasks::OptimizeInputsTask;
-use crate::cascades::{CascadesOptimizer, Memo};
-use crate::nodes::NodeType;
+use crate::{
+    cascades::{CascadesOptimizer, GroupId, Memo},
+    nodes::NodeType,
+};
+
+use super::{explore_group::ExploreGroupTask, optimize_expr::OptimizeExprTask, Task};
 
 pub struct OptimizeGroupTask {
+    parent_task_id: Option<usize>,
+    task_id: usize,
     group_id: GroupId,
+    cost_limit: Option<isize>,
 }
 
 impl OptimizeGroupTask {
-    pub fn new(group_id: GroupId) -> Self {
-        Self { group_id }
+    pub fn new(
+        parent_task_id: Option<usize>,
+        task_id: usize,
+        group_id: GroupId,
+        cost_limit: Option<isize>,
+    ) -> Self {
+        Self {
+            parent_task_id,
+            task_id,
+            group_id,
+            cost_limit,
+        }
     }
 }
 
+/// OptimizeGroup will find the best physical plan for the group.
+/// It does this by applying implementation rules through the OptimizeExpr task
+/// (Recall "implementation rules" are logical -> physical)
+///
+/// Before it tries to generate different physical plans, it will invoke
+/// explore tasks to generate more logical expressions through transformation
+/// rules.
+///
+/// Pseudocode:
+/// function OptGrp(expr, limit)
+///     grp ← GetGroup(expr)
+///     if !grp.Explored then
+///         tasks.Push(OptGrp(grp, limit))
+///         tasks.Push(ExplGrp(grp, limit))
+///     else
+///         for expr ∈ grp.Expressions do
+///         tasks.Push(OptExpr(expr, limit))
 impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeGroupTask {
-    fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) -> Result<Vec<Box<dyn Task<T, M>>>> {
-        trace!(event = "task_begin", task = "optimize_group", group_id = %self.group_id);
-        let group_info = optimizer.get_group_info(self.group_id);
-        if group_info.winner.has_decided() {
-            trace!(event = "task_finish", task = "optimize_group");
-            return Ok(vec![]);
-        }
-        let exprs = optimizer.get_all_exprs_in_group(self.group_id);
-        let mut tasks = vec![];
-        let exprs_cnt = exprs.len();
-        for &expr in &exprs {
-            let typ = optimizer.get_expr_memoed(expr).typ.clone();
-            if typ.is_logical() {
-                tasks.push(Box::new(OptimizeExpressionTask::new(expr, false)) as Box<dyn Task<T, M>>);
-            }
-        }
-        for &expr in &exprs {
-            let typ = optimizer.get_expr_memoed(expr).typ.clone();
-            if !typ.is_logical() {
-                tasks.push(Box::new(OptimizeInputsTask::new(
-                    expr,
-                    !optimizer.prop.disable_pruning,
-                )) as Box<dyn Task<T, M>>);
-            }
-        }
-        trace!(event = "task_finish", task = "optimize_group", group_id = %self.group_id, exprs_cnt = exprs_cnt);
-        Ok(tasks)
-    }
+    fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) {
+        trace!(task_id = self.task_id, parent_task_id = self.parent_task_id, event = "task_begin", task = "optimize_group", group_id = %self.group_id);
+        let group_explored = optimizer.is_group_explored(self.group_id);
 
-    fn describe(&self) -> String {
-        format!("optimize_group {}", self.group_id)
+        // Apply transformation rules *before* trying to apply our
+        // implementation rules. (Task dependency enforced via stack push order)
+        if !group_explored {
+            // TODO(parallel): Task dependency here
+            optimizer.push_task(Box::new(OptimizeGroupTask::new(
+                Some(self.task_id),
+                optimizer.get_next_task_id(),
+                self.group_id,
+                self.cost_limit,
+            )));
+            optimizer.push_task(Box::new(ExploreGroupTask::new(
+                Some(self.task_id),
+                optimizer.get_next_task_id(),
+                self.group_id,
+                self.cost_limit,
+            )));
+        } else {
+            // Optimize every expression in the group
+            // (apply implementation rules)
+            for expr in optimizer.get_all_exprs_in_group(self.group_id) {
+                optimizer.push_task(Box::new(OptimizeExprTask::new(
+                    Some(self.task_id),
+                    optimizer.get_next_task_id(),
+                    expr,
+                    self.cost_limit,
+                )));
+            }
+        }
+        trace!(task_id = self.task_id, parent_task_id = self.parent_task_id, event = "task_finish", task = "optimize_group", group_id = %self.group_id);
     }
 }

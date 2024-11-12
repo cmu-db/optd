@@ -94,29 +94,37 @@ impl DatafusionOptimizer {
         ]
     }
 
-    pub fn default_cascades_rules() -> Vec<Arc<dyn Rule<DfNodeType, CascadesOptimizer<DfNodeType>>>>
-    {
-        let rules = rules::PhysicalConversionRule::all_conversions();
-        let mut rule_wrappers = vec![];
-        for rule in rules {
-            rule_wrappers.push(rule);
-        }
-        rule_wrappers.push(Arc::new(rules::FilterProjectTransposeRule::new()));
-        rule_wrappers.push(Arc::new(rules::FilterCrossJoinTransposeRule::new()));
-        rule_wrappers.push(Arc::new(rules::FilterInnerJoinTransposeRule::new()));
-        rule_wrappers.push(Arc::new(rules::FilterSortTransposeRule::new()));
-        rule_wrappers.push(Arc::new(rules::FilterAggTransposeRule::new()));
-        rule_wrappers.push(Arc::new(rules::HashJoinRule::new()));
-        rule_wrappers.push(Arc::new(rules::JoinCommuteRule::new()));
-        rule_wrappers.push(Arc::new(rules::JoinAssocRule::new()));
-        rule_wrappers.push(Arc::new(rules::ProjectionPullUpJoin::new()));
-        rule_wrappers.push(Arc::new(rules::EliminateProjectRule::new()));
-        rule_wrappers.push(Arc::new(rules::ProjectMergeRule::new()));
-        rule_wrappers.push(Arc::new(rules::EliminateLimitRule::new()));
-        rule_wrappers.push(Arc::new(rules::EliminateJoinRule::new()));
-        rule_wrappers.push(Arc::new(rules::EliminateFilterRule::new()));
-        rule_wrappers.push(Arc::new(rules::ProjectFilterTransposeRule::new()));
-        rule_wrappers
+    pub fn default_cascades_rules() -> (
+        Vec<Arc<dyn Rule<DfNodeType, CascadesOptimizer<DfNodeType>>>>,
+        Vec<Arc<dyn Rule<DfNodeType, CascadesOptimizer<DfNodeType>>>>,
+    ) {
+        // Transformation rules (logical->logical)
+        let mut transformation_rules: Vec<
+            Arc<dyn Rule<DfNodeType, CascadesOptimizer<DfNodeType>>>,
+        > = vec![];
+        // TODO: There's a significant cycle issue in this PR!
+        // transformation_rules.push(Arc::new(rules::FilterProjectTransposeRule::new()));
+        transformation_rules.push(Arc::new(rules::FilterCrossJoinTransposeRule::new()));
+        transformation_rules.push(Arc::new(rules::FilterInnerJoinTransposeRule::new()));
+        transformation_rules.push(Arc::new(rules::FilterSortTransposeRule::new()));
+        transformation_rules.push(Arc::new(rules::FilterAggTransposeRule::new()));
+        transformation_rules.push(Arc::new(rules::JoinCommuteRule::new()));
+        transformation_rules.push(Arc::new(rules::JoinAssocRule::new()));
+        // transformation_rules.push(Arc::new(rules::ProjectionPullUpJoin::new()));
+        transformation_rules.push(Arc::new(rules::EliminateProjectRule::new()));
+        // transformation_rules.push(Arc::new(rules::ProjectMergeRule::new()));
+        transformation_rules.push(Arc::new(rules::EliminateLimitRule::new()));
+        transformation_rules.push(Arc::new(rules::EliminateJoinRule::new()));
+        transformation_rules.push(Arc::new(rules::EliminateFilterRule::new()));
+        // transformation_rules.push(Arc::new(rules::ProjectFilterTransposeRule::new()));
+
+        // Implementation rules (logical->physical)
+        let mut implementation_rules: Vec<
+            Arc<dyn Rule<DfNodeType, CascadesOptimizer<DfNodeType>>>,
+        > = rules::PhysicalConversionRule::all_conversions();
+        implementation_rules.push(Arc::new(rules::HashJoinRule::new()));
+
+        (transformation_rules, implementation_rules)
     }
 
     /// Create an optimizer with partial explore (otherwise it's too slow).
@@ -132,7 +140,8 @@ impl DatafusionOptimizer {
         cost_model: impl CostModel<DfNodeType, NaiveMemo<DfNodeType>>,
         runtime_map: RuntimeAdaptionStorage,
     ) -> Self {
-        let cascades_rules = Self::default_cascades_rules();
+        let (cascades_transformation_rules, cascades_implementation_rules) =
+            Self::default_cascades_rules();
         let heuristic_rules = Self::default_heuristic_rules();
         let property_builders: Arc<[Box<dyn PropertyBuilderAny<DfNodeType>>]> = Arc::new([
             Box::new(SchemaPropertyBuilder::new(catalog.clone())),
@@ -141,7 +150,8 @@ impl DatafusionOptimizer {
         Self {
             runtime_statistics: runtime_map,
             cascades_optimizer: CascadesOptimizer::new_with_prop(
-                cascades_rules,
+                cascades_transformation_rules.into(),
+                cascades_implementation_rules.into(),
                 Box::new(cost_model),
                 vec![
                     Box::new(SchemaPropertyBuilder::new(catalog.clone())),
@@ -166,21 +176,23 @@ impl DatafusionOptimizer {
 
     /// The optimizer settings for three-join demo as a perfect optimizer.
     pub fn new_alternative_physical_for_demo(catalog: Arc<dyn Catalog>) -> Self {
-        let rules = rules::PhysicalConversionRule::all_conversions();
-        let mut rule_wrappers = Vec::new();
-        for rule in rules {
-            rule_wrappers.push(rule);
-        }
-        rule_wrappers.push(Arc::new(rules::HashJoinRule::new()));
-        rule_wrappers.insert(0, Arc::new(rules::JoinCommuteRule::new()));
-        rule_wrappers.insert(1, Arc::new(rules::JoinAssocRule::new()));
-        rule_wrappers.insert(2, Arc::new(rules::ProjectionPullUpJoin::new()));
-        rule_wrappers.insert(3, Arc::new(rules::EliminateFilterRule::new()));
+        let mut impl_rules: Vec<Arc<dyn Rule<DfNodeType, CascadesOptimizer<DfNodeType>>>> =
+            rules::PhysicalConversionRule::all_conversions();
+
+        let mut transform_rules: Vec<Arc<dyn Rule<DfNodeType, CascadesOptimizer<DfNodeType>>>> =
+            vec![];
+
+        impl_rules.push(Arc::new(rules::HashJoinRule::new()));
+        transform_rules.insert(0, Arc::new(rules::JoinCommuteRule::new()));
+        transform_rules.insert(1, Arc::new(rules::JoinAssocRule::new()));
+        transform_rules.insert(2, Arc::new(rules::ProjectionPullUpJoin::new()));
+        transform_rules.insert(3, Arc::new(rules::EliminateFilterRule::new()));
 
         let cost_model = AdaptiveCostModel::new(1000);
         let runtime_statistics = cost_model.get_runtime_map();
         let optimizer = CascadesOptimizer::new(
-            rule_wrappers,
+            impl_rules.into(),
+            transform_rules.into(),
             Box::new(cost_model),
             vec![
                 Box::new(SchemaPropertyBuilder::new(catalog.clone())),
