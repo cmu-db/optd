@@ -15,11 +15,12 @@ use super::tasks::OptimizeGroupTask;
 use super::{NaiveMemo, Task};
 use crate::cascades::memo::Winner;
 use crate::cost::CostModel;
+use crate::logical_property::{LogicalPropertyBuilder, LogicalPropertyBuilderAny};
 use crate::nodes::{
     ArcPlanNode, ArcPredNode, NodeType, PlanNodeMeta, PlanNodeMetaMap, PlanNodeOrGroup,
 };
 use crate::optimizer::Optimizer;
-use crate::property::{PropertyBuilder, PropertyBuilderAny};
+use crate::physical_property::PhysicalProperty;
 use crate::rules::Rule;
 
 pub type RuleId = usize;
@@ -50,7 +51,7 @@ pub struct CascadesOptimizer<T: NodeType, M: Memo<T> = NaiveMemo<T>> {
     rules: Arc<[Arc<dyn Rule<T, Self>>]>,
     disabled_rules: HashSet<usize>,
     cost: Arc<dyn CostModel<T, M>>,
-    property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
+    property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>,
     pub ctx: OptimizerContext,
     pub prop: OptimizerProperties,
 }
@@ -96,7 +97,7 @@ impl<T: NodeType> CascadesOptimizer<T, NaiveMemo<T>> {
     pub fn new(
         rules: Vec<Arc<dyn Rule<T, Self>>>,
         cost: Box<dyn CostModel<T, NaiveMemo<T>>>,
-        property_builders: Vec<Box<dyn PropertyBuilderAny<T>>>,
+        property_builders: Vec<Box<dyn LogicalPropertyBuilderAny<T>>>,
     ) -> Self {
         Self::new_with_prop(rules, cost, property_builders, Default::default())
     }
@@ -104,7 +105,7 @@ impl<T: NodeType> CascadesOptimizer<T, NaiveMemo<T>> {
     pub fn new_with_prop(
         rules: Vec<Arc<dyn Rule<T, Self>>>,
         cost: Box<dyn CostModel<T, NaiveMemo<T>>>,
-        property_builders: Vec<Box<dyn PropertyBuilderAny<T>>>,
+        property_builders: Vec<Box<dyn LogicalPropertyBuilderAny<T>>>,
         prop: OptimizerProperties,
     ) -> Self {
         let tasks = VecDeque::new();
@@ -192,7 +193,7 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
                 println!(
                     "  {}={}",
                     property.property_name(),
-                    property.display(group.properties[id].as_ref())
+                    group.properties[id].as_ref()
                 )
             }
             if let Some(predicate_binding) = self.memo.try_get_predicate_binding(group_id) {
@@ -327,12 +328,13 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
     /// P is the type of the property you expect
     /// idx is the idx of the property you want. The order of properties is defined
     ///   by the property_builders parameter in CascadesOptimizer::new()
-    pub fn get_property_by_group<P: PropertyBuilder<T>>(
+    pub fn get_property_by_group<P: LogicalPropertyBuilder<T>>(
         &self,
         group_id: GroupId,
         idx: usize,
     ) -> P::Prop {
         self.memo.get_group(group_id).properties[idx]
+            .as_any()
             .downcast_ref::<P::Prop>()
             .unwrap()
             .clone()
@@ -398,7 +400,15 @@ impl<T: NodeType, M: Memo<T>> Optimizer<T> for CascadesOptimizer<T, M> {
         self.optimize_inner(root_rel)
     }
 
-    fn get_property<P: PropertyBuilder<T>>(
+    fn optimize_with_required_props(
+        &mut self,
+        _: ArcPlanNode<T>,
+        _: &[&dyn PhysicalProperty],
+    ) -> Result<ArcPlanNode<T>> {
+        unimplemented!()
+    }
+
+    fn get_logical_property<P: LogicalPropertyBuilder<T>>(
         &self,
         root_rel: PlanNodeOrGroup<T>,
         idx: usize,

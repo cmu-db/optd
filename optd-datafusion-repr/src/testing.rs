@@ -8,7 +8,7 @@ mod tpch_catalog;
 
 use std::sync::Arc;
 
-use optd_core::heuristics::{ApplyOrder, HeuristicsOptimizer};
+use optd_core::heuristics::{ApplyOrder, HeuristicsOptimizer, HeuristicsOptimizerOptions};
 use optd_core::rules::Rule;
 
 use self::tpch_catalog::TpchCatalog;
@@ -24,7 +24,11 @@ pub fn new_test_optimizer(
 
     HeuristicsOptimizer::new_with_rules(
         vec![rule],
-        ApplyOrder::TopDown,
+        HeuristicsOptimizerOptions {
+            apply_order: ApplyOrder::TopDown,
+            enable_physical_prop_passthrough: true,
+        },
         Arc::new([Box::new(SchemaPropertyBuilder::new(dummy_catalog))]),
+        Arc::new([]),
     )
 }
