@@ -1,5 +1,6 @@
 [package]
 name = "optd-sqllogictest"
+description = "sqllogictest for optd"
 version.workspace = true
 edition.workspace = true
 homepage.workspace = true
