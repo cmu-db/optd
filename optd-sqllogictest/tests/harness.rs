@@ -40,7 +40,7 @@ fn build_runtime() -> Runtime {
 fn test(filename: impl AsRef<Path>) -> Result<(), Failed> {
     build_runtime().block_on(async {
         // let mut tester = Runner::new(|| async { Ok(DatafusionDBMS::new_no_optd().await?) });
-        let mut tester = Runner::new(|| async { Ok(DatafusionDBMS::new().await?) });
+        let mut tester = Runner::new(|| async { DatafusionDBMS::new().await });
         tester.run_file_async(filename).await?;
         Ok(())
     })
