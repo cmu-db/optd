@@ -5,6 +5,8 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::Display;
+use std::hash::{DefaultHasher, Hasher};
+use std::io::Write;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -168,6 +170,74 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
 
     pub fn is_rule_disabled(&self, rule_id: usize) -> bool {
         self.disabled_rules.contains(&rule_id)
+    }
+
+    pub fn dump_dot(&self, writer: &mut Box<dyn Write>) -> Result<(), std::io::Error> {
+        let memo = self.memo();
+
+        // filter out predicates and use a btree for predictable iteration order
+        let mut groups = BTreeSet::new();
+        for group_id in memo.get_all_group_ids() {
+            let group = memo.get_group(group_id);
+            let mut rel = false;
+            for expr_id in memo.get_all_exprs_in_group(group_id).iter() {
+                if memo.get_expr_memoed(*expr_id).typ.is_logical() {
+                    groups.insert(group_id);
+                    break;
+                }
+            }
+        }
+
+        writeln!(writer, "digraph Memo {{")?;
+        writeln!(
+            writer,
+            "compound=true; ranksep=1.0; node [colorscheme=set312];"
+        )?;
+        for group_id in groups.iter() {
+            let group = memo.get_group(*group_id);
+            writeln!(writer, "subgraph cluster_{} {{", group_id.0)?;
+            writeln!(writer, "rank=source;")?;
+            writeln!(writer, "edge [style=invis];")?;
+            writeln!(
+                writer,
+                "g{} [shape=plaintext,label=\"group_id=!{}\"];",
+                group_id.0, group_id.0
+            )?;
+            for expr_id in memo.get_all_exprs_in_group(*group_id).iter() {
+                let expr = memo.get_expr_memoed(*expr_id);
+                let mut s = DefaultHasher::new();
+                expr.typ.hash(&mut s);
+                let color = (s.finish() % 11) + 1; // %11 looks better than %12! :-)
+                let shape = if expr.typ.is_logical() { "oval" } else { "box" };
+                let rules = match self.fired_rules.get(expr_id) {
+                    None => 0,
+                    Some(v) => v.len(),
+                };
+                writeln!(
+                    writer,
+                    "e{} [shape={},label=\"{}: {:?} ({})\",style=filled,color={}]",
+                    expr_id.0, shape, expr_id.0, expr.typ, rules, color
+                )?;
+                writeln!(writer, "g{} -> e{};", group_id.0, expr_id.0)?;
+            }
+            writeln!(writer, "}}");
+        }
+        for group_id in groups.iter() {
+            for expr_id in memo.get_all_exprs_in_group(*group_id).iter() {
+                let expr = memo.get_expr_memoed(*expr_id);
+                //writeln!(writer, "\"g{}\" -> \"e{}\";", i, e)?;
+                for child in expr.children.iter() {
+                    if groups.contains(child) {
+                        writeln!(
+                            writer,
+                            "e{} -> g{} [lhead=\"cluster_{}\"];",
+                            expr_id.0, child.0, child.0
+                        )?;
+                    }
+                }
+            }
+        }
+        writeln!(writer, "}}")
     }
 
     pub fn dump(&self) {

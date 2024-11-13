@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use itertools::Itertools;
-use tracing::trace;
+use tracing::{log::log_enabled, log::Level::Trace, trace};
 
 use super::Task;
 use crate::cascades::memo::ArcMemoPlanNode;
@@ -162,6 +162,19 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for ApplyRuleTask {
         if optimizer.is_rule_disabled(self.rule_id) {
             optimizer.mark_rule_fired(self.expr_id, self.rule_id);
             return Ok(vec![]);
+        }
+
+        if log_enabled!(target: "optd-memoviz", Trace) {
+            let path = format!(
+                "optd-{:#016x}.dot",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            );
+            let mut writer =
+                Box::new(std::fs::File::create(path).unwrap()) as Box<dyn std::io::Write>;
+            optimizer.dump_dot(&mut writer);
         }
 
         let rule = optimizer.rules()[self.rule_id].clone();
