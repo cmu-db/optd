@@ -61,18 +61,11 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for AdvancedCostModel {
         node: &DfNodeType,
         predicates: &[ArcDfPredNode],
         children_stats: &[Option<&Statistics>],
-        children_costs: &[Cost],
         context: Option<RelNodeContext>,
         optimizer: Option<&CascadesOptimizer<DfNodeType>>,
     ) -> Cost {
-        self.base_model.compute_operation_cost(
-            node,
-            predicates,
-            children_stats,
-            children_costs,
-            context,
-            optimizer,
-        )
+        self.base_model
+            .compute_operation_cost(node, predicates, children_stats, context, optimizer)
     }
 
     fn derive_statistics(

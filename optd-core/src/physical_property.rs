@@ -12,11 +12,16 @@ use itertools::Itertools;
 
 use crate::nodes::{ArcPredNode, NodeType, PlanNode, PlanNodeOrGroup};
 
+/// The trait enables we store any physical property in the memo table by erasing the concrete type.
+/// In the future, we can implement `serialize`/`deserialize` on this trait so that we can serialize
+/// the physical properties.
 pub trait PhysicalProperty: 'static + Any + Send + Sync + Debug + Display {
     fn as_any(&self) -> &dyn Any;
     fn to_boxed(&self) -> Box<dyn PhysicalProperty>;
 }
 
+/// A wrapper around the `PhysicalPropertyBuilder` so that we can erase the concrete type and store
+/// it safely in the memo table.
 pub trait PhysicalPropertyBuilderAny<T: NodeType>: 'static + Send + Sync {
     fn derive_any(
         &self,
@@ -41,6 +46,7 @@ pub trait PhysicalPropertyBuilderAny<T: NodeType>: 'static + Send + Sync {
     fn property_name(&self) -> &'static str;
 }
 
+/// The trait for building physical properties for a plan node.
 pub trait PhysicalPropertyBuilder<T: NodeType>: 'static + Send + Sync + Sized {
     type Prop: PhysicalProperty + Clone + Sized;
 

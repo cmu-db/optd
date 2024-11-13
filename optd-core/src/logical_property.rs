@@ -8,10 +8,15 @@ use std::fmt::{Debug, Display};
 
 use crate::nodes::{ArcPredNode, NodeType};
 
+/// The trait enables we store any logical property in the memo table by erasing the concrete type.
+/// In the future, we can implement `serialize`/`deserialize` on this trait so that we can serialize
+/// the logical properties.
 pub trait LogicalProperty: 'static + Any + Send + Sync + Debug + Display {
     fn as_any(&self) -> &dyn Any;
 }
 
+/// A wrapper around the `LogicalPropertyBuilder` so that we can erase the concrete type and store
+/// it safely in the memo table.
 pub trait LogicalPropertyBuilderAny<T: NodeType>: 'static + Send + Sync {
     fn derive_any(
         &self,
@@ -22,6 +27,7 @@ pub trait LogicalPropertyBuilderAny<T: NodeType>: 'static + Send + Sync {
     fn property_name(&self) -> &'static str;
 }
 
+/// The trait for building logical properties for a plan node.
 pub trait LogicalPropertyBuilder<T: NodeType>: 'static + Send + Sync + Sized {
     type Prop: LogicalProperty + Sized + Clone;
 

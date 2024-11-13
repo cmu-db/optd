@@ -19,7 +19,6 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for DummyCostModel {
         _: &DfNodeType,
         _: &[ArcDfPredNode],
         _: &[Option<&Statistics>],
-        _: &[Cost],
         _: Option<RelNodeContext>,
         _: Option<&CascadesOptimizer<DfNodeType>>,
     ) -> Cost {

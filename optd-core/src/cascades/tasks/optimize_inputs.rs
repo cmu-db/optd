@@ -197,7 +197,6 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeInputsTask {
                 &expr.typ,
                 &preds,
                 &input_statistics_ref,
-                &input_cost,
                 Some(context.clone()),
                 Some(optimizer),
             );
