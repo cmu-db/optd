@@ -158,24 +158,6 @@ pub trait Memo<T: NodeType>: 'static + Send + Sync {
     ) -> Result<ArcPlanNode<T>> {
         get_best_group_binding_inner(self, group_id, &mut post_process)
     }
-
-    /// Get all bindings of a predicate group. Will panic if the group contains more than one
-    /// bindings. Note that we are currently in the refactor process of having predicates as a
-    /// separate entity. If the representation stores predicates in the rel node children, the
-    /// repr should use this function to get the predicate binding. Otherwise, use `ger_pred`
-    /// for those predicates stored within the `predicates` field.
-    ///
-    /// TODO: this can be removed after the predicate refactor, unless someone comes up with a
-    /// plan representation that embeds predicates in the plan node.
-    fn get_predicate_binding(&self, group_id: GroupId) -> Option<ArcPlanNode<T>> {
-        get_predicate_binding_group_inner(self, group_id, true)
-    }
-
-    /// Get all bindings of a predicate group. Returns None if the group contains zero or more than
-    /// one bindings.
-    fn try_get_predicate_binding(&self, group_id: GroupId) -> Option<ArcPlanNode<T>> {
-        get_predicate_binding_group_inner(self, group_id, false)
-    }
 }
 
 fn get_best_group_binding_inner<M: Memo<T> + ?Sized, T: NodeType>(
@@ -202,51 +184,6 @@ fn get_best_group_binding_inner<M: Memo<T> + ?Sized, T: NodeType>(
         return Ok(node);
     }
     bail!("no best group binding for group {}", group_id)
-}
-
-fn get_predicate_binding_expr_inner<M: Memo<T> + ?Sized, T: NodeType>(
-    this: &M,
-    expr_id: ExprId,
-    panic_on_invalid_group: bool,
-) -> Option<ArcPlanNode<T>> {
-    let expr = this.get_expr_memoed(expr_id);
-    let mut children = Vec::with_capacity(expr.children.len());
-    for child in expr.children.iter() {
-        if let Some(child) = get_predicate_binding_group_inner(this, *child, panic_on_invalid_group)
-        {
-            children.push(PlanNodeOrGroup::PlanNode(child));
-        } else {
-            return None;
-        }
-    }
-    Some(Arc::new(PlanNode {
-        typ: expr.typ.clone(),
-        children,
-        predicates: expr.predicates.iter().map(|x| this.get_pred(*x)).collect(),
-    }))
-}
-
-fn get_predicate_binding_group_inner<M: Memo<T> + ?Sized, T: NodeType>(
-    this: &M,
-    group_id: GroupId,
-    panic_on_invalid_group: bool,
-) -> Option<ArcPlanNode<T>> {
-    let exprs = this.get_all_exprs_in_group(group_id);
-    match exprs.len() {
-        0 => None,
-        1 => get_predicate_binding_expr_inner(
-            this,
-            exprs.first().copied().unwrap(),
-            panic_on_invalid_group,
-        ),
-        len => {
-            if panic_on_invalid_group {
-                panic!("group {group_id} has {len} expressions")
-            } else {
-                None
-            }
-        }
-    }
 }
 
 /// A naive, simple, and unoptimized memo table implementation.

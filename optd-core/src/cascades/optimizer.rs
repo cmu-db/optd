@@ -196,9 +196,6 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
                     group.properties[id].as_ref()
                 )
             }
-            if let Some(predicate_binding) = self.memo.try_get_predicate_binding(group_id) {
-                println!("  predicate={}", predicate_binding);
-            }
             let mut all_predicates = BTreeSet::new();
             for expr_id in self.memo.get_all_exprs_in_group(group_id) {
                 let memo_node = self.memo.get_expr_memoed(expr_id);
@@ -346,10 +343,6 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
 
     pub(super) fn get_expr_memoed(&self, expr_id: ExprId) -> ArcMemoPlanNode<T> {
         self.memo.get_expr_memoed(expr_id)
-    }
-
-    pub fn get_predicate_binding(&self, group_id: GroupId) -> Option<ArcPlanNode<T>> {
-        self.memo.get_predicate_binding(group_id)
     }
 
     pub fn get_pred(&self, pred_id: PredId) -> ArcPredNode<T> {
