@@ -1,4 +1,3 @@
--- PAVLO
 -- Setup Test Table
 CREATE TABLE xxx (a INTEGER, b INTEGER);
 INSERT INTO xxx VALUES (0, 0), (1, 1), (2, 2);
