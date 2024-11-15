@@ -289,6 +289,9 @@ impl<T: NodeType> std::fmt::Display for PlanNode<T> {
         for child in &self.children {
             write!(f, " {}", child)?;
         }
+        for pred in &self.predicates {
+            write!(f, " {}", pred)?;
+        }
         write!(f, ")")
     }
 }

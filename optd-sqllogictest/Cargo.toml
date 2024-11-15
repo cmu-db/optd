@@ -1,0 +1,45 @@
+[package]
+name = "optd-sqllogictest"
+description = "sqllogictest for optd"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror = "2"
+sqllogictest = "0.22"
+clap = { version = "4.5.4", features = ["derive"] }
+anyhow = { version = "1", features = ["backtrace"] }
+async-trait = "0.1"
+datafusion-optd-cli = { path = "../datafusion-optd-cli", version = "32.0.0" }
+optd-datafusion-repr-adv-cost = { path = "../optd-datafusion-repr-adv-cost", version = "0.1" }
+datafusion = { version = "32.0.0", features = [
+    "avro",
+    "crypto_expressions",
+    "encoding_expressions",
+    "regex_expressions",
+    "unicode_expressions",
+    "compression",
+] }
+env_logger = "0.9"
+mimalloc = { version = "0.1", default-features = false }
+regex = "1.8"
+tokio = { version = "1.24", features = [
+    "macros",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "parking_lot",
+] }
+optd-datafusion-bridge = { path = "../optd-datafusion-bridge", version = "0.1" }
+optd-datafusion-repr = { path = "../optd-datafusion-repr", version = "0.1" }
+itertools = "0.13"
+lazy_static = "1.4.0"
+
+[[test]]
+name = "harness"
+path = "./tests/harness.rs"
+harness = false

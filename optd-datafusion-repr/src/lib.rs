@@ -13,11 +13,11 @@ use cost::{AdaptiveCostModel, RuntimeAdaptionStorage};
 pub use memo_ext::{LogicalJoinOrder, MemoExt};
 use optd_core::cascades::{CascadesOptimizer, GroupId, NaiveMemo, OptimizerProperties};
 use optd_core::cost::CostModel;
-use optd_core::heuristics::{ApplyOrder, HeuristicsOptimizer};
+use optd_core::heuristics::{ApplyOrder, HeuristicsOptimizer, HeuristicsOptimizerOptions};
+use optd_core::logical_property::LogicalPropertyBuilderAny;
 use optd_core::nodes::PlanNodeMetaMap;
 pub use optd_core::nodes::Value;
 use optd_core::optimizer::Optimizer;
-use optd_core::property::PropertyBuilderAny;
 use optd_core::rules::Rule;
 pub use optimizer_ext::OptimizerExt;
 use plan_nodes::{ArcDfPlanNode, DfNodeType};
@@ -134,7 +134,7 @@ impl DatafusionOptimizer {
     ) -> Self {
         let cascades_rules = Self::default_cascades_rules();
         let heuristic_rules = Self::default_heuristic_rules();
-        let property_builders: Arc<[Box<dyn PropertyBuilderAny<DfNodeType>>]> = Arc::new([
+        let property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<DfNodeType>>]> = Arc::new([
             Box::new(SchemaPropertyBuilder::new(catalog.clone())),
             Box::new(ColumnRefPropertyBuilder::new(catalog.clone())),
         ]);
@@ -156,8 +156,12 @@ impl DatafusionOptimizer {
             ),
             heuristic_optimizer: HeuristicsOptimizer::new_with_rules(
                 heuristic_rules,
-                ApplyOrder::TopDown, // uhh TODO reconsider
+                HeuristicsOptimizerOptions {
+                    apply_order: ApplyOrder::TopDown, // uhh TODO reconsider
+                    enable_physical_prop_passthrough: true,
+                },
                 property_builders.clone(),
+                Arc::new([]),
             ),
             enable_adaptive,
             enable_heuristic: true,
@@ -194,7 +198,11 @@ impl DatafusionOptimizer {
             enable_heuristic: false,
             heuristic_optimizer: HeuristicsOptimizer::new_with_rules(
                 vec![],
-                ApplyOrder::BottomUp,
+                HeuristicsOptimizerOptions {
+                    apply_order: ApplyOrder::BottomUp,
+                    enable_physical_prop_passthrough: true,
+                },
+                Arc::new([]),
                 Arc::new([]),
             ),
         }

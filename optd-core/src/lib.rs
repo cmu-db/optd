@@ -8,7 +8,11 @@
 pub mod cascades;
 pub mod cost;
 pub mod heuristics;
+pub mod logical_property;
 pub mod nodes;
 pub mod optimizer;
-pub mod property;
+pub mod physical_property;
 pub mod rules;
+
+#[cfg(test)]
+pub(crate) mod tests;

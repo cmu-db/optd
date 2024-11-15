@@ -3,16 +3,19 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
-use std::any::Any;
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use itertools::Itertools;
 
+use crate::logical_property::{LogicalProperty, LogicalPropertyBuilderAny};
 use crate::nodes::{ArcPlanNode, NodeType, PlanNode, PlanNodeOrGroup};
 use crate::optimizer::Optimizer;
-use crate::property::PropertyBuilderAny;
+use crate::physical_property::{
+    PhysicalProperty, PhysicalPropertyBuilderAny, PhysicalPropertyBuilders,
+};
 use crate::rules::{Rule, RuleMatcher};
 
 pub enum ApplyOrder {
@@ -20,11 +23,17 @@ pub enum ApplyOrder {
     BottomUp,
 }
 
+pub struct HeuristicsOptimizerOptions {
+    pub apply_order: ApplyOrder,
+    pub enable_physical_prop_passthrough: bool,
+}
+
 pub struct HeuristicsOptimizer<T: NodeType> {
     rules: Arc<[Arc<dyn Rule<T, Self>>]>,
-    apply_order: ApplyOrder,
-    property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
-    properties: HashMap<ArcPlanNode<T>, Arc<[Box<dyn Any + Send + Sync + 'static>]>>,
+    options: HeuristicsOptimizerOptions,
+    logical_property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>,
+    physical_property_builders: PhysicalPropertyBuilders<T>,
+    logical_properties_cache: HashMap<ArcPlanNode<T>, Arc<[Box<dyn LogicalProperty>]>>,
 }
 
 fn match_node<T: NodeType>(
@@ -87,14 +96,16 @@ fn match_and_pick<T: NodeType>(
 impl<T: NodeType> HeuristicsOptimizer<T> {
     pub fn new_with_rules(
         rules: Vec<Arc<dyn Rule<T, Self>>>,
-        apply_order: ApplyOrder,
-        property_builders: Arc<[Box<dyn PropertyBuilderAny<T>>]>,
+        options: HeuristicsOptimizerOptions,
+        logical_property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>,
+        physical_property_builders: Arc<[Box<dyn PhysicalPropertyBuilderAny<T>>]>,
     ) -> Self {
         Self {
             rules: rules.into(),
-            apply_order,
-            property_builders,
-            properties: HashMap::new(),
+            options,
+            logical_property_builders,
+            logical_properties_cache: HashMap::new(),
+            physical_property_builders: PhysicalPropertyBuilders(physical_property_builders),
         }
     }
 
@@ -129,7 +140,7 @@ impl<T: NodeType> HeuristicsOptimizer<T> {
     }
 
     fn optimize_inner(&mut self, root_rel: ArcPlanNode<T>) -> Result<ArcPlanNode<T>> {
-        match self.apply_order {
+        match self.options.apply_order {
             ApplyOrder::BottomUp => {
                 let optimized_children = self.optimize_inputs(&root_rel.children)?;
                 let node = self.apply_rules(
@@ -157,7 +168,7 @@ impl<T: NodeType> HeuristicsOptimizer<T> {
     }
 
     fn infer_properties(&mut self, root_rel: ArcPlanNode<T>) {
-        if self.properties.contains_key(&root_rel) {
+        if self.logical_properties_cache.contains_key(&root_rel) {
             return;
         }
 
@@ -167,14 +178,14 @@ impl<T: NodeType> HeuristicsOptimizer<T> {
             .map(|child| {
                 let child = child.unwrap_plan_node();
                 self.infer_properties(child.clone());
-                self.properties.get(&child).unwrap().clone()
+                self.logical_properties_cache.get(&child).unwrap().clone()
             })
             .collect_vec();
-        let mut props = Vec::with_capacity(self.property_builders.len());
-        for (id, builder) in self.property_builders.iter().enumerate() {
+        let mut props = Vec::with_capacity(self.logical_property_builders.len());
+        for (id, builder) in self.logical_property_builders.iter().enumerate() {
             let child_properties = child_properties
                 .iter()
-                .map(|x| x[id].as_ref() as &dyn std::any::Any)
+                .map(|x| x[id].as_ref())
                 .collect::<Vec<_>>();
             let prop = builder.derive_any(
                 root_rel.typ.clone(),
@@ -183,27 +194,112 @@ impl<T: NodeType> HeuristicsOptimizer<T> {
             );
             props.push(prop);
         }
-        self.properties.insert(root_rel.clone(), props.into());
+        self.logical_properties_cache
+            .insert(root_rel.clone(), props.into());
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn enforce_physical_properties_inner<X, Y>(
+        &self,
+        root_rel: ArcPlanNode<T>,
+        required_props: Y,
+    ) -> Result<(ArcPlanNode<T>, Vec<Box<dyn PhysicalProperty>>)>
+    where
+        X: Borrow<dyn PhysicalProperty>,
+        Y: AsRef<[X]>,
+    {
+        let required_props = required_props.as_ref();
+        let children_required_props = if self.options.enable_physical_prop_passthrough {
+            // If physical property passthrough is enabled, we pass the required properties to the children.
+            self.physical_property_builders.passthrough_many(
+                root_rel.typ.clone(),
+                &root_rel.predicates,
+                required_props,
+                root_rel.children.len(),
+            )
+        } else {
+            // Otherwise, we do not pass any required property of the current node, and therefore, it only generates
+            // the properties required by the node type.
+            self.physical_property_builders
+                .passthrough_many_no_required_property(
+                    root_rel.typ.clone(),
+                    &root_rel.predicates,
+                    root_rel.children.len(),
+                )
+        };
+        let mut children = Vec::with_capacity(root_rel.children.len());
+        let mut children_output_properties = Vec::with_capacity(root_rel.children.len());
+        for (child, required_properties) in root_rel
+            .children
+            .iter()
+            .zip(children_required_props.into_iter())
+        {
+            let (child, child_output_properties) = self.enforce_physical_properties_inner(
+                child.unwrap_plan_node(),
+                &required_properties,
+            )?;
+            children.push(PlanNodeOrGroup::PlanNode(child));
+            children_output_properties.push(child_output_properties);
+        }
+        let new_root_rel = Arc::new(PlanNode {
+            typ: root_rel.typ.clone(),
+            children,
+            predicates: root_rel.predicates.clone(),
+        });
+        let derived_props = self.physical_property_builders.derive_many(
+            root_rel.typ.clone(),
+            &root_rel.predicates,
+            &children_output_properties,
+            root_rel.children.len(),
+        );
+        let (current_rel, output_properties) = self
+            .physical_property_builders
+            .enforce_many_if_not_satisfied(new_root_rel.into(), &derived_props, required_props);
+        Ok((current_rel.unwrap_plan_node(), output_properties))
+    }
+
+    fn enforce_physical_properties(
+        &self,
+        root_rel: ArcPlanNode<T>,
+        required_props: &[&dyn PhysicalProperty],
+    ) -> Result<ArcPlanNode<T>> {
+        assert_eq!(required_props.len(), self.physical_property_builders.len());
+        let (root_rel, output_properties) =
+            self.enforce_physical_properties_inner(root_rel, required_props)?;
+        let _ = output_properties;
+        Ok(root_rel)
     }
 }
 
 impl<T: NodeType> Optimizer<T> for HeuristicsOptimizer<T> {
     fn optimize(&mut self, root_rel: ArcPlanNode<T>) -> Result<ArcPlanNode<T>> {
-        self.optimize_inner(root_rel)
+        let phys_props = self.physical_property_builders.default_many();
+        let phys_props_ref = phys_props.iter().map(|x| x.as_ref()).collect_vec();
+        self.optimize_with_required_props(root_rel, &phys_props_ref)
     }
 
-    fn get_property<P: crate::property::PropertyBuilder<T>>(
+    fn optimize_with_required_props(
+        &mut self,
+        root_rel: ArcPlanNode<T>,
+        required_props: &[&dyn PhysicalProperty],
+    ) -> Result<ArcPlanNode<T>> {
+        let optimized_rel = self.optimize_inner(root_rel)?;
+        self.enforce_physical_properties(optimized_rel, required_props)
+    }
+
+    fn get_logical_property<P: crate::logical_property::LogicalPropertyBuilder<T>>(
         &self,
         root_rel: PlanNodeOrGroup<T>,
         idx: usize,
     ) -> P::Prop {
         let props = self
-            .properties
+            .logical_properties_cache
             .get(&root_rel.unwrap_plan_node())
             .with_context(|| format!("cannot obtain properties for {}", root_rel))
             .unwrap();
         let prop = props[idx].as_ref();
-        prop.downcast_ref::<P::Prop>()
+        prop.as_any()
+            .downcast_ref::<P::Prop>()
             .with_context(|| {
                 format!(
                     "cannot downcast property at idx {} into provided property instance",

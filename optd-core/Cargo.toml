@@ -19,3 +19,6 @@ serde = { version = "1.0", features = ["derive", "rc"] }
 arrow-schema = "47.0.0"
 chrono = "0.4"
 erased-serde = "0.4"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"

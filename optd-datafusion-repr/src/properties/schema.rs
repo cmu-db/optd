@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use optd_core::property::PropertyBuilder;
+use optd_core::logical_property::{LogicalProperty, LogicalPropertyBuilder};
 use serde::{Deserialize, Serialize};
 
 use super::DEFAULT_NAME;
@@ -69,6 +69,12 @@ impl Schema {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+impl LogicalProperty for Schema {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -143,7 +149,7 @@ impl SchemaPropertyBuilder {
     }
 }
 
-impl PropertyBuilder<DfNodeType> for SchemaPropertyBuilder {
+impl LogicalPropertyBuilder<DfNodeType> for SchemaPropertyBuilder {
     type Prop = Schema;
 
     fn derive(

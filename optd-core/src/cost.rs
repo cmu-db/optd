@@ -23,7 +23,6 @@ pub trait CostModel<T: NodeType, M: Memo<T>>: 'static + Send + Sync {
         node: &T,
         predicates: &[ArcPredNode<T>],
         children_stats: &[Option<&Statistics>],
-        children_costs: &[Cost],
         context: Option<RelNodeContext>,
         optimizer: Option<&CascadesOptimizer<T, M>>,
     ) -> Cost;
