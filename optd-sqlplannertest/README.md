@@ -16,10 +16,15 @@ Each file can contain multiple tests that are executed in sequential order from 
 - sql: |
     CREATE TABLE xxx (a INTEGER, b INTEGER);
     INSERT INTO xxx VALUES (0, 0), (1, 1), (2, 2);
+  tasks:
+    - execute
+  desc: Database Setup
+- sql: |
     SELECT * FROM xxx WHERE a = 0;
   tasks:
     - execute
-  desc: Simple Test
+    - explain:logical_optd,physical_optd
+  desc: Equality predicate
 ```
 | Name       | Description                                                        |
 | ---------- | ------------------------------------------------------------------ |
