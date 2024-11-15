@@ -3,7 +3,7 @@
     create table t2(t2v1 int, t2v3 int);
     create table t3(t3v2 int, t3v4 int);
   tasks:
-    - execute[use_df_logical]
+    - execute
 # - sql: |
 #     select * from t1 where t1v1 in (select t2v1 from t2);
 #   desc: Test whether the optimizer can unnest "in" subqueries. -- failing with unsupported expression

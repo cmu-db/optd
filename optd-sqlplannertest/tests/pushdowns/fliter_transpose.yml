@@ -4,7 +4,7 @@
     insert into t1 values (0, 0), (1, 1), (2, 2);
     insert into t2 values (0, 200), (1, 201), (2, 202);
   tasks:
-    - execute[use_df_logical]
+    - execute
 - sql: |
     SELECT t1.t1v1, t1.t1v2, t2.t2v3
       FROM t1, t2

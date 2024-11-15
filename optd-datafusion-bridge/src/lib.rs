@@ -118,6 +118,7 @@ impl OptdQueryPlanner {
         if let LogicalPlan::Dml(_) | LogicalPlan::Ddl(_) | LogicalPlan::EmptyRelation(_) =
             logical_plan
         {
+            // Fallback to the datafusion planner for DML/DDL operations. optd cannot handle this.
             let planner = DefaultPhysicalPlanner::default();
             return Ok(planner
                 .create_physical_plan(logical_plan, session_state)
