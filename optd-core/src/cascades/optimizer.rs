@@ -7,6 +7,7 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::Display;
 use std::hash::{DefaultHasher, Hasher};
 use std::io::Write;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -42,6 +43,8 @@ pub struct OptimizerProperties {
     pub partial_explore_space: Option<usize>,
     /// Disable pruning during optimization.
     pub disable_pruning: bool,
+    /// Dump the memo as 0000.dot, 0001.dot, ... files to this path
+    pub dot_file_path: Option<String>,
 }
 
 pub struct CascadesOptimizer<T: NodeType, M: Memo<T> = NaiveMemo<T>> {
@@ -56,6 +59,7 @@ pub struct CascadesOptimizer<T: NodeType, M: Memo<T> = NaiveMemo<T>> {
     property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>,
     pub ctx: OptimizerContext,
     pub prop: OptimizerProperties,
+    pub next_dot_file: usize,
 }
 
 /// `RelNode` only contains the representation of the plan nodes. Sometimes, we need more context,
@@ -125,6 +129,7 @@ impl<T: NodeType> CascadesOptimizer<T, NaiveMemo<T>> {
             property_builders,
             prop,
             disabled_rules: HashSet::new(),
+            next_dot_file: 0,
         }
     }
 
@@ -172,7 +177,7 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
         self.disabled_rules.contains(&rule_id)
     }
 
-    pub fn dump_dot(&self, writer: &mut Box<dyn Write>) -> Result<(), std::io::Error> {
+    pub fn dump_dot(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
         let memo = self.memo();
 
         // filter out predicates and use a btree for predictable iteration order

@@ -3,11 +3,12 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
 use itertools::Itertools;
-use tracing::{log::log_enabled, log::Level::Trace, trace};
+use tracing::{debug, trace};
 
 use super::Task;
 use crate::cascades::memo::ArcMemoPlanNode;
@@ -164,16 +165,11 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for ApplyRuleTask {
             return Ok(vec![]);
         }
 
-        if log_enabled!(target: "optd-memoviz", Trace) {
-            let path = format!(
-                "optd-{:#016x}.dot",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            );
-            let mut writer =
-                Box::new(std::fs::File::create(path).unwrap()) as Box<dyn std::io::Write>;
+        if let Some(pathname) = &optimizer.prop.dot_file_path {
+            let path = Path::new(pathname).join(format!("{:#08}.dot", optimizer.next_dot_file));
+            debug!("dumping memo to {:?}", path);
+            optimizer.next_dot_file += 1;
+            let mut writer = std::fs::File::create(path).unwrap();
             optimizer.dump_dot(&mut writer);
         }
 
