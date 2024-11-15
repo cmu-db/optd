@@ -232,13 +232,11 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
                 let expr = memo.get_expr_memoed(*expr_id);
                 //writeln!(writer, "\"g{}\" -> \"e{}\";", i, e)?;
                 for child in expr.children.iter() {
-                    if groups.contains(child) {
-                        writeln!(
-                            writer,
-                            "e{} -> g{} [lhead=\"cluster_{}\"];",
-                            expr_id.0, child.0, child.0
-                        )?;
-                    }
+                    writeln!(
+                        writer,
+                        "e{} -> g{} [lhead=\"cluster_{}\"];",
+                        expr_id.0, child.0, child.0
+                    )?;
                 }
             }
         }
