@@ -146,7 +146,7 @@ impl OptdPlanContext<'_> {
                     datafusion::physical_plan::expressions::Literal::new(value),
                 ))
             }
-            DfPredType::Func(_) => {
+            DfPredType::Func => {
                 let expr = FuncPred::from_pred_node(expr).unwrap();
                 let func = expr.func();
                 let args = expr

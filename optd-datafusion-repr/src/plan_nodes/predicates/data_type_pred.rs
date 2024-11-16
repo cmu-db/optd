@@ -4,7 +4,7 @@
 // https://opensource.org/licenses/MIT.
 
 use arrow_schema::DataType;
-use optd_core::nodes::PlanNodeMetaMap;
+use optd_core::nodes::{PlanNodeMetaMap, Value};
 use pretty_xmlish::Pretty;
 
 use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
@@ -16,17 +16,19 @@ impl DataTypePred {
     pub fn new(typ: DataType) -> Self {
         DataTypePred(
             DfPredNode {
-                typ: DfPredType::DataType(typ),
+                typ: DfPredType::DataType,
                 children: vec![],
-                data: None,
+                data: Some(Value::Serialized(bincode::serialize(&typ).unwrap().into())),
             }
             .into(),
         )
     }
 
     pub fn data_type(&self) -> DataType {
-        if let DfPredType::DataType(ref data_type) = self.0.typ {
-            data_type.clone()
+        if let DfPredType::DataType = self.0.typ {
+            let data_type: DataType =
+                bincode::deserialize(&self.0.data.as_ref().unwrap().as_slice()).unwrap();
+            data_type
         } else {
             panic!("not a data type")
         }
@@ -39,7 +41,7 @@ impl DfReprPredNode for DataTypePred {
     }
 
     fn from_pred_node(pred_node: ArcDfPredNode) -> Option<Self> {
-        if !matches!(pred_node.typ, DfPredType::DataType(_)) {
+        if !matches!(pred_node.typ, DfPredType::DataType) {
             return None;
         }
         Some(Self(pred_node))

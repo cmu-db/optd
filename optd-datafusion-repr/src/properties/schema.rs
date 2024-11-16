@@ -5,14 +5,16 @@
 
 use std::sync::Arc;
 
+use arrow_schema::DataType;
 use itertools::Itertools;
 use optd_core::logical_property::{LogicalProperty, LogicalPropertyBuilder};
 use serde::{Deserialize, Serialize};
+use tracing_subscriber::registry::Data;
 
 use super::DEFAULT_NAME;
 use crate::plan_nodes::{
-    decode_empty_relation_schema, ArcDfPredNode, ConstantPred, ConstantType, DfNodeType,
-    DfPredType, DfReprPredNode, FuncType,
+    decode_empty_relation_schema, ArcDfPredNode, ConstantPred, ConstantType, DataTypePred,
+    DfNodeType, DfPredType, DfReprPredNode, FuncPred, FuncType,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -130,20 +132,32 @@ impl SchemaPropertyBuilder {
                     })
                     .collect(),
             },
-            DfPredType::DataType(data_type) => Schema {
-                fields: vec![Field {
-                    // name and nullable are just placeholders since
-                    // they'll be overwritten by Cast
-                    name: DEFAULT_NAME.to_string(),
-                    typ: ConstantType::from_data_type(data_type.clone()),
-                    nullable: true,
-                }],
-            },
-            DfPredType::Func(FuncType::Agg(_)) => Schema {
-                // TODO: this is just a place holder now.
-                // The real type should be the column type.
-                fields: vec![Field::placeholder()],
-            },
+            DfPredType::DataType => {
+                let data_type: DataType =
+                    DataTypePred::from_pred_node(predicate).unwrap().data_type();
+                Schema {
+                    fields: vec![Field {
+                        // name and nullable are just placeholders since
+                        // they'll be overwritten by Cast
+                        name: DEFAULT_NAME.to_string(),
+                        typ: ConstantType::from_data_type(data_type.clone()),
+                        nullable: true,
+                    }],
+                }
+            }
+            DfPredType::Func => {
+                let func_type = FuncPred::from_pred_node(predicate).unwrap().func();
+
+                if let FuncType::Agg(_) = func_type {
+                    Schema {
+                        // TODO: this is just a place holder now.
+                        // The real type should be the column type.
+                        fields: vec![Field::placeholder()],
+                    }
+                } else {
+                    Schema { fields: vec![] }
+                }
+            }
             _ => Schema { fields: vec![] },
         }
     }

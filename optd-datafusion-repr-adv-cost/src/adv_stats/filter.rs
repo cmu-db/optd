@@ -104,7 +104,7 @@ impl<
             DfPredType::LogOp(log_op_typ) => {
                 self.get_log_op_selectivity(*log_op_typ, &expr_tree.children, schema, column_refs)
             }
-            DfPredType::Func(_) => unimplemented!("check bool type or else panic"),
+            DfPredType::Func => unimplemented!("check bool type or else panic"),
             DfPredType::SortOrder(_) => {
                 panic!("the selectivity of sort order expressions is undefined")
             }
@@ -114,7 +114,7 @@ impl<
                 let like_expr = LikePred::from_pred_node(expr_tree).unwrap();
                 self.get_like_selectivity(&like_expr, column_refs)
             }
-            DfPredType::DataType(_) => {
+            DfPredType::DataType => {
                 panic!("the selectivity of a data type is not defined")
             }
             DfPredType::InList => {

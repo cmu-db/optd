@@ -364,8 +364,8 @@ impl ColumnRefPropertyBuilder {
                 GroupColumnRefs::new(column_refs, correlation)
             }
             DfPredType::Constant(_)
-            | DfPredType::Func(_)
-            | DfPredType::DataType(_)
+            | DfPredType::Func
+            | DfPredType::DataType
             | DfPredType::Between
             | DfPredType::Like
             | DfPredType::InList

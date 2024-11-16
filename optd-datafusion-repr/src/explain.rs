@@ -45,7 +45,7 @@ pub fn explain_pred_node(
             .explain(meta_map),
         DfPredType::UnOp(_) => UnOpPred::from_pred_node(node).unwrap().explain(meta_map),
         DfPredType::BinOp(_) => BinOpPred::from_pred_node(node).unwrap().explain(meta_map),
-        DfPredType::Func(_) => FuncPred::from_pred_node(node).unwrap().explain(meta_map),
+        DfPredType::Func => FuncPred::from_pred_node(node).unwrap().explain(meta_map),
         DfPredType::List => {
             ListPred::from_pred_node(node) // ExprList is the only place that we will have list in the datafusion repr
                 .unwrap()
@@ -59,7 +59,7 @@ pub fn explain_pred_node(
         DfPredType::Between => BetweenPred::from_pred_node(node).unwrap().explain(meta_map),
         DfPredType::Cast => CastPred::from_pred_node(node).unwrap().explain(meta_map),
         DfPredType::Like => LikePred::from_pred_node(node).unwrap().explain(meta_map),
-        DfPredType::DataType(_) => DataTypePred::from_pred_node(node)
+        DfPredType::DataType => DataTypePred::from_pred_node(node)
             .unwrap()
             .explain(meta_map),
         DfPredType::InList => InListPred::from_pred_node(node).unwrap().explain(meta_map),

@@ -53,12 +53,12 @@ pub enum DfPredType {
     UnOp(UnOpType),
     BinOp(BinOpType),
     LogOp(LogOpType),
-    Func(FuncType),
+    Func,
     SortOrder(SortOrderType),
     Between,
     Cast,
     Like,
-    DataType(DataType),
+    DataType,
     InList,
 }
 
