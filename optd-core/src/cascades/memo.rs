@@ -95,14 +95,14 @@ pub struct Group {
 pub trait Memo<T: NodeType>: 'static + Send + Sync {
     /// Add an expression to the memo table. If the expression already exists, it will return the
     /// existing group id and expr id. Otherwise, a new group and expr will be created.
-    fn add_new_expr(&mut self, rel_node: ArcPlanNode<T>) -> (GroupId, ExprId);
+    fn add_new_expr(&mut self, plan_node: ArcPlanNode<T>) -> (GroupId, ExprId);
 
     /// Add a new expression to an existing gruop. If the expression is a group, it will merge the
     /// two groups. Otherwise, it will add the expression to the group. Returns the expr id if
     /// the expression is not a group.
     fn add_expr_to_group(
         &mut self,
-        rel_node: PlanNodeOrGroup<T>,
+        plan_node: PlanNodeOrGroup<T>,
         group_id: GroupId,
     ) -> Option<ExprId>;
 
@@ -212,9 +212,9 @@ pub struct NaiveMemo<T: NodeType> {
 }
 
 impl<T: NodeType> Memo<T> for NaiveMemo<T> {
-    fn add_new_expr(&mut self, rel_node: ArcPlanNode<T>) -> (GroupId, ExprId) {
+    fn add_new_expr(&mut self, plan_node: ArcPlanNode<T>) -> (GroupId, ExprId) {
         let (group_id, expr_id) = self
-            .add_new_group_expr_inner(rel_node, None)
+            .add_new_group_expr_inner(plan_node, None)
             .expect("should not trigger merge group");
         self.verify_integrity();
         (group_id, expr_id)
@@ -222,20 +222,20 @@ impl<T: NodeType> Memo<T> for NaiveMemo<T> {
 
     fn add_expr_to_group(
         &mut self,
-        rel_node: PlanNodeOrGroup<T>,
+        plan_node: PlanNodeOrGroup<T>,
         group_id: GroupId,
     ) -> Option<ExprId> {
-        match rel_node {
+        match plan_node {
             PlanNodeOrGroup::Group(input_group) => {
                 let input_group = self.reduce_group(input_group);
                 let group_id = self.reduce_group(group_id);
                 self.merge_group_inner(input_group, group_id);
                 None
             }
-            PlanNodeOrGroup::PlanNode(rel_node) => {
+            PlanNodeOrGroup::PlanNode(plan_node) => {
                 let reduced_group_id = self.reduce_group(group_id);
                 let (returned_group_id, expr_id) = self
-                    .add_new_group_expr_inner(rel_node, Some(reduced_group_id))
+                    .add_new_group_expr_inner(plan_node, Some(reduced_group_id))
                     .unwrap();
                 assert_eq!(returned_group_id, reduced_group_id);
                 self.verify_integrity();
@@ -470,10 +470,10 @@ impl<T: NodeType> NaiveMemo<T> {
 
     fn add_new_group_expr_inner(
         &mut self,
-        rel_node: ArcPlanNode<T>,
+        plan_node: ArcPlanNode<T>,
         add_to_group_id: Option<GroupId>,
     ) -> anyhow::Result<(GroupId, ExprId)> {
-        let children_group_ids = rel_node
+        let children_group_ids = plan_node
             .children
             .iter()
             .map(|child| {
@@ -492,9 +492,9 @@ impl<T: NodeType> NaiveMemo<T> {
             })
             .collect::<Vec<_>>();
         let memo_node = MemoPlanNode {
-            typ: rel_node.typ.clone(),
+            typ: plan_node.typ.clone(),
             children: children_group_ids,
-            predicates: rel_node
+            predicates: plan_node
                 .predicates
                 .iter()
                 .map(|x| self.add_new_pred(x.clone()))
@@ -526,8 +526,8 @@ impl<T: NodeType> NaiveMemo<T> {
     /// This is inefficient: usually the optimizer should have a MemoRef instead of passing the full
     /// rel node. Should be only used for debugging purpose.
     #[cfg(test)]
-    pub(crate) fn get_expr_info(&self, rel_node: ArcPlanNode<T>) -> (GroupId, ExprId) {
-        let children_group_ids = rel_node
+    pub(crate) fn get_expr_info(&self, plan_node: ArcPlanNode<T>) -> (GroupId, ExprId) {
+        let children_group_ids = plan_node
             .children
             .iter()
             .map(|child| match child {
@@ -536,9 +536,9 @@ impl<T: NodeType> NaiveMemo<T> {
             })
             .collect::<Vec<_>>();
         let memo_node = MemoPlanNode {
-            typ: rel_node.typ.clone(),
+            typ: plan_node.typ.clone(),
             children: children_group_ids,
-            predicates: rel_node
+            predicates: plan_node
                 .predicates
                 .iter()
                 .map(|x| self.pred_node_to_pred_id[x])
