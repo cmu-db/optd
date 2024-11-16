@@ -56,43 +56,7 @@ impl Serialize for AggregateFunction {
     where
         S: serde::Serializer,
     {
-        let x = match self.0 {
-            datafusion_expr::AggregateFunction::Count => 0,
-            datafusion_expr::AggregateFunction::Sum => 1,
-            datafusion_expr::AggregateFunction::Min => 2,
-            datafusion_expr::AggregateFunction::Max => 3,
-            datafusion_expr::AggregateFunction::Avg => 4,
-            datafusion_expr::AggregateFunction::Median => 5,
-            datafusion_expr::AggregateFunction::ApproxDistinct => 6,
-            datafusion_expr::AggregateFunction::ArrayAgg => 7,
-            datafusion_expr::AggregateFunction::FirstValue => 8,
-            datafusion_expr::AggregateFunction::LastValue => 9,
-            datafusion_expr::AggregateFunction::Variance => 10,
-            datafusion_expr::AggregateFunction::VariancePop => 11,
-            datafusion_expr::AggregateFunction::Stddev => 12,
-            datafusion_expr::AggregateFunction::StddevPop => 13,
-            datafusion_expr::AggregateFunction::Covariance => 14,
-            datafusion_expr::AggregateFunction::CovariancePop => 15,
-            datafusion_expr::AggregateFunction::Correlation => 16,
-            datafusion_expr::AggregateFunction::RegrSlope => 17,
-            datafusion_expr::AggregateFunction::RegrIntercept => 18,
-            datafusion_expr::AggregateFunction::RegrCount => 19,
-            datafusion_expr::AggregateFunction::RegrR2 => 20,
-            datafusion_expr::AggregateFunction::RegrAvgx => 21,
-            datafusion_expr::AggregateFunction::RegrAvgy => 22,
-            datafusion_expr::AggregateFunction::RegrSXX => 23,
-            datafusion_expr::AggregateFunction::RegrSYY => 24,
-            datafusion_expr::AggregateFunction::RegrSXY => 25,
-            datafusion_expr::AggregateFunction::ApproxPercentileCont => 26,
-            datafusion_expr::AggregateFunction::ApproxPercentileContWithWeight => 27,
-            datafusion_expr::AggregateFunction::ApproxMedian => 28,
-            datafusion_expr::AggregateFunction::Grouping => 29,
-            datafusion_expr::AggregateFunction::BitAnd => 30,
-            datafusion_expr::AggregateFunction::BitOr => 31,
-            datafusion_expr::AggregateFunction::BitXor => 32,
-            datafusion_expr::AggregateFunction::BoolAnd => 33,
-            datafusion_expr::AggregateFunction::BoolOr => 34,
-        };
+        let x = self.0.clone() as u16;
         x.serialize(serializer)
     }
 }
@@ -103,43 +67,78 @@ impl<'a> Deserialize<'a> for AggregateFunction {
         D: serde::Deserializer<'a>,
     {
         let x = u16::deserialize(deserializer)?;
-        let v = match x {
-            0 => datafusion_expr::AggregateFunction::Count,
-            1 => datafusion_expr::AggregateFunction::Sum,
-            2 => datafusion_expr::AggregateFunction::Min,
-            3 => datafusion_expr::AggregateFunction::Max,
-            4 => datafusion_expr::AggregateFunction::Avg,
-            5 => datafusion_expr::AggregateFunction::Median,
-            6 => datafusion_expr::AggregateFunction::ApproxDistinct,
-            7 => datafusion_expr::AggregateFunction::ArrayAgg,
-            8 => datafusion_expr::AggregateFunction::FirstValue,
-            9 => datafusion_expr::AggregateFunction::LastValue,
-            10 => datafusion_expr::AggregateFunction::Variance,
-            11 => datafusion_expr::AggregateFunction::VariancePop,
-            12 => datafusion_expr::AggregateFunction::Stddev,
-            13 => datafusion_expr::AggregateFunction::StddevPop,
-            14 => datafusion_expr::AggregateFunction::Covariance,
-            15 => datafusion_expr::AggregateFunction::CovariancePop,
-            16 => datafusion_expr::AggregateFunction::Correlation,
-            17 => datafusion_expr::AggregateFunction::RegrSlope,
-            18 => datafusion_expr::AggregateFunction::RegrIntercept,
-            19 => datafusion_expr::AggregateFunction::RegrCount,
-            20 => datafusion_expr::AggregateFunction::RegrR2,
-            21 => datafusion_expr::AggregateFunction::RegrAvgx,
-            22 => datafusion_expr::AggregateFunction::RegrAvgy,
-            23 => datafusion_expr::AggregateFunction::RegrSXX,
-            24 => datafusion_expr::AggregateFunction::RegrSYY,
-            25 => datafusion_expr::AggregateFunction::RegrSXY,
-            26 => datafusion_expr::AggregateFunction::ApproxPercentileCont,
-            27 => datafusion_expr::AggregateFunction::ApproxPercentileContWithWeight,
-            28 => datafusion_expr::AggregateFunction::ApproxMedian,
-            29 => datafusion_expr::AggregateFunction::Grouping,
-            30 => datafusion_expr::AggregateFunction::BitAnd,
-            31 => datafusion_expr::AggregateFunction::BitOr,
-            32 => datafusion_expr::AggregateFunction::BitXor,
-            33 => datafusion_expr::AggregateFunction::BoolAnd,
-            34 => datafusion_expr::AggregateFunction::BoolOr,
-            _ => panic!("invalid aggregate function"),
+        let v = if x == datafusion_expr::AggregateFunction::Count as u16 {
+            datafusion_expr::AggregateFunction::Count
+        } else if x == datafusion_expr::AggregateFunction::Sum as u16 {
+            datafusion_expr::AggregateFunction::Sum
+        } else if x == datafusion_expr::AggregateFunction::Min as u16 {
+            datafusion_expr::AggregateFunction::Min
+        } else if x == datafusion_expr::AggregateFunction::Max as u16 {
+            datafusion_expr::AggregateFunction::Max
+        } else if x == datafusion_expr::AggregateFunction::Avg as u16 {
+            datafusion_expr::AggregateFunction::Avg
+        } else if x == datafusion_expr::AggregateFunction::Median as u16 {
+            datafusion_expr::AggregateFunction::Median
+        } else if x == datafusion_expr::AggregateFunction::ApproxDistinct as u16 {
+            datafusion_expr::AggregateFunction::ApproxDistinct
+        } else if x == datafusion_expr::AggregateFunction::ArrayAgg as u16 {
+            datafusion_expr::AggregateFunction::ArrayAgg
+        } else if x == datafusion_expr::AggregateFunction::FirstValue as u16 {
+            datafusion_expr::AggregateFunction::FirstValue
+        } else if x == datafusion_expr::AggregateFunction::LastValue as u16 {
+            datafusion_expr::AggregateFunction::LastValue
+        } else if x == datafusion_expr::AggregateFunction::Variance as u16 {
+            datafusion_expr::AggregateFunction::Variance
+        } else if x == datafusion_expr::AggregateFunction::VariancePop as u16 {
+            datafusion_expr::AggregateFunction::VariancePop
+        } else if x == datafusion_expr::AggregateFunction::Stddev as u16 {
+            datafusion_expr::AggregateFunction::Stddev
+        } else if x == datafusion_expr::AggregateFunction::StddevPop as u16 {
+            datafusion_expr::AggregateFunction::StddevPop
+        } else if x == datafusion_expr::AggregateFunction::Covariance as u16 {
+            datafusion_expr::AggregateFunction::Covariance
+        } else if x == datafusion_expr::AggregateFunction::CovariancePop as u16 {
+            datafusion_expr::AggregateFunction::CovariancePop
+        } else if x == datafusion_expr::AggregateFunction::Correlation as u16 {
+            datafusion_expr::AggregateFunction::Correlation
+        } else if x == datafusion_expr::AggregateFunction::RegrSlope as u16 {
+            datafusion_expr::AggregateFunction::RegrSlope
+        } else if x == datafusion_expr::AggregateFunction::RegrIntercept as u16 {
+            datafusion_expr::AggregateFunction::RegrIntercept
+        } else if x == datafusion_expr::AggregateFunction::RegrCount as u16 {
+            datafusion_expr::AggregateFunction::RegrCount
+        } else if x == datafusion_expr::AggregateFunction::RegrR2 as u16 {
+            datafusion_expr::AggregateFunction::RegrR2
+        } else if x == datafusion_expr::AggregateFunction::RegrAvgx as u16 {
+            datafusion_expr::AggregateFunction::RegrAvgx
+        } else if x == datafusion_expr::AggregateFunction::RegrAvgy as u16 {
+            datafusion_expr::AggregateFunction::RegrAvgy
+        } else if x == datafusion_expr::AggregateFunction::RegrSXX as u16 {
+            datafusion_expr::AggregateFunction::RegrSXX
+        } else if x == datafusion_expr::AggregateFunction::RegrSYY as u16 {
+            datafusion_expr::AggregateFunction::RegrSYY
+        } else if x == datafusion_expr::AggregateFunction::RegrSXY as u16 {
+            datafusion_expr::AggregateFunction::RegrSXY
+        } else if x == datafusion_expr::AggregateFunction::ApproxPercentileCont as u16 {
+            datafusion_expr::AggregateFunction::ApproxPercentileCont
+        } else if x == datafusion_expr::AggregateFunction::ApproxPercentileContWithWeight as u16 {
+            datafusion_expr::AggregateFunction::ApproxPercentileContWithWeight
+        } else if x == datafusion_expr::AggregateFunction::ApproxMedian as u16 {
+            datafusion_expr::AggregateFunction::ApproxMedian
+        } else if x == datafusion_expr::AggregateFunction::Grouping as u16 {
+            datafusion_expr::AggregateFunction::Grouping
+        } else if x == datafusion_expr::AggregateFunction::BitAnd as u16 {
+            datafusion_expr::AggregateFunction::BitAnd
+        } else if x == datafusion_expr::AggregateFunction::BitOr as u16 {
+            datafusion_expr::AggregateFunction::BitOr
+        } else if x == datafusion_expr::AggregateFunction::BitXor as u16 {
+            datafusion_expr::AggregateFunction::BitXor
+        } else if x == datafusion_expr::AggregateFunction::BoolAnd as u16 {
+            datafusion_expr::AggregateFunction::BoolAnd
+        } else if x == datafusion_expr::AggregateFunction::BoolOr as u16 {
+            datafusion_expr::AggregateFunction::BoolOr
+        } else {
+            panic!("invalid aggregate function")
         };
 
         Ok(AggregateFunction(v))
