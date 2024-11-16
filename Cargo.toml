@@ -24,3 +24,4 @@ repository = "https://github.com/cmu-db/optd"
 
 [workspace.dependencies]
 futures-lite = "2"
+strum = { version = "0.26", features = ["derive"] }

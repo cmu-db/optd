@@ -9,7 +9,6 @@ use arrow_schema::DataType;
 use itertools::Itertools;
 use optd_core::logical_property::{LogicalProperty, LogicalPropertyBuilder};
 use serde::{Deserialize, Serialize};
-use tracing_subscriber::registry::Data;
 
 use super::DEFAULT_NAME;
 use crate::plan_nodes::{

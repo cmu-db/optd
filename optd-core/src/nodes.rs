@@ -216,10 +216,33 @@ impl Value {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct VariantTag(pub u16);
+
 pub trait NodeType:
-    PartialEq + Eq + Hash + Clone + 'static + Display + Debug + Send + Sync
+    PartialEq
+    + Eq
+    + Hash
+    + Clone
+    + 'static
+    + Display
+    + Debug
+    + Send
+    + Sync
+    + TryFrom<VariantTag>
+    + Into<VariantTag>
 {
-    type PredType: PartialEq + Eq + Hash + Clone + 'static + Display + Debug + Send + Sync;
+    type PredType: PartialEq
+        + Eq
+        + Hash
+        + Clone
+        + 'static
+        + Display
+        + Debug
+        + Send
+        + Sync
+        + TryFrom<VariantTag>
+        + Into<VariantTag>;
 
     fn is_logical(&self) -> bool;
 }
