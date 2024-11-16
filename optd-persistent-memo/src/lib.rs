@@ -24,6 +24,7 @@ pub struct PersistentMemo<T: NodeType> {
     // Predicate stuff.
     pred_id_to_pred_node: HashMap<PredId, nodes::ArcPredNode<T>>,
     pred_node_to_pred_id: HashMap<nodes::ArcPredNode<T>, PredId>,
+    // TODO: Instead of wrapping usize in all of our data structures, consider picking a fixed-size integer type.
     expr_group_id_counter: usize,
 
     // We update all group IDs in the memo table upon group merging, but
@@ -35,6 +36,7 @@ pub struct PersistentMemo<T: NodeType> {
 
 type OrmLogicalExpr = optd_persistent::entities::logical_expression::Model;
 type OrmPhysicalExpr = optd_persistent::entities::physical_expression::Model;
+type OrmGroup = optd_persistent::entities::cascades_group::Model;
 
 impl<T: NodeType> PersistentMemo<T> {
     pub fn new(database_url: Option<&str>) -> StorageResult<Self> {
@@ -61,6 +63,26 @@ impl<T: NodeType> PersistentMemo<T> {
 
     fn node_to_physical_expr(&self, plan_node: nodes::ArcPlanNode<T>) -> OrmPhysicalExpr {
         todo!()
+    }
+
+    fn logical_expr_to_node(&self, logical_expr: OrmLogicalExpr) -> cascades::ArcMemoPlanNode<T> {
+        todo!()
+    }
+
+    fn physical_expr_to_node(
+        &self,
+        physical_expr: OrmPhysicalExpr,
+    ) -> cascades::ArcMemoPlanNode<T> {
+        todo!()
+    }
+
+    fn orm_to_optd_group(&self, orm_group: OrmGroup) -> cascades::Group {
+        todo!()
+    }
+
+    fn group_info_to_phys_id(&self, group_info: cascades::GroupInfo) -> i32 {
+        let cascades::GroupInfo { winner } = group_info;
+        todo!("Converting group info... what now?")
     }
 }
 
@@ -101,7 +123,9 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
             ))
             .unwrap();
             // TODO: add_logical_expression_to_group does not return an expr, though it should
-            Some(ExprId(0))
+            let e_id: i32 = 0;
+            let e_id = ExprId(e_id.try_into().unwrap());
+            Some(e_id)
         } else {
             let physical_expr = self.node_to_physical_expr(plan_node.clone());
             futures_lite::future::block_on(self.storage.add_physical_expression_to_group(
@@ -111,7 +135,10 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
             ))
             .unwrap();
             // TODO: add_physical_expression_to_group does not return an expr, though it should
-            Some(ExprId(0))
+            let e_id: i32 = 0;
+            let e_id = ExprId(e_id.try_into().unwrap());
+            self.physical_expressions.insert(e_id);
+            Some(e_id)
         }
     }
 
@@ -126,19 +153,38 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
     }
 
     fn get_group_id(&self, expr_id: ExprId) -> GroupId {
+        // TODO: This functionality is missing in the ORM implementation...
         todo!()
     }
 
     fn get_expr_memoed(&self, expr_id: ExprId) -> cascades::ArcMemoPlanNode<T> {
-        todo!()
+        if self.physical_expressions.contains(&expr_id) {
+            let physical_expr = futures_lite::future::block_on(
+                self.storage
+                    .get_physical_expression(expr_id.0.try_into().unwrap()),
+            )
+            .unwrap();
+            self.physical_expr_to_node(physical_expr)
+        } else {
+            let logical_expr = futures_lite::future::block_on(
+                self.storage
+                    .get_logical_expression(expr_id.0.try_into().unwrap()),
+            )
+            .unwrap();
+            self.logical_expr_to_node(logical_expr)
+        }
     }
 
     fn get_all_group_ids(&self) -> Vec<GroupId> {
+        // TODO: This functionality is missing in the ORM implementation...
         todo!()
     }
 
     fn get_group(&self, group_id: GroupId) -> &cascades::Group {
-        todo!()
+        let g_id = group_id.0.try_into().unwrap();
+        let orm_group = futures_lite::future::block_on(self.storage.get_group(g_id)).unwrap();
+        let group = self.orm_to_optd_group(orm_group);
+        Box::leak(Box::new(group)) // TODO: Memo table trait should return Arcs
     }
 
     fn get_pred(&self, pred_id: PredId) -> nodes::ArcPredNode<T> {
@@ -146,10 +192,12 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
     }
 
     fn update_group_info(&mut self, group_id: GroupId, group_info: cascades::GroupInfo) {
+        // TODO: This might require a bigger redesign
         todo!()
     }
 
     fn estimated_plan_space(&self) -> usize {
+        // TODO: This functionality is missing in the ORM implementation...
         todo!()
     }
 }
