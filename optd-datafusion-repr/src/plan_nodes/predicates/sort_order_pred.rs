@@ -7,10 +7,11 @@ use std::fmt::Display;
 
 use optd_core::nodes::PlanNodeMetaMap;
 use pretty_xmlish::Pretty;
+use serde::{Deserialize, Serialize};
 
 use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum SortOrderType {
     Asc,
     Desc,

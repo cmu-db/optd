@@ -3,16 +3,91 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
+use std::str::FromStr;
+
 use optd_core::nodes::PlanNodeMetaMap;
 use pretty_xmlish::Pretty;
+use serde::{Deserialize, Serialize};
 
 use super::ListPred;
 use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct BuiltinScalarFunction(datafusion_expr::BuiltinScalarFunction);
+
+impl Serialize for BuiltinScalarFunction {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.to_string().serialize(serializer)
+    }
+}
+
+impl<'a> Deserialize<'a> for BuiltinScalarFunction {
+    fn deserialize<D>(deserializer: D) -> Result<BuiltinScalarFunction, D::Error>
+    where
+        D: serde::Deserializer<'a>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(BuiltinScalarFunction(
+            datafusion_expr::BuiltinScalarFunction::from_str(&s).unwrap(),
+        ))
+    }
+}
+
+impl From<datafusion_expr::BuiltinScalarFunction> for BuiltinScalarFunction {
+    fn from(func: datafusion_expr::BuiltinScalarFunction) -> Self {
+        Self(func)
+    }
+}
+
+impl Into<datafusion_expr::BuiltinScalarFunction> for BuiltinScalarFunction {
+    fn into(self) -> datafusion_expr::BuiltinScalarFunction {
+        self.0
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct AggregateFunction(datafusion_expr::AggregateFunction);
+
+impl Serialize for AggregateFunction {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.to_string().serialize(serializer)
+    }
+}
+
+impl<'a> Deserialize<'a> for AggregateFunction {
+    fn deserialize<D>(deserializer: D) -> Result<AggregateFunction, D::Error>
+    where
+        D: serde::Deserializer<'a>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(AggregateFunction(
+            datafusion_expr::AggregateFunction::from_str(&s).unwrap(),
+        ))
+    }
+}
+
+impl From<datafusion_expr::AggregateFunction> for AggregateFunction {
+    fn from(func: datafusion_expr::AggregateFunction) -> Self {
+        Self(func)
+    }
+}
+
+impl Into<datafusion_expr::AggregateFunction> for AggregateFunction {
+    fn into(self) -> datafusion_expr::AggregateFunction {
+        self.0
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum FuncType {
-    Scalar(datafusion_expr::BuiltinScalarFunction),
-    Agg(datafusion_expr::AggregateFunction),
+    Scalar(BuiltinScalarFunction),
+    Agg(AggregateFunction),
     Case,
 }
 
@@ -24,11 +99,11 @@ impl std::fmt::Display for FuncType {
 
 impl FuncType {
     pub fn new_scalar(func_id: datafusion_expr::BuiltinScalarFunction) -> Self {
-        FuncType::Scalar(func_id)
+        FuncType::Scalar(func_id.into())
     }
 
     pub fn new_agg(func_id: datafusion_expr::AggregateFunction) -> Self {
-        FuncType::Agg(func_id)
+        FuncType::Agg(func_id.into())
     }
 }
 

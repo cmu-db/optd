@@ -5,6 +5,7 @@
 
 use optd_core::nodes::PlanNodeMetaMap;
 use pretty_xmlish::Pretty;
+use serde::{Deserialize, Serialize};
 
 use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
 
@@ -12,7 +13,7 @@ use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
 /// functions     to distinguish between them matches how datafusion::logical_expr::Operator does
 /// things I initially thought about splitting BinOpType into three "subenums". However, having two
 /// nested levels of     types leads to some really confusing code
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum BinOpType {
     // numerical
     Add,

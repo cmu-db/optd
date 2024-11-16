@@ -95,7 +95,7 @@ impl OptdPlanContext<'_> {
             .map(|expr| Self::conv_from_optd_expr(expr, context))
             .collect::<Result<Vec<_>>>()?;
         Ok(create_aggregate_expr(
-            &func,
+            &func.into(),
             false,
             &args,
             &[],
@@ -158,7 +158,7 @@ impl OptdPlanContext<'_> {
                 match func {
                     FuncType::Scalar(func) => {
                         Ok(datafusion::physical_expr::functions::create_physical_expr(
-                            &func,
+                            &func.into(),
                             &args,
                             context,
                             &physical_expr::execution_props::ExecutionProps::new(),

@@ -38,12 +38,13 @@ pub use predicates::{
 use pretty_xmlish::{Pretty, PrettyConfig};
 pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
+use serde::{Deserialize, Serialize};
 pub use sort::{LogicalSort, PhysicalSort};
 pub use subquery::{DependentJoin, RawDependentJoin}; // Add missing import
 
 use crate::explain::{explain_plan_node, explain_pred_node};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DfPredType {
     List,
     Constant(ConstantType),
@@ -69,7 +70,7 @@ impl std::fmt::Display for DfPredType {
 
 /// DfNodeType FAQ:
 ///   - The define_plan_node!() macro defines what the children of each join node are
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DfNodeType {
     // Developers: update `is_logical` function after adding new plan nodes
     // Plan nodes
