@@ -11,6 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
+use itertools::Itertools;
 use tracing::trace;
 
 use super::memo::{ArcMemoPlanNode, GroupInfo, Memo};
@@ -180,18 +181,8 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
     pub fn dump_dot(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
         let memo = self.memo();
 
-        // filter out predicates and use a btree for predictable iteration order
-        let mut groups = BTreeSet::new();
-        for group_id in memo.get_all_group_ids() {
-            let group = memo.get_group(group_id);
-            let mut rel = false;
-            for expr_id in memo.get_all_exprs_in_group(group_id).iter() {
-                if memo.get_expr_memoed(*expr_id).typ.is_logical() {
-                    groups.insert(group_id);
-                    break;
-                }
-            }
-        }
+        // Collect all groups in a predictable iteration order
+        let groups: Vec<GroupId> = memo.get_all_group_ids().iter().sorted().cloned().collect();
 
         writeln!(writer, "digraph Memo {{")?;
         writeln!(
@@ -230,7 +221,6 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
         for group_id in groups.iter() {
             for expr_id in memo.get_all_exprs_in_group(*group_id).iter() {
                 let expr = memo.get_expr_memoed(*expr_id);
-                //writeln!(writer, "\"g{}\" -> \"e{}\";", i, e)?;
                 for child in expr.children.iter() {
                     writeln!(
                         writer,
