@@ -1,4 +1,4 @@
-use optd_core::nodes::VariantTag;
+use optd_core::nodes::{SerializedNodeTag, SerializedPredTag};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -30,7 +30,7 @@ use super::{
     strum::EnumCount,
 )]
 #[repr(u8)]
-enum DfPredTypeFlat {
+enum DfPredTypeFlattened {
     List,
     Constant,
     ColumnRef,
@@ -71,7 +71,7 @@ enum DfPredTypeFlat {
     strum::EnumCount,
 )]
 #[repr(u8)]
-pub enum DfNodeTypeFlat {
+pub enum DfNodeTypeFlattened {
     // Logical plan nodes
     Projection,
     Filter,
@@ -95,40 +95,40 @@ pub enum DfNodeTypeFlat {
     PhysicalLimit,
 }
 
-impl TryFrom<VariantTag> for DfPredType {
+impl TryFrom<SerializedPredTag> for DfPredType {
     type Error = u16;
 
-    fn try_from(value: VariantTag) -> Result<Self, Self::Error> {
-        let VariantTag(v) = value;
+    fn try_from(value: SerializedPredTag) -> Result<Self, Self::Error> {
+        let SerializedPredTag(v) = value;
         let [discriminant, rest] = v.to_be_bytes();
         let typ = {
-            let flat = DfPredTypeFlat::from_repr(discriminant).ok_or_else(|| v)?;
-            match flat {
-                DfPredTypeFlat::Constant => {
+            let flattened = DfPredTypeFlattened::from_repr(discriminant).ok_or_else(|| v)?;
+            match flattened {
+                DfPredTypeFlattened::Constant => {
                     DfPredType::Constant(ConstantType::from_repr(rest).ok_or_else(|| v)?)
                 }
 
-                DfPredTypeFlat::UnOp => {
+                DfPredTypeFlattened::UnOp => {
                     DfPredType::UnOp(UnOpType::from_repr(rest).ok_or_else(|| v)?)
                 }
-                DfPredTypeFlat::BinOp => {
+                DfPredTypeFlattened::BinOp => {
                     DfPredType::BinOp(BinOpType::from_repr(rest).ok_or_else(|| v)?)
                 }
-                DfPredTypeFlat::LogOp => {
+                DfPredTypeFlattened::LogOp => {
                     DfPredType::LogOp(LogOpType::from_repr(rest).ok_or_else(|| v)?)
                 }
-                DfPredTypeFlat::SortOrder => {
+                DfPredTypeFlattened::SortOrder => {
                     DfPredType::SortOrder(SortOrderType::from_repr(rest).ok_or_else(|| v)?)
                 }
-                DfPredTypeFlat::ColumnRef => DfPredType::ColumnRef,
-                DfPredTypeFlat::ExternColumnRef => DfPredType::ExternColumnRef,
-                DfPredTypeFlat::List => DfPredType::List,
-                DfPredTypeFlat::Func => DfPredType::Func,
-                DfPredTypeFlat::Between => DfPredType::Between,
-                DfPredTypeFlat::Cast => DfPredType::Cast,
-                DfPredTypeFlat::Like => DfPredType::Like,
-                DfPredTypeFlat::DataType => DfPredType::DataType,
-                DfPredTypeFlat::InList => DfPredType::InList,
+                DfPredTypeFlattened::ColumnRef => DfPredType::ColumnRef,
+                DfPredTypeFlattened::ExternColumnRef => DfPredType::ExternColumnRef,
+                DfPredTypeFlattened::List => DfPredType::List,
+                DfPredTypeFlattened::Func => DfPredType::Func,
+                DfPredTypeFlattened::Between => DfPredType::Between,
+                DfPredTypeFlattened::Cast => DfPredType::Cast,
+                DfPredTypeFlattened::Like => DfPredType::Like,
+                DfPredTypeFlattened::DataType => DfPredType::DataType,
+                DfPredTypeFlattened::InList => DfPredType::InList,
             }
         };
 
@@ -136,121 +136,127 @@ impl TryFrom<VariantTag> for DfPredType {
     }
 }
 
-impl From<DfPredType> for VariantTag {
+impl From<DfPredType> for SerializedPredTag {
     fn from(value: DfPredType) -> Self {
         let (discriminant, rest) = {
             match value {
                 DfPredType::Constant(constant_type) => {
-                    (DfPredTypeFlat::Constant as u8, constant_type as u8)
+                    (DfPredTypeFlattened::Constant as u8, constant_type as u8)
                 }
-                DfPredType::UnOp(un_op_type) => (DfPredTypeFlat::UnOp as u8, un_op_type as u8),
-                DfPredType::BinOp(bin_op_type) => (DfPredTypeFlat::BinOp as u8, bin_op_type as u8),
-                DfPredType::LogOp(log_op_type) => (DfPredTypeFlat::LogOp as u8, log_op_type as u8),
+                DfPredType::UnOp(un_op_type) => (DfPredTypeFlattened::UnOp as u8, un_op_type as u8),
+                DfPredType::BinOp(bin_op_type) => {
+                    (DfPredTypeFlattened::BinOp as u8, bin_op_type as u8)
+                }
+                DfPredType::LogOp(log_op_type) => {
+                    (DfPredTypeFlattened::LogOp as u8, log_op_type as u8)
+                }
                 DfPredType::SortOrder(sort_order_type) => {
-                    (DfPredTypeFlat::SortOrder as u8, sort_order_type as u8)
+                    (DfPredTypeFlattened::SortOrder as u8, sort_order_type as u8)
                 }
-                DfPredType::List => (DfPredTypeFlat::List as u8, 0),
-                DfPredType::ColumnRef => (DfPredTypeFlat::ColumnRef as u8, 0),
-                DfPredType::ExternColumnRef => (DfPredTypeFlat::ExternColumnRef as u8, 0),
-                DfPredType::Func => (DfPredTypeFlat::Func as u8, 0),
-                DfPredType::Between => (DfPredTypeFlat::Between as u8, 0),
-                DfPredType::Cast => (DfPredTypeFlat::Cast as u8, 0),
-                DfPredType::Like => (DfPredTypeFlat::Like as u8, 0),
-                DfPredType::DataType => (DfPredTypeFlat::DataType as u8, 0),
-                DfPredType::InList => (DfPredTypeFlat::InList as u8, 0),
+                DfPredType::List => (DfPredTypeFlattened::List as u8, 0),
+                DfPredType::ColumnRef => (DfPredTypeFlattened::ColumnRef as u8, 0),
+                DfPredType::ExternColumnRef => (DfPredTypeFlattened::ExternColumnRef as u8, 0),
+                DfPredType::Func => (DfPredTypeFlattened::Func as u8, 0),
+                DfPredType::Between => (DfPredTypeFlattened::Between as u8, 0),
+                DfPredType::Cast => (DfPredTypeFlattened::Cast as u8, 0),
+                DfPredType::Like => (DfPredTypeFlattened::Like as u8, 0),
+                DfPredType::DataType => (DfPredTypeFlattened::DataType as u8, 0),
+                DfPredType::InList => (DfPredTypeFlattened::InList as u8, 0),
             }
         };
-        VariantTag(u16::from_be_bytes([discriminant, rest]))
+        SerializedPredTag(u16::from_be_bytes([discriminant, rest]))
     }
 }
 
-impl TryFrom<VariantTag> for DfNodeType {
+impl TryFrom<SerializedNodeTag> for DfNodeType {
     type Error = u16;
 
-    fn try_from(value: VariantTag) -> Result<Self, Self::Error> {
-        let VariantTag(v) = value;
+    fn try_from(value: SerializedNodeTag) -> Result<Self, Self::Error> {
+        let SerializedNodeTag(v) = value;
         let [discriminant, rest] = v.to_be_bytes();
         let typ = {
-            let flat = DfNodeTypeFlat::from_repr(discriminant).ok_or_else(|| v)?;
-            match flat {
-                DfNodeTypeFlat::Join => {
+            let flattened = DfNodeTypeFlattened::from_repr(discriminant).ok_or_else(|| v)?;
+            match flattened {
+                DfNodeTypeFlattened::Join => {
                     DfNodeType::Join(JoinType::from_repr(rest).ok_or_else(|| v)?)
                 }
-                DfNodeTypeFlat::RawDepJoin => {
+                DfNodeTypeFlattened::RawDepJoin => {
                     DfNodeType::RawDepJoin(JoinType::from_repr(rest).ok_or_else(|| v)?)
                 }
-                DfNodeTypeFlat::DepJoin => {
+                DfNodeTypeFlattened::DepJoin => {
                     DfNodeType::DepJoin(JoinType::from_repr(rest).ok_or_else(|| v)?)
                 }
-                DfNodeTypeFlat::PhysicalHashJoin => {
+                DfNodeTypeFlattened::PhysicalHashJoin => {
                     DfNodeType::PhysicalHashJoin(JoinType::from_repr(rest).ok_or_else(|| v)?)
                 }
-                DfNodeTypeFlat::PhysicalNestedLoopJoin => {
+                DfNodeTypeFlattened::PhysicalNestedLoopJoin => {
                     DfNodeType::PhysicalNestedLoopJoin(JoinType::from_repr(rest).ok_or_else(|| v)?)
                 }
-                DfNodeTypeFlat::Projection => DfNodeType::Projection,
-                DfNodeTypeFlat::Filter => DfNodeType::Filter,
-                DfNodeTypeFlat::Scan => DfNodeType::Scan,
-                DfNodeTypeFlat::Sort => DfNodeType::Sort,
-                DfNodeTypeFlat::Agg => DfNodeType::Agg,
-                DfNodeTypeFlat::EmptyRelation => DfNodeType::EmptyRelation,
-                DfNodeTypeFlat::Limit => DfNodeType::Limit,
-                DfNodeTypeFlat::PhysicalProjection => DfNodeType::PhysicalProjection,
-                DfNodeTypeFlat::PhysicalFilter => DfNodeType::PhysicalFilter,
-                DfNodeTypeFlat::PhysicalScan => DfNodeType::PhysicalScan,
-                DfNodeTypeFlat::PhysicalSort => DfNodeType::PhysicalSort,
-                DfNodeTypeFlat::PhysicalAgg => DfNodeType::PhysicalAgg,
-                DfNodeTypeFlat::PhysicalEmptyRelation => DfNodeType::PhysicalEmptyRelation,
-                DfNodeTypeFlat::PhysicalLimit => DfNodeType::PhysicalLimit,
+                DfNodeTypeFlattened::Projection => DfNodeType::Projection,
+                DfNodeTypeFlattened::Filter => DfNodeType::Filter,
+                DfNodeTypeFlattened::Scan => DfNodeType::Scan,
+                DfNodeTypeFlattened::Sort => DfNodeType::Sort,
+                DfNodeTypeFlattened::Agg => DfNodeType::Agg,
+                DfNodeTypeFlattened::EmptyRelation => DfNodeType::EmptyRelation,
+                DfNodeTypeFlattened::Limit => DfNodeType::Limit,
+                DfNodeTypeFlattened::PhysicalProjection => DfNodeType::PhysicalProjection,
+                DfNodeTypeFlattened::PhysicalFilter => DfNodeType::PhysicalFilter,
+                DfNodeTypeFlattened::PhysicalScan => DfNodeType::PhysicalScan,
+                DfNodeTypeFlattened::PhysicalSort => DfNodeType::PhysicalSort,
+                DfNodeTypeFlattened::PhysicalAgg => DfNodeType::PhysicalAgg,
+                DfNodeTypeFlattened::PhysicalEmptyRelation => DfNodeType::PhysicalEmptyRelation,
+                DfNodeTypeFlattened::PhysicalLimit => DfNodeType::PhysicalLimit,
             }
         };
         Ok(typ)
     }
 }
 
-impl From<DfNodeType> for VariantTag {
+impl From<DfNodeType> for SerializedNodeTag {
     fn from(value: DfNodeType) -> Self {
         let (discriminant, rest) = match value {
-            DfNodeType::Join(join_type) => (DfNodeTypeFlat::Join as u8, join_type as u8),
+            DfNodeType::Join(join_type) => (DfNodeTypeFlattened::Join as u8, join_type as u8),
             DfNodeType::RawDepJoin(join_type) => {
-                (DfNodeTypeFlat::RawDepJoin as u8, join_type as u8)
+                (DfNodeTypeFlattened::RawDepJoin as u8, join_type as u8)
             }
-            DfNodeType::DepJoin(join_type) => (DfNodeTypeFlat::DepJoin as u8, join_type as u8),
+            DfNodeType::DepJoin(join_type) => (DfNodeTypeFlattened::DepJoin as u8, join_type as u8),
             DfNodeType::PhysicalHashJoin(join_type) => {
-                (DfNodeTypeFlat::PhysicalHashJoin as u8, join_type as u8)
+                (DfNodeTypeFlattened::PhysicalHashJoin as u8, join_type as u8)
             }
             DfNodeType::PhysicalNestedLoopJoin(join_type) => (
-                DfNodeTypeFlat::PhysicalNestedLoopJoin as u8,
+                DfNodeTypeFlattened::PhysicalNestedLoopJoin as u8,
                 join_type as u8,
             ),
-            DfNodeType::Projection => (DfNodeTypeFlat::Projection as u8, 0),
-            DfNodeType::Filter => (DfNodeTypeFlat::Filter as u8, 0),
-            DfNodeType::Scan => (DfNodeTypeFlat::Scan as u8, 0),
-            DfNodeType::Sort => (DfNodeTypeFlat::Sort as u8, 0),
-            DfNodeType::Agg => (DfNodeTypeFlat::Agg as u8, 0),
-            DfNodeType::EmptyRelation => (DfNodeTypeFlat::EmptyRelation as u8, 0),
-            DfNodeType::Limit => (DfNodeTypeFlat::Limit as u8, 0),
-            DfNodeType::PhysicalProjection => (DfNodeTypeFlat::PhysicalProjection as u8, 0),
-            DfNodeType::PhysicalFilter => (DfNodeTypeFlat::PhysicalFilter as u8, 0),
-            DfNodeType::PhysicalScan => (DfNodeTypeFlat::PhysicalScan as u8, 0),
-            DfNodeType::PhysicalSort => (DfNodeTypeFlat::PhysicalSort as u8, 0),
-            DfNodeType::PhysicalAgg => (DfNodeTypeFlat::PhysicalAgg as u8, 0),
-            DfNodeType::PhysicalEmptyRelation => (DfNodeTypeFlat::PhysicalEmptyRelation as u8, 0),
-            DfNodeType::PhysicalLimit => (DfNodeTypeFlat::PhysicalLimit as u8, 0),
+            DfNodeType::Projection => (DfNodeTypeFlattened::Projection as u8, 0),
+            DfNodeType::Filter => (DfNodeTypeFlattened::Filter as u8, 0),
+            DfNodeType::Scan => (DfNodeTypeFlattened::Scan as u8, 0),
+            DfNodeType::Sort => (DfNodeTypeFlattened::Sort as u8, 0),
+            DfNodeType::Agg => (DfNodeTypeFlattened::Agg as u8, 0),
+            DfNodeType::EmptyRelation => (DfNodeTypeFlattened::EmptyRelation as u8, 0),
+            DfNodeType::Limit => (DfNodeTypeFlattened::Limit as u8, 0),
+            DfNodeType::PhysicalProjection => (DfNodeTypeFlattened::PhysicalProjection as u8, 0),
+            DfNodeType::PhysicalFilter => (DfNodeTypeFlattened::PhysicalFilter as u8, 0),
+            DfNodeType::PhysicalScan => (DfNodeTypeFlattened::PhysicalScan as u8, 0),
+            DfNodeType::PhysicalSort => (DfNodeTypeFlattened::PhysicalSort as u8, 0),
+            DfNodeType::PhysicalAgg => (DfNodeTypeFlattened::PhysicalAgg as u8, 0),
+            DfNodeType::PhysicalEmptyRelation => {
+                (DfNodeTypeFlattened::PhysicalEmptyRelation as u8, 0)
+            }
+            DfNodeType::PhysicalLimit => (DfNodeTypeFlattened::PhysicalLimit as u8, 0),
         };
-        VariantTag(u16::from_be_bytes([discriminant, rest]))
+        SerializedNodeTag(u16::from_be_bytes([discriminant, rest]))
     }
 }
 
 #[cfg(test)]
-impl DfNodeTypeFlat {
+impl DfNodeTypeFlattened {
     fn is_join(&self) -> bool {
         match self {
-            DfNodeTypeFlat::Join
-            | DfNodeTypeFlat::RawDepJoin
-            | DfNodeTypeFlat::DepJoin
-            | DfNodeTypeFlat::PhysicalHashJoin
-            | DfNodeTypeFlat::PhysicalNestedLoopJoin => true,
+            DfNodeTypeFlattened::Join
+            | DfNodeTypeFlattened::RawDepJoin
+            | DfNodeTypeFlattened::DepJoin
+            | DfNodeTypeFlattened::PhysicalHashJoin
+            | DfNodeTypeFlattened::PhysicalNestedLoopJoin => true,
             _ => false,
         }
     }
@@ -267,22 +273,25 @@ mod tests {
     fn test_df_node_type_to_tag_e2e() {
         let mut valid_tags = Vec::new();
         let mut invalid_tags = Vec::new();
-        for flattened in DfNodeTypeFlat::iter() {
+        for flattened in DfNodeTypeFlattened::iter() {
             let discriminant = flattened as u8;
             if flattened.is_join() {
                 for join_type in JoinType::iter() {
-                    valid_tags.push(VariantTag(u16::from_be_bytes([
+                    valid_tags.push(SerializedNodeTag(u16::from_be_bytes([
                         discriminant,
                         join_type as u8,
                     ])));
                 }
-                invalid_tags.push(VariantTag(u16::from_be_bytes([discriminant, u8::MAX])));
+                invalid_tags.push(SerializedNodeTag(u16::from_be_bytes([
+                    discriminant,
+                    u8::MAX,
+                ])));
             } else {
-                valid_tags.push(VariantTag(u16::from_be_bytes([discriminant, 0])));
+                valid_tags.push(SerializedNodeTag(u16::from_be_bytes([discriminant, 0])));
             }
         }
-        invalid_tags.push(VariantTag(u16::from_be_bytes([
-            DfNodeTypeFlat::COUNT as u8,
+        invalid_tags.push(SerializedNodeTag(u16::from_be_bytes([
+            DfNodeTypeFlattened::COUNT as u8,
             0,
         ])));
 
@@ -291,7 +300,7 @@ mod tests {
         });
 
         valid_tags.iter().for_each(|&tag| {
-            let new_tag = VariantTag::from(DfNodeType::try_from(tag).unwrap());
+            let new_tag = SerializedNodeTag::from(DfNodeType::try_from(tag).unwrap());
             assert_eq!(tag, new_tag);
         });
 
@@ -309,59 +318,74 @@ mod tests {
     fn test_df_pred_type_to_tag_e2e() {
         let mut valid_tags = Vec::new();
         let mut invalid_tags = Vec::new();
-        for flattened in DfPredTypeFlat::iter() {
+        for flattened in DfPredTypeFlattened::iter() {
             let discriminant = flattened as u8;
             match flattened {
-                DfPredTypeFlat::Constant => {
+                DfPredTypeFlattened::Constant => {
                     for constant_type in ConstantType::iter() {
-                        valid_tags.push(VariantTag(u16::from_be_bytes([
+                        valid_tags.push(SerializedPredTag(u16::from_be_bytes([
                             discriminant,
                             constant_type as u8,
                         ])));
                     }
-                    invalid_tags.push(VariantTag(u16::from_be_bytes([discriminant, u8::MAX])));
+                    invalid_tags.push(SerializedPredTag(u16::from_be_bytes([
+                        discriminant,
+                        u8::MAX,
+                    ])));
                 }
-                DfPredTypeFlat::UnOp => {
+                DfPredTypeFlattened::UnOp => {
                     for un_op_type in UnOpType::iter() {
-                        valid_tags.push(VariantTag(u16::from_be_bytes([
+                        valid_tags.push(SerializedPredTag(u16::from_be_bytes([
                             discriminant,
                             un_op_type as u8,
                         ])));
                     }
-                    invalid_tags.push(VariantTag(u16::from_be_bytes([discriminant, u8::MAX])));
+                    invalid_tags.push(SerializedPredTag(u16::from_be_bytes([
+                        discriminant,
+                        u8::MAX,
+                    ])));
                 }
-                DfPredTypeFlat::BinOp => {
+                DfPredTypeFlattened::BinOp => {
                     for bin_op_type in BinOpType::iter() {
-                        valid_tags.push(VariantTag(u16::from_be_bytes([
+                        valid_tags.push(SerializedPredTag(u16::from_be_bytes([
                             discriminant,
                             bin_op_type as u8,
                         ])));
                     }
-                    invalid_tags.push(VariantTag(u16::from_be_bytes([discriminant, u8::MAX])));
+                    invalid_tags.push(SerializedPredTag(u16::from_be_bytes([
+                        discriminant,
+                        u8::MAX,
+                    ])));
                 }
-                DfPredTypeFlat::LogOp => {
+                DfPredTypeFlattened::LogOp => {
                     for log_op_type in LogOpType::iter() {
-                        valid_tags.push(VariantTag(u16::from_be_bytes([
+                        valid_tags.push(SerializedPredTag(u16::from_be_bytes([
                             discriminant,
                             log_op_type as u8,
                         ])));
                     }
-                    invalid_tags.push(VariantTag(u16::from_be_bytes([discriminant, u8::MAX])));
+                    invalid_tags.push(SerializedPredTag(u16::from_be_bytes([
+                        discriminant,
+                        u8::MAX,
+                    ])));
                 }
-                DfPredTypeFlat::SortOrder => {
+                DfPredTypeFlattened::SortOrder => {
                     for sort_order_type in SortOrderType::iter() {
-                        valid_tags.push(VariantTag(u16::from_be_bytes([
+                        valid_tags.push(SerializedPredTag(u16::from_be_bytes([
                             discriminant,
                             sort_order_type as u8,
                         ])));
                     }
-                    invalid_tags.push(VariantTag(u16::from_be_bytes([discriminant, u8::MAX])));
+                    invalid_tags.push(SerializedPredTag(u16::from_be_bytes([
+                        discriminant,
+                        u8::MAX,
+                    ])));
                 }
-                _ => valid_tags.push(VariantTag(u16::from_be_bytes([discriminant, 0]))),
+                _ => valid_tags.push(SerializedPredTag(u16::from_be_bytes([discriminant, 0]))),
             }
         }
-        invalid_tags.push(VariantTag(u16::from_be_bytes([
-            DfPredTypeFlat::COUNT as u8,
+        invalid_tags.push(SerializedPredTag(u16::from_be_bytes([
+            DfPredTypeFlattened::COUNT as u8,
             0,
         ])));
 
@@ -370,7 +394,7 @@ mod tests {
         });
 
         valid_tags.iter().for_each(|&tag| {
-            let new_tag = VariantTag::from(DfPredType::try_from(tag).unwrap());
+            let new_tag = SerializedPredTag::from(DfPredType::try_from(tag).unwrap());
             assert_eq!(tag, new_tag);
         });
 

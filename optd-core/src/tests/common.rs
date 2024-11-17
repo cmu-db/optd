@@ -7,7 +7,8 @@ use crate::{
     cascades::GroupId,
     logical_property::{LogicalProperty, LogicalPropertyBuilder},
     nodes::{
-        ArcPlanNode, ArcPredNode, NodeType, PlanNode, PlanNodeOrGroup, PredNode, Value, VariantTag,
+        ArcPlanNode, ArcPredNode, NodeType, PlanNode, PlanNodeOrGroup, PredNode, SerializedNodeTag,
+        SerializedPredTag, Value,
     },
     physical_property::{PhysicalProperty, PhysicalPropertyBuilder},
 };
@@ -34,19 +35,19 @@ pub(crate) enum MemoTestRelTyp {
     PhysicalHashAgg,
 }
 
-impl TryFrom<VariantTag> for MemoTestRelTyp {
+impl TryFrom<SerializedNodeTag> for MemoTestRelTyp {
     type Error = u16;
 
-    fn try_from(value: VariantTag) -> Result<Self, Self::Error> {
-        let VariantTag(v) = value;
+    fn try_from(value: SerializedNodeTag) -> Result<Self, Self::Error> {
+        let SerializedNodeTag(v) = value;
         let typ = Self::from_repr(v).ok_or_else(|| v)?;
         Ok(typ)
     }
 }
 
-impl From<MemoTestRelTyp> for VariantTag {
+impl From<MemoTestRelTyp> for SerializedNodeTag {
     fn from(value: MemoTestRelTyp) -> Self {
-        VariantTag(value as u16)
+        SerializedNodeTag(value as u16)
     }
 }
 
@@ -59,19 +60,19 @@ pub(crate) enum MemoTestPredTyp {
     ColumnRef,
 }
 
-impl TryFrom<VariantTag> for MemoTestPredTyp {
+impl TryFrom<SerializedPredTag> for MemoTestPredTyp {
     type Error = u16;
 
-    fn try_from(value: VariantTag) -> Result<Self, Self::Error> {
-        let VariantTag(v) = value;
+    fn try_from(value: SerializedPredTag) -> Result<Self, Self::Error> {
+        let SerializedPredTag(v) = value;
         let typ = Self::from_repr(v).ok_or_else(|| v)?;
         Ok(typ)
     }
 }
 
-impl From<MemoTestPredTyp> for VariantTag {
+impl From<MemoTestPredTyp> for SerializedPredTag {
     fn from(value: MemoTestPredTyp) -> Self {
-        VariantTag(value as u16)
+        SerializedPredTag(value as u16)
     }
 }
 
