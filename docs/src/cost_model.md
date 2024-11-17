@@ -11,7 +11,7 @@ pub trait CostModel<T: RelNodeTyp>: 'static + Send + Sync {
             node: &T,
             data: &Option<Value>,
             children: &[Cost],
-            context: Option<RelNodeContext>,
+            context: RelNodeContext,
     ) -> Cost;
 }
 ```

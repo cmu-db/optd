@@ -89,8 +89,8 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for DfCostModel {
         node: &DfNodeType,
         predicates: &[ArcDfPredNode],
         children: &[&Statistics],
-        _context: Option<RelNodeContext>,
-        _optimizer: Option<&CascadesOptimizer<DfNodeType>>,
+        _context: RelNodeContext,
+        _optimizer: &CascadesOptimizer<DfNodeType>,
     ) -> Statistics {
         match node {
             DfNodeType::PhysicalScan => {
@@ -132,8 +132,8 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for DfCostModel {
         node: &DfNodeType,
         predicates: &[ArcDfPredNode],
         children: &[Option<&Statistics>],
-        _context: Option<RelNodeContext>,
-        _optimizer: Option<&CascadesOptimizer<DfNodeType>>,
+        _context: RelNodeContext,
+        _optimizer: &CascadesOptimizer<DfNodeType>,
     ) -> Cost {
         let row_cnts = children
             .iter()

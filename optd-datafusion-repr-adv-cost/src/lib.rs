@@ -61,8 +61,8 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for AdvancedCostModel {
         node: &DfNodeType,
         predicates: &[ArcDfPredNode],
         children_stats: &[Option<&Statistics>],
-        context: Option<RelNodeContext>,
-        optimizer: Option<&CascadesOptimizer<DfNodeType>>,
+        context: RelNodeContext,
+        optimizer: &CascadesOptimizer<DfNodeType>,
     ) -> Cost {
         self.base_model
             .compute_operation_cost(node, predicates, children_stats, context, optimizer)
@@ -73,11 +73,9 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for AdvancedCostModel {
         node: &DfNodeType,
         predicates: &[ArcDfPredNode],
         children_stats: &[&Statistics],
-        context: Option<RelNodeContext>,
-        optimizer: Option<&CascadesOptimizer<DfNodeType>>,
+        context: RelNodeContext,
+        optimizer: &CascadesOptimizer<DfNodeType>,
     ) -> Statistics {
-        let context = context.as_ref();
-        let optimizer = optimizer.as_ref();
         let row_cnts = children_stats
             .iter()
             .map(|child| DfCostModel::row_cnt(child))
@@ -100,12 +98,8 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for AdvancedCostModel {
                 DfCostModel::stat(row_cnt)
             }
             DfNodeType::PhysicalFilter => {
-                let output_schema = optimizer
-                    .unwrap()
-                    .get_schema_of(context.unwrap().group_id.into());
-                let output_column_ref = optimizer
-                    .unwrap()
-                    .get_column_ref_of(context.unwrap().group_id.into());
+                let output_schema = optimizer.get_schema_of(context.group_id.into());
+                let output_column_ref = optimizer.get_column_ref_of(context.group_id.into());
                 let row_cnt = self.stats.get_filter_row_cnt(
                     row_cnts[0],
                     output_schema,
@@ -115,18 +109,12 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for AdvancedCostModel {
                 DfCostModel::stat(row_cnt)
             }
             DfNodeType::PhysicalNestedLoopJoin(join_typ) => {
-                let output_schema = optimizer
-                    .unwrap()
-                    .get_schema_of(context.unwrap().group_id.into());
-                let output_column_ref = optimizer
-                    .unwrap()
-                    .get_column_ref_of(context.unwrap().group_id.into());
-                let left_column_ref = optimizer
-                    .unwrap()
-                    .get_column_ref_of(context.unwrap().children_group_ids[0].into());
-                let right_column_ref = optimizer
-                    .unwrap()
-                    .get_column_ref_of(context.unwrap().children_group_ids[1].into());
+                let output_schema = optimizer.get_schema_of(context.group_id.into());
+                let output_column_ref = optimizer.get_column_ref_of(context.group_id.into());
+                let left_column_ref =
+                    optimizer.get_column_ref_of(context.children_group_ids[0].into());
+                let right_column_ref =
+                    optimizer.get_column_ref_of(context.children_group_ids[1].into());
                 let row_cnt = self.stats.get_nlj_row_cnt(
                     *join_typ,
                     row_cnts[0],
@@ -140,18 +128,12 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for AdvancedCostModel {
                 DfCostModel::stat(row_cnt)
             }
             DfNodeType::PhysicalHashJoin(join_typ) => {
-                let output_schema = optimizer
-                    .unwrap()
-                    .get_schema_of(context.unwrap().group_id.into());
-                let output_column_ref = optimizer
-                    .unwrap()
-                    .get_column_ref_of(context.unwrap().group_id.into());
-                let left_column_ref = optimizer
-                    .unwrap()
-                    .get_column_ref_of(context.unwrap().children_group_ids[0].into());
-                let right_column_ref = optimizer
-                    .unwrap()
-                    .get_column_ref_of(context.unwrap().children_group_ids[1].into());
+                let output_schema = optimizer.get_schema_of(context.group_id.into());
+                let output_column_ref = optimizer.get_column_ref_of(context.group_id.into());
+                let left_column_ref =
+                    optimizer.get_column_ref_of(context.children_group_ids[0].into());
+                let right_column_ref =
+                    optimizer.get_column_ref_of(context.children_group_ids[1].into());
                 let row_cnt = self.stats.get_hash_join_row_cnt(
                     *join_typ,
                     row_cnts[0],
@@ -166,9 +148,7 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for AdvancedCostModel {
                 DfCostModel::stat(row_cnt)
             }
             DfNodeType::PhysicalAgg => {
-                let output_column_ref = optimizer
-                    .unwrap()
-                    .get_column_ref_of(context.unwrap().group_id.into());
+                let output_column_ref = optimizer.get_column_ref_of(context.group_id.into());
                 let row_cnt = self
                     .stats
                     .get_agg_row_cnt(predicates[1].clone(), output_column_ref);
@@ -178,8 +158,8 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for AdvancedCostModel {
                 node,
                 predicates,
                 children_stats,
-                context.cloned(),
-                optimizer.copied(),
+                context,
+                optimizer,
             ),
         }
     }

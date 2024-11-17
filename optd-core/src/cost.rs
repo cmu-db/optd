@@ -16,25 +16,29 @@ pub struct Statistics(pub Box<dyn std::any::Any + Send + Sync + 'static>);
 pub struct Cost(pub Vec<f64>);
 
 pub trait CostModel<T: NodeType, M: Memo<T>>: 'static + Send + Sync {
-    /// Compute the cost of a single operation
+    /// Compute the cost of a single operation. `RelNodeContext` might be
+    /// optional in the future when we implement physical property enforcers.
+    /// If we have not decided the winner for a child group yet, the statistics
+    /// for that group will be `None`.
     #[allow(clippy::too_many_arguments)]
     fn compute_operation_cost(
         &self,
         node: &T,
         predicates: &[ArcPredNode<T>],
         children_stats: &[Option<&Statistics>],
-        context: Option<RelNodeContext>,
-        optimizer: Option<&CascadesOptimizer<T, M>>,
+        context: RelNodeContext,
+        optimizer: &CascadesOptimizer<T, M>,
     ) -> Cost;
 
-    /// Derive the statistics of a single operation
+    /// Derive the statistics of a single operation. `RelNodeContext` might be
+    /// optional in the future when we implement physical property enforcers.
     fn derive_statistics(
         &self,
         node: &T,
         predicates: &[ArcPredNode<T>],
         children_stats: &[&Statistics],
-        context: Option<RelNodeContext>,
-        optimizer: Option<&CascadesOptimizer<T, M>>,
+        context: RelNodeContext,
+        optimizer: &CascadesOptimizer<T, M>,
     ) -> Statistics;
 
     fn explain_cost(&self, cost: &Cost) -> String;

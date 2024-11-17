@@ -28,11 +28,9 @@ pub struct AdaptiveCostModel {
 }
 
 impl AdaptiveCostModel {
-    fn get_row_cnt(&self, context: &Option<RelNodeContext>) -> f64 {
+    fn get_row_cnt(&self, context: &RelNodeContext) -> f64 {
         let guard = self.runtime_row_cnt.lock().unwrap();
-        if let Some((runtime_row_cnt, iter)) =
-            guard.history.get(&context.as_ref().unwrap().group_id)
-        {
+        if let Some((runtime_row_cnt, iter)) = guard.history.get(&context.group_id) {
             if *iter + self.decay >= guard.iter_cnt {
                 return (*runtime_row_cnt).max(1) as f64;
             }
@@ -67,8 +65,8 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for AdaptiveCostModel {
         node: &DfNodeType,
         predicates: &[ArcDfPredNode],
         children: &[Option<&Statistics>],
-        context: Option<RelNodeContext>,
-        optimizer: Option<&CascadesOptimizer<DfNodeType>>,
+        context: RelNodeContext,
+        optimizer: &CascadesOptimizer<DfNodeType>,
     ) -> Cost {
         if let DfNodeType::PhysicalScan = node {
             let row_cnt = self.get_row_cnt(&context);
@@ -83,8 +81,8 @@ impl CostModel<DfNodeType, NaiveMemo<DfNodeType>> for AdaptiveCostModel {
         node: &DfNodeType,
         predicates: &[ArcDfPredNode],
         children: &[&Statistics],
-        context: Option<RelNodeContext>,
-        optimizer: Option<&CascadesOptimizer<DfNodeType>>,
+        context: RelNodeContext,
+        optimizer: &CascadesOptimizer<DfNodeType>,
     ) -> Statistics {
         if let DfNodeType::PhysicalScan = node {
             let row_cnt = self.get_row_cnt(&context);
