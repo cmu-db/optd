@@ -4,14 +4,24 @@ use optd_core::{
 };
 use optd_persistent::{
     entities::{
-        cascades_group, logical_expression, physical_expression,
+        cascades_group, group_winner, logical_children, logical_expression, physical_expression,
         prelude::{LogicalExpression, PhysicalExpression},
     },
     StorageResult,
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, PaginatorTrait,
+    QueryFilter, Set,
 };
+
+pub struct BackendWinnerInfo {
+    pub expr_id: i32,
+    pub cost: f64,
+}
+struct BackendGroupInfo {
+    pub group_exprs: Vec<i32>,
+    pub winner: Option<BackendWinnerInfo>,
+}
 
 // TODO: Use the junction table for children instead of data field!
 // TODO: Physical version of everything :/
@@ -24,6 +34,57 @@ impl MemoBackendManager {
         Ok(Self {
             db: Database::connect(database_url.unwrap()).await?,
         })
+    }
+
+    async fn get_winner(&self, winner_id: i32) -> StorageResult<Option<group_winner::Model>> {
+        let winner = group_winner::Entity::find()
+            .filter(group_winner::Column::Id.eq(winner_id))
+            .one(&self.db)
+            .await?;
+
+        Ok(winner)
+    }
+
+    pub async fn get_group(&self, group_id: i32) -> StorageResult<BackendGroupInfo> {
+        let group = cascades_group::Entity::find()
+            .filter(cascades_group::Column::Id.eq(group_id))
+            .one(&self.db)
+            .await?;
+
+        let group = group.expect("Group not found!");
+
+        // todo no physical here either
+        let children: Vec<i32> = logical_children::Entity::find()
+            .filter(logical_children::Column::GroupId.eq(group_id))
+            .all(&self.db)
+            .await?
+            .iter()
+            .map(|child| child.logical_expression_id)
+            .collect();
+
+        let winner = self.get_winner(group.latest_winner.unwrap()).await?;
+
+        Ok(BackendGroupInfo {
+            group_exprs: children,
+            winner: winner.map(|winner| BackendWinnerInfo {
+                expr_id: winner.physical_expression_id,
+                cost: 100.0,
+            }),
+        })
+    }
+
+    pub async fn update_winner(&self) {
+        todo!()
+    }
+
+    pub async fn get_expr_count(&self) -> StorageResult<u64> {
+        let count = logical_expression::Entity::find().count(&self.db).await?;
+        Ok(count)
+    }
+
+    pub async fn get_all_group_ids(&self) -> StorageResult<Vec<i32>> {
+        let groups = cascades_group::Entity::find().all(&self.db).await?;
+        Ok(groups.iter().map(|g| g.id).collect())
     }
 
     pub async fn get_expr_by_id(

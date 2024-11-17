@@ -46,7 +46,7 @@ pub struct OptimizerProperties {
 pub struct CascadesOptimizer<T: NodeType, M: Memo<T> = NaiveMemo<T>> {
     memo: M,
     pub(super) tasks: VecDeque<Box<dyn Task<T, M>>>,
-    explored_group: HashSet<GroupId>,
+    explored_group: HashSet<GroupId>, // TODO: this should be moved to memo table for ORM
     explored_expr: HashSet<ExprId>,
     fired_rules: HashMap<ExprId, HashSet<RuleId>>,
     rules: Arc<[Arc<dyn Rule<T, Self>>]>,

@@ -1,11 +1,14 @@
 mod backend_manager;
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use backend_manager::MemoBackendManager;
 use futures_lite::future;
 use optd_core::{
-    cascades::{self, ArcMemoPlanNode, ExprId, GroupId, Memo, MemoPlanNode, PredId},
+    cascades::{self, ArcMemoPlanNode, ExprId, GroupId, GroupInfo, Memo, MemoPlanNode, PredId},
     nodes::{self, ArcPlanNode, NodeType, PlanNodeOrGroup},
 };
 use optd_persistent::{self, BackendManager, MemoStorage, StorageResult};
@@ -200,15 +203,29 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
     }
 
     fn get_all_group_ids(&self) -> Vec<GroupId> {
-        // TODO: This functionality is missing in the ORM implementation...
-        todo!()
+        future::block_on(self.storage.get_all_group_ids())
+            .unwrap()
+            .iter()
+            .map(|id| GroupId((*id).try_into().unwrap()))
+            .collect()
     }
 
     fn get_group(&self, group_id: GroupId) -> &cascades::Group {
         let g_id = group_id.0.try_into().unwrap();
         let orm_group = future::block_on(self.storage.get_group(g_id)).unwrap();
-        let group = self.orm_to_optd_group(orm_group);
-        Box::leak(Box::new(group)) // TODO: Memo table trait should return Arcs
+
+        let new_group = cascades::Group {
+            group_exprs: orm_group
+                .group_exprs
+                .iter()
+                .map(|expr_id| ExprId((*expr_id).try_into().unwrap()))
+                .collect(),
+            info: GroupInfo {
+                winner: cascades::Winner::Unknown, // TODO
+            },
+            properties: Arc::new([]), // TODO
+        };
+        Box::leak(Box::new(new_group)) // TODO: Memo table trait should probably return Arcs?
     }
 
     fn get_pred(&self, pred_id: PredId) -> nodes::ArcPredNode<T> {
@@ -221,7 +238,6 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
     }
 
     fn estimated_plan_space(&self) -> usize {
-        // TODO: This functionality is missing in the ORM implementation...
-        todo!()
+        future::block_on(self.storage.get_expr_count()).unwrap() as usize
     }
 }

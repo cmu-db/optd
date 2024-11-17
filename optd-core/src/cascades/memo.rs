@@ -86,9 +86,9 @@ pub struct GroupInfo {
 }
 
 pub struct Group {
-    pub(crate) group_exprs: HashSet<ExprId>,
-    pub(crate) info: GroupInfo,
-    pub(crate) properties: Arc<[Box<dyn LogicalProperty>]>,
+    pub group_exprs: HashSet<ExprId>,
+    pub info: GroupInfo,
+    pub properties: Arc<[Box<dyn LogicalProperty>]>,
 }
 
 /// Trait for memo table implementations.
