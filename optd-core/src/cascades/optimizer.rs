@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::Display;
-use std::hash::{DefaultHasher, Hasher};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
@@ -228,9 +228,41 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
                         expr_id.0, child.0, child.0
                     )?;
                 }
+                let mut next_pred: usize = 0;
+                for pred_id in expr.predicates.iter() {
+                    let pred = memo.get_pred(*pred_id);
+                    let id = next_pred;
+                    self.dump_dot_pred(writer, &pred, expr_id.0, &mut next_pred);
+                    writeln!(writer, "e{} -> p{}_{};", expr_id.0, expr_id.0, id)?;
+                }
             }
         }
         writeln!(writer, "}}")
+    }
+
+    fn dump_dot_pred(
+        &self,
+        writer: &mut dyn Write,
+        pred: &ArcPredNode<T>,
+        base: usize,
+        next_pred: &mut usize,
+    ) -> Result<(), std::io::Error> {
+        let mut s = DefaultHasher::new();
+        pred.typ.hash(&mut s);
+        let color = (s.finish() % 11) + 1;
+        let id = *next_pred;
+        *next_pred += 1;
+        writeln!(
+            writer,
+            "p{}_{} [shape=diamond,label=\"{:?}\",penwidth=3,color={}]",
+            base, id, pred.typ, color
+        )?;
+        for child in pred.children.iter() {
+            let child_id = *next_pred;
+            self.dump_dot_pred(writer, child, base, next_pred)?;
+            writeln!(writer, "p{}_{} -> p{}_{};", base, id, base, child_id)?;
+        }
+        Ok(())
     }
 
     pub fn dump(&self) {
