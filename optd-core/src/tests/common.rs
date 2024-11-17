@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, strum::FromRepr)]
-#[repr(u8)]
+#[repr(u16)]
 pub(crate) enum MemoTestRelTyp {
     Join,
     Project,
@@ -38,7 +38,9 @@ impl TryFrom<VariantTag> for MemoTestRelTyp {
     type Error = u16;
 
     fn try_from(value: VariantTag) -> Result<Self, Self::Error> {
-        Self::from_repr(value.0 as u8).ok_or_else(|| value.0)
+        let VariantTag(v) = value;
+        let typ = Self::from_repr(v).ok_or_else(|| v)?;
+        Ok(typ)
     }
 }
 
@@ -49,7 +51,7 @@ impl From<MemoTestRelTyp> for VariantTag {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, strum::FromRepr)]
-#[repr(u8)]
+#[repr(u16)]
 pub(crate) enum MemoTestPredTyp {
     List,
     Expr,
@@ -61,7 +63,9 @@ impl TryFrom<VariantTag> for MemoTestPredTyp {
     type Error = u16;
 
     fn try_from(value: VariantTag) -> Result<Self, Self::Error> {
-        Self::from_repr(value.0 as u8).ok_or_else(|| value.0)
+        let VariantTag(v) = value;
+        let typ = Self::from_repr(v).ok_or_else(|| v)?;
+        Ok(typ)
     }
 }
 

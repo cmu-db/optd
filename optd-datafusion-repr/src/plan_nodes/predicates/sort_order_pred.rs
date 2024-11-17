@@ -3,6 +3,7 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
+use core::str;
 use std::fmt::Display;
 
 use optd_core::nodes::PlanNodeMetaMap;
@@ -12,11 +13,19 @@ use serde::{Deserialize, Serialize};
 use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
 
 #[derive(
-    Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Default, strum::FromRepr,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Debug,
+    Serialize,
+    Deserialize,
+    strum::FromRepr,
+    strum::EnumIter,
 )]
 #[repr(u8)]
 pub enum SortOrderType {
-    #[default]
     Asc,
     Desc,
 }

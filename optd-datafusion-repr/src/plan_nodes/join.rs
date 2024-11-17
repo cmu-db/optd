@@ -12,11 +12,20 @@ use super::macros::define_plan_node;
 use super::{ArcDfPlanNode, ArcDfPredNode, DfNodeType, DfPlanNode, DfReprPlanNode, ListPred};
 
 #[derive(
-    Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default, strum::FromRepr,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::FromRepr,
+    strum::EnumCount,
+    strum::EnumIter,
 )]
 #[repr(u8)]
 pub enum JoinType {
-    #[default]
     Inner = 1,
     FullOuter,
     LeftOuter,

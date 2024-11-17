@@ -16,6 +16,7 @@ mod projection;
 mod scan;
 mod sort;
 mod subquery;
+pub mod tag;
 
 use std::fmt::Debug;
 
@@ -28,7 +29,6 @@ pub use join::{JoinType, LogicalJoin, PhysicalHashJoin, PhysicalNestedLoopJoin};
 pub use limit::{LogicalLimit, PhysicalLimit};
 use optd_core::nodes::{
     ArcPlanNode, ArcPredNode, NodeType, PlanNode, PlanNodeMeta, PlanNodeMetaMap, PredNode,
-    VariantTag,
 };
 pub use predicates::{
     BetweenPred, BinOpPred, BinOpType, CastPred, ColumnRefPred, ConstantPred, ConstantType,
@@ -44,7 +44,7 @@ pub use subquery::{DependentJoin, RawDependentJoin}; // Add missing import
 
 use crate::explain::{explain_plan_node, explain_pred_node};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, strum::FromRepr)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum DfPredType {
     List,
@@ -71,7 +71,7 @@ impl std::fmt::Display for DfPredType {
 
 /// DfNodeType FAQ:
 ///   - The define_plan_node!() macro defines what the children of each join node are
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, strum::FromRepr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum DfNodeType {
     // Developers: update `is_logical` function after adding new plan nodes
@@ -214,136 +214,4 @@ pub fn dispatch_plan_explain_to_string(
     let mut out = String::new();
     config.unicode(&mut out, &plan_node.explain(meta_map));
     out
-}
-
-impl DfPredType {
-    /// ## Serialization
-    /// A variant tag for [`DfPredType`] has two parts. An `u8` discriminant
-    /// followed an `u8` extra field (could be [`ConstantType`], [`UnOpType`], etc.),
-    /// listed in big-endian order.
-    ///
-    /// ```
-    /// ----------------------------------------
-    /// | discriminant (u8) | extra field (u8) |
-    /// ----------------------------------------
-    /// ```
-    /// See https://doc.rust-lang.org/std/mem/fn.discriminant.html.
-    fn discriminant(&self) -> u8 {
-        // SAFETY: Because `Self` is marked `repr(u8)`, its layout is a `repr(C)` `union`
-        // between `repr(C)` structs, each of which has the `u8` discriminant as its first
-        // field, so we can read the discriminant without offsetting the pointer.
-        unsafe { *<*const _>::from(self).cast::<u8>() }
-    }
-}
-
-impl TryFrom<VariantTag> for DfPredType {
-    type Error = u16;
-
-    fn try_from(value: VariantTag) -> Result<Self, Self::Error> {
-        let VariantTag(v) = value;
-        let [discriminant, rest] = v.to_be_bytes();
-        let typ = {
-            let typ = Self::from_repr(discriminant).ok_or_else(|| v)?;
-            match typ {
-                DfPredType::Constant(_) => {
-                    DfPredType::Constant(ConstantType::from_repr(rest).ok_or_else(|| v)?)
-                }
-                DfPredType::UnOp(_) => {
-                    DfPredType::UnOp(UnOpType::from_repr(rest).ok_or_else(|| v)?)
-                }
-                DfPredType::BinOp(_) => {
-                    DfPredType::BinOp(BinOpType::from_repr(rest).ok_or_else(|| v)?)
-                }
-                DfPredType::LogOp(_) => {
-                    DfPredType::LogOp(LogOpType::from_repr(rest).ok_or_else(|| v)?)
-                }
-                DfPredType::SortOrder(_) => {
-                    DfPredType::SortOrder(SortOrderType::from_repr(rest).ok_or_else(|| v)?)
-                }
-                _ => typ,
-            }
-        };
-
-        Ok(typ)
-    }
-}
-
-impl From<DfPredType> for VariantTag {
-    fn from(value: DfPredType) -> Self {
-        let discriminant = value.discriminant();
-        let rest = match value {
-            DfPredType::Constant(constant_type) => constant_type as u8,
-            DfPredType::UnOp(un_op_type) => un_op_type as u8,
-            DfPredType::BinOp(bin_op_type) => bin_op_type as u8,
-            DfPredType::LogOp(log_op_type) => log_op_type as u8,
-            DfPredType::SortOrder(sort_order_type) => sort_order_type as u8,
-            _ => 0,
-        };
-        VariantTag(u16::from_be_bytes([discriminant, rest]))
-    }
-}
-
-impl DfNodeType {
-    /// ## Serialization
-    /// A variant tag for [`DfNodeType`] has two parts. An `u8` discriminant
-    /// followed an `u8` extra field ([`JoinType`] for now), listed in big-endian order.
-    ///
-    /// ```
-    /// ----------------------------------------
-    /// | discriminant (u8) | extra field (u8) |
-    /// ----------------------------------------
-    /// ```
-    /// See https://doc.rust-lang.org/std/mem/fn.discriminant.html.
-    fn discriminant(&self) -> u8 {
-        // SAFETY: Because `Self` is marked `repr(u8)`, its layout is a `repr(C)` `union`
-        // between `repr(C)` structs, each of which has the `u8` discriminant as its first
-        // field, so we can read the discriminant without offsetting the pointer.
-        unsafe { *<*const _>::from(self).cast::<u8>() }
-    }
-}
-
-impl TryFrom<VariantTag> for DfNodeType {
-    type Error = u16;
-
-    fn try_from(value: VariantTag) -> Result<Self, Self::Error> {
-        let VariantTag(v) = value;
-        let [discriminant, rest] = v.to_be_bytes();
-        let typ = {
-            let typ = Self::from_repr(discriminant).ok_or_else(|| v)?;
-            match typ {
-                DfNodeType::Join(_) => {
-                    DfNodeType::Join(JoinType::from_repr(rest).ok_or_else(|| v)?)
-                }
-                DfNodeType::RawDepJoin(_) => {
-                    DfNodeType::RawDepJoin(JoinType::from_repr(rest).ok_or_else(|| v)?)
-                }
-                DfNodeType::DepJoin(_) => {
-                    DfNodeType::DepJoin(JoinType::from_repr(rest).ok_or_else(|| v)?)
-                }
-                DfNodeType::PhysicalHashJoin(_) => {
-                    DfNodeType::PhysicalHashJoin(JoinType::from_repr(rest).ok_or_else(|| v)?)
-                }
-                DfNodeType::PhysicalNestedLoopJoin(_) => {
-                    DfNodeType::PhysicalNestedLoopJoin(JoinType::from_repr(rest).ok_or_else(|| v)?)
-                }
-                _ => typ,
-            }
-        };
-        Ok(typ)
-    }
-}
-
-impl From<DfNodeType> for VariantTag {
-    fn from(value: DfNodeType) -> Self {
-        let discriminant = value.discriminant();
-        let rest = match value {
-            DfNodeType::Join(join_type) => join_type as u8,
-            DfNodeType::RawDepJoin(join_type) => join_type as u8,
-            DfNodeType::DepJoin(join_type) => join_type as u8,
-            DfNodeType::PhysicalHashJoin(join_type) => join_type as u8,
-            DfNodeType::PhysicalNestedLoopJoin(join_type) => join_type as u8,
-            _ => 0,
-        };
-        VariantTag(u16::from_be_bytes([discriminant, rest]))
-    }
 }

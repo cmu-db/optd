@@ -14,12 +14,20 @@ use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
 /// things I initially thought about splitting BinOpType into three "subenums". However, having two
 /// nested levels of     types leads to some really confusing code
 #[derive(
-    Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Default, strum::FromRepr,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Debug,
+    Serialize,
+    Deserialize,
+    strum::FromRepr,
+    strum::EnumIter,
 )]
 #[repr(u8)]
 pub enum BinOpType {
     // numerical
-    #[default]
     Add,
     Sub,
     Mul,
