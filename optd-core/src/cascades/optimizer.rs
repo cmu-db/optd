@@ -8,6 +8,7 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use tracing::trace;
 
 use super::memo::{ArcMemoPlanNode, GroupInfo, Memo};
@@ -66,13 +67,19 @@ pub struct RelNodeContext {
     pub children_group_ids: Vec<GroupId>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash, Serialize, Deserialize,
+)]
 pub struct GroupId(pub usize);
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash, Serialize, Deserialize,
+)]
 pub struct ExprId(pub usize);
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Hash, Serialize, Deserialize,
+)]
 pub struct PredId(pub usize);
 
 impl Display for GroupId {

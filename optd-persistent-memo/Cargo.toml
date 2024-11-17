@@ -8,6 +8,15 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+anyhow = "1"
 optd-persistent = { git = "https://github.com/cmu-db/optd-experimental", branch = "yuchen/orm-integration" }
 optd-core = { path = "../optd-core", version = "0.1" }
+sea-orm = { version = "1.1.1", features = [
+    "sqlx-sqlite",
+    "runtime-tokio-rustls",
+    "macros",
+    "debug-print",
+    "with-json",
+] }
+serde_json = "1.0.118"
 futures-lite.workspace = true

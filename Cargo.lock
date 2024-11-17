@@ -3447,9 +3447,12 @@ dependencies = [
 name = "optd-persistent-memo"
 version = "0.1.1"
 dependencies = [
+ "anyhow",
  "futures-lite",
  "optd-core",
  "optd-persistent",
+ "sea-orm",
+ "serde_json",
 ]
 
 [[package]]

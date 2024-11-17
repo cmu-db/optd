@@ -1,14 +1,18 @@
+mod backend_manager;
+
 use std::collections::{HashMap, HashSet};
 
+use backend_manager::MemoBackendManager;
+use futures_lite::future;
 use optd_core::{
-    cascades::{self, ExprId, GroupId, Memo, PredId},
-    nodes::{self, NodeType},
+    cascades::{self, ArcMemoPlanNode, ExprId, GroupId, Memo, MemoPlanNode, PredId},
+    nodes::{self, ArcPlanNode, NodeType, PlanNodeOrGroup},
 };
 use optd_persistent::{self, BackendManager, MemoStorage, StorageResult};
 
 /// A memo table implementation based on the `optd-persistent` crate storage.
 pub struct PersistentMemo<T: NodeType> {
-    storage: optd_persistent::BackendManager,
+    storage: MemoBackendManager,
 
     // TODO: This is a hacky workaround to keep track of which expressions
     // are physical and which are logical, so we know which table to check
@@ -41,7 +45,7 @@ type OrmGroup = optd_persistent::entities::cascades_group::Model;
 impl<T: NodeType> PersistentMemo<T> {
     pub fn new(database_url: Option<&str>) -> StorageResult<Self> {
         Ok(PersistentMemo {
-            storage: futures_lite::future::block_on(BackendManager::new(database_url))?,
+            storage: future::block_on(MemoBackendManager::new(database_url))?,
             physical_expressions: HashSet::new(),
             pred_id_to_pred_node: HashMap::new(),
             pred_node_to_pred_id: HashMap::new(),
@@ -57,52 +61,75 @@ impl<T: NodeType> PersistentMemo<T> {
         PredId(id)
     }
 
-    fn node_to_logical_expr(&self, plan_node: nodes::ArcPlanNode<T>) -> OrmLogicalExpr {
-        todo!()
+    fn reduce_group(&self, group_id: GroupId) -> GroupId {
+        self.merged_group_mapping[&group_id]
     }
 
-    fn node_to_physical_expr(&self, plan_node: nodes::ArcPlanNode<T>) -> OrmPhysicalExpr {
-        todo!()
-    }
+    fn add_new_group_expr_inner(
+        &mut self,
+        plan_node: ArcPlanNode<T>,
+        add_to_group_id: Option<GroupId>,
+    ) -> anyhow::Result<(GroupId, ExprId)> {
+        // Get children group IDs
+        let children_group_ids = plan_node
+            .children
+            .iter()
+            .map(|child| {
+                match child {
+                    // TODO: can I remove reduce?
+                    PlanNodeOrGroup::Group(group) => self.reduce_group(*group),
+                    PlanNodeOrGroup::PlanNode(child) => {
+                        // No merge / modification to the memo should occur for the following
+                        // operation
+                        let (group, _) = self
+                            .add_new_group_expr_inner(child.clone(), None)
+                            .expect("should not trigger merge group");
+                        self.reduce_group(group) // TODO: can I remove?
+                    }
+                }
+            })
+            .map(|x| x.0.try_into().unwrap())
+            .collect::<Vec<_>>();
 
-    fn logical_expr_to_node(&self, logical_expr: OrmLogicalExpr) -> cascades::ArcMemoPlanNode<T> {
-        todo!()
-    }
+        let typ_id = 0; // TODO: typ to i16
+        let is_logical = plan_node.typ.is_logical();
 
-    fn physical_expr_to_node(
-        &self,
-        physical_expr: OrmPhysicalExpr,
-    ) -> cascades::ArcMemoPlanNode<T> {
-        todo!()
-    }
+        // If expression is already stored
+        if let Some((group_id, expr_id)) =
+            future::block_on(self.storage.lookup_expr(typ_id, &children_group_ids)).unwrap()
+        {
+            if let Some(add_to_group_id) = add_to_group_id {
+                let add_to_group_id = self.reduce_group(add_to_group_id);
+                // TODO: support for group merging
+                // self.merge_group_inner(add_to_group_id, group_id);
+                return Ok((add_to_group_id, ExprId(expr_id.try_into().unwrap())));
+            }
+            return Ok((
+                GroupId(group_id.try_into().unwrap()),
+                ExprId(expr_id.try_into().unwrap()),
+            ));
+        }
 
-    fn orm_to_optd_group(&self, orm_group: OrmGroup) -> cascades::Group {
-        todo!()
-    }
+        let res = future::block_on(self.storage.insert_expr(
+            typ_id,
+            &children_group_ids,
+            add_to_group_id.map(|x| x.0.try_into().unwrap()),
+        ))
+        .unwrap();
 
-    fn group_info_to_phys_id(&self, group_info: cascades::GroupInfo) -> i32 {
-        let cascades::GroupInfo { winner } = group_info;
-        todo!("Converting group info... what now?")
+        Ok((
+            GroupId(res.0.try_into().unwrap()),
+            ExprId(res.1.try_into().unwrap()),
+        ))
     }
 }
 
 impl<T: NodeType> Memo<T> for PersistentMemo<T> {
     fn add_new_expr(&mut self, plan_node: nodes::ArcPlanNode<T>) -> (GroupId, ExprId) {
-        if plan_node.typ.is_logical() {
-            let logical_expr = self.node_to_logical_expr(plan_node.clone());
-            let (g_id, e_id) = futures_lite::future::block_on(self.storage.add_logical_expression(
-                logical_expr,
-                vec![], // TODO: Unused in both our reference impls
-            ))
-            .unwrap();
-
-            (
-                GroupId(g_id.try_into().unwrap()),
-                ExprId(e_id.try_into().unwrap()),
-            )
-        } else {
-            panic!("Inserting physical expressions into new groups is not supported---something went wrong.")
-        }
+        let (group_id, expr_id) = self
+            .add_new_group_expr_inner(plan_node, None)
+            .expect("should not trigger merge group");
+        (group_id, expr_id)
     }
 
     fn add_expr_to_group(
@@ -110,35 +137,22 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
         plan_node: nodes::PlanNodeOrGroup<T>,
         group_id: GroupId,
     ) -> Option<ExprId> {
-        let nodes::PlanNodeOrGroup::PlanNode(plan_node) = plan_node else {
-            todo!("group merging");
-        };
-
-        if plan_node.typ.is_logical() {
-            let logical_expr = self.node_to_logical_expr(plan_node.clone());
-            futures_lite::future::block_on(self.storage.add_logical_expression_to_group(
-                group_id.0.try_into().unwrap(),
-                logical_expr,
-                vec![], // TODO: Unused in both our reference impls
-            ))
-            .unwrap();
-            // TODO: add_logical_expression_to_group does not return an expr, though it should
-            let e_id: i32 = 0;
-            let e_id = ExprId(e_id.try_into().unwrap());
-            Some(e_id)
-        } else {
-            let physical_expr = self.node_to_physical_expr(plan_node.clone());
-            futures_lite::future::block_on(self.storage.add_physical_expression_to_group(
-                group_id.0.try_into().unwrap(),
-                physical_expr,
-                vec![], // TODO: Unused in both our reference impls
-            ))
-            .unwrap();
-            // TODO: add_physical_expression_to_group does not return an expr, though it should
-            let e_id: i32 = 0;
-            let e_id = ExprId(e_id.try_into().unwrap());
-            self.physical_expressions.insert(e_id);
-            Some(e_id)
+        match plan_node {
+            PlanNodeOrGroup::Group(input_group) => {
+                let input_group = self.reduce_group(input_group);
+                let group_id = self.reduce_group(group_id);
+                // TODO: Group merging
+                // self.merge_group_inner(input_group, group_id);
+                None
+            }
+            PlanNodeOrGroup::PlanNode(plan_node) => {
+                let reduced_group_id = self.reduce_group(group_id);
+                let (returned_group_id, expr_id) = self
+                    .add_new_group_expr_inner(plan_node, Some(reduced_group_id))
+                    .unwrap();
+                assert_eq!(returned_group_id, reduced_group_id);
+                Some(expr_id)
+            }
         }
     }
 
@@ -153,25 +167,35 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
     }
 
     fn get_group_id(&self, expr_id: ExprId) -> GroupId {
-        // TODO: This functionality is missing in the ORM implementation...
-        todo!()
+        GroupId(
+            future::block_on(self.storage.get_expr_by_id(expr_id.0.try_into().unwrap()))
+                .unwrap()
+                .unwrap()
+                .0
+                .try_into()
+                .unwrap(),
+        )
     }
 
-    fn get_expr_memoed(&self, expr_id: ExprId) -> cascades::ArcMemoPlanNode<T> {
-        if self.physical_expressions.contains(&expr_id) {
-            let physical_expr = futures_lite::future::block_on(
-                self.storage
-                    .get_physical_expression(expr_id.0.try_into().unwrap()),
-            )
-            .unwrap();
-            self.physical_expr_to_node(physical_expr)
-        } else {
-            let logical_expr = futures_lite::future::block_on(
-                self.storage
-                    .get_logical_expression(expr_id.0.try_into().unwrap()),
-            )
-            .unwrap();
-            self.logical_expr_to_node(logical_expr)
+    fn get_expr_memoed(&self, mut expr_id: ExprId) -> cascades::ArcMemoPlanNode<T> {
+        while let Some(new_expr_id) = self.dup_expr_mapping.get(&expr_id) {
+            expr_id = *new_expr_id;
+        }
+
+        let expr_id = expr_id.0.try_into().unwrap();
+
+        let (_, typ_id, children_group_ids) =
+            future::block_on(self.storage.get_expr_by_id(expr_id))
+                .unwrap()
+                .expect("expr not found in database");
+
+        MemoPlanNode {
+            typ: T::from_i16(typ_id), // TODO: from_i16
+            children: children_group_ids
+                .iter()
+                .map(|group_id| GroupId(*group_id.try_into().unwrap()))
+                .collect(),
+            predicates: vec![], // TODO
         }
     }
 
@@ -182,7 +206,7 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
 
     fn get_group(&self, group_id: GroupId) -> &cascades::Group {
         let g_id = group_id.0.try_into().unwrap();
-        let orm_group = futures_lite::future::block_on(self.storage.get_group(g_id)).unwrap();
+        let orm_group = future::block_on(self.storage.get_group(g_id)).unwrap();
         let group = self.orm_to_optd_group(orm_group);
         Box::leak(Box::new(group)) // TODO: Memo table trait should return Arcs
     }
