@@ -18,7 +18,7 @@ pub struct BackendWinnerInfo {
     pub expr_id: i32,
     pub cost: f64,
 }
-struct BackendGroupInfo {
+pub struct BackendGroupInfo {
     pub group_exprs: Vec<i32>,
     pub winner: Option<BackendWinnerInfo>,
 }

@@ -9,7 +9,7 @@ use backend_manager::MemoBackendManager;
 use futures_lite::future;
 use optd_core::{
     cascades::{self, ArcMemoPlanNode, ExprId, GroupId, GroupInfo, Memo, MemoPlanNode, PredId},
-    nodes::{self, ArcPlanNode, NodeType, PlanNodeOrGroup},
+    nodes::{self, ArcPlanNode, NodeType, PlanNodeOrGroup, SerializedNodeTag},
 };
 use optd_persistent::{self, BackendManager, MemoStorage, StorageResult};
 
@@ -94,7 +94,7 @@ impl<T: NodeType> PersistentMemo<T> {
             .map(|x| x.0.try_into().unwrap())
             .collect::<Vec<_>>();
 
-        let typ_id = 0; // TODO: typ to i16
+        let typ_id = plan_node.typ.clone().into().0 as i16;
         let is_logical = plan_node.typ.is_logical();
 
         // If expression is already stored
@@ -192,14 +192,19 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
                 .unwrap()
                 .expect("expr not found in database");
 
+        let Ok(typ) = T::try_from(SerializedNodeTag(typ_id as u16)) else {
+            panic!("invalid node type");
+        };
+
         MemoPlanNode {
-            typ: T::from_i16(typ_id), // TODO: from_i16
+            typ: typ,
             children: children_group_ids
                 .iter()
-                .map(|group_id| GroupId(*group_id.try_into().unwrap()))
+                .map(|group_id| GroupId((*group_id).try_into().unwrap()))
                 .collect(),
             predicates: vec![], // TODO
         }
+        .into()
     }
 
     fn get_all_group_ids(&self) -> Vec<GroupId> {
