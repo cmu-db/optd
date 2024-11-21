@@ -1,11 +1,6 @@
-use optd_core::{
-    cascades::{ExprId, GroupId},
-    nodes::NodeType,
-};
 use optd_persistent::{
     entities::{
         cascades_group, group_winner, logical_children, logical_expression, physical_expression,
-        prelude::{LogicalExpression, PhysicalExpression},
     },
     StorageResult,
 };
@@ -14,10 +9,19 @@ use sea_orm::{
     QueryFilter, Set,
 };
 
+// Ben:
+// Support logical/physical expressions
+// Figure out how to store and use winners
+
+// Yuchen:
+// Support predicates
+// Figure out how to support group merging
+
 pub struct BackendWinnerInfo {
     pub expr_id: i32,
     pub cost: f64,
 }
+
 pub struct BackendGroupInfo {
     pub group_exprs: Vec<i32>,
     pub winner: Option<BackendWinnerInfo>,
@@ -68,7 +72,7 @@ impl MemoBackendManager {
             group_exprs: children,
             winner: winner.map(|winner| BackendWinnerInfo {
                 expr_id: winner.physical_expression_id,
-                cost: 100.0,
+                cost: 100.0, // TODO
             }),
         })
     }
@@ -98,13 +102,23 @@ impl MemoBackendManager {
 
         if let Some(expr) = expr {
             let children: Vec<i32> = serde_json::from_value(expr.data).unwrap();
-            Ok(Some((expr.group_id, expr.variant_tag, children)))
-        } else {
-            Ok(None)
+            return Ok(Some((expr.group_id, expr.variant_tag, children)));
         }
+
+        let expr = physical_expression::Entity::find()
+            .filter(physical_expression::Column::Id.eq(expr_id))
+            .one(&self.db)
+            .await?;
+
+        if let Some(expr) = expr {
+            let children: Vec<i32> = serde_json::from_value(expr.data).unwrap();
+            return Ok(Some((expr.group_id, expr.variant_tag, children)));
+        }
+
+        Ok(None)
     }
 
-    pub async fn lookup_expr(
+    async fn lookup_logical_expr(
         &self,
         typ_id: i16,
         children: &Vec<i32>,
@@ -133,9 +147,52 @@ impl MemoBackendManager {
         Ok(Some((existing_expression.group_id, existing_expression.id)))
     }
 
+    async fn lookup_physical_expr(
+        &self,
+        typ_id: i16,
+        children: &Vec<i32>,
+    ) -> StorageResult<Option<(i32, i32)>> {
+        let children_json = serde_json::to_value(children).unwrap();
+        let matches = physical_expression::Entity::find()
+            .filter(physical_expression::Column::VariantTag.eq(typ_id))
+            .filter(physical_expression::Column::Data.eq(children_json))
+            .all(&self.db)
+            .await?;
+
+        if matches.is_empty() {
+            return Ok(None);
+        }
+
+        // Only 1 should be identical, else something has gone wrong
+        assert!(
+            matches.len() <= 1,
+            "Found duplicate expressions in the physical_expression table!"
+        );
+
+        let existing_expression = matches
+            .last()
+            .expect("we just checked that an element exists");
+
+        Ok(Some((existing_expression.group_id, existing_expression.id)))
+    }
+
+    pub async fn lookup_expr(
+        &self,
+        typ_id: i16,
+        is_logical: bool,
+        children: &Vec<i32>,
+    ) -> StorageResult<Option<(i32, i32)>> {
+        if is_logical {
+            self.lookup_logical_expr(typ_id, children).await
+        } else {
+            self.lookup_physical_expr(typ_id, children).await
+        }
+    }
+
     pub async fn insert_expr(
         &self,
         typ_id: i16,
+        is_logical: bool,
         children: &Vec<i32>,
         add_to_group_id: Option<i32>,
     ) -> StorageResult<(i32, i32)> {
@@ -143,8 +200,10 @@ impl MemoBackendManager {
 
         // assert no identical expressions exist
         debug_assert!(
-            self.lookup_expr(typ_id, children).await?.is_none(),
-            "Identical expression already exists in the logical_expression table!"
+            self.lookup_expr(typ_id, is_logical, children)
+                .await?
+                .is_none(),
+            "Identical expression already exists!"
         );
 
         let group_id = if let Some(group_id) = add_to_group_id {
@@ -161,14 +220,26 @@ impl MemoBackendManager {
         };
 
         // Insert the input expression with the correct `group_id`.
-        let new_expr = logical_expression::ActiveModel {
-            group_id: Set(group_id),
-            variant_tag: Set(typ_id.try_into().unwrap()),
-            data: Set(children_json),
-            ..Default::default()
-        };
-        let new_expr = new_expr.insert(&self.db).await?;
+        if is_logical {
+            let new_expr = logical_expression::ActiveModel {
+                group_id: Set(group_id),
+                variant_tag: Set(typ_id.try_into().unwrap()),
+                data: Set(children_json),
+                ..Default::default()
+            };
+            let new_expr = new_expr.insert(&self.db).await?;
 
-        Ok((new_expr.group_id, new_expr.id))
+            Ok((new_expr.group_id, new_expr.id))
+        } else {
+            let new_expr = physical_expression::ActiveModel {
+                group_id: Set(group_id),
+                variant_tag: Set(typ_id.try_into().unwrap()),
+                data: Set(children_json),
+                ..Default::default()
+            };
+            let new_expr = new_expr.insert(&self.db).await?;
+
+            Ok((new_expr.group_id, new_expr.id))
+        }
     }
 }

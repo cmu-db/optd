@@ -17,22 +17,15 @@ use optd_persistent::{self, BackendManager, MemoStorage, StorageResult};
 pub struct PersistentMemo<T: NodeType> {
     storage: MemoBackendManager,
 
-    // TODO: This is a hacky workaround to keep track of which expressions
-    // are physical and which are logical, so we know which table to check
-    // in the ORM.
-    // Obviously this defeats the purpose of the ORM.
-    physical_expressions: HashSet<ExprId>,
+    // TODO: This is an in-memory solution for mapping logical/physical expression IDs to
+    // the actual expression ID. Needs to be redesigned for persistence.
 
-    // --
-    // TODO: Below this: Stuff we need to move into the memotable
-    // Storing this stuff defeats the purpose of the ORM.
-    // --
+    // TODO: Instead of wrapping usize in all of our data structures, consider picking a fixed-size integer type.
+    expr_group_id_counter: usize,
 
     // Predicate stuff.
     pred_id_to_pred_node: HashMap<PredId, nodes::ArcPredNode<T>>,
     pred_node_to_pred_id: HashMap<nodes::ArcPredNode<T>, PredId>,
-    // TODO: Instead of wrapping usize in all of our data structures, consider picking a fixed-size integer type.
-    expr_group_id_counter: usize,
 
     // We update all group IDs in the memo table upon group merging, but
     // there might be edge cases that some tasks still hold the old group ID.
@@ -49,7 +42,6 @@ impl<T: NodeType> PersistentMemo<T> {
     pub fn new(database_url: Option<&str>) -> StorageResult<Self> {
         Ok(PersistentMemo {
             storage: future::block_on(MemoBackendManager::new(database_url))?,
-            physical_expressions: HashSet::new(),
             pred_id_to_pred_node: HashMap::new(),
             pred_node_to_pred_id: HashMap::new(),
             expr_group_id_counter: 0,
@@ -58,10 +50,10 @@ impl<T: NodeType> PersistentMemo<T> {
         })
     }
 
-    fn next_pred_id(&mut self) -> PredId {
+    fn next_id(&mut self) -> usize {
         let id = self.expr_group_id_counter;
         self.expr_group_id_counter += 1;
-        PredId(id)
+        id
     }
 
     fn reduce_group(&self, group_id: GroupId) -> GroupId {
@@ -98,8 +90,12 @@ impl<T: NodeType> PersistentMemo<T> {
         let is_logical = plan_node.typ.is_logical();
 
         // If expression is already stored
-        if let Some((group_id, expr_id)) =
-            future::block_on(self.storage.lookup_expr(typ_id, &children_group_ids)).unwrap()
+        if let Some((group_id, expr_id)) = future::block_on(self.storage.lookup_expr(
+            typ_id,
+            is_logical,
+            &children_group_ids,
+        ))
+        .unwrap()
         {
             if let Some(add_to_group_id) = add_to_group_id {
                 let add_to_group_id = self.reduce_group(add_to_group_id);
@@ -115,6 +111,7 @@ impl<T: NodeType> PersistentMemo<T> {
 
         let res = future::block_on(self.storage.insert_expr(
             typ_id,
+            is_logical,
             &children_group_ids,
             add_to_group_id.map(|x| x.0.try_into().unwrap()),
         ))
@@ -160,7 +157,7 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
     }
 
     fn add_new_pred(&mut self, pred_node: nodes::ArcPredNode<T>) -> PredId {
-        let pred_id = self.next_pred_id();
+        let pred_id = PredId(self.next_id().try_into().unwrap());
         if let Some(id) = self.pred_node_to_pred_id.get(&pred_node) {
             return *id;
         }
