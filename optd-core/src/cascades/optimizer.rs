@@ -5,9 +5,13 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::Display;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::Write;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
+use itertools::Itertools;
 use tracing::trace;
 
 use super::memo::{ArcMemoPlanNode, GroupInfo, Memo};
@@ -40,6 +44,8 @@ pub struct OptimizerProperties {
     pub partial_explore_space: Option<usize>,
     /// Disable pruning during optimization.
     pub disable_pruning: bool,
+    /// Dump the memo as 0000.dot, 0001.dot, ... files to this path
+    pub dot_file_path: Option<String>,
 }
 
 pub struct CascadesOptimizer<T: NodeType, M: Memo<T> = NaiveMemo<T>> {
@@ -54,6 +60,7 @@ pub struct CascadesOptimizer<T: NodeType, M: Memo<T> = NaiveMemo<T>> {
     property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>,
     pub ctx: OptimizerContext,
     pub prop: OptimizerProperties,
+    pub next_dot_file: usize,
 }
 
 /// `RelNode` only contains the representation of the plan nodes. Sometimes, we need more context,
@@ -123,6 +130,7 @@ impl<T: NodeType> CascadesOptimizer<T, NaiveMemo<T>> {
             property_builders,
             prop,
             disabled_rules: HashSet::new(),
+            next_dot_file: 0,
         }
     }
 
@@ -168,6 +176,93 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
 
     pub fn is_rule_disabled(&self, rule_id: usize) -> bool {
         self.disabled_rules.contains(&rule_id)
+    }
+
+    pub fn dump_dot(&self, writer: &mut dyn Write) -> Result<(), std::io::Error> {
+        let memo = self.memo();
+
+        // Collect all groups in a predictable iteration order
+        let groups: Vec<GroupId> = memo.get_all_group_ids().iter().sorted().cloned().collect();
+
+        writeln!(writer, "digraph Memo {{")?;
+        writeln!(
+            writer,
+            "compound=true; ranksep=1.0; node [colorscheme=set312];"
+        )?;
+        for group_id in groups.iter() {
+            let group = memo.get_group(*group_id);
+            writeln!(writer, "subgraph cluster_{} {{", group_id.0)?;
+            writeln!(writer, "rank=source;")?;
+            writeln!(writer, "edge [style=invis];")?;
+            writeln!(
+                writer,
+                "g{} [shape=plaintext,label=\"group_id=!{}\"];",
+                group_id.0, group_id.0
+            )?;
+            for expr_id in memo.get_all_exprs_in_group(*group_id).iter() {
+                let expr = memo.get_expr_memoed(*expr_id);
+                let mut s = DefaultHasher::new();
+                expr.typ.hash(&mut s);
+                let color = (s.finish() % 11) + 1; // %11 looks better than %12! :-)
+                let shape = if expr.typ.is_logical() { "oval" } else { "box" };
+                let rules = match self.fired_rules.get(expr_id) {
+                    None => 0,
+                    Some(v) => v.len(),
+                };
+                writeln!(
+                    writer,
+                    "e{} [shape={},label=\"{}: {:?} ({})\",style=filled,color={}]",
+                    expr_id.0, shape, expr_id.0, expr.typ, rules, color
+                )?;
+                writeln!(writer, "g{} -> e{};", group_id.0, expr_id.0)?;
+            }
+            writeln!(writer, "}}");
+        }
+        for group_id in groups.iter() {
+            for expr_id in memo.get_all_exprs_in_group(*group_id).iter() {
+                let expr = memo.get_expr_memoed(*expr_id);
+                for child in expr.children.iter() {
+                    writeln!(
+                        writer,
+                        "e{} -> g{} [lhead=\"cluster_{}\"];",
+                        expr_id.0, child.0, child.0
+                    )?;
+                }
+                let mut next_pred: usize = 0;
+                for pred_id in expr.predicates.iter() {
+                    let pred = memo.get_pred(*pred_id);
+                    let id = next_pred;
+                    self.dump_dot_pred(writer, &pred, expr_id.0, &mut next_pred);
+                    writeln!(writer, "e{} -> p{}_{};", expr_id.0, expr_id.0, id)?;
+                }
+            }
+        }
+        writeln!(writer, "}}")
+    }
+
+    fn dump_dot_pred(
+        &self,
+        writer: &mut dyn Write,
+        pred: &ArcPredNode<T>,
+        base: usize,
+        next_pred: &mut usize,
+    ) -> Result<(), std::io::Error> {
+        let mut s = DefaultHasher::new();
+        pred.typ.hash(&mut s);
+        let color = (s.finish() % 11) + 1;
+        let id = *next_pred;
+        *next_pred += 1;
+        writeln!(
+            writer,
+            "p{}_{} [shape=diamond,label=\"{:?}\",penwidth=3,color={}]",
+            base, id, pred.typ, color
+        )?;
+        for child in pred.children.iter() {
+            let child_id = *next_pred;
+            self.dump_dot_pred(writer, child, base, next_pred)?;
+            writeln!(writer, "p{}_{} -> p{}_{};", base, id, base, child_id)?;
+        }
+        Ok(())
     }
 
     pub fn dump(&self) {
