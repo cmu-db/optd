@@ -14,6 +14,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::DataType;
+use datafusion::catalog::information_schema::InformationSchemaProvider;
+use datafusion::catalog::schema::SchemaProvider;
 use datafusion::catalog::CatalogList;
 use datafusion::error::Result;
 use datafusion::execution::context::{QueryPlanner, SessionState};
@@ -23,13 +25,107 @@ use datafusion::logical_expr::{
 use datafusion::physical_plan::explain::ExplainExec;
 use datafusion::physical_plan::{displayable, ExecutionPlan};
 use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
+use datafusion::sql::TableReference;
 use itertools::Itertools;
 use optd_datafusion_repr::plan_nodes::{
-    dispatch_plan_explain_to_string, ArcDfPlanNode, ConstantType, DfNodeType, DfReprPlanNode,
-    PhysicalHashJoin, PhysicalNestedLoopJoin,
+    dispatch_plan_explain_to_string, ArcDfPlanNode, DfNodeType, DfReprPlanNode, PhysicalHashJoin,
+    PhysicalNestedLoopJoin,
 };
-use optd_datafusion_repr::properties::schema::Catalog;
-use optd_datafusion_repr::{DatafusionOptimizer, MemoExt};
+use optd_datafusion_repr::{
+    plan_nodes::ConstantType, properties::schema::Catalog, DatafusionOptimizer, MemoExt,
+};
+
+macro_rules! optd_extensions_options {
+    (
+     $(#[doc = $struct_d:tt])*
+     $vis:vis struct $struct_name:ident {
+        $(
+        $(#[doc = $d:tt])*
+        $field_vis:vis $field_name:ident : $field_type:ty, default = $default:expr
+        )*$(,)*
+    }
+    ) => {
+        $(#[doc = $struct_d])*
+        #[derive(Debug, Clone)]
+        #[non_exhaustive]
+        $vis struct $struct_name{
+            $(
+            $(#[doc = $d])*
+            $field_vis $field_name : $field_type,
+            )*
+        }
+
+        impl Default for $struct_name {
+            fn default() -> Self {
+                Self {
+                    $($field_name: $default),*
+                }
+            }
+        }
+
+        impl datafusion::config::ExtensionOptions for $struct_name {
+            fn as_any(&self) -> &dyn ::std::any::Any {
+                self
+            }
+
+            fn as_any_mut(&mut self) -> &mut dyn ::std::any::Any {
+                self
+            }
+
+            fn cloned(&self) -> Box<dyn datafusion::config::ExtensionOptions> {
+                Box::new(self.clone())
+            }
+
+            fn set(&mut self, key: &str, value: &str) -> Result<()> {
+                match key {
+                    $(
+                       stringify!($field_name) => {
+                        self.$field_name = value.parse().map_err(|e| {
+                            ::datafusion::error::DataFusionError::Context(
+                                format!(concat!("Error parsing {} as ", stringify!($t),), value),
+                                Box::new(::datafusion::error::DataFusionError::External(Box::new(e))),
+                            )
+                        })?;
+                        Ok(())
+                       }
+                    )*
+                    _ => Err(::datafusion::error::DataFusionError::Internal(
+                        format!(concat!("Config value \"{}\" not found on ", stringify!($struct_name)), key)
+                    ))
+                }
+            }
+
+            fn entries(&self) -> Vec<datafusion::config::ConfigEntry> {
+                vec![
+                    $(
+                        datafusion::config::ConfigEntry {
+                            key: format!("optd.{}", stringify!($field_name)),
+                            value: (self.$field_name != $default).then(|| self.$field_name.to_string()),
+                            description: concat!($($d),*).trim(),
+                        },
+                    )*
+                ]
+            }
+        }
+    }
+}
+
+optd_extensions_options! {
+    /// optd configurations
+    pub struct OptdDFConfig {
+        /// Turn on adaptive optimization.
+        pub enable_adaptive: bool, default = false
+        /// Use heuristic optimizer before entering cascades.
+        pub enable_heuristic: bool, default = true
+
+        pub explain_logical: bool, default = true
+    }
+
+}
+
+impl datafusion::config::ConfigExtension for OptdDFConfig {
+    const PREFIX: &'static str = "optd";
+}
 
 pub struct OptdPlanContext<'a> {
     tables: HashMap<String, Arc<dyn TableSource>>,
@@ -45,23 +141,44 @@ impl<'a> OptdPlanContext<'a> {
             optimizer: None,
         }
     }
+
+    pub fn optd_config(&self) -> &OptdDFConfig {
+        let config = self
+            .session_state
+            .config_options()
+            .extensions
+            .get::<OptdDFConfig>()
+            .expect("optd config not set");
+
+        config
+    }
 }
 
 pub struct DatafusionCatalog {
     catalog: Arc<dyn CatalogList>,
+    information_schema: Arc<dyn SchemaProvider>,
 }
 
 impl DatafusionCatalog {
     pub fn new(catalog: Arc<dyn CatalogList>) -> Self {
-        Self { catalog }
+        let information_schema = Arc::new(InformationSchemaProvider::new(catalog.clone()));
+        Self {
+            catalog,
+            information_schema,
+        }
     }
 }
 
 impl Catalog for DatafusionCatalog {
     fn get(&self, name: &str) -> optd_datafusion_repr::properties::schema::Schema {
-        let catalog = self.catalog.catalog("datafusion").unwrap();
-        let schema = catalog.schema("public").unwrap();
-        let table = futures_lite::future::block_on(schema.table(name.as_ref())).unwrap();
+        let resolved = TableReference::from(name).resolve("datafusion", "public");
+        let catalog = self.catalog.catalog(&resolved.catalog).unwrap();
+        let schema = if resolved.schema == "information_schema" {
+            self.information_schema.clone()
+        } else {
+            catalog.schema(&resolved.schema).unwrap()
+        };
+        let table = futures_lite::future::block_on(schema.table(&resolved.table)).unwrap();
         let schema = table.schema();
         let fields = schema.fields();
         let mut optd_fields = Vec::with_capacity(fields.len());

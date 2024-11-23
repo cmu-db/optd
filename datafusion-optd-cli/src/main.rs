@@ -180,6 +180,13 @@ pub async fn main() -> Result<()> {
         session_config = session_config.with_batch_size(batch_size);
     };
 
+    // Set optd configs from command line.
+    let mut config_ext = datafusion::config::Extensions::new();
+    let mut optd_conf = optd_datafusion_bridge::OptdDFConfig::default();
+    optd_conf.enable_adaptive = args.enable_adaptive;
+    config_ext.insert(optd_conf);
+    session_config.options_mut().extensions = config_ext;
+
     let rn_config = RuntimeConfig::new();
     let rn_config =
         // set memory pool size
@@ -204,8 +211,7 @@ pub async fn main() -> Result<()> {
     let runtime_env = create_runtime_env(rn_config.clone())?;
 
     let mut ctx = {
-        let mut state =
-            SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
+        let mut state = SessionState::new_with_config_rt(session_config, Arc::new(runtime_env));
         if !args.enable_df_logical {
             // clean up optimizer rules so that we can plug in our own optimizer
             state = state.with_optimizer_rules(vec![]);

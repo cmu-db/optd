@@ -594,8 +594,8 @@ impl OptdPlanContext<'_> {
             typ => unimplemented!("{}", typ),
         };
 
-        let optimizer = self.optimizer.as_ref().unwrap();
-        if optimizer.adaptive_enabled() {
+        let config = self.optd_config();
+        if config.enable_adaptive {
             let bare_with_collector: Result<Arc<dyn ExecutionPlan>> =
                 Ok(Arc::new(CollectorExec::new(
                     bare,
