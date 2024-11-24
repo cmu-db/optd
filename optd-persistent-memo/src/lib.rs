@@ -1,7 +1,7 @@
 mod backend_manager;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -19,6 +19,9 @@ pub struct PersistentMemo<T: NodeType> {
 
     // TODO: This is an in-memory solution for mapping logical/physical expression IDs to
     // the actual expression ID. Needs to be redesigned for persistence.
+    log_id_to_expr_id: HashMap<i32, ExprId>,
+    phys_id_to_expr_id: HashMap<i32, ExprId>,
+    expr_id_to_log_phys_id: HashMap<ExprId, (i32, bool)>,
 
     // TODO: Instead of wrapping usize in all of our data structures, consider picking a fixed-size integer type.
     expr_group_id_counter: usize,
@@ -47,6 +50,9 @@ impl<T: NodeType> PersistentMemo<T> {
             expr_group_id_counter: 0,
             merged_group_mapping: HashMap::new(),
             dup_expr_mapping: HashMap::new(),
+            log_id_to_expr_id: HashMap::new(),
+            phys_id_to_expr_id: HashMap::new(),
+            expr_id_to_log_phys_id: HashMap::new(),
         })
     }
 
@@ -117,10 +123,21 @@ impl<T: NodeType> PersistentMemo<T> {
         ))
         .unwrap();
 
-        Ok((
-            GroupId(res.0.try_into().unwrap()),
-            ExprId(res.1.try_into().unwrap()),
-        ))
+        let unified_expr_id: ExprId = if is_logical {
+            if let None = self.log_id_to_expr_id.get(&res.1) {
+                let expr_id = ExprId(self.next_id());
+                self.log_id_to_expr_id.insert(res.1, expr_id);
+            }
+            self.log_id_to_expr_id.get(&res.1).unwrap().clone()
+        } else {
+            if let None = self.phys_id_to_expr_id.get(&res.1) {
+                let expr_id = ExprId(self.next_id());
+                self.phys_id_to_expr_id.insert(res.1, expr_id);
+            }
+            self.phys_id_to_expr_id.get(&res.1).unwrap().clone()
+        };
+
+        Ok((GroupId(res.0.try_into().unwrap()), unified_expr_id))
     }
 }
 
@@ -167,8 +184,12 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
     }
 
     fn get_group_id(&self, expr_id: ExprId) -> GroupId {
+        let (expr_id, is_logical) = self
+            .expr_id_to_log_phys_id
+            .get(&expr_id)
+            .expect("expr id was not found in expr->logphys mapping");
         GroupId(
-            future::block_on(self.storage.get_expr_by_id(expr_id.0.try_into().unwrap()))
+            future::block_on(self.storage.get_expr_by_id(*expr_id, *is_logical))
                 .unwrap()
                 .unwrap()
                 .0
@@ -182,10 +203,13 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
             expr_id = *new_expr_id;
         }
 
-        let expr_id = expr_id.0.try_into().unwrap();
+        let (expr_id, is_logical) = self
+            .expr_id_to_log_phys_id
+            .get(&expr_id)
+            .expect("expr id was not found in expr->logphys mapping");
 
         let (_, typ_id, children_group_ids) =
-            future::block_on(self.storage.get_expr_by_id(expr_id))
+            future::block_on(self.storage.get_expr_by_id(*expr_id, *is_logical))
                 .unwrap()
                 .expect("expr not found in database");
 

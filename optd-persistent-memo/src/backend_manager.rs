@@ -9,14 +9,6 @@ use sea_orm::{
     QueryFilter, Set,
 };
 
-// Ben:
-// Support logical/physical expressions
-// Figure out how to store and use winners
-
-// Yuchen:
-// Support predicates
-// Figure out how to support group merging
-
 pub struct BackendWinnerInfo {
     pub expr_id: i32,
     pub cost: f64,
@@ -94,28 +86,33 @@ impl MemoBackendManager {
     pub async fn get_expr_by_id(
         &self,
         expr_id: i32,
+        is_logical: bool,
     ) -> StorageResult<Option<(i32, i16, Vec<i32>)>> {
-        let expr = logical_expression::Entity::find()
-            .filter(logical_expression::Column::Id.eq(expr_id))
-            .one(&self.db)
-            .await?;
+        if is_logical {
+            let expr = logical_expression::Entity::find()
+                .filter(logical_expression::Column::Id.eq(expr_id))
+                .one(&self.db)
+                .await?;
 
-        if let Some(expr) = expr {
-            let children: Vec<i32> = serde_json::from_value(expr.data).unwrap();
-            return Ok(Some((expr.group_id, expr.variant_tag, children)));
+            if let Some(expr) = expr {
+                let children: Vec<i32> = serde_json::from_value(expr.data).unwrap();
+                Ok(Some((expr.group_id, expr.variant_tag, children)))
+            } else {
+                Ok(None)
+            }
+        } else {
+            let expr = physical_expression::Entity::find()
+                .filter(physical_expression::Column::Id.eq(expr_id))
+                .one(&self.db)
+                .await?;
+
+            if let Some(expr) = expr {
+                let children: Vec<i32> = serde_json::from_value(expr.data).unwrap();
+                Ok(Some((expr.group_id, expr.variant_tag, children)))
+            } else {
+                Ok(None)
+            }
         }
-
-        let expr = physical_expression::Entity::find()
-            .filter(physical_expression::Column::Id.eq(expr_id))
-            .one(&self.db)
-            .await?;
-
-        if let Some(expr) = expr {
-            let children: Vec<i32> = serde_json::from_value(expr.data).unwrap();
-            return Ok(Some((expr.group_id, expr.variant_tag, children)));
-        }
-
-        Ok(None)
     }
 
     async fn lookup_logical_expr(
