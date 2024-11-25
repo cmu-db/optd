@@ -1,6 +1,8 @@
 use optd_persistent::{
     entities::{
         cascades_group, group_winner, logical_children, logical_expression, physical_expression,
+        predicate, predicate_children, predicate_logical_expression_junction,
+        predicate_physical_expression_junction,
     },
     StorageResult,
 };
@@ -17,6 +19,12 @@ pub struct BackendWinnerInfo {
 pub struct BackendGroupInfo {
     pub group_exprs: Vec<i32>,
     pub winner: Option<BackendWinnerInfo>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct PredicateData {
+    pub children_ids: Vec<i32>,
+    pub data: Option<optd_core::nodes::Value>,
 }
 
 // TODO: Use the junction table for children instead of data field!
@@ -237,6 +245,149 @@ impl MemoBackendManager {
             let new_expr = new_expr.insert(&self.db).await?;
 
             Ok((new_expr.group_id, new_expr.id))
+        }
+    }
+
+    /// Returns the predicate id.
+    pub async fn insert_pred(&self, typ_id: i32, data: serde_json::Value) -> StorageResult<i32> {
+        debug_assert!(
+            self.lookup_pred(typ_id, data.clone()).await?.is_none(),
+            "Identical predicate already exists!"
+        );
+
+        let new_pred = predicate::ActiveModel {
+            data: Set(data),
+            variant: Set(typ_id),
+            ..Default::default()
+        };
+        Ok(new_pred.insert(&self.db).await?.id)
+    }
+
+    /// Returns the predicate id if the predicate already exist. Otherwise returns `None`.
+    pub async fn lookup_pred(
+        &self,
+        typ_id: i32,
+        data: serde_json::Value,
+    ) -> StorageResult<Option<i32>> {
+        let matches = predicate::Entity::find()
+            .filter(predicate::Column::Variant.eq(typ_id))
+            .filter(predicate::Column::Data.eq(data))
+            .all(&self.db)
+            .await?;
+
+        if matches.is_empty() {
+            return Ok(None);
+        }
+
+        assert_eq!(
+            matches.len(),
+            1,
+            "Found duplicate entries stored in the predicate table"
+        );
+
+        let existing_pred = matches.last().expect("pred exist");
+        Ok(Some(existing_pred.id))
+    }
+
+    /// Returns `data` and `typ_id`.
+    pub async fn get_pred(&self, id: i32) -> StorageResult<Option<predicate::Model>> {
+        let pred = predicate::Entity::find()
+            .filter(predicate::Column::Id.eq(id))
+            .one(&self.db)
+            .await?;
+        Ok(pred)
+    }
+
+    pub async fn insert_pred_children(&self, id: i32, children: &Vec<i32>) -> StorageResult<()> {
+        let iter = children
+            .iter()
+            .map(|&child_id| predicate_children::ActiveModel {
+                parent_id: Set(id),
+                child_id: Set(child_id),
+            });
+        predicate_children::Entity::insert_many(iter)
+            .exec(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_pred_children(&self, id: i32) -> StorageResult<Vec<Option<predicate::Model>>> {
+        let ids = predicate_children::Entity::find()
+            .filter(predicate_children::Column::ParentId.eq(id))
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|x| x.child_id)
+            .collect::<Vec<_>>();
+
+        let mut children = Vec::with_capacity(ids.len());
+        for id in ids {
+            let pred = self.get_pred(id).await?;
+            children.push(pred);
+        }
+        Ok(children)
+    }
+
+    pub async fn link_logical_expr_to_predicates(
+        &self,
+        id: i32,
+        predicates: &Vec<i32>,
+    ) -> StorageResult<()> {
+        let iter =
+            predicates.iter().map(
+                |&pred_id| predicate_logical_expression_junction::ActiveModel {
+                    logical_expr_id: Set(id),
+                    predicate_id: Set(pred_id),
+                },
+            );
+        predicate_logical_expression_junction::Entity::insert_many(iter)
+            .exec(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn link_physical_expr_to_predicates(
+        &self,
+        id: i32,
+        predicates: &Vec<i32>,
+    ) -> StorageResult<()> {
+        let iter =
+            predicates.iter().map(
+                |&pred_id| predicate_physical_expression_junction::ActiveModel {
+                    physical_expr_id: Set(id),
+                    predicate_id: Set(pred_id),
+                },
+            );
+        predicate_physical_expression_junction::Entity::insert_many(iter)
+            .exec(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_pred_ids_in_expr(
+        &self,
+        expr_id: i32,
+        is_logical: bool,
+    ) -> StorageResult<Vec<i32>> {
+        if is_logical {
+            let preds = predicate_logical_expression_junction::Entity::find()
+                .filter(predicate_logical_expression_junction::Column::LogicalExprId.eq(expr_id))
+                .all(&self.db)
+                .await?
+                .iter()
+                .map(|x| x.predicate_id)
+                .collect();
+            Ok(preds)
+        } else {
+            // The order of pred is troublesome (add index to each junction entry?).
+            let preds = predicate_physical_expression_junction::Entity::find()
+                .filter(predicate_physical_expression_junction::Column::PhysicalExprId.eq(expr_id))
+                .all(&self.db)
+                .await?
+                .iter()
+                .map(|x| x.predicate_id)
+                .collect();
+            Ok(preds)
         }
     }
 }

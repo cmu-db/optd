@@ -16,7 +16,7 @@ datafusion = "32.0.0"
 ordered-float = "4"
 optd-datafusion-repr = { path = "../optd-datafusion-repr", version = "0.1" }
 optd-core = { path = "../optd-core", version = "0.1" }
-serde = { version = "1.0", features = ["derive"] }
+serde.workspace = true
 rayon = "1.10"
 itertools = "0.13"
 test-case = "3.3"
