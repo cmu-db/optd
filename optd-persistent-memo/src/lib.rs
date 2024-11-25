@@ -1,38 +1,34 @@
 mod backend_manager;
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
-use backend_manager::MemoBackendManager;
+use backend_manager::{MemoBackendManager, PredicateData};
 use futures_lite::future;
 use optd_core::{
-    cascades::{self, ArcMemoPlanNode, ExprId, GroupId, GroupInfo, Memo, MemoPlanNode, PredId},
-    nodes::{self, ArcPlanNode, NodeType, PlanNodeOrGroup, SerializedNodeTag},
+    cascades::{self, ExprId, GroupId, GroupInfo, Memo, MemoPlanNode, PredId},
+    nodes::{
+        self, ArcPlanNode, NodeType, PlanNodeOrGroup, PredNode, SerializedNodeTag,
+        SerializedPredTag,
+    },
 };
-use optd_persistent::{self, StorageResult};
+use optd_persistent::{self, entities::predicate, StorageResult};
 
 /// A memo table implementation based on the `optd-persistent` crate storage.
 pub struct PersistentMemo<T: NodeType> {
     storage: MemoBackendManager,
 
-    // TODO: This is a hacky workaround to keep track of which expressions
-    // are physical and which are logical, so we know which table to check
-    // in the ORM.
-    // Obviously this defeats the purpose of the ORM.
-    physical_expressions: HashSet<ExprId>,
+    // TODO: This is an in-memory solution for mapping logical/physical expression IDs to
+    // the actual expression ID. Needs to be redesigned for persistence.
+    log_id_to_expr_id: HashMap<i32, ExprId>,
+    phys_id_to_expr_id: HashMap<i32, ExprId>,
+    expr_id_to_log_phys_id: HashMap<ExprId, (i32, bool)>,
 
-    // --
-    // TODO: Below this: Stuff we need to move into the memotable
-    // Storing this stuff defeats the purpose of the ORM.
-    // --
+    // TODO: Instead of wrapping usize in all of our data structures, consider picking a fixed-size integer type.
+    expr_group_id_counter: usize,
 
     // Predicate stuff.
     pred_id_to_pred_node: HashMap<PredId, nodes::ArcPredNode<T>>,
     pred_node_to_pred_id: HashMap<nodes::ArcPredNode<T>, PredId>,
-    // TODO: Instead of wrapping usize in all of our data structures, consider picking a fixed-size integer type.
-    expr_group_id_counter: usize,
 
     // We update all group IDs in the memo table upon group merging, but
     // there might be edge cases that some tasks still hold the old group ID.
@@ -49,19 +45,21 @@ impl<T: NodeType> PersistentMemo<T> {
     pub fn new(database_url: Option<&str>) -> StorageResult<Self> {
         Ok(PersistentMemo {
             storage: future::block_on(MemoBackendManager::new(database_url))?,
-            physical_expressions: HashSet::new(),
             pred_id_to_pred_node: HashMap::new(),
             pred_node_to_pred_id: HashMap::new(),
             expr_group_id_counter: 0,
             merged_group_mapping: HashMap::new(),
             dup_expr_mapping: HashMap::new(),
+            log_id_to_expr_id: HashMap::new(),
+            phys_id_to_expr_id: HashMap::new(),
+            expr_id_to_log_phys_id: HashMap::new(),
         })
     }
 
-    fn next_pred_id(&mut self) -> PredId {
+    fn next_id(&mut self) -> usize {
         let id = self.expr_group_id_counter;
         self.expr_group_id_counter += 1;
-        PredId(id)
+        id
     }
 
     fn reduce_group(&self, group_id: GroupId) -> GroupId {
@@ -98,8 +96,12 @@ impl<T: NodeType> PersistentMemo<T> {
         let is_logical = plan_node.typ.is_logical();
 
         // If expression is already stored
-        if let Some((group_id, expr_id)) =
-            future::block_on(self.storage.lookup_expr(typ_id, &children_group_ids)).unwrap()
+        if let Some((group_id, expr_id)) = future::block_on(self.storage.lookup_expr(
+            typ_id,
+            is_logical,
+            &children_group_ids,
+        ))
+        .unwrap()
         {
             if let Some(add_to_group_id) = add_to_group_id {
                 let add_to_group_id = self.reduce_group(add_to_group_id);
@@ -115,15 +117,95 @@ impl<T: NodeType> PersistentMemo<T> {
 
         let res = future::block_on(self.storage.insert_expr(
             typ_id,
+            is_logical,
             &children_group_ids,
             add_to_group_id.map(|x| x.0.try_into().unwrap()),
         ))
         .unwrap();
 
-        Ok((
-            GroupId(res.0.try_into().unwrap()),
-            ExprId(res.1.try_into().unwrap()),
-        ))
+        let predicate_ids = plan_node
+            .predicates
+            .iter()
+            .map(|x| self.add_new_pred(x.clone()).0.try_into().unwrap())
+            .collect::<Vec<i32>>();
+
+        let unified_expr_id: ExprId = if is_logical {
+            if let None = self.log_id_to_expr_id.get(&res.1) {
+                let expr_id = ExprId(self.next_id());
+                self.log_id_to_expr_id.insert(res.1, expr_id);
+                future::block_on(
+                    self.storage
+                        .link_logical_expr_to_predicates(res.1, &predicate_ids),
+                )
+                .unwrap();
+            }
+            self.log_id_to_expr_id.get(&res.1).unwrap().clone()
+        } else {
+            if let None = self.phys_id_to_expr_id.get(&res.1) {
+                future::block_on(
+                    self.storage
+                        .link_physical_expr_to_predicates(res.1, &predicate_ids),
+                )
+                .unwrap();
+                let expr_id = ExprId(self.next_id());
+                self.phys_id_to_expr_id.insert(res.1, expr_id);
+            }
+            self.phys_id_to_expr_id.get(&res.1).unwrap().clone()
+        };
+
+        Ok((GroupId(res.0.try_into().unwrap()), unified_expr_id))
+    }
+
+    fn add_new_pred_inner(&mut self, pred_node: nodes::ArcPredNode<T>) -> PredId {
+        let mut children_pred_ids: Vec<i32> = Vec::with_capacity(pred_node.children.len());
+        for child in pred_node.children.iter() {
+            let id = self.add_new_pred_inner(child.clone());
+            children_pred_ids.push(id.0.try_into().unwrap());
+        }
+
+        let typ_id = pred_node.typ.clone().into().0 as i32;
+        let data = serde_json::to_value(backend_manager::PredicateData {
+            children_ids: children_pred_ids.clone(),
+            data: pred_node.data.clone(),
+        })
+        .unwrap();
+
+        let pred_id = if let Some(id) =
+            future::block_on(self.storage.lookup_pred(typ_id, data.clone())).unwrap()
+        {
+            id
+        } else {
+            future::block_on(self.storage.insert_pred(typ_id, data)).unwrap()
+        };
+
+        future::block_on(
+            self.storage
+                .insert_pred_children(pred_id, &children_pred_ids),
+        )
+        .unwrap();
+
+        PredId(pred_id.try_into().unwrap())
+    }
+
+    fn get_pred_inner(&self, pred_id: i32) -> nodes::ArcPredNode<T> {
+        let pred = future::block_on(self.storage.get_pred(pred_id))
+            .unwrap()
+            .expect("pred should exist");
+
+        let Ok(typ) = T::PredType::try_from(SerializedPredTag(pred.variant as u16)) else {
+            panic!("invalid node type");
+        };
+        let PredicateData { children_ids, data } = serde_json::from_value(pred.data).unwrap();
+        let mut children = Vec::with_capacity(children_ids.len());
+        for child_id in children_ids {
+            children.push(self.get_pred_inner(child_id));
+        }
+
+        Arc::new(PredNode {
+            typ,
+            children,
+            data,
+        })
     }
 }
 
@@ -160,18 +242,17 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
     }
 
     fn add_new_pred(&mut self, pred_node: nodes::ArcPredNode<T>) -> PredId {
-        let pred_id = self.next_pred_id();
-        if let Some(id) = self.pred_node_to_pred_id.get(&pred_node) {
-            return *id;
-        }
-        self.pred_node_to_pred_id.insert(pred_node.clone(), pred_id);
-        self.pred_id_to_pred_node.insert(pred_id, pred_node);
+        let pred_id = self.add_new_pred_inner(pred_node);
         pred_id
     }
 
     fn get_group_id(&self, expr_id: ExprId) -> GroupId {
+        let (expr_id, is_logical) = self
+            .expr_id_to_log_phys_id
+            .get(&expr_id)
+            .expect("expr id was not found in expr->logphys mapping");
         GroupId(
-            future::block_on(self.storage.get_expr_by_id(expr_id.0.try_into().unwrap()))
+            future::block_on(self.storage.get_expr_by_id(*expr_id, *is_logical))
                 .unwrap()
                 .unwrap()
                 .0
@@ -185,10 +266,13 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
             expr_id = *new_expr_id;
         }
 
-        let expr_id = expr_id.0.try_into().unwrap();
+        let (expr_id, is_logical) = self
+            .expr_id_to_log_phys_id
+            .get(&expr_id)
+            .expect("expr id was not found in expr->logphys mapping");
 
         let (_, typ_id, children_group_ids) =
-            future::block_on(self.storage.get_expr_by_id(expr_id))
+            future::block_on(self.storage.get_expr_by_id(*expr_id, *is_logical))
                 .unwrap()
                 .expect("expr not found in database");
 
@@ -196,13 +280,20 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
             panic!("invalid node type");
         };
 
+        // TODO: The order of predicates are not preserved.
+        let predicates = future::block_on(self.storage.get_pred_ids_in_expr(*expr_id, *is_logical))
+            .unwrap()
+            .iter()
+            .map(|&id| PredId(id.try_into().unwrap()))
+            .collect();
+
         MemoPlanNode {
             typ: typ,
             children: children_group_ids
                 .iter()
                 .map(|group_id| GroupId((*group_id).try_into().unwrap()))
                 .collect(),
-            predicates: vec![], // TODO
+            predicates,
         }
         .into()
     }
@@ -234,7 +325,8 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
     }
 
     fn get_pred(&self, pred_id: PredId) -> nodes::ArcPredNode<T> {
-        self.pred_id_to_pred_node[&pred_id].clone()
+        let pred_id = pred_id.0.try_into().unwrap();
+        self.get_pred_inner(pred_id)
     }
 
     fn update_group_info(&mut self, group_id: GroupId, group_info: cascades::GroupInfo) {
