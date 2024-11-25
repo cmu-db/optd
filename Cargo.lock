@@ -3474,6 +3474,7 @@ dependencies = [
  "optd-core",
  "optd-persistent",
  "sea-orm",
+ "serde",
  "serde_json",
 ]
 

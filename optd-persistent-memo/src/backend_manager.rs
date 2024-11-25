@@ -21,6 +21,12 @@ pub struct BackendGroupInfo {
     pub winner: Option<BackendWinnerInfo>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct PredicateData {
+    pub children_ids: Vec<i32>,
+    pub data: Option<optd_core::nodes::Value>,
+}
+
 // TODO: Use the junction table for children instead of data field!
 // TODO: Physical version of everything :/
 pub struct MemoBackendManager {
@@ -305,6 +311,23 @@ impl MemoBackendManager {
         Ok(())
     }
 
+    pub async fn get_pred_children(&self, id: i32) -> StorageResult<Vec<Option<predicate::Model>>> {
+        let ids = predicate_children::Entity::find()
+            .filter(predicate_children::Column::ParentId.eq(id))
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|x| x.child_id)
+            .collect::<Vec<_>>();
+
+        let mut children = Vec::with_capacity(ids.len());
+        for id in ids {
+            let pred = self.get_pred(id).await?;
+            children.push(pred);
+        }
+        Ok(children)
+    }
+
     pub async fn link_logical_expr_to_predicates(
         &self,
         id: i32,
@@ -339,5 +362,32 @@ impl MemoBackendManager {
             .exec(&self.db)
             .await?;
         Ok(())
+    }
+
+    pub async fn get_pred_ids_in_expr(
+        &self,
+        expr_id: i32,
+        is_logical: bool,
+    ) -> StorageResult<Vec<i32>> {
+        if is_logical {
+            let preds = predicate_logical_expression_junction::Entity::find()
+                .filter(predicate_logical_expression_junction::Column::LogicalExprId.eq(expr_id))
+                .all(&self.db)
+                .await?
+                .iter()
+                .map(|x| x.predicate_id)
+                .collect();
+            Ok(preds)
+        } else {
+            // The order of pred is troublesome (add index to each junction entry?).
+            let preds = predicate_physical_expression_junction::Entity::find()
+                .filter(predicate_physical_expression_junction::Column::PhysicalExprId.eq(expr_id))
+                .all(&self.db)
+                .await?
+                .iter()
+                .map(|x| x.predicate_id)
+                .collect();
+            Ok(preds)
+        }
     }
 }
