@@ -123,14 +123,30 @@ impl<T: NodeType> PersistentMemo<T> {
         ))
         .unwrap();
 
+        let predicate_ids = plan_node
+            .predicates
+            .iter()
+            .map(|x| self.add_new_pred(x.clone()).0.try_into().unwrap())
+            .collect::<Vec<i32>>();
+
         let unified_expr_id: ExprId = if is_logical {
             if let None = self.log_id_to_expr_id.get(&res.1) {
                 let expr_id = ExprId(self.next_id());
                 self.log_id_to_expr_id.insert(res.1, expr_id);
+                future::block_on(
+                    self.storage
+                        .link_logical_expr_to_predicates(res.1, &predicate_ids),
+                )
+                .unwrap();
             }
             self.log_id_to_expr_id.get(&res.1).unwrap().clone()
         } else {
             if let None = self.phys_id_to_expr_id.get(&res.1) {
+                future::block_on(
+                    self.storage
+                        .link_physical_expr_to_predicates(res.1, &predicate_ids),
+                )
+                .unwrap();
                 let expr_id = ExprId(self.next_id());
                 self.phys_id_to_expr_id.insert(res.1, expr_id);
             }
@@ -138,6 +154,33 @@ impl<T: NodeType> PersistentMemo<T> {
         };
 
         Ok((GroupId(res.0.try_into().unwrap()), unified_expr_id))
+    }
+
+    fn add_new_pred_inner(&mut self, pred_node: nodes::ArcPredNode<T>) -> PredId {
+        let mut children_pred_ids: Vec<i32> = Vec::with_capacity(pred_node.children.len());
+        for child in pred_node.children.iter() {
+            let id = self.add_new_pred_inner(child.clone());
+            children_pred_ids.push(id.0.try_into().unwrap());
+        }
+
+        let typ_id = pred_node.typ.clone().into().0 as i32;
+        let data = serde_json::to_value(pred_node.data.clone()).unwrap();
+
+        let pred_id = if let Some(id) =
+            future::block_on(self.storage.lookup_pred(typ_id, data.clone())).unwrap()
+        {
+            id
+        } else {
+            future::block_on(self.storage.insert_pred(typ_id, data)).unwrap()
+        };
+
+        future::block_on(
+            self.storage
+                .insert_pred_children(pred_id, &children_pred_ids),
+        )
+        .unwrap();
+
+        PredId(pred_id.try_into().unwrap())
     }
 }
 
@@ -174,12 +217,7 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
     }
 
     fn add_new_pred(&mut self, pred_node: nodes::ArcPredNode<T>) -> PredId {
-        let pred_id = PredId(self.next_id().try_into().unwrap());
-        if let Some(id) = self.pred_node_to_pred_id.get(&pred_node) {
-            return *id;
-        }
-        self.pred_node_to_pred_id.insert(pred_node.clone(), pred_id);
-        self.pred_id_to_pred_node.insert(pred_id, pred_node);
+        let pred_id = self.add_new_pred_inner(pred_node);
         pred_id
     }
 
