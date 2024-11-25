@@ -1,6 +1,6 @@
 mod backend_manager;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use backend_manager::{MemoBackendManager, PredicateData};
 use futures_lite::future;
@@ -15,7 +15,11 @@ use optd_persistent::{self, entities::predicate, StorageResult};
 
 /// A memo table implementation based on the `optd-persistent` crate storage.
 pub struct PersistentMemo<T: NodeType> {
+    /// Struct that allows access the ORM
     storage: MemoBackendManager,
+
+    /// Field that allows us to conveniently tie the PersistentMemo to NodeType
+    _p: PhantomData<T>,
 
     // TODO: This is an in-memory solution for mapping logical/physical expression IDs to
     // the actual expression ID. Needs to be redesigned for persistence.
@@ -25,10 +29,6 @@ pub struct PersistentMemo<T: NodeType> {
 
     // TODO: Instead of wrapping usize in all of our data structures, consider picking a fixed-size integer type.
     expr_group_id_counter: usize,
-
-    // Predicate stuff.
-    pred_id_to_pred_node: HashMap<PredId, nodes::ArcPredNode<T>>,
-    pred_node_to_pred_id: HashMap<nodes::ArcPredNode<T>, PredId>,
 
     // We update all group IDs in the memo table upon group merging, but
     // there might be edge cases that some tasks still hold the old group ID.
@@ -45,8 +45,7 @@ impl<T: NodeType> PersistentMemo<T> {
     pub fn new(database_url: Option<&str>) -> StorageResult<Self> {
         Ok(PersistentMemo {
             storage: future::block_on(MemoBackendManager::new(database_url))?,
-            pred_id_to_pred_node: HashMap::new(),
-            pred_node_to_pred_id: HashMap::new(),
+            _p: PhantomData,
             expr_group_id_counter: 0,
             merged_group_mapping: HashMap::new(),
             dup_expr_mapping: HashMap::new(),
