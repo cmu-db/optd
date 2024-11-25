@@ -18,7 +18,7 @@ pub struct PersistentMemo<T: NodeType> {
     /// Struct that allows access the ORM
     storage: MemoBackendManager,
 
-    /// Field that allows us to conveniently tie the PersistentMemo to NodeType
+    /// Allows us to conveniently tie the PersistentMemo to NodeType
     _p: PhantomData<T>,
 
     // TODO: This is an in-memory solution for mapping logical/physical expression IDs to
