@@ -1,11 +1,13 @@
 mod backend_manager;
 
+use core::panic;
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
-use backend_manager::{MemoBackendManager, PredicateData};
+use backend_manager::{BackendWinnerInfo, MemoBackendManager, PredicateData};
 use futures_lite::future;
 use optd_core::{
-    cascades::{self, ExprId, GroupId, GroupInfo, Memo, MemoPlanNode, PredId},
+    cascades::{self, ExprId, GroupId, GroupInfo, Memo, MemoPlanNode, PredId, WinnerInfo},
+    cost::Statistics,
     nodes::{
         self, ArcPlanNode, NodeType, PlanNodeOrGroup, PredNode, SerializedNodeTag,
         SerializedPredTag,
@@ -316,7 +318,17 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
                 .map(|expr_id| ExprId((*expr_id).try_into().unwrap()))
                 .collect(),
             info: GroupInfo {
-                winner: cascades::Winner::Unknown, // TODO
+                winner: match orm_group.winner {
+                    Some(winner) => cascades::Winner::Full(WinnerInfo {
+                        expr_id: ExprId(self.phys_id_to_expr_id[&winner.physical_expr_id].0),
+                        total_weighted_cost: winner.total_weighted_cost,
+                        operation_weighted_cost: winner.operation_weighted_cost,
+                        total_cost: winner.total_cost,
+                        operation_cost: winner.operation_cost,
+                        statistics: todo!(),
+                    }),
+                    None => cascades::Winner::Unknown,
+                },
             },
             properties: Arc::new([]), // TODO
         };
@@ -329,8 +341,33 @@ impl<T: NodeType> Memo<T> for PersistentMemo<T> {
     }
 
     fn update_group_info(&mut self, group_id: GroupId, group_info: cascades::GroupInfo) {
-        // TODO: This might require a bigger redesign
-        todo!()
+        // TODO: What of in_progress, is_optimized
+
+        match group_info.winner {
+            cascades::Winner::Unknown => {}
+            cascades::Winner::Impossible => {
+                panic!("Impossible winner not supported in persistent memo yet");
+            }
+            cascades::Winner::Full(mut info) => {
+                let phys_expr_id = self
+                    .expr_id_to_log_phys_id
+                    .get(&info.expr_id)
+                    .expect("winner expr id not found in expr->logphys mapping")
+                    .0;
+
+                let backend_info = BackendWinnerInfo {
+                    physical_expr_id: phys_expr_id,
+                    total_weighted_cost: info.total_weighted_cost,
+                    operation_weighted_cost: info.operation_weighted_cost,
+                    total_cost: info.total_cost,
+                    operation_cost: info.operation_cost,
+                    // TODO: Statistics
+                };
+
+                let group_id = group_id.0.try_into().unwrap();
+                future::block_on(self.storage.update_winner(group_id, Some(backend_info))).unwrap();
+            }
+        }
     }
 
     fn estimated_plan_space(&self) -> usize {

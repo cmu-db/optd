@@ -3,6 +3,8 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
+use serde::{Deserialize, Serialize};
+
 use crate::cascades::{CascadesOptimizer, Memo, RelNodeContext};
 use crate::nodes::{ArcPredNode, NodeType};
 
@@ -12,7 +14,7 @@ pub struct Statistics(pub Box<dyn std::any::Any + Send + Sync + 'static>);
 /// The cost of an operation. The cost is represented as a vector of double values.
 /// For example, it can be represented as `[compute_cost, io_cost]`.
 /// A lower value means a better cost.
-#[derive(Default, Clone, Debug, PartialOrd, PartialEq)]
+#[derive(Default, Clone, Debug, PartialOrd, PartialEq, Serialize, Deserialize)]
 pub struct Cost(pub Vec<f64>);
 
 pub trait CostModel<T: NodeType, M: Memo<T>>: 'static + Send + Sync {

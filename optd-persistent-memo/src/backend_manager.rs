@@ -1,7 +1,8 @@
+use optd_core::{cascades::WinnerInfo, cost::Cost};
 use optd_persistent::{
     entities::{
         cascades_group, group_winner, logical_children, logical_expression, physical_expression,
-        predicate, predicate_children, predicate_logical_expression_junction,
+        plan_cost, predicate, predicate_children, predicate_logical_expression_junction,
         predicate_physical_expression_junction,
     },
     StorageResult,
@@ -10,15 +11,21 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, PaginatorTrait,
     QueryFilter, Set,
 };
-
-pub struct BackendWinnerInfo {
-    pub expr_id: i32,
-    pub cost: f64,
-}
+use serde::{Deserialize, Serialize};
 
 pub struct BackendGroupInfo {
     pub group_exprs: Vec<i32>,
     pub winner: Option<BackendWinnerInfo>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct BackendWinnerInfo {
+    pub physical_expr_id: i32,
+    pub total_weighted_cost: f64,
+    pub operation_weighted_cost: f64,
+    pub total_cost: Cost,
+    pub operation_cost: Cost,
+    // TODO: Statistics
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -40,13 +47,20 @@ impl MemoBackendManager {
         })
     }
 
-    async fn get_winner(&self, winner_id: i32) -> StorageResult<Option<group_winner::Model>> {
-        let winner = group_winner::Entity::find()
-            .filter(group_winner::Column::Id.eq(winner_id))
-            .one(&self.db)
-            .await?;
+    async fn get_winner(
+        &self,
+        winner_id: Option<i32>,
+    ) -> StorageResult<Option<group_winner::Model>> {
+        if let Some(winner_id) = winner_id {
+            let winner = group_winner::Entity::find()
+                .filter(group_winner::Column::Id.eq(winner_id))
+                .one(&self.db)
+                .await?;
 
-        Ok(winner)
+            Ok(Some(winner.unwrap()))
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn get_group(&self, group_id: i32) -> StorageResult<BackendGroupInfo> {
@@ -66,19 +80,59 @@ impl MemoBackendManager {
             .map(|child| child.logical_expression_id)
             .collect();
 
-        let winner = self.get_winner(group.latest_winner.unwrap()).await?;
+        let winner = self.get_winner(group.latest_winner).await?;
 
         Ok(BackendGroupInfo {
             group_exprs: children,
             winner: winner.map(|winner| BackendWinnerInfo {
-                expr_id: winner.physical_expression_id,
-                cost: 100.0, // TODO
+                physical_expr_id: winner.physical_expression_id,
+                total_weighted_cost: 0.0, // TODO: Cost is not saved
+                operation_weighted_cost: 0.0,
+                total_cost: Cost(vec![]),
+                operation_cost: Cost(vec![]),
             }),
         })
     }
 
-    pub async fn update_winner(&self) {
-        todo!()
+    pub async fn update_winner(
+        &self,
+        group_id: i32,
+        winner: Option<BackendWinnerInfo>,
+    ) -> StorageResult<()> {
+        // TODO: Do we need garbage collection?
+        let new_winner = if let Some(winner) = winner {
+            let cost = plan_cost::ActiveModel {
+                physical_expression_id: Set(winner.physical_expr_id),
+                ..Default::default()
+            }; // TODO: how can we store cost??
+
+            let cost_res = cost.insert(&self.db).await?;
+
+            let winner = group_winner::ActiveModel {
+                group_id: Set(group_id),
+                physical_expression_id: Set(winner.physical_expr_id),
+                cost_id: Set(cost_res.id),
+                ..Default::default()
+            };
+            let winner_res = winner.insert(&self.db).await?;
+
+            Some(winner_res.id)
+        } else {
+            None
+        };
+
+        // update
+        let mut group_res: cascades_group::ActiveModel = cascades_group::Entity::find()
+            .filter(cascades_group::Column::Id.eq(group_id))
+            .one(&self.db)
+            .await?
+            .unwrap()
+            .into();
+
+        group_res.latest_winner = Set(new_winner);
+        group_res.update(&self.db).await?;
+
+        return Ok(());
     }
 
     pub async fn get_expr_count(&self) -> StorageResult<u64> {

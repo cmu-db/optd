@@ -9,7 +9,9 @@ mod memo;
 mod optimizer;
 mod tasks;
 
-pub use memo::{ArcMemoPlanNode, Group, GroupInfo, Memo, MemoPlanNode, NaiveMemo, Winner};
+pub use memo::{
+    ArcMemoPlanNode, Group, GroupInfo, Memo, MemoPlanNode, NaiveMemo, Winner, WinnerInfo,
+};
 pub use optimizer::{
     CascadesOptimizer, ExprId, GroupId, OptimizerProperties, PredId, RelNodeContext,
 };

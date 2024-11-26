@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use tracing::trace;
 
 use super::optimizer::{ExprId, GroupId, PredId};
