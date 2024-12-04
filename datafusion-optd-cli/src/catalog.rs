@@ -15,31 +15,41 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use async_trait::async_trait;
-use datafusion::catalog::schema::SchemaProvider;
-use datafusion::catalog::{CatalogList, CatalogProvider};
-use datafusion::datasource::listing::{ListingTable, ListingTableConfig, ListingTableUrl};
-use datafusion::datasource::TableProvider;
-use datafusion::error::Result;
-use datafusion::execution::context::SessionState;
-use parking_lot::RwLock;
 use std::any::Any;
 use std::sync::{Arc, Weak};
 
-/// Wraps another catalog, automatically creating table providers
-/// for local files if needed
-pub struct DynamicFileCatalog {
-    inner: Arc<dyn CatalogList>,
+use crate::object_storage::{get_object_store, AwsOptions, GcpOptions};
+
+use datafusion::catalog::{CatalogProvider, CatalogProviderList, SchemaProvider};
+
+use datafusion::common::plan_datafusion_err;
+use datafusion::datasource::listing::ListingTableUrl;
+use datafusion::datasource::TableProvider;
+use datafusion::error::Result;
+use datafusion::execution::context::SessionState;
+use datafusion::execution::session_state::SessionStateBuilder;
+
+use async_trait::async_trait;
+use dirs::home_dir;
+use parking_lot::RwLock;
+
+/// Wraps another catalog, automatically register require object stores for the file locations
+#[derive(Debug)]
+pub struct DynamicObjectStoreCatalog {
+    inner: Arc<dyn CatalogProviderList>,
     state: Weak<RwLock<SessionState>>,
 }
 
-impl DynamicFileCatalog {
-    pub fn new(inner: Arc<dyn CatalogList>, state: Weak<RwLock<SessionState>>) -> Self {
+impl DynamicObjectStoreCatalog {
+    pub fn new(
+        inner: Arc<dyn CatalogProviderList>,
+        state: Weak<RwLock<SessionState>>,
+    ) -> Self {
         Self { inner, state }
     }
 }
 
-impl CatalogList for DynamicFileCatalog {
+impl CatalogProviderList for DynamicObjectStoreCatalog {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -58,25 +68,29 @@ impl CatalogList for DynamicFileCatalog {
 
     fn catalog(&self, name: &str) -> Option<Arc<dyn CatalogProvider>> {
         let state = self.state.clone();
-        self.inner
-            .catalog(name)
-            .map(|catalog| Arc::new(DynamicFileCatalogProvider::new(catalog, state)) as _)
+        self.inner.catalog(name).map(|catalog| {
+            Arc::new(DynamicObjectStoreCatalogProvider::new(catalog, state)) as _
+        })
     }
 }
 
 /// Wraps another catalog provider
-struct DynamicFileCatalogProvider {
+#[derive(Debug)]
+struct DynamicObjectStoreCatalogProvider {
     inner: Arc<dyn CatalogProvider>,
     state: Weak<RwLock<SessionState>>,
 }
 
-impl DynamicFileCatalogProvider {
-    pub fn new(inner: Arc<dyn CatalogProvider>, state: Weak<RwLock<SessionState>>) -> Self {
+impl DynamicObjectStoreCatalogProvider {
+    pub fn new(
+        inner: Arc<dyn CatalogProvider>,
+        state: Weak<RwLock<SessionState>>,
+    ) -> Self {
         Self { inner, state }
     }
 }
 
-impl CatalogProvider for DynamicFileCatalogProvider {
+impl CatalogProvider for DynamicObjectStoreCatalogProvider {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -87,9 +101,9 @@ impl CatalogProvider for DynamicFileCatalogProvider {
 
     fn schema(&self, name: &str) -> Option<Arc<dyn SchemaProvider>> {
         let state = self.state.clone();
-        self.inner
-            .schema(name)
-            .map(|schema| Arc::new(DynamicFileSchemaProvider::new(schema, state)) as _)
+        self.inner.schema(name).map(|schema| {
+            Arc::new(DynamicObjectStoreSchemaProvider::new(schema, state)) as _
+        })
     }
 
     fn register_schema(
@@ -101,20 +115,25 @@ impl CatalogProvider for DynamicFileCatalogProvider {
     }
 }
 
-/// Wraps another schema provider
-struct DynamicFileSchemaProvider {
+/// Wraps another schema provider. [DynamicObjectStoreSchemaProvider] is responsible for registering the required
+/// object stores for the file locations.
+#[derive(Debug)]
+struct DynamicObjectStoreSchemaProvider {
     inner: Arc<dyn SchemaProvider>,
     state: Weak<RwLock<SessionState>>,
 }
 
-impl DynamicFileSchemaProvider {
-    pub fn new(inner: Arc<dyn SchemaProvider>, state: Weak<RwLock<SessionState>>) -> Self {
+impl DynamicObjectStoreSchemaProvider {
+    pub fn new(
+        inner: Arc<dyn SchemaProvider>,
+        state: Weak<RwLock<SessionState>>,
+    ) -> Self {
         Self { inner, state }
     }
 }
 
 #[async_trait]
-impl SchemaProvider for DynamicFileSchemaProvider {
+impl SchemaProvider for DynamicObjectStoreSchemaProvider {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -131,20 +150,62 @@ impl SchemaProvider for DynamicFileSchemaProvider {
         self.inner.register_table(name, table)
     }
 
-    async fn table(&self, name: &str) -> Option<Arc<dyn TableProvider>> {
+    async fn table(&self, name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
         let inner_table = self.inner.table(name).await;
-        if inner_table.is_some() {
-            return inner_table;
+        if inner_table.is_ok() {
+            if let Some(inner_table) = inner_table? {
+                return Ok(Some(inner_table));
+            }
         }
 
         // if the inner schema provider didn't have a table by
         // that name, try to treat it as a listing table
-        let state = self.state.upgrade()?.read().clone();
-        let config = ListingTableConfig::new(ListingTableUrl::parse(name).ok()?)
-            .infer(&state)
-            .await
-            .ok()?;
-        Some(Arc::new(ListingTable::try_new(config).ok()?))
+        let mut state = self
+            .state
+            .upgrade()
+            .ok_or_else(|| plan_datafusion_err!("locking error"))?
+            .read()
+            .clone();
+        let mut builder = SessionStateBuilder::from(state.clone());
+        let optimized_name = substitute_tilde(name.to_owned());
+        let table_url = ListingTableUrl::parse(optimized_name.as_str())?;
+        let scheme = table_url.scheme();
+        let url = table_url.as_ref();
+
+        // If the store is already registered for this URL then `get_store`
+        // will return `Ok` which means we don't need to register it again. However,
+        // if `get_store` returns an `Err` then it means the corresponding store is
+        // not registered yet and we need to register it
+        match state.runtime_env().object_store_registry.get_store(url) {
+            Ok(_) => { /*Nothing to do here, store for this URL is already registered*/ }
+            Err(_) => {
+                // Register the store for this URL. Here we don't have access
+                // to any command options so the only choice is to use an empty collection
+                match scheme {
+                    "s3" | "oss" | "cos" => {
+                        if let Some(table_options) = builder.table_options() {
+                            table_options.extensions.insert(AwsOptions::default())
+                        }
+                    }
+                    "gs" | "gcs" => {
+                        if let Some(table_options) = builder.table_options() {
+                            table_options.extensions.insert(GcpOptions::default())
+                        }
+                    }
+                    _ => {}
+                };
+                state = builder.build();
+                let store = get_object_store(
+                    &state,
+                    table_url.scheme(),
+                    url,
+                    &state.default_table_options(),
+                )
+                .await?;
+                state.runtime_env().register_object_store(url, store);
+            }
+        }
+        self.inner.table(name).await
     }
 
     fn deregister_table(&self, name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
@@ -153,5 +214,161 @@ impl SchemaProvider for DynamicFileSchemaProvider {
 
     fn table_exist(&self, name: &str) -> bool {
         self.inner.table_exist(name)
+    }
+}
+
+pub fn substitute_tilde(cur: String) -> String {
+    if let Some(usr_dir_path) = home_dir() {
+        if let Some(usr_dir) = usr_dir_path.to_str() {
+            if cur.starts_with('~') && !usr_dir.is_empty() {
+                return cur.replacen('~', usr_dir, 1);
+            }
+        }
+    }
+    cur
+}
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    use datafusion::catalog::SchemaProvider;
+    use datafusion::prelude::SessionContext;
+
+    fn setup_context() -> (SessionContext, Arc<dyn SchemaProvider>) {
+        let ctx = SessionContext::new();
+        ctx.register_catalog_list(Arc::new(DynamicObjectStoreCatalog::new(
+            ctx.state().catalog_list().clone(),
+            ctx.state_weak_ref(),
+        )));
+
+        let provider = &DynamicObjectStoreCatalog::new(
+            ctx.state().catalog_list().clone(),
+            ctx.state_weak_ref(),
+        ) as &dyn CatalogProviderList;
+        let catalog = provider
+            .catalog(provider.catalog_names().first().unwrap())
+            .unwrap();
+        let schema = catalog
+            .schema(catalog.schema_names().first().unwrap())
+            .unwrap();
+        (ctx, schema)
+    }
+
+    #[tokio::test]
+    async fn query_http_location_test() -> Result<()> {
+        // This is a unit test so not expecting a connection or a file to be
+        // available
+        let domain = "example.com";
+        let location = format!("http://{domain}/file.parquet");
+
+        let (ctx, schema) = setup_context();
+
+        // That's a non registered table so expecting None here
+        let table = schema.table(&location).await?;
+        assert!(table.is_none());
+
+        // It should still create an object store for the location in the SessionState
+        let store = ctx
+            .runtime_env()
+            .object_store(ListingTableUrl::parse(location)?)?;
+
+        assert_eq!(format!("{store}"), "HttpStore");
+
+        // The store must be configured for this domain
+        let expected_domain = format!("Domain(\"{domain}\")");
+        assert!(format!("{store:?}").contains(&expected_domain));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn query_s3_location_test() -> Result<()> {
+        let bucket = "examples3bucket";
+        let location = format!("s3://{bucket}/file.parquet");
+
+        let (ctx, schema) = setup_context();
+
+        let table = schema.table(&location).await?;
+        assert!(table.is_none());
+
+        let store = ctx
+            .runtime_env()
+            .object_store(ListingTableUrl::parse(location)?)?;
+        assert_eq!(format!("{store}"), format!("AmazonS3({bucket})"));
+
+        // The store must be configured for this domain
+        let expected_bucket = format!("bucket: \"{bucket}\"");
+        assert!(format!("{store:?}").contains(&expected_bucket));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn query_gs_location_test() -> Result<()> {
+        let bucket = "examplegsbucket";
+        let location = format!("gs://{bucket}/file.parquet");
+
+        let (ctx, schema) = setup_context();
+
+        let table = schema.table(&location).await?;
+        assert!(table.is_none());
+
+        let store = ctx
+            .runtime_env()
+            .object_store(ListingTableUrl::parse(location)?)?;
+        assert_eq!(format!("{store}"), format!("GoogleCloudStorage({bucket})"));
+
+        // The store must be configured for this domain
+        let expected_bucket = format!("bucket_name_encoded: \"{bucket}\"");
+        assert!(format!("{store:?}").contains(&expected_bucket));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn query_invalid_location_test() {
+        let location = "ts://file.parquet";
+        let (_ctx, schema) = setup_context();
+
+        assert!(schema.table(location).await.is_err());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn test_substitute_tilde() {
+        use std::env;
+        use std::path::MAIN_SEPARATOR;
+        let original_home = home_dir();
+        let test_home_path = if cfg!(windows) {
+            "C:\\Users\\user"
+        } else {
+            "/home/user"
+        };
+        env::set_var(
+            if cfg!(windows) { "USERPROFILE" } else { "HOME" },
+            test_home_path,
+        );
+        let input = "~/Code/datafusion/benchmarks/data/tpch_sf1/part/part-0.parquet";
+        let expected = format!(
+            "{}{}Code{}datafusion{}benchmarks{}data{}tpch_sf1{}part{}part-0.parquet",
+            test_home_path,
+            MAIN_SEPARATOR,
+            MAIN_SEPARATOR,
+            MAIN_SEPARATOR,
+            MAIN_SEPARATOR,
+            MAIN_SEPARATOR,
+            MAIN_SEPARATOR,
+            MAIN_SEPARATOR
+        );
+        let actual = substitute_tilde(input.to_string());
+        assert_eq!(actual, expected);
+        match original_home {
+            Some(home_path) => env::set_var(
+                if cfg!(windows) { "USERPROFILE" } else { "HOME" },
+                home_path.to_str().unwrap(),
+            ),
+            None => env::remove_var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }),
+        }
     }
 }
