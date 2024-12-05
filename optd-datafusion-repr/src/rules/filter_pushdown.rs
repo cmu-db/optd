@@ -346,7 +346,7 @@ fn apply_filter_agg_transpose(
         let mut group_by_cols_only = true;
         for child in children {
             if let Some(col_ref) = ColumnRefPred::from_pred_node(child.clone()) {
-                if !group_cols.contains(&col_ref.index()) {
+                if col_ref.index() >= group_cols.len() {
                     group_by_cols_only = false;
                     break;
                 }
