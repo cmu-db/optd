@@ -1,7 +1,7 @@
 include _tpch_tables.slt.part
 
 query
-SELECT
+select
     l_returnflag,
     l_linestatus,
     sum(l_quantity) as sum_qty,
@@ -12,16 +12,18 @@ SELECT
     avg(l_extendedprice) as avg_price,
     avg(l_discount) as avg_disc,
     count(*) as count_order
-FROM
+from
     lineitem
-WHERE
-    l_shipdate <= date '1998-12-01' - interval '90' day
-GROUP BY
-    l_returnflag, l_linestatus
-ORDER BY
-    l_returnflag, l_linestatus;
+where
+    l_shipdate <= date '1998-12-01' - interval '71' day
+group by
+    l_returnflag,
+    l_linestatus
+order by
+    l_returnflag,
+    l_linestatus;
 ----
 A F 37474.00 37569624.64 35676192.0970 37101416.222424 25.354533 25419.231826 0.050866 1478
 N F 1041.00 1041301.07 999060.8980 1036450.802280 27.394736 27402.659736 0.042894 38
-N O 75168.00 75384955.37 71653166.3034 74498798.133073 25.558653 25632.422771 0.049697 2941
+N O 75823.00 76040604.76 72270477.1588 75140545.284463 25.564059 25637.425745 0.049824 2966
 R F 36511.00 36570841.24 34738472.8758 36169060.112193 25.059025 25100.096938 0.050027 1457

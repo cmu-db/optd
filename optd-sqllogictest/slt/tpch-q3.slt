@@ -1,36 +1,35 @@
 include _tpch_tables.slt.part
 
 query
-SELECT
+select
     l_orderkey,
-    SUM(l_extendedprice * (1 - l_discount)) AS revenue,
+    sum(l_extendedprice * (1 - l_discount)) as revenue,
     o_orderdate,
-    o_shippriority 
-FROM
+    o_shippriority
+from
     customer,
     orders,
-    lineitem 
-WHERE
-    c_mktsegment = 'FURNITURE' 
-    AND c_custkey = o_custkey 
-    AND l_orderkey = o_orderkey 
-    AND o_orderdate < DATE '1995-03-29' 
-    AND l_shipdate > DATE '1995-03-29' 
-GROUP BY
+    lineitem
+where
+    c_mktsegment = 'BUILDING'
+    and c_custkey = o_custkey
+    and l_orderkey = o_orderkey
+    and o_orderdate < date '1995-03-15'
+    and l_shipdate > date '1995-03-15'
+group by
     l_orderkey,
     o_orderdate,
-    o_shippriority 
-ORDER BY
-    revenue DESC,
-    o_orderdate LIMIT 10;
+    o_shippriority
+order by
+    revenue desc,
+    o_orderdate
+limit 10;
 ----
-3588 199498.4104 1995-03-19 0
-4327 123939.6659 1995-03-16 0
-5347 118914.1310 1995-02-22 0
-450 111508.1186 1995-03-05 0
-1767 109576.4152 1995-03-14 0
-386 86258.3745 1995-01-25 0
-897 54854.6063 1995-03-20 0
-2982 54150.4719 1995-03-19 0
-3526 51178.7043 1995-03-16 0
-2277 42401.7338 1995-01-02 0
+1637       164224.9253 1995-02-08  0
+5191       49378.3094  1994-12-11  0
+742        43728.0480  1994-12-23  0
+3492       43716.0724  1994-11-24  0
+2883       36666.9612  1995-01-23  0
+998        11785.5486  1994-11-26  0
+3430       4726.6775   1994-12-12  0
+4423       3055.9365   1995-02-17  0
