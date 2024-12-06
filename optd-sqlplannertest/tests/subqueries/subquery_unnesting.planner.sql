@@ -44,7 +44,7 @@ LogicalProjection { exprs: [ #0, #1 ] }
                 └── LogicalAgg
                     ├── exprs:Agg(Sum)
                     │   └── [ Cast { cast_to: Int64, child: #2 } ]
-                    ├── groups: [ #1 ]
+                    ├── groups: [ #0 ]
                     └── LogicalFilter
                         ├── cond:Eq
                         │   ├── #1
@@ -64,7 +64,7 @@ PhysicalProjection { exprs: [ #2, #3 ], cost: {compute=18005,io=3000}, stat: {ro
     │   └── PhysicalAgg
     │       ├── aggrs:Agg(Sum)
     │       │   └── [ Cast { cast_to: Int64, child: #2 } ]
-    │       ├── groups: [ #1 ]
+    │       ├── groups: [ #0 ]
     │       ├── cost: {compute=14000,io=2000}
     │       ├── stat: {row_cnt=1000}
     │       └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ], cost: {compute=6000,io=2000}, stat: {row_cnt=1000} }
@@ -118,7 +118,7 @@ LogicalProjection { exprs: [ #0, #1 ] }
                 └── LogicalAgg
                     ├── exprs:Agg(Sum)
                     │   └── [ Cast { cast_to: Int64, child: #2 } ]
-                    ├── groups: [ #1 ]
+                    ├── groups: [ #0 ]
                     └── LogicalProjection { exprs: [ #0, #1, #2, #3, #4 ] }
                         └── LogicalFilter
                             ├── cond:And
@@ -145,7 +145,7 @@ PhysicalProjection { exprs: [ #2, #3 ], cost: {compute=21005,io=4000}, stat: {ro
     │   └── PhysicalAgg
     │       ├── aggrs:Agg(Sum)
     │       │   └── [ Cast { cast_to: Int64, child: #2 } ]
-    │       ├── groups: [ #1 ]
+    │       ├── groups: [ #0 ]
     │       ├── cost: {compute=17000,io=3000}
     │       ├── stat: {row_cnt=1000}
     │       └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ], cost: {compute=9000,io=3000}, stat: {row_cnt=1000} }

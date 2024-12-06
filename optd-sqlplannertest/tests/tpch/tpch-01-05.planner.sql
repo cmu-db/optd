@@ -358,7 +358,7 @@ PhysicalLimit { skip: 0(u64), fetch: 100(u64) }
             └── PhysicalAgg
                 ├── aggrs:Agg(Min)
                 │   └── [ #4 ]
-                ├── groups: [ #1 ]
+                ├── groups: [ #0 ]
                 └── PhysicalFilter
                     ├── cond:And
                     │   ├── Eq
