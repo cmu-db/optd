@@ -116,12 +116,12 @@ LogicalProjection { exprs: [ #0, #1 ] }
                 └── LogicalAgg
                     ├── exprs:Agg(Sum)
                     │   └── [ #2 ]
-                    ├── groups: [ #1 ]
+                    ├── groups: [ #0 ]
                     └── LogicalProjection { exprs: [ #0, #1, #2 ] }
                         └── LogicalAgg
                             ├── exprs:Agg(Sum)
                             │   └── [ Cast { cast_to: Int64, child: #2 } ]
-                            ├── groups: [ #1, #1 ]
+                            ├── groups: [ #0, #1 ]
                             └── LogicalFilter
                                 ├── cond:Eq
                                 │   ├── #1
@@ -141,13 +141,13 @@ PhysicalProjection { exprs: [ #2, #3 ], cost: {compute=25005,io=3000}, stat: {ro
     │   └── PhysicalAgg
     │       ├── aggrs:Agg(Sum)
     │       │   └── [ #2 ]
-    │       ├── groups: [ #1 ]
+    │       ├── groups: [ #0 ]
     │       ├── cost: {compute=21000,io=2000}
     │       ├── stat: {row_cnt=1000}
     │       └── PhysicalAgg
     │           ├── aggrs:Agg(Sum)
     │           │   └── [ Cast { cast_to: Int64, child: #2 } ]
-    │           ├── groups: [ #1, #1 ]
+    │           ├── groups: [ #0, #1 ]
     │           ├── cost: {compute=15000,io=2000}
     │           ├── stat: {row_cnt=1000}
     │           └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ], cost: {compute=6000,io=2000}, stat: {row_cnt=1000} }
@@ -186,7 +186,7 @@ LogicalProjection { exprs: [ #0, #2 ] }
             └── LogicalAgg
                 ├── exprs:Agg(Sum)
                 │   └── [ Cast { cast_to: Int64, child: #2 } ]
-                ├── groups: [ #1 ]
+                ├── groups: [ #0 ]
                 └── LogicalFilter
                     ├── cond:Eq
                     │   ├── #1
@@ -201,7 +201,7 @@ PhysicalProjection { exprs: [ #0, #3 ], cost: {compute=20000,io=3000}, stat: {ro
     └── PhysicalAgg
         ├── aggrs:Agg(Sum)
         │   └── [ Cast { cast_to: Int64, child: #2 } ]
-        ├── groups: [ #1 ]
+        ├── groups: [ #0 ]
         ├── cost: {compute=14000,io=2000}
         ├── stat: {row_cnt=1000}
         └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ], cost: {compute=6000,io=2000}, stat: {row_cnt=1000} }

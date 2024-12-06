@@ -43,8 +43,8 @@ LogicalProjection
         │   └── Lt
         │       ├── Cast { cast_to: Decimal128(30, 15), child: #4 }
         │       └── #25
-        └── DependentJoin { join_type: Inner, cond: true, extern_cols: [ Extern(#16) ] }
-            ├── LogicalJoin { join_type: Inner, cond: true }
+        └── RawDependentJoin { join_type: Cross, cond: true, extern_cols: [ Extern(#16) ] }
+            ├── LogicalJoin { join_type: Cross, cond: true }
             │   ├── LogicalScan { table: lineitem }
             │   └── LogicalScan { table: part }
             └── LogicalProjection
@@ -70,37 +70,49 @@ PhysicalProjection
 │       │   ├── Cast { cast_to: Float64, child: #0 }
 │       │   └── 7(float)
 │       └── 16(i64)
-└── PhysicalGather
-    └── PhysicalStreamAgg
-        ├── aggrs:Agg(Sum)
-        │   └── [ #5 ]
-        ├── groups: []
-        └── PhysicalHashShuffle { columns: [] }
-            └── PhysicalFilter
-                ├── cond:And
-                │   └── Lt
-                │       ├── Cast { cast_to: Decimal128(30, 15), child: #4 }
-                │       └── #25
-                └── PhysicalHashAgg
+└── PhysicalAgg
+    ├── aggrs:Agg(Sum)
+    │   └── [ #5 ]
+    ├── groups: []
+    └── PhysicalProjection { exprs: [ #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23, #24, #0, #1, #2, #3, #4, #5, #6, #7, #8, #26 ] }
+        └── PhysicalNestedLoopJoin
+            ├── join_type: Inner
+            ├── cond:And
+            │   ├── Lt
+            │   │   ├── Cast { cast_to: Decimal128(30, 15), child: #13 }
+            │   │   └── #26
+            │   └── Eq
+            │       ├── #0
+            │       └── #25
+            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
+            │   ├── PhysicalFilter
+            │   │   ├── cond:And
+            │   │   │   ├── Eq
+            │   │   │   │   ├── #3
+            │   │   │   │   └── "Brand#13"
+            │   │   │   └── Eq
+            │   │   │       ├── #6
+            │   │   │       └── "JUMBO PKG"
+            │   │   └── PhysicalScan { table: part }
+            │   └── PhysicalScan { table: lineitem }
+            └── PhysicalProjection
+                ├── exprs:
+                │   ┌── #0
+                │   └── Cast
+                │       ├── cast_to: Decimal128(30, 15)
+                │       ├── child:Mul
+                │       │   ├── 0.2(float)
+                │       │   └── Cast { cast_to: Float64, child: #1 }
+
+                └── PhysicalAgg
                     ├── aggrs:Agg(Avg)
-                    │   └── [ #29 ]
-                    ├── groups: [ #0, #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23, #24 ]
+                    │   └── [ #5 ]
+                    ├── groups: [ #0 ]
                     └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
-                        ├── PhysicalHashShuffle { columns: [ #0 ] }
-                        │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-                        │       ├── PhysicalHashShuffle { columns: [ #1 ] }
-                        │       │   └── PhysicalScan { table: lineitem }
-                        │       └── PhysicalFilter
-                        │           ├── cond:And
-                        │           │   ├── Eq
-                        │           │   │   ├── #3
-                        │           │   │   └── "Brand#13"
-                        │           │   └── Eq
-                        │           │       ├── #6
-                        │           │       └── "JUMBO PKG"
-                        │           └── PhysicalHashShuffle { columns: [ #0 ] }
-                        │               └── PhysicalScan { table: part }
-                        └── PhysicalHashShuffle { columns: [ #1 ] }
-                            └── PhysicalScan { table: lineitem }
+                        ├── PhysicalAgg { aggrs: [], groups: [ #16 ] }
+                        │   └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                        │       ├── PhysicalScan { table: lineitem }
+                        │       └── PhysicalScan { table: part }
+                        └── PhysicalScan { table: lineitem }
 */
 
