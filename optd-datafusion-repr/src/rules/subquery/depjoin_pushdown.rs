@@ -116,7 +116,12 @@ fn apply_dep_initial_distinct(
 
     // Our join condition is going to make sure that all of the correlated columns
     // in the right side are equal to their equivalent columns in the left side.
-    // (they will have the same index, just shifted over)
+    //
+    // If we have correlated columns [#16, #17], we want our condition to be:
+    // #16 = #0 AND #17 = #1
+    //
+    // This is because the aggregate we install on the right side will map the
+    // correlated columns to their respective indices as shown.
     let join_cond = LogOpPred::new(
         LogOpType::And,
         correlated_col_indices
