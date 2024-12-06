@@ -177,16 +177,18 @@ fn apply_dep_join_past_proj(
     let cond = join.cond();
     let extern_cols = join.extern_cols();
     let proj = LogicalProjection::from_plan_node(right.unwrap_plan_node()).unwrap();
+    let proj_exprs = proj.exprs();
     let right = proj.child();
 
     // TODO: can we have external columns in projection node? I don't think so?
     // Cross join should always have true cond
     assert!(cond == ConstantPred::bool(true).into_pred_node());
     let left_schema_len = optimizer.get_schema_of(left.clone()).len();
-    let right_schema_len = optimizer.get_schema_of(right.clone()).len();
 
-    let right_cols_proj =
-        (0..right_schema_len).map(|x| ColumnRefPred::new(x + left_schema_len).into_pred_node());
+    let right_cols_proj = proj_exprs.to_vec().into_iter().map(|x| {
+        x.rewrite_column_refs(|col| Some(col + left_schema_len))
+            .unwrap()
+    });
 
     let left_cols_proj = (0..left_schema_len).map(|x| ColumnRefPred::new(x).into_pred_node());
     let new_proj_exprs = ListPred::new(
@@ -281,7 +283,7 @@ define_rule!(
 /// talk by Mark Raasveldt. The correlated columns are covered in the original paper.
 ///
 /// TODO: the outer join is not implemented yet, so some edge cases won't work.
-///       Run SQList tests to catch these, I guess.
+///       Run SQLite tests to catch these, I guess.
 fn apply_dep_join_past_agg(
     _optimizer: &impl Optimizer<DfNodeType>,
     binding: ArcDfPlanNode,
@@ -310,15 +312,14 @@ fn apply_dep_join_past_agg(
         })
         .collect::<Vec<_>>();
 
+    // We need to group by all correlated columns.
+    // In our initial distinct step, we installed an agg node that groups by all correlated columns.
+    // Keeping this in mind, we only need to append a sequential number for each correlated column,
+    // as these will correspond to the outputs of the agg node.
     let new_groups = ListPred::new(
-        groups
-            .to_vec()
-            .into_iter()
-            .map(|x| {
-                x.rewrite_column_refs(|col| Some(col + correlated_col_indices.len()))
-                    .unwrap()
-            })
-            .chain(correlated_col_indices.iter().map(|x| {
+        (0..correlated_col_indices.len())
+            .map(|x| ColumnRefPred::new(x).into_pred_node())
+            .chain(groups.to_vec().into_iter().map(|x| {
                 x.rewrite_column_refs(|col| Some(col + correlated_col_indices.len()))
                     .unwrap()
             }))
