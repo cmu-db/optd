@@ -321,12 +321,12 @@ impl DatafusionDBMS {
 #[async_trait]
 impl sqlplannertest::PlannerTestRunner for DatafusionDBMS {
     async fn run(&mut self, test_case: &sqlplannertest::ParsedTestCase) -> Result<String> {
-        if !test_case.before_sql.is_empty() {
-            panic!("before is not supported in optd-sqlplannertest, always specify the task type to run");
-        }
-
         let mut result = String::new();
         let r = &mut result;
+        for sql in &test_case.before_sql {
+            // We drop output of before statements
+            self.execute(sql, &TestFlags::default()).await?;
+        }
         for task in &test_case.tasks {
             let flags = extract_flags(task)?;
             if task.starts_with("execute") {
