@@ -1,0 +1,11 @@
+statement ok
+create table t1(v1 int, v2 int);
+
+statement ok
+create table t2(v3 int, v4 int);
+
+statement ok
+insert into t1 values (1, 100), (2, 200), (2, 250), (3, 300), (3, 300);
+
+statement ok
+insert into t2 values (2, 200), (2, 250), (3, 300);
