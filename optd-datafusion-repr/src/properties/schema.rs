@@ -119,7 +119,11 @@ impl SchemaPropertyBuilder {
             DfPredType::LogOp(_) => Schema {
                 fields: vec![Field::placeholder(); children.len()],
             },
-
+            DfPredType::BinOp(_) => {
+                let mut fields = children[0].fields.clone();
+                fields.extend(children[1].fields.clone());
+                Schema { fields }
+            }
             DfPredType::Cast => Schema {
                 fields: children[0]
                     .fields
