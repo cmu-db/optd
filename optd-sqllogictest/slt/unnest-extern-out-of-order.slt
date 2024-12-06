@@ -1,0 +1,20 @@
+include _tpch_tables.slt.part
+
+# A query with a correlated subquery that retrieves columns out of order
+# i.e. the extern columns are not of the format [#0, #1, ...]
+# This query has extern columns [#1]
+query
+select
+    l_orderkey,
+    l_partkey,
+    l_extendedprice,
+    (
+        select avg(p_size)
+        from part
+        where p_partkey = l_partkey
+    ) as avg_extendedprice
+from lineitem
+where l_extendedprice > 55000;
+----
+1121 200 55010.00 22.0
+4931 200 55010.00 22.0
