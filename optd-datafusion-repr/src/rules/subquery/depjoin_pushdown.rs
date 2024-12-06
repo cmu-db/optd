@@ -119,11 +119,13 @@ fn apply_dep_initial_distinct(
     // (they will have the same index, just shifted over)
     let join_cond = LogOpPred::new(
         LogOpType::And,
-        (0..correlated_col_indices.len())
-            .map(|i| {
+        correlated_col_indices
+            .iter()
+            .enumerate()
+            .map(|(i, x)| {
                 assert!(i + left_schema_size < left_schema_size + right_schema_size);
                 BinOpPred::new(
-                    ColumnRefPred::new(i).into_pred_node(),
+                    ColumnRefPred::new(*x).into_pred_node(),
                     ColumnRefPred::new(i + left_schema_size).into_pred_node(),
                     BinOpType::Eq,
                 )
