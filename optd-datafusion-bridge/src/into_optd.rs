@@ -24,7 +24,6 @@ use crate::OptdPlanContext;
 enum SubqueryType {
     Scalar,
     Exists,
-    NotExists,
 }
 
 impl OptdPlanContext<'_> {
@@ -45,8 +44,7 @@ impl OptdPlanContext<'_> {
         {
             let dep_join_type = match sq_typ {
                 SubqueryType::Scalar => JoinType::Inner,
-                SubqueryType::Exists => JoinType::LeftSemi,
-                SubqueryType::NotExists => JoinType::LeftAnti,
+                SubqueryType::Exists => JoinType::LeftOuter,
             };
 
             let subquery_root = self.conv_into_optd_plan_node(subquery, Some(input_schema))?;
@@ -248,6 +246,14 @@ impl OptdPlanContext<'_> {
                 )
                 .into_pred_node())
             }
+            Expr::IsNull(x) => {
+                let expr = self.conv_into_optd_expr(x.as_ref(), context, dep_ctx, subqueries)?;
+                Ok(FuncPred::new(FuncType::IsNull, ListPred::new(vec![expr])).into_pred_node())
+            }
+            Expr::IsNotNull(x) => {
+                let expr = self.conv_into_optd_expr(x.as_ref(), context, dep_ctx, subqueries)?;
+                Ok(FuncPred::new(FuncType::IsNotNull, ListPred::new(vec![expr])).into_pred_node())
+            }
             Expr::Sort(x) => {
                 let expr =
                     self.conv_into_optd_expr(x.expr.as_ref(), context, dep_ctx, subqueries)?;
@@ -298,14 +304,21 @@ impl OptdPlanContext<'_> {
             Expr::Exists(ex) => {
                 // We could use mark join here, if we had one...
                 let sq = &ex.subquery;
-                let typ = if ex.negated {
-                    SubqueryType::NotExists
+                let typ = SubqueryType::Exists;
+                let bin_op = if ex.negated {
+                    BinOpType::Neq
                 } else {
-                    SubqueryType::Exists
+                    BinOpType::Eq
                 };
 
+                let new_column_ref_idx = context.fields().len() + subqueries.len();
                 subqueries.push((sq, typ));
-                Ok(ConstantPred::bool(true).into_pred_node().into_pred_node())
+                Ok(BinOpPred::new(
+                    ColumnRefPred::new(new_column_ref_idx).into_pred_node(),
+                    ConstantPred::bool(true).into_pred_node(),
+                    bin_op,
+                )
+                .into_pred_node())
             }
             _ => bail!("Unsupported expression: {:?}", expr),
         }

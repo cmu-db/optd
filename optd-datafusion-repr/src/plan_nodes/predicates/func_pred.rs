@@ -14,6 +14,8 @@ pub enum FuncType {
     Scalar(datafusion_expr::BuiltinScalarFunction),
     Agg(datafusion_expr::AggregateFunction),
     Case,
+    IsNull,
+    IsNotNull,
 }
 
 impl std::fmt::Display for FuncType {

@@ -162,11 +162,17 @@ fn apply_dep_initial_distinct(
             ),
         )
         .into_plan_node(),
-        JoinType::LeftSemi | JoinType::LeftAnti => LogicalProjection::new(
+        // Simulate a left mark join
+        JoinType::LeftOuter => LogicalProjection::new(
             new_join.into_plan_node(),
             ListPred::new(
                 (0..left_schema_size)
                     .map(|x| ColumnRefPred::new(x).into_pred_node())
+                    .chain([FuncPred::new(
+                        FuncType::IsNotNull,
+                        ListPred::new(vec![ColumnRefPred::new(left_schema_size).into_pred_node()]),
+                    )
+                    .into_pred_node()])
                     .collect(),
             ),
         )

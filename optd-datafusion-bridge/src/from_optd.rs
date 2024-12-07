@@ -174,6 +174,14 @@ impl OptdPlanContext<'_> {
                             Some(else_expr),
                         )?)
                     }
+                    FuncType::IsNull => {
+                        let expr = args[0].clone();
+                        Ok(physical_expr::expressions::is_null(expr)?)
+                    }
+                    FuncType::IsNotNull => {
+                        let expr = args[0].clone();
+                        Ok(physical_expr::expressions::is_not_null(expr)?)
+                    }
                     _ => unreachable!(),
                 }
             }
