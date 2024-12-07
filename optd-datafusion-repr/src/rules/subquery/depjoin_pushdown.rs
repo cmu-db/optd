@@ -15,7 +15,7 @@ use crate::plan_nodes::{
     ListPred, LogOpPred, LogOpType, LogicalAgg, LogicalFilter, LogicalJoin, LogicalProjection,
     PredExt, RawDependentJoin,
 };
-use crate::rules::macros::define_rule;
+use crate::rules::macros::define_rule_discriminant;
 use crate::OptimizerExt;
 
 /// Like rewrite_column_refs, except it translates ExternColumnRefs into ColumnRefs
@@ -49,7 +49,7 @@ fn rewrite_extern_column_refs(
     )
 }
 
-define_rule!(
+define_rule_discriminant!(
     DepInitialDistinct,
     apply_dep_initial_distinct,
     (RawDepJoin(JoinType::Cross), left, right)
@@ -87,7 +87,7 @@ fn apply_dep_initial_distinct(
             left,
             right,
             ConstantPred::bool(true).into_pred_node(),
-            JoinType::Cross,
+            join.join_type(),
         );
 
         return vec![new_join.into_plan_node().into()];
@@ -111,7 +111,7 @@ fn apply_dep_initial_distinct(
         right,
         cond,
         extern_cols,
-        JoinType::Cross,
+        join.join_type(),
     );
 
     // Our join condition is going to make sure that all of the correlated columns
@@ -165,7 +165,7 @@ fn apply_dep_initial_distinct(
     vec![new_proj.into_plan_node().into()]
 }
 
-define_rule!(
+define_rule_discriminant!(
     DepJoinPastProj,
     apply_dep_join_past_proj,
     (DepJoin(JoinType::Cross), left, (Projection, right))
@@ -212,7 +212,7 @@ fn apply_dep_join_past_proj(
     vec![new_proj.into_plan_node().into()]
 }
 
-define_rule!(
+define_rule_discriminant!(
     DepJoinPastFilter,
     apply_dep_join_past_filter,
     (DepJoin(JoinType::Cross), left, (Filter, right))
@@ -276,7 +276,7 @@ fn apply_dep_join_past_filter(
     vec![new_filter.into_plan_node().into()]
 }
 
-define_rule!(
+define_rule_discriminant!(
     DepJoinPastAgg,
     apply_dep_join_past_agg,
     (DepJoin(JoinType::Cross), left, (Agg, right))
@@ -354,7 +354,7 @@ fn apply_dep_join_past_agg(
 
 // Heuristics-only rule. If we don't have references to the external columns on the right side,
 // we can rewrite the dependent join into a normal join.
-define_rule!(
+define_rule_discriminant!(
     DepJoinEliminate,
     apply_dep_join_eliminate_at_scan, // TODO matching is all wrong
     (DepJoin(JoinType::Cross), left, right)

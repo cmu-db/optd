@@ -4,21 +4,30 @@
 // https://opensource.org/licenses/MIT.
 
 macro_rules! define_matcher {
-    ( ( $typ:expr $(, $children:tt )* ) ) => {
-        RuleMatcher::MatchNode {
-            typ: $typ,
-            children: vec![
-                $( crate::rules::macros::define_matcher!($children) ),*
-            ],
+    ( $discriminant:expr, ( $typ:expr $(, $children:tt )* ) ) => {
+        if $discriminant {
+            RuleMatcher::MatchDiscriminant {
+                typ_discriminant: std::mem::discriminant(&$typ),
+                children: vec![
+                    $( crate::rules::macros::define_matcher!($discriminant, $children) ),*
+                ],
+            }
+        } else {
+            RuleMatcher::MatchNode {
+                typ: $typ,
+                children: vec![
+                    $( crate::rules::macros::define_matcher!($discriminant, $children) ),*
+                ],
+            }
         }
     };
-    ( $pick_one:tt ) => {
+    ( $discriminant:expr, $pick_one:tt ) => {
         RuleMatcher::Any
     };
 }
 
 macro_rules! define_rule_inner {
-    ($rule_type:expr, $name:ident, $apply:ident, $($matcher:tt)+) => {
+    ($rule_type:expr, $discriminant:expr, $name:ident, $apply:ident, $($matcher:tt)+) => {
         pub struct $name {
             matcher: RuleMatcher<DfNodeType>,
         }
@@ -27,7 +36,7 @@ macro_rules! define_rule_inner {
             pub fn new() -> Self {
                 #[allow(unused_imports)]
                 use DfNodeType::*;
-                let matcher = crate::rules::macros::define_matcher!($($matcher)+);
+                let matcher = crate::rules::macros::define_matcher! { $discriminant, $($matcher)+ };
                 Self { matcher }
             }
         }
@@ -60,14 +69,22 @@ macro_rules! define_rule_inner {
 
 macro_rules! define_rule {
     ($name:ident, $apply:ident, $($matcher:tt)+) => {
-        crate::rules::macros::define_rule_inner! { false, $name, $apply, $($matcher)+ }
+        crate::rules::macros::define_rule_inner! { false, false, $name, $apply, $($matcher)+ }
+    };
+}
+
+macro_rules! define_rule_discriminant {
+    ($name:ident, $apply:ident, $($matcher:tt)+) => {
+        crate::rules::macros::define_rule_inner! { false, true, $name, $apply, $($matcher)+ }
     };
 }
 
 macro_rules! define_impl_rule {
     ($name:ident, $apply:ident, $($matcher:tt)+) => {
-        crate::rules::macros::define_rule_inner! { true, $name, $apply, $($matcher)+ }
+        crate::rules::macros::define_rule_inner! { true, false, $name, $apply, $($matcher)+ }
     };
 }
 
-pub(crate) use {define_impl_rule, define_matcher, define_rule, define_rule_inner};
+pub(crate) use {
+    define_impl_rule, define_matcher, define_rule, define_rule_discriminant, define_rule_inner,
+};

@@ -20,19 +20,33 @@ use optd_datafusion_repr::properties::schema::Schema as OptdSchema;
 
 use crate::OptdPlanContext;
 
+#[derive(Debug, Clone, Copy)]
+enum SubqueryType {
+    Scalar,
+    Exists,
+}
+
 impl OptdPlanContext<'_> {
     fn subqueries_to_dependent_joins(
         &mut self,
-        subqueries: &[&Subquery],
+        subqueries: &[(&Subquery, SubqueryType)],
         input: ArcDfPlanNode,
         input_schema: &DFSchema,
     ) -> Result<ArcDfPlanNode> {
         let mut node = input;
-        for Subquery {
-            subquery,
-            outer_ref_columns,
-        } in subqueries.iter()
+        for (
+            Subquery {
+                subquery,
+                outer_ref_columns,
+            },
+            sq_typ,
+        ) in subqueries.iter()
         {
+            let dep_join_type = match sq_typ {
+                SubqueryType::Scalar => JoinType::Inner,
+                SubqueryType::Exists => JoinType::LeftSemi,
+            };
+
             let subquery_root = self.conv_into_optd_plan_node(subquery, Some(input_schema))?;
             let dep_join = RawDependentJoin::new(
                 node,
@@ -55,7 +69,7 @@ impl OptdPlanContext<'_> {
                         })
                         .collect(),
                 ),
-                JoinType::Cross,
+                dep_join_type,
             );
             node = dep_join.into_plan_node();
         }
@@ -91,7 +105,7 @@ impl OptdPlanContext<'_> {
         expr: &'a logical_expr::Expr,
         context: &DFSchema,
         dep_ctx: Option<&DFSchema>,
-        subqueries: &mut Vec<&'a Subquery>,
+        subqueries: &mut Vec<(&'a Subquery, SubqueryType)>,
     ) -> Result<ArcDfPredNode> {
         use logical_expr::Expr;
         match expr {
@@ -276,8 +290,22 @@ impl OptdPlanContext<'_> {
                 // This relies on a left-deep tree of dependent joins being
                 // generated below this node, in response to all pushed subqueries.
                 let new_column_ref_idx = context.fields().len() + subqueries.len();
-                subqueries.push(sq);
+                subqueries.push((sq, SubqueryType::Scalar));
                 Ok(ColumnRefPred::new(new_column_ref_idx).into_pred_node())
+            }
+            Expr::Exists(ex) => {
+                // We could use mark join here, if we had one...
+                let sq = &ex.subquery;
+                assert!(!ex.negated, "unimplemented"); // Use anti join
+
+                let new_column_ref_idx = context.fields().len() + subqueries.len();
+                subqueries.push((sq, SubqueryType::Exists));
+                Ok(BinOpPred::new(
+                    ColumnRefPred::new(new_column_ref_idx).into_pred_node(),
+                    ConstantPred::int64(0).into_pred_node(),
+                    BinOpType::Gt,
+                )
+                .into_pred_node())
             }
             _ => bail!("Unsupported expression: {:?}", expr),
         }
@@ -324,7 +352,7 @@ impl OptdPlanContext<'_> {
         exprs: &'a [logical_expr::Expr],
         context: &DFSchema,
         dep_ctx: Option<&DFSchema>,
-        subqueries: &mut Vec<&'a Subquery>,
+        subqueries: &mut Vec<(&'a Subquery, SubqueryType)>,
     ) -> Result<ListPred> {
         let exprs = exprs
             .iter()
