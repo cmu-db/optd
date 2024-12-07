@@ -11,24 +11,27 @@
     select * from t2, t1 where t1v1 = t2v1;
   desc: Test whether the optimizer enumerates all 2-join orders.
   tasks:
-    # well actually pruning doesn't matter b/c join order is logical, but we are now missing join orders with t1 as the outer table
     - explain[disable_pruning]:logical_join_orders
+    - explain:logical_join_orders
     - execute
 - sql: |
     select * from t2, t1, t3 where t1v1 = t2v1 and t1v1 = t3v2;
   desc: Test whether the optimizer enumerates all 3-join orders. (It should)
   tasks:
     - explain[disable_pruning]:logical_join_orders
+    - explain:logical_join_orders
     - execute
 - sql: |
     select * from t2, t1, t3 where t1v1 = t2v1 and t1v2 = t3v2;
   desc: Test whether the optimizer enumerates all 3-join orders. (It don't currently)
   tasks:
     - explain[disable_pruning]:logical_join_orders
+    - explain:logical_join_orders
     - execute
 - sql: |
     select * from t1, t2, t3 where t1v1 = t2v1 and t1v2 = t3v2;
   desc: Test whether the optimizer enumerates all 3-join orders. (It don't currently)
   tasks:
     - explain[disable_pruning]:logical_join_orders
+    - explain:logical_join_orders
     - execute

@@ -6,7 +6,7 @@
   tasks:
     - execute
 - sql: |
-    select * from t1 as a, t1 as b where a.t1v1 = b.t1v1;
+    select * from t1 as a, t1 as b where a.t1v1 = b.t1v1 order by a.t1v1;
   desc: test self join
   tasks:
     - explain:logical_join_orders,logical_optd,physical_optd

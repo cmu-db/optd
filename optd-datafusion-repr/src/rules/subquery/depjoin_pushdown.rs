@@ -418,9 +418,7 @@ fn apply_dep_join_past_agg(
         new_outer_join.into_plan_node(),
         ListPred::new(
             (0..left_schema_size)
-                .chain(
-                    left_schema_size + new_agg_groups_size..left_schema_size + new_agg_schema_size,
-                )
+                .chain(left_schema_size + left_schema_size..left_schema_size + new_agg_schema_size)
                 .map(|x| {
                     // Count(*) special case: We want all NULLs to be transformed into 0s.
                     if x >= left_schema_size + new_agg_groups_size {
