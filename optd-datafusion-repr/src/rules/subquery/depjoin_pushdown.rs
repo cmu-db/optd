@@ -392,7 +392,6 @@ fn apply_dep_join_past_agg(
         new_outer_join.into_plan_node(),
         ListPred::new(
             (0..left_schema_size)
-                .into_iter()
                 .chain(
                     left_schema_size + new_agg_groups_size..left_schema_size + new_agg_schema_size,
                 )
