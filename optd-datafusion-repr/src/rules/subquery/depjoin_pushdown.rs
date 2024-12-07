@@ -3,17 +3,16 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
-use optd_core::nodes::{PlanNodeOrGroup, PredNode};
-// TODO: No push past join
-// TODO: Sideways information passing??
+use datafusion_expr::{AggregateFunction, BuiltinScalarFunction};
+use optd_core::nodes::{PlanNodeOrGroup, PredNode, Value};
 use optd_core::optimizer::Optimizer;
 use optd_core::rules::{Rule, RuleMatcher};
 
 use crate::plan_nodes::{
-    ArcDfPlanNode, ArcDfPredNode, BinOpPred, BinOpType, ColumnRefPred, ConstantPred, DependentJoin,
-    DfNodeType, DfPredType, DfReprPlanNode, DfReprPredNode, ExternColumnRefPred, JoinType,
-    ListPred, LogOpPred, LogOpType, LogicalAgg, LogicalFilter, LogicalJoin, LogicalProjection,
-    PredExt, RawDependentJoin,
+    ArcDfPlanNode, ArcDfPredNode, BinOpPred, BinOpType, ColumnRefPred, ConstantPred, ConstantType,
+    DependentJoin, DfNodeType, DfPredType, DfReprPlanNode, DfReprPredNode, ExternColumnRefPred,
+    FuncPred, FuncType, JoinType, ListPred, LogOpPred, LogOpType, LogicalAgg, LogicalFilter,
+    LogicalJoin, LogicalProjection, PredExt, RawDependentJoin,
 };
 use crate::rules::macros::define_rule;
 use crate::OptimizerExt;
@@ -397,7 +396,33 @@ fn apply_dep_join_past_agg(
                 .chain(
                     left_schema_size + new_agg_groups_size..left_schema_size + new_agg_schema_size,
                 )
-                .map(|x| ColumnRefPred::new(x).into_pred_node())
+                .map(|x| {
+                    // Count(*) special case: We want all NULLs to be transformed into 0s.
+                    if x >= left_schema_size + new_agg_groups_size {
+                        // If this node corresponds to an agg function, and
+                        // it's a count(*), apply the workaround
+                        let expr =
+                            exprs.to_vec()[x - left_schema_size - new_agg_groups_size].clone();
+                        if expr.typ == DfPredType::Func(FuncType::Agg(AggregateFunction::Count)) {
+                            let expr_child = expr.child(0).child(0);
+
+                            if expr_child.typ == DfPredType::Constant(ConstantType::UInt8)
+                                && expr_child.data == Some(Value::UInt8(1))
+                            {
+                                return FuncPred::new(
+                                    FuncType::Scalar(BuiltinScalarFunction::Coalesce),
+                                    ListPred::new(vec![
+                                        ColumnRefPred::new(x).into_pred_node(),
+                                        ConstantPred::int64(0).into_pred_node(),
+                                    ]),
+                                )
+                                .into_pred_node();
+                            }
+                        }
+                    }
+
+                    ColumnRefPred::new(x).into_pred_node()
+                })
                 .collect(),
         ),
     );
