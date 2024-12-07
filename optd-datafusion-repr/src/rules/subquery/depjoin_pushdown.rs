@@ -361,7 +361,6 @@ fn apply_dep_join_past_agg(
             .iter()
             .enumerate()
             .map(|(i, x)| {
-                let x = ColumnRefPred::from_pred_node(x.clone()).unwrap().index();
                 assert!(i + left_schema_size < left_schema_size + new_agg_schema_size);
                 BinOpPred::new(
                     ColumnRefPred::new(i).into_pred_node(),
