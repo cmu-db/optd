@@ -81,7 +81,7 @@ LogicalLimit { skip: 0(u64), fetch: 100(u64) }
             │   └── Eq
             │       ├── #19
             │       └── #28
-            └── RawDependentJoin { join_type: Cross, cond: true, extern_cols: [ Extern(#0) ] }
+            └── RawDependentJoin { join_type: Inner, cond: true, extern_cols: [ Extern(#0) ] }
                 ├── LogicalJoin { join_type: Cross, cond: true }
                 │   ├── LogicalJoin { join_type: Cross, cond: true }
                 │   │   ├── LogicalJoin { join_type: Cross, cond: true }

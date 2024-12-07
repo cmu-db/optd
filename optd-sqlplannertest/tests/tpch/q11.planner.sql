@@ -36,7 +36,7 @@ LogicalSort
         ├── cond:Gt
         │   ├── Cast { cast_to: Decimal128(38, 15), child: #1 }
         │   └── #2
-        └── RawDependentJoin { join_type: Cross, cond: true, extern_cols: [] }
+        └── RawDependentJoin { join_type: Inner, cond: true, extern_cols: [] }
             ├── LogicalAgg
             │   ├── exprs:Agg(Sum)
             │   │   └── Mul
