@@ -100,7 +100,10 @@ fn apply_filter_project_transpose(
     let exprs = proj.exprs();
     let cond = filter.cond();
 
-    let proj_col_map = ProjectionMapping::build(&exprs).unwrap();
+    let Some(proj_col_map) = ProjectionMapping::build(&exprs) else {
+        return vec![];
+    };
+
     let rewritten_cond = proj_col_map.rewrite_filter_cond(cond, false);
 
     let new_filter_node = LogicalFilter::new_unchecked(child, rewritten_cond);

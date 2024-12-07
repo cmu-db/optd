@@ -1,0 +1,18 @@
+include _tpch_tables.slt.part
+
+query
+SELECT
+    c_custkey,
+    c_name
+FROM
+    customer c
+WHERE
+    EXISTS (
+        SELECT 1
+        FROM orders o
+        WHERE o.o_custkey = c.c_custkey
+        AND o.o_orderstatus = 'O'
+        AND o.o_orderdate > '1998-08-01'
+    );
+----
+88 Customer#000000088

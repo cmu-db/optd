@@ -191,6 +191,8 @@ impl<
             JoinType::Inner => inner_join_selectivity,
             JoinType::LeftOuter => f64::max(inner_join_selectivity, 1.0 / right_row_cnt),
             JoinType::RightOuter => f64::max(inner_join_selectivity, 1.0 / left_row_cnt),
+            JoinType::LeftSemi => f64::max(inner_join_selectivity, 1.0 / right_row_cnt),
+            JoinType::LeftAnti => f64::max(inner_join_selectivity, 1.0 / right_row_cnt),
             JoinType::Cross => {
                 assert!(
                     on_col_ref_pairs.is_empty(),
@@ -359,7 +361,11 @@ impl<
         &self,
         base_col_refs: HashSet<BaseTableColumnRef>,
     ) -> f64 {
-        assert!(base_col_refs.len() > 1);
+        // Hack to avoid issue w/ self joins...unsure if this is a good idea
+        if base_col_refs.len() <= 1 {
+            return 1.0;
+        }
+
         let num_base_col_refs = base_col_refs.len();
         base_col_refs
             .into_iter()
