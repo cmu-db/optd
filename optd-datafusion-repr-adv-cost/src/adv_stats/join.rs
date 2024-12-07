@@ -359,7 +359,11 @@ impl<
         &self,
         base_col_refs: HashSet<BaseTableColumnRef>,
     ) -> f64 {
-        assert!(base_col_refs.len() > 1);
+        // Hack to avoid issue w/ self joins...unsure if this is a good idea
+        if base_col_refs.len() <= 1 {
+            return 1.0;
+        }
+
         let num_base_col_refs = base_col_refs.len();
         base_col_refs
             .into_iter()
