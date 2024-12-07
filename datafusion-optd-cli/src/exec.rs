@@ -1,3 +1,8 @@
+// Copyright (c) 2023-2024 CMU Database Group
+//
+// Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
+
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -32,6 +37,8 @@ use crate::{
     print_options::{MaxRows, PrintOptions},
 };
 
+use arrow::util::display::ArrayFormatter;
+use arrow::util::display::FormatOptions;
 use datafusion::common::instant::Instant;
 use datafusion::common::plan_datafusion_err;
 use datafusion::config::ConfigFileType;
@@ -46,6 +53,69 @@ use datafusion::sql::sqlparser;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 use tokio::signal;
+
+// BEGIN optd-cli patch
+
+pub async fn exec_from_commands_collect(
+    ctx: &dyn CliSessionContext,
+    commands: Vec<String>,
+) -> Result<Vec<Vec<String>>> {
+    let mut result = Vec::new();
+    for sql in commands {
+        result.extend(exec_and_collect(ctx, sql).await?);
+    }
+    Ok(result)
+}
+
+/// Utility function to execute a query and collect the result.
+pub async fn exec_and_collect(
+    ctx: &dyn CliSessionContext,
+    sql: String,
+) -> Result<Vec<Vec<String>>> {
+    let sql = unescape_input(&sql)?;
+    let task_ctx = ctx.task_ctx();
+    let dialect = &task_ctx.session_config().options().sql_parser.dialect;
+    let dialect = dialect_from_str(dialect).ok_or_else(|| {
+        plan_datafusion_err!(
+            "Unsupported SQL dialect: {dialect}. Available dialects: \
+                 Generic, MySQL, PostgreSQL, Hive, SQLite, Snowflake, Redshift, \
+                 MsSQL, ClickHouse, BigQuery, Ansi."
+        )
+    })?;
+
+    let mut result = Vec::new();
+
+    let statements = DFParser::parse_sql_with_dialect(&sql, dialect.as_ref())?;
+    for statement in statements {
+        let plan = create_plan(ctx, statement).await?;
+
+        let df = ctx.execute_logical_plan(plan).await?;
+        let physical_plan = df.create_physical_plan().await?;
+
+        let results = collect(physical_plan, task_ctx.clone()).await?;
+
+        let options = FormatOptions::default();
+        for batch in results {
+            let converters = batch
+                .columns()
+                .iter()
+                .map(|a| ArrayFormatter::try_new(a.as_ref(), &options))
+                .collect::<Result<Vec<_>, _>>()?;
+            for row_idx in 0..batch.num_rows() {
+                let mut row = Vec::with_capacity(batch.num_columns());
+                for converter in converters.iter() {
+                    let mut buffer = String::with_capacity(8);
+                    converter.value(row_idx).write(&mut buffer)?;
+                    row.push(buffer);
+                }
+                result.push(row);
+            }
+        }
+    }
+    Ok(result)
+}
+
+// END optd-cli patch
 
 /// run and execute SQL statements and commands, against a context with the given print options
 pub async fn exec_from_commands(
@@ -149,10 +219,7 @@ pub async fn exec_from_repl(
                                         eprintln!("{e}")
                                     }
                                 } else {
-                                    eprintln!(
-                                        "'\\{}' is not a valid command",
-                                        &line[1..]
-                                    );
+                                    eprintln!("'\\{}' is not a valid command", &line[1..]);
                                 }
                             } else {
                                 println!("Output format is {:?}.", print_options.format);
@@ -183,9 +250,9 @@ pub async fn exec_from_repl(
                         },
                     }
                     // dialect might have changed
-                    rl.helper_mut().unwrap().set_dialect(
-                        &ctx.task_ctx().session_config().options().sql_parser.dialect,
-                    );
+                    rl.helper_mut()
+                        .unwrap()
+                        .set_dialect(&ctx.task_ctx().session_config().options().sql_parser.dialect);
                 }
             }
             Err(ReadlineError::Interrupted) => {
@@ -225,8 +292,7 @@ pub(super) async fn exec_and_print(
 
     let statements = DFParser::parse_sql_with_dialect(&sql, dialect.as_ref())?;
     for statement in statements {
-        let adjusted =
-            AdjustedPrintOptions::new(print_options.clone()).with_statement(&statement);
+        let adjusted = AdjustedPrintOptions::new(print_options.clone()).with_statement(&statement);
 
         let plan = create_plan(ctx, statement).await?;
         let adjusted = adjusted.with_plan(&plan);
@@ -274,9 +340,7 @@ impl AdjustedPrintOptions {
         // all rows
         if matches!(
             plan,
-            LogicalPlan::Explain(_)
-                | LogicalPlan::DescribeTable(_)
-                | LogicalPlan::Analyze(_)
+            LogicalPlan::Explain(_) | LogicalPlan::DescribeTable(_) | LogicalPlan::Analyze(_)
         ) {
             self.inner.maxrows = MaxRows::Unlimited;
         }
@@ -314,13 +378,8 @@ async fn create_plan(
     if let LogicalPlan::Ddl(DdlStatement::CreateExternalTable(cmd)) = &plan {
         // To support custom formats, treat error as None
         let format = config_file_type_from_str(&cmd.file_type);
-        register_object_store_and_config_extensions(
-            ctx,
-            &cmd.location,
-            &cmd.options,
-            format,
-        )
-        .await?;
+        register_object_store_and_config_extensions(ctx, &cmd.location, &cmd.options, format)
+            .await?;
     }
 
     if let LogicalPlan::Copy(copy_to) = &mut plan {
@@ -390,8 +449,7 @@ pub(crate) async fn register_object_store_and_config_extensions(
     table_options.alter_with_string_hash_map(options)?;
 
     // Retrieve the appropriate object store based on the scheme, URL, and modified table options
-    let store =
-        get_object_store(&ctx.session_state(), scheme, url, &table_options).await?;
+    let store = get_object_store(&ctx.session_state(), scheme, url, &table_options).await?;
 
     // Register the retrieved object store in the session context's runtime environment
     ctx.register_object_store(url, store);
@@ -414,13 +472,8 @@ mod tests {
 
         if let LogicalPlan::Ddl(DdlStatement::CreateExternalTable(cmd)) = &plan {
             let format = config_file_type_from_str(&cmd.file_type);
-            register_object_store_and_config_extensions(
-                &ctx,
-                &cmd.location,
-                &cmd.options,
-                format,
-            )
-            .await?;
+            register_object_store_and_config_extensions(&ctx, &cmd.location, &cmd.options, format)
+                .await?;
         } else {
             return plan_err!("LogicalPlan is not a CreateExternalTable");
         }
@@ -462,8 +515,7 @@ mod tests {
     async fn create_object_store_table_http() -> Result<()> {
         // Should be OK
         let location = "http://example.com/file.parquet";
-        let sql =
-            format!("CREATE EXTERNAL TABLE test STORED AS PARQUET LOCATION '{location}'");
+        let sql = format!("CREATE EXTERNAL TABLE test STORED AS PARQUET LOCATION '{location}'");
         create_external_table_test(location, &sql).await?;
 
         Ok(())
@@ -580,8 +632,10 @@ mod tests {
         let location = "gcs://bucket/path/file.parquet";
 
         // for service_account_path
-        let sql = format!("CREATE EXTERNAL TABLE test STORED AS PARQUET
-            OPTIONS('gcp.service_account_path' '{service_account_path}') LOCATION '{location}'");
+        let sql = format!(
+            "CREATE EXTERNAL TABLE test STORED AS PARQUET
+            OPTIONS('gcp.service_account_path' '{service_account_path}') LOCATION '{location}'"
+        );
         let err = create_external_table_test(location, &sql)
             .await
             .unwrap_err();
@@ -611,8 +665,7 @@ mod tests {
         let location = "path/to/file.parquet";
 
         // Ensure that local files are also registered
-        let sql =
-            format!("CREATE EXTERNAL TABLE test STORED AS PARQUET LOCATION '{location}'");
+        let sql = format!("CREATE EXTERNAL TABLE test STORED AS PARQUET LOCATION '{location}'");
         create_external_table_test(location, &sql).await.unwrap();
 
         Ok(())

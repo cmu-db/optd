@@ -41,10 +41,7 @@ pub struct DynamicObjectStoreCatalog {
 }
 
 impl DynamicObjectStoreCatalog {
-    pub fn new(
-        inner: Arc<dyn CatalogProviderList>,
-        state: Weak<RwLock<SessionState>>,
-    ) -> Self {
+    pub fn new(inner: Arc<dyn CatalogProviderList>, state: Weak<RwLock<SessionState>>) -> Self {
         Self { inner, state }
     }
 }
@@ -68,9 +65,9 @@ impl CatalogProviderList for DynamicObjectStoreCatalog {
 
     fn catalog(&self, name: &str) -> Option<Arc<dyn CatalogProvider>> {
         let state = self.state.clone();
-        self.inner.catalog(name).map(|catalog| {
-            Arc::new(DynamicObjectStoreCatalogProvider::new(catalog, state)) as _
-        })
+        self.inner
+            .catalog(name)
+            .map(|catalog| Arc::new(DynamicObjectStoreCatalogProvider::new(catalog, state)) as _)
     }
 }
 
@@ -82,10 +79,7 @@ struct DynamicObjectStoreCatalogProvider {
 }
 
 impl DynamicObjectStoreCatalogProvider {
-    pub fn new(
-        inner: Arc<dyn CatalogProvider>,
-        state: Weak<RwLock<SessionState>>,
-    ) -> Self {
+    pub fn new(inner: Arc<dyn CatalogProvider>, state: Weak<RwLock<SessionState>>) -> Self {
         Self { inner, state }
     }
 }
@@ -101,9 +95,9 @@ impl CatalogProvider for DynamicObjectStoreCatalogProvider {
 
     fn schema(&self, name: &str) -> Option<Arc<dyn SchemaProvider>> {
         let state = self.state.clone();
-        self.inner.schema(name).map(|schema| {
-            Arc::new(DynamicObjectStoreSchemaProvider::new(schema, state)) as _
-        })
+        self.inner
+            .schema(name)
+            .map(|schema| Arc::new(DynamicObjectStoreSchemaProvider::new(schema, state)) as _)
     }
 
     fn register_schema(
@@ -124,10 +118,7 @@ struct DynamicObjectStoreSchemaProvider {
 }
 
 impl DynamicObjectStoreSchemaProvider {
-    pub fn new(
-        inner: Arc<dyn SchemaProvider>,
-        state: Weak<RwLock<SessionState>>,
-    ) -> Self {
+    pub fn new(inner: Arc<dyn SchemaProvider>, state: Weak<RwLock<SessionState>>) -> Self {
         Self { inner, state }
     }
 }

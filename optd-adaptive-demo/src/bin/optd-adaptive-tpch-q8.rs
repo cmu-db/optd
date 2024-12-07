@@ -6,9 +6,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use datafusion::catalog_common::MemoryCatalogProviderList;
 use datafusion::error::Result;
-use datafusion::execution::context::{SessionConfig, SessionState};
+use datafusion::execution::context::SessionConfig;
 use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::execution::SessionStateBuilder;
 use datafusion::prelude::SessionContext;
 use datafusion_optd_cli::exec::{exec_from_commands, exec_from_commands_collect, exec_from_files};
 use datafusion_optd_cli::print_format::PrintFormat;
@@ -26,21 +28,24 @@ async fn main() -> Result<()> {
     session_config.options_mut().optimizer.max_passes = 0;
 
     let rn_config = RuntimeConfig::new();
-    let runtime_env = RuntimeEnv::new(rn_config.clone())?;
+    let runtime_env = RuntimeEnv::try_new(rn_config.clone())?;
 
-    let mut ctx = {
-        let mut state =
-            SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
+    let ctx = {
+        let mut state = SessionStateBuilder::new()
+            .with_config(session_config.clone())
+            .with_runtime_env(Arc::new(runtime_env));
+        let catalog = Arc::new(MemoryCatalogProviderList::new());
         let optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical(
-            Arc::new(DatafusionCatalog::new(state.catalog_list())),
+            Arc::new(DatafusionCatalog::new(catalog.clone())),
             true,
         );
+        state = state.with_catalog_list(catalog);
         // clean up optimizer rules so that we can plug in our own optimizer
         state = state.with_optimizer_rules(vec![]);
         state = state.with_physical_optimizer_rules(vec![]);
         // use optd-bridge query planner
         state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));
-        SessionContext::new_with_state(state)
+        SessionContext::new_with_state(state.build())
     };
     ctx.refresh_catalogs().await?;
 
@@ -48,20 +53,22 @@ async fn main() -> Result<()> {
         format: PrintFormat::Table,
         quiet: true,
         maxrows: MaxRows::Limited(5),
+        color: false,
     };
 
     let print_options = PrintOptions {
         format: PrintFormat::Table,
         quiet: false,
         maxrows: MaxRows::Limited(5),
+        color: false,
     };
 
     exec_from_files(
+        &ctx,
         vec!["datafusion-optd-cli/tpch-sf0_01/populate.sql".to_string()],
-        &mut ctx,
         &slient_print_options,
     )
-    .await;
+    .await?;
 
     let mut iter = 0;
 
@@ -107,7 +114,7 @@ o_year
 order by
 o_year;
         "#;
-        let result = exec_from_commands_collect(&mut ctx, vec![format!("explain {}", sql)]).await?;
+        let result = exec_from_commands_collect(&ctx, vec![format!("explain {}", sql)]).await?;
         println!(
             "{}",
             result
@@ -116,7 +123,7 @@ o_year;
                 .map(|x| &x[1])
                 .unwrap()
         );
-        exec_from_commands(&mut ctx, &print_options, vec![sql.to_string()]).await;
+        exec_from_commands(&ctx, vec![sql.to_string()], &print_options).await?;
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }

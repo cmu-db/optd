@@ -11,23 +11,27 @@ use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum FuncType {
-    Scalar(datafusion_expr::BuiltinScalarFunction),
-    Agg(datafusion_expr::AggregateFunction),
+    Scalar(String),
+    Agg(String),
     Case,
 }
 
 impl std::fmt::Display for FuncType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            FuncType::Scalar(func_id) => write!(f, "Scalar({})", heck::AsUpperCamelCase(func_id)),
+            FuncType::Agg(func_id) => write!(f, "Agg({})", heck::AsUpperCamelCase(func_id)),
+            _ => write!(f, "{:?}", self),
+        }
     }
 }
 
 impl FuncType {
-    pub fn new_scalar(func_id: datafusion_expr::BuiltinScalarFunction) -> Self {
+    pub fn new_scalar(func_id: String) -> Self {
         FuncType::Scalar(func_id)
     }
 
-    pub fn new_agg(func_id: datafusion_expr::AggregateFunction) -> Self {
+    pub fn new_agg(func_id: String) -> Self {
         FuncType::Agg(func_id)
     }
 }

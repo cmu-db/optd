@@ -14,15 +14,18 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::DataType;
-use datafusion::catalog::CatalogList;
-use datafusion::error::Result;
+use datafusion::catalog::CatalogProviderList;
+use datafusion::catalog_common::MemoryCatalogProviderList;
 use datafusion::execution::context::{QueryPlanner, SessionState};
+use datafusion::execution::runtime_env::RuntimeConfig;
+use datafusion::execution::SessionStateBuilder;
 use datafusion::logical_expr::{
     Explain, LogicalPlan, PlanType, StringifiedPlan, TableSource, ToStringifiedPlan,
 };
 use datafusion::physical_plan::explain::ExplainExec;
 use datafusion::physical_plan::{displayable, ExecutionPlan};
 use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
+use datafusion::prelude::{SessionConfig, SessionContext};
 use itertools::Itertools;
 use optd_datafusion_repr::plan_nodes::{
     dispatch_plan_explain_to_string, ArcDfPlanNode, ConstantType, DfNodeType, DfReprPlanNode,
@@ -30,6 +33,8 @@ use optd_datafusion_repr::plan_nodes::{
 };
 use optd_datafusion_repr::properties::schema::Catalog;
 use optd_datafusion_repr::{DatafusionOptimizer, MemoExt};
+use optd_datafusion_repr_adv_cost::adv_stats::stats::DataFusionBaseTableStats;
+use optd_datafusion_repr_adv_cost::new_physical_adv_cost;
 
 pub struct OptdPlanContext<'a> {
     tables: HashMap<String, Arc<dyn TableSource>>,
@@ -48,11 +53,11 @@ impl<'a> OptdPlanContext<'a> {
 }
 
 pub struct DatafusionCatalog {
-    catalog: Arc<dyn CatalogList>,
+    catalog: Arc<dyn CatalogProviderList>,
 }
 
 impl DatafusionCatalog {
-    pub fn new(catalog: Arc<dyn CatalogList>) -> Self {
+    pub fn new(catalog: Arc<dyn CatalogProviderList>) -> Self {
         Self { catalog }
     }
 }
@@ -61,7 +66,9 @@ impl Catalog for DatafusionCatalog {
     fn get(&self, name: &str) -> optd_datafusion_repr::properties::schema::Schema {
         let catalog = self.catalog.catalog("datafusion").unwrap();
         let schema = catalog.schema("public").unwrap();
-        let table = futures_lite::future::block_on(schema.table(name.as_ref())).unwrap();
+        let table = futures_lite::future::block_on(schema.table(name.as_ref()))
+            .unwrap()
+            .unwrap();
         let schema = table.schema();
         let fields = schema.fields();
         let mut optd_fields = Vec::with_capacity(fields.len());
@@ -237,13 +244,19 @@ impl OptdQueryPlanner {
     }
 }
 
+impl std::fmt::Debug for OptdQueryPlanner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "OptdQueryPlanner")
+    }
+}
+
 #[async_trait]
 impl QueryPlanner for OptdQueryPlanner {
     async fn create_physical_plan(
         &self,
         logical_plan: &LogicalPlan,
         session_state: &SessionState,
-    ) -> Result<Arc<dyn ExecutionPlan>> {
+    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         Ok(self
             .create_physical_plan_inner(logical_plan, session_state)
             .await
@@ -300,4 +313,79 @@ fn get_join_order(rel_node: ArcDfPlanNode) -> Option<JoinOrder> {
             None
         }
     }
+}
+
+pub struct OptdDfContext {
+    pub ctx: SessionContext,
+    pub catalog: Arc<dyn CatalogProviderList>,
+    pub optimizer: Arc<OptdQueryPlanner>,
+}
+
+/// Utility function to create a session context for datafusion + optd.
+pub async fn create_df_context(
+    session_config: Option<SessionConfig>,
+    rn_config: Option<RuntimeConfig>,
+    catalog: Option<Arc<dyn CatalogProviderList>>,
+    enable_adaptive: bool,
+    use_df_logical: bool,
+    with_advanced_cost: bool,
+    stats: Option<DataFusionBaseTableStats>,
+) -> anyhow::Result<OptdDfContext> {
+    let mut session_config = if let Some(session_config) = session_config {
+        session_config
+    } else {
+        SessionConfig::from_env()?.with_information_schema(true)
+    };
+
+    if !use_df_logical {
+        session_config.options_mut().optimizer.max_passes = 0;
+    }
+
+    let rn_config = if let Some(rn_config) = rn_config {
+        rn_config
+    } else {
+        RuntimeConfig::new()
+    };
+    let runtime_env = Arc::new(rn_config.build()?);
+
+    let catalog = if let Some(catalog) = catalog {
+        catalog
+    } else {
+        Arc::new(MemoryCatalogProviderList::new())
+    };
+
+    let mut builder = SessionStateBuilder::new()
+        .with_config(session_config)
+        .with_runtime_env(runtime_env)
+        .with_catalog_list(catalog.clone())
+        .with_default_features();
+
+    let optimizer = if with_advanced_cost {
+        new_physical_adv_cost(
+            Arc::new(DatafusionCatalog::new(catalog.clone())),
+            stats.unwrap_or_default(),
+            enable_adaptive,
+        )
+    } else {
+        DatafusionOptimizer::new_physical(
+            Arc::new(DatafusionCatalog::new(catalog.clone())),
+            enable_adaptive,
+        )
+    };
+    if !use_df_logical {
+        // clean up optimizer rules so that we can plug in our own optimizer
+        builder = builder.with_optimizer_rules(vec![]);
+    }
+    builder = builder.with_physical_optimizer_rules(vec![]);
+    // use optd-bridge query planner
+    let optimizer = Arc::new(OptdQueryPlanner::new(optimizer));
+    builder = builder.with_query_planner(optimizer.clone());
+    let state = builder.build();
+    let ctx = SessionContext::new_with_state(state).enable_url_table();
+    ctx.refresh_catalogs().await?;
+    Ok(OptdDfContext {
+        ctx,
+        catalog,
+        optimizer,
+    })
 }

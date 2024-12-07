@@ -5,16 +5,15 @@
 
 use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
-use datafusion::execution::context::{SessionConfig, SessionState};
-use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::execution::context::SessionConfig;
+use datafusion::execution::runtime_env::RuntimeConfig;
+use datafusion::execution::SessionStateBuilder;
 use datafusion::prelude::SessionContext;
 use datafusion::sql::parser::DFParser;
 use datafusion::sql::sqlparser::dialect::GenericDialect;
 use datafusion_optd_cli::helper::unescape_input;
 use mimalloc::MiMalloc;
-use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
-use optd_datafusion_repr_adv_cost::adv_stats::stats::DataFusionBaseTableStats;
-use optd_datafusion_repr_adv_cost::new_physical_adv_cost;
+use optd_datafusion_bridge::create_df_context;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -51,41 +50,21 @@ impl DatafusionDBMS {
 
     /// Creates a new session context.
     async fn new_session_ctx() -> Result<SessionContext> {
-        let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
-        session_config.options_mut().optimizer.max_passes = 0;
-        let rn_config = RuntimeConfig::new();
-        let runtime_env = RuntimeEnv::new(rn_config.clone())?;
-        let optd_optimizer;
-        let ctx = {
-            let mut state =
-                SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
-            let optimizer = new_physical_adv_cost(
-                Arc::new(DatafusionCatalog::new(state.catalog_list())),
-                DataFusionBaseTableStats::default(),
-                false,
-            );
-            // clean up optimizer rules so that we can plug in our own optimizer
-            state = state.with_optimizer_rules(vec![]);
-            state = state.with_physical_optimizer_rules(vec![]);
-            // use optd-bridge query planner
-            optd_optimizer = Arc::new(OptdQueryPlanner::new(optimizer));
-            state = state.with_query_planner(optd_optimizer.clone());
-            SessionContext::new_with_state(state)
-        };
-        ctx.refresh_catalogs().await?;
+        let ctx = create_df_context(None, None, None, false, false, true, None)
+            .await?
+            .ctx;
         Ok(ctx)
     }
 
     /// Creates a new session context without optd
     async fn new_session_ctx_no_optd() -> Result<SessionContext> {
         let session_config = SessionConfig::from_env()?.with_information_schema(true);
-        let rn_config = RuntimeConfig::new();
-        let runtime_env = RuntimeEnv::new(rn_config.clone())?;
-        let ctx = {
-            let state =
-                SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
-            SessionContext::new_with_state(state)
-        };
+        let runtime_env = Arc::new(RuntimeConfig::new().build()?);
+        let state = SessionStateBuilder::new()
+            .with_config(session_config)
+            .with_runtime_env(runtime_env)
+            .build();
+        let ctx = SessionContext::new_with_state(state);
         ctx.refresh_catalogs().await?;
         Ok(ctx)
     }

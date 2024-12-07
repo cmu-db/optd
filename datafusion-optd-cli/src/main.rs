@@ -192,8 +192,10 @@ async fn main_inner() -> Result<()> {
         args.enable_adaptive,
         args.enable_df_logical,
         args.adv_cost,
+        None,
     )
-    .await?
+    .await
+    .unwrap()
     .ctx;
     // end optd-cli patch
 

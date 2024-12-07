@@ -158,11 +158,8 @@ impl PrintOptions {
             with_header = false;
         }
 
-        let formatted_exec_details = get_execution_details_formatted(
-            row_count,
-            MaxRows::Unlimited,
-            query_start_time,
-        );
+        let formatted_exec_details =
+            get_execution_details_formatted(row_count, MaxRows::Unlimited, query_start_time);
 
         if !self.quiet {
             writeln!(writer, "{formatted_exec_details}")?;

@@ -131,10 +131,8 @@ fn format_batches_with_maxrows<W: std::io::Write>(
                 }
             }
 
-            let formatted = pretty_format_batches_with_options(
-                &filtered_batches,
-                &DEFAULT_FORMAT_OPTIONS,
-            )?;
+            let formatted =
+                pretty_format_batches_with_options(&filtered_batches, &DEFAULT_FORMAT_OPTIONS)?;
             if over_limit {
                 let mut formatted_str = format!("{}", formatted);
                 formatted_str = keep_only_maxrows(&formatted_str, maxrows);
@@ -144,8 +142,7 @@ fn format_batches_with_maxrows<W: std::io::Write>(
             }
         }
         MaxRows::Unlimited => {
-            let formatted =
-                pretty_format_batches_with_options(batches, &DEFAULT_FORMAT_OPTIONS)?;
+            let formatted = pretty_format_batches_with_options(batches, &DEFAULT_FORMAT_OPTIONS)?;
             writeln!(writer, "{}", formatted)?;
         }
     }
@@ -190,19 +187,13 @@ impl PrintFormat {
     }
 
     /// Print when the result batches contain no rows
-    fn print_empty<W: std::io::Write>(
-        &self,
-        writer: &mut W,
-        schema: SchemaRef,
-    ) -> Result<()> {
+    fn print_empty<W: std::io::Write>(&self, writer: &mut W, schema: SchemaRef) -> Result<()> {
         match self {
             // Print column headers for Table format
             Self::Table if !schema.fields().is_empty() => {
                 let empty_batch = RecordBatch::new_empty(schema);
-                let formatted = pretty_format_batches_with_options(
-                    &[empty_batch],
-                    &DEFAULT_FORMAT_OPTIONS,
-                )?;
+                let formatted =
+                    pretty_format_batches_with_options(&[empty_batch], &DEFAULT_FORMAT_OPTIONS)?;
                 writeln!(writer, "{}", formatted)?;
             }
             _ => {}
@@ -344,8 +335,7 @@ mod tests {
     }
     #[test]
     fn print_json() {
-        let expected =
-            &[r#"[{"a":1,"b":4,"c":7},{"a":2,"b":5,"c":8},{"a":3,"b":6,"c":9}]"#];
+        let expected = &[r#"[{"a":1,"b":4,"c":7},{"a":2,"b":5,"c":8},{"a":3,"b":6,"c":9}]"#];
 
         PrintBatchesTest::new()
             .with_format(PrintFormat::Json)

@@ -51,8 +51,7 @@ impl Highlighter for SyntaxHighlighter {
         let mut out_line = String::new();
 
         // `with_unescape(false)` since we want to rebuild the original string.
-        let mut tokenizer =
-            Tokenizer::new(self.dialect.as_ref(), line).with_unescape(false);
+        let mut tokenizer = Tokenizer::new(self.dialect.as_ref(), line).with_unescape(false);
         let tokens = tokenizer.tokenize();
         match tokens {
             Ok(tokens) => {

@@ -324,9 +324,7 @@ impl TableFunctionImpl for ParquetMetadataFunc {
             Some(Expr::Literal(ScalarValue::Utf8(Some(s)))) => s, // single quote: parquet_metadata('x.parquet')
             Some(Expr::Column(Column { name, .. })) => name, // double quote: parquet_metadata("x.parquet")
             _ => {
-                return plan_err!(
-                    "parquet_metadata requires string argument as its input"
-                );
+                return plan_err!("parquet_metadata requires string argument as its input");
             }
         };
 
@@ -399,13 +397,11 @@ impl TableFunctionImpl for ParquetMetadataFunc {
                 let converted_type = column.column_descr().converted_type();
 
                 if let Some(s) = column.statistics() {
-                    let (min_val, max_val) =
-                        convert_parquet_statistics(s, converted_type);
+                    let (min_val, max_val) = convert_parquet_statistics(s, converted_type);
                     stats_min_arr.push(min_val.clone());
                     stats_max_arr.push(max_val.clone());
                     stats_null_count_arr.push(s.null_count_opt().map(|c| c as i64));
-                    stats_distinct_count_arr
-                        .push(s.distinct_count_opt().map(|c| c as i64));
+                    stats_distinct_count_arr.push(s.distinct_count_opt().map(|c| c as i64));
                     stats_min_value_arr.push(min_val);
                     stats_max_value_arr.push(max_val);
                 } else {

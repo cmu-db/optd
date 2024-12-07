@@ -45,7 +45,7 @@ order by
 limit 100;
 
 /*
-LogicalLimit { skip: 0(u64), fetch: 100(u64) }
+LogicalLimit { skip: 0(i64), fetch: 100(i64) }
 └── LogicalSort
     ├── exprs:
     │   ┌── SortOrder { order: Desc }
@@ -120,7 +120,7 @@ LogicalLimit { skip: 0(u64), fetch: 100(u64) }
                                 │   │   └── LogicalScan { table: supplier }
                                 │   └── LogicalScan { table: nation }
                                 └── LogicalScan { table: region }
-LogicalLimit { skip: 0(u64), fetch: 100(u64) }
+LogicalLimit { skip: 0(i64), fetch: 100(i64) }
 └── LogicalSort
     ├── exprs:
     │   ┌── SortOrder { order: Desc }
@@ -211,7 +211,7 @@ LogicalLimit { skip: 0(u64), fetch: 100(u64) }
                                         │   │   └── LogicalScan { table: supplier }
                                         │   └── LogicalScan { table: nation }
                                         └── LogicalScan { table: region }
-PhysicalLimit { skip: 0(u64), fetch: 100(u64) }
+PhysicalLimit { skip: 0(i64), fetch: 100(i64) }
 └── PhysicalSort
     ├── exprs:
     │   ┌── SortOrder { order: Desc }

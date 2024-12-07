@@ -7,15 +7,25 @@
     - execute
 - sql: |
     select 64 + 1;
+  desc: Test whether the optimizer handles empty relation (select single value) correctly.
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
     select 64 + 1 from t1;
-  desc: Test whether the optimizer handles empty relation correctly.
+  desc: Test whether the optimizer handles select constant from table correctly.
   tasks:
     - explain:logical_optd,physical_optd
     - execute
 - sql: |
     select * from t1 inner join t2 on false;
+  desc: Test whether the optimizer eliminates join to empty relation
+  tasks:
+    - explain:logical_optd,physical_optd
+    - execute
+- sql: |
     select 64+1 from t1 inner join t2 on false;
   desc: Test whether the optimizer eliminates join to empty relation
   tasks:
-    - explain:logical_optd,optimized_logical_optd,physical_optd
+    - explain:logical_optd,physical_optd
     - execute

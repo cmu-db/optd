@@ -23,7 +23,7 @@ ORDER BY
     o_orderdate LIMIT 10;
 
 /*
-LogicalLimit { skip: 0(u64), fetch: 10(u64) }
+LogicalLimit { skip: 0(i64), fetch: 10(i64) }
 └── LogicalSort
     ├── exprs:
     │   ┌── SortOrder { order: Desc }
@@ -61,7 +61,7 @@ LogicalLimit { skip: 0(u64), fetch: 10(u64) }
                     │   ├── LogicalScan { table: customer }
                     │   └── LogicalScan { table: orders }
                     └── LogicalScan { table: lineitem }
-PhysicalLimit { skip: 0(u64), fetch: 10(u64) }
+PhysicalLimit { skip: 0(i64), fetch: 10(i64) }
 └── PhysicalSort
     ├── exprs:
     │   ┌── SortOrder { order: Desc }

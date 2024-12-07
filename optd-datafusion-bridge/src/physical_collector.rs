@@ -8,7 +8,7 @@ use std::task::{Context, Poll};
 
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::error::{DataFusionError, Result};
+use datafusion::error::Result;
 use datafusion::execution::TaskContext;
 use datafusion::physical_plan::{
     internal_err, DisplayAs, DisplayFormatType, ExecutionPlan, RecordBatchStream,
@@ -56,16 +56,20 @@ impl ExecutionPlan for CollectorExec {
         self.input.schema()
     }
 
-    fn output_partitioning(&self) -> datafusion::physical_plan::Partitioning {
-        self.input.output_partitioning()
+    fn name(&self) -> &str {
+        "CollectorExec"
+    }
+
+    fn properties(&self) -> &datafusion::physical_plan::PlanProperties {
+        self.input.properties()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 
-    fn children(&self) -> Vec<Arc<dyn ExecutionPlan>> {
-        vec![self.input.clone()]
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![&self.input]
     }
 
     fn with_new_children(
@@ -80,11 +84,7 @@ impl ExecutionPlan for CollectorExec {
         )))
     }
 
-    fn output_ordering(&self) -> Option<&[datafusion::physical_expr::PhysicalSortExpr]> {
-        self.input.output_ordering()
-    }
-
-    fn statistics(&self) -> datafusion::physical_plan::Statistics {
+    fn statistics(&self) -> Result<datafusion::physical_plan::Statistics> {
         self.input.statistics()
     }
 

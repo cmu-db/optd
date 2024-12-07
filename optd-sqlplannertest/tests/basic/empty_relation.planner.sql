@@ -9,9 +9,8 @@ insert into t2 values (0, 200), (1, 201), (2, 202);
 3
 */
 
--- Test whether the optimizer handles empty relation correctly.
+-- Test whether the optimizer handles empty relation (select single value) correctly.
 select 64 + 1;
-select 64 + 1 from t1;
 
 /*
 LogicalProjection
@@ -25,6 +24,22 @@ PhysicalProjection
 │   └── 1(i64)
 └── PhysicalEmptyRelation { produce_one_row: true }
 65
+*/
+
+-- Test whether the optimizer handles select constant from table correctly.
+select 64 + 1 from t1;
+
+/*
+LogicalProjection
+├── exprs:Add
+│   ├── 64(i64)
+│   └── 1(i64)
+└── LogicalScan { table: t1 }
+PhysicalProjection
+├── exprs:Add
+│   ├── 64(i64)
+│   └── 1(i64)
+└── PhysicalScan { table: t1 }
 65
 65
 65
@@ -32,14 +47,30 @@ PhysicalProjection
 
 -- Test whether the optimizer eliminates join to empty relation
 select * from t1 inner join t2 on false;
-select 64+1 from t1 inner join t2 on false;
 
 /*
 LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
 └── LogicalJoin { join_type: Inner, cond: false }
     ├── LogicalScan { table: t1 }
     └── LogicalScan { table: t2 }
-LogicalEmptyRelation { produce_one_row: false }
 PhysicalEmptyRelation { produce_one_row: false }
+*/
+
+-- Test whether the optimizer eliminates join to empty relation
+select 64+1 from t1 inner join t2 on false;
+
+/*
+LogicalProjection
+├── exprs:Add
+│   ├── 64(i64)
+│   └── 1(i64)
+└── LogicalJoin { join_type: Inner, cond: false }
+    ├── LogicalScan { table: t1 }
+    └── LogicalScan { table: t2 }
+PhysicalProjection
+├── exprs:Add
+│   ├── 64(i64)
+│   └── 1(i64)
+└── PhysicalEmptyRelation { produce_one_row: false }
 */
 
