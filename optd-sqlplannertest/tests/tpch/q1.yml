@@ -22,3 +22,4 @@
   before: ["include_sql:schema.sql"]
   tasks:
     - explain:logical_optd,physical_optd
+    - bench
