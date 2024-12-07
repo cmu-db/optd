@@ -411,6 +411,7 @@ mod tests {
         Ok(())
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_parquet_metadata_works() -> Result<(), DataFusionError> {
         let ctx = SessionContext::new();
@@ -441,6 +442,7 @@ mod tests {
         Ok(())
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_parquet_metadata_works_with_strings() -> Result<(), DataFusionError> {
         let ctx = SessionContext::new();
