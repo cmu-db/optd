@@ -192,6 +192,7 @@ impl<
             JoinType::LeftOuter => f64::max(inner_join_selectivity, 1.0 / right_row_cnt),
             JoinType::RightOuter => f64::max(inner_join_selectivity, 1.0 / left_row_cnt),
             JoinType::LeftSemi => f64::max(inner_join_selectivity, 1.0 / right_row_cnt),
+            JoinType::LeftAnti => f64::max(inner_join_selectivity, 1.0 / right_row_cnt),
             JoinType::Cross => {
                 assert!(
                     on_col_ref_pairs.is_empty(),

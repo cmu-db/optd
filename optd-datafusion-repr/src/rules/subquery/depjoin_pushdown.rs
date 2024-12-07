@@ -162,12 +162,11 @@ fn apply_dep_initial_distinct(
             ),
         )
         .into_plan_node(),
-        JoinType::LeftSemi => LogicalProjection::new(
+        JoinType::LeftSemi | JoinType::LeftAnti => LogicalProjection::new(
             new_join.into_plan_node(),
             ListPred::new(
                 (0..left_schema_size)
                     .map(|x| ColumnRefPred::new(x).into_pred_node())
-                    .chain([ConstantPred::bool(true).into_pred_node()])
                     .collect(),
             ),
         )

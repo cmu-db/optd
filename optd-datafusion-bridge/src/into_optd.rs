@@ -24,6 +24,7 @@ use crate::OptdPlanContext;
 enum SubqueryType {
     Scalar,
     Exists,
+    NotExists,
 }
 
 impl OptdPlanContext<'_> {
@@ -45,6 +46,7 @@ impl OptdPlanContext<'_> {
             let dep_join_type = match sq_typ {
                 SubqueryType::Scalar => JoinType::Inner,
                 SubqueryType::Exists => JoinType::LeftSemi,
+                SubqueryType::NotExists => JoinType::LeftAnti,
             };
 
             let subquery_root = self.conv_into_optd_plan_node(subquery, Some(input_schema))?;
@@ -296,16 +298,14 @@ impl OptdPlanContext<'_> {
             Expr::Exists(ex) => {
                 // We could use mark join here, if we had one...
                 let sq = &ex.subquery;
-                assert!(!ex.negated, "unimplemented"); // Use anti join
+                let typ = if ex.negated {
+                    SubqueryType::NotExists
+                } else {
+                    SubqueryType::Exists
+                };
 
-                let new_column_ref_idx = context.fields().len() + subqueries.len();
-                subqueries.push((sq, SubqueryType::Exists));
-                Ok(BinOpPred::new(
-                    ColumnRefPred::new(new_column_ref_idx).into_pred_node(),
-                    ConstantPred::bool(true).into_pred_node(),
-                    BinOpType::Eq,
-                )
-                .into_pred_node())
+                subqueries.push((sq, typ));
+                Ok(ConstantPred::bool(true).into_pred_node().into_pred_node())
             }
             _ => bail!("Unsupported expression: {:?}", expr),
         }
