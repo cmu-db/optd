@@ -16,7 +16,7 @@ LogicalProjection { exprs: [ #0, #1 ] }
     ├── cond:Gt
     │   ├── #2
     │   └── 100(i64)
-    └── RawDependentJoin { join_type: Cross, cond: true, extern_cols: [ Extern(#0) ] }
+    └── RawDependentJoin { join_type: Inner, cond: true, extern_cols: [ Extern(#0) ] }
         ├── LogicalScan { table: t1 }
         └── LogicalProjection { exprs: [ #0 ] }
             └── LogicalAgg
@@ -102,7 +102,7 @@ LogicalProjection { exprs: [ #0, #1 ] }
     ├── cond:Gt
     │   ├── #2
     │   └── 100(i64)
-    └── RawDependentJoin { join_type: Cross, cond: true, extern_cols: [ Extern(#0) ] }
+    └── RawDependentJoin { join_type: Inner, cond: true, extern_cols: [ Extern(#0) ] }
         ├── LogicalScan { table: t1 }
         └── LogicalProjection { exprs: [ #0 ] }
             └── LogicalAgg
