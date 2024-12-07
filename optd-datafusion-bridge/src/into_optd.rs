@@ -302,8 +302,8 @@ impl OptdPlanContext<'_> {
                 subqueries.push((sq, SubqueryType::Exists));
                 Ok(BinOpPred::new(
                     ColumnRefPred::new(new_column_ref_idx).into_pred_node(),
-                    ConstantPred::int64(0).into_pred_node(),
-                    BinOpType::Gt,
+                    ConstantPred::bool(true).into_pred_node(),
+                    BinOpType::Eq,
                 )
                 .into_pred_node())
             }

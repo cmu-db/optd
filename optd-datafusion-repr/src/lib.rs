@@ -20,7 +20,7 @@ pub use optd_core::nodes::Value;
 use optd_core::optimizer::Optimizer;
 use optd_core::rules::Rule;
 pub use optimizer_ext::OptimizerExt;
-use plan_nodes::{ArcDfPlanNode, DfNodeType};
+use plan_nodes::{ArcDfPlanNode, DfNodeType, DfReprPlanNode};
 use properties::column_ref::ColumnRefPropertyBuilder;
 use properties::schema::{Catalog, SchemaPropertyBuilder};
 

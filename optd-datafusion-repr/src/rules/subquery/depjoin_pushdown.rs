@@ -12,7 +12,7 @@ use crate::plan_nodes::{
     ArcDfPlanNode, ArcDfPredNode, BinOpPred, BinOpType, ColumnRefPred, ConstantPred, ConstantType,
     DependentJoin, DfNodeType, DfPredType, DfReprPlanNode, DfReprPredNode, ExternColumnRefPred,
     FuncPred, FuncType, JoinType, ListPred, LogOpPred, LogOpType, LogicalAgg, LogicalFilter,
-    LogicalJoin, LogicalProjection, PredExt, RawDependentJoin,
+    LogicalJoin, LogicalLimit, LogicalProjection, PredExt, RawDependentJoin,
 };
 use crate::rules::macros::define_rule_discriminant;
 use crate::OptimizerExt;
@@ -86,7 +86,7 @@ fn apply_dep_initial_distinct(
             left,
             right,
             ConstantPred::bool(true).into_pred_node(),
-            join.join_type(),
+            JoinType::Cross,
         );
 
         return vec![new_join.into_plan_node().into()];
@@ -142,26 +142,40 @@ fn apply_dep_initial_distinct(
         left,
         new_dep_join.into_plan_node(),
         join_cond.into_pred_node(),
-        JoinType::Inner,
+        join.join_type(),
     );
 
     // Ensure that the schema above the new_join is the same as it was before
     // for correctness (Project the left side of the new join,
     // plus the *right side of the right side*)
-    let new_proj = LogicalProjection::new(
-        new_join.into_plan_node(),
-        ListPred::new(
-            (0..left_schema_size)
-                .chain(
-                    (left_schema_size + correlated_col_indices.len())
-                        ..(left_schema_size + correlated_col_indices.len() + right_schema_size),
-                )
-                .map(|x| ColumnRefPred::new(x).into_pred_node())
-                .collect(),
-        ),
-    );
+    let node = match join.join_type() {
+        JoinType::Inner => LogicalProjection::new(
+            new_join.into_plan_node(),
+            ListPred::new(
+                (0..left_schema_size)
+                    .chain(
+                        (left_schema_size + correlated_col_indices.len())
+                            ..(left_schema_size + correlated_col_indices.len() + right_schema_size),
+                    )
+                    .map(|x| ColumnRefPred::new(x).into_pred_node())
+                    .collect(),
+            ),
+        )
+        .into_plan_node(),
+        JoinType::LeftSemi => LogicalProjection::new(
+            new_join.into_plan_node(),
+            ListPred::new(
+                (0..left_schema_size)
+                    .map(|x| ColumnRefPred::new(x).into_pred_node())
+                    .chain([ConstantPred::bool(true).into_pred_node()])
+                    .collect(),
+            ),
+        )
+        .into_plan_node(),
+        _ => unimplemented!(),
+    };
 
-    vec![new_proj.into_plan_node().into()]
+    vec![node.into()]
 }
 
 define_rule_discriminant!(
@@ -205,7 +219,7 @@ fn apply_dep_join_past_proj(
     );
 
     let new_dep_join =
-        DependentJoin::new_unchecked(left, right, cond, extern_cols, JoinType::Cross);
+        DependentJoin::new_unchecked(left, right, cond, extern_cols, join.join_type());
     let new_proj = LogicalProjection::new(new_dep_join.into_plan_node(), new_proj_exprs);
 
     vec![new_proj.into_plan_node().into()]
@@ -267,7 +281,7 @@ fn apply_dep_join_past_filter(
                 .map(|x| ExternColumnRefPred::new(x).into_pred_node())
                 .collect(),
         ),
-        JoinType::Cross,
+        join.join_type(),
     );
 
     let new_filter = LogicalFilter::new(new_dep_join.into_plan_node(), rewritten_expr);
@@ -343,7 +357,7 @@ fn apply_dep_join_past_agg(
     );
 
     let new_dep_join =
-        DependentJoin::new_unchecked(left.clone(), right, cond, extern_cols, JoinType::Cross);
+        DependentJoin::new_unchecked(left.clone(), right, cond, extern_cols, join.join_type());
 
     let new_agg_exprs_size = new_exprs.len();
     let new_agg_groups_size = new_groups.len();

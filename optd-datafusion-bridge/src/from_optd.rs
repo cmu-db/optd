@@ -450,8 +450,14 @@ impl OptdPlanContext<'_> {
         }
 
         let join_type = match node.join_type() {
-            JoinType::Inner => datafusion::logical_expr::JoinType::Inner,
-            JoinType::LeftOuter => datafusion::logical_expr::JoinType::Left,
+            JoinType::Inner => datafusion_expr::JoinType::Inner,
+            JoinType::FullOuter => datafusion_expr::JoinType::Full,
+            JoinType::LeftOuter => datafusion_expr::JoinType::Left,
+            JoinType::RightOuter => datafusion_expr::JoinType::Right,
+            JoinType::LeftSemi => datafusion_expr::JoinType::LeftSemi,
+            JoinType::RightSemi => datafusion_expr::JoinType::RightSemi,
+            JoinType::LeftAnti => datafusion_expr::JoinType::LeftAnti,
+            JoinType::RightAnti => datafusion_expr::JoinType::RightAnti,
             _ => unimplemented!(),
         };
 
