@@ -15,12 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::print_format::PrintFormat;
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::error::Result;
 use std::fmt::{Display, Formatter};
+use std::io::Write;
+use std::pin::Pin;
 use std::str::FromStr;
-use std::time::Instant;
+
+use crate::print_format::PrintFormat;
+
+use arrow::datatypes::SchemaRef;
+use arrow::record_batch::RecordBatch;
+use datafusion::common::instant::Instant;
+use datafusion::common::DataFusionError;
+use datafusion::error::Result;
+use datafusion::physical_plan::RecordBatchStream;
+
+use futures::StreamExt;
 
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum MaxRows {
@@ -62,35 +71,98 @@ pub struct PrintOptions {
     pub format: PrintFormat,
     pub quiet: bool,
     pub maxrows: MaxRows,
+    pub color: bool,
 }
 
-fn get_timing_info_str(row_count: usize, maxrows: MaxRows, query_start_time: Instant) -> String {
-    let row_word = if row_count == 1 { "row" } else { "rows" };
+// Returns the query execution details formatted
+fn get_execution_details_formatted(
+    row_count: usize,
+    maxrows: MaxRows,
+    query_start_time: Instant,
+) -> String {
     let nrows_shown_msg = match maxrows {
-        MaxRows::Limited(nrows) if nrows < row_count => format!(" ({} shown)", nrows),
+        MaxRows::Limited(nrows) if nrows < row_count => {
+            format!("(First {nrows} displayed. Use --maxrows to adjust)")
+        }
         _ => String::new(),
     };
 
     format!(
-        "{} {} in set{}. Query took {:.3} seconds.\n",
+        "{} row(s) fetched. {}\nElapsed {:.3} seconds.\n",
         row_count,
-        row_word,
         nrows_shown_msg,
         query_start_time.elapsed().as_secs_f64()
     )
 }
 
 impl PrintOptions {
-    /// print the batches to stdout using the specified format
-    pub fn print_batches(&self, batches: &[RecordBatch], query_start_time: Instant) -> Result<()> {
-        let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
-        // Elapsed time should not count time for printing batches
-        let timing_info = get_timing_info_str(row_count, self.maxrows, query_start_time);
+    /// Print the batches to stdout using the specified format
+    pub fn print_batches(
+        &self,
+        schema: SchemaRef,
+        batches: &[RecordBatch],
+        query_start_time: Instant,
+    ) -> Result<()> {
+        let stdout = std::io::stdout();
+        let mut writer = stdout.lock();
 
-        self.format.print_batches(batches, self.maxrows)?;
+        self.format
+            .print_batches(&mut writer, schema, batches, self.maxrows, true)?;
+
+        let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
+        let formatted_exec_details = get_execution_details_formatted(
+            row_count,
+            if self.format == PrintFormat::Table {
+                self.maxrows
+            } else {
+                MaxRows::Unlimited
+            },
+            query_start_time,
+        );
 
         if !self.quiet {
-            println!("{timing_info}");
+            writeln!(writer, "{formatted_exec_details}")?;
+        }
+
+        Ok(())
+    }
+
+    /// Print the stream to stdout using the specified format
+    pub async fn print_stream(
+        &self,
+        mut stream: Pin<Box<dyn RecordBatchStream>>,
+        query_start_time: Instant,
+    ) -> Result<()> {
+        if self.format == PrintFormat::Table {
+            return Err(DataFusionError::External(
+                "PrintFormat::Table is not implemented".to_string().into(),
+            ));
+        };
+
+        let stdout = std::io::stdout();
+        let mut writer = stdout.lock();
+
+        let mut row_count = 0_usize;
+        let mut with_header = true;
+
+        while let Some(maybe_batch) = stream.next().await {
+            let batch = maybe_batch?;
+            row_count += batch.num_rows();
+            self.format.print_batches(
+                &mut writer,
+                batch.schema(),
+                &[batch],
+                MaxRows::Unlimited,
+                with_header,
+            )?;
+            with_header = false;
+        }
+
+        let formatted_exec_details =
+            get_execution_details_formatted(row_count, MaxRows::Unlimited, query_start_time);
+
+        if !self.quiet {
+            writeln!(writer, "{formatted_exec_details}")?;
         }
 
         Ok(())

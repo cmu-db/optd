@@ -27,17 +27,17 @@ fn apply_eliminate_limit(
     let skip = limit.skip();
     let fetch = limit.fetch();
     let child = limit.child();
-    if let DfPredType::Constant(ConstantType::UInt64) = skip.typ {
-        if let DfPredType::Constant(ConstantType::UInt64) = fetch.typ {
-            let skip_val = ConstantPred::from_pred_node(skip).unwrap().value().as_u64();
+    if let DfPredType::Constant(ConstantType::Int64) = skip.typ {
+        if let DfPredType::Constant(ConstantType::Int64) = fetch.typ {
+            let skip_val = ConstantPred::from_pred_node(skip).unwrap().value().as_i64();
 
             let fetch_val = ConstantPred::from_pred_node(fetch)
                 .unwrap()
                 .value()
-                .as_u64();
+                .as_i64();
 
             // Bad convention to have u64 max represent None
-            let fetch_is_none = fetch_val == u64::MAX;
+            let fetch_is_none = fetch_val == i64::MAX;
 
             let schema = optimizer.get_schema_of(child.clone());
             if fetch_is_none && skip_val == 0 {

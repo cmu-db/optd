@@ -12,7 +12,7 @@ use std::{env, fs, io};
 
 /// A wrapper around tpch-kit
 use csv2parquet::Opts;
-use datafusion::catalog::schema::SchemaProvider;
+use datafusion::catalog::SchemaProvider;
 use serde::{Deserialize, Serialize};
 
 use crate::shell;
@@ -166,7 +166,12 @@ impl TpchKit {
             log::debug!("[start] making parquet for {}", tpch_kit_config);
             for csv_tbl_fpath in self.get_tbl_fpath_vec(tpch_kit_config, "tbl").unwrap() {
                 let tbl_name = Self::get_tbl_name_from_tbl_fpath(&csv_tbl_fpath);
-                let schema = schema_provider.table(&tbl_name).await.unwrap().schema();
+                let schema = schema_provider
+                    .table(&tbl_name)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .schema();
                 let mut parquet_tbl_fpath = csv_tbl_fpath.clone();
                 parquet_tbl_fpath.set_extension("parquet");
                 let mut opts = Opts::new(csv_tbl_fpath, parquet_tbl_fpath.clone());
