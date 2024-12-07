@@ -10,22 +10,28 @@ insert into t2 values (0, 200), (1, 201), (2, 202);
 */
 
 -- test self join
-select * from t1 as a, t1 as b where a.t1v1 = b.t1v1;
+select * from t1 as a, t1 as b where a.t1v1 = b.t1v1 order by a.t1v1;
 
 /*
 (Join t1 t1)
 
-LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
-└── LogicalFilter
-    ├── cond:Eq
-    │   ├── #0
-    │   └── #2
-    └── LogicalJoin { join_type: Cross, cond: true }
-        ├── LogicalScan { table: t1 }
-        └── LogicalScan { table: t1 }
-PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-├── PhysicalScan { table: t1 }
-└── PhysicalScan { table: t1 }
+LogicalSort
+├── exprs:SortOrder { order: Asc }
+│   └── #0
+└── LogicalProjection { exprs: [ #0, #1, #2, #3 ] }
+    └── LogicalFilter
+        ├── cond:Eq
+        │   ├── #0
+        │   └── #2
+        └── LogicalJoin { join_type: Cross, cond: true }
+            ├── LogicalScan { table: t1 }
+            └── LogicalScan { table: t1 }
+PhysicalSort
+├── exprs:SortOrder { order: Asc }
+│   └── #0
+└── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+    ├── PhysicalScan { table: t1 }
+    └── PhysicalScan { table: t1 }
 0 0 0 0
 1 1 1 1
 2 2 2 2

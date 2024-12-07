@@ -19,6 +19,9 @@ select * from t2, t1 where t1v1 = t2v1;
 (Join t1 t2)
 (Join t2 t1)
 
+(Join t1 t2)
+(Join t2 t1)
+
 0 200 0 0
 1 201 1 1
 2 202 2 2
@@ -28,6 +31,15 @@ select * from t2, t1 where t1v1 = t2v1;
 select * from t2, t1, t3 where t1v1 = t2v1 and t1v1 = t3v2;
 
 /*
+(Join t2 (Join t1 t3))
+(Join t2 (Join t3 t1))
+(Join t3 (Join t1 t2))
+(Join t3 (Join t2 t1))
+(Join (Join t1 t2) t3)
+(Join (Join t1 t3) t2)
+(Join (Join t2 t1) t3)
+(Join (Join t3 t1) t2)
+
 (Join t2 (Join t1 t3))
 (Join t2 (Join t3 t1))
 (Join t3 (Join t1 t2))
@@ -55,6 +67,15 @@ select * from t2, t1, t3 where t1v1 = t2v1 and t1v2 = t3v2;
 (Join (Join t2 t1) t3)
 (Join (Join t3 t1) t2)
 
+(Join t2 (Join t1 t3))
+(Join t2 (Join t3 t1))
+(Join t3 (Join t1 t2))
+(Join t3 (Join t2 t1))
+(Join (Join t1 t2) t3)
+(Join (Join t1 t3) t2)
+(Join (Join t2 t1) t3)
+(Join (Join t3 t1) t2)
+
 0 200 0 0 0 300
 1 201 1 1 1 301
 2 202 2 2 2 302
@@ -64,6 +85,15 @@ select * from t2, t1, t3 where t1v1 = t2v1 and t1v2 = t3v2;
 select * from t1, t2, t3 where t1v1 = t2v1 and t1v2 = t3v2;
 
 /*
+(Join t2 (Join t1 t3))
+(Join t2 (Join t3 t1))
+(Join t3 (Join t1 t2))
+(Join t3 (Join t2 t1))
+(Join (Join t1 t2) t3)
+(Join (Join t1 t3) t2)
+(Join (Join t2 t1) t3)
+(Join (Join t3 t1) t2)
+
 (Join t2 (Join t1 t3))
 (Join t2 (Join t3 t1))
 (Join t3 (Join t1 t2))
