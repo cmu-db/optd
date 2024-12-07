@@ -360,7 +360,7 @@ fn apply_dep_join_past_agg(
         correlated_col_indices
             .iter()
             .enumerate()
-            .map(|(i, x)| {
+            .map(|(i, _)| {
                 assert!(i + left_schema_size < left_schema_size + new_agg_schema_size);
                 BinOpPred::new(
                     ColumnRefPred::new(i).into_pred_node(),
