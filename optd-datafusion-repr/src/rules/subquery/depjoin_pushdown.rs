@@ -3,6 +3,8 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
+use std::iter;
+
 use datafusion_expr::{AggregateFunction, BuiltinScalarFunction};
 use optd_core::nodes::{PlanNodeOrGroup, PredNode, Value};
 use optd_core::optimizer::Optimizer;
@@ -163,20 +165,26 @@ fn apply_dep_initial_distinct(
         )
         .into_plan_node(),
         // Simulate a left mark join
-        JoinType::LeftOuter => LogicalProjection::new(
-            new_join.into_plan_node(),
-            ListPred::new(
-                (0..left_schema_size)
-                    .map(|x| ColumnRefPred::new(x).into_pred_node())
-                    .chain([FuncPred::new(
-                        FuncType::IsNotNull,
-                        ListPred::new(vec![ColumnRefPred::new(left_schema_size).into_pred_node()]),
-                    )
-                    .into_pred_node()])
-                    .collect(),
-            ),
-        )
-        .into_plan_node(),
+        JoinType::LeftSemi | JoinType::LeftAnti => {
+            let val = match join.join_type() {
+                JoinType::LeftSemi => true,
+                JoinType::LeftAnti => false,
+                _ => unreachable!(),
+            };
+            LogicalProjection::new(
+                new_join.into_plan_node(),
+                ListPred::new(
+                    (0..left_schema_size)
+                        .map(|x| ColumnRefPred::new(x).into_pred_node())
+                        .chain(
+                            iter::repeat(ConstantPred::bool(val).into_pred_node())
+                                .take(correlated_col_indices.len()),
+                        )
+                        .collect(),
+                ),
+            )
+            .into_plan_node()
+        }
         _ => unimplemented!(),
     };
 
