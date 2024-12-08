@@ -191,8 +191,6 @@ impl<
             JoinType::Inner => inner_join_selectivity,
             JoinType::LeftOuter => f64::max(inner_join_selectivity, 1.0 / right_row_cnt),
             JoinType::RightOuter => f64::max(inner_join_selectivity, 1.0 / left_row_cnt),
-            JoinType::LeftSemi => f64::max(inner_join_selectivity, 1.0 / right_row_cnt),
-            JoinType::LeftAnti => f64::max(inner_join_selectivity, 1.0 / right_row_cnt),
             JoinType::Cross => {
                 assert!(
                     on_col_ref_pairs.is_empty(),
@@ -200,6 +198,8 @@ impl<
                 );
                 join_filter_selectivity
             }
+            // TODO: Does this make sense?
+            JoinType::LeftMark => f64::max(inner_join_selectivity, 1.0 / right_row_cnt),
             _ => unimplemented!("join_typ={} is not implemented", join_typ),
         }
     }

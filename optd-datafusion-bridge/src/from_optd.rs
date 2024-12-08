@@ -195,6 +195,10 @@ impl OptdPlanContext<'_> {
                             Some(else_expr),
                         )?)
                     }
+                    FuncType::Not => {
+                        let expr = args[0].clone();
+                        Ok(physical_expr::expressions::not(expr)?)
+                    }
                     FuncType::IsNull => {
                         let expr = args[0].clone();
                         Ok(physical_expr::expressions::is_null(expr)?)

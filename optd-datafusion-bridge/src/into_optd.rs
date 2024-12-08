@@ -46,7 +46,7 @@ impl OptdPlanContext<'_> {
         {
             let dep_join_type = match sq_typ {
                 SubqueryType::Scalar => JoinType::Inner,
-                SubqueryType::Exists => JoinType::LeftSemi,
+                SubqueryType::Exists => JoinType::LeftMark,
                 _ => unimplemented!(),
             };
 
@@ -273,6 +273,10 @@ impl OptdPlanContext<'_> {
                 )
                 .into_pred_node())
             }
+            Expr::Not(x) => {
+                let expr = self.conv_into_optd_expr(x.as_ref(), context, dep_ctx, subqueries)?;
+                Ok(FuncPred::new(FuncType::Not, ListPred::new(vec![expr])).into_pred_node())
+            }
             Expr::IsNull(x) => {
                 let expr = self.conv_into_optd_expr(x.as_ref(), context, dep_ctx, subqueries)?;
                 Ok(FuncPred::new(FuncType::IsNull, ListPred::new(vec![expr])).into_pred_node())
@@ -318,15 +322,21 @@ impl OptdPlanContext<'_> {
             Expr::Exists(ex) => {
                 // We could use mark join here, if we had one...
                 let sq = &ex.subquery;
+                let negated = ex.negated;
 
                 let new_column_ref_idx = context.fields().len() + subqueries.len();
                 subqueries.push((sq, SubqueryType::Exists));
-                Ok(BinOpPred::new(
-                    ColumnRefPred::new(new_column_ref_idx).into_pred_node(),
-                    ConstantPred::bool(true).into_pred_node(),
-                    BinOpType::Eq,
-                )
-                .into_pred_node())
+                if negated {
+                    Ok(FuncPred::new(
+                        FuncType::Not,
+                        ListPred::new(
+                            vec![ColumnRefPred::new(new_column_ref_idx).into_pred_node()],
+                        ),
+                    )
+                    .into_pred_node())
+                } else {
+                    Ok(ColumnRefPred::new(new_column_ref_idx).into_pred_node())
+                }
             }
             Expr::InSubquery(insq) => {
                 let sq = &insq.subquery;

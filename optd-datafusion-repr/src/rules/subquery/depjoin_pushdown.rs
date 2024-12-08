@@ -149,8 +149,8 @@ fn apply_dep_initial_distinct(
     // Ensure that the schema above the new_join is the same as it was before
     // for correctness (Project the left side of the new join,
     // plus the *right side of the right side*)
-    let node = match join.join_type() {
-        JoinType::Inner => LogicalProjection::new(
+    let node = if matches!(join.join_type(), JoinType::Inner) {
+        LogicalProjection::new(
             new_join.into_plan_node(),
             ListPred::new(
                 (0..left_schema_size)
@@ -162,29 +162,9 @@ fn apply_dep_initial_distinct(
                     .collect(),
             ),
         )
-        .into_plan_node(),
-        // Simulate a left mark join
-        JoinType::LeftSemi | JoinType::LeftAnti => {
-            let val = match join.join_type() {
-                JoinType::LeftSemi => true,
-                JoinType::LeftAnti => false,
-                _ => unreachable!(),
-            };
-            LogicalProjection::new(
-                new_join.into_plan_node(),
-                ListPred::new(
-                    (0..left_schema_size)
-                        .map(|x| ColumnRefPred::new(x).into_pred_node())
-                        .chain(
-                            iter::repeat(ConstantPred::bool(val).into_pred_node())
-                                .take(correlated_col_indices.len()),
-                        )
-                        .collect(),
-                ),
-            )
-            .into_plan_node()
-        }
-        _ => unimplemented!(),
+        .into_plan_node()
+    } else {
+        new_join.into_plan_node()
     };
 
     vec![node.into()]
