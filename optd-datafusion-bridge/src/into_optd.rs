@@ -7,7 +7,8 @@ use anyhow::{bail, Result};
 use datafusion::common::DFSchema;
 use datafusion::logical_expr::{self, logical_plan, LogicalPlan, Operator};
 use datafusion::scalar::ScalarValue;
-use datafusion_expr::Subquery;
+use datafusion_expr::{ExprSchemable, Subquery};
+use itertools::Itertools;
 use optd_core::nodes::PredNode;
 use optd_datafusion_repr::plan_nodes::{
     ArcDfPlanNode, ArcDfPredNode, BetweenPred, BinOpPred, BinOpType, CastPred, ColumnRefPred,
@@ -209,10 +210,24 @@ impl OptdPlanContext<'_> {
             }
             Expr::ScalarFunction(x) => {
                 let args = self.conv_into_optd_expr_list(&x.args, context, dep_ctx, subqueries)?;
-                Ok(
-                    FuncPred::new(FuncType::new_scalar(x.func.name().to_string()), args)
-                        .into_pred_node(),
+                Ok(FuncPred::new(
+                    FuncType::new_scalar(
+                        x.func.name().to_string(),
+                        // TODO: remove this infer...
+                        x.func
+                            .return_type_from_exprs(
+                                &x.args,
+                                context,
+                                &x.args
+                                    .iter()
+                                    .map(|x| x.get_type(context).unwrap())
+                                    .collect_vec(),
+                            )
+                            .unwrap(),
+                    ),
+                    args,
                 )
+                .into_pred_node())
             }
             Expr::AggregateFunction(x) => {
                 let args = self.conv_into_optd_expr_list(&x.args, context, dep_ctx, subqueries)?;

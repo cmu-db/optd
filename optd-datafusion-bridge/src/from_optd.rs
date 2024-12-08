@@ -171,7 +171,7 @@ impl OptdPlanContext<'_> {
                     .map(|expr| self.conv_from_optd_expr(expr, context))
                     .collect::<Result<Vec<_>>>()?;
                 match func {
-                    FuncType::Scalar(func) => {
+                    FuncType::Scalar(func, ret_typ) => {
                         let scalar_func = self
                             .session_state
                             .scalar_functions()
@@ -182,7 +182,7 @@ impl OptdPlanContext<'_> {
                             &func,
                             scalar_func.clone(),
                             args,
-                            datafusion::arrow::datatypes::DataType::Int64, // TODO: properly infer the typ
+                            ret_typ,
                         )))
                     }
                     FuncType::Case => {
