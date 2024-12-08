@@ -33,7 +33,7 @@ ORDER BY
 LIMIT 20;
 
 /*
-LogicalLimit { skip: 0(u64), fetch: 20(u64) }
+LogicalLimit { skip: 0(i64), fetch: 20(i64) }
 └── LogicalSort
     ├── exprs:SortOrder { order: Desc }
     │   └── #2
@@ -75,7 +75,7 @@ LogicalLimit { skip: 0(u64), fetch: 20(u64) }
                     │   │   └── LogicalScan { table: orders }
                     │   └── LogicalScan { table: lineitem }
                     └── LogicalScan { table: nation }
-PhysicalLimit { skip: 0(u64), fetch: 20(u64) }
+PhysicalLimit { skip: 0(i64), fetch: 20(i64) }
 └── PhysicalSort
     ├── exprs:SortOrder { order: Desc }
     │   └── #2

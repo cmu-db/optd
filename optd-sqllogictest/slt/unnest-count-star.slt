@@ -3,7 +3,7 @@ include _basic_tables.slt.part
 # This query uses a count(*) agg function, with nulls. Nulls should be
 # transformed from NULL to 0 when they come from count(*).
 # It won't work without the outer join fix + a special case on count(*).
-# It also has out-of-order extern column [#1]
+# It also has an out-of-order extern column [#1]
 query
 select
     v1,

@@ -56,7 +56,7 @@ LogicalSort
         │   ├── Agg(Avg)
         │   │   └── [ #6 ]
         │   └── Agg(Count)
-        │       └── [ 1(u8) ]
+        │       └── [ 1(i64) ]
         ├── groups: [ #8, #9 ]
         └── LogicalFilter
             ├── cond:Leq
@@ -100,7 +100,7 @@ PhysicalSort
     │   ├── Agg(Avg)
     │   │   └── [ #6 ]
     │   └── Agg(Count)
-    │       └── [ 1(u8) ]
+    │       └── [ 1(i64) ]
     ├── groups: [ #8, #9 ]
     └── PhysicalFilter
         ├── cond:Leq

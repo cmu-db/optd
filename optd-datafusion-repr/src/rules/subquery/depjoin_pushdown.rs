@@ -5,16 +5,15 @@
 
 use std::iter;
 
-use datafusion_expr::{AggregateFunction, BuiltinScalarFunction};
-use optd_core::nodes::{PlanNodeOrGroup, PredNode, Value};
+use optd_core::nodes::{PlanNodeOrGroup, PredNode};
 use optd_core::optimizer::Optimizer;
 use optd_core::rules::{Rule, RuleMatcher};
 
 use crate::plan_nodes::{
-    ArcDfPlanNode, ArcDfPredNode, BinOpPred, BinOpType, ColumnRefPred, ConstantPred, ConstantType,
-    DependentJoin, DfNodeType, DfPredType, DfReprPlanNode, DfReprPredNode, ExternColumnRefPred,
-    FuncPred, FuncType, JoinType, ListPred, LogOpPred, LogOpType, LogicalAgg, LogicalFilter,
-    LogicalJoin, LogicalLimit, LogicalProjection, PredExt, RawDependentJoin,
+    ArcDfPlanNode, ArcDfPredNode, BinOpPred, BinOpType, ColumnRefPred, ConstantPred, DependentJoin,
+    DfNodeType, DfPredType, DfReprPlanNode, DfReprPredNode, ExternColumnRefPred, FuncPred,
+    FuncType, JoinType, ListPred, LogOpPred, LogOpType, LogicalAgg, LogicalFilter, LogicalJoin,
+    LogicalProjection, PredExt, RawDependentJoin,
 };
 use crate::rules::macros::define_rule_discriminant;
 use crate::OptimizerExt;
@@ -387,7 +386,7 @@ fn apply_dep_join_past_agg(
         correlated_col_indices
             .iter()
             .enumerate()
-            .map(|(i, x)| {
+            .map(|(i, _)| {
                 assert!(i + left_schema_size < left_schema_size + new_agg_schema_size);
                 BinOpPred::new(
                     ColumnRefPred::new(i).into_pred_node(),
@@ -415,6 +414,9 @@ fn apply_dep_join_past_agg(
     // exprs from the new agg node. If we use everything from the new agg,
     // we don't maintain nulls as desired.
     let outer_join_proj = LogicalProjection::new(
+        // The meaning is to take everything from the left side, and everything
+        // from the right side *that is not in the left side*. I am unsure
+        // of the correctness of this project in every case.
         new_outer_join.into_plan_node(),
         ListPred::new(
             (0..left_schema_size)
@@ -426,14 +428,15 @@ fn apply_dep_join_past_agg(
                         // it's a count(*), apply the workaround
                         let expr =
                             exprs.to_vec()[x - left_schema_size - new_agg_groups_size].clone();
-                        if expr.typ == DfPredType::Func(FuncType::Agg(AggregateFunction::Count)) {
+                        if expr.typ == DfPredType::Func(FuncType::Agg("count".to_string())) {
                             let expr_child = expr.child(0).child(0);
-
-                            if expr_child.typ == DfPredType::Constant(ConstantType::UInt8)
-                                && expr_child.data == Some(Value::UInt8(1))
-                            {
+                            // Any count(constant)should be treated as `count(*)`
+                            if let DfPredType::Constant(constant_typ) = expr_child.typ {
                                 return FuncPred::new(
-                                    FuncType::Scalar(BuiltinScalarFunction::Coalesce),
+                                    FuncType::Scalar(
+                                        "coalesce".to_string(),
+                                        constant_typ.into_data_type(),
+                                    ),
                                     ListPred::new(vec![
                                         ColumnRefPred::new(x).into_pred_node(),
                                         ConstantPred::int64(0).into_pred_node(),

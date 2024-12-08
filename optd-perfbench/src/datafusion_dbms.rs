@@ -5,25 +5,21 @@
 
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Instant;
 
 use async_trait::async_trait;
 use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
-use datafusion::execution::config::SessionConfig;
-use datafusion::execution::context::{SessionContext, SessionState};
+use datafusion::execution::context::SessionContext;
 use datafusion::execution::options::CsvReadOptions;
-use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
 use datafusion::sql::parser::DFParser;
 use datafusion::sql::sqlparser::dialect::GenericDialect;
 use datafusion_optd_cli::helper::unescape_input;
 use lazy_static::lazy_static;
-use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
-use optd_datafusion_repr::DatafusionOptimizer;
+use optd_datafusion_bridge::create_df_context;
 use optd_datafusion_repr_adv_cost::adv_stats::stats::{
     DataFusionBaseTableStats, DataFusionPerTableStats,
 };
-use optd_datafusion_repr_adv_cost::new_physical_adv_cost;
 use parquet::arrow::arrow_reader::{
     ArrowReaderMetadata, ParquetRecordBatchReader, ParquetRecordBatchReaderBuilder,
 };
@@ -116,27 +112,9 @@ impl DatafusionDBMS {
         adaptive: bool,
         use_df_logical: bool,
     ) -> anyhow::Result<SessionContext> {
-        let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
-
-        if !use_df_logical {
-            session_config.options_mut().optimizer.max_passes = 0;
-        }
-
-        let rn_config = RuntimeConfig::new();
-        let runtime_env = RuntimeEnv::new(rn_config.clone())?;
-        let ctx = {
-            let mut state =
-                SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
-            let optimizer: DatafusionOptimizer = new_physical_adv_cost(
-                Arc::new(DatafusionCatalog::new(state.catalog_list())),
-                stats.unwrap_or_default(),
-                adaptive,
-            );
-            state = state.with_physical_optimizer_rules(vec![]);
-            state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));
-            SessionContext::new_with_state(state)
-        };
-        ctx.refresh_catalogs().await?;
+        let ctx = create_df_context(None, None, None, adaptive, use_df_logical, true, stats)
+            .await?
+            .ctx;
         Ok(ctx)
     }
 
@@ -376,7 +354,7 @@ impl DatafusionDBMS {
             Self::execute(
                 self.get_ctx(),
                 &format!(
-                    "create external table {}_tbl stored as csv delimiter '|' location '{}';",
+                    "create external table {}_tbl stored as csv OPTIONS (HAS_HEADER false, DELIMITER '|') location '{}';",
                     tbl_name,
                     tbl_fpath.to_str().unwrap()
                 ),
@@ -392,6 +370,7 @@ impl DatafusionDBMS {
                 .unwrap()
                 .table(tbl_name)
                 .await
+                .unwrap()
                 .unwrap()
                 .schema();
 
@@ -537,6 +516,7 @@ impl DatafusionDBMS {
                 .unwrap()
                 .table(tbl_name)
                 .await
+                .unwrap()
                 .unwrap()
                 .schema();
             self.get_ctx()
