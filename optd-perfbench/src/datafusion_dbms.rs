@@ -354,7 +354,7 @@ impl DatafusionDBMS {
             Self::execute(
                 self.get_ctx(),
                 &format!(
-                    "create external table {}_tbl stored as csv delimiter '|' location '{}';",
+                    "create external table {}_tbl stored as csv OPTIONS (HAS_HEADER false, DELIMITER '|') location '{}';",
                     tbl_name,
                     tbl_fpath.to_str().unwrap()
                 ),
