@@ -388,6 +388,9 @@ fn apply_dep_join_past_agg(
     // exprs from the new agg node. If we use everything from the new agg,
     // we don't maintain nulls as desired.
     let outer_join_proj = LogicalProjection::new(
+        // The meaning is to take everything from the left side, and everything
+        // from the right side *that is not in the left side*. I am unsure
+        // of the correctness of this project in every case.
         new_outer_join.into_plan_node(),
         ListPred::new(
             (0..left_schema_size)
