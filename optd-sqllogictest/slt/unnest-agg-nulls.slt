@@ -2,7 +2,7 @@ include _basic_tables.slt.part
 
 # This query has NULL values from the subquery agg. It won't work without the
 # outer join fix.
-# It also has out-of-order extern column [#1]
+# It also has an out-of-order extern column [#1]
 query
 select
     v1,
