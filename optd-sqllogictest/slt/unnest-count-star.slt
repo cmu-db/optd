@@ -1,0 +1,22 @@
+include _basic_tables.slt.part
+
+# This query uses a count(*) agg function, with nulls. Nulls should be
+# transformed from NULL to 0 when they come from count(*).
+# It won't work without the outer join fix + a special case on count(*).
+# It also has an out-of-order extern column [#1]
+query
+select
+    v1,
+    v2,
+    (
+        select count(*)
+        from t2
+        where v4 = v2
+    ) as avg_v4
+from t1 order by v1;
+----
+1 100 0
+2 200 1
+2 250 1
+3 300 1
+3 300 1

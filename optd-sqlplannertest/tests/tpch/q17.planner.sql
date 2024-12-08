@@ -104,15 +104,26 @@ PhysicalProjection
                 │       │   ├── 0.2(float)
                 │       │   └── Cast { cast_to: Float64, child: #1 }
 
-                └── PhysicalAgg
-                    ├── aggrs:Agg(Avg)
-                    │   └── [ #5 ]
-                    ├── groups: [ #0 ]
-                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
+                └── PhysicalProjection { exprs: [ #0, #2 ] }
+                    └── PhysicalNestedLoopJoin
+                        ├── join_type: LeftOuter
+                        ├── cond:And
+                        │   └── Eq
+                        │       ├── #0
+                        │       └── #1
                         ├── PhysicalAgg { aggrs: [], groups: [ #16 ] }
                         │   └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
                         │       ├── PhysicalScan { table: lineitem }
                         │       └── PhysicalScan { table: part }
-                        └── PhysicalScan { table: lineitem }
+                        └── PhysicalAgg
+                            ├── aggrs:Agg(Avg)
+                            │   └── [ #5 ]
+                            ├── groups: [ #0 ]
+                            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
+                                ├── PhysicalAgg { aggrs: [], groups: [ #16 ] }
+                                │   └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                                │       ├── PhysicalScan { table: lineitem }
+                                │       └── PhysicalScan { table: part }
+                                └── PhysicalScan { table: lineitem }
 */
 

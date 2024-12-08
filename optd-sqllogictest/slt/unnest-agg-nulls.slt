@@ -1,0 +1,21 @@
+include _basic_tables.slt.part
+
+# This query has NULL values from the subquery agg. It won't work without the
+# outer join fix.
+# It also has an out-of-order extern column [#1]
+query
+select
+    v1,
+    v2,
+    (
+        select avg(v4)
+        from t2
+        where v4 = v2
+    ) as avg_v4
+from t1 order by v1;
+----
+1 100 NULL
+2 200 200.0
+2 250 250.0
+3 300 300.0
+3 300 300.0
