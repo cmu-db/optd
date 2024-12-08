@@ -25,7 +25,7 @@ use crate::OptdPlanContext;
 enum SubqueryType {
     Scalar,
     Exists,
-    NotExists,
+    Any,
 }
 
 impl OptdPlanContext<'_> {
@@ -47,7 +47,7 @@ impl OptdPlanContext<'_> {
             let dep_join_type = match sq_typ {
                 SubqueryType::Scalar => JoinType::Inner,
                 SubqueryType::Exists => JoinType::LeftSemi,
-                SubqueryType::NotExists => JoinType::LeftAnti,
+                _ => unimplemented!(),
             };
 
             let subquery_root = self.conv_into_optd_plan_node(subquery, Some(input_schema))?;
@@ -318,23 +318,13 @@ impl OptdPlanContext<'_> {
             Expr::Exists(ex) => {
                 // We could use mark join here, if we had one...
                 let sq = &ex.subquery;
-                let typ = if ex.negated {
-                    SubqueryType::NotExists
-                } else {
-                    SubqueryType::Exists
-                };
-                let bin_op = if ex.negated {
-                    BinOpType::Neq
-                } else {
-                    BinOpType::Eq
-                };
 
                 let new_column_ref_idx = context.fields().len() + subqueries.len();
-                subqueries.push((sq, typ));
+                subqueries.push((sq, SubqueryType::Exists));
                 Ok(BinOpPred::new(
                     ColumnRefPred::new(new_column_ref_idx).into_pred_node(),
                     ConstantPred::bool(true).into_pred_node(),
-                    bin_op,
+                    BinOpType::Eq,
                 )
                 .into_pred_node())
             }
@@ -515,6 +505,7 @@ impl OptdPlanContext<'_> {
             DFJoinType::RightAnti => JoinType::RightAnti,
             DFJoinType::LeftSemi => JoinType::LeftSemi,
             DFJoinType::RightSemi => JoinType::RightSemi,
+            DFJoinType::LeftMark => JoinType::LeftMark,
             _ => unimplemented!(),
         };
         let mut log_ops = Vec::with_capacity(node.on.len());

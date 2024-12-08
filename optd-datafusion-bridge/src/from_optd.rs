@@ -486,6 +486,7 @@ impl OptdPlanContext<'_> {
             JoinType::RightSemi => datafusion_expr::JoinType::RightSemi,
             JoinType::LeftAnti => datafusion_expr::JoinType::LeftAnti,
             JoinType::RightAnti => datafusion_expr::JoinType::RightAnti,
+            JoinType::LeftMark => datafusion_expr::JoinType::LeftMark,
             _ => unimplemented!(),
         };
 

@@ -177,7 +177,9 @@ impl LogicalPropertyBuilder<DfNodeType> for SchemaPropertyBuilder {
             }
             DfNodeType::Projection => Self::derive_for_predicate(predicates[0].clone()),
             DfNodeType::Filter | DfNodeType::Limit | DfNodeType::Sort => children[0].clone(),
-            DfNodeType::Join(join_type) => {
+            DfNodeType::Join(join_type)
+            | DfNodeType::RawDepJoin(join_type)
+            | DfNodeType::DepJoin(join_type) => {
                 use crate::plan_nodes::JoinType::*;
                 match join_type {
                     Inner | LeftOuter | RightOuter | FullOuter | Cross => {
@@ -188,18 +190,7 @@ impl LogicalPropertyBuilder<DfNodeType> for SchemaPropertyBuilder {
                     }
                     LeftSemi | LeftAnti => children[0].clone(),
                     RightSemi | RightAnti => children[1].clone(),
-                }
-            }
-            DfNodeType::RawDepJoin(join_type) | DfNodeType::DepJoin(join_type) => {
-                use crate::plan_nodes::JoinType::*;
-                match join_type {
-                    Inner => {
-                        let mut schema = children[0].clone();
-                        let schema2 = children[1].clone();
-                        schema.fields.extend(schema2.fields);
-                        schema
-                    }
-                    LeftSemi | LeftAnti => {
+                    LeftMark => {
                         let mut schema = children[0].clone();
                         schema.fields.push(Field {
                             name: "exists".to_string(),
@@ -208,7 +199,6 @@ impl LogicalPropertyBuilder<DfNodeType> for SchemaPropertyBuilder {
                         });
                         schema
                     }
-                    _ => unreachable!(),
                 }
             }
             DfNodeType::EmptyRelation => decode_empty_relation_schema(&predicates[1]),

@@ -20,6 +20,7 @@ pub enum JoinType {
     RightSemi,
     LeftAnti,
     RightAnti,
+    LeftMark,
 }
 
 impl Display for JoinType {
