@@ -131,7 +131,7 @@ impl DatafusionDBMS {
 
             let batches = df.collect().await?;
 
-            let options = FormatOptions::default();
+            let options = FormatOptions::default().with_null("NULL");
 
             for batch in batches {
                 let converters = batch
