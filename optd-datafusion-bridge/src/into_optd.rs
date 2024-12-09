@@ -46,8 +46,7 @@ impl OptdPlanContext<'_> {
         {
             let dep_join_type = match sq_typ {
                 SubqueryType::Scalar => JoinType::Inner,
-                SubqueryType::Exists => JoinType::LeftMark,
-                _ => unimplemented!(),
+                SubqueryType::Exists | SubqueryType::Any => JoinType::LeftMark,
             };
 
             let subquery_root = self.conv_into_optd_plan_node(subquery, Some(input_schema))?;
@@ -345,7 +344,7 @@ impl OptdPlanContext<'_> {
                 assert!(!insq.negated, "unimplemented");
 
                 let new_column_ref_idx = context.fields().len() + subqueries.len();
-                subqueries.push((sq, SubqueryType::Scalar));
+                subqueries.push((sq, SubqueryType::Any));
                 Ok(BinOpPred::new(
                     expr,
                     ColumnRefPred::new(new_column_ref_idx).into_pred_node(),
@@ -516,7 +515,6 @@ impl OptdPlanContext<'_> {
             DFJoinType::LeftSemi => JoinType::LeftSemi,
             DFJoinType::RightSemi => JoinType::RightSemi,
             DFJoinType::LeftMark => JoinType::LeftMark,
-            _ => unimplemented!(),
         };
         let mut log_ops = Vec::with_capacity(node.on.len());
         let mut subqueries = vec![];
