@@ -211,7 +211,16 @@ impl Value {
                 }
                 _ => panic!("{self} could not be converted into an Date32"),
             }),
-            _ => unimplemented!("Have not implemented convert_to_type for DataType {typ}"),
+            DataType::Decimal128(_, _) => Value::Decimal128(match self {
+                // TODO: Should we be ignoring the scale and precision here?
+                Value::Int128(i128) => *i128,
+                Value::Int64(i64) => (*i64).into(),
+                Value::Int32(i32) => (*i32).into(),
+                _ => panic!("{self} could not be converted into an Decimal128"),
+            }),
+            _ => unimplemented!(
+                "Have not implemented convert_to_type from {self} for DataType {typ}"
+            ),
         }
     }
 }
