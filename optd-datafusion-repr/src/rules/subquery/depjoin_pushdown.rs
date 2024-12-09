@@ -177,7 +177,7 @@ fn apply_dep_initial_distinct(
     //
     // This is because the aggregate we install on the right side will map the
     // correlated columns to their respective indices as shown.
-    assert!(!correlated_col_indices.is_empty());
+    debug_assert!(!correlated_col_indices.is_empty());
     let join_cond = match join.sq_type() {
         SubqueryType::Scalar | SubqueryType::Exists => LogOpPred::new(
             LogOpType::And,
