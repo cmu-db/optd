@@ -46,6 +46,7 @@ impl ConstantType {
             Value::Int64(_) => ConstantType::Int64,
             Value::Float(_) => ConstantType::Float64,
             Value::Date32(_) => ConstantType::Date,
+            Value::Decimal128(_) => ConstantType::Decimal,
             _ => unimplemented!("get_data_type_from_value() not implemented for value {value}"),
         }
     }
