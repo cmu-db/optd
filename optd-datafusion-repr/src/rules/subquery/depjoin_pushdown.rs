@@ -3,7 +3,6 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
-use datafusion_expr::Aggregate;
 use optd_core::nodes::{PlanNodeOrGroup, PredNode};
 use optd_core::optimizer::Optimizer;
 use optd_core::rules::{Rule, RuleMatcher};
@@ -98,7 +97,7 @@ fn apply_dep_initial_distinct(
                 )
                 .into_plan_node();
                 let right_count_star = LogicalAgg::new(
-                    right_lim_1.into(),
+                    right_lim_1,
                     ListPred::new(vec![FuncPred::new(
                         FuncType::Agg("count".to_string()),
                         ListPred::new(vec![ConstantPred::int64(1).into_pred_node()]),
@@ -178,7 +177,7 @@ fn apply_dep_initial_distinct(
     //
     // This is because the aggregate we install on the right side will map the
     // correlated columns to their respective indices as shown.
-    assert!(correlated_col_indices.len() > 0);
+    assert!(!correlated_col_indices.is_empty());
     let join_cond = match join.sq_type() {
         SubqueryType::Scalar | SubqueryType::Exists => LogOpPred::new(
             LogOpType::And,
