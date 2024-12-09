@@ -81,6 +81,32 @@ fn apply_dep_initial_distinct(
 
     // If we have no correlated columns, for a scalar subquery, we can emit a cross join
     // TODO(bowad): Uncorrelated for ANY/EXISTS
+    if correlated_col_indices.is_empty() {
+        let res = match join.sq_type() {
+            SubqueryType::Scalar => LogicalJoin::new_unchecked(
+                left,
+                right,
+                ConstantPred::bool(true).into_pred_node(),
+                JoinType::Cross,
+            )
+            .into_plan_node(),
+            SubqueryType::Exists => todo!(),
+            SubqueryType::Any { pred, op } => LogicalJoin::new_unchecked(
+                left,
+                right,
+                BinOpPred::new(
+                    pred.clone().into(),
+                    ColumnRefPred::new(left_schema_size).into_pred_node(),
+                    *op,
+                )
+                .into_pred_node(),
+                JoinType::LeftMark,
+            )
+            .into_plan_node(),
+        };
+
+        return vec![res.into()];
+    }
     if correlated_col_indices.is_empty() && matches!(join.sq_type(), SubqueryType::Scalar) {
         let new_join = LogicalJoin::new_unchecked(
             left,
