@@ -3,6 +3,7 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
+use datafusion_expr::Aggregate;
 use optd_core::nodes::{PlanNodeOrGroup, PredNode};
 use optd_core::optimizer::Optimizer;
 use optd_core::rules::{Rule, RuleMatcher};
@@ -11,7 +12,7 @@ use crate::plan_nodes::{
     ArcDfPlanNode, ArcDfPredNode, BinOpPred, BinOpType, ColumnRefPred, ConstantPred, DependentJoin,
     DfNodeType, DfPredType, DfReprPlanNode, DfReprPredNode, ExternColumnRefPred, FuncPred,
     FuncType, JoinType, ListPred, LogOpPred, LogOpType, LogicalAgg, LogicalFilter, LogicalJoin,
-    LogicalProjection, PredExt, RawDependentJoin, SubqueryType,
+    LogicalLimit, LogicalProjection, PredExt, RawDependentJoin, SubqueryType,
 };
 use crate::rules::macros::{define_rule, define_rule_discriminant};
 use crate::OptimizerExt;
@@ -90,7 +91,43 @@ fn apply_dep_initial_distinct(
                 JoinType::Cross,
             )
             .into_plan_node(),
-            SubqueryType::Exists => todo!(),
+            SubqueryType::Exists => {
+                let right_lim_1 = LogicalLimit::new_unchecked(
+                    right,
+                    ConstantPred::int64(0).into_pred_node(),
+                    ConstantPred::int64(1).into_pred_node(),
+                )
+                .into_plan_node();
+                let right_count_star = LogicalAgg::new(
+                    right_lim_1.into(),
+                    ListPred::new(vec![FuncPred::new(
+                        FuncType::Agg("count".to_string()),
+                        ListPred::new(vec![ConstantPred::int64(1).into_pred_node()]),
+                    )
+                    .into_pred_node()]),
+                    ListPred::new(vec![]),
+                )
+                .into_plan_node();
+
+                let count_star_to_bool_proj = LogicalProjection::new(
+                    right_count_star,
+                    ListPred::new(vec![BinOpPred::new(
+                        ColumnRefPred::new(0).into_pred_node(),
+                        ConstantPred::int64(0).into_pred_node(),
+                        BinOpType::Gt,
+                    )
+                    .into_pred_node()]),
+                )
+                .into_plan_node();
+
+                LogicalJoin::new_unchecked(
+                    left,
+                    count_star_to_bool_proj,
+                    ConstantPred::bool(true).into_pred_node(),
+                    JoinType::Cross,
+                )
+                .into_plan_node()
+            }
             SubqueryType::Any { pred, op } => LogicalJoin::new_unchecked(
                 left,
                 right,
