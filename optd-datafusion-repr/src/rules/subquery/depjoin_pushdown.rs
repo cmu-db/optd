@@ -200,7 +200,7 @@ fn apply_dep_initial_distinct(
             correlated_col_indices
                 .iter()
                 .enumerate()
-                .map(|(i, x)| {
+                .map(|(i, _)| {
                     assert!(i + left_schema_size < left_schema_size + right_schema_size);
                     BinOpPred::new(
                         pred.clone().into(),
