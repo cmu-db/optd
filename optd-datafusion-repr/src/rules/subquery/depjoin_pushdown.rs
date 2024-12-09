@@ -166,6 +166,7 @@ fn apply_dep_initial_distinct(
         ),
     );
 
+    let new_dep_join_schema_size = correlated_col_indices.len() + right_schema_size;
     let new_dep_join =
         DependentJoin::new_unchecked(distinct_agg_node.into_plan_node(), right, cond, extern_cols);
 
@@ -185,7 +186,7 @@ fn apply_dep_initial_distinct(
                 .iter()
                 .enumerate()
                 .map(|(i, x)| {
-                    assert!(i + left_schema_size < left_schema_size + right_schema_size);
+                    assert!(i + left_schema_size < left_schema_size + new_dep_join_schema_size);
                     BinOpPred::new(
                         ColumnRefPred::new(*x).into_pred_node(),
                         ColumnRefPred::new(i + left_schema_size).into_pred_node(),
@@ -201,7 +202,7 @@ fn apply_dep_initial_distinct(
                 .iter()
                 .enumerate()
                 .map(|(i, _)| {
-                    assert!(i + left_schema_size < left_schema_size + right_schema_size);
+                    assert!(i + left_schema_size < left_schema_size + new_dep_join_schema_size);
                     BinOpPred::new(
                         pred.clone().into(),
                         ColumnRefPred::new(i + left_schema_size).into_pred_node(),
