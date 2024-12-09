@@ -1,8 +1,3 @@
-// Copyright (c) 2023-2024 CMU Database Group
-//
-// Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
-// https://opensource.org/licenses/MIT.
-
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -22,22 +17,22 @@
 
 //! Command within CLI
 
-use crate::exec::exec_from_lines;
+use crate::cli_context::CliSessionContext;
+use crate::exec::{exec_and_print, exec_from_lines};
 use crate::functions::{display_all_functions, Function};
 use crate::print_format::PrintFormat;
 use crate::print_options::PrintOptions;
-use clap::ArgEnum;
+use clap::ValueEnum;
 use datafusion::arrow::array::{ArrayRef, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::exec_err;
+use datafusion::common::instant::Instant;
 use datafusion::error::{DataFusionError, Result};
-use datafusion::prelude::SessionContext;
 use std::fs::File;
 use std::io::BufReader;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Instant;
 
 /// Command
 #[derive(Debug)]
@@ -60,28 +55,25 @@ pub enum OutputFormat {
 impl Command {
     pub async fn execute(
         &self,
-        ctx: &mut SessionContext,
+        ctx: &dyn CliSessionContext,
         print_options: &mut PrintOptions,
     ) -> Result<()> {
-        let now = Instant::now();
         match self {
-            Self::Help => print_options.print_batches(&[all_commands_info()], now),
-            Self::ListTables => {
-                let df = ctx.sql("SHOW TABLES").await?;
-                let batches = df.collect().await?;
-                print_options.print_batches(&batches, now)
+            Self::Help => {
+                let now = Instant::now();
+                let command_batch = all_commands_info();
+                print_options.print_batches(command_batch.schema(), &[command_batch], now)
             }
+            Self::ListTables => exec_and_print(ctx, print_options, "SHOW TABLES".into()).await,
             Self::DescribeTableStmt(name) => {
-                let df = ctx.sql(&format!("SHOW COLUMNS FROM {}", name)).await?;
-                let batches = df.collect().await?;
-                print_options.print_batches(&batches, now)
+                exec_and_print(ctx, print_options, format!("SHOW COLUMNS FROM {}", name)).await
             }
             Self::Include(filename) => {
                 if let Some(filename) = filename {
                     let file = File::open(filename).map_err(|e| {
                         DataFusionError::Execution(format!("Error opening {:?} {}", filename, e))
                     })?;
-                    exec_from_lines(ctx, &mut BufReader::new(file), print_options).await;
+                    exec_from_lines(ctx, &mut BufReader::new(file), print_options).await?;
                     Ok(())
                 } else {
                     exec_err!("Required filename argument is missing")

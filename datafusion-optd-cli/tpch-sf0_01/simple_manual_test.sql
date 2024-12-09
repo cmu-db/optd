@@ -7,7 +7,7 @@ CREATE TABLE NATION  (
     N_COMMENT    VARCHAR(152)
 );
 
-CREATE EXTERNAL TABLE nation_tbl STORED AS CSV DELIMITER '|' LOCATION 'datafusion-optd-cli/tpch-sf0_01/nation.tbl';
+CREATE EXTERNAL TABLE nation_tbl STORED AS CSV OPTIONS (HAS_HEADER false, DELIMITER '|') LOCATION 'datafusion-optd-cli/tpch-sf0_01/nation.csv';
 insert into nation select column_1, column_2, column_3, column_4 from nation_tbl;
 
 SELECT * FROM nation where nation.n_nationkey = 1 OR nation.n_nationkey = 2 OR nation.n_nationkey = 5;

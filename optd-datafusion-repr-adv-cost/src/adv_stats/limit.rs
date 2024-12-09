@@ -19,9 +19,9 @@ impl<
         let fetch = ConstantPred::from_pred_node(fetch_expr)
             .unwrap()
             .value()
-            .as_u64();
+            .as_i64();
         // u64::MAX represents None
-        if fetch == u64::MAX {
+        if fetch == i64::MAX {
             child_row_cnt
         } else {
             child_row_cnt.min(fetch as f64)

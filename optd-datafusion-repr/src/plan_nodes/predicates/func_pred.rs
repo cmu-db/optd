@@ -3,6 +3,7 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
+use arrow_schema::DataType;
 use optd_core::nodes::PlanNodeMetaMap;
 use pretty_xmlish::Pretty;
 
@@ -11,23 +12,29 @@ use crate::plan_nodes::{ArcDfPredNode, DfPredNode, DfPredType, DfReprPredNode};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum FuncType {
-    Scalar(datafusion_expr::BuiltinScalarFunction),
-    Agg(datafusion_expr::AggregateFunction),
+    Scalar(String, DataType),
+    Agg(String),
     Case,
 }
 
 impl std::fmt::Display for FuncType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            FuncType::Scalar(func_id, _) => {
+                write!(f, "Scalar({})", heck::AsUpperCamelCase(func_id))
+            }
+            FuncType::Agg(func_id) => write!(f, "Agg({})", heck::AsUpperCamelCase(func_id)),
+            _ => write!(f, "{:?}", self),
+        }
     }
 }
 
 impl FuncType {
-    pub fn new_scalar(func_id: datafusion_expr::BuiltinScalarFunction) -> Self {
-        FuncType::Scalar(func_id)
+    pub fn new_scalar(func_id: String, return_type: DataType) -> Self {
+        FuncType::Scalar(func_id, return_type) // TODO: infer ret type in optd
     }
 
-    pub fn new_agg(func_id: datafusion_expr::AggregateFunction) -> Self {
+    pub fn new_agg(func_id: String) -> Self {
         FuncType::Agg(func_id)
     }
 }

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::{fs, io};
 
 use csv2parquet::Opts;
-use datafusion::catalog::schema::SchemaProvider;
+use datafusion::catalog::SchemaProvider;
 /// A wrapper around job-kit
 use serde::{Deserialize, Serialize};
 
@@ -143,7 +143,12 @@ impl JobKit {
             log::debug!("[start] making parquet for {}", job_kit_config);
             for csv_tbl_fpath in self.get_tbl_fpath_vec("csv").unwrap() {
                 let tbl_name = Self::get_tbl_name_from_tbl_fpath(&csv_tbl_fpath);
-                let schema = schema_provider.table(&tbl_name).await.unwrap().schema();
+                let schema = schema_provider
+                    .table(&tbl_name)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .schema();
                 let mut parquet_tbl_fpath = csv_tbl_fpath.clone();
                 parquet_tbl_fpath.set_extension("parquet");
                 let mut opts = Opts::new(csv_tbl_fpath, parquet_tbl_fpath.clone());

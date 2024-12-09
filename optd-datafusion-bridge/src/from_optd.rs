@@ -8,16 +8,16 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use async_recursion::async_recursion;
-use datafusion::arrow::datatypes::{Field, Schema, SchemaRef};
+use datafusion::arrow::datatypes::{Field, IntervalMonthDayNano, Schema, SchemaRef};
 use datafusion::datasource::source_as_provider;
 use datafusion::logical_expr::Operator;
-use datafusion::physical_expr;
+use datafusion::physical_expr::aggregate::AggregateExprBuilder;
+use datafusion::physical_expr::{self, LexOrdering, PhysicalExprRef, ScalarFunctionExpr};
 use datafusion::physical_plan::aggregates::AggregateMode;
-use datafusion::physical_plan::expressions::create_aggregate_expr;
 use datafusion::physical_plan::joins::utils::{ColumnIndex, JoinFilter};
 use datafusion::physical_plan::joins::{CrossJoinExec, PartitionMode};
 use datafusion::physical_plan::projection::ProjectionExec;
-use datafusion::physical_plan::{self, AggregateExpr, ExecutionPlan, PhysicalExpr};
+use datafusion::physical_plan::{self, ExecutionPlan, PhysicalExpr};
 use datafusion::scalar::ScalarValue;
 use optd_core::nodes::{PlanNodeMetaMap, PlanNodeOrGroup};
 use optd_datafusion_repr::plan_nodes::{
@@ -62,7 +62,7 @@ impl OptdPlanContext<'_> {
         sort_expr: SortOrderPred,
         context: &SchemaRef,
     ) -> Result<physical_expr::PhysicalSortExpr> {
-        let expr = Self::conv_from_optd_expr(sort_expr.child(), context)?;
+        let expr = self.conv_from_optd_expr(sort_expr.child(), context)?;
         Ok(physical_expr::PhysicalSortExpr {
             expr,
             options: match sort_expr.order() {
@@ -82,29 +82,34 @@ impl OptdPlanContext<'_> {
         &mut self,
         expr: ArcDfPredNode,
         context: &SchemaRef,
-    ) -> Result<Arc<dyn AggregateExpr>> {
+    ) -> Result<Arc<physical_expr::aggregate::AggregateFunctionExpr>> {
         let expr = FuncPred::from_pred_node(expr).unwrap();
         let typ = expr.func();
         let FuncType::Agg(func) = typ else {
             unreachable!()
         };
+        let agg_expr = self
+            .session_state
+            .aggregate_functions()
+            .get(&func)
+            .context("agg func not found")?
+            .clone();
         let args = expr
             .children()
             .to_vec()
             .into_iter()
-            .map(|expr| Self::conv_from_optd_expr(expr, context))
+            .map(|expr| self.conv_from_optd_expr(expr, context))
             .collect::<Result<Vec<_>>>()?;
-        Ok(create_aggregate_expr(
-            &func,
-            false,
-            &args,
-            &[],
-            context,
-            "<agg_func>",
-        )?)
+        let agg_expr = AggregateExprBuilder::new(agg_expr.clone(), args)
+            .schema(context.clone())
+            .alias("<agg>")
+            .build()
+            .map(Arc::new)?;
+        Ok(agg_expr)
     }
 
     fn conv_from_optd_expr(
+        &self,
         expr: impl DfReprPredNode,
         context: &SchemaRef,
     ) -> Result<Arc<dyn PhysicalExpr>> {
@@ -114,7 +119,12 @@ impl OptdPlanContext<'_> {
                 let expr = ColumnRefPred::from_pred_node(expr).unwrap();
                 let idx = expr.index();
                 Ok(Arc::new(
-                    datafusion::physical_plan::expressions::Column::new("<expr>", idx),
+                    // Datafusion checks if column expr name matches the schema, so we have to supply the name
+                    // inferred by datafusion, instead of using our own logical properties.
+                    datafusion::physical_plan::expressions::Column::new(
+                        context.fields()[idx].name(),
+                        idx,
+                    ),
                 ))
             }
             DfPredType::Constant(typ) => {
@@ -137,7 +147,12 @@ impl OptdPlanContext<'_> {
                     }
                     ConstantType::Date => ScalarValue::Date32(Some(value.as_i64() as i32)),
                     ConstantType::IntervalMonthDateNano => {
-                        ScalarValue::IntervalMonthDayNano(Some(value.as_i128()))
+                        let value = value.as_i128();
+                        ScalarValue::IntervalMonthDayNano(Some(IntervalMonthDayNano::new(
+                            (value >> 96) as i32,
+                            ((value >> 64) & ((1 << 32) - 1)) as i32,
+                            (value & ((1 << 64) - 1)) as i64,
+                        )))
                     }
                     ConstantType::Utf8String => ScalarValue::Utf8(Some(value.as_str().to_string())),
                     ConstantType::Binary => unimplemented!(),
@@ -153,16 +168,22 @@ impl OptdPlanContext<'_> {
                     .children()
                     .to_vec()
                     .into_iter()
-                    .map(|expr| Self::conv_from_optd_expr(expr, context))
+                    .map(|expr| self.conv_from_optd_expr(expr, context))
                     .collect::<Result<Vec<_>>>()?;
                 match func {
-                    FuncType::Scalar(func) => {
-                        Ok(datafusion::physical_expr::functions::create_physical_expr(
+                    FuncType::Scalar(func, ret_typ) => {
+                        let scalar_func = self
+                            .session_state
+                            .scalar_functions()
+                            .get(&func)
+                            .context("scalar func not found")?
+                            .clone();
+                        Ok(Arc::new(ScalarFunctionExpr::new(
                             &func,
-                            &args,
-                            context,
-                            &physical_expr::execution_props::ExecutionProps::new(),
-                        )?)
+                            scalar_func.clone(),
+                            args,
+                            ret_typ,
+                        )))
                     }
                     FuncType::Case => {
                         let when_expr = args[0].clone();
@@ -180,13 +201,13 @@ impl OptdPlanContext<'_> {
             DfPredType::LogOp(typ) => {
                 let expr = LogOpPred::from_pred_node(expr).unwrap();
                 let mut children = expr.children().into_iter();
-                let first_expr = Self::conv_from_optd_expr(children.next().unwrap(), context)?;
+                let first_expr = self.conv_from_optd_expr(children.next().unwrap(), context)?;
                 let op = match typ {
                     LogOpType::And => Operator::And,
                     LogOpType::Or => Operator::Or,
                 };
                 children.try_fold(first_expr, |acc, expr| {
-                    let expr = Self::conv_from_optd_expr(expr, context)?;
+                    let expr = self.conv_from_optd_expr(expr, context)?;
                     Ok(
                         Arc::new(datafusion::physical_plan::expressions::BinaryExpr::new(
                             acc, op, expr,
@@ -196,8 +217,8 @@ impl OptdPlanContext<'_> {
             }
             DfPredType::BinOp(op) => {
                 let expr = BinOpPred::from_pred_node(expr).unwrap();
-                let left = Self::conv_from_optd_expr(expr.left_child(), context)?;
-                let right = Self::conv_from_optd_expr(expr.right_child(), context)?;
+                let left = self.conv_from_optd_expr(expr.left_child(), context)?;
+                let right = self.conv_from_optd_expr(expr.right_child(), context)?;
                 let op = match op {
                     BinOpType::Eq => Operator::Eq,
                     BinOpType::Neq => Operator::NotEq,
@@ -220,7 +241,7 @@ impl OptdPlanContext<'_> {
             DfPredType::Between => {
                 // TODO: should we just convert between to x <= c1 and x >= c2?
                 let expr = BetweenPred::from_pred_node(expr).unwrap();
-                Self::conv_from_optd_expr(
+                self.conv_from_optd_expr(
                     LogOpPred::new(
                         LogOpType::And,
                         vec![
@@ -236,7 +257,7 @@ impl OptdPlanContext<'_> {
             }
             DfPredType::Cast => {
                 let expr = CastPred::from_pred_node(expr).unwrap();
-                let child = Self::conv_from_optd_expr(expr.child(), context)?;
+                let child = self.conv_from_optd_expr(expr.child(), context)?;
                 Ok(Arc::new(
                     datafusion::physical_plan::expressions::CastExpr::new(
                         child,
@@ -247,8 +268,8 @@ impl OptdPlanContext<'_> {
             }
             DfPredType::Like => {
                 let expr = LikePred::from_pred_node(expr).unwrap();
-                let child = Self::conv_from_optd_expr(expr.child(), context)?;
-                let pattern = Self::conv_from_optd_expr(expr.pattern(), context)?;
+                let child = self.conv_from_optd_expr(expr.child(), context)?;
+                let pattern = self.conv_from_optd_expr(expr.pattern(), context)?;
                 Ok(Arc::new(
                     datafusion::physical_plan::expressions::LikeExpr::new(
                         expr.negated(),
@@ -260,12 +281,12 @@ impl OptdPlanContext<'_> {
             }
             DfPredType::InList => {
                 let expr = InListPred::from_pred_node(expr).unwrap();
-                let child = Self::conv_from_optd_expr(expr.child(), context)?;
+                let child = self.conv_from_optd_expr(expr.child(), context)?;
                 let list = expr
                     .list()
                     .to_vec()
                     .into_iter()
-                    .map(|expr| Self::conv_from_optd_expr(expr, context))
+                    .map(|expr| self.conv_from_optd_expr(expr, context))
                     .collect::<Result<Vec<_>>>()?;
                 let negated = expr.negated();
                 Ok(Arc::new(
@@ -292,7 +313,7 @@ impl OptdPlanContext<'_> {
             .enumerate()
             .map(|(idx, expr)| {
                 Ok((
-                    Self::conv_from_optd_expr(expr, &input_exec.schema())?,
+                    self.conv_from_optd_expr(expr, &input_exec.schema())?,
                     format!("col{}", idx),
                 ))
             })
@@ -311,7 +332,7 @@ impl OptdPlanContext<'_> {
         meta: &PlanNodeMetaMap,
     ) -> Result<Arc<dyn ExecutionPlan + 'static>> {
         let input_exec = self.conv_from_optd_plan_node(node.child(), meta).await?;
-        let physical_expr = Self::conv_from_optd_expr(node.cond(), &input_exec.schema())?;
+        let physical_expr = self.conv_from_optd_expr(node.cond(), &input_exec.schema())?;
         Ok(
             Arc::new(datafusion::physical_plan::filter::FilterExec::try_new(
                 physical_expr,
@@ -329,21 +350,21 @@ impl OptdPlanContext<'_> {
         let child = self.conv_from_optd_plan_node(node.child(), meta).await?;
 
         // Limit skip/fetch expressions are only allowed to be constant int
-        assert!(node.skip().typ == DfPredType::Constant(ConstantType::UInt64));
+        assert_eq!(node.skip().typ, DfPredType::Constant(ConstantType::Int64));
         // Conversion from u64 -> usize could fail (also the case in into_optd)
         let skip = ConstantPred::from_pred_node(node.skip())
             .unwrap()
             .value()
-            .as_u64()
+            .as_i64()
             .try_into()
             .unwrap();
 
-        assert!(node.fetch().typ == DfPredType::Constant(ConstantType::UInt64));
+        assert_eq!(node.fetch().typ, DfPredType::Constant(ConstantType::Int64));
         let fetch = ConstantPred::from_pred_node(node.fetch())
             .unwrap()
             .value()
-            .as_u64();
-        let fetch_opt: Option<usize> = if fetch == u64::MAX {
+            .as_i64();
+        let fetch_opt: Option<usize> = if fetch == i64::MAX {
             None
         } else {
             Some(fetch.try_into().unwrap())
@@ -376,14 +397,14 @@ impl OptdPlanContext<'_> {
             .collect::<Result<Vec<_>>>()?;
         Ok(
             Arc::new(datafusion::physical_plan::sorts::sort::SortExec::new(
-                physical_exprs,
+                LexOrdering::new(physical_exprs),
                 input_exec,
             )) as Arc<dyn ExecutionPlan + 'static>,
         )
     }
 
     #[async_recursion]
-    async fn conv_from_optd_agg(
+    async fn conv_from_optd_hash_agg(
         &mut self,
         node: PhysicalAgg,
         meta: &PlanNodeMetaMap,
@@ -401,7 +422,7 @@ impl OptdPlanContext<'_> {
             .into_iter()
             .map(|expr| {
                 Ok((
-                    Self::conv_from_optd_expr(expr, &input_exec.schema())?,
+                    self.conv_from_optd_expr(expr, &input_exec.schema())?,
                     "<agg_expr>".to_string(),
                 ))
             })
@@ -414,7 +435,6 @@ impl OptdPlanContext<'_> {
                 AggregateMode::Single,
                 group_exprs,
                 agg_exprs,
-                vec![None; agg_num],
                 vec![None; agg_num],
                 input_exec,
                 schema,
@@ -442,9 +462,9 @@ impl OptdPlanContext<'_> {
         };
 
         let physical_expr =
-            Self::conv_from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
+            self.conv_from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
 
-        if let JoinType::Cross = node.join_type() {
+        if node.join_type() == JoinType::Cross {
             return Ok(Arc::new(CrossJoinExec::new(left_exec, right_exec))
                 as Arc<dyn ExecutionPlan + 'static>);
         }
@@ -459,13 +479,13 @@ impl OptdPlanContext<'_> {
         for i in 0..left_exec.schema().fields().len() {
             column_idxs.push(ColumnIndex {
                 index: i,
-                side: physical_plan::joins::utils::JoinSide::Left,
+                side: datafusion::common::JoinSide::Left,
             });
         }
         for i in 0..right_exec.schema().fields().len() {
             column_idxs.push(ColumnIndex {
                 index: i,
-                side: physical_plan::joins::utils::JoinSide::Right,
+                side: datafusion::common::JoinSide::Right,
             });
         }
 
@@ -504,14 +524,14 @@ impl OptdPlanContext<'_> {
                 bail!("right expr is not column ref")
             };
             on.push((
-                physical_expr::expressions::Column::new(
+                Arc::new(physical_expr::expressions::Column::new(
                     left_exec.schema().field(left_expr.index()).name(),
                     left_expr.index(),
-                ),
-                physical_expr::expressions::Column::new(
+                )) as PhysicalExprRef,
+                Arc::new(physical_expr::expressions::Column::new(
                     right_exec.schema().field(right_expr.index()).name(),
                     right_expr.index(),
-                ),
+                )) as PhysicalExprRef,
             ));
         }
         Ok(
@@ -521,6 +541,7 @@ impl OptdPlanContext<'_> {
                 on,
                 None,
                 &join_type,
+                None,
                 PartitionMode::CollectLeft,
                 false,
             )?) as Arc<dyn ExecutionPlan + 'static>,
@@ -561,7 +582,7 @@ impl OptdPlanContext<'_> {
                     .await?
             }
             DfNodeType::PhysicalAgg => {
-                self.conv_from_optd_agg(PhysicalAgg::from_plan_node(rel_node).unwrap(), meta)
+                self.conv_from_optd_hash_agg(PhysicalAgg::from_plan_node(rel_node).unwrap(), meta)
                     .await?
             }
             DfNodeType::PhysicalNestedLoopJoin(_) => {
@@ -582,10 +603,17 @@ impl OptdPlanContext<'_> {
                 let physical_node = PhysicalEmptyRelation::from_plan_node(rel_node).unwrap();
                 let schema = physical_node.empty_relation_schema();
                 let datafusion_schema: Schema = from_optd_schema(schema);
-                Arc::new(datafusion::physical_plan::empty::EmptyExec::new(
-                    physical_node.produce_one_row(),
-                    Arc::new(datafusion_schema),
-                )) as Arc<dyn ExecutionPlan>
+                if physical_node.produce_one_row() {
+                    Arc::new(
+                        datafusion::physical_plan::placeholder_row::PlaceholderRowExec::new(
+                            Arc::new(datafusion_schema),
+                        ),
+                    ) as Arc<dyn ExecutionPlan>
+                } else {
+                    Arc::new(datafusion::physical_plan::empty::EmptyExec::new(Arc::new(
+                        datafusion_schema,
+                    ))) as Arc<dyn ExecutionPlan>
+                }
             }
             DfNodeType::PhysicalLimit => {
                 self.conv_from_optd_limit(PhysicalLimit::from_plan_node(rel_node).unwrap(), meta)

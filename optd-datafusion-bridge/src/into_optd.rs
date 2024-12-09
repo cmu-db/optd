@@ -7,7 +7,8 @@ use anyhow::{bail, Result};
 use datafusion::common::DFSchema;
 use datafusion::logical_expr::{self, logical_plan, LogicalPlan, Operator};
 use datafusion::scalar::ScalarValue;
-use datafusion_expr::Subquery;
+use datafusion_expr::{ExprSchemable, Subquery};
+use itertools::Itertools;
 use optd_core::nodes::PredNode;
 use optd_datafusion_repr::plan_nodes::{
     ArcDfPlanNode, ArcDfPredNode, BetweenPred, BinOpPred, BinOpType, CastPred, ColumnRefPred,
@@ -188,7 +189,11 @@ impl OptdPlanContext<'_> {
                 }
                 ScalarValue::IntervalMonthDayNano(x) => {
                     let x = x.as_ref().unwrap();
-                    Ok(ConstantPred::interval_month_day_nano(*x).into_pred_node())
+                    Ok(ConstantPred::interval_month_day_nano(
+                        ((((x.months as i128) << 32) + x.days as i128) << 64)
+                            + x.nanoseconds as i128,
+                    )
+                    .into_pred_node())
                 }
                 ScalarValue::Decimal128(x, _, _) => {
                     let x = x.as_ref().unwrap();
@@ -205,11 +210,31 @@ impl OptdPlanContext<'_> {
             }
             Expr::ScalarFunction(x) => {
                 let args = self.conv_into_optd_expr_list(&x.args, context, dep_ctx, subqueries)?;
-                Ok(FuncPred::new(FuncType::new_scalar(x.fun), args).into_pred_node())
+                Ok(FuncPred::new(
+                    FuncType::new_scalar(
+                        x.func.name().to_string(),
+                        // TODO: remove this infer...
+                        x.func
+                            .return_type_from_exprs(
+                                &x.args,
+                                context,
+                                &x.args
+                                    .iter()
+                                    .map(|x| x.get_type(context).unwrap())
+                                    .collect_vec(),
+                            )
+                            .unwrap(),
+                    ),
+                    args,
+                )
+                .into_pred_node())
             }
             Expr::AggregateFunction(x) => {
                 let args = self.conv_into_optd_expr_list(&x.args, context, dep_ctx, subqueries)?;
-                Ok(FuncPred::new(FuncType::new_agg(x.fun.clone()), args).into_pred_node())
+                Ok(
+                    FuncPred::new(FuncType::new_agg(x.func.name().to_string()), args)
+                        .into_pred_node(),
+                )
             }
             Expr::Case(x) => {
                 let when_then_expr = &x.when_then_expr;
@@ -229,19 +254,6 @@ impl OptdPlanContext<'_> {
                 Ok(FuncPred::new(
                     FuncType::Case,
                     ListPred::new(vec![when_expr, then_expr, else_expr]),
-                )
-                .into_pred_node())
-            }
-            Expr::Sort(x) => {
-                let expr =
-                    self.conv_into_optd_expr(x.expr.as_ref(), context, dep_ctx, subqueries)?;
-                Ok(SortOrderPred::new(
-                    if x.asc {
-                        SortOrderType::Asc
-                    } else {
-                        SortOrderType::Desc
-                    },
-                    expr,
                 )
                 .into_pred_node())
             }
@@ -333,6 +345,31 @@ impl OptdPlanContext<'_> {
         Ok(ListPred::new(exprs))
     }
 
+    fn conv_into_optd_expr_sort_list<'a>(
+        &mut self,
+        exprs: &'a [logical_expr::SortExpr],
+        context: &DFSchema,
+        dep_ctx: Option<&DFSchema>,
+        subqueries: &mut Vec<&'a Subquery>,
+    ) -> Result<ListPred> {
+        let exprs = exprs
+            .iter()
+            .map(|sort| {
+                Ok(SortOrderPred::new(
+                    if sort.asc {
+                        SortOrderType::Asc
+                    } else {
+                        SortOrderType::Desc
+                    },
+                    // TODO: null_first
+                    self.conv_into_optd_expr(&sort.expr, context, dep_ctx, subqueries)?,
+                )
+                .into_pred_node())
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(ListPred::new(exprs))
+    }
+
     fn conv_into_optd_sort(
         &mut self,
         node: &logical_plan::Sort,
@@ -340,7 +377,7 @@ impl OptdPlanContext<'_> {
     ) -> Result<LogicalSort> {
         let input = self.conv_into_optd_plan_node(node.input.as_ref(), dep_ctx)?;
         let mut subqueries = vec![];
-        let expr_list = self.conv_into_optd_expr_list(
+        let expr_list = self.conv_into_optd_expr_sort_list(
             &node.expr,
             node.input.schema(),
             dep_ctx,
@@ -416,6 +453,7 @@ impl OptdPlanContext<'_> {
             DFJoinType::RightAnti => JoinType::RightAnti,
             DFJoinType::LeftSemi => JoinType::LeftSemi,
             DFJoinType::RightSemi => JoinType::RightSemi,
+            _ => unimplemented!(),
         };
         let mut log_ops = Vec::with_capacity(node.on.len());
         let mut subqueries = vec![];
@@ -448,7 +486,7 @@ impl OptdPlanContext<'_> {
                 left,
                 right,
                 ConstantPred::bool(true).into_pred_node(),
-                join_type,
+                JoinType::Cross,
             ))
         } else if log_ops.len() == 1 {
             Ok(LogicalJoin::new(left, right, log_ops.remove(0), join_type))
@@ -463,21 +501,6 @@ impl OptdPlanContext<'_> {
                 join_type,
             ))
         }
-    }
-
-    fn conv_into_optd_cross_join(
-        &mut self,
-        node: &logical_plan::CrossJoin,
-        dep_ctx: Option<&DFSchema>,
-    ) -> Result<LogicalJoin> {
-        let left = self.conv_into_optd_plan_node(node.left.as_ref(), dep_ctx)?;
-        let right = self.conv_into_optd_plan_node(node.right.as_ref(), dep_ctx)?;
-        Ok(LogicalJoin::new(
-            left,
-            right,
-            ConstantPred::bool(true).into_pred_node(),
-            JoinType::Cross,
-        ))
     }
 
     fn conv_into_optd_empty_relation(
@@ -498,18 +521,23 @@ impl OptdPlanContext<'_> {
         dep_ctx: Option<&DFSchema>,
     ) -> Result<LogicalLimit> {
         let input = self.conv_into_optd_plan_node(node.input.as_ref(), dep_ctx)?;
-        // try_into guys are converting usize to u64.
-        let converted_skip = node.skip.try_into().unwrap();
-        let converted_fetch = if let Some(x) = node.fetch {
-            x.try_into().unwrap()
-        } else {
-            u64::MAX // u64 MAX represents infinity (not the best way to do this)
-        };
-        Ok(LogicalLimit::new(
-            input,
-            ConstantPred::uint64(converted_skip).into_pred_node(),
-            ConstantPred::uint64(converted_fetch).into_pred_node(),
-        ))
+        let skip = node
+            .skip
+            .as_ref()
+            .map(|expr| {
+                self.conv_into_optd_expr(expr.as_ref(), node.input.schema(), dep_ctx, &mut vec![])
+            })
+            .transpose()?
+            .unwrap_or_else(|| ConstantPred::int64(0).into_pred_node());
+        let fetch = node
+            .fetch
+            .as_ref()
+            .map(|expr| {
+                self.conv_into_optd_expr(expr.as_ref(), node.input.schema(), dep_ctx, &mut vec![])
+            })
+            .transpose()?
+            .unwrap_or_else(|| ConstantPred::int64(i64::MAX).into_pred_node());
+        Ok(LogicalLimit::new(input, skip, fetch))
     }
 
     fn conv_into_optd_plan_node(
@@ -533,9 +561,6 @@ impl OptdPlanContext<'_> {
             LogicalPlan::Filter(node) => {
                 self.conv_into_optd_filter(node, dep_ctx)?.into_plan_node()
             }
-            LogicalPlan::CrossJoin(node) => self
-                .conv_into_optd_cross_join(node, dep_ctx)?
-                .into_plan_node(),
             LogicalPlan::EmptyRelation(node) => {
                 self.conv_into_optd_empty_relation(node)?.into_plan_node()
             }

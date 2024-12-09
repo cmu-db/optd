@@ -18,52 +18,61 @@
 [package]
 name = "datafusion-optd-cli"
 description = "Command Line Client for DataFusion query engine."
-version = "32.0.0"
+version = "43.0.0"
+authors = ["Apache DataFusion <dev@datafusion.apache.org>"]
 edition = "2021"
 keywords = ["arrow", "datafusion", "query", "sql"]
 license = "Apache-2.0"
 homepage = "https://github.com/cmu-db/optd"
 repository = "https://github.com/cmu-db/optd"
-rust-version = "1.70"
+# Specify MSRV here as `cargo msrv` doesn't support workspace version
+rust-version = "1.79"
 readme = "README.md"
 
 [dependencies]
-arrow = "47.0.0"
-async-trait = "0.1.41"
-aws-config = "0.55"
-aws-credential-types = "0.55"
-clap = { version = "3", features = ["derive", "cargo"] }
-datafusion = { version = "32.0.0", features = [
+arrow = { version = "53.0.0" }
+async-trait = "0.1.73"
+aws-config = "1.5.5"
+aws-sdk-sso = "1.43.0"
+aws-sdk-ssooidc = "1.44.0"
+aws-sdk-sts = "1.43.0"
+# end pin aws-sdk crates
+aws-credential-types = "1.2.0"
+clap = { version = "4.5.16", features = ["derive", "cargo"] }
+datafusion = { version = "43.0.0", features = [
     "avro",
     "crypto_expressions",
+    "datetime_expressions",
     "encoding_expressions",
+    "parquet",
     "regex_expressions",
     "unicode_expressions",
     "compression",
 ] }
-dirs = "4.0.0"
-env_logger = "0.9"
+dirs = "5.0.1"
+env_logger = "0.11"
+futures = "0.3"
 mimalloc = { version = "0.1", default-features = false }
-object_store = { version = "0.7.0", features = ["aws", "gcp"] }
+object_store = { version = "0.11.0", features = ["aws", "gcp", "http"] }
 parking_lot = { version = "0.12" }
+parquet = { version = "53.0.0", default-features = false }
 regex = "1.8"
-rustyline = "11.0"
+rustyline = "14.0"
 tokio = { version = "1.24", features = [
     "macros",
     "rt",
     "rt-multi-thread",
     "sync",
     "parking_lot",
+    "signal",
 ] }
 url = "2.2"
+# begin optd-cli patch
 optd-datafusion-bridge = { path = "../optd-datafusion-bridge", version = "0.1" }
-optd-datafusion-repr-adv-cost = { path = "../optd-datafusion-repr-adv-cost", version = "0.1" }
-optd-datafusion-repr = { path = "../optd-datafusion-repr", version = "0.1" }
-tracing-subscriber = "0.3"
-tracing = "0.1"
+# end optd-cli patch
 
 [dev-dependencies]
 assert_cmd = "2.0"
 ctor = "0.2.0"
 predicates = "3.0"
-rstest = "0.17"
+rstest = "0.22"

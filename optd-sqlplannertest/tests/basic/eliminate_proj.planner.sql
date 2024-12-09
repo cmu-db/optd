@@ -15,11 +15,11 @@ select v1 from (select v2, v1 from (select v1, v2 from t1 limit 5));
 /*
 LogicalProjection { exprs: [ #1 ] }
 └── LogicalProjection { exprs: [ #1, #0 ] }
-    └── LogicalLimit { skip: 0(u64), fetch: 5(u64) }
+    └── LogicalLimit { skip: 0(i64), fetch: 5(i64) }
         └── LogicalProjection { exprs: [ #0, #1 ] }
             └── LogicalScan { table: t1 }
 PhysicalProjection { exprs: [ #0 ] }
-└── PhysicalLimit { skip: 0(u64), fetch: 5(u64) }
+└── PhysicalLimit { skip: 0(i64), fetch: 5(i64) }
     └── PhysicalProjection { exprs: [ #0, #1 ] }
         └── PhysicalScan { table: t1 }
 */
@@ -30,12 +30,12 @@ select v1 from (select v2, v1 from (select v1, v2 from t1 limit 5));
 /*
 LogicalProjection { exprs: [ #1 ] }
 └── LogicalProjection { exprs: [ #1, #0 ] }
-    └── LogicalLimit { skip: 0(u64), fetch: 5(u64) }
+    └── LogicalLimit { skip: 0(i64), fetch: 5(i64) }
         └── LogicalProjection { exprs: [ #0, #1 ] }
             └── LogicalScan { table: t1 }
 PhysicalProjection { exprs: [ #1 ] }
 └── PhysicalProjection { exprs: [ #1, #0 ] }
-    └── PhysicalLimit { skip: 0(u64), fetch: 5(u64) }
+    └── PhysicalLimit { skip: 0(i64), fetch: 5(i64) }
         └── PhysicalScan { table: t1 }
 */
 
@@ -45,11 +45,11 @@ select v1 from (select v2, v1 from (select v1, v2 from t1 limit 5));
 /*
 LogicalProjection { exprs: [ #1 ] }
 └── LogicalProjection { exprs: [ #1, #0 ] }
-    └── LogicalLimit { skip: 0(u64), fetch: 5(u64) }
+    └── LogicalLimit { skip: 0(i64), fetch: 5(i64) }
         └── LogicalProjection { exprs: [ #0, #1 ] }
             └── LogicalScan { table: t1 }
 PhysicalProjection { exprs: [ #0 ] }
-└── PhysicalLimit { skip: 0(u64), fetch: 5(u64) }
+└── PhysicalLimit { skip: 0(i64), fetch: 5(i64) }
     └── PhysicalScan { table: t1 }
 0
 1
@@ -62,11 +62,11 @@ select v1 from (select v2, v1 from (select v1, v2 from t1 limit 5));
 /*
 LogicalProjection { exprs: [ #1 ] }
 └── LogicalProjection { exprs: [ #1, #0 ] }
-    └── LogicalLimit { skip: 0(u64), fetch: 5(u64) }
+    └── LogicalLimit { skip: 0(i64), fetch: 5(i64) }
         └── LogicalProjection { exprs: [ #0, #1 ] }
             └── LogicalScan { table: t1 }
 PhysicalProjection { exprs: [ #0 ] }
-└── PhysicalLimit { skip: 0(u64), fetch: 5(u64) }
+└── PhysicalLimit { skip: 0(i64), fetch: 5(i64) }
     └── PhysicalScan { table: t1 }
 0
 1

@@ -10,9 +10,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
-use datafusion::catalog::CatalogList;
-use datafusion::execution::context::{SessionConfig, SessionState};
-use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::catalog::CatalogProviderList;
 use datafusion::execution::TaskContext;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::SessionContext;
@@ -22,10 +20,7 @@ use datafusion_optd_cli::helper::unescape_input;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use mimalloc::MiMalloc;
-use optd_datafusion_bridge::{DatafusionCatalog, OptdQueryPlanner};
-use optd_datafusion_repr::DatafusionOptimizer;
-use optd_datafusion_repr_adv_cost::adv_stats::stats::DataFusionBaseTableStats;
-use optd_datafusion_repr_adv_cost::new_physical_adv_cost;
+use optd_datafusion_bridge::{create_df_context, OptdDfContext, OptdQueryPlanner};
 use regex::Regex;
 
 #[global_allocator]
@@ -70,52 +65,20 @@ impl DatafusionDBMS {
     /// optimizer will be used.
     async fn new_session_ctx(
         use_df_logical: bool,
-        catalog: Option<Arc<dyn CatalogList>>,
+        catalog: Option<Arc<dyn CatalogProviderList>>,
         with_advanced_cost: bool,
     ) -> Result<(SessionContext, Arc<OptdQueryPlanner>)> {
-        let mut session_config = SessionConfig::from_env()?.with_information_schema(true);
-        if !use_df_logical {
-            session_config.options_mut().optimizer.max_passes = 0;
-        }
-
-        let rn_config = RuntimeConfig::new();
-        let runtime_env = RuntimeEnv::new(rn_config.clone())?;
-        let optd_optimizer;
-
-        let ctx = {
-            let mut state = if let Some(catalog) = catalog {
-                SessionState::new_with_config_rt_and_catalog_list(
-                    session_config.clone(),
-                    Arc::new(runtime_env),
-                    catalog,
-                )
-            } else {
-                SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env))
-            };
-            let optimizer = if with_advanced_cost {
-                new_physical_adv_cost(
-                    Arc::new(DatafusionCatalog::new(state.catalog_list())),
-                    DataFusionBaseTableStats::default(),
-                    false,
-                )
-            } else {
-                DatafusionOptimizer::new_physical(
-                    Arc::new(DatafusionCatalog::new(state.catalog_list())),
-                    false,
-                )
-            };
-            if !use_df_logical {
-                // clean up optimizer rules so that we can plug in our own optimizer
-                state = state.with_optimizer_rules(vec![]);
-            }
-            state = state.with_physical_optimizer_rules(vec![]);
-            // use optd-bridge query planner
-            optd_optimizer = Arc::new(OptdQueryPlanner::new(optimizer));
-            state = state.with_query_planner(optd_optimizer.clone());
-            SessionContext::new_with_state(state)
-        };
-        ctx.refresh_catalogs().await?;
-        Ok((ctx, optd_optimizer))
+        let OptdDfContext { ctx, optimizer, .. } = create_df_context(
+            None,
+            None,
+            catalog,
+            false,
+            use_df_logical,
+            with_advanced_cost,
+            None,
+        )
+        .await?;
+        Ok((ctx, optimizer))
     }
 
     pub async fn setup(&self, flags: &TestFlags) -> Result<()> {
@@ -216,7 +179,7 @@ impl DatafusionDBMS {
         for statement in statements {
             let (plan, task_ctx) = self.create_physical_plan(statement, flags).await?;
             let batches = self.execute_physical(plan, task_ctx).await?;
-            let options = FormatOptions::default();
+            let options = FormatOptions::default().with_null("NULL");
 
             for batch in batches {
                 let converters = batch

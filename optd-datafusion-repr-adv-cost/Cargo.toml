@@ -10,9 +10,9 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
-arrow-schema = "47.0.0"
+arrow-schema = "53.3.0"
 assert_approx_eq = "1.1.0"
-datafusion = "32.0.0"
+datafusion = "43.0.0"
 ordered-float = "4"
 optd-datafusion-repr = { path = "../optd-datafusion-repr", version = "0.1" }
 optd-core = { path = "../optd-core", version = "0.1" }

@@ -13,7 +13,7 @@ insert into t2 values (0, 200), (1, 201), (2, 202);
 select * from t1 LIMIT 0;
 
 /*
-LogicalLimit { skip: 0(u64), fetch: 0(u64) }
+LogicalLimit { skip: 0(i64), fetch: 0(i64) }
 └── LogicalProjection { exprs: [ #0, #1 ] }
     └── LogicalScan { table: t1 }
 PhysicalEmptyRelation { produce_one_row: false }

@@ -6,9 +6,11 @@
 use std::sync::Arc;
 
 use console::Style;
+use datafusion::catalog_common::MemoryCatalogProviderList;
 use datafusion::error::Result;
-use datafusion::execution::context::{SessionConfig, SessionState};
-use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::execution::context::SessionConfig;
+use datafusion::execution::runtime_env::RuntimeConfig;
+use datafusion::execution::SessionStateBuilder;
 use datafusion::prelude::SessionContext;
 use datafusion_optd_cli::exec::{exec_from_commands, exec_from_commands_collect};
 use datafusion_optd_cli::print_format::PrintFormat;
@@ -23,69 +25,85 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut ctx = {
+    let ctx = {
         let session_config = SessionConfig::from_env()?.with_information_schema(true);
-        let rn_config = RuntimeConfig::new();
-        let runtime_env = RuntimeEnv::new(rn_config.clone())?;
-        let mut state =
-            SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
+        let rn_config = RuntimeConfig::new().build()?;
+        let mut state = SessionStateBuilder::new()
+            .with_config(session_config.clone())
+            .with_runtime_env(Arc::new(rn_config));
+        let catalog = Arc::new(MemoryCatalogProviderList::new());
         let mut optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical(
-            Arc::new(DatafusionCatalog::new(state.catalog_list())),
+            Arc::new(DatafusionCatalog::new(catalog.clone())),
             true,
         );
+        state = state.with_catalog_list(catalog);
+        // clean up optimizer rules so that we can plug in our own optimizer
+        state = state.with_optimizer_rules(vec![]);
+        state = state.with_physical_optimizer_rules(vec![]);
+        // Disable limit
         optimizer.optd_optimizer_mut().prop.partial_explore_iter = None;
         optimizer.optd_optimizer_mut().prop.partial_explore_space = None;
+        // use optd-bridge query planner
         state = state.with_query_planner(Arc::new(OptdQueryPlanner::new(optimizer)));
-        SessionContext::new_with_state(state)
+        SessionContext::new_with_state(state.build())
     };
     ctx.refresh_catalogs().await?;
 
     let perfect_optimizer;
-    let mut ctx_perfect = {
+    let ctx_perfect = {
         let session_config = SessionConfig::from_env()?.with_information_schema(true);
-        let rn_config = RuntimeConfig::new();
-        let runtime_env = RuntimeEnv::new(rn_config.clone())?;
-        let mut state =
-            SessionState::new_with_config_rt(session_config.clone(), Arc::new(runtime_env));
-        let mut optimizer: DatafusionOptimizer =
-            DatafusionOptimizer::new_alternative_physical_for_demo(Arc::new(
-                DatafusionCatalog::new(state.catalog_list()),
-            ));
+        let rn_config = RuntimeConfig::new().build()?;
+        let mut state = SessionStateBuilder::new()
+            .with_config(session_config.clone())
+            .with_runtime_env(Arc::new(rn_config));
+        let catalog = Arc::new(MemoryCatalogProviderList::new());
+        let mut optimizer: DatafusionOptimizer = DatafusionOptimizer::new_physical(
+            Arc::new(DatafusionCatalog::new(catalog.clone())),
+            true,
+        );
+        state = state.with_catalog_list(catalog);
+        // clean up optimizer rules so that we can plug in our own optimizer
+        state = state.with_optimizer_rules(vec![]);
+        state = state.with_physical_optimizer_rules(vec![]);
+        // Disable limit
         optimizer.optd_optimizer_mut().prop.partial_explore_iter = None;
         optimizer.optd_optimizer_mut().prop.partial_explore_space = None;
         perfect_optimizer = Arc::new(OptdQueryPlanner::new(optimizer));
+        // use optd-bridge query planner
         state = state.with_query_planner(perfect_optimizer.clone());
-        SessionContext::new_with_state(state)
+        SessionContext::new_with_state(state.build())
     };
+    ctx.refresh_catalogs().await?;
     ctx_perfect.refresh_catalogs().await?;
 
     let slient_print_options = PrintOptions {
         format: PrintFormat::Table,
         quiet: true,
         maxrows: MaxRows::Limited(5),
+        color: false,
     };
 
     exec_from_commands(
-        &mut ctx,
-        &slient_print_options,
+        &ctx,
         vec![
             "create table t1(t1v1 int, t1v2 int);".to_string(),
             "create table t2(t2v1 int);".to_string(),
             "create table t3(t3v2 int);".to_string(),
         ],
+        &slient_print_options,
     )
-    .await;
+    .await?;
 
     exec_from_commands(
-        &mut ctx_perfect,
-        &slient_print_options,
+        &ctx_perfect,
         vec![
             "create table t1(t1v1 int, t1v2 int);".to_string(),
             "create table t2(t2v1 int);".to_string(),
             "create table t3(t3v2 int);".to_string(),
         ],
+        &slient_print_options,
     )
-    .await;
+    .await?;
 
     let mut data_progress = [5; 3];
     let mut iter = 0;
@@ -118,14 +136,14 @@ async fn main() -> Result<()> {
         statement
     }
     let statement = do_insert(0, 0, 5, 1);
-    exec_from_commands(&mut ctx, &slient_print_options, vec![statement.clone()]).await;
-    exec_from_commands(&mut ctx_perfect, &slient_print_options, vec![statement]).await;
+    exec_from_commands(&ctx, vec![statement.clone()], &slient_print_options).await?;
+    exec_from_commands(&ctx_perfect, vec![statement], &slient_print_options).await?;
     let statement = do_insert(1, 0, 5, 1);
-    exec_from_commands(&mut ctx, &slient_print_options, vec![statement.clone()]).await;
-    exec_from_commands(&mut ctx_perfect, &slient_print_options, vec![statement]).await;
+    exec_from_commands(&ctx, vec![statement.clone()], &slient_print_options).await?;
+    exec_from_commands(&ctx_perfect, vec![statement], &slient_print_options).await?;
     let statement = do_insert(2, 0, 5, 1);
-    exec_from_commands(&mut ctx, &slient_print_options, vec![statement.clone()]).await;
-    exec_from_commands(&mut ctx_perfect, &slient_print_options, vec![statement]).await;
+    exec_from_commands(&ctx, vec![statement.clone()], &slient_print_options).await?;
+    exec_from_commands(&ctx_perfect, vec![statement], &slient_print_options).await?;
 
     fn get_join_order(result: Vec<Vec<String>>) -> String {
         result
@@ -150,18 +168,17 @@ async fn main() -> Result<()> {
                 let end = begin + progress;
                 *data_progress_item = end;
                 let statement = do_insert(table, begin, end, repeat);
-                exec_from_commands(&mut ctx, &slient_print_options, vec![statement.clone()]).await;
-                exec_from_commands(&mut ctx_perfect, &slient_print_options, vec![statement]).await;
+                exec_from_commands(&ctx, vec![statement.clone()], &slient_print_options).await?;
+                exec_from_commands(&ctx_perfect, vec![statement], &slient_print_options).await?;
             }
         }
         iter += 1;
 
         let query = "select * from t1, t2, t3 where t1v1 = t2v1 and t1v2 = t3v2;";
-        let result =
-            exec_from_commands_collect(&mut ctx, vec![format!("explain {}", query)]).await?;
+        let result = exec_from_commands_collect(&ctx, vec![format!("explain {}", query)]).await?;
         let join_order: String = get_join_order(result);
-        exec_from_commands(&mut ctx, &slient_print_options, vec![query.to_string()]).await;
-        exec_from_commands(&mut ctx, &slient_print_options, vec![query.to_string()]).await;
+        exec_from_commands(&ctx, vec![query.to_string()], &slient_print_options).await?;
+        exec_from_commands(&ctx, vec![query.to_string()], &slient_print_options).await?;
 
         {
             let mut guard = perfect_optimizer.optimizer.lock().unwrap();
@@ -183,8 +200,7 @@ async fn main() -> Result<()> {
         let query5 = "select * from t3, t1, t2 where t1v1 = t2v1 and t1v2 = t3v2;";
         let query6 = "select * from t3, t2, t1 where t1v1 = t2v1 and t1v2 = t3v2;";
         exec_from_commands(
-            &mut ctx_perfect,
-            &slient_print_options,
+            &ctx_perfect,
             vec![
                 query00.to_string(),
                 query01.to_string(),
@@ -210,8 +226,9 @@ async fn main() -> Result<()> {
                 query6.to_string(),
                 query6.to_string(),
             ],
+            &slient_print_options,
         )
-        .await;
+        .await?;
 
         {
             let mut guard = perfect_optimizer.optimizer.lock().unwrap();
@@ -221,8 +238,7 @@ async fn main() -> Result<()> {
         }
 
         let result =
-            exec_from_commands_collect(&mut ctx_perfect, vec![format!("explain {}", query)])
-                .await?;
+            exec_from_commands_collect(&ctx_perfect, vec![format!("explain {}", query)]).await?;
         let best_join_order = get_join_order(result);
         correct += if best_join_order == join_order { 1 } else { 0 };
         let out = format!(
@@ -240,7 +256,7 @@ async fn main() -> Result<()> {
             println!("{}", out);
         }
         // exec_from_commands(
-        //     &mut ctx_perfect,
+        //     &ctx_perfect,
         //     &print_options,
         //     vec![r#"
         //         select
