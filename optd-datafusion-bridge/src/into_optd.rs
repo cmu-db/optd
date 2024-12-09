@@ -309,7 +309,6 @@ impl OptdPlanContext<'_> {
                 Ok(ColumnRefPred::new(new_column_ref_idx).into_pred_node())
             }
             Expr::Exists(ex) => {
-                // We could use mark join here, if we had one...
                 let sq = &ex.subquery;
                 let negated = ex.negated;
 

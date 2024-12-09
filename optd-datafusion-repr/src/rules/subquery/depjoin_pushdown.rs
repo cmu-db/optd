@@ -80,8 +80,7 @@ fn apply_dep_initial_distinct(
         .map(|x| ExternColumnRefPred::from_pred_node(x).unwrap().index())
         .collect::<Vec<usize>>();
 
-    // If we have no correlated columns, for a scalar subquery, we can emit a cross join
-    // TODO(bowad): Uncorrelated for ANY/EXISTS
+    // If we have no correlated columns, we can skip the whole dependent join step
     if correlated_col_indices.is_empty() {
         let res = match join.sq_type() {
             SubqueryType::Scalar => LogicalJoin::new_unchecked(
