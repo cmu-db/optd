@@ -12,7 +12,7 @@ use optd_datafusion_repr::plan_nodes::{
 use optd_datafusion_repr::properties::column_ref::{
     BaseTableColumnRef, BaseTableColumnRefs, ColumnRef, GroupColumnRefs,
 };
-use optd_datafusion_repr::properties::schema::{Field, Schema};
+use optd_datafusion_repr::properties::schema::Schema;
 use optd_datafusion_repr::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;

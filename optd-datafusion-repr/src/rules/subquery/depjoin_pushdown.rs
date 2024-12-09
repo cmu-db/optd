@@ -3,8 +3,6 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
-use std::iter;
-
 use optd_core::nodes::{PlanNodeOrGroup, PredNode};
 use optd_core::optimizer::Optimizer;
 use optd_core::rules::{Rule, RuleMatcher};
@@ -13,9 +11,9 @@ use crate::plan_nodes::{
     ArcDfPlanNode, ArcDfPredNode, BinOpPred, BinOpType, ColumnRefPred, ConstantPred, DependentJoin,
     DfNodeType, DfPredType, DfReprPlanNode, DfReprPredNode, ExternColumnRefPred, FuncPred,
     FuncType, JoinType, ListPred, LogOpPred, LogOpType, LogicalAgg, LogicalFilter, LogicalJoin,
-    LogicalProjection, PredExt, RawDependentJoin,
+    LogicalProjection, PredExt, RawDependentJoin, SubqueryType,
 };
-use crate::rules::macros::define_rule_discriminant;
+use crate::rules::macros::{define_rule, define_rule_discriminant};
 use crate::OptimizerExt;
 
 /// Like rewrite_column_refs, except it translates ExternColumnRefs into ColumnRefs
@@ -52,7 +50,7 @@ fn rewrite_extern_column_refs(
 define_rule_discriminant!(
     DepInitialDistinct,
     apply_dep_initial_distinct,
-    (RawDepJoin(JoinType::Cross), left, right)
+    (RawDepJoin(SubqueryType::Scalar), left, right)
 );
 
 /// Initial rule to generate a join above this dependent join, and push the dependent
@@ -81,8 +79,9 @@ fn apply_dep_initial_distinct(
         .map(|x| ExternColumnRefPred::from_pred_node(x).unwrap().index())
         .collect::<Vec<usize>>();
 
-    // If we have no correlated columns, just emit a cross join instead
-    if correlated_col_indices.is_empty() {
+    // If we have no correlated columns, for a scalar subquery, we can emit a cross join
+    // TODO: Uncorrelated for ANY/EXISTS
+    if correlated_col_indices.is_empty() && matches!(join.sq_type(), SubqueryType::Scalar) {
         let new_join = LogicalJoin::new_unchecked(
             left,
             right,
@@ -106,13 +105,8 @@ fn apply_dep_initial_distinct(
         ),
     );
 
-    let new_dep_join = DependentJoin::new_unchecked(
-        distinct_agg_node.into_plan_node(),
-        right,
-        cond,
-        extern_cols,
-        join.join_type(),
-    );
+    let new_dep_join =
+        DependentJoin::new_unchecked(distinct_agg_node.into_plan_node(), right, cond, extern_cols);
 
     // Our join condition is going to make sure that all of the correlated columns
     // in the right side are equal to their equivalent columns in the left side.
@@ -122,34 +116,58 @@ fn apply_dep_initial_distinct(
     //
     // This is because the aggregate we install on the right side will map the
     // correlated columns to their respective indices as shown.
-    let join_cond = LogOpPred::new(
-        LogOpType::And,
-        correlated_col_indices
-            .iter()
-            .enumerate()
-            .map(|(i, x)| {
-                assert!(i + left_schema_size < left_schema_size + right_schema_size);
-                BinOpPred::new(
-                    ColumnRefPred::new(*x).into_pred_node(),
-                    ColumnRefPred::new(i + left_schema_size).into_pred_node(),
-                    BinOpType::Eq,
-                )
-                .into_pred_node()
-            })
-            .collect(),
-    );
+    assert!(correlated_col_indices.len() > 0);
+    let join_cond = match join.sq_type() {
+        SubqueryType::Scalar | SubqueryType::Exists => LogOpPred::new(
+            LogOpType::And,
+            correlated_col_indices
+                .iter()
+                .enumerate()
+                .map(|(i, x)| {
+                    assert!(i + left_schema_size < left_schema_size + right_schema_size);
+                    BinOpPred::new(
+                        ColumnRefPred::new(*x).into_pred_node(),
+                        ColumnRefPred::new(i + left_schema_size).into_pred_node(),
+                        BinOpType::Eq,
+                    )
+                    .into_pred_node()
+                })
+                .collect(),
+        ),
+        SubqueryType::Any { pred, op } => LogOpPred::new(
+            LogOpType::And,
+            correlated_col_indices
+                .iter()
+                .enumerate()
+                .map(|(i, x)| {
+                    assert!(i + left_schema_size < left_schema_size + right_schema_size);
+                    BinOpPred::new(
+                        pred.clone().into(),
+                        ColumnRefPred::new(i + left_schema_size).into_pred_node(),
+                        *op,
+                    )
+                    .into_pred_node()
+                })
+                .collect(),
+        ),
+    };
+
+    let join_type = match join.sq_type() {
+        SubqueryType::Scalar => JoinType::Inner,
+        SubqueryType::Exists | SubqueryType::Any { pred: _, op: _ } => JoinType::LeftMark,
+    };
 
     let new_join = LogicalJoin::new_unchecked(
         left,
         new_dep_join.into_plan_node(),
         join_cond.into_pred_node(),
-        join.join_type(),
+        join_type,
     );
 
     // Ensure that the schema above the new_join is the same as it was before
     // for correctness (Project the left side of the new join,
     // plus the *right side of the right side*)
-    let node = if matches!(join.join_type(), JoinType::Inner) {
+    let node = if matches!(join.sq_type(), SubqueryType::Scalar) {
         LogicalProjection::new(
             new_join.into_plan_node(),
             ListPred::new(
@@ -170,10 +188,10 @@ fn apply_dep_initial_distinct(
     vec![node.into()]
 }
 
-define_rule_discriminant!(
+define_rule!(
     DepJoinPastProj,
     apply_dep_join_past_proj,
-    (DepJoin(JoinType::Cross), left, (Projection, right))
+    (DepJoin, left, (Projection, right))
 );
 
 /// Pushes a dependent join past a projection node.
@@ -210,17 +228,16 @@ fn apply_dep_join_past_proj(
             .collect(),
     );
 
-    let new_dep_join =
-        DependentJoin::new_unchecked(left, right, cond, extern_cols, join.join_type());
+    let new_dep_join = DependentJoin::new_unchecked(left, right, cond, extern_cols);
     let new_proj = LogicalProjection::new(new_dep_join.into_plan_node(), new_proj_exprs);
 
     vec![new_proj.into_plan_node().into()]
 }
 
-define_rule_discriminant!(
+define_rule!(
     DepJoinPastFilter,
     apply_dep_join_past_filter,
-    (DepJoin(JoinType::Cross), left, (Filter, right))
+    (DepJoin, left, (Filter, right))
 );
 
 /// Pushes a dependent join past a projection node.
@@ -273,7 +290,6 @@ fn apply_dep_join_past_filter(
                 .map(|x| ExternColumnRefPred::new(x).into_pred_node())
                 .collect(),
         ),
-        join.join_type(),
     );
 
     let new_filter = LogicalFilter::new(new_dep_join.into_plan_node(), rewritten_expr);
@@ -281,10 +297,10 @@ fn apply_dep_join_past_filter(
     vec![new_filter.into_plan_node().into()]
 }
 
-define_rule_discriminant!(
+define_rule!(
     DepJoinPastAgg,
     apply_dep_join_past_agg,
-    (DepJoin(JoinType::Cross), left, (Agg, right))
+    (DepJoin, left, (Agg, right))
 );
 
 /// Pushes a dependent join past an aggregation node
@@ -348,8 +364,7 @@ fn apply_dep_join_past_agg(
             .collect(),
     );
 
-    let new_dep_join =
-        DependentJoin::new_unchecked(left.clone(), right, cond, extern_cols, join.join_type());
+    let new_dep_join = DependentJoin::new_unchecked(left.clone(), right, cond, extern_cols);
 
     let new_agg_exprs_size = new_exprs.len();
     let new_agg_groups_size = new_groups.len();
@@ -438,10 +453,10 @@ fn apply_dep_join_past_agg(
 
 // Heuristics-only rule. If we don't have references to the external columns on the right side,
 // we can rewrite the dependent join into a normal join.
-define_rule_discriminant!(
+define_rule!(
     DepJoinEliminate,
     apply_dep_join_eliminate_at_scan, // TODO matching is all wrong
-    (DepJoin(JoinType::Cross), left, right)
+    (DepJoin, left, right)
 );
 
 /// If we've gone all the way down to the scan node, we can swap the dependent join

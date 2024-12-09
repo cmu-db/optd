@@ -6,9 +6,8 @@ FROM customer c
 WHERE c.c_custkey IN (
     SELECT o.o_custkey
     FROM orders o
-    WHERE o.o_custkey = c.c_custkey AND o.o_totalprice > 250000
-)
-ORDER BY c.c_custkey;
+    WHERE o.o_totalprice > 250000
+) order by c.c_custkey;
 ----
 10 Customer#000000010
 70 Customer#000000070

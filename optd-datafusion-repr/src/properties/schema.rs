@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use super::DEFAULT_NAME;
 use crate::plan_nodes::{
     decode_empty_relation_schema, ArcDfPredNode, ConstantPred, ConstantType, DfNodeType,
-    DfPredType, DfReprPredNode, FuncType,
+    DfPredType, DfReprPredNode, FuncType, JoinType, SubqueryType,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -177,9 +177,7 @@ impl LogicalPropertyBuilder<DfNodeType> for SchemaPropertyBuilder {
             }
             DfNodeType::Projection => Self::derive_for_predicate(predicates[0].clone()),
             DfNodeType::Filter | DfNodeType::Limit | DfNodeType::Sort => children[0].clone(),
-            DfNodeType::Join(join_type)
-            | DfNodeType::RawDepJoin(join_type)
-            | DfNodeType::DepJoin(join_type) => {
+            DfNodeType::Join(join_type) => {
                 use crate::plan_nodes::JoinType::*;
                 match join_type {
                     Inner | LeftOuter | RightOuter | FullOuter | Cross => {
@@ -200,6 +198,17 @@ impl LogicalPropertyBuilder<DfNodeType> for SchemaPropertyBuilder {
                         schema
                     }
                 }
+            }
+            DfNodeType::RawDepJoin(sq_type) => match sq_type {
+                SubqueryType::Scalar => {
+                    self.derive(DfNodeType::Join(JoinType::Inner), predicates, children)
+                }
+                SubqueryType::Exists | SubqueryType::Any { pred: _, op: _ } => {
+                    self.derive(DfNodeType::Join(JoinType::LeftMark), predicates, children)
+                }
+            },
+            DfNodeType::DepJoin => {
+                self.derive(DfNodeType::Join(JoinType::Inner), predicates, children)
             }
             DfNodeType::EmptyRelation => decode_empty_relation_schema(&predicates[1]),
             x => unimplemented!("cannot derive schema property for {}", x),

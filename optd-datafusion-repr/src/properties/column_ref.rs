@@ -16,7 +16,7 @@ use super::DEFAULT_NAME;
 use crate::{
     plan_nodes::{
         decode_empty_relation_schema, ArcDfPredNode, BinOpType, ConstantPred, DfNodeType,
-        DfPredType, DfReprPredNode, JoinType, LogOpType,
+        DfPredType, DfReprPredNode, JoinType, LogOpType, SubqueryType,
     },
     utils::DisjointSets,
 };
@@ -451,9 +451,7 @@ impl LogicalPropertyBuilder<DfNodeType> for ColumnRefPropertyBuilder {
                 GroupColumnRefs::new(column_refs, child.output_correlation.clone())
             }
             // Should account for all physical join types.
-            DfNodeType::Join(join_type)
-            | DfNodeType::RawDepJoin(join_type)
-            | DfNodeType::DepJoin(join_type) => {
+            DfNodeType::Join(join_type) => {
                 // Concatenate left and right children column refs.
                 let column_refs = Self::concat_children_col_refs(&children[0..2]);
                 // Merge the equal columns of two children as input correlation.
@@ -501,6 +499,17 @@ impl LogicalPropertyBuilder<DfNodeType> for ColumnRefPropertyBuilder {
                     _ => None,
                 };
                 GroupColumnRefs::new(column_refs, output_correlation)
+            }
+            DfNodeType::RawDepJoin(sq_type) => match sq_type {
+                SubqueryType::Scalar => {
+                    self.derive(DfNodeType::Join(JoinType::Inner), predicates, children)
+                }
+                SubqueryType::Exists | SubqueryType::Any { pred: _, op: _ } => {
+                    self.derive(DfNodeType::Join(JoinType::LeftMark), predicates, children)
+                }
+            },
+            DfNodeType::DepJoin => {
+                self.derive(DfNodeType::Join(JoinType::Inner), predicates, children)
             }
             DfNodeType::Agg => {
                 let child = children[0];

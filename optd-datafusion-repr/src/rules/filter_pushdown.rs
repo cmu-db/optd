@@ -270,7 +270,7 @@ fn filter_join_transpose(
         }
         _ => {
             // We don't support modifying the join condition for other join types yet
-            LogicalJoin::new_unchecked(new_left, new_right, join_cond, join_typ)
+            LogicalJoin::new_unchecked(new_left, new_right, join_cond, *join_typ)
         }
     };
 

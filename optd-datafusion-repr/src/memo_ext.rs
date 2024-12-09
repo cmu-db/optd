@@ -41,7 +41,7 @@ fn enumerate_join_order_expr_inner<M: Memo<DfNodeType> + ?Sized>(
     visited: &mut HashMap<GroupId, Vec<LogicalJoinOrder>>,
 ) -> Vec<LogicalJoinOrder> {
     let expr = memo.get_expr_memoed(current);
-    match expr.typ {
+    match &expr.typ {
         DfNodeType::Scan => {
             let table = memo.get_pred(expr.predicates[0]); // TODO: use unified repr
             let table = ConstantPred::from_pred_node(table)
@@ -50,7 +50,7 @@ fn enumerate_join_order_expr_inner<M: Memo<DfNodeType> + ?Sized>(
                 .as_str();
             vec![LogicalJoinOrder::Table(table)]
         }
-        DfNodeType::Join(_) | DfNodeType::DepJoin(_) | DfNodeType::RawDepJoin(_) => {
+        DfNodeType::Join(_) | DfNodeType::DepJoin | DfNodeType::RawDepJoin(_) => {
             // Assume child 0 == left, child 1 == right
             let left = expr.children[0];
             let right = expr.children[1];

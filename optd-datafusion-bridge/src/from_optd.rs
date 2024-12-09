@@ -476,7 +476,7 @@ impl OptdPlanContext<'_> {
         let physical_expr =
             self.conv_from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
 
-        if node.join_type() == JoinType::Cross {
+        if *node.join_type() == JoinType::Cross {
             return Ok(Arc::new(CrossJoinExec::new(left_exec, right_exec))
                 as Arc<dyn ExecutionPlan + 'static>);
         }
