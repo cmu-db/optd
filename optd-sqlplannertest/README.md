@@ -31,17 +31,20 @@ There are two metrics we care about when evaluating
 ### Usage
 
 ```shell
-# benchmark all TPC-H queries with "bench" task enabled
+# Benchmark all TPC-H queries with "bench" task enabled
 cargo bench --bench planner_bench tpch/
 
-# benchmark TPC-H Q1
+# Benchmark TPC-H Q1
 cargo bench --bench planner_bench tpch/q1/
 
-# benchmark TPC-H Q1 planning
+# Benchmark TPC-H Q1 planning
 cargo bench --bench planner_bench tpch/q1/planning
 
-# benchmark TPC-H Q1 execution
+# Benchmark TPC-H Q1 execution
 cargo bench --bench planner_bench tpch/q1/execution
+
+# View the HTML report
+python3 -m http.server -d ./target/criterion/
 ```
 
 ### Limitations
