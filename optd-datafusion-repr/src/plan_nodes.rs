@@ -39,7 +39,7 @@ use pretty_xmlish::{Pretty, PrettyConfig};
 pub use projection::{LogicalProjection, PhysicalProjection};
 pub use scan::{LogicalScan, PhysicalScan};
 pub use sort::{LogicalSort, PhysicalSort};
-pub use subquery::{DependentJoin, RawDependentJoin}; // Add missing import
+pub use subquery::{DependentJoin, RawDependentJoin, SubqueryType};
 
 use crate::explain::{explain_plan_node, explain_pred_node};
 
@@ -69,7 +69,7 @@ impl std::fmt::Display for DfPredType {
 
 /// DfNodeType FAQ:
 ///   - The define_plan_node!() macro defines what the children of each join node are
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DfNodeType {
     // Developers: update `is_logical` function after adding new plan nodes
     // Plan nodes
@@ -77,8 +77,8 @@ pub enum DfNodeType {
     Filter,
     Scan,
     Join(JoinType),
-    RawDepJoin(JoinType),
-    DepJoin(JoinType),
+    RawDepJoin(SubqueryType),
+    DepJoin,
     Sort,
     Agg,
     EmptyRelation,

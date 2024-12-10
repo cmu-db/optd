@@ -66,7 +66,10 @@ impl<
     ) -> f64 {
         match &expr_tree.typ {
             DfPredType::Constant(_) => Self::get_constant_selectivity(expr_tree),
-            DfPredType::ColumnRef => unimplemented!("check bool type or else panic"),
+            DfPredType::ColumnRef => {
+                // TODO: Check that field is of bool type
+                0.5 // TODO: placeholder---how can we get the selectivity?
+            }
             DfPredType::UnOp(un_op_typ) => {
                 assert!(expr_tree.children.len() == 1);
                 let child = expr_tree.child(0);
@@ -104,7 +107,10 @@ impl<
             DfPredType::LogOp(log_op_typ) => {
                 self.get_log_op_selectivity(*log_op_typ, &expr_tree.children, schema, column_refs)
             }
-            DfPredType::Func(_) => unimplemented!("check bool type or else panic"),
+            DfPredType::Func(_) => {
+                // TODO: Check that field is of bool type
+                0.5 // TODO: placeholder---how can we get the selectivity?
+            }
             DfPredType::SortOrder(_) => {
                 panic!("the selectivity of sort order expressions is undefined")
             }

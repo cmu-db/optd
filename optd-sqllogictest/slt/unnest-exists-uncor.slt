@@ -1,0 +1,17 @@
+include _tpch_tables.slt.part
+
+query
+SELECT c_name
+FROM customer c
+WHERE c_nationkey IN (
+    SELECT n_nationkey
+    FROM nation
+    WHERE n_name = 'GERMANY'
+);
+----
+Customer#000000062
+Customer#000000071
+Customer#000000093
+Customer#000000119
+Customer#000000129
+Customer#000000136

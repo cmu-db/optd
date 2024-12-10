@@ -18,7 +18,7 @@ macro_rules! define_plan_node {
 
             fn from_plan_node(plan_node: ArcDfPlanNode) -> Option<Self> {
                 #[allow(unused_variables)]
-                if let DfNodeType :: $variant $( ($inner_name) )? = plan_node.typ {
+                if let DfNodeType :: $variant $( ($inner_name) )? = &plan_node.typ {
                     Some(Self(plan_node))
                 } else {
                     None
@@ -105,9 +105,9 @@ macro_rules! define_plan_node {
             )*
 
             $(
-                pub fn $inner_name(&self) -> JoinType {
-                    if let DfNodeType :: $variant ($inner_name) = self.0 .typ {
-                        return $inner_name;
+                pub fn $inner_name(&self) -> &$inner_typ {
+                    if let DfNodeType :: $variant ($inner_name) = &self.0.typ {
+                        return &$inner_name;
                     } else {
                         unreachable!();
                     }

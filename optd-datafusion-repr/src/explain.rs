@@ -75,7 +75,7 @@ pub fn explain_plan_node(
         DfNodeType::RawDepJoin(_) => RawDependentJoin::from_plan_node(node)
             .unwrap()
             .explain(meta_map),
-        DfNodeType::DepJoin(_) => DependentJoin::from_plan_node(node)
+        DfNodeType::DepJoin => DependentJoin::from_plan_node(node)
             .unwrap()
             .explain(meta_map),
         DfNodeType::Scan => LogicalScan::from_plan_node(node).unwrap().explain(meta_map),

@@ -3,6 +3,8 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
+use std::sync::Arc;
+
 use anyhow::{bail, Result};
 use datafusion::common::DFSchema;
 use datafusion::logical_expr::{self, logical_plan, LogicalPlan, Operator};
@@ -15,7 +17,7 @@ use optd_datafusion_repr::plan_nodes::{
     ConstantPred, DfReprPlanNode, DfReprPredNode, ExternColumnRefPred, FuncPred, FuncType,
     InListPred, JoinType, LikePred, ListPred, LogOpPred, LogOpType, LogicalAgg,
     LogicalEmptyRelation, LogicalFilter, LogicalJoin, LogicalLimit, LogicalProjection, LogicalScan,
-    LogicalSort, RawDependentJoin, SortOrderPred, SortOrderType,
+    LogicalSort, RawDependentJoin, SortOrderPred, SortOrderType, SubqueryType,
 };
 use optd_datafusion_repr::properties::schema::Schema as OptdSchema;
 
@@ -24,15 +26,18 @@ use crate::OptdPlanContext;
 impl OptdPlanContext<'_> {
     fn subqueries_to_dependent_joins(
         &mut self,
-        subqueries: &[&Subquery],
+        subqueries: Vec<(&Subquery, SubqueryType)>,
         input: ArcDfPlanNode,
         input_schema: &DFSchema,
     ) -> Result<ArcDfPlanNode> {
         let mut node = input;
-        for Subquery {
-            subquery,
-            outer_ref_columns,
-        } in subqueries.iter()
+        for (
+            Subquery {
+                subquery,
+                outer_ref_columns,
+            },
+            sq_typ,
+        ) in subqueries.into_iter()
         {
             let subquery_root = self.conv_into_optd_plan_node(subquery, Some(input_schema))?;
             let dep_join = RawDependentJoin::new(
@@ -56,7 +61,7 @@ impl OptdPlanContext<'_> {
                         })
                         .collect(),
                 ),
-                JoinType::Cross,
+                sq_typ,
             );
             node = dep_join.into_plan_node();
         }
@@ -92,7 +97,7 @@ impl OptdPlanContext<'_> {
         expr: &'a logical_expr::Expr,
         context: &DFSchema,
         dep_ctx: Option<&DFSchema>,
-        subqueries: &mut Vec<&'a Subquery>,
+        subqueries: &mut Vec<(&'a Subquery, SubqueryType)>,
     ) -> Result<ArcDfPredNode> {
         use logical_expr::Expr;
         match expr {
@@ -257,6 +262,18 @@ impl OptdPlanContext<'_> {
                 )
                 .into_pred_node())
             }
+            Expr::Not(x) => {
+                let expr = self.conv_into_optd_expr(x.as_ref(), context, dep_ctx, subqueries)?;
+                Ok(FuncPred::new(FuncType::Not, ListPred::new(vec![expr])).into_pred_node())
+            }
+            Expr::IsNull(x) => {
+                let expr = self.conv_into_optd_expr(x.as_ref(), context, dep_ctx, subqueries)?;
+                Ok(FuncPred::new(FuncType::IsNull, ListPred::new(vec![expr])).into_pred_node())
+            }
+            Expr::IsNotNull(x) => {
+                let expr = self.conv_into_optd_expr(x.as_ref(), context, dep_ctx, subqueries)?;
+                Ok(FuncPred::new(FuncType::IsNotNull, ListPred::new(vec![expr])).into_pred_node())
+            }
             Expr::Between(x) => {
                 let expr =
                     self.conv_into_optd_expr(x.expr.as_ref(), context, dep_ctx, subqueries)?;
@@ -288,8 +305,52 @@ impl OptdPlanContext<'_> {
                 // This relies on a left-deep tree of dependent joins being
                 // generated below this node, in response to all pushed subqueries.
                 let new_column_ref_idx = context.fields().len() + subqueries.len();
-                subqueries.push(sq);
+                subqueries.push((sq, SubqueryType::Scalar));
                 Ok(ColumnRefPred::new(new_column_ref_idx).into_pred_node())
+            }
+            Expr::Exists(ex) => {
+                let sq = &ex.subquery;
+                let negated = ex.negated;
+
+                let new_column_ref_idx = context.fields().len() + subqueries.len();
+                subqueries.push((sq, SubqueryType::Exists));
+                if negated {
+                    Ok(FuncPred::new(
+                        FuncType::Not,
+                        ListPred::new(
+                            vec![ColumnRefPred::new(new_column_ref_idx).into_pred_node()],
+                        ),
+                    )
+                    .into_pred_node())
+                } else {
+                    Ok(ColumnRefPred::new(new_column_ref_idx).into_pred_node())
+                }
+            }
+            Expr::InSubquery(insq) => {
+                let sq = &insq.subquery;
+                let expr =
+                    self.conv_into_optd_expr(insq.expr.as_ref(), context, dep_ctx, subqueries)?;
+                let negated = insq.negated;
+
+                let new_column_ref_idx = context.fields().len() + subqueries.len();
+                subqueries.push((
+                    sq,
+                    SubqueryType::Any {
+                        pred: Arc::unwrap_or_clone(expr),
+                        op: BinOpType::Eq,
+                    },
+                ));
+                if negated {
+                    Ok(FuncPred::new(
+                        FuncType::Not,
+                        ListPred::new(
+                            vec![ColumnRefPred::new(new_column_ref_idx).into_pred_node()],
+                        ),
+                    )
+                    .into_pred_node())
+                } else {
+                    Ok(ColumnRefPred::new(new_column_ref_idx).into_pred_node())
+                }
             }
             _ => bail!("Unsupported expression: {:?}", expr),
         }
@@ -308,7 +369,7 @@ impl OptdPlanContext<'_> {
             dep_ctx,
             &mut subqueries,
         )?;
-        let input = self.subqueries_to_dependent_joins(&subqueries, input, node.input.schema())?;
+        let input = self.subqueries_to_dependent_joins(subqueries, input, node.input.schema())?;
         Ok(LogicalProjection::new(input, expr_list))
     }
 
@@ -326,7 +387,7 @@ impl OptdPlanContext<'_> {
             &mut subqueries,
         )?;
 
-        let input = self.subqueries_to_dependent_joins(&subqueries, input, node.input.schema())?;
+        let input = self.subqueries_to_dependent_joins(subqueries, input, node.input.schema())?;
 
         Ok(LogicalFilter::new(input, expr))
     }
@@ -336,7 +397,7 @@ impl OptdPlanContext<'_> {
         exprs: &'a [logical_expr::Expr],
         context: &DFSchema,
         dep_ctx: Option<&DFSchema>,
-        subqueries: &mut Vec<&'a Subquery>,
+        subqueries: &mut Vec<(&'a Subquery, SubqueryType)>,
     ) -> Result<ListPred> {
         let exprs = exprs
             .iter()
@@ -350,7 +411,7 @@ impl OptdPlanContext<'_> {
         exprs: &'a [logical_expr::SortExpr],
         context: &DFSchema,
         dep_ctx: Option<&DFSchema>,
-        subqueries: &mut Vec<&'a Subquery>,
+        subqueries: &mut Vec<(&'a Subquery, SubqueryType)>,
     ) -> Result<ListPred> {
         let exprs = exprs
             .iter()
@@ -453,7 +514,7 @@ impl OptdPlanContext<'_> {
             DFJoinType::RightAnti => JoinType::RightAnti,
             DFJoinType::LeftSemi => JoinType::LeftSemi,
             DFJoinType::RightSemi => JoinType::RightSemi,
-            _ => unimplemented!(),
+            DFJoinType::LeftMark => JoinType::LeftMark,
         };
         let mut log_ops = Vec::with_capacity(node.on.len());
         let mut subqueries = vec![];

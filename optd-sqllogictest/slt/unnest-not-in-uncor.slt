@@ -1,0 +1,61 @@
+include _tpch_tables.slt.part
+
+query
+SELECT c.c_custkey, c.c_name
+FROM customer c
+WHERE c.c_custkey NOT IN (
+    SELECT o.o_custkey
+    FROM orders o
+    WHERE  o.o_orderstatus = 'O'
+) order by c.c_custkey;
+----
+3 Customer#000000003
+6 Customer#000000006
+9 Customer#000000009
+12 Customer#000000012
+15 Customer#000000015
+18 Customer#000000018
+21 Customer#000000021
+24 Customer#000000024
+27 Customer#000000027
+30 Customer#000000030
+33 Customer#000000033
+36 Customer#000000036
+39 Customer#000000039
+42 Customer#000000042
+45 Customer#000000045
+48 Customer#000000048
+51 Customer#000000051
+54 Customer#000000054
+57 Customer#000000057
+60 Customer#000000060
+63 Customer#000000063
+66 Customer#000000066
+69 Customer#000000069
+72 Customer#000000072
+75 Customer#000000075
+78 Customer#000000078
+81 Customer#000000081
+84 Customer#000000084
+87 Customer#000000087
+90 Customer#000000090
+93 Customer#000000093
+96 Customer#000000096
+99 Customer#000000099
+102 Customer#000000102
+105 Customer#000000105
+108 Customer#000000108
+111 Customer#000000111
+114 Customer#000000114
+117 Customer#000000117
+120 Customer#000000120
+123 Customer#000000123
+126 Customer#000000126
+129 Customer#000000129
+132 Customer#000000132
+135 Customer#000000135
+138 Customer#000000138
+141 Customer#000000141
+144 Customer#000000144
+147 Customer#000000147
+150 Customer#000000150

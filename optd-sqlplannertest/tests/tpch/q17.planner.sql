@@ -43,7 +43,7 @@ LogicalProjection
         │   └── Lt
         │       ├── Cast { cast_to: Decimal128(30, 15), child: #4 }
         │       └── #25
-        └── RawDependentJoin { join_type: Cross, cond: true, extern_cols: [ Extern(#16) ] }
+        └── RawDependentJoin { sq_type: Scalar, cond: true, extern_cols: [ Extern(#16) ] }
             ├── LogicalJoin { join_type: Cross, cond: true }
             │   ├── LogicalScan { table: lineitem }
             │   └── LogicalScan { table: part }

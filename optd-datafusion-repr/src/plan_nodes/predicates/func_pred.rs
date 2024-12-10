@@ -15,6 +15,9 @@ pub enum FuncType {
     Scalar(String, DataType),
     Agg(String),
     Case,
+    Not,
+    IsNull,
+    IsNotNull,
 }
 
 impl std::fmt::Display for FuncType {

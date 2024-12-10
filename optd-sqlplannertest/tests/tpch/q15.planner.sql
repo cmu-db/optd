@@ -46,7 +46,7 @@ LogicalSort
         │   └── Eq
         │       ├── #8
         │       └── #9
-        └── RawDependentJoin { join_type: Cross, cond: true, extern_cols: [] }
+        └── RawDependentJoin { sq_type: Scalar, cond: true, extern_cols: [] }
             ├── LogicalJoin { join_type: Cross, cond: true }
             │   ├── LogicalScan { table: supplier }
             │   └── LogicalProjection { exprs: [ #0, #1 ] }

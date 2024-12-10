@@ -16,7 +16,7 @@ LogicalProjection { exprs: [ #0, #1 ] }
     ├── cond:Gt
     │   ├── #2
     │   └── 100(i64)
-    └── RawDependentJoin { join_type: Cross, cond: true, extern_cols: [ Extern(#0) ] }
+    └── RawDependentJoin { sq_type: Scalar, cond: true, extern_cols: [ Extern(#0) ] }
         ├── LogicalScan { table: t1 }
         └── LogicalProjection { exprs: [ #0 ] }
             └── LogicalAgg
@@ -102,7 +102,7 @@ LogicalProjection { exprs: [ #0, #1 ] }
     ├── cond:Gt
     │   ├── #2
     │   └── 100(i64)
-    └── RawDependentJoin { join_type: Cross, cond: true, extern_cols: [ Extern(#0) ] }
+    └── RawDependentJoin { sq_type: Scalar, cond: true, extern_cols: [ Extern(#0) ] }
         ├── LogicalScan { table: t1 }
         └── LogicalProjection { exprs: [ #0 ] }
             └── LogicalAgg
@@ -220,7 +220,7 @@ select t1v1, (select sum(t2v3) from t2 where t2v1 = t1v1) as sum from t1;
 
 /*
 LogicalProjection { exprs: [ #0, #2 ] }
-└── RawDependentJoin { join_type: Cross, cond: true, extern_cols: [ Extern(#0) ] }
+└── RawDependentJoin { sq_type: Scalar, cond: true, extern_cols: [ Extern(#0) ] }
     ├── LogicalScan { table: t1 }
     └── LogicalProjection { exprs: [ #0 ] }
         └── LogicalAgg
@@ -296,7 +296,7 @@ LogicalProjection { exprs: [ #0, #1 ] }
     ├── cond:Gt
     │   ├── #2
     │   └── 100(i64)
-    └── RawDependentJoin { join_type: Cross, cond: true, extern_cols: [ Extern(#0) ] }
+    └── RawDependentJoin { sq_type: Scalar, cond: true, extern_cols: [ Extern(#0) ] }
         ├── LogicalScan { table: t1 }
         └── LogicalProjection { exprs: [ #0 ] }
             └── LogicalAgg
