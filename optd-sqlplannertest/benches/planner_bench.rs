@@ -26,7 +26,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let path = tests_dir.join(format!("{selection}/populate.sql"));
     let populate_sql = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read populate.sql"))
+        .with_context(|| format!("failed to read {}", path.display()))
         .unwrap();
 
     planner_bench_runner(
