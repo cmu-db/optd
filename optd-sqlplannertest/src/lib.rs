@@ -3,13 +3,18 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
-use std::collections::HashSet;
+pub mod bench_helper;
+
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
+use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::util::display::{ArrayFormatter, FormatOptions};
 use datafusion::catalog::CatalogProviderList;
+use datafusion::execution::TaskContext;
+use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::SessionContext;
-use datafusion::sql::parser::DFParser;
+use datafusion::sql::parser::{DFParser, Statement};
 use datafusion::sql::sqlparser::dialect::GenericDialect;
 use datafusion_optd_cli::helper::unescape_input;
 use itertools::Itertools;
@@ -76,76 +81,107 @@ impl DatafusionDBMS {
         Ok((ctx, optimizer))
     }
 
-    pub(crate) async fn execute(&self, sql: &str, flags: &TestFlags) -> Result<Vec<Vec<String>>> {
-        {
-            let mut guard = self
-                .optd_optimizer
-                .as_ref()
-                .unwrap()
-                .optimizer
-                .lock()
-                .unwrap();
-            let optimizer = guard.as_mut().unwrap().optd_optimizer_mut();
-            if flags.panic_on_budget {
-                optimizer.panic_on_explore_limit(true);
-            } else {
-                optimizer.panic_on_explore_limit(false);
-            }
-            if flags.disable_pruning {
-                optimizer.disable_pruning(true);
-            } else {
-                optimizer.disable_pruning(false);
-            }
-            let rules = optimizer.rules();
-            if flags.enable_logical_rules.is_empty() {
-                for r in 0..rules.len() {
-                    optimizer.enable_rule(r);
-                }
-                guard.as_mut().unwrap().enable_heuristic(true);
-            } else {
-                for (rule_id, rule) in rules.as_ref().iter().enumerate() {
-                    if rule.is_impl_rule() {
-                        optimizer.enable_rule(rule_id);
-                    } else {
-                        optimizer.disable_rule(rule_id);
-                    }
-                }
-                let mut rules_to_enable = flags
-                    .enable_logical_rules
-                    .iter()
-                    .map(|x| x.as_str())
-                    .collect::<HashSet<_>>();
-                for (rule_id, rule) in rules.as_ref().iter().enumerate() {
-                    if rules_to_enable.remove(rule.name()) {
-                        optimizer.enable_rule(rule_id);
-                    }
-                }
-                if !rules_to_enable.is_empty() {
-                    bail!("Unknown logical rule: {:?}", rules_to_enable);
-                }
-                guard.as_mut().unwrap().enable_heuristic(false);
-            }
+    /// Sets up test specific behaviors based on `flags`.
+    pub(crate) async fn setup(&self, flags: &TestFlags) -> Result<()> {
+        let mut guard = self
+            .optd_optimizer
+            .as_ref()
+            .unwrap()
+            .optimizer
+            .lock()
+            .unwrap();
+        let optimizer = guard.as_mut().unwrap().optd_optimizer_mut();
+        if flags.panic_on_budget {
+            optimizer.panic_on_explore_limit(true);
+        } else {
+            optimizer.panic_on_explore_limit(false);
         }
+        if flags.disable_pruning {
+            optimizer.disable_pruning(true);
+        } else {
+            optimizer.disable_pruning(false);
+        }
+        let rules = optimizer.rules();
+        if flags.enable_logical_rules.is_empty() {
+            for r in 0..rules.len() {
+                optimizer.enable_rule(r);
+            }
+            guard.as_mut().unwrap().enable_heuristic(true);
+        } else {
+            for (rule_id, rule) in rules.as_ref().iter().enumerate() {
+                if rule.is_impl_rule() {
+                    optimizer.enable_rule(rule_id);
+                } else {
+                    optimizer.disable_rule(rule_id);
+                }
+            }
+            let mut rules_to_enable = flags
+                .enable_logical_rules
+                .iter()
+                .map(|x| x.as_str())
+                .collect::<HashSet<_>>();
+            for (rule_id, rule) in rules.as_ref().iter().enumerate() {
+                if rules_to_enable.remove(rule.name()) {
+                    optimizer.enable_rule(rule_id);
+                }
+            }
+            if !rules_to_enable.is_empty() {
+                bail!("Unknown logical rule: {:?}", rules_to_enable);
+            }
+            guard.as_mut().unwrap().enable_heuristic(false);
+        }
+
+        Ok(())
+    }
+
+    /// Parses input SQL string into statements.
+    pub async fn parse_sql(&self, sql: &str) -> Result<VecDeque<Statement>> {
         let sql = unescape_input(sql)?;
         let dialect = Box::new(GenericDialect);
         let statements = DFParser::parse_sql_with_dialect(&sql, dialect.as_ref())?;
+        Ok(statements)
+    }
+
+    /// Creates a physical execution plan with associated task context from a SQL statement.
+    pub(crate) async fn create_physical_plan(
+        &self,
+        stmt: Statement,
+        flags: &TestFlags,
+    ) -> Result<(Arc<dyn ExecutionPlan>, Arc<TaskContext>)> {
+        let df = if flags.enable_df_logical {
+            let plan = self
+                .use_df_logical_ctx
+                .state()
+                .statement_to_plan(stmt)
+                .await?;
+            self.use_df_logical_ctx.execute_logical_plan(plan).await?
+        } else {
+            let plan = self.ctx.state().statement_to_plan(stmt).await?;
+
+            self.ctx.execute_logical_plan(plan).await?
+        };
+        let task_ctx = Arc::new(df.task_ctx());
+        let plan = df.create_physical_plan().await?;
+        Ok((plan, task_ctx))
+    }
+
+    /// Executes the physical [`ExecutionPlan`] and collect the results in memory.
+    pub(crate) async fn execute_physical(
+        &self,
+        plan: Arc<dyn ExecutionPlan>,
+        task_ctx: Arc<TaskContext>,
+    ) -> Result<Vec<RecordBatch>> {
+        let batches = datafusion::physical_plan::collect(plan, task_ctx).await?;
+        Ok(batches)
+    }
+
+    pub async fn execute(&self, sql: &str, flags: &TestFlags) -> Result<Vec<Vec<String>>> {
+        self.setup(flags).await?;
+        let statements = self.parse_sql(sql).await?;
         let mut result = Vec::new();
         for statement in statements {
-            let df = if flags.enable_df_logical {
-                let plan = self
-                    .use_df_logical_ctx
-                    .state()
-                    .statement_to_plan(statement)
-                    .await?;
-                self.use_df_logical_ctx.execute_logical_plan(plan).await?
-            } else {
-                let plan = self.ctx.state().statement_to_plan(statement).await?;
-
-                self.ctx.execute_logical_plan(plan).await?
-            };
-
-            let batches = df.collect().await?;
-
+            let (plan, task_ctx) = self.create_physical_plan(statement, flags).await?;
+            let batches = self.execute_physical(plan, task_ctx).await?;
             let options = FormatOptions::default().with_null("NULL");
 
             for batch in batches {
@@ -307,7 +343,7 @@ lazy_static! {
 }
 
 #[derive(Default, Debug)]
-struct TestFlags {
+pub struct TestFlags {
     verbose: bool,
     enable_df_logical: bool,
     enable_logical_rules: Vec<String>,
@@ -319,7 +355,7 @@ struct TestFlags {
 /// Extract the flags from a task. The flags are specified in square brackets.
 /// For example, the flags for the task `explain[use_df_logical, verbose]` are `["use_df_logical",
 /// "verbose"]`.
-fn extract_flags(task: &str) -> Result<TestFlags> {
+pub fn extract_flags(task: &str) -> Result<TestFlags> {
     if let Some(captures) = FLAGS_REGEX.captures(task) {
         let flags = captures
             .get(1)

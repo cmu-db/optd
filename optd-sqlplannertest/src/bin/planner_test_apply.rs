@@ -12,8 +12,8 @@ use sqlplannertest::PlannerTestApplyOptions;
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    /// Optional list of directories to apply the test; if empty, apply all tests
-    directories: Vec<String>,
+    /// Optional list of test modules or test files to apply the test; if empty, apply all tests
+    selections: Vec<String>,
     /// Use the advanced cost model
     #[clap(long)]
     enable_advanced_cost_model: bool,
@@ -29,40 +29,23 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let enable_advanced_cost_model = cli.enable_advanced_cost_model;
-    let opts = PlannerTestApplyOptions { serial: cli.serial };
+    let opts = PlannerTestApplyOptions {
+        serial: cli.serial,
+        selections: cli.selections,
+    };
 
-    if cli.directories.is_empty() {
-        println!("Running all tests");
-        sqlplannertest::planner_test_apply_with_options(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"),
-            move || async move {
-                if enable_advanced_cost_model {
-                    optd_sqlplannertest::DatafusionDBMS::new_advanced_cost().await
-                } else {
-                    optd_sqlplannertest::DatafusionDBMS::new().await
-                }
-            },
-            opts,
-        )
-        .await?;
-    } else {
-        for directory in cli.directories {
-            println!("Running tests in {}", directory);
-            sqlplannertest::planner_test_apply_with_options(
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests")
-                    .join(directory),
-                move || async move {
-                    if enable_advanced_cost_model {
-                        optd_sqlplannertest::DatafusionDBMS::new_advanced_cost().await
-                    } else {
-                        optd_sqlplannertest::DatafusionDBMS::new().await
-                    }
-                },
-                opts.clone(),
-            )
-            .await?;
-        }
-    }
+    sqlplannertest::planner_test_apply_with_options(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"),
+        move || async move {
+            if enable_advanced_cost_model {
+                optd_sqlplannertest::DatafusionDBMS::new_advanced_cost().await
+            } else {
+                optd_sqlplannertest::DatafusionDBMS::new().await
+            }
+        },
+        opts,
+    )
+    .await?;
+
     Ok(())
 }

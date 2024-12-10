@@ -47,3 +47,4 @@
   before: ["include_sql:schema.sql"]
   tasks:
     - explain:logical_optd,optimized_logical_optd,physical_optd
+
