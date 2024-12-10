@@ -81,7 +81,8 @@ impl DatafusionDBMS {
         Ok((ctx, optimizer))
     }
 
-    pub async fn setup(&self, flags: &TestFlags) -> Result<()> {
+    /// Sets up test specific behaviors based on `flags`.
+    pub(crate) async fn setup(&self, flags: &TestFlags) -> Result<()> {
         let mut guard = self
             .optd_optimizer
             .as_ref()
@@ -133,6 +134,7 @@ impl DatafusionDBMS {
         Ok(())
     }
 
+    /// Parses input SQL string into statements.
     pub async fn parse_sql(&self, sql: &str) -> Result<VecDeque<Statement>> {
         let sql = unescape_input(sql)?;
         let dialect = Box::new(GenericDialect);
@@ -141,7 +143,7 @@ impl DatafusionDBMS {
     }
 
     /// Creates a physical execution plan with associated task context from a SQL statement.
-    pub async fn create_physical_plan(
+    pub(crate) async fn create_physical_plan(
         &self,
         stmt: Statement,
         flags: &TestFlags,
@@ -163,7 +165,8 @@ impl DatafusionDBMS {
         Ok((plan, task_ctx))
     }
 
-    pub async fn execute_physical(
+    /// Executes the physical [`ExecutionPlan`] and collect the results in memory.
+    pub(crate) async fn execute_physical(
         &self,
         plan: Arc<dyn ExecutionPlan>,
         task_ctx: Arc<TaskContext>,
