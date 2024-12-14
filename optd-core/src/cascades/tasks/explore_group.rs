@@ -14,11 +14,15 @@ use crate::nodes::NodeType;
 
 pub struct ExploreGroupTask {
     group_id: GroupId,
+    upper_bound: Option<f64>,
 }
 
 impl ExploreGroupTask {
-    pub fn new(group_id: GroupId) -> Self {
-        Self { group_id }
+    pub fn new(group_id: GroupId, upper_bound: Option<f64>) -> Self {
+        Self {
+            group_id,
+            upper_bound,
+        }
     }
 }
 
@@ -36,7 +40,7 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for ExploreGroupTask {
             let typ = optimizer.get_expr_memoed(expr).typ.clone();
             if typ.is_logical() {
                 tasks
-                    .push(Box::new(OptimizeExpressionTask::new(expr, true)) as Box<dyn Task<T, M>>);
+                    .push(Box::new(OptimizeExpressionTask::new(expr, true, self.upper_bound)) as Box<dyn Task<T, M>>);
             }
         }
         optimizer.mark_group_explored(self.group_id);

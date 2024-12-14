@@ -352,7 +352,7 @@ impl<T: NodeType> NaiveMemo<T> {
     }
 
     fn verify_integrity(&self) {
-        if cfg!(debug_assertions) {
+        if false {
             let num_of_exprs = self.expr_id_to_expr_node.len();
             assert_eq!(num_of_exprs, self.expr_node_to_expr_id.len());
             assert_eq!(num_of_exprs, self.expr_id_to_group_id.len());

@@ -42,22 +42,25 @@ pub struct OptimizeInputsTask {
     expr_id: ExprId,
     continue_from: Option<ContinueTask>,
     pruning: bool,
+    upper_bound: Option<f64>,
 }
 
 impl OptimizeInputsTask {
-    pub fn new(expr_id: ExprId, pruning: bool) -> Self {
+    pub fn new(expr_id: ExprId, pruning: bool, upper_bound: Option<f64>) -> Self {
         Self {
             expr_id,
             continue_from: None,
             pruning,
+            upper_bound,
         }
     }
 
-    fn continue_from(&self, cont: ContinueTask, pruning: bool) -> Self {
+    fn continue_from(&self, cont: ContinueTask, pruning: bool, upper_bound: Option<f64>) -> Self {
         Self {
             expr_id: self.expr_id,
             continue_from: Some(cont),
             pruning,
+            upper_bound,
         }
     }
 
@@ -153,6 +156,19 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeInputsTask {
 
         trace!(event = "task_begin", task = "optimize_inputs", expr_id = %self.expr_id, continue_from = %ContinueTaskDisplay(&self.continue_from), total_children = %children_group_ids.len());
 
+        let upper_bound = if self.pruning {
+            if let Some(upper_bound) = self.upper_bound {
+                Some(upper_bound)
+            } else if let Some(winner) = optimizer.get_group_info(group_id).winner.as_full_winner()
+            {
+                Some(winner.total_weighted_cost)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         if let Some(ContinueTask {
             next_group_idx,
             return_from_optimize_group,
@@ -219,9 +235,9 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeInputsTask {
                     winner_weighted_cost = %trace_fmt(&group_info.winner),
                     current_processing = %next_group_idx,
                     total_child_groups = %children_group_ids.len());
-                if let Some(winner) = group_info.winner.as_full_winner() {
+                if let Some(upper_bound) = upper_bound {
                     let cost_so_far = cost.weighted_cost(&total_cost);
-                    if winner.total_weighted_cost <= cost_so_far {
+                    if upper_bound <= cost_so_far {
                         trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id, result = "pruned");
                         return Ok(vec![]);
                     }
@@ -232,7 +248,7 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeInputsTask {
                 let child_group_id = children_group_ids[next_group_idx];
                 let group_idx = next_group_idx;
                 let child_group_info = optimizer.get_group_info(child_group_id);
-                if !child_group_info.winner.has_full_winner() {
+                let Some(child_winner) = child_group_info.winner.as_full_winner() else {
                     if !return_from_optimize_group {
                         trace!(event = "task_yield", task = "optimize_inputs", expr_id = %self.expr_id, group_idx = %group_idx, yield_to = "optimize_group", optimize_group_id = %child_group_id);
                         return Ok(vec![
@@ -242,15 +258,17 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeInputsTask {
                                     return_from_optimize_group: true,
                                 },
                                 self.pruning,
+                                upper_bound,
                             )) as Box<dyn Task<T, M>>,
-                            Box::new(OptimizeGroupTask::new(child_group_id)) as Box<dyn Task<T, M>>,
+                            Box::new(OptimizeGroupTask::new(child_group_id, upper_bound))
+                                as Box<dyn Task<T, M>>,
                         ]);
                     } else {
                         self.update_winner_impossible(optimizer);
                         trace!(event = "task_finish", task = "optimize_inputs", expr_id = %self.expr_id, result = "impossible");
                         return Ok(vec![]);
                     }
-                }
+                };
                 trace!(event = "task_yield", task = "optimize_inputs", expr_id = %self.expr_id, group_idx = %group_idx, yield_to = "next_optimize_input");
                 Ok(vec![Box::new(self.continue_from(
                     ContinueTask {
@@ -258,6 +276,7 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeInputsTask {
                         return_from_optimize_group: false,
                     },
                     self.pruning,
+                    upper_bound.map(|bound| bound - child_winner.total_weighted_cost),
                 )) as Box<dyn Task<T, M>>])
             } else {
                 self.update_winner(input_statistics_ref, operation_cost, total_cost, optimizer);
@@ -272,6 +291,7 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeInputsTask {
                     return_from_optimize_group: false,
                 },
                 self.pruning,
+                upper_bound,
             )) as Box<dyn Task<T, M>>])
         }
     }

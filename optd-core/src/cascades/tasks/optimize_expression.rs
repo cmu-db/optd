@@ -16,11 +16,16 @@ use crate::rules::RuleMatcher;
 pub struct OptimizeExpressionTask {
     expr_id: ExprId,
     exploring: bool,
+    upper_bound: Option<f64>,
 }
 
 impl OptimizeExpressionTask {
-    pub fn new(expr_id: ExprId, exploring: bool) -> Self {
-        Self { expr_id, exploring }
+    pub fn new(expr_id: ExprId, exploring: bool, upper_bound: Option<f64>) -> Self {
+        Self {
+            expr_id,
+            exploring,
+            upper_bound,
+        }
     }
 }
 
@@ -37,6 +42,7 @@ fn top_matches<T: NodeType>(matcher: &RuleMatcher<T>, match_typ: T) -> bool {
 impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeExpressionTask {
     fn execute(&self, optimizer: &mut CascadesOptimizer<T, M>) -> Result<Vec<Box<dyn Task<T, M>>>> {
         let expr = optimizer.get_expr_memoed(self.expr_id);
+        let group_id = optimizer.get_group_id(self.expr_id);
         trace!(event = "task_begin", task = "optimize_expr", expr_id = %self.expr_id, expr = %expr);
         let mut tasks = vec![];
         for (rule_id, rule) in optimizer.rules().iter().enumerate() {
@@ -48,17 +54,27 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeExpressionTask {
                 continue;
             }
             // Skip transformation rules when budget is used
-            if optimizer.ctx.budget_used && !rule.is_impl_rule() {
+            if (optimizer.ctx.budget_used_logical || optimizer.ctx.budget_used_all)
+                && !rule.is_impl_rule()
+            {
                 continue;
             }
+            if optimizer.ctx.budget_used_all
+                && optimizer.get_group_info(group_id).winner.has_full_winner()
+            {
+                break;
+            }
             if top_matches(rule.matcher(), expr.typ.clone()) {
-                tasks.push(
-                    Box::new(ApplyRuleTask::new(rule_id, self.expr_id, self.exploring))
-                        as Box<dyn Task<T, M>>,
-                );
+                tasks.push(Box::new(ApplyRuleTask::new(
+                    rule_id,
+                    self.expr_id,
+                    self.exploring,
+                    self.upper_bound,
+                )) as Box<dyn Task<T, M>>);
                 for &input_group_id in &expr.children {
                     tasks.push(
-                        Box::new(ExploreGroupTask::new(input_group_id)) as Box<dyn Task<T, M>>
+                        Box::new(ExploreGroupTask::new(input_group_id, self.upper_bound))
+                            as Box<dyn Task<T, M>>,
                     );
                 }
             }

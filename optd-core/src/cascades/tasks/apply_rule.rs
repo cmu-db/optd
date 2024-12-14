@@ -21,14 +21,21 @@ pub struct ApplyRuleTask {
     rule_id: RuleId,
     expr_id: ExprId,
     exploring: bool,
+    upper_bound: Option<f64>,
 }
 
 impl ApplyRuleTask {
-    pub fn new(rule_id: RuleId, expr_id: ExprId, exploring: bool) -> Self {
+    pub fn new(
+        rule_id: RuleId,
+        expr_id: ExprId,
+        exploring: bool,
+        upper_bound: Option<f64>,
+    ) -> Self {
         Self {
             rule_id,
             expr_id,
             exploring,
+            upper_bound,
         }
     }
 }
@@ -170,7 +177,11 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for ApplyRuleTask {
         let group_id = optimizer.get_group_id(self.expr_id);
         let mut tasks = vec![];
         let binding_exprs = match_and_pick_expr(rule.matcher(), self.expr_id, optimizer);
+        if !binding_exprs.is_empty() {
+            *optimizer.stats.rule_match_count.entry(self.rule_id).or_default() += 1;
+        }
         for binding in binding_exprs {
+            *optimizer.stats.rule_total_bindings.entry(self.rule_id).or_default() += 1;
             trace!(event = "before_apply_rule", task = "apply_rule", input_binding=%binding);
             let applied = rule.apply(optimizer, binding);
 
@@ -181,13 +192,14 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for ApplyRuleTask {
                     let typ = expr.unwrap_typ();
                     if typ.is_logical() {
                         tasks.push(
-                            Box::new(OptimizeExpressionTask::new(expr_id, self.exploring))
+                            Box::new(OptimizeExpressionTask::new(expr_id, self.exploring, self.upper_bound))
                                 as Box<dyn Task<T, M>>,
                         );
                     } else {
                         tasks.push(Box::new(OptimizeInputsTask::new(
                             expr_id,
                             !optimizer.prop.disable_pruning,
+                            self.upper_bound
                         )) as Box<dyn Task<T, M>>);
                     }
                     optimizer.unmark_expr_explored(expr_id);

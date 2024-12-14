@@ -27,7 +27,8 @@ pub type RuleId = usize;
 
 #[derive(Default, Clone, Debug)]
 pub struct OptimizerContext {
-    pub budget_used: bool,
+    pub budget_used_logical: bool,
+    pub budget_used_all: bool,
     pub rules_applied: usize,
 }
 
@@ -42,6 +43,12 @@ pub struct OptimizerProperties {
     pub disable_pruning: bool,
 }
 
+#[derive(Debug, Default)]
+pub struct CascadesStats {
+    pub rule_match_count: HashMap<usize, usize>,
+    pub rule_total_bindings: HashMap<usize, usize>,
+}
+
 pub struct CascadesOptimizer<T: NodeType, M: Memo<T> = NaiveMemo<T>> {
     memo: M,
     pub(super) tasks: VecDeque<Box<dyn Task<T, M>>>,
@@ -49,6 +56,7 @@ pub struct CascadesOptimizer<T: NodeType, M: Memo<T> = NaiveMemo<T>> {
     explored_expr: HashSet<ExprId>,
     fired_rules: HashMap<ExprId, HashSet<RuleId>>,
     rules: Arc<[Arc<dyn Rule<T, Self>>]>,
+    pub stats: CascadesStats,
     disabled_rules: HashSet<usize>,
     cost: Arc<dyn CostModel<T, M>>,
     property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>,
@@ -123,6 +131,7 @@ impl<T: NodeType> CascadesOptimizer<T, NaiveMemo<T>> {
             property_builders,
             prop,
             disabled_rules: HashSet::new(),
+            stats: CascadesStats::default(),
         }
     }
 
@@ -248,16 +257,17 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
     fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
         trace!(event = "fire_optimize_tasks", root_group_id = %group_id);
         self.tasks
-            .push_back(Box::new(OptimizeGroupTask::new(group_id)));
+            .push_back(Box::new(OptimizeGroupTask::new(group_id, None)));
         // get the task from the stack
-        self.ctx.budget_used = false;
+        self.ctx.budget_used_logical = false;
+        self.ctx.budget_used_all = false;
         let plan_space_begin = self.memo.estimated_plan_space();
         let mut iter = 0;
         while let Some(task) = self.tasks.pop_back() {
             let new_tasks = task.execute(self)?;
             self.tasks.extend(new_tasks);
             iter += 1;
-            if !self.ctx.budget_used {
+            if !self.ctx.budget_used_logical {
                 let plan_space = self.memo.estimated_plan_space();
                 if let Some(partial_explore_space) = self.prop.partial_explore_space {
                     if plan_space - plan_space_begin > partial_explore_space {
@@ -265,22 +275,45 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
                             "plan space size budget used, not applying logical rules any more. current plan space: {}",
                             plan_space
                         );
-                        self.ctx.budget_used = true;
+                        self.ctx.budget_used_logical = true;
                         if self.prop.panic_on_budget {
                             panic!("plan space size budget used");
                         }
                     }
-                } else if let Some(partial_explore_iter) = self.prop.partial_explore_iter {
+                }
+             }
+             if !self.ctx.budget_used_all {
+                if let Some(partial_explore_iter) = self.prop.partial_explore_iter {
                     if iter >= partial_explore_iter {
                         println!(
-                            "plan explore iter budget used, not applying logical rules any more. current plan space: {}",
-                            plan_space
+                            "plan explore iter budget used, not applying physical/logical rules any more if there's no winner. current iter: {}",
+                            iter
                         );
-                        self.ctx.budget_used = true;
+                        self.ctx.budget_used_all = true;
                         if self.prop.panic_on_budget {
                             panic!("plan space size budget used");
                         }
                     }
+                }
+            }
+            if iter > 100000 && iter % 10000 == 0 {
+                println!("iter={}", iter);
+                println!("plan_space={}", self.memo.estimated_plan_space());
+                for (id, rule) in self.rules.iter().enumerate() {
+                    println!(
+                        "{}: matched={}, bindings={}",
+                        rule.name(),
+                        self.stats
+                            .rule_match_count
+                            .get(&id)
+                            .copied()
+                            .unwrap_or_default(),
+                        self.stats
+                            .rule_total_bindings
+                            .get(&id)
+                            .copied()
+                            .unwrap_or_default()
+                    );
                 }
             }
         }

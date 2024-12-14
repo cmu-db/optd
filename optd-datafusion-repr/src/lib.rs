@@ -102,7 +102,6 @@ impl DatafusionOptimizer {
             rule_wrappers.push(rule);
         }
         rule_wrappers.push(Arc::new(rules::FilterProjectTransposeRule::new()));
-        rule_wrappers.push(Arc::new(rules::FilterCrossJoinTransposeRule::new()));
         rule_wrappers.push(Arc::new(rules::FilterInnerJoinTransposeRule::new()));
         rule_wrappers.push(Arc::new(rules::FilterSortTransposeRule::new()));
         rule_wrappers.push(Arc::new(rules::FilterAggTransposeRule::new()));
@@ -150,7 +149,7 @@ impl DatafusionOptimizer {
                 OptimizerProperties {
                     panic_on_budget: false,
                     partial_explore_iter: Some(1 << 20),
-                    partial_explore_space: Some(1 << 10),
+                    partial_explore_space: None, // remove this in the future
                     disable_pruning: false,
                 },
             ),

@@ -15,11 +15,15 @@ use crate::nodes::NodeType;
 
 pub struct OptimizeGroupTask {
     group_id: GroupId,
+    upper_bound: Option<f64>,
 }
 
 impl OptimizeGroupTask {
-    pub fn new(group_id: GroupId) -> Self {
-        Self { group_id }
+    pub fn new(group_id: GroupId, upper_bound: Option<f64>) -> Self {
+        Self {
+            group_id,
+            upper_bound,
+        }
     }
 }
 
@@ -37,7 +41,7 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeGroupTask {
         for &expr in &exprs {
             let typ = optimizer.get_expr_memoed(expr).typ.clone();
             if typ.is_logical() {
-                tasks.push(Box::new(OptimizeExpressionTask::new(expr, false)) as Box<dyn Task<T, M>>);
+                tasks.push(Box::new(OptimizeExpressionTask::new(expr, false, self.upper_bound)) as Box<dyn Task<T, M>>);
             }
         }
         for &expr in &exprs {
@@ -46,6 +50,7 @@ impl<T: NodeType, M: Memo<T>> Task<T, M> for OptimizeGroupTask {
                 tasks.push(Box::new(OptimizeInputsTask::new(
                     expr,
                     !optimizer.prop.disable_pruning,
+                    self.upper_bound
                 )) as Box<dyn Task<T, M>>);
             }
         }
