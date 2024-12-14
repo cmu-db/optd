@@ -160,20 +160,6 @@ fn apply_filter_merge(
     vec![new_filter.into_plan_node().into()]
 }
 
-// TODO: define_rule! should be able to match on any join type, ideally...
-define_rule!(
-    FilterCrossJoinTransposeRule,
-    apply_filter_cross_join_transpose,
-    (Filter, (Join(JoinType::Cross), child_a, child_b))
-);
-
-fn apply_filter_cross_join_transpose(
-    optimizer: &impl Optimizer<DfNodeType>,
-    binding: ArcDfPlanNode,
-) -> Vec<PlanNodeOrGroup<DfNodeType>> {
-    filter_join_transpose(optimizer, binding)
-}
-
 define_rule!(
     FilterInnerJoinTransposeRule,
     apply_filter_inner_join_transpose,
@@ -255,18 +241,6 @@ fn filter_join_transpose(
             let old_cond = join_cond;
             let new_conds = merge_conds(and_expr_list_to_expr(join_conds), old_cond);
             LogicalJoin::new_unchecked(new_left, new_right, new_conds, JoinType::Inner)
-        }
-        JoinType::Cross => {
-            if !join_conds.is_empty() {
-                LogicalJoin::new_unchecked(
-                    new_left,
-                    new_right,
-                    and_expr_list_to_expr(join_conds),
-                    JoinType::Inner,
-                )
-            } else {
-                LogicalJoin::new_unchecked(new_left, new_right, join_cond, JoinType::Cross)
-            }
         }
         _ => {
             // We don't support modifying the join condition for other join types yet

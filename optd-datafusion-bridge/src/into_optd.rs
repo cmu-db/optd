@@ -547,7 +547,7 @@ impl OptdPlanContext<'_> {
                 left,
                 right,
                 ConstantPred::bool(true).into_pred_node(),
-                JoinType::Cross,
+                JoinType::Inner,
             ))
         } else if log_ops.len() == 1 {
             Ok(LogicalJoin::new(left, right, log_ops.remove(0), join_type))

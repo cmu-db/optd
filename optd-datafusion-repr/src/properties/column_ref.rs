@@ -471,7 +471,7 @@ impl LogicalPropertyBuilder<DfNodeType> for ColumnRefPropertyBuilder {
                 //
                 // Otherwise be conservative and discard all correlations.
                 let output_correlation = match join_type {
-                    JoinType::Inner | JoinType::Cross => {
+                    JoinType::Inner => {
                         // Merge the equal columns in the join condition into the those from the
                         // children.
                         if let Some(SemanticCorrelation {

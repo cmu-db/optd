@@ -81,7 +81,7 @@ fn apply_eliminate_join(
                         left,
                         right,
                         ConstantPred::bool(true).into_pred_node(),
-                        JoinType::Cross,
+                        JoinType::Inner,
                     );
                     return vec![node.into_plan_node().into()];
                 } else {

@@ -476,7 +476,9 @@ impl OptdPlanContext<'_> {
         let physical_expr =
             self.conv_from_optd_expr(node.cond(), &Arc::new(filter_schema.clone()))?;
 
-        if *node.join_type() == JoinType::Cross {
+        if node.join_type() == &JoinType::Inner
+            && node.cond() == ConstantPred::bool(true).into_pred_node()
+        {
             return Ok(Arc::new(CrossJoinExec::new(left_exec, right_exec))
                 as Arc<dyn ExecutionPlan + 'static>);
         }
@@ -491,7 +493,6 @@ impl OptdPlanContext<'_> {
             JoinType::LeftAnti => datafusion_expr::JoinType::LeftAnti,
             JoinType::RightAnti => datafusion_expr::JoinType::RightAnti,
             JoinType::LeftMark => datafusion_expr::JoinType::LeftMark,
-            _ => unimplemented!(),
         };
 
         let mut column_idxs = vec![];

@@ -86,7 +86,7 @@ fn apply_dep_initial_distinct(
                 left,
                 right,
                 ConstantPred::bool(true).into_pred_node(),
-                JoinType::Cross,
+                JoinType::Inner,
             )
             .into_plan_node(),
             SubqueryType::Exists => {
@@ -122,7 +122,7 @@ fn apply_dep_initial_distinct(
                     left,
                     count_star_to_bool_proj,
                     ConstantPred::bool(true).into_pred_node(),
-                    JoinType::Cross,
+                    JoinType::Inner,
                 )
                 .into_plan_node()
             }
@@ -147,7 +147,7 @@ fn apply_dep_initial_distinct(
             left,
             right,
             ConstantPred::bool(true).into_pred_node(),
-            JoinType::Cross,
+            JoinType::Inner,
         );
 
         return vec![new_join.into_plan_node().into()];

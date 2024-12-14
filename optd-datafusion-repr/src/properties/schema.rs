@@ -180,7 +180,7 @@ impl LogicalPropertyBuilder<DfNodeType> for SchemaPropertyBuilder {
             DfNodeType::Join(join_type) => {
                 use crate::plan_nodes::JoinType::*;
                 match join_type {
-                    Inner | LeftOuter | RightOuter | FullOuter | Cross => {
+                    Inner | LeftOuter | RightOuter | FullOuter => {
                         let mut schema = children[0].clone();
                         let schema2 = children[1].clone();
                         schema.fields.extend(schema2.fields);
