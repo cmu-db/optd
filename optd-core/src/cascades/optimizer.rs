@@ -261,10 +261,10 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
                 let plan_space = self.memo.estimated_plan_space();
                 if let Some(partial_explore_space) = self.prop.partial_explore_space {
                     if plan_space - plan_space_begin > partial_explore_space {
-                        println!(
-                            "plan space size budget used, not applying logical rules any more. current plan space: {}",
-                            plan_space
-                        );
+                        // println!(
+                        //     "plan space size budget used, not applying logical rules any more. current plan space: {}",
+                        //     plan_space
+                        // );
                         self.ctx.budget_used = true;
                         if self.prop.panic_on_budget {
                             panic!("plan space size budget used");

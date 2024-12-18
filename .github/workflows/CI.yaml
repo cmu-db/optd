@@ -36,6 +36,8 @@ jobs:
         with:
           profile: minimal
           components: rustfmt, clippy
+      # Make sure to use cached compilation objects if they exist.
+      - uses: Swatinem/rust-cache@v2
       - name: Check code format
         uses: actions-rs/cargo@v1
         with:
