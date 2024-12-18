@@ -307,6 +307,7 @@ impl<T: NodeType> Memo<T> for NaiveMemo<T> {
                 self.expr_id_to_expr_node[expr_id]
             );
         }
+        let group_id = self.reduce_group(group_id);
         let grp = self.groups.get_mut(&group_id);
         grp.unwrap().info = group_info;
     }
