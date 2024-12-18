@@ -20,7 +20,7 @@ pub use optd_core::nodes::Value;
 use optd_core::optimizer::Optimizer;
 use optd_core::rules::Rule;
 pub use optimizer_ext::OptimizerExt;
-use plan_nodes::{ArcDfPlanNode, DfNodeType};
+use plan_nodes::{ArcDfPlanNode, DfNodeType, DfReprPlanNode};
 use properties::column_ref::ColumnRefPropertyBuilder;
 use properties::schema::{Catalog, SchemaPropertyBuilder};
 
@@ -139,17 +139,20 @@ impl DatafusionOptimizer {
         ]);
         Self {
             runtime_statistics: runtime_map,
-            cascades_optimizer: CascadesOptimizer::new_with_prop(
+            cascades_optimizer: CascadesOptimizer::new_with_options(
                 cascades_rules,
                 Box::new(cost_model),
                 vec![
-                    Box::new(SchemaPropertyBuilder::new(catalog.clone())),
-                    Box::new(ColumnRefPropertyBuilder::new(catalog.clone())),
-                ],
+                    Box::new(SchemaPropertyBuilder::new(catalog.clone()))
+                        as Box<dyn LogicalPropertyBuilderAny<DfNodeType>>,
+                    Box::new(ColumnRefPropertyBuilder::new(catalog.clone()))
+                        as Box<dyn LogicalPropertyBuilderAny<DfNodeType>>,
+                ]
+                .into(),
                 OptimizerProperties {
                     panic_on_budget: false,
-                    partial_explore_iter: Some(1 << 20),
-                    partial_explore_space: None, // remove this in the future
+                    partial_explore_iter: Some(1 << 18),
+                    partial_explore_space: Some(1 << 14),
                     disable_pruning: false,
                 },
             ),
@@ -186,9 +189,12 @@ impl DatafusionOptimizer {
             rule_wrappers,
             Box::new(cost_model),
             vec![
-                Box::new(SchemaPropertyBuilder::new(catalog.clone())),
-                Box::new(ColumnRefPropertyBuilder::new(catalog)),
-            ],
+                Box::new(SchemaPropertyBuilder::new(catalog.clone()))
+                    as Box<dyn LogicalPropertyBuilderAny<DfNodeType>>,
+                Box::new(ColumnRefPropertyBuilder::new(catalog.clone()))
+                    as Box<dyn LogicalPropertyBuilderAny<DfNodeType>>,
+            ]
+            .into(),
         );
         Self {
             runtime_statistics,
@@ -224,12 +230,39 @@ impl DatafusionOptimizer {
             self.cascades_optimizer.step_clear();
         }
 
-        let group_id = self.cascades_optimizer.step_optimize_rel(root_rel)?;
+        tracing::debug!("before_cascades={}", root_rel.explain_to_string(None));
+
+        self.cascades_optimizer
+            .disable_rule_by_name("join_commute_rule");
+        self.cascades_optimizer
+            .disable_rule_by_name("join_assoc_rule");
+        let group_id = self
+            .cascades_optimizer
+            .step_optimize_rel(root_rel.clone())?;
+
+        tracing::debug!(
+            "stage_1_best_plan={}",
+            self.cascades_optimizer
+                .step_get_optimize_rel(group_id, &mut None)?
+                .explain_to_string(None)
+        );
+
+        self.cascades_optimizer
+            .enable_rule_by_name("join_commute_rule");
+        self.cascades_optimizer
+            .enable_rule_by_name("join_assoc_rule");
+        self.cascades_optimizer.step_next_stage();
+        self.cascades_optimizer.fire_optimize_tasks(group_id)?;
 
         let mut meta = Some(HashMap::new());
         let optimized_rel = self
             .cascades_optimizer
             .step_get_optimize_rel(group_id, &mut meta)?;
+
+        tracing::debug!(
+            "stage_2_best_plan={}",
+            optimized_rel.explain_to_string(None)
+        );
 
         Ok((group_id, optimized_rel, meta.unwrap()))
     }

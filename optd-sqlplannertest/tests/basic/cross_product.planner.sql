@@ -14,10 +14,10 @@ select * from t1, t2;
 
 /*
 LogicalProjection { exprs: [ #0, #1 ] }
-└── LogicalJoin { join_type: Cross, cond: true }
+└── LogicalJoin { join_type: Inner, cond: true }
     ├── LogicalScan { table: t1 }
     └── LogicalScan { table: t2 }
-PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+PhysicalNestedLoopJoin { join_type: Inner, cond: true }
 ├── PhysicalScan { table: t1 }
 └── PhysicalScan { table: t2 }
 0 0

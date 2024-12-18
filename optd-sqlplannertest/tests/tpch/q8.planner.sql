@@ -100,13 +100,13 @@ LogicalSort
                 │   └── Eq
                 │       ├── #4
                 │       └── "ECONOMY ANODIZED STEEL"
-                └── LogicalJoin { join_type: Cross, cond: true }
-                    ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   │   ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   │   │   ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   │   │   │   ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   │   │   │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                └── LogicalJoin { join_type: Inner, cond: true }
+                    ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   │   ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   │   │   ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   │   │   │   ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   │   │   │   │   ├── LogicalJoin { join_type: Inner, cond: true }
                     │   │   │   │   │   │   ├── LogicalScan { table: part }
                     │   │   │   │   │   │   └── LogicalScan { table: supplier }
                     │   │   │   │   │   └── LogicalScan { table: lineitem }
@@ -149,22 +149,24 @@ PhysicalSort
             │   └── #54
             └── PhysicalHashJoin { join_type: Inner, left_keys: [ #51 ], right_keys: [ #0 ] }
                 ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #12 ], right_keys: [ #0 ] }
-                │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #16 ], right_keys: [ #0 ] }
-                │   │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0, #9 ], right_keys: [ #1, #2 ] }
-                │   │   │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                │   │   │   │   ├── PhysicalFilter
-                │   │   │   │   │   ├── cond:Eq
-                │   │   │   │   │   │   ├── #4
-                │   │   │   │   │   │   └── "ECONOMY ANODIZED STEEL"
-                │   │   │   │   │   └── PhysicalScan { table: part }
-                │   │   │   │   └── PhysicalScan { table: supplier }
-                │   │   │   └── PhysicalScan { table: lineitem }
-                │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #12 ], right_keys: [ #0 ] }
-                │   │       ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-                │   │       │   ├── PhysicalFilter { cond: Between { child: #4, lower: Cast { cast_to: Date32, child: "1995-01-01" }, upper: Cast { cast_to: Date32, child: "1996-12-31" } } }
-                │   │       │   │   └── PhysicalScan { table: orders }
-                │   │       │   └── PhysicalScan { table: customer }
-                │   │       └── PhysicalScan { table: nation }
+                │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #44 ], right_keys: [ #0 ] }
+                │   │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #33 ], right_keys: [ #0 ] }
+                │   │   │   ├── PhysicalProjection { exprs: [ #25, #26, #27, #28, #29, #30, #31, #32, #33, #34, #35, #36, #37, #38, #39, #40, #0, #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23, #24 ] }
+                │   │   │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
+                │   │   │   │       ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
+                │   │   │   │       │   ├── PhysicalProjection { exprs: [ #9, #10, #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #22, #23, #24, #0, #1, #2, #3, #4, #5, #6, #7, #8 ] }
+                │   │   │   │       │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+                │   │   │   │       │   │       ├── PhysicalFilter { cond: Between { child: #4, lower: Cast { cast_to: Date32, child: "1995-01-01" }, upper: Cast { cast_to: Date32, child: "1996-12-31" } } }
+                │   │   │   │       │   │       │   └── PhysicalScan { table: orders }
+                │   │   │   │       │   │       └── PhysicalScan { table: lineitem }
+                │   │   │   │       │   └── PhysicalFilter
+                │   │   │   │       │       ├── cond:Eq
+                │   │   │   │       │       │   ├── #4
+                │   │   │   │       │       │   └── "ECONOMY ANODIZED STEEL"
+                │   │   │   │       │       └── PhysicalScan { table: part }
+                │   │   │   │       └── PhysicalScan { table: supplier }
+                │   │   │   └── PhysicalScan { table: customer }
+                │   │   └── PhysicalScan { table: nation }
                 │   └── PhysicalScan { table: nation }
                 └── PhysicalFilter
                     ├── cond:Eq

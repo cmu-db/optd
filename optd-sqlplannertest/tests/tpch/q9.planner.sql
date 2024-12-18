@@ -79,11 +79,11 @@ LogicalSort
                 │   │   ├── #12
                 │   │   └── #46
                 │   └── Like { expr: #1, pattern: "%green%", negated: false, case_insensitive: false }
-                └── LogicalJoin { join_type: Cross, cond: true }
-                    ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   │   ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                └── LogicalJoin { join_type: Inner, cond: true }
+                    ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   │   ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   │   │   ├── LogicalJoin { join_type: Inner, cond: true }
                     │   │   │   │   ├── LogicalScan { table: part }
                     │   │   │   │   └── LogicalScan { table: supplier }
                     │   │   │   └── LogicalScan { table: lineitem }
@@ -118,7 +118,7 @@ PhysicalSort
             ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #16 ], right_keys: [ #0 ] }
             │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #18, #17 ], right_keys: [ #1, #0 ] }
             │   │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #9, #0 ], right_keys: [ #2, #1 ] }
-            │   │   │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+            │   │   │   ├── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
             │   │   │   │   ├── PhysicalFilter { cond: Like { expr: #1, pattern: "%green%", negated: false, case_insensitive: false } }
             │   │   │   │   │   └── PhysicalScan { table: part }
             │   │   │   │   └── PhysicalScan { table: supplier }

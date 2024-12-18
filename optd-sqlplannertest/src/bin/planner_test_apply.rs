@@ -24,7 +24,18 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
+    use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
+
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .init();
+
+    unsafe { backtrace_on_stack_overflow::enable() };
 
     let cli = Cli::parse();
 

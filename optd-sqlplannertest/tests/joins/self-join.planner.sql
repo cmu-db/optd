@@ -23,7 +23,7 @@ LogicalSort
         ├── cond:Eq
         │   ├── #0
         │   └── #2
-        └── LogicalJoin { join_type: Cross, cond: true }
+        └── LogicalJoin { join_type: Inner, cond: true }
             ├── LogicalScan { table: t1 }
             └── LogicalScan { table: t1 }
 PhysicalSort

@@ -158,6 +158,11 @@ pub trait Memo<T: NodeType>: 'static + Send + Sync {
     ) -> Result<ArcPlanNode<T>> {
         get_best_group_binding_inner(self, group_id, &mut post_process)
     }
+
+    /// Get winner of a group and a subgroup.
+    fn get_group_winner(&self, group_id: GroupId) -> &Winner {
+        &self.get_group(group_id).info.winner
+    }
 }
 
 fn get_best_group_binding_inner<M: Memo<T> + ?Sized, T: NodeType>(

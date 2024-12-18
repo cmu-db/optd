@@ -127,44 +127,46 @@ PhysicalSort
                 │   └── Eq
                 │       ├── #0
                 │       └── #9
-                ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                │   ├── PhysicalScan { table: customer }
-                │   └── PhysicalAgg
-                │       ├── aggrs:Agg(Avg)
-                │       │   └── [ #5 ]
-                │       ├── groups: []
-                │       └── PhysicalFilter
-                │           ├── cond:And
-                │           │   ├── Gt
-                │           │   │   ├── Cast { cast_to: Decimal128(30, 15), child: #5 }
-                │           │   │   └── Cast { cast_to: Decimal128(30, 15), child: 0(float) }
-                │           │   └── InList
-                │           │       ├── expr:Scalar(Substr)
-                │           │       │   └── [ #4, 1(i64), 2(i64) ]
-                │           │       ├── list: [ "13", "31", "23", "29", "30", "18", "17" ]
-                │           │       ├── negated: false
+                ├── PhysicalProjection { exprs: [ #1, #2, #3, #4, #5, #6, #7, #8, #0 ] }
+                │   └── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
+                │       ├── PhysicalAgg
+                │       │   ├── aggrs:Agg(Avg)
+                │       │   │   └── [ #5 ]
+                │       │   ├── groups: []
+                │       │   └── PhysicalFilter
+                │       │       ├── cond:And
+                │       │       │   ├── Gt
+                │       │       │   │   ├── Cast { cast_to: Decimal128(30, 15), child: #5 }
+                │       │       │   │   └── Cast { cast_to: Decimal128(30, 15), child: 0(float) }
+                │       │       │   └── InList
+                │       │       │       ├── expr:Scalar(Substr)
+                │       │       │       │   └── [ #4, 1(i64), 2(i64) ]
+                │       │       │       ├── list: [ "13", "31", "23", "29", "30", "18", "17" ]
+                │       │       │       ├── negated: false
 
-                │           └── PhysicalScan { table: customer }
+                │       │       └── PhysicalScan { table: customer }
+                │       └── PhysicalScan { table: customer }
                 └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
                     ├── PhysicalAgg { aggrs: [], groups: [ #0 ] }
-                    │   └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                    │       ├── PhysicalScan { table: customer }
-                    │       └── PhysicalAgg
-                    │           ├── aggrs:Agg(Avg)
-                    │           │   └── [ #5 ]
-                    │           ├── groups: []
-                    │           └── PhysicalFilter
-                    │               ├── cond:And
-                    │               │   ├── Gt
-                    │               │   │   ├── Cast { cast_to: Decimal128(30, 15), child: #5 }
-                    │               │   │   └── Cast { cast_to: Decimal128(30, 15), child: 0(float) }
-                    │               │   └── InList
-                    │               │       ├── expr:Scalar(Substr)
-                    │               │       │   └── [ #4, 1(i64), 2(i64) ]
-                    │               │       ├── list: [ "13", "31", "23", "29", "30", "18", "17" ]
-                    │               │       ├── negated: false
+                    │   └── PhysicalProjection { exprs: [ #1, #2, #3, #4, #5, #6, #7, #8, #0 ] }
+                    │       └── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
+                    │           ├── PhysicalAgg
+                    │           │   ├── aggrs:Agg(Avg)
+                    │           │   │   └── [ #5 ]
+                    │           │   ├── groups: []
+                    │           │   └── PhysicalFilter
+                    │           │       ├── cond:And
+                    │           │       │   ├── Gt
+                    │           │       │   │   ├── Cast { cast_to: Decimal128(30, 15), child: #5 }
+                    │           │       │   │   └── Cast { cast_to: Decimal128(30, 15), child: 0(float) }
+                    │           │       │   └── InList
+                    │           │       │       ├── expr:Scalar(Substr)
+                    │           │       │       │   └── [ #4, 1(i64), 2(i64) ]
+                    │           │       │       ├── list: [ "13", "31", "23", "29", "30", "18", "17" ]
+                    │           │       │       ├── negated: false
 
-                    │               └── PhysicalScan { table: customer }
+                    │           │       └── PhysicalScan { table: customer }
+                    │           └── PhysicalScan { table: customer }
                     └── PhysicalScan { table: orders }
 */
 

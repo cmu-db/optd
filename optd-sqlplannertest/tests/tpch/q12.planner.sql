@@ -72,7 +72,7 @@ LogicalSort
             │   └── Lt
             │       ├── #21
             │       └── Cast { cast_to: Date32, child: "1995-01-01" }
-            └── LogicalJoin { join_type: Cross, cond: true }
+            └── LogicalJoin { join_type: Inner, cond: true }
                 ├── LogicalScan { table: orders }
                 └── LogicalScan { table: lineitem }
 PhysicalSort

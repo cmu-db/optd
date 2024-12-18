@@ -100,7 +100,7 @@ LogicalProjection { exprs: [ #0 ] }
         │       └── Eq
         │           ├── #13
         │           └── "DELIVER IN PERSON"
-        └── LogicalJoin { join_type: Cross, cond: true }
+        └── LogicalJoin { join_type: Inner, cond: true }
             ├── LogicalScan { table: lineitem }
             └── LogicalScan { table: part }
 PhysicalAgg
@@ -170,7 +170,7 @@ PhysicalAgg
     │       └── Eq
     │           ├── #13
     │           └── "DELIVER IN PERSON"
-    └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+    └── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
         ├── PhysicalScan { table: lineitem }
         └── PhysicalScan { table: part }
 */

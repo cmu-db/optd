@@ -59,7 +59,7 @@ LogicalSort
             │   └── Not
             │       └── [ #14 ]
             └── RawDependentJoin { sq_type: Any { pred: PredNode { typ: ColumnRef, children: [], data: Some(UInt64(1)) }, op: Eq }, cond: true, extern_cols: [] }
-                ├── LogicalJoin { join_type: Cross, cond: true }
+                ├── LogicalJoin { join_type: Inner, cond: true }
                 │   ├── LogicalScan { table: partsupp }
                 │   └── LogicalScan { table: part }
                 └── LogicalProjection { exprs: [ #0 ] }
@@ -96,7 +96,7 @@ PhysicalSort
             ├── cond:Eq
             │   ├── #1
             │   └── #14
-            ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+            ├── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
             │   ├── PhysicalScan { table: partsupp }
             │   └── PhysicalScan { table: part }
             └── PhysicalProjection { exprs: [ #0 ] }

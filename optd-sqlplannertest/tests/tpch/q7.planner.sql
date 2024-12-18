@@ -97,11 +97,11 @@ LogicalSort
                 │   │           ├── #45
                 │   │           └── "FRANCE"
                 │   └── Between { child: #17, lower: Cast { cast_to: Date32, child: "1995-01-01" }, upper: Cast { cast_to: Date32, child: "1996-12-31" } }
-                └── LogicalJoin { join_type: Cross, cond: true }
-                    ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   │   ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                └── LogicalJoin { join_type: Inner, cond: true }
+                    ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   │   ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   │   │   ├── LogicalJoin { join_type: Inner, cond: true }
                     │   │   │   │   ├── LogicalScan { table: supplier }
                     │   │   │   │   └── LogicalScan { table: lineitem }
                     │   │   │   └── LogicalScan { table: orders }
@@ -154,13 +154,13 @@ PhysicalSort
             │               └── "FRANCE"
             ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #3 ], right_keys: [ #0 ] }
             │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #24 ], right_keys: [ #0 ] }
-            │   │   ├── PhysicalProjection { exprs: [ #16, #17, #18, #19, #20, #21, #22, #0, #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15, #23, #24, #25, #26, #27, #28, #29, #30, #31 ] }
-            │   │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-            │   │   │       ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
-            │   │   │       │   ├── PhysicalFilter { cond: Between { child: #10, lower: Cast { cast_to: Date32, child: "1995-01-01" }, upper: Cast { cast_to: Date32, child: "1996-12-31" } } }
-            │   │   │       │   │   └── PhysicalScan { table: lineitem }
-            │   │   │       │   └── PhysicalScan { table: supplier }
-            │   │   │       └── PhysicalScan { table: orders }
+            │   │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #7 ], right_keys: [ #0 ] }
+            │   │   │   ├── PhysicalProjection { exprs: [ #16, #17, #18, #19, #20, #21, #22, #0, #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15 ] }
+            │   │   │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #2 ], right_keys: [ #0 ] }
+            │   │   │   │       ├── PhysicalFilter { cond: Between { child: #10, lower: Cast { cast_to: Date32, child: "1995-01-01" }, upper: Cast { cast_to: Date32, child: "1996-12-31" } } }
+            │   │   │   │       │   └── PhysicalScan { table: lineitem }
+            │   │   │   │       └── PhysicalScan { table: supplier }
+            │   │   │   └── PhysicalScan { table: orders }
             │   │   └── PhysicalScan { table: customer }
             │   └── PhysicalScan { table: nation }
             └── PhysicalScan { table: nation }

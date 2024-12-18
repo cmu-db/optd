@@ -3,17 +3,19 @@
 // Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Display;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
 use tracing::trace;
 
 use super::memo::{ArcMemoPlanNode, GroupInfo, Memo};
-use super::tasks::OptimizeGroupTask;
-use super::{NaiveMemo, Task};
+use super::NaiveMemo;
 use crate::cascades::memo::Winner;
+use crate::cascades::tasks2::{TaskContext, TaskDesc};
 use crate::cost::CostModel;
 use crate::logical_property::{LogicalPropertyBuilder, LogicalPropertyBuilderAny};
 use crate::nodes::{
@@ -27,8 +29,10 @@ pub type RuleId = usize;
 
 #[derive(Default, Clone, Debug)]
 pub struct OptimizerContext {
-    pub budget_used_logical: bool,
-    pub budget_used_all: bool,
+    /// Not apply logical rules any more
+    pub logical_budget_used: bool,
+    /// Not apply all rules any more; get a physical plan ASAP
+    pub all_budget_used: bool,
     pub rules_applied: usize,
 }
 
@@ -47,19 +51,23 @@ pub struct OptimizerProperties {
 pub struct CascadesStats {
     pub rule_match_count: HashMap<usize, usize>,
     pub rule_total_bindings: HashMap<usize, usize>,
+    pub explore_group_count: usize,
+    pub optimize_group_count: usize,
+    pub optimize_expr_count: usize,
+    pub apply_rule_count: usize,
+    pub optimize_input_count: usize,
 }
 
 pub struct CascadesOptimizer<T: NodeType, M: Memo<T> = NaiveMemo<T>> {
     memo: M,
-    pub(super) tasks: VecDeque<Box<dyn Task<T, M>>>,
     explored_group: HashSet<GroupId>,
-    explored_expr: HashSet<ExprId>,
+    explored_expr: HashSet<TaskDesc>,
     fired_rules: HashMap<ExprId, HashSet<RuleId>>,
     rules: Arc<[Arc<dyn Rule<T, Self>>]>,
     pub stats: CascadesStats,
     disabled_rules: HashSet<usize>,
     cost: Arc<dyn CostModel<T, M>>,
-    property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>,
+    logical_property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>,
     pub ctx: OptimizerContext,
     pub prop: OptimizerProperties,
 }
@@ -105,39 +113,36 @@ impl<T: NodeType> CascadesOptimizer<T, NaiveMemo<T>> {
     pub fn new(
         rules: Vec<Arc<dyn Rule<T, Self>>>,
         cost: Box<dyn CostModel<T, NaiveMemo<T>>>,
-        property_builders: Vec<Box<dyn LogicalPropertyBuilderAny<T>>>,
+        logical_property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>,
     ) -> Self {
-        Self::new_with_prop(rules, cost, property_builders, Default::default())
+        Self::new_with_options(rules, cost, logical_property_builders, Default::default())
     }
 
-    pub fn new_with_prop(
+    pub fn new_with_options(
         rules: Vec<Arc<dyn Rule<T, Self>>>,
         cost: Box<dyn CostModel<T, NaiveMemo<T>>>,
-        property_builders: Vec<Box<dyn LogicalPropertyBuilderAny<T>>>,
+        logical_property_builders: Arc<[Box<dyn LogicalPropertyBuilderAny<T>>]>,
         prop: OptimizerProperties,
     ) -> Self {
-        let tasks = VecDeque::new();
-        let property_builders: Arc<[_]> = property_builders.into();
-        let memo = NaiveMemo::new(property_builders.clone());
+        let memo = NaiveMemo::new(logical_property_builders.clone());
         Self {
             memo,
-            tasks,
             explored_group: HashSet::new(),
             explored_expr: HashSet::new(),
             fired_rules: HashMap::new(),
             rules: rules.into(),
             cost: cost.into(),
             ctx: OptimizerContext::default(),
-            property_builders,
+            logical_property_builders,
             prop,
-            disabled_rules: HashSet::new(),
             stats: CascadesStats::default(),
+            disabled_rules: HashSet::new(),
         }
     }
 
     /// Clear the memo table and all optimizer states.
     pub fn step_clear(&mut self) {
-        self.memo = NaiveMemo::new(self.property_builders.clone());
+        self.memo = NaiveMemo::new(self.logical_property_builders.clone());
         self.fired_rules.clear();
         self.explored_group.clear();
         self.explored_expr.clear();
@@ -146,6 +151,13 @@ impl<T: NodeType> CascadesOptimizer<T, NaiveMemo<T>> {
     /// Clear the winner so that the optimizer can continue to explore the group.
     pub fn step_clear_winner(&mut self) {
         self.memo.clear_winner();
+        self.explored_group.clear();
+        self.explored_expr.clear();
+    }
+
+    /// Clear the explored groups so that the optimizer can continue to apply the rules.
+    pub fn step_next_stage(&mut self) {
+        self.explored_group.clear();
         self.explored_expr.clear();
     }
 }
@@ -175,6 +187,32 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
         self.disabled_rules.remove(&rule_id);
     }
 
+    pub fn disable_rule_by_name(&mut self, rule_name: &str) {
+        let mut modified = false;
+        for (id, rule) in self.rules.iter().enumerate() {
+            if rule.name() == rule_name {
+                self.disabled_rules.insert(id);
+                modified = true;
+            }
+        }
+        if !modified {
+            panic!("rule {} not found", rule_name);
+        }
+    }
+
+    pub fn enable_rule_by_name(&mut self, rule_name: &str) {
+        let mut modified = false;
+        for (id, rule) in self.rules.iter().enumerate() {
+            if rule.name() == rule_name {
+                self.disabled_rules.remove(&id);
+                modified = true;
+            }
+        }
+        if !modified {
+            panic!("rule {} not found", rule_name);
+        }
+    }
+
     pub fn is_rule_disabled(&self, rule_id: usize) -> bool {
         self.disabled_rules.contains(&rule_id)
     }
@@ -198,7 +236,7 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
             };
             println!("group_id={} {}", group_id, winner_str);
             let group = self.memo.get_group(group_id);
-            for (id, property) in self.property_builders.iter().enumerate() {
+            for (id, property) in self.logical_property_builders.iter().enumerate() {
                 println!(
                     "  {}={}",
                     property.property_name(),
@@ -218,9 +256,9 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
             }
         }
     }
-
     /// Optimize a `RelNode`.
     pub fn step_optimize_rel(&mut self, root_rel: ArcPlanNode<T>) -> Result<GroupId> {
+        trace!(event = "step_optimize_rel", rel = %root_rel);
         let (group_id, _) = self.add_new_expr(root_rel);
         self.fire_optimize_tasks(group_id)?;
         Ok(group_id)
@@ -254,74 +292,21 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
         res
     }
 
-    fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
+    pub fn fire_optimize_tasks(&mut self, group_id: GroupId) -> Result<()> {
+        use pollster::FutureExt as _;
         trace!(event = "fire_optimize_tasks", root_group_id = %group_id);
-        self.tasks
-            .push_back(Box::new(OptimizeGroupTask::new(group_id, None)));
-        // get the task from the stack
-        self.ctx.budget_used_logical = false;
-        self.ctx.budget_used_all = false;
-        let plan_space_begin = self.memo.estimated_plan_space();
-        let mut iter = 0;
-        while let Some(task) = self.tasks.pop_back() {
-            let new_tasks = task.execute(self)?;
-            self.tasks.extend(new_tasks);
-            iter += 1;
-            if !self.ctx.budget_used_logical {
-                let plan_space = self.memo.estimated_plan_space();
-                if let Some(partial_explore_space) = self.prop.partial_explore_space {
-                    if plan_space - plan_space_begin > partial_explore_space {
-                        println!(
-                            "plan space size budget used, not applying logical rules any more. current plan space: {}",
-                            plan_space
-                        );
-                        self.ctx.budget_used_logical = true;
-                        if self.prop.panic_on_budget {
-                            panic!("plan space size budget used");
-                        }
-                    }
-                }
-             }
-             if !self.ctx.budget_used_all {
-                if let Some(partial_explore_iter) = self.prop.partial_explore_iter {
-                    if iter >= partial_explore_iter {
-                        println!(
-                            "plan explore iter budget used, not applying physical/logical rules any more if there's no winner. current iter: {}",
-                            iter
-                        );
-                        self.ctx.budget_used_all = true;
-                        if self.prop.panic_on_budget {
-                            panic!("plan space size budget used");
-                        }
-                    }
-                }
-            }
-            if iter > 100000 && iter % 10000 == 0 {
-                println!("iter={}", iter);
-                println!("plan_space={}", self.memo.estimated_plan_space());
-                for (id, rule) in self.rules.iter().enumerate() {
-                    println!(
-                        "{}: matched={}, bindings={}",
-                        rule.name(),
-                        self.stats
-                            .rule_match_count
-                            .get(&id)
-                            .copied()
-                            .unwrap_or_default(),
-                        self.stats
-                            .rule_total_bindings
-                            .get(&id)
-                            .copied()
-                            .unwrap_or_default()
-                    );
-                }
-            }
-        }
+        let mut task = TaskContext::new(self);
+        // 32MB stack for the optimization process, TODO: reduce memory footprint
+        stacker::maybe_grow(32 * 1024 * 1024, 32 * 1024 * 1024, || {
+            let fut: Pin<Box<dyn Future<Output = ()>>> = Box::pin(task.fire_optimize(group_id));
+            fut.block_on();
+        });
         Ok(())
     }
 
     fn optimize_inner(&mut self, root_rel: ArcPlanNode<T>) -> Result<ArcPlanNode<T>> {
         let (group_id, _) = self.add_new_expr(root_rel);
+
         self.fire_optimize_tasks(group_id)?;
         self.memo.get_best_group_binding(group_id, |_, _, _| {})
     }
@@ -346,12 +331,12 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
         self.memo.add_expr_to_group(rel_node, group_id)
     }
 
-    pub(super) fn get_group_info(&self, group_id: GroupId) -> &GroupInfo {
-        self.memo.get_group_info(group_id)
+    pub(super) fn get_group_winner(&self, group_id: GroupId) -> &Winner {
+        self.memo.get_group_winner(group_id)
     }
 
-    pub(super) fn update_group_info(&mut self, group_id: GroupId, group_info: GroupInfo) {
-        self.memo.update_group_info(group_id, group_info)
+    pub(super) fn update_group_winner(&mut self, group_id: GroupId, winner: Winner) {
+        self.memo.update_group_info(group_id, GroupInfo { winner });
     }
 
     /// Get the properties of a Cascades group
@@ -370,10 +355,6 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
             .clone()
     }
 
-    pub(super) fn get_group_id(&self, expr_id: ExprId) -> GroupId {
-        self.memo.get_group_id(expr_id)
-    }
-
     pub(super) fn get_expr_memoed(&self, expr_id: ExprId) -> ArcMemoPlanNode<T> {
         self.memo.get_expr_memoed(expr_id)
     }
@@ -390,16 +371,16 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
         self.explored_group.insert(group_id);
     }
 
-    pub(super) fn is_expr_explored(&self, expr_id: ExprId) -> bool {
-        self.explored_expr.contains(&expr_id)
+    pub(super) fn has_task_started(&self, task_desc: &TaskDesc) -> bool {
+        self.explored_expr.contains(task_desc)
     }
 
-    pub(super) fn mark_expr_explored(&mut self, expr_id: ExprId) {
-        self.explored_expr.insert(expr_id);
+    pub(super) fn mark_task_start(&mut self, task_desc: &TaskDesc) {
+        self.explored_expr.insert(task_desc.clone());
     }
 
-    pub(super) fn unmark_expr_explored(&mut self, expr_id: ExprId) {
-        self.explored_expr.remove(&expr_id);
+    pub(super) fn mark_task_end(&mut self, task_desc: &TaskDesc) {
+        self.explored_expr.remove(task_desc);
     }
 
     pub(super) fn is_rule_fired(&self, group_expr_id: ExprId, rule_id: RuleId) -> bool {
@@ -418,6 +399,31 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
 
     pub fn memo(&self) -> &M {
         &self.memo
+    }
+
+    pub fn dump_stats(&self) {
+        println!("plan_space={}", self.memo.estimated_plan_space());
+        for (id, rule) in self.rules.iter().enumerate() {
+            println!(
+                "{}: matched={}, bindings={}",
+                rule.name(),
+                self.stats
+                    .rule_match_count
+                    .get(&id)
+                    .copied()
+                    .unwrap_or_default(),
+                self.stats
+                    .rule_total_bindings
+                    .get(&id)
+                    .copied()
+                    .unwrap_or_default()
+            );
+        }
+        println!("explore_group_count={}", self.stats.explore_group_count);
+        println!("optimize_group_count={}", self.stats.optimize_group_count);
+        println!("optimize_expr_count={}", self.stats.optimize_expr_count);
+        println!("apply_rule_count={}", self.stats.apply_rule_count);
+        println!("optimize_input_count={}", self.stats.optimize_input_count);
     }
 }
 

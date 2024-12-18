@@ -190,6 +190,7 @@ impl OptdQueryPlanner {
                     if verbose { Some(&meta) } else { None },
                 ),
             ));
+            tracing::debug!("generating optd-join-order");
             let join_orders = optimizer
                 .optd_cascades_optimizer()
                 .memo()

@@ -20,7 +20,7 @@ LogicalProjection { exprs: [ #0, #1, #3 ] }
     ├── cond:Eq
     │   ├── #0
     │   └── #2
-    └── LogicalJoin { join_type: Cross, cond: true }
+    └── LogicalJoin { join_type: Inner, cond: true }
         ├── LogicalScan { table: t1 }
         └── LogicalScan { table: t2 }
 PhysicalProjection { exprs: [ #0, #1, #3 ] }
@@ -28,7 +28,7 @@ PhysicalProjection { exprs: [ #0, #1, #3 ] }
     ├── cond:Eq
     │   ├── #0
     │   └── #2
-    └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+    └── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
         ├── PhysicalScan { table: t1 }
         └── PhysicalScan { table: t2 }
 */
@@ -44,7 +44,7 @@ LogicalProjection { exprs: [ #0, #1, #3 ] }
     ├── cond:Eq
     │   ├── #0
     │   └── #3
-    └── LogicalJoin { join_type: Cross, cond: true }
+    └── LogicalJoin { join_type: Inner, cond: true }
         ├── LogicalScan { table: t1 }
         └── LogicalScan { table: t2 }
 PhysicalProjection { exprs: [ #0, #1, #3 ] }
@@ -52,7 +52,7 @@ PhysicalProjection { exprs: [ #0, #1, #3 ] }
     ├── cond:Eq
     │   ├── #0
     │   └── #3
-    └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+    └── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
         ├── PhysicalScan { table: t1 }
         └── PhysicalScan { table: t2 }
 */
@@ -69,7 +69,7 @@ LogicalProjection { exprs: [ #0, #1, #2 ] }
     │   ├── #0
     │   └── #2
     └── LogicalProjection { exprs: [ #0, #1, #3 ] }
-        └── LogicalJoin { join_type: Cross, cond: true }
+        └── LogicalJoin { join_type: Inner, cond: true }
             ├── LogicalScan { table: t1 }
             └── LogicalScan { table: t2 }
 PhysicalProjection { exprs: [ #0, #1, #3 ] }
@@ -77,7 +77,7 @@ PhysicalProjection { exprs: [ #0, #1, #3 ] }
     ├── cond:Eq
     │   ├── #0
     │   └── #3
-    └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+    └── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
         ├── PhysicalScan { table: t1 }
         └── PhysicalScan { table: t2 }
 */

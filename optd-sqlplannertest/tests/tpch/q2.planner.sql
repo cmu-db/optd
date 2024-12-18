@@ -82,10 +82,10 @@ LogicalLimit { skip: 0(i64), fetch: 100(i64) }
             │       ├── #19
             │       └── #28
             └── RawDependentJoin { sq_type: Scalar, cond: true, extern_cols: [ Extern(#0) ] }
-                ├── LogicalJoin { join_type: Cross, cond: true }
-                │   ├── LogicalJoin { join_type: Cross, cond: true }
-                │   │   ├── LogicalJoin { join_type: Cross, cond: true }
-                │   │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                ├── LogicalJoin { join_type: Inner, cond: true }
+                │   ├── LogicalJoin { join_type: Inner, cond: true }
+                │   │   ├── LogicalJoin { join_type: Inner, cond: true }
+                │   │   │   ├── LogicalJoin { join_type: Inner, cond: true }
                 │   │   │   │   ├── LogicalScan { table: part }
                 │   │   │   │   └── LogicalScan { table: supplier }
                 │   │   │   └── LogicalScan { table: partsupp }
@@ -113,9 +113,9 @@ LogicalLimit { skip: 0(i64), fetch: 100(i64) }
                             │   └── Eq
                             │       ├── #17
                             │       └── "AFRICA"
-                            └── LogicalJoin { join_type: Cross, cond: true }
-                                ├── LogicalJoin { join_type: Cross, cond: true }
-                                │   ├── LogicalJoin { join_type: Cross, cond: true }
+                            └── LogicalJoin { join_type: Inner, cond: true }
+                                ├── LogicalJoin { join_type: Inner, cond: true }
+                                │   ├── LogicalJoin { join_type: Inner, cond: true }
                                 │   │   ├── LogicalScan { table: partsupp }
                                 │   │   └── LogicalScan { table: supplier }
                                 │   └── LogicalScan { table: nation }
@@ -162,10 +162,10 @@ LogicalLimit { skip: 0(i64), fetch: 100(i64) }
                     ├── cond:Eq
                     │   ├── #0
                     │   └── #28
-                    ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   │   ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                    ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   │   ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   │   │   ├── LogicalJoin { join_type: Inner, cond: true }
                     │   │   │   │   ├── LogicalScan { table: part }
                     │   │   │   │   └── LogicalScan { table: supplier }
                     │   │   │   └── LogicalScan { table: partsupp }
@@ -180,10 +180,10 @@ LogicalLimit { skip: 0(i64), fetch: 100(i64) }
                                 │       ├── #0
                                 │       └── #1
                                 ├── LogicalAgg { exprs: [], groups: [ #0 ] }
-                                │   └── LogicalJoin { join_type: Cross, cond: true }
-                                │       ├── LogicalJoin { join_type: Cross, cond: true }
-                                │       │   ├── LogicalJoin { join_type: Cross, cond: true }
-                                │       │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                                │   └── LogicalJoin { join_type: Inner, cond: true }
+                                │       ├── LogicalJoin { join_type: Inner, cond: true }
+                                │       │   ├── LogicalJoin { join_type: Inner, cond: true }
+                                │       │   │   ├── LogicalJoin { join_type: Inner, cond: true }
                                 │       │   │   │   ├── LogicalScan { table: part }
                                 │       │   │   │   └── LogicalScan { table: supplier }
                                 │       │   │   └── LogicalScan { table: partsupp }
@@ -212,18 +212,18 @@ LogicalLimit { skip: 0(i64), fetch: 100(i64) }
                                         │       └── "AFRICA"
                                         └── LogicalJoin { join_type: Inner, cond: true }
                                             ├── LogicalAgg { exprs: [], groups: [ #0 ] }
-                                            │   └── LogicalJoin { join_type: Cross, cond: true }
-                                            │       ├── LogicalJoin { join_type: Cross, cond: true }
-                                            │       │   ├── LogicalJoin { join_type: Cross, cond: true }
-                                            │       │   │   ├── LogicalJoin { join_type: Cross, cond: true }
+                                            │   └── LogicalJoin { join_type: Inner, cond: true }
+                                            │       ├── LogicalJoin { join_type: Inner, cond: true }
+                                            │       │   ├── LogicalJoin { join_type: Inner, cond: true }
+                                            │       │   │   ├── LogicalJoin { join_type: Inner, cond: true }
                                             │       │   │   │   ├── LogicalScan { table: part }
                                             │       │   │   │   └── LogicalScan { table: supplier }
                                             │       │   │   └── LogicalScan { table: partsupp }
                                             │       │   └── LogicalScan { table: nation }
                                             │       └── LogicalScan { table: region }
-                                            └── LogicalJoin { join_type: Cross, cond: true }
-                                                ├── LogicalJoin { join_type: Cross, cond: true }
-                                                │   ├── LogicalJoin { join_type: Cross, cond: true }
+                                            └── LogicalJoin { join_type: Inner, cond: true }
+                                                ├── LogicalJoin { join_type: Inner, cond: true }
+                                                │   ├── LogicalJoin { join_type: Inner, cond: true }
                                                 │   │   ├── LogicalScan { table: partsupp }
                                                 │   │   └── LogicalScan { table: supplier }
                                                 │   └── LogicalScan { table: nation }
@@ -239,81 +239,69 @@ PhysicalLimit { skip: 0(i64), fetch: 100(i64) }
     │   │   └── #1
     │   └── SortOrder { order: Asc }
     │       └── #3
-    └── PhysicalProjection { exprs: [ #21, #17, #4, #7, #9, #18, #20, #22 ] }
-        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #26, #7 ], right_keys: [ #2, #0 ] }
-            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #7, #16 ], right_keys: [ #0, #1 ] }
-            │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #3 ], right_keys: [ #12 ] }
-            │   │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #2 ] }
-            │   │   │   ├── PhysicalFilter
-            │   │   │   │   ├── cond:Eq
-            │   │   │   │   │   ├── #1
-            │   │   │   │   │   └── "AFRICA"
-            │   │   │   │   └── PhysicalScan { table: region }
-            │   │   │   └── PhysicalScan { table: nation }
-            │   │   └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-            │   │       ├── PhysicalFilter
-            │   │       │   ├── cond:And
-            │   │       │   │   ├── Eq
-            │   │       │   │   │   ├── Cast { cast_to: Int64, child: #5 }
-            │   │       │   │   │   └── 4(i64)
-            │   │       │   │   └── Like { expr: #4, pattern: "%TIN", negated: false, case_insensitive: false }
-            │   │       │   └── PhysicalScan { table: part }
-            │   │       └── PhysicalScan { table: supplier }
-            │   └── PhysicalScan { table: partsupp }
-            └── PhysicalNestedLoopJoin
-                ├── join_type: LeftOuter
-                ├── cond:And
-                │   └── Eq
-                │       ├── #0
-                │       └── #1
-                ├── PhysicalAgg { aggrs: [], groups: [ #0 ] }
-                │   └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                │       ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                │       │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                │       │   │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                │       │   │   │   ├── PhysicalScan { table: part }
-                │       │   │   │   └── PhysicalScan { table: supplier }
-                │       │   │   └── PhysicalScan { table: partsupp }
-                │       │   └── PhysicalScan { table: nation }
-                │       └── PhysicalScan { table: region }
-                └── PhysicalAgg
-                    ├── aggrs:Agg(Min)
-                    │   └── [ #4 ]
-                    ├── groups: [ #0 ]
-                    └── PhysicalFilter
-                        ├── cond:And
-                        │   ├── Eq
-                        │   │   ├── #0
-                        │   │   └── #1
-                        │   ├── Eq
-                        │   │   ├── #6
-                        │   │   └── #2
-                        │   ├── Eq
-                        │   │   ├── #9
-                        │   │   └── #13
-                        │   ├── Eq
-                        │   │   ├── #15
-                        │   │   └── #17
-                        │   └── Eq
-                        │       ├── #18
-                        │       └── "AFRICA"
-                        └── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
+    └── PhysicalProjection { exprs: [ #14, #10, #22, #0, #2, #11, #13, #15 ] }
+        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #19, #0 ], right_keys: [ #1, #0 ] }
+            ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #23 ], right_keys: [ #0 ] }
+            │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #12 ], right_keys: [ #0 ] }
+            │   │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0, #9 ], right_keys: [ #0, #1 ] }
+            │   │   │   ├── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
+            │   │   │   │   ├── PhysicalFilter
+            │   │   │   │   │   ├── cond:And
+            │   │   │   │   │   │   ├── Eq
+            │   │   │   │   │   │   │   ├── Cast { cast_to: Int64, child: #5 }
+            │   │   │   │   │   │   │   └── 4(i64)
+            │   │   │   │   │   │   └── Like { expr: #4, pattern: "%TIN", negated: false, case_insensitive: false }
+            │   │   │   │   │   └── PhysicalScan { table: part }
+            │   │   │   │   └── PhysicalScan { table: supplier }
+            │   │   │   └── PhysicalScan { table: partsupp }
+            │   │   └── PhysicalScan { table: nation }
+            │   └── PhysicalFilter
+            │       ├── cond:Eq
+            │       │   ├── #1
+            │       │   └── "AFRICA"
+            │       └── PhysicalScan { table: region }
+            └── PhysicalProjection { exprs: [ #0, #2 ] }
+                └── PhysicalNestedLoopJoin
+                    ├── join_type: LeftOuter
+                    ├── cond:And
+                    │   └── Eq
+                    │       ├── #0
+                    │       └── #1
+                    ├── PhysicalAgg { aggrs: [], groups: [ #0 ] }
+                    │   └── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
+                    │       ├── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
+                    │       │   ├── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
+                    │       │   │   ├── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
+                    │       │   │   │   ├── PhysicalScan { table: part }
+                    │       │   │   │   └── PhysicalScan { table: supplier }
+                    │       │   │   └── PhysicalScan { table: partsupp }
+                    │       │   └── PhysicalScan { table: nation }
+                    │       └── PhysicalScan { table: region }
+                    └── PhysicalAgg
+                        ├── aggrs:Agg(Min)
+                        │   └── [ #4 ]
+                        ├── groups: [ #0 ]
+                        └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
                             ├── PhysicalAgg { aggrs: [], groups: [ #0 ] }
-                            │   └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                            │       ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                            │       │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                            │       │   │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                            │   └── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
+                            │       ├── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
+                            │       │   ├── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
+                            │       │   │   ├── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
                             │       │   │   │   ├── PhysicalScan { table: part }
                             │       │   │   │   └── PhysicalScan { table: supplier }
                             │       │   │   └── PhysicalScan { table: partsupp }
                             │       │   └── PhysicalScan { table: nation }
                             │       └── PhysicalScan { table: region }
-                            └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                                ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                                │   ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+                            └── PhysicalHashJoin { join_type: Inner, left_keys: [ #14 ], right_keys: [ #0 ] }
+                                ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #8 ], right_keys: [ #0 ] }
+                                │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
                                 │   │   ├── PhysicalScan { table: partsupp }
                                 │   │   └── PhysicalScan { table: supplier }
                                 │   └── PhysicalScan { table: nation }
-                                └── PhysicalScan { table: region }
+                                └── PhysicalFilter
+                                    ├── cond:Eq
+                                    │   ├── #1
+                                    │   └── "AFRICA"
+                                    └── PhysicalScan { table: region }
 */
 

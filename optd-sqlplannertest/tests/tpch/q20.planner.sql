@@ -52,7 +52,7 @@ LogicalSort
         │       ├── #8
         │       └── "IRAQ"
         └── RawDependentJoin { sq_type: Any { pred: PredNode { typ: ColumnRef, children: [], data: Some(UInt64(0)) }, op: Eq }, cond: true, extern_cols: [] }
-            ├── LogicalJoin { join_type: Cross, cond: true }
+            ├── LogicalJoin { join_type: Inner, cond: true }
             │   ├── LogicalScan { table: supplier }
             │   └── LogicalScan { table: nation }
             └── LogicalProjection { exprs: [ #1 ] }
@@ -111,84 +111,90 @@ PhysicalSort
             ├── cond:Eq
             │   ├── #0
             │   └── #11
-            ├── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
+            ├── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
             │   ├── PhysicalScan { table: supplier }
             │   └── PhysicalScan { table: nation }
-            └── PhysicalProjection { exprs: [ #4 ] }
-                └── PhysicalFilter
+            └── PhysicalProjection { exprs: [ #1 ] }
+                └── PhysicalNestedLoopJoin
+                    ├── join_type: Inner
                     ├── cond:And
-                    │   ├── #8
-                    │   └── Gt
-                    │       ├── Cast { cast_to: Float64, child: #5 }
-                    │       └── #2
-                    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0, #1 ], right_keys: [ #0, #1 ] }
-                        ├── PhysicalProjection
-                        │   ├── exprs:
-                        │   │   ┌── #0
-                        │   │   ├── #1
-                        │   │   └── Mul
-                        │   │       ├── 0.5(float)
-                        │   │       └── Cast { cast_to: Float64, child: #2 }
-                        │   └── PhysicalProjection { exprs: [ #0, #1, #4 ] }
-                        │       └── PhysicalNestedLoopJoin
-                        │           ├── join_type: LeftOuter
-                        │           ├── cond:And
-                        │           │   ├── Eq
-                        │           │   │   ├── #0
-                        │           │   │   └── #2
-                        │           │   └── Eq
-                        │           │       ├── #1
-                        │           │       └── #3
-                        │           ├── PhysicalAgg { aggrs: [], groups: [ #0, #1 ] }
-                        │           │   └── PhysicalNestedLoopJoin
-                        │           │       ├── join_type: LeftMark
-                        │           │       ├── cond:Eq
-                        │           │       │   ├── #0
-                        │           │       │   └── #5
-                        │           │       ├── PhysicalScan { table: partsupp }
-                        │           │       └── PhysicalProjection { exprs: [ #0 ] }
-                        │           │           └── PhysicalFilter { cond: Like { expr: #1, pattern: "indian%", negated: false, case_insensitive: false } }
-                        │           │               └── PhysicalScan { table: part }
-                        │           └── PhysicalAgg
-                        │               ├── aggrs:Agg(Sum)
-                        │               │   └── [ #6 ]
-                        │               ├── groups: [ #0, #1 ]
-                        │               └── PhysicalFilter
-                        │                   ├── cond:And
-                        │                   │   ├── Eq
-                        │                   │   │   ├── #3
-                        │                   │   │   └── #0
-                        │                   │   ├── Eq
-                        │                   │   │   ├── #4
-                        │                   │   │   └── #1
-                        │                   │   ├── Geq
-                        │                   │   │   ├── #12
-                        │                   │   │   └── Cast { cast_to: Date32, child: "1996-01-01" }
-                        │                   │   └── Lt
-                        │                   │       ├── #12
-                        │                   │       └── Add
-                        │                   │           ├── Cast { cast_to: Date32, child: "1996-01-01" }
-                        │                   │           └── INTERVAL_MONTH_DAY_NANO (12, 0, 0)
-                        │                   └── PhysicalNestedLoopJoin { join_type: Cross, cond: true }
-                        │                       ├── PhysicalAgg { aggrs: [], groups: [ #0, #1 ] }
-                        │                       │   └── PhysicalNestedLoopJoin
-                        │                       │       ├── join_type: LeftMark
-                        │                       │       ├── cond:Eq
-                        │                       │       │   ├── #0
-                        │                       │       │   └── #5
-                        │                       │       ├── PhysicalScan { table: partsupp }
-                        │                       │       └── PhysicalProjection { exprs: [ #0 ] }
-                        │                       │           └── PhysicalFilter { cond: Like { expr: #1, pattern: "indian%", negated: false, case_insensitive: false } }
-                        │                       │               └── PhysicalScan { table: part }
-                        │                       └── PhysicalScan { table: lineitem }
-                        └── PhysicalNestedLoopJoin
-                            ├── join_type: LeftMark
-                            ├── cond:Eq
-                            │   ├── #0
-                            │   └── #5
-                            ├── PhysicalScan { table: partsupp }
-                            └── PhysicalProjection { exprs: [ #0 ] }
-                                └── PhysicalFilter { cond: Like { expr: #1, pattern: "indian%", negated: false, case_insensitive: false } }
-                                    └── PhysicalScan { table: part }
+                    │   ├── Gt
+                    │   │   ├── Cast { cast_to: Float64, child: #2 }
+                    │   │   └── #8
+                    │   ├── Eq
+                    │   │   ├── #0
+                    │   │   └── #6
+                    │   └── Eq
+                    │       ├── #1
+                    │       └── #7
+                    ├── PhysicalFilter { cond: #5 }
+                    │   └── PhysicalNestedLoopJoin
+                    │       ├── join_type: LeftMark
+                    │       ├── cond:Eq
+                    │       │   ├── #0
+                    │       │   └── #5
+                    │       ├── PhysicalScan { table: partsupp }
+                    │       └── PhysicalProjection { exprs: [ #0 ] }
+                    │           └── PhysicalFilter { cond: Like { expr: #1, pattern: "indian%", negated: false, case_insensitive: false } }
+                    │               └── PhysicalScan { table: part }
+                    └── PhysicalProjection
+                        ├── exprs:
+                        │   ┌── #0
+                        │   ├── #1
+                        │   └── Mul
+                        │       ├── 0.5(float)
+                        │       └── Cast { cast_to: Float64, child: #2 }
+                        └── PhysicalProjection { exprs: [ #0, #1, #4 ] }
+                            └── PhysicalNestedLoopJoin
+                                ├── join_type: LeftOuter
+                                ├── cond:And
+                                │   ├── Eq
+                                │   │   ├── #0
+                                │   │   └── #2
+                                │   └── Eq
+                                │       ├── #1
+                                │       └── #3
+                                ├── PhysicalAgg { aggrs: [], groups: [ #0, #1 ] }
+                                │   └── PhysicalNestedLoopJoin
+                                │       ├── join_type: LeftMark
+                                │       ├── cond:Eq
+                                │       │   ├── #0
+                                │       │   └── #5
+                                │       ├── PhysicalScan { table: partsupp }
+                                │       └── PhysicalProjection { exprs: [ #0 ] }
+                                │           └── PhysicalFilter { cond: Like { expr: #1, pattern: "indian%", negated: false, case_insensitive: false } }
+                                │               └── PhysicalScan { table: part }
+                                └── PhysicalAgg
+                                    ├── aggrs:Agg(Sum)
+                                    │   └── [ #6 ]
+                                    ├── groups: [ #0, #1 ]
+                                    └── PhysicalFilter
+                                        ├── cond:And
+                                        │   ├── Eq
+                                        │   │   ├── #3
+                                        │   │   └── #0
+                                        │   ├── Eq
+                                        │   │   ├── #4
+                                        │   │   └── #1
+                                        │   ├── Geq
+                                        │   │   ├── #12
+                                        │   │   └── Cast { cast_to: Date32, child: "1996-01-01" }
+                                        │   └── Lt
+                                        │       ├── #12
+                                        │       └── Add
+                                        │           ├── Cast { cast_to: Date32, child: "1996-01-01" }
+                                        │           └── INTERVAL_MONTH_DAY_NANO (12, 0, 0)
+                                        └── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
+                                            ├── PhysicalAgg { aggrs: [], groups: [ #0, #1 ] }
+                                            │   └── PhysicalNestedLoopJoin
+                                            │       ├── join_type: LeftMark
+                                            │       ├── cond:Eq
+                                            │       │   ├── #0
+                                            │       │   └── #5
+                                            │       ├── PhysicalScan { table: partsupp }
+                                            │       └── PhysicalProjection { exprs: [ #0 ] }
+                                            │           └── PhysicalFilter { cond: Like { expr: #1, pattern: "indian%", negated: false, case_insensitive: false } }
+                                            │               └── PhysicalScan { table: part }
+                                            └── PhysicalScan { table: lineitem }
 */
 

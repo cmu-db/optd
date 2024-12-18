@@ -32,6 +32,6 @@
     select * from t1, (select * from t2, t3) where t1v1 = t2v1 and t1v2 = t3v2;
   desc: Test whether the optimizer enumerates all 3-join orders. (It don't currently)
   tasks:
-    - explain[disable_pruning]:logical_join_orders
-    - explain:logical_join_orders,logical_optd,physical_optd
+    - explain[disable_pruning]:logical_join_orders,physical_optd
+    - explain:logical_join_orders,physical_optd
     - execute

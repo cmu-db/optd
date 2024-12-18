@@ -50,7 +50,7 @@ LogicalProjection
         │       └── Add
         │           ├── Cast { cast_to: Date32, child: "1995-09-01" }
         │           └── INTERVAL_MONTH_DAY_NANO (1, 0, 0)
-        └── LogicalJoin { join_type: Cross, cond: true }
+        └── LogicalJoin { join_type: Inner, cond: true }
             ├── LogicalScan { table: lineitem }
             └── LogicalScan { table: part }
 PhysicalProjection

@@ -68,9 +68,9 @@ LogicalLimit { skip: 0(i64), fetch: 20(i64) }
                 │   └── Eq
                 │       ├── #3
                 │       └── #33
-                └── LogicalJoin { join_type: Cross, cond: true }
-                    ├── LogicalJoin { join_type: Cross, cond: true }
-                    │   ├── LogicalJoin { join_type: Cross, cond: true }
+                └── LogicalJoin { join_type: Inner, cond: true }
+                    ├── LogicalJoin { join_type: Inner, cond: true }
+                    │   ├── LogicalJoin { join_type: Inner, cond: true }
                     │   │   ├── LogicalScan { table: customer }
                     │   │   └── LogicalScan { table: orders }
                     │   └── LogicalScan { table: lineitem }
@@ -89,26 +89,26 @@ PhysicalLimit { skip: 0(i64), fetch: 20(i64) }
             │           └── #23
             ├── groups: [ #0, #1, #5, #4, #34, #2, #7 ]
             └── PhysicalHashJoin { join_type: Inner, left_keys: [ #3 ], right_keys: [ #0 ] }
-                ├── PhysicalProjection { exprs: [ #25, #26, #27, #28, #29, #30, #31, #32, #16, #17, #18, #19, #20, #21, #22, #23, #24, #0, #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15 ] }
-                │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-                │       ├── PhysicalFilter
-                │       │   ├── cond:Eq
-                │       │   │   ├── #8
-                │       │   │   └── "R"
-                │       │   └── PhysicalScan { table: lineitem }
-                │       └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-                │           ├── PhysicalFilter
-                │           │   ├── cond:And
-                │           │   │   ├── Geq
-                │           │   │   │   ├── #4
-                │           │   │   │   └── Cast { cast_to: Date32, child: "1993-07-01" }
-                │           │   │   └── Lt
-                │           │   │       ├── #4
-                │           │   │       └── Add
-                │           │   │           ├── Cast { cast_to: Date32, child: "1993-07-01" }
-                │           │   │           └── INTERVAL_MONTH_DAY_NANO (3, 0, 0)
-                │           │   └── PhysicalScan { table: orders }
-                │           └── PhysicalScan { table: customer }
+                ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #8 ], right_keys: [ #0 ] }
+                │   ├── PhysicalProjection { exprs: [ #9, #10, #11, #12, #13, #14, #15, #16, #0, #1, #2, #3, #4, #5, #6, #7, #8 ] }
+                │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
+                │   │       ├── PhysicalFilter
+                │   │       │   ├── cond:And
+                │   │       │   │   ├── Geq
+                │   │       │   │   │   ├── #4
+                │   │       │   │   │   └── Cast { cast_to: Date32, child: "1993-07-01" }
+                │   │       │   │   └── Lt
+                │   │       │   │       ├── #4
+                │   │       │   │       └── Add
+                │   │       │   │           ├── Cast { cast_to: Date32, child: "1993-07-01" }
+                │   │       │   │           └── INTERVAL_MONTH_DAY_NANO (3, 0, 0)
+                │   │       │   └── PhysicalScan { table: orders }
+                │   │       └── PhysicalScan { table: customer }
+                │   └── PhysicalFilter
+                │       ├── cond:Eq
+                │       │   ├── #8
+                │       │   └── "R"
+                │       └── PhysicalScan { table: lineitem }
                 └── PhysicalScan { table: nation }
 */
 

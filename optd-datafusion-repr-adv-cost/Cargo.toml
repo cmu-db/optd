@@ -21,6 +21,5 @@ rayon = "1.10"
 itertools = "0.13"
 test-case = "3.3"
 tracing = "0.1"
-tracing-subscriber = "0.3"
 optd-gungnir = { path = "../optd-gungnir", version = "0.1" }
 serde_with = { version = "3.7.0", features = ["json"] }
