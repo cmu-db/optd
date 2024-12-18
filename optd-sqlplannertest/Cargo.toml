@@ -13,7 +13,7 @@ repository = { workspace = true }
 [dependencies]
 clap = { version = "4.5.4", features = ["derive"] }
 anyhow = { version = "1", features = ["backtrace"] }
-sqlplannertest = "0.4"
+sqlplannertest = "0.4.1"
 async-trait = "0.1"
 datafusion-optd-cli = { path = "../datafusion-optd-cli", version = "43.0.0" }
 optd-datafusion-repr-adv-cost = { path = "../optd-datafusion-repr-adv-cost", version = "0.1" }

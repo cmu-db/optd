@@ -4644,7 +4644,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn",
@@ -4719,9 +4719,9 @@ dependencies = [
 
 [[package]]
 name = "sqlplannertest"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3510ad2ca50c652ccef035ae6fe3596c306f365a1319d8ca116f01381127a335"
+checksum = "d5fa1bbd1b93ed508085086dfdfec2cd5641ae520b42bbd973af0a8a0451aabf"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4734,6 +4734,7 @@ dependencies = [
  "serde_yaml",
  "similar",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

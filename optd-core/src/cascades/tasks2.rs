@@ -160,10 +160,14 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
                 continue;
             }
             // Skip transformation rules when budget is used
-            if self.optimizer.ctx.logical_budget_used && !rule.is_impl_rule() {
+            if (self.optimizer.ctx.logical_budget_used || self.optimizer.ctx.all_budget_used)
+                && !rule.is_impl_rule()
+            {
                 continue;
             }
-            if self.optimizer.ctx.all_budget_used {
+            if self.optimizer.ctx.all_budget_used
+                && self.optimizer.get_group_winner(group_id).has_full_winner()
+            {
                 break;
             }
             if top_matches(rule.matcher(), expr.typ.clone()) {
@@ -246,7 +250,8 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
         let rule = self.optimizer.rules()[rule_id].clone();
 
         let binding_exprs = match_and_pick_expr(rule.matcher(), expr_id, self.optimizer);
-        if binding_exprs.len() >= 100 {
+        const BINDING_EXPR_WARNING_THRESHOLD: usize = 200;
+        if binding_exprs.len() >= BINDING_EXPR_WARNING_THRESHOLD {
             tracing::warn!(
                 event = "rule_application",
                 task = "apply_rule",
@@ -302,11 +307,15 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
                 }
             }
 
-            if self.optimizer.ctx.all_budget_used {
-                break;
-            }
-            if self.optimizer.ctx.logical_budget_used && !rule.is_impl_rule() {
+            if (self.optimizer.ctx.logical_budget_used || self.optimizer.ctx.all_budget_used)
+                && !rule.is_impl_rule()
+            {
                 continue;
+            }
+            if self.optimizer.ctx.all_budget_used
+                && self.optimizer.get_group_winner(group_id).has_full_winner()
+            {
+                break;
             }
 
             trace!(event = "before_apply_rule", task = "apply_rule", input_binding=%binding);
@@ -540,7 +549,7 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
 
     fn on_task_start(&self) {
         if (self.optimizer.ctx.all_budget_used || self.optimizer.ctx.logical_budget_used)
-            && self.steps % 100 == 0
+            && self.steps % 100000 == 0
         {
             println!("out of budget, dumping info");
             println!("step={}", self.steps);

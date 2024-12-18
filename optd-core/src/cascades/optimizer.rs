@@ -297,7 +297,7 @@ impl<T: NodeType, M: Memo<T>> CascadesOptimizer<T, M> {
         trace!(event = "fire_optimize_tasks", root_group_id = %group_id);
         let mut task = TaskContext::new(self);
         // 32MB stack for the optimization process, TODO: reduce memory footprint
-        stacker::maybe_grow(32 * 1024 * 1024, 32 * 1024 * 1024, || {
+        stacker::grow(32 * 1024 * 1024, || {
             let fut: Pin<Box<dyn Future<Output = ()>>> = Box::pin(task.fire_optimize(group_id));
             fut.block_on();
         });

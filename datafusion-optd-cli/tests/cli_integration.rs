@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use assert_cmd::prelude::CommandCargoExt;
 
@@ -55,11 +55,8 @@ fn init() {
 fn cli_test_tpch() {
     let mut cmd = Command::cargo_bin("datafusion-optd-cli").unwrap();
     cmd.current_dir(".."); // all paths in `test.sql` assume we're in the base dir of the repo
-    cmd.args([
-        "--enable-df-logical",
-        "--file",
-        "datafusion-optd-cli/tpch-sf0_01/test.sql",
-    ]);
+    cmd.args(["--file", "datafusion-optd-cli/tpch-sf0_01/test.sql"]);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let status = cmd.status().unwrap();
     assert!(
         status.success(),
