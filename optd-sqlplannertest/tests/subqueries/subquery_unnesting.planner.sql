@@ -62,14 +62,14 @@ LogicalProjection { exprs: [ #0, #1 ] }
                                     ├── LogicalAgg { exprs: [], groups: [ #0 ] }
                                     │   └── LogicalScan { table: t1 }
                                     └── LogicalScan { table: t2 }
-PhysicalProjection { exprs: [ #0, #1 ], cost: {compute=4033008,io=4000}, stat: {row_cnt=1} }
-└── PhysicalProjection { exprs: [ #0, #1, #2, #4 ], cost: {compute=4033005,io=4000}, stat: {row_cnt=1} }
+PhysicalProjection { exprs: [ #0, #1 ], cost: {compute=4033080,io=4000}, stat: {row_cnt=10} }
+└── PhysicalProjection { exprs: [ #0, #1, #2, #4 ], cost: {compute=4033050,io=4000}, stat: {row_cnt=10} }
     └── PhysicalFilter
         ├── cond:Gt
         │   ├── #4
         │   └── 100(i64)
         ├── cost: {compute=4033000,io=4000}
-        ├── stat: {row_cnt=1}
+        ├── stat: {row_cnt=10}
         └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ], cost: {compute=4030000,io=4000}, stat: {row_cnt=1000} }
             ├── PhysicalScan { table: t1, cost: {compute=0,io=1000}, stat: {row_cnt=1000} }
             └── PhysicalNestedLoopJoin
@@ -168,14 +168,14 @@ LogicalProjection { exprs: [ #0, #1 ] }
                                                     ├── LogicalAgg { exprs: [], groups: [ #0 ] }
                                                     │   └── LogicalScan { table: t1 }
                                                     └── LogicalScan { table: t2 }
-PhysicalProjection { exprs: [ #0, #1 ], cost: {compute=44228008,io=5000}, stat: {row_cnt=1} }
-└── PhysicalProjection { exprs: [ #0, #1, #2, #4 ], cost: {compute=44228005,io=5000}, stat: {row_cnt=1} }
+PhysicalProjection { exprs: [ #0, #1 ], cost: {compute=44228080,io=5000}, stat: {row_cnt=10} }
+└── PhysicalProjection { exprs: [ #0, #1, #2, #4 ], cost: {compute=44228050,io=5000}, stat: {row_cnt=10} }
     └── PhysicalFilter
         ├── cond:Gt
         │   ├── #4
         │   └── 100(i64)
         ├── cost: {compute=44228000,io=5000}
-        ├── stat: {row_cnt=1}
+        ├── stat: {row_cnt=10}
         └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ], cost: {compute=44225000,io=5000}, stat: {row_cnt=1000} }
             ├── PhysicalScan { table: t1, cost: {compute=0,io=1000}, stat: {row_cnt=1000} }
             └── PhysicalNestedLoopJoin
@@ -359,14 +359,14 @@ LogicalProjection { exprs: [ #0, #1 ] }
                                         └── LogicalJoin { join_type: Inner, cond: true }
                                             ├── LogicalScan { table: t2 }
                                             └── LogicalScan { table: t3 }
-PhysicalProjection { exprs: [ #0, #1 ], cost: {compute=4036008,io=5000}, stat: {row_cnt=1} }
-└── PhysicalProjection { exprs: [ #0, #1, #2, #4 ], cost: {compute=4036005,io=5000}, stat: {row_cnt=1} }
+PhysicalProjection { exprs: [ #0, #1 ], cost: {compute=4036080,io=5000}, stat: {row_cnt=10} }
+└── PhysicalProjection { exprs: [ #0, #1, #2, #4 ], cost: {compute=4036050,io=5000}, stat: {row_cnt=10} }
     └── PhysicalFilter
         ├── cond:Gt
         │   ├── #4
         │   └── 100(i64)
         ├── cost: {compute=4036000,io=5000}
-        ├── stat: {row_cnt=1}
+        ├── stat: {row_cnt=10}
         └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ], cost: {compute=4033000,io=5000}, stat: {row_cnt=1000} }
             ├── PhysicalScan { table: t1, cost: {compute=0,io=1000}, stat: {row_cnt=1000} }
             └── PhysicalNestedLoopJoin

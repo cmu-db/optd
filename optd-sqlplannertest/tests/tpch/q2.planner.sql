@@ -243,17 +243,18 @@ PhysicalLimit { skip: 0(i64), fetch: 100(i64) }
         └── PhysicalHashJoin { join_type: Inner, left_keys: [ #19, #0 ], right_keys: [ #1, #0 ] }
             ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #23 ], right_keys: [ #0 ] }
             │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #12 ], right_keys: [ #0 ] }
-            │   │   ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0, #9 ], right_keys: [ #0, #1 ] }
-            │   │   │   ├── PhysicalNestedLoopJoin { join_type: Inner, cond: true }
-            │   │   │   │   ├── PhysicalFilter
-            │   │   │   │   │   ├── cond:And
-            │   │   │   │   │   │   ├── Eq
-            │   │   │   │   │   │   │   ├── Cast { cast_to: Int64, child: #5 }
-            │   │   │   │   │   │   │   └── 4(i64)
-            │   │   │   │   │   │   └── Like { expr: #4, pattern: "%TIN", negated: false, case_insensitive: false }
-            │   │   │   │   │   └── PhysicalScan { table: part }
-            │   │   │   │   └── PhysicalScan { table: supplier }
-            │   │   │   └── PhysicalScan { table: partsupp }
+            │   │   ├── PhysicalProjection { exprs: [ #0, #1, #2, #3, #4, #5, #6, #7, #8, #14, #15, #16, #17, #18, #19, #20, #9, #10, #11, #12, #13 ] }
+            │   │   │   └── PhysicalHashJoin { join_type: Inner, left_keys: [ #10 ], right_keys: [ #0 ] }
+            │   │   │       ├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
+            │   │   │       │   ├── PhysicalFilter
+            │   │   │       │   │   ├── cond:And
+            │   │   │       │   │   │   ├── Eq
+            │   │   │       │   │   │   │   ├── Cast { cast_to: Int64, child: #5 }
+            │   │   │       │   │   │   │   └── 4(i64)
+            │   │   │       │   │   │   └── Like { expr: #4, pattern: "%TIN", negated: false, case_insensitive: false }
+            │   │   │       │   │   └── PhysicalScan { table: part }
+            │   │   │       │   └── PhysicalScan { table: partsupp }
+            │   │   │       └── PhysicalScan { table: supplier }
             │   │   └── PhysicalScan { table: nation }
             │   └── PhysicalFilter
             │       ├── cond:Eq

@@ -101,7 +101,6 @@ fn enumerate_join_order_expr_inner<M: Memo<DfNodeType> + ?Sized>(
                 .take(MAX_JOIN_ORDER_OUTPUT)
                 .map(|x| (*x).clone())
                 .collect_vec()
-                .into()
         }
         _ => Vec::new(),
     }
@@ -139,7 +138,7 @@ impl<M: Memo<DfNodeType>> MemoExt for M {
         let mut visited = HashMap::new();
         enumerate_join_order_group_inner(self, entry, &mut visited, &mut false)
             .iter()
-            .map(|x| x.clone())
+            .cloned()
             .collect()
     }
 }
