@@ -46,9 +46,9 @@ jobs:
         with:
           command: clippy
           args: --workspace --all-targets --all-features --locked -- -D warnings
+      - uses: taiki-e/install-action@nextest
       - name: Test
         uses: actions-rs/cargo@v1
         with:
-          command: test
-          args: --no-fail-fast --workspace --all-features --locked
-      
+          command: nextest
+          args: run --no-fail-fast --workspace --all-features --locked
