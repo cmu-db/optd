@@ -1,0 +1,12 @@
+- sql: |
+    create table t1(t1v1 int, t1v2 int);
+    create table t2(t2v1 int, t2v3 int);
+    insert into t1 values (0, 0), (1, 1), (2, 2);
+    insert into t2 values (0, 200), (1, 201), (2, 202);
+  tasks:
+    - execute
+- sql: |
+    select * from t1 as a, t1 as b where a.t1v1 = b.t1v1 order by a.t1v1;
+  desc: test self join
+  tasks:
+    - explain[dump_memo_table,enable_tracing]:physical_optd

@@ -6,6 +6,7 @@ use tracing::trace;
 use super::memo::MemoPlanNode;
 use super::rule_match::match_and_pick_expr;
 use super::{optimizer::RuleId, CascadesOptimizer, ExprId, GroupId, Memo};
+use crate::cascades::optimizer::OptimizerTrace;
 use crate::cascades::{
     memo::{Winner, WinnerInfo},
     RelNodeContext,
@@ -21,7 +22,12 @@ struct SearchContext {
 
 pub struct TaskContext<'a, T: NodeType, M: Memo<T>> {
     optimizer: &'a mut CascadesOptimizer<T, M>,
+    /// The stage of the process
+    stage: usize,
+    /// Number of tasks fired, used to determine the explore budget
     steps: usize,
+    /// Counter of trace produced, used in the traces
+    trace_steps: usize,
 }
 
 /// Ensures we don't run into cycles / dead loops.
@@ -32,14 +38,17 @@ pub enum TaskDesc {
 }
 
 impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
-    pub fn new(optimizer: &'a mut CascadesOptimizer<T, M>) -> Self {
+    pub fn new(optimizer: &'a mut CascadesOptimizer<T, M>, stage: usize) -> Self {
         Self {
+            stage,
             optimizer,
             steps: 0,
+            trace_steps: 0,
         }
     }
 
     pub async fn fire_optimize(&mut self, group_id: GroupId) {
+        tracing::debug!(event = "fire_optimize", group_id = %group_id);
         self.optimize_group(SearchContext {
             group_id,
             upper_bound: None,
@@ -323,7 +332,25 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
             for expr in applied {
                 trace!(event = "after_apply_rule", task = "apply_rule", output_binding=%expr);
                 // TODO: remove clone in the below line
-                if let Some(expr_id) = self.optimizer.add_expr_to_group(expr.clone(), group_id) {
+                if let Some(produced_expr_id) =
+                    self.optimizer.add_expr_to_group(expr.clone(), group_id)
+                {
+                    if self.optimizer.prop.enable_tracing {
+                        self.trace_steps += 1;
+                        self.optimizer
+                            .stats
+                            .trace
+                            .entry(group_id)
+                            .or_default()
+                            .push(OptimizerTrace::ApplyRule {
+                                stage: self.stage,
+                                step: self.trace_steps,
+                                group_id,
+                                applied_expr_id: expr_id,
+                                produced_expr_id,
+                                rule_id,
+                            });
+                    }
                     let typ = expr.unwrap_typ();
                     if typ.is_logical() {
                         self.optimize_expr(
@@ -331,7 +358,7 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
                                 group_id,
                                 upper_bound: ctx.upper_bound,
                             },
-                            expr_id,
+                            produced_expr_id,
                             exploring,
                         )
                         .await;
@@ -341,7 +368,7 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
                                 group_id,
                                 upper_bound: ctx.upper_bound,
                             },
-                            expr_id,
+                            produced_expr_id,
                         )
                         .await;
                     }
@@ -384,7 +411,13 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
         expr_id: ExprId,
         expr: &MemoPlanNode<T>,
         predicates: &[ArcPredNode<T>],
-    ) -> (Vec<Option<Arc<Statistics>>>, Vec<Cost>, Cost, Cost) {
+    ) -> (
+        Vec<Option<Arc<Statistics>>>,
+        Vec<Cost>,
+        Cost,
+        Cost,
+        Vec<Option<ExprId>>,
+    ) {
         let context = RelNodeContext {
             expr_id,
             group_id,
@@ -392,6 +425,7 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
         };
         let mut input_stats = Vec::with_capacity(expr.children.len());
         let mut input_cost = Vec::with_capacity(expr.children.len());
+        let mut children_winners = Vec::with_capacity(expr.children.len());
         let cost = self.optimizer.cost();
         #[allow(clippy::needless_range_loop)]
         for idx in 0..expr.children.len() {
@@ -406,6 +440,7 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
                     .map(|x| x.total_cost.clone())
                     .unwrap_or_else(|| cost.zero()),
             );
+            children_winners.push(winner.map(|x| x.expr_id));
         }
         let input_stats_ref = input_stats
             .iter()
@@ -419,7 +454,13 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
             self.optimizer,
         );
         let total_cost = cost.sum(&operation_cost, &input_cost);
-        (input_stats, input_cost, total_cost, operation_cost)
+        (
+            input_stats,
+            input_cost,
+            total_cost,
+            operation_cost,
+            children_winners,
+        )
     }
 
     async fn optimize_input_inner(&mut self, ctx: SearchContext, expr_id: ExprId) {
@@ -465,7 +506,7 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
 
         for (input_group_idx, _) in expr.children.iter().enumerate() {
             // Before optimizing each of the child, infer a current lower bound cost
-            let (_, input_costs, total_cost, _) =
+            let (_, input_costs, total_cost, _, _) =
                 self.gather_statistics_and_costs(group_id, expr_id, &expr, &predicates);
 
             let child_upper_bound = if !self.optimizer.prop.disable_pruning {
@@ -513,7 +554,7 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
         }
 
         // Compute everything again
-        let (input_stats, _, total_cost, operation_cost) =
+        let (input_stats, _, total_cost, operation_cost, children_winner) =
             self.gather_statistics_and_costs(group_id, expr_id, &expr, &predicates);
         let input_stats_ref = input_stats
             .iter()
@@ -542,6 +583,21 @@ impl<'a, T: NodeType, M: Memo<T>> TaskContext<'a, T, M> {
             operation_weighted_cost: cost.weighted_cost(&operation_cost),
             statistics,
         };
+        if self.optimizer.prop.enable_tracing {
+            self.trace_steps += 1;
+            self.optimizer
+                .stats
+                .trace
+                .entry(group_id)
+                .or_default()
+                .push(OptimizerTrace::DecideWinner {
+                    stage: self.stage,
+                    step: self.trace_steps,
+                    group_id,
+                    proposed_winner_info: proposed_winner.clone(),
+                    children_winner: children_winner.into_iter().map(|x| x.unwrap()).collect(),
+                });
+        }
         self.update_winner_if_better(group_id, proposed_winner);
         trace!(event = "task_finish", task = "optimize_inputs", expr_id = %expr_id, result = "resolved");
         self.optimizer.mark_task_end(&desc);

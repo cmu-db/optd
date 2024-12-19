@@ -91,16 +91,10 @@ impl DatafusionDBMS {
             .lock()
             .unwrap();
         let optimizer = guard.as_mut().unwrap().optd_optimizer_mut();
-        if flags.panic_on_budget {
-            optimizer.panic_on_explore_limit(true);
-        } else {
-            optimizer.panic_on_explore_limit(false);
-        }
-        if flags.disable_pruning {
-            optimizer.disable_pruning(true);
-        } else {
-            optimizer.disable_pruning(false);
-        }
+
+        optimizer.prop.panic_on_budget = flags.panic_on_budget;
+        optimizer.prop.enable_tracing = flags.enable_tracing;
+        optimizer.prop.disable_pruning = flags.disable_pruning;
         let rules = optimizer.rules();
         if flags.enable_logical_rules.is_empty() {
             for r in 0..rules.len() {
@@ -200,17 +194,6 @@ impl DatafusionDBMS {
                     result.push(row);
                 }
             }
-        }
-        if flags.dump_memo_table {
-            let mut guard = self
-                .optd_optimizer
-                .as_ref()
-                .unwrap()
-                .optimizer
-                .lock()
-                .unwrap();
-            let optimizer = guard.as_mut().unwrap().optd_optimizer_mut();
-            optimizer.dump();
         }
         Ok(result)
     }
@@ -333,6 +316,19 @@ impl sqlplannertest::PlannerTestRunner for DatafusionDBMS {
             } else if task.starts_with("explain") {
                 self.task_explain(r, &test_case.sql, task, &flags).await?;
             }
+            if flags.dump_memo_table {
+                let mut guard = self
+                    .optd_optimizer
+                    .as_ref()
+                    .unwrap()
+                    .optimizer
+                    .lock()
+                    .unwrap();
+                let optimizer = guard.as_mut().unwrap().optd_optimizer_mut();
+                let mut buf = String::new();
+                optimizer.dump(&mut buf).unwrap();
+                r.push_str(&buf);
+            }
         }
         Ok(result)
     }
@@ -348,6 +344,7 @@ pub struct TestFlags {
     enable_df_logical: bool,
     enable_logical_rules: Vec<String>,
     panic_on_budget: bool,
+    enable_tracing: bool,
     dump_memo_table: bool,
     disable_pruning: bool,
 }
@@ -382,6 +379,8 @@ pub fn extract_flags(task: &str) -> Result<TestFlags> {
                 options.dump_memo_table = true;
             } else if flag == "disable_pruning" {
                 options.disable_pruning = true;
+            } else if flag == "enable_tracing" {
+                options.enable_tracing = true;
             } else {
                 bail!("Unknown flag: {}", flag);
             }
