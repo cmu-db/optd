@@ -132,11 +132,12 @@ PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
 (Join (Join t3 t1) t2)
 (Join (Join t3 t2) t1)
 
-PhysicalHashJoin { join_type: Inner, left_keys: [ #1 ], right_keys: [ #0 ] }
-├── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #0 ] }
-│   ├── PhysicalScan { table: t1 }
-│   └── PhysicalScan { table: t2 }
-└── PhysicalScan { table: t3 }
+PhysicalProjection { exprs: [ #4, #5, #0, #1, #2, #3 ] }
+└── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #2 ] }
+    ├── PhysicalScan { table: t2 }
+    └── PhysicalHashJoin { join_type: Inner, left_keys: [ #0 ], right_keys: [ #1 ] }
+        ├── PhysicalScan { table: t3 }
+        └── PhysicalScan { table: t1 }
 0 0 0 200 0 300
 1 1 1 201 1 301
 2 2 2 202 2 302

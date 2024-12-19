@@ -407,13 +407,28 @@ impl<T: NodeType> NaiveMemo<T> {
         trace!(event = "merge_group", merge_into = %merge_into, merge_from = %merge_from);
         let group_merge_from = self.groups.remove(&merge_from).unwrap();
         let group_merge_into = self.groups.get_mut(&merge_into).unwrap();
-        // TODO: update winner, cost and properties
+
+        // Merge expressions
         for from_expr in group_merge_from.group_exprs {
             let ret = self.expr_id_to_group_id.insert(from_expr, merge_into);
             assert!(ret.is_some());
             group_merge_into.group_exprs.insert(from_expr);
         }
         self.merged_group_mapping.insert(merge_from, merge_into);
+
+        // Merge winner
+        if let Some(winner) = group_merge_from.info.winner.as_full_winner() {
+            match &group_merge_into.info.winner {
+                Winner::Impossible | Winner::Unknown => {
+                    group_merge_into.info.winner = Winner::Full(winner.clone());
+                }
+                Winner::Full(winner_into) => {
+                    if winner.total_weighted_cost < winner_into.total_weighted_cost {
+                        group_merge_into.info.winner = Winner::Full(winner.clone());
+                    }
+                }
+            }
+        }
 
         // Update all indexes and other data structures
         // 1. update merged group mapping -- could be optimized with union find
