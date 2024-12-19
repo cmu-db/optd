@@ -113,6 +113,9 @@ pub trait Memo<T: NodeType>: 'static + Send + Sync {
     /// The group id is volatile, depending on whether the groups are merged.
     fn get_group_id(&self, expr_id: ExprId) -> GroupId;
 
+    /// Reduce the group ID to the merged group ID.
+    fn reduce_group(&self, group_id: GroupId) -> GroupId;
+
     /// Get the memoized representation of a node.
     fn get_expr_memoed(&self, expr_id: ExprId) -> ArcMemoPlanNode<T>;
 
@@ -315,6 +318,10 @@ impl<T: NodeType> Memo<T> for NaiveMemo<T> {
     fn estimated_plan_space(&self) -> usize {
         self.expr_id_to_expr_node.len()
     }
+
+    fn reduce_group(&self, group_id: GroupId) -> GroupId {
+        self.merged_group_mapping[&group_id]
+    }
 }
 
 impl<T: NodeType> NaiveMemo<T> {
@@ -394,10 +401,6 @@ impl<T: NodeType> NaiveMemo<T> {
             }
             assert_eq!(cnt, num_of_exprs);
         }
-    }
-
-    fn reduce_group(&self, group_id: GroupId) -> GroupId {
-        self.merged_group_mapping[&group_id]
     }
 
     fn merge_group_inner(&mut self, merge_into: GroupId, merge_from: GroupId) {

@@ -154,6 +154,7 @@ impl DatafusionOptimizer {
                     partial_explore_iter: Some(1 << 18),
                     partial_explore_space: Some(1 << 14),
                     disable_pruning: false,
+                    enable_tracing: false,
                 },
             ),
             heuristic_optimizer: HeuristicsOptimizer::new_with_rules(
