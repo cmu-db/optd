@@ -3,7 +3,7 @@ authors = ["Alex Chi"]
 language = "en"
 multilingual = false
 src = "src"
-title = "Introduction to optd"
+title = "the optd book"
 
 [output.html]
 additional-css = ["custom.css"]
