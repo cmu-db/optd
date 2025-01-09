@@ -1,0 +1,3 @@
+[workspace]
+members = ["optd-tmp"]
+resolver = "2"
