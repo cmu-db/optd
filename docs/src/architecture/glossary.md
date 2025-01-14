@@ -17,6 +17,8 @@ A **logical expression** is a tree/DAG of logical operators.
 
 A **physical expression** is a tree/DAG of physical operators.
 
+The term **expression** in the context of Cascades can refer to either a relational or a scalar expression.
+
 ### Properties
 
 **Properties** are metadata computed (and sometimes stored) for each node in an expression.
