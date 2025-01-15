@@ -1,6 +1,7 @@
 [package]
-name = "optd-tmp"
+name = "optd-core"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+trait-variant = "0.1.2"
