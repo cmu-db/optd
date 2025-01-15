@@ -4,31 +4,52 @@ TODO make names make sense.
 
 There are several concepts in the optimizer that we would like to model with strong types.
 
+## Proposed Glossary
+
+In memo table land:
+
+- Expression: A logical, physical, or scalar operator in the mutually recursive memo table structure
+- Relation(al) Expression: A logical or physical expression in the memo table
+- Logical Expression: A logical relational operator with group identifiers as children
+- Physical Expression: A physical relational operator with group identifiers as children
+- Scalar Expression: A scalar operator, otherwise known as SQL expression or a SQL predicate
+
+In search / plan enumeration land:
+
+- Logical Plan: The initial in-memory input logical plan of operators (entrypoint for optimization)
+- Physical Plan: The final in-memory output physical plan of operators (materialized from memo)
+- Logical Operator: An in-memory logical node in a logical plan
+- Physical Operator: An in-memory physical node in a physical plan
+- (TODO) Partial Logical Plan: Intermediate state for transformation rule matching and application
+- (TODO) Partial Physical Plan: Intermediate state for implementation rule matching and application
+
 ## Memo Table
 
 The memo table will be stored on disk, which means it would be ideal if the in-memory structure of
-memo table objects are exactly the same as the on-disk representation to allow for zero-copy
+memo table objects is exactly the same as the on-disk representation to allow for zero-copy
 deserialization.
 
 The memo data structure is a mutually recursive structure connected by identifiers (not pointers).
-Relational expressions have group identifiers as children, and groups themselves represent a set of
-equivalent "things" (where "things" can be logical expressions, physical expressions, or scalars).
+Expressions have group identifiers as children, and groups themselves represent a set of equivalent
+"things" (where "things" can be logical, physical, or scalar expressions).
 
-There should be 1 overarching type to represent a node / object in the memo table, which I propose
-should be called `MemoNode`. This means that `MemoNode` should be the representation that we use to
-ingest and extract data to and from the persistent memo table.
+There should be 1 overarching type to represent a relation / operator in the memo table, which I
+propose should be called `Expression`. This means that `Expression` should be the representation
+that we use to ingest and extract data to and from the persistent memo table. This is _different_
+from the representation we use to ingest the initial `LogicalPlan` and output the final
+`PhysicalPlan`.
 
 ```rust
-/// A type representing an optimization node / object in the memo table.
-pub enum MemoNode {
-    Relation(Relation),
-    Scalar(Scalar),
+/// A type representing an optimization operator in the memo table.
+pub enum Expression {
+    RelationExpression(RelationExpression),
+    ScalarExpression(ScalarExpression),
 }
 
-/// A type representing logical or physical operators in a relational algebraic query plan.
-pub enum Relation {
-    Logical(LogicalExpression),
-    Physical(PhysicalExpression),
+/// A type representing logical or physical expressions in the memo table.
+pub enum RelationExpression {
+    LogicalExpression(LogicalExpression),
+    PhysicalExpression(PhysicalExpression),
 }
 
 /// A type that represent scalar SQL expression / predicates.
@@ -38,65 +59,64 @@ pub struct Scalar;
 ```
 
 Since we want to store both relational operators as well as scalar SQL expressions in the memo
-table, we represent a `MemoNode` as sum type over a `Scalar` type and a `Relation` type, where
-`Relation` is a sum over `LogicalExpression` and `PhysicalExpression`.
+table, we represent a `Expression` as sum type over a `ScalarExpression` type and a
+`RelationExpression` type, where `RelationExpression` is a sum over `LogicalExpression` and
+`PhysicalExpression`.
 
-For `LogicalExpression` and `PhysicalExpression`, these are sum types representing all of the
-possible relational operators, both logical and physical.
+`LogicalExpression` and `PhysicalExpression` are sum types representing all of the possible
+relational operators, both logical and physical.
 
 ```rust
-/// A type representing different kinds of logical expressions / operators.
+/// A type representing different kinds of logical expressions in the memo table.
 pub enum LogicalExpression {
     Scan(Scan),
     Filter(Filter),
     Join(Join),
     Sort(Sort),
-    <-- snip -->
 }
 
-/// A logical Filter expression / relation.
+/// A logical `Filter` operator.
 ///
 /// This type will have a dedicated SQL table associated with it.
 struct Filter {
-    /// A Filter relation has only 1 child.
+    /// A `Filter` relation has only 1 child.
     child: GroupId,
     /// Note that we use groups to handle equivalent SQL predicates as well.
     predicate: GroupId,
 }
 
-/// A logical Join expression / relation.
+/// A logical `Join` operator.
 ///
 /// This type will have a dedicated SQL table associated with it.
 struct Join {
-    /// The left side of the Join relation.
+    /// The left side of the `Join` relation.
     left: GroupId,
-    /// The right side of the Join relation.
+    /// The right side of the `Join` relation.
     right: GroupId,
     /// Note that we use groups to handle equivalent SQL predicates as well.
     condition: GroupId,
 }
 
-/// A type representing different kinds of physical expressions / operators.
+/// A type representing different kinds of physical expressions in the memo table.
 pub enum PhysicalExpression {
     TableScan(TableScan),
     PhysicalFilter(PhysicalFilter),
     SortMergeJoin(SortMergeJoin),
     HashJoin(HashJoin),
     MergeSort(MergeSort),
-    <-- snip -->
 }
 ```
 
 The goal is to have a table representing each variant, which would enable zero-copy deserialization
-from the memo table into one of these expressions. This means that retrieving a `MemoNode` from the
-memo table should be as simple as wrapping a `LogicalExpression` or `PhysicalExpression` in a
-`Relation` and then a `MemoNode`, meaning CRUD operations should be very simple.
+from the memo table into one of these expressions. This means that retrieving a `Expression`
+from the memo table should be as simple as wrapping a `LogicalExpression` or `PhysicalExpression` in
+a `RelationExpression` and then a `Expression`, meaning CRUD operations should be very simple.
 
 ## Search
 
 Since the memo table does not actually encode query plans directly (it encodes _groups_ of
-relational expressions), we should not be using the same `MemoNode` type to model operations that
-the search and rule engine need.
+relational expressions), we should not be using the same `Expression` type to model operations
+that the search and rule engine need.
 
 ### Input and Output
 
@@ -111,10 +131,12 @@ https://docs.rs/substrait/latest/substrait/proto/rel/enum.RelType.html, but I am
 information we need yet.
 
 ```rust
+/// An in-memory tree of logical operators. Used as the input / entrypoint of the optimizer.
 pub enum LogicalPlan {
     ???
 }
 
+/// An in-memory tree of physical operators. Used as the final materialized output of the optimizer.
 pub enum PhysicalPlan {
     ???
 }
@@ -140,9 +162,9 @@ information for implementation rules.
 ///
 /// TODO Make this an actual tree with the correct modeling of types.
 /// TODO Figure out exact semantics of this type.
-pub enum PartialLogicalExpression {
+pub enum PartialLogicalPlan {
     LogicalOperator(LogicalOperator),
-    Scalar(Scalar),
+    ScalarOperator(ScalarOperator),
     GroupId(GroupId),
 }
 
@@ -153,10 +175,10 @@ pub enum PartialLogicalExpression {
 ///
 /// TODO Make this an actual tree with the correct modeling of types.
 /// TODO Figure out exact semantics of this type.
-pub enum PartialPhysicalExpression {
+pub enum PartialPhysicalPlan {
     LogicalOperator(LogicalOperator),
     PhysicalOperator(PhysicalOperator),
-    Scalar(Scalar),
+    ScalarOperator(ScalarOperator),
     GroupId(GroupId),
 }
 ```
@@ -180,29 +202,45 @@ pub async fn check_transformation(
     &self,
     expr: LogicalExpression,
     rule: Rule,
-) -> Vec<PartialLogicalExpression> {}
+) -> Vec<PartialLogicalPlan> {}
 
 pub async fn check_implementation(
     &self,
     expr: LogicalExpression,
     rule: Rule,
-) -> Vec<PartialPhysicalExpression> {}
+) -> Vec<PartialPhysicalPlan> {}
 
 pub fn apply_transformation(
     &mut self,
-    expr: PartialLogicalExpression,
+    expr: PartialLogicalPlan,
     rule: Rule,
-) -> Vec<MemoNode> {}
+) -> Vec<Expression> {}
 
 pub fn apply_implementation(
     &mut self,
-    expr: PartialPhysicalExpression,
+    expr: PartialPhysicalPlan,
     rule: Rule,
-) -> Vec<MemoNode> {}
+) -> Vec<Expression> {}
 
-pub fn add_expressions(&mut self, new_exprs: Vec<MemoNode>) {}
+pub async fn add_expressions(&mut self, new_exprs: Vec<Expression>) {}
 ```
+
+These types should be _private_ to the rule engine, and it should not be exposed to rule writers.
+Obviously this is easier said than done, and we will likely have to write a proc macro for this.
 
 ## Pipeline Flow
 
-TODO End-to-end description
+The end-to-end pipeline should look something like this:
+
+1. We ingest the input `LogicalPlan` in memory and recursively insert the initial groups and
+expressions into the memo table.
+2. We start up optimization by recursively optimizing the top-level group in the memo table.
+4. For every rule application, we are matching against a `LogicalExpression` in the memo table via
+the functions `check_transformation` or `check_implementation`.
+    - Rules might need to match against specific children of `LogicalExpression`, which means we
+    need to query for specific operators in a group in the memo table.
+    - The `check` functions returned partially materialized plans that have a mix of materialized
+    operators and group IDs that make it easy to manipulate in memory.
+5. We take every partially materialized plan that gets generated by the `check` functions and apply
+the transformations, generating new `Expression`s that need to be inserted into the memo table.
+6. At the very end, materialize the final physical plan.

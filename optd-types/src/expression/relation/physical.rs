@@ -1,6 +1,6 @@
 use crate::GroupId;
 
-/// A type representing different kinds of physical expressions / operators.
+/// A type representing different kinds of physical expressions in the memo table.
 pub enum PhysicalExpression {
     TableScan(TableScan),
     PhysicalFilter(PhysicalFilter),
@@ -17,7 +17,6 @@ struct PhysicalFilter {
     child: GroupId,
     predicate: GroupId,
 }
-
 
 struct SortMergeJoin {
     left: GroupId,
@@ -36,4 +35,3 @@ struct MergeSort {
     child: GroupId,
     sort_expr: GroupId,
 }
-

@@ -1,43 +1,12 @@
-use relation::{LogicalExpression, Relation};
-use scalar::Scalar;
+use crate::expression::{Expression, LogicalExpression};
+use crate::{PartialLogicalPlan, PartialPhysicalPlan};
 
-use crate::{GroupId, Rule};
-
-mod relation;
-mod scalar;
-
-/// A type representing an optimization node / object in the memo table.
-pub enum MemoNode {
-    Relation(Relation),
-    Scalar(Scalar),
-}
-
-pub struct LogicalOperator;
-
-pub struct PhysicalOperator;
-
-/// A type representing a tree of logical nodes, scalar nodes, and group IDs.
+/// A type representing a transformation or implementation rule for query operators.
 ///
-/// Note that group IDs must be leaves of this tree.
-///
-/// TODO Make this an actual tree with the correct modeling of types.
-pub enum PartialLogicalExpression {
-    LogicalOperator(LogicalOperator),
-    Scalar(Scalar),
-    GroupId(GroupId),
-}
-
-/// A type representing a tree of logical nodes, physical nodes, scalar nodes, and group IDs.
-///
-/// Note that group IDs must be leaves of this tree, and that physical nodes cannot have children
-/// that are logical nodes.
-///
-/// TODO Make this an actual tree with the correct modeling of types.
-pub enum PartialPhysicalExpression {
-    LogicalOperator(LogicalOperator),
-    PhysicalOperator(PhysicalOperator),
-    Scalar(Scalar),
-    GroupId(GroupId),
+/// TODO The variants are just placeholders.
+pub enum Rule {
+    Transformation,
+    Implementation,
 }
 
 pub struct Memo;
@@ -54,11 +23,11 @@ impl Memo {
     ///
     /// If the rule wants to match against `Filter(Join(?L, ?R))`, then this function will partially
     /// materialize two expressions `Filter(e1)` and `Filter(e2)`.
-     pub async fn check_transformation(
+    pub async fn check_transformation(
         &self,
         expr: LogicalExpression,
         rule: Rule,
-    ) -> Vec<PartialLogicalExpression> {
+    ) -> Vec<PartialLogicalPlan> {
         todo!()
     }
 
@@ -66,27 +35,27 @@ impl Memo {
         &self,
         expr: LogicalExpression,
         rule: Rule,
-    ) -> Vec<PartialPhysicalExpression> {
+    ) -> Vec<PartialPhysicalPlan> {
         todo!()
     }
 
     pub fn apply_transformation(
         &mut self,
-        expr: PartialLogicalExpression,
+        expr: PartialLogicalPlan,
         rule: Rule,
-    ) -> Vec<MemoNode> {
+    ) -> Vec<Expression> {
         todo!()
     }
 
     pub fn apply_implementation(
         &mut self,
-        expr: PartialPhysicalExpression,
+        expr: PartialPhysicalPlan,
         rule: Rule,
-    ) -> Vec<MemoNode> {
+    ) -> Vec<Expression> {
         todo!()
     }
 
-    pub fn add_expressions(&mut self, new_exprs: Vec<MemoNode>) {
+    pub async fn add_expressions(&mut self, new_exprs: Vec<Expression>) {
         todo!()
     }
 }

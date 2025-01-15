@@ -1,6 +1,6 @@
 use crate::GroupId;
 
-/// A type representing different kinds of logical expressions / operators.
+/// A type representing different kinds of logical expressions in the memo table.
 pub enum LogicalExpression {
     Scan(Scan),
     Filter(Filter),
