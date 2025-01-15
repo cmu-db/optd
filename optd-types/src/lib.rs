@@ -1,15 +1,37 @@
+mod expression;
 mod memo;
-pub use memo::MemoNode;
-
-/// A type representing a transformation or implementation rule for query operators.
-///
-/// TODO The variants are just placeholders.
-pub enum Rule {
-    Transformation,
-    Implementation
-}
 
 pub struct GroupId(usize);
+
+pub struct LogicalOperator;
+
+pub struct PhysicalOperator;
+
+pub struct ScalarOperator;
+
+/// A type representing a tree of logical nodes, scalar nodes, and group IDs.
+///
+/// Note that group IDs must be leaves of this tree.
+///
+/// TODO Make this an actual tree with the correct modeling of types.
+pub enum PartialLogicalPlan {
+    LogicalOperator(LogicalOperator),
+    ScalarOperator(ScalarOperator),
+    GroupId(GroupId),
+}
+
+/// A type representing a tree of logical nodes, physical nodes, scalar nodes, and group IDs.
+///
+/// Note that group IDs must be leaves of this tree, and that physical nodes cannot have children
+/// that are logical nodes.
+///
+/// TODO Make this an actual tree with the correct modeling of types.
+pub enum PartialPhysicalPlan {
+    LogicalOperator(LogicalOperator),
+    PhysicalOperator(PhysicalOperator),
+    ScalarOperator(ScalarOperator),
+    GroupId(GroupId),
+}
 
 /// An in-memory tree of logical operators. Used as the input / entrypoint of the optimizer.
 ///
