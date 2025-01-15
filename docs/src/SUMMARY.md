@@ -8,7 +8,7 @@
 
 # Contributor Guide
 
-- [Installaton]() 
+- [Installaton]()
 
 # RFCs
 

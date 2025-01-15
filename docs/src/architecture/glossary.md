@@ -2,16 +2,16 @@
 
 Definitions in query optimization can get very overloaded. Below is the language optd developers speak.
 
-### Relational operator 
+### Relational operator
 A **relation operator** (`RelNode`) describes an operation that can be evaluated to obtain a bag of tuples. In other literature this is also referred to as a query plan. A relational operator can be either logical or physical.
 
 ### Scalar operator
 
-A **scalar operator** (`ScalarNode`) describes an operation that can be evaluated to obtain a single value. In other literature this is also referred to as a sql expression or a row expression. 
+A **scalar operator** (`ScalarNode`) describes an operation that can be evaluated to obtain a single value. In other literature this is also referred to as a sql expression or a row expression.
 
 ## Cascades
 
-### Expressions 
+### Expressions
 
 A **logical expression** is a tree/DAG of logical operators.
 
@@ -30,7 +30,7 @@ Properties of an expression may be **required** by the original SQL query or **d
 - Examples: row count, operator type,statistics, whether relational output columns can contain nulls.
 
 **Physical properties** are characteristics of an expression that
-impact its layout, presentation, or location, but not its logical content. 
+impact its layout, presentation, or location, but not its logical content.
 
 - Examples: order and data distribution.
 
