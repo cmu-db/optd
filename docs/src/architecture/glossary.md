@@ -1,12 +1,48 @@
 # Glossary
 
-We have found that definitions in query optimization have internally become overloaded. This
+We have found internally that definitions in query optimization have become overloaded. This
 document defines key names and definitions for concepts that are required in optimization.
 
 Many of the names and definitions will be inspired by the Cascades framework. However, there are a
 few important differences that need to be addressed considering our memo table will be persistent.
 
-## Memo Table Concepts
+## Terms
+
+-   [Memo Table](#memo-table)
+-   [Group](#group)
+    -   Relational Group
+    -   Scalar Group
+-   [Expression](#expression-logical-physical-scalar)
+    -   Relational Expression
+        -   Logical Expression
+        -   Physical Expression
+    -   Scalar Expression
+-   [Plan](#logical--physical-plans)
+    -   Logical Plan
+    -   Physical Plan
+-   [Operator / Plan Node](#logical--physical-plans)
+    -   Logical Operator
+    -   Physical Operator
+    -   Scalar Operator
+-   Property
+    -   Logical Property
+    -   Physical Property
+    -   ? Derived Property ?
+-   Rule
+    -   Transformation Rule
+    -   Implementation Rule
+
+## Comparison with Cascades
+
+In the Cascades framework, an expression is a tree of operators. In `optd`, we are instead defining
+a Plan to be a tree or DAG of operators. An Expression in `optd` strictly refers to the
+representation of an operator in the Memo Table, not in plans.
+
+See the [section below](#expression-logical-physical-scalar) for more information.
+
+Most other terms in `optd` are similar to Cascades or self-explanatory.
+
+## Memo Table Terms
 
 This section describes names and definitions of concepts related to the **Memo Table**.
 
@@ -83,7 +119,7 @@ We follow the definition of groups in the Volcano and Cascades frameworks. From 
 article (Section 2.2, page 205):
 
 > In the memo, each class of equivalent expressions is called an _equivalence class_ or a _group_,
-> and all equivalent expression within the class are called _group expressions_ or simply
+> and all equivalent expressions within the class are called _group expressions_ or simply
 > _expressions_.
 
 A **Relational Group** is a set of 1 or more equivalent Logical Expressions and 0 or more equivalent
@@ -116,6 +152,10 @@ A **Scalar Operator** describes an operation that can be evaluated to obtain a s
 can also be referred to as a SQL expression, a row expression, or a SQL predicate.
 
 ---
+---
+---
+
+TODO: Cleanup
 
 ### Properties
 
