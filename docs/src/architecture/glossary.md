@@ -6,7 +6,7 @@ document defines key names and definitions for concepts that are required in opt
 Many of the names and definitions will be inspired by the Cascades framework. However, there are a
 few important differences that need to be addressed considering our memo table will be persistent.
 
-## Terms
+# Terms
 
 -   [Memo Table](#memo-table)
 -   [Group](#group)
@@ -20,7 +20,7 @@ few important differences that need to be addressed considering our memo table w
 -   [Plan](#logical--physical-plans)
     -   Logical Plan
     -   Physical Plan
--   [Operator / Plan Node](#logical--physical-plans)
+-   [Operator / Plan Node](#operators)
     -   Logical Operator
     -   Physical Operator
     -   Scalar Operator
@@ -32,7 +32,7 @@ few important differences that need to be addressed considering our memo table w
     -   Transformation Rule
     -   Implementation Rule
 
-## Comparison with Cascades
+# Comparison with Cascades
 
 In the Cascades framework, an expression is a tree of operators. In `optd`, we are instead defining
 a Plan to be a tree or DAG of operators. An Expression in `optd` strictly refers to the
@@ -42,17 +42,17 @@ See the [section below](#expression-logical-physical-scalar) for more informatio
 
 Most other terms in `optd` are similar to Cascades or self-explanatory.
 
-## Memo Table Terms
+# Memo Table Terms
 
 This section describes names and definitions of concepts related to the **Memo Table**.
 
-### Memo Table
+## Memo Table
 
 The **Memo Table** is the data structure used for dynamic programming in a top-down plan enumeration
 search algorithm. The memo table consists of a mutually recursive data structure made up of
 **Expressions** and **Groups**.
 
-### Expression (Logical, Physical, Scalar)
+## Expression (Logical, Physical, Scalar)
 
 An **Expression** is the representation of an operator **inside of the Memo Table**.
 
@@ -95,7 +95,9 @@ Another key difference between Plan Nodes and Expressions is that Expressions ha
 
 </details>
 
-### Expression Equivalence
+<br>
+
+## Expression Equivalence
 
 Two Logical Expressions are equivalent if the **Logical Properties** of the two Expressions are the
 same. In other words, the Logical Plans they represent produce the same set of rows and columns.
@@ -107,7 +109,7 @@ exact same order and distribution.
 A Logical Expression with a required Physical Property is equivalent to a Physical Expression if the
 Physical Expression has the same Logical Property and delivers the Physical Property. (FIXME unclear?)
 
-### Group
+## Group
 
 A **Group** is a set of equivalent **Expressions**.
 
@@ -131,12 +133,12 @@ A **Scalar Group** consists of equivalent Scalar Expressions.
 
 <br>
 
-## Plan Enumeration and Search Concepts
+# Plan Enumeration and Search Concepts
 
 This section describes names and definitions of concepts related to the general plan enumeration and
 search of optimal query plans.
 
-### Logical / Physical Plans
+## Logical / Physical Plans
 
 A **Logical Plan** is a tree or DAG of **Logical Operators** that can be evaluated to produce a bag
 of tuples. This can also be referred to as a Logical Query Plan. The Operators that make up this
@@ -146,18 +148,24 @@ A **Physical Plan** is a tree or DAG of **Physical Operators** that can be evalu
 engine to produce a table. This can also be referred to as a Physical Query Plan. The Operators that
 make up this Physical Plan can be considered Physical Plan Nodes.
 
-### Scalar Operator
+## Operators
+
+A **Logical Operator** is a node in a Logical Plan (which is a tree or DAG).
+
+A **Physical Operator** is a node in a Physical Plan (which is a tree or DAG).
 
 A **Scalar Operator** describes an operation that can be evaluated to obtain a single value. This
 can also be referred to as a SQL expression, a row expression, or a SQL predicate.
 
 ---
+
 ---
+
 ---
 
 TODO: Cleanup
 
-### Properties
+## Properties
 
 **Properties** are metadata computed (and sometimes stored) for each node in an expression.
 Properties of an expression may be **required** by the original SQL query or **derived** from **physical properties of one of its inputs.**
@@ -171,7 +179,7 @@ impact its layout, presentation, or location, but not its logical content.
 
 -   Examples: order and data distribution.
 
-### Rule
+## Rule
 
 a **rule** in Cascades transforms an expression into equivalent expressions. It has the following interface.
 
