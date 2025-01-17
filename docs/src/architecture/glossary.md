@@ -18,23 +18,24 @@ few important differences that need to be addressed considering our memo table w
 -   [Group]
     -   [Relational Group]
     -   [Scalar Group]
--   [Plan]
+-   [Query Plan]
     -   [Logical Plan]
     -   [Physical Plan]
 -   [Operator] / [Plan Node]
-    -   [Logical Operator]
-    -   [Physical Operator]
+    -   [Relational Operator]
+        -   [Logical Operator]
+        -   [Physical Operator]
     -   [Scalar Operator]
--   Property
-    -   Logical Property
-    -   Physical Property
+-   [Property]
+    -   [Logical Property]
+    -   [Physical Property]
     -   ? Derived Property ?
--   Rule
-    -   Transformation Rule
-    -   Implementation Rule
+-   [Rule]
+    -   [Transformation Rule]
+    -   [Implementation Rule]
 
 [Memo Table]: #memo-table
-[Expression]: #expression-logical-physical-scalar
+[Expression]: #expression
 [Relational Expression]: #relational-expression
 [Logical Expression]: #logical-expression
 [Physical Expression]: #physical-expression
@@ -42,25 +43,34 @@ few important differences that need to be addressed considering our memo table w
 [Group]: #group
 [Relational Group]: #relational-group
 [Scalar Group]: #scalar-group
-[Plan]: #query-plan
+[Query Plan]: #query-plan
 [Logical Plan]: #logical-plan
 [Physical Plan]: #physical-plan
 [Plan Node]: #operator
 [Operator]: #operator
+[Relational Operator]: #relational-operator
 [Logical Operator]: #logical-operator
 [Physical Operator]: #physical-operator
 [Scalar Operator]: #scalar-operator
+[Property]: #property
+[Logical Property]: #logical-property
+[Physical Property]: #physical-property
+[Rule]: #rule
+[Transformation Rule]: #transformation-rule
+[Implementation Rule]: #implementation-rule
 
 # Comparison with Cascades
 
 In the Cascades framework, an expression is a tree of operators. In `optd`, we are instead defining
-a logical or physical query [Plan] to be a tree or DAG of [Operator]s. An expression in `optd`
+a logical or physical [Query Plan] to be a tree or DAG of [Operator]s. An expression in `optd`
 strictly refers to the representation of an operator in the [Memo Table], not in query plans.
 
 See the [section below](#expression-logical-physical-scalar) on the kinds of expressions for more
 information.
 
 Most other terms in `optd` are similar to Cascades or are self-explanatory.
+
+<br>
 
 # Memo Table Terms
 
@@ -72,9 +82,9 @@ The memo table is the data structure used for dynamic programming in a top-down 
 search algorithm. The memo table consists of a mutually recursive data structure made up of
 [Expression]s and [Group]s.
 
-## Expression (Logical, Physical, Scalar)
+## Expression
 
-An **expression** is the representation of a non-materialized operator _inside_ of the [Memo Table].
+An expression is the representation of a non-materialized operator _inside_ of the [Memo Table].
 
 There are 2 types of expressions: [Relational Expression]s and [Scalar Expression]s. A [Relational
 Expression] can be either a [Logical Expression] or a [Physical Expression].
@@ -124,31 +134,35 @@ A physical expression is a version of a [Relational Expression].
 
 TODO(connor) Add more details.
 
-Examples of Physical Expressions include Table Scan, Index Scan, Hash Join, or Sort Merge Join.
+Examples of physical expressions include Table Scan, Index Scan, Hash Join, or Sort Merge Join.
 
 ## Scalar Expression
 
 A scalar expression is a version of an [Expression].
 
+A scalar expression describes an operation that can be evaluated to obtain a single value. This can
+also be referred to as a SQL expression, a row expression, or a SQL predicate.
+
 TODO(everyone) Figure out the semantics of what a scalar expression really is.
 
-Examples of Scalar Expressions include the expressions `t1.a < 42` or `t1.b = t2.c`.
+Examples of scalar expressions include the expressions `t1.a < 42` or `t1.b = t2.c`.
 
 ## Expression Equivalence
 
-Two Logical Expressions are equivalent if the **Logical Properties** of the two Expressions are the
-same. In other words, the Logical Plans they represent produce the same set of rows and columns.
+Two [Logical Expression]s are equivalent if the [Logical Property]s of the two expressions are the
+same. In other words, the [Logical Plan]s they represent produce the same set of rows and columns.
 
-Two Physical Expressions are equivalent if their Logical and **Physical Properties** are the same.
-In other words, the Physical Plans they represent produce the same set of rows and columns, in the
+Two Physical Expressions are equivalent if their Logical and [Physical Property]s are the same.
+In other words, the [Physical Plan]s they represent produce the same set of rows and columns, in the
 exact same order and distribution.
 
-A Logical Expression with a required Physical Property is equivalent to a Physical Expression if the
-Physical Expression has the same Logical Property and delivers the Physical Property. (FIXME unclear?)
+(TODO FIXME This is unclear?)
+A [Logical Expression] with a required [Physical Property] is equivalent to a [Physical Expression]
+if the [Physical Expression] has the same [Logical Property] and delivers the [Physical Property].
 
 ## Group
 
-A **Group** is a set of equivalent [Expression]s.
+A **group** is a set of equivalent [Expression]s.
 
 We follow the definition of groups in the Volcano and Cascades frameworks. From the EQOP Microsoft
 article (Section 2.2, page 205):
@@ -162,6 +176,12 @@ article (Section 2.2, page 205):
 A relational group is a set of 1 or more equivalent [Logical Expression]s and 0 or more equivalent
 [Physical Expression]s.
 
+For a given relational group, the first step of optimization is exploration, in which equivalent
+[Logical Expression]s are added to the group via [Transformation Rule]s. Once the search space for
+the group has been exhausted (all possible transformation rules have been applied to all logical
+expressions in the group), the group can be physically optimized. At this point, the search
+algorithm will apply [Implementation RUle]s to cost and find the best execution plan.
+
 TODO(connor) Add more details.
 
 TODO(connor) Add example.
@@ -174,6 +194,8 @@ TODO(connor) Add more details.
 
 TODO(connor) Add example.
 
+<br>
+
 # Plan Enumeration and Search Concepts
 
 This section describes names and definitions of concepts related to the general plan enumeration and
@@ -181,36 +203,55 @@ search of optimal query plans.
 
 ## Query Plan
 
-TODO
+A query plan is a tree or DAG of relational and scalar operators. We can consider query optimization
+to be a function from an unoptimized query plan to an optimized query plan. More specifically, the
+input plan is generally a [Logical Plan] and the output plan is always a [Physical Plan].
+
+We generally consider query plans to either be completely logical or completely physical. However,
+when dealing with rule matching and rule application to enumerate different but equivalent query
+plans, we also deal with partially materialized query plans that can be a mix of both logical and
+physical operators (as well as group identifiers and other scalar operators).
+
+TODO Add more details about partially materialized plans.
 
 ## Logical Plan
 
-A **Logical Plan** is a tree or DAG of **Logical Operators** that can be evaluated to produce a bag
-of tuples. This can also be referred to as a Logical Query Plan. The Operators that make up this
-Logical Plan can be considered Logical Plan Nodes.
+A logical plan is a tree or DAG of [Logical Operator]s that can be evaluated to produce a bag of
+tuples. This can also be referred to as a logical query plan. The [Operator]s that make up this
+logical plan can be considered logical plan nodes.
 
 ## Physical Plan
 
-A **Physical Plan** is a tree or DAG of **Physical Operators** that can be evaluated by an execution
-engine to produce a table. This can also be referred to as a Physical Query Plan. The Operators that
-make up this Physical Plan can be considered Physical Plan Nodes.
+A physical plan is a tree or DAG of [Physical Operator]s that can be evaluated by an execution
+engine to produce a table. This can also be referred to as a physical query plan. The [Operator]s
+that make up this physical plan can be considered physical plan nodes.
 
 ## Operator
 
-TODO
+An operator is the materialized version of an [Expression]. Like expressions, there are both
+relational operators and scalar operators.
+
+See the following sections for more information.
+
+## Relational Operator
+
+A relational operator is a node in a [Query Plan] (which is a tree or DAG), and is the materialized
+version of a [Relational Expression].
 
 ## Logical Operator
 
-A **Logical Operator** is a node in a Logical Plan (which is a tree or DAG).
+A logical operator is a node in a [Logical Plan] (which is a tree or DAG), and is the materialized
+version of a [Logical Expression].
 
 ## Physical Operator
 
-A **Physical Operator** is a node in a Physical Plan (which is a tree or DAG).
+A physical operator is a node in a [Physical Plan] (which is a tree or DAG), and is the materialized
+version of a [Physical Expression].
 
 ## Scalar Operator
 
-A **Scalar Operator** describes an operation that can be evaluated to obtain a single value. This
-can also be referred to as a SQL expression, a row expression, or a SQL predicate.
+A scalar operator is a node in a [Query Plan] that describes a scalar expression, and can be
+considered the materialized version of a [Scalar Expression].
 
 ---
 
@@ -220,14 +261,18 @@ can also be referred to as a SQL expression, a row expression, or a SQL predicat
 
 TODO: Cleanup
 
-## Properties
+## Property
 
 **Properties** are metadata computed (and sometimes stored) for each node in an expression.
 Properties of an expression may be **required** by the original SQL query or **derived** from **physical properties of one of its inputs.**
 
+## Logical Property
+
 **Logical properties** describe the structure and content of data returned by an expression.
 
 -   Examples: row count, operator type,statistics, whether relational output columns can contain nulls.
+
+## Physical Property
 
 **Physical properties** are characteristics of an expression that
 impact its layout, presentation, or location, but not its logical content.
@@ -247,7 +292,11 @@ trait Rule {
 }
 ```
 
+## Transformation Rule
+
 A **transformation rule** transforms a **part** of the logical expression into logical expressions. This is also called a logical to logical transformation in other systems.
+
+## Implementation Rule
 
 A **implementation rule** transforms a **part** of a logical expression to an equivalent physical expression with physical properties.
 
