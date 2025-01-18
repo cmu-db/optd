@@ -34,6 +34,7 @@ few important differences that need to be addressed considering our memo table w
     -   [Transformation Rule]
     -   [Implementation Rule]
 
+[EQOP]: https://www.microsoft.com/en-us/research/publication/extensible-query-optimizers-in-practice/
 [Memo Table]: #memo-table
 [Expression]: #expression
 [Relational Expression]: #relational-expression
@@ -58,6 +59,8 @@ few important differences that need to be addressed considering our memo table w
 [Rule]: #rule
 [Transformation Rule]: #transformation-rule
 [Implementation Rule]: #implementation-rule
+[Enforcer Rule]: #enforcer-rule
+[Enforcer Operator]: #enforcer-operator
 
 # Comparison with Cascades
 
@@ -156,7 +159,8 @@ Two Physical Expressions are equivalent if their Logical and [Physical Property]
 In other words, the [Physical Plan]s they represent produce the same set of rows and columns, in the
 exact same order and distribution.
 
-(TODO FIXME This is unclear?)
+TODO This next part is unclear?
+
 A [Logical Expression] with a required [Physical Property] is equivalent to a [Physical Expression]
 if the [Physical Expression] has the same [Logical Property] and delivers the [Physical Property].
 
@@ -164,7 +168,7 @@ if the [Physical Expression] has the same [Logical Property] and delivers the [P
 
 A **group** is a set of equivalent [Expression]s.
 
-We follow the definition of groups in the Volcano and Cascades frameworks. From the EQOP Microsoft
+We follow the definition of groups in the Volcano and Cascades frameworks. From the [EQOP] Microsoft
 article (Section 2.2, page 205):
 
 > In the memo, each class of equivalent expressions is called an _equivalence class_ or a _group_,
@@ -182,17 +186,17 @@ the group has been exhausted (all possible transformation rules have been applie
 expressions in the group), the group can be physically optimized. At this point, the search
 algorithm will apply [Implementation RUle]s to cost and find the best execution plan.
 
-TODO(connor) Add more details.
+TODO Add more details.
 
-TODO(connor) Add example.
+TODO Add example.
 
 ## Scalar Group
 
 A scalar group consists of equivalent [Scalar Expression]s.
 
-TODO(connor) Add more details.
+TODO Add more details.
 
-TODO(connor) Add example.
+TODO Add example.
 
 <br>
 
@@ -253,55 +257,76 @@ version of a [Physical Expression].
 A scalar operator is a node in a [Query Plan] that describes a scalar expression, and can be
 considered the materialized version of a [Scalar Expression].
 
----
-
----
-
----
-
-TODO: Cleanup
-
 ## Property
 
-**Properties** are metadata computed (and sometimes stored) for each node in an expression.
-Properties of an expression may be **required** by the original SQL query or **derived** from **physical properties of one of its inputs.**
+A property is metadata computed (and sometimes stored) for a given relational expression.
+
+Properties of an expression may be _required_ by the original SQL query or _derived_ from the
+[Physical Property] of one of its inputs.
+
+TODO Add more details.
 
 ## Logical Property
 
-**Logical properties** describe the structure and content of data returned by an expression.
+A logical property describes the structure and content of data returned by a given expression.
 
--   Examples: row count, operator type,statistics, whether relational output columns can contain nulls.
+Examples: row count, operator type,statistics, whether relational output columns can contain nulls.
+
+TODO Clean up and add more details.
 
 ## Physical Property
 
-**Physical properties** are characteristics of an expression that
-impact its layout, presentation, or location, but not its logical content.
+A physical property is a characteristic of an expression that impacts its layout, presentation, or
+location, but not its logical content.
 
--   Examples: order and data distribution.
+Examples: order and data distribution.
+
+TODO Clean up and add more details.
 
 ## Rule
 
-a **rule** in Cascades transforms an expression into equivalent expressions. It has the following interface.
+A rule transforms a query plan or sub-plan into an equivalent plan.
+
+Rules should have an interface similar to the following:
 
 ```rust
 trait Rule {
     /// Checks whether the rule is applicable on the input expression.
 	fn check_pattern(expr: Expr) -> bool;
+
     /// Transforms the expression into one or more equivalent expressions.
 	fn transform(expr: Expr) -> Vec<Expr>;
 }
 ```
 
+TODO Actually figure out the interface for rules since it's probably not going to like that.
+
+TODO Clean up and add more details.
+
 ## Transformation Rule
 
-A **transformation rule** transforms a **part** of the logical expression into logical expressions. This is also called a logical to logical transformation in other systems.
+A transformation rule transforms a _part_ of the logical expression into logical expressions.
+
+This is also called a logical to logical transformation in other systems.
+
+TODO Clean up and add more details.
 
 ## Implementation Rule
 
-A **implementation rule** transforms a **part** of a logical expression to an equivalent physical expression with physical properties.
+A implementation rule transforms a _part_ of a logical expression to an equivalent physical
+expression with physical properties.
 
-In Cascades, you don't need to materialize the entire query tree when applying rules. Instead, you can materialize expressions on demand while leaving unrelated parts of the tree as group identifiers.
+In Cascades, you don't need to materialize the entire query tree when applying rules. Instead, you
+can materialize expressions on demand while leaving unrelated parts of the tree as group identifiers.
 
 In other systems, there are physical to physical expression transformation for execution engine specific optimization, physical property enforcement, or distributed planning. At the moment, we are **not** considering physical-to-physical transformations.
 
-**Enforcer rule:** _TODO!_
+TODO Clean up and add more details.
+
+## Enforcer Rule
+
+TODO Write this section.
+
+## Enforcer Operator
+
+TODO Write this section.
