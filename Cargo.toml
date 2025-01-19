@@ -6,4 +6,6 @@ resolver = "2"
 diesel = { version = "2.2", features = [
     "sqlite",
     "returning_clauses_for_sqlite_3_35",
+    "chrono",
 ] }
+chrono = "0.4.39"

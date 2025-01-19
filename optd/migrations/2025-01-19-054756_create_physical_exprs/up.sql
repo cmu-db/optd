@@ -10,7 +10,7 @@ CREATE TABLE physical_exprs (
   -- The physical property dervied based on the properties of the children nodes.
   derived_phys_prop_id BIGINT NOT NULL,
   -- The cost associated with the physical expression.
-  cost REAL NOT NULL,
+  cost DOUBLE NOT NULL,
   -- Time at which the physical expression is created.
   created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP) NOT NULL,
   FOREIGN KEY (typ_desc) REFERENCES physical_typ_descs(id) ON DELETE CASCADE ON UPDATE CASCADE,

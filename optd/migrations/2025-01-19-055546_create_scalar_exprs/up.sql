@@ -10,7 +10,7 @@ CREATE TABLE scalar_exprs (
   -- Time at which the logical expression is created.
   created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP) NOT NULL,
   -- The cost associated computing the scalar expression.
-  cost REAL, -- TODO: This can be NULL, do we want a seperate table?
+  cost DOUBLE, -- TODO: This can be NULL, do we want a seperate table?
   FOREIGN KEY (typ_desc) REFERENCES scalar_typ_descs(id) ON DELETE CASCADE ON UPDATE CASCADE,
   FOREIGN KEY (group_id) REFERENCES scalar_groups(id) ON DELETE CASCADE ON UPDATE CASCADE
 );

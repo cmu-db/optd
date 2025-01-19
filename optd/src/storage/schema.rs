@@ -30,7 +30,7 @@ diesel::table! {
         typ_desc -> BigInt,
         group_id -> BigInt,
         derived_phys_prop_id -> BigInt,
-        cost -> Float,
+        cost -> Double,
         created_at -> Timestamp,
     }
 }
@@ -72,7 +72,7 @@ diesel::table! {
         typ_desc -> BigInt,
         group_id -> BigInt,
         created_at -> Timestamp,
-        cost -> Nullable<Float>,
+        cost -> Nullable<Double>,
     }
 }
 
