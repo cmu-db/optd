@@ -6,7 +6,7 @@ CREATE TABLE physical_exprs (
   -- The type descriptor of the physical expression.
   typ_desc BIGINT NOT NULL,
   -- The group this physical expression belongs to.
-  group_id BIGINT NOT NULL,  -- groups.id
+  group_id BIGINT NOT NULL,
   -- The physical property dervied based on the properties of the children nodes.
   derived_phys_prop_id BIGINT NOT NULL,
   -- The cost associated with the physical expression.

@@ -50,19 +50,33 @@ diesel::table! {
 }
 
 diesel::table! {
-    rel_group_winners (group_id, required_phys_prop_id) {
-        group_id -> BigInt,
-        required_phys_prop_id -> BigInt,
-        physical_expr_id -> BigInt,
-    }
-}
-
-diesel::table! {
     rel_groups (id) {
         id -> BigInt,
         status -> Integer,
         created_at -> Timestamp,
         rep_id -> Nullable<BigInt>,
+    }
+}
+
+diesel::table! {
+    rel_subgroup_physical_exprs (subgroup_id, physical_expr_id) {
+        subgroup_id -> BigInt,
+        physical_expr_id -> BigInt,
+    }
+}
+
+diesel::table! {
+    rel_subgroup_winners (subgroup_id) {
+        subgroup_id -> BigInt,
+        physical_expr_id -> BigInt,
+    }
+}
+
+diesel::table! {
+    rel_subgroups (id) {
+        id -> BigInt,
+        group_id -> BigInt,
+        required_phys_prop_id -> BigInt,
     }
 }
 
@@ -112,9 +126,11 @@ diesel::joinable!(logical_props -> rel_groups (group_id));
 diesel::joinable!(physical_exprs -> physical_props (derived_phys_prop_id));
 diesel::joinable!(physical_exprs -> physical_typ_descs (typ_desc));
 diesel::joinable!(physical_exprs -> rel_groups (group_id));
-diesel::joinable!(rel_group_winners -> physical_exprs (physical_expr_id));
-diesel::joinable!(rel_group_winners -> physical_props (required_phys_prop_id));
-diesel::joinable!(rel_group_winners -> rel_groups (group_id));
+diesel::joinable!(rel_subgroup_physical_exprs -> physical_exprs (physical_expr_id));
+diesel::joinable!(rel_subgroup_physical_exprs -> rel_subgroups (subgroup_id));
+diesel::joinable!(rel_subgroup_winners -> physical_exprs (physical_expr_id));
+diesel::joinable!(rel_subgroups -> physical_props (required_phys_prop_id));
+diesel::joinable!(rel_subgroups -> rel_groups (group_id));
 diesel::joinable!(scalar_exprs -> scalar_groups (group_id));
 diesel::joinable!(scalar_exprs -> scalar_typ_descs (typ_desc));
 diesel::joinable!(scalar_group_winners -> scalar_exprs (scalar_expr_id));
@@ -128,8 +144,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     physical_exprs,
     physical_props,
     physical_typ_descs,
-    rel_group_winners,
     rel_groups,
+    rel_subgroup_physical_exprs,
+    rel_subgroup_winners,
+    rel_subgroups,
     scalar_exprs,
     scalar_group_winners,
     scalar_groups,

@@ -8,7 +8,9 @@ use diesel::{
     sql_types::{BigInt, Integer},
 };
 
-#[derive(Queryable, Selectable)]
+/// A relational group contains one or more equivalent logical expressions
+/// and zero or more physical expressions.
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
 #[diesel(table_name = super::schema::rel_groups)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct RelGroup {
@@ -22,20 +24,38 @@ pub struct RelGroup {
     pub rep_id: Option<RelGroupId>,
 }
 
-#[derive(Queryable, Selectable)]
-#[diesel(table_name = super::schema::rel_group_winners)]
+/// A relational subgroup contains a subset of physical expressions in a relational group that
+/// can satisfies the same required physical properties.
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
+#[diesel(table_name = super::schema::rel_subgroups)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct RelGroupWinner {
-    /// The group we are interested in.
+pub struct RelSubGroup {
+    pub id: RelSubGroupId,
+    /// The group the subgroup belongs to.
     pub group_id: RelGroupId,
-    /// The required physical property.
+    /// The required physical property of the subgroup.
     pub required_phys_prop_id: PhysicalPropId,
-    /// The winner of the group with `group_id` and required physical property.
+}
+
+/// A subgroup winner is a physical expression that is the winner of a group with a required physical property.
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
+#[diesel(table_name = super::schema::rel_subgroup_winners)]
+#[diesel(belongs_to(RelSubGroup))]
+#[diesel(belongs_to(PhysicalExpr))]
+#[diesel(primary_key(subgroup_id))]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct RelSubgroupWinner {
+    /// The subgroup id of the winner, i.e. the winner of the group with `group_id` and some required physical property.
+    pub subgroup_id: RelSubGroupId,
+    /// The physical expression id of the winner.
     pub physical_expr_id: PhysicalExprId,
 }
 
-#[derive(Queryable, Selectable)]
+/// A logical expression is a relational expression that consists of a tree of logical operators.
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
 #[diesel(table_name = super::schema::logical_exprs)]
+#[diesel(belongs_to(RelGroup))]
+#[diesel(belongs_to(LogicalTypDesc))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct LogicalExpr {
     /// The logical expression identifier.
@@ -48,8 +68,10 @@ pub struct LogicalExpr {
     pub created_at: chrono::NaiveDateTime,
 }
 
-#[derive(Queryable, Selectable)]
+/// Logicial properties are shared by a relational group.
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
 #[diesel(table_name = super::schema::logical_props)]
+#[diesel(belongs_to(RelGroup))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct LogicalProp {
     /// The logical property identifier.
@@ -60,7 +82,8 @@ pub struct LogicalProp {
     pub card_est: i64,
 }
 
-#[derive(Queryable, Selectable)]
+/// Descriptor for a logical relational operator type.
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
 #[diesel(table_name = super::schema::logical_typ_descs)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct LogicalTypDesc {
@@ -70,8 +93,11 @@ pub struct LogicalTypDesc {
     pub name: String,
 }
 
-#[derive(Queryable, Selectable)]
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
 #[diesel(table_name = super::schema::physical_exprs)]
+#[diesel(belongs_to(RelGroup))]
+#[diesel(belongs_to(PhysicalTypDesc))]
+#[diesel(belongs_to(PhysicalProp))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct PhysicalExpr {
     /// The physical expression id.
@@ -88,7 +114,27 @@ pub struct PhysicalExpr {
     pub created_at: chrono::NaiveDateTime,
 }
 
-#[derive(Queryable, Selectable)]
+// TODO(yuchen): Do we need a junction table for (logical_expr, required_phys_prop) <=> subgroup? TBD.
+/// A relational subgroup expression entry specifies if a physical expression belongs to a subgroup.
+/// It is a m:n relationship since a subgroup can have multiple physical expressions,
+/// and a physical expression can belong to multiple subgroups.
+#[derive(Queryable, Selectable, Identifiable, Associations)]
+#[diesel(table_name = super::schema::rel_subgroup_physical_exprs)]
+#[diesel(primary_key(subgroup_id, physical_expr_id))]
+#[diesel(belongs_to(RelSubGroup, foreign_key = subgroup_id))]
+#[diesel(belongs_to(PhysicalExpr))]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct RelSubGroupPhysicalExpr {
+    /// The subgroup the physical expression belongs to.
+    pub subgroup_id: RelSubGroupId,
+    /// TThe physical expression id.
+    pub physical_expr_id: PhysicalExprId,
+}
+
+/// A physical property is a characteristic of an expression that impacts its layout,
+/// presentation, or location, but not its logical content.
+/// They could be either required by a subgroup or derived on a physical expression.
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
 #[diesel(table_name = super::schema::physical_props)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct PhysicalProp {
@@ -98,7 +144,8 @@ pub struct PhysicalProp {
     pub payload: Vec<u8>,
 }
 
-#[derive(Queryable, Selectable)]
+/// Descriptor for a physical relational operator type.
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
 #[diesel(table_name = super::schema::physical_typ_descs)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct PhysicalTypDesc {
@@ -108,8 +155,12 @@ pub struct PhysicalTypDesc {
     pub name: String,
 }
 
-#[derive(Queryable, Selectable)]
+// TODO: ideally you want scalar to mimic the relational expressions. We don't have a definition of a physical scalar expression yet.
+/// A scalar expression consists of a tree of scalar operators.
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
 #[diesel(table_name = super::schema::scalar_exprs)]
+#[diesel(belongs_to(ScalarGroup))]
+#[diesel(belongs_to(ScalarTyeDesc))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ScalarExpr {
     /// The scalar expression id.
@@ -118,29 +169,37 @@ pub struct ScalarExpr {
     pub typ_desc: ScalarTypDescId,
     /// The scalar group that this scalar expression belongs to.
     pub group_id: ScalarGroupId,
+    /// The time at which this scalar expression was created.
     pub created_at: chrono::NaiveDateTime,
+    /// The cost associated with this scalar expression. None if the cost has not been computed.
     pub cost: Option<f64>,
 }
 
-#[derive(Queryable, Selectable)]
+/// A scalar group contains one or more equivalent scalar expressions.
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
 #[diesel(table_name = super::schema::scalar_groups)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ScalarGroup {
     pub id: ScalarGroupId,
     pub status: i32,
     pub created_at: chrono::NaiveDateTime,
-    pub rep_id: Option<i64>,
+    pub rep_id: Option<ScalarGroupId>,
 }
 
-#[derive(Queryable, Selectable)]
+/// A scalar group winner is a scalar expression with the lowest cost in a scalar group.
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
 #[diesel(table_name = super::schema::scalar_group_winners)]
+#[diesel(primary_key(group_id))]
+#[diesel(belongs_to(ScalarGroup))]
+#[diesel(belongs_to(ScalarExpr))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ScalarGroupWinner {
     pub group_id: ScalarGroupId,
     pub scalar_expr_id: ScalarExprId,
 }
 
-#[derive(Queryable, Selectable)]
+/// A scalar property is a property shared by a scalar group.
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
 #[diesel(table_name = super::schema::scalar_props)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ScalarProp {
@@ -150,7 +209,8 @@ pub struct ScalarProp {
     pub payload: Vec<u8>,
 }
 
-#[derive(Queryable, Selectable)]
+/// Descriptor for a scalar type.
+#[derive(Queryable, Selectable, Identifiable, AsChangeset)]
 #[diesel(table_name = super::schema::scalar_typ_descs)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ScalarTyeDesc {
@@ -161,6 +221,7 @@ pub struct ScalarTyeDesc {
 }
 
 /// Defines a new ID type with the given name, inner type, and SQL type.
+/// Also deriving some common traits for the new type.
 #[macro_export]
 macro_rules! impl_diesel_new_type_from_to_sql {
     ($type_name:ident, $inner_type:ty, $sql_type:ty) => {
@@ -206,6 +267,7 @@ macro_rules! impl_diesel_new_type_from_to_sql {
 }
 
 impl_diesel_new_type_from_to_sql!(RelGroupId, i64, BigInt);
+impl_diesel_new_type_from_to_sql!(RelSubGroupId, i64, BigInt);
 impl_diesel_new_type_from_to_sql!(LogicalExprId, i64, BigInt);
 impl_diesel_new_type_from_to_sql!(PhysicalExprId, i64, BigInt);
 impl_diesel_new_type_from_to_sql!(LogicalPropId, i64, BigInt);
