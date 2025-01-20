@@ -10,3 +10,4 @@ diesel = { version = "2.2", features = [
     "returning_clauses_for_sqlite_3_35",
     "chrono",
 ] }
+dotenvy = "0.15"
