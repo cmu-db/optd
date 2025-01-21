@@ -18,11 +18,11 @@ To generate a new migration, use the following command:
 diesel migration generate <migration_name>
 ```
 
-Diesel CLI will create two empty files in the `optd/migrations` folder. You will see output that looks something like this:
+Diesel CLI will create two empty files in the `optd-storgage/migrations` folder. You will see output that looks something like this:
 
 ```shell
-Creating optd/migrations/2025-01-20-153830_<migration_name>/up.sql
-Creating optd/migrations/2025-01-20-153830_<migration_name>/down.sql
+Creating optd-storage/migrations/2025-01-20-153830_<migration_name>/up.sql
+Creating optd-storage/migrations/2025-01-20-153830_<migration_name>/down.sql
 ```
 
 The `up.sql` file should contain the changes you want to apply and `down.sql` should contain the command to revert the changes.

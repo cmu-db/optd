@@ -1,5 +1,5 @@
 [package]
-name = "optd"
+name = "optd-storage"
 version = "0.1.0"
 edition = "2021"
 

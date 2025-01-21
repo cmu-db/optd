@@ -3,7 +3,7 @@
 
 [print_schema]
 # The file diesel will write the generated schema to.
-file = "optd/src/storage/schema.rs"
+file = "optd-storage/src/storage/schema.rs"
 
 
 # A column of type `INTEGER PRIMARY KEY` becomes an alias for the 64-bit signed integer `ROWID`. 
@@ -12,4 +12,4 @@ sqlite_integer_primary_key_is_bigint = true
 
 [migrations_directory]
 # The directory where the migration files are located.
-dir = "optd/migrations"
+dir = "optd-storage/migrations"
