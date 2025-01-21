@@ -1,5 +1,5 @@
 [workspace]
-members = ["optd"]
+members = ["optd-storage"]
 resolver = "2"
 
 [workspace.dependencies]
