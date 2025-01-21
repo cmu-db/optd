@@ -7,3 +7,4 @@ edition = "2021"
 diesel.workspace = true
 chrono.workspace = true
 anyhow.workspace = true
+libsqlite3-sys.workspace = true
