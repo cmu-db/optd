@@ -141,6 +141,8 @@ pub struct PhysicalProp {
     /// The physical property id.
     pub id: PhysicalPropId,
     /// The opaquely stored payload.
+    // TODO(yuchen): Instead, probably could do something simliar to
+    // the relational and scalar expression "inheritance" pattern.
     pub payload: Vec<u8>,
 }
 
@@ -206,6 +208,8 @@ pub struct ScalarProp {
     /// The scalar property id.
     pub id: ScalarPropId,
     /// The opaquely stored payload.
+    // TODO(yuchen): Instead, probably could do something simliar to
+    // the relational and scalar expression "inheritance" pattern.
     pub payload: Vec<u8>,
 }
 
