@@ -9,6 +9,7 @@
 # Contributor Guide
 
 - [Installaton]()
+- [Working with diesel-rs](./contributor_guide/diesel.md)
 
 # RFCs
 
