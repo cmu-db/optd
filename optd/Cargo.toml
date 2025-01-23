@@ -1,0 +1,10 @@
+[package]
+name = "optd"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+diesel.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+libsqlite3-sys.workspace = true

@@ -91,7 +91,7 @@ jobs:
         uses: dtolnay/install@cargo-docs-rs
       - name: cargo docs-rs
         # TODO: Once we figure out the crates, rename this.
-        run: cargo docs-rs -p optd-tmp
+        run: cargo docs-rs -p optd
   hack:
     # cargo-hack checks combinations of feature flags to ensure that features are all additive
     # which is required for feature unification
