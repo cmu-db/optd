@@ -13,3 +13,4 @@ diesel = { version = "2.2", features = [
 # Using a bundled version of sqlite3-sys to avoid build issues.
 libsqlite3-sys = { version = "0.30", features = ["bundled"] }
 dotenvy = "0.15"
+diesel_migrations = "2.2"

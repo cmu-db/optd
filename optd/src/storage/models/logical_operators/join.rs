@@ -5,7 +5,7 @@ use crate::storage::{
     schema,
 };
 
-#[derive(Debug, Queryable, Selectable, Identifiable, AsChangeset)]
+#[derive(Debug, Queryable, Selectable, Insertable, Identifiable, AsChangeset)]
 #[diesel(table_name = schema::logical_joins)]
 #[diesel(primary_key(logical_expr_id))]
 #[diesel(belongs_to(LogicalExpr))]
@@ -20,4 +20,6 @@ pub struct LogicalJoin {
     pub left: RelGroupId,
     /// The group on the right side of the join.
     pub right: RelGroupId,
+    /// The join condition (mocked).
+    pub join_cond: String,
 }

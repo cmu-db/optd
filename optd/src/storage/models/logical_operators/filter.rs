@@ -5,7 +5,7 @@ use crate::storage::{
     schema,
 };
 
-#[derive(Debug, Queryable, Selectable, Identifiable, AsChangeset)]
+#[derive(Debug, Queryable, Selectable, Insertable, Identifiable, AsChangeset)]
 #[diesel(table_name = schema::logical_filters)]
 #[diesel(primary_key(logical_expr_id))]
 #[diesel(belongs_to(LogicalExpr))]
