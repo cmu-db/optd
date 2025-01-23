@@ -4,7 +4,7 @@ CREATE TABLE logical_exprs (
     -- The logical expression id.
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     -- The logical operator descriptor id.
-    logical_op_desc_id INTEGER NOT NULL,
+    logical_op_desc_id BIGINT NOT NULL,
     -- The group this logical expression belongs to.
     group_id BIGINT NOT NULL, -- groups.id
     -- Time at which the logical expression is created.

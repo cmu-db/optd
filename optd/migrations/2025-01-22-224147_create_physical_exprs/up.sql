@@ -5,7 +5,7 @@ CREATE TABLE physical_exprs (
     -- The physical expression id.
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     -- The physical operator descriptor id.
-    physical_op_desc_id INTEGER NOT NULL,
+    physical_op_desc_id BIGINT NOT NULL,
     -- The group this physical expression belongs to.
     group_id BIGINT NOT NULL,
     -- The total cost for executing a physical plan rooted at this expression (FAKE).

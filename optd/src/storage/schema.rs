@@ -3,17 +3,27 @@
 diesel::table! {
     logical_exprs (id) {
         id -> BigInt,
-        logical_op_desc_id -> Integer,
+        logical_op_desc_id -> BigInt,
         group_id -> BigInt,
         created_at -> Timestamp,
     }
 }
 
 diesel::table! {
+    logical_filters (logical_expr_id) {
+        logical_expr_id -> BigInt,
+        child -> BigInt,
+        predicate -> Text,
+    }
+}
+
+diesel::table! {
     logical_joins (logical_expr_id) {
         logical_expr_id -> BigInt,
-        left -> Integer,
-        right -> Integer,
+        join_type -> Integer,
+        left -> BigInt,
+        right -> BigInt,
+        join_cond -> Text,
     }
 }
 
@@ -34,7 +44,7 @@ diesel::table! {
 diesel::table! {
     physical_exprs (id) {
         id -> BigInt,
-        physical_op_desc_id -> Integer,
+        physical_op_desc_id -> BigInt,
         group_id -> BigInt,
         total_cost -> Double,
         created_at -> Timestamp,
@@ -42,10 +52,20 @@ diesel::table! {
 }
 
 diesel::table! {
-    physical_nested_loop_joins (physical_expr_id) {
+    physical_filters (physical_expr_id) {
         physical_expr_id -> BigInt,
-        left -> Integer,
-        right -> Integer,
+        child -> BigInt,
+        predicate -> Text,
+    }
+}
+
+diesel::table! {
+    physical_nljoins (physical_expr_id) {
+        physical_expr_id -> BigInt,
+        join_type -> Integer,
+        left -> BigInt,
+        right -> BigInt,
+        join_cond -> Text,
     }
 }
 
@@ -57,7 +77,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    physical_scans (physical_expr_id) {
+    physical_table_scans (physical_expr_id) {
         physical_expr_id -> BigInt,
         table_name -> Text,
     }
@@ -72,19 +92,25 @@ diesel::table! {
 
 diesel::joinable!(logical_exprs -> logical_op_descs (logical_op_desc_id));
 diesel::joinable!(logical_exprs -> rel_groups (group_id));
+diesel::joinable!(logical_filters -> logical_exprs (logical_expr_id));
+diesel::joinable!(logical_filters -> rel_groups (child));
 diesel::joinable!(logical_joins -> logical_exprs (logical_expr_id));
 diesel::joinable!(logical_scans -> logical_exprs (logical_expr_id));
 diesel::joinable!(physical_exprs -> physical_op_descs (physical_op_desc_id));
 diesel::joinable!(physical_exprs -> rel_groups (group_id));
+diesel::joinable!(physical_filters -> physical_exprs (physical_expr_id));
+diesel::joinable!(physical_filters -> rel_groups (child));
 
 diesel::allow_tables_to_appear_in_same_query!(
     logical_exprs,
+    logical_filters,
     logical_joins,
     logical_op_descs,
     logical_scans,
     physical_exprs,
-    physical_nested_loop_joins,
+    physical_filters,
+    physical_nljoins,
     physical_op_descs,
-    physical_scans,
+    physical_table_scans,
     rel_groups,
 );
