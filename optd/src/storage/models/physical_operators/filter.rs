@@ -8,7 +8,7 @@ use crate::storage::{
 #[derive(Debug, Queryable, Selectable, Identifiable, AsChangeset)]
 #[diesel(table_name = schema::physical_filters)]
 #[diesel(primary_key(physical_expr_id))]
-#[diesel(belongs_to(LogicalExpr))]
+#[diesel(belongs_to(PhysicalExpr, foreign_key = physical_expr_id))]
 #[diesel(belongs_to(RelGroup, foreign_key = child))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct PhysicalFilter {
