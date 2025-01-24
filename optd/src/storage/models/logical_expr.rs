@@ -1,10 +1,11 @@
 //! The logical expression object.
 
 use diesel::{prelude::*, sql_types::BigInt};
+use enum_dispatch::enum_dispatch;
 
 use crate::{
     define_diesel_new_id_type_from_to_sql,
-    storage::{schema, StorageManager},
+    storage::{schema::logical_exprs, StorageManager},
 };
 
 use super::{
@@ -16,7 +17,7 @@ use super::{
 define_diesel_new_id_type_from_to_sql!(LogicalExprId, i64, BigInt);
 
 #[derive(Debug, Queryable, Selectable, Identifiable, AsChangeset)]
-#[diesel(table_name = schema::logical_exprs)]
+#[diesel(table_name = logical_exprs)]
 #[diesel(belongs_to(RelGroup))]
 #[diesel(belongs_to(LogicalOpKind))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -31,13 +32,80 @@ pub struct LogicalExprRecord {
     pub created_at: chrono::NaiveDateTime,
 }
 
+#[enum_dispatch(LogicalExprStorage)]
+#[derive(Debug)]
 pub enum LogicalExpr {
     Scan(LogicalScan),
     Filter(LogicalFilter),
     Join(LogicalJoin),
 }
 
-pub trait LogicalStorage {
-    fn get_group_expr(&self, conn: &mut StorageManager) -> Option<(LogicalExprId, RelGroupId)>;
-    fn insert(&self, conn: &mut StorageManager) -> bool;
+#[derive(Debug)]
+pub struct LogicalExprWithId {
+    pub id: LogicalExprId,
+    pub inner: LogicalExpr,
+}
+
+pub trait LogicalOp {
+    const NAME: &'static str;
+
+    fn get(id: LogicalExprId, storage: &mut StorageManager) -> Self;
+}
+
+#[enum_dispatch]
+pub trait LogicalExprStorage {
+    fn name(&self) -> &'static str;
+
+    /// Gets the logical expression id if it is already in the database.
+    fn id(&self, storage: &mut StorageManager) -> Option<LogicalExprId>;
+
+    fn insert_op(&self, id: LogicalExprId, storage: &mut StorageManager);
+
+    /// Gets the logical operator kind id.
+    fn op_kind(&self, storage: &mut StorageManager) -> LogicalOpKindId {
+        use crate::storage::schema::logical_op_kinds::dsl::*;
+
+        logical_op_kinds
+            .filter(name.eq(self.name()))
+            .select(id)
+            .first::<LogicalOpKindId>(&mut storage.conn)
+            .expect("Failed to get logical operator kind id for LogicalScan")
+    }
+
+    /// Gets the logical expression id and the relational group id if it is already in the database.
+    fn get_identifiers(&self, storage: &mut StorageManager) -> Option<(LogicalExprId, RelGroupId)> {
+        let id = self.id(storage)?;
+        let rel_group_id = storage.rel_group_of_logical_expr(id);
+        Some((id, rel_group_id))
+    }
+
+    /// Adds the logical expression to the database.
+    /// If the logical expression is already in the database, it returns the logical expression id and the relational group id.
+    /// Otherwise, it inserts the logical expression into the database and returns the generated logical expression id and
+    /// the relational group id.
+    fn add(&self, storage: &mut StorageManager) -> (LogicalExprId, RelGroupId) {
+        if let Some((id, rel_group_id)) = self.get_identifiers(storage) {
+            (id, rel_group_id)
+        } else {
+            let rel_group_id = storage.create_rel_group();
+            let op_kind_id = self.op_kind(storage);
+            let id = storage.add_logical_expr_record(op_kind_id, rel_group_id);
+            self.insert_op(id, storage);
+            (id, rel_group_id)
+        }
+    }
+
+    fn add_to_group(
+        &self,
+        rel_group_id: RelGroupId,
+        storage: &mut StorageManager,
+    ) -> LogicalExprId {
+        if let Some(logcal_expr_id) = self.id(storage) {
+            return logcal_expr_id;
+        }
+        let op_kind_id = self.op_kind(storage);
+        let logical_expr_id = storage.add_logical_expr_record(op_kind_id, rel_group_id);
+        self.insert_op(logical_expr_id, storage);
+        logical_expr_id
+    }
 }

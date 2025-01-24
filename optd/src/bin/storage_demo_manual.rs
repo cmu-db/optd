@@ -1,7 +1,6 @@
-use std::env;
-
 use diesel::prelude::*;
 use dotenvy::dotenv;
+
 use optd::storage::{
     models::{
         common::JoinType,
@@ -16,55 +15,8 @@ use optd::storage::{
     StorageManager,
 };
 
-fn main() -> anyhow::Result<()> {
-    dotenv().ok();
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let mut storage = StorageManager::new(&database_url)?;
-    storage.migration_run()?;
-    {
-        use optd::storage::schema::logical_op_kinds::dsl::*;
-        let kinds = logical_op_kinds
-            .select(LogicalOpKind::as_select())
-            .load(&mut storage.conn)?;
-
-        println!("logical operator support (n={})", kinds.len());
-        for kind in kinds {
-            println!("+ {}", kind.name);
-        }
-    }
-
-    {
-        use optd::storage::schema::physical_op_kinds::dsl::*;
-        let descs = physical_op_kinds
-            .select(PhysicalOpKind::as_select())
-            .load(&mut storage.conn)?;
-
-        println!("physical operator support (n={})", descs.len());
-        for desc in descs {
-            println!("+ {}", desc.name);
-        }
-    }
-
-    {
-        use optd::storage::schema::physical_op_kinds::dsl::*;
-        let descs = physical_op_kinds
-            .select(PhysicalOpKind::as_select())
-            .load(&mut storage.conn)?;
-
-        println!("physical operator support (n={})", descs.len());
-        for desc in descs {
-            println!("+ {}", desc.name);
-        }
-    }
-
-    // CREATE TABLE t1(v1 INTEGER, v2 TEXT);
-    // CREATE TABLE t2(v1 INTEGER, v2 TEXT);
-    // SELECT * from t1 inner join t2 on t1.v1 = t2.v1 where t1.v2 = 'foo';
-    // - LogicalFilter (on: t1.v2 = 'foo')
-    //   - LogicalJoin (inner, on t1.v1 = t2.v1)
-    //     - LogicalScan (t1)
-    //     - LogicalScan (t2)
-
+#[allow(dead_code)]
+pub fn demo(mut storage: StorageManager) -> anyhow::Result<()> {
     let logical_scan_id = logical_op_kinds::table
         .filter(logical_op_kinds::name.eq("LogicalScan"))
         .select(logical_op_kinds::id)
@@ -278,6 +230,45 @@ fn main() -> anyhow::Result<()> {
     // select l.id, l.group_id, l.created_at, desc.name
     // from logical_exprs as l, logical_op_kinds as desc
     // where l.logical_op_kind_id = desc.id;
+    Ok(())
+}
 
+fn main() -> anyhow::Result<()> {
+    // CREATE TABLE t1(v1 INTEGER, v2 TEXT);
+    // CREATE TABLE t2(v1 INTEGER, v2 TEXT);
+    // SELECT * from t1 inner join t2 on t1.v1 = t2.v1 where t1.v2 = 'foo';
+    // - LogicalFilter (on: t1.v2 = 'foo')
+    //   - LogicalJoin (inner, on t1.v1 = t2.v1)
+    //     - LogicalScan (t1)
+    //     - LogicalScan (t2)
+    dotenv().ok();
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let mut storage = StorageManager::new(&database_url)?;
+    storage.migration_run()?;
+    {
+        use optd::storage::schema::logical_op_kinds::dsl::*;
+        let kinds = logical_op_kinds
+            .select(LogicalOpKind::as_select())
+            .load(&mut storage.conn)?;
+
+        println!("logical operator support (n={})", kinds.len());
+        for kind in kinds {
+            println!("+ {}", kind.name);
+        }
+    }
+
+    {
+        use optd::storage::schema::physical_op_kinds::dsl::*;
+        let descs = physical_op_kinds
+            .select(PhysicalOpKind::as_select())
+            .load(&mut storage.conn)?;
+
+        println!("physical operator support (n={})", descs.len());
+        for desc in descs {
+            println!("+ {}", desc.name);
+        }
+    }
+    // manual_demo(storage)?;
+    demo(storage)?;
     Ok(())
 }

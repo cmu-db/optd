@@ -2,7 +2,7 @@ use diesel::prelude::*;
 
 use crate::storage::schema::physical_table_scans;
 
-#[derive(Debug, Queryable, Insertable)]
+#[derive(Debug, Queryable, Insertable, Selectable)]
 #[diesel(table_name = physical_table_scans)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct PhysicalTableScan {

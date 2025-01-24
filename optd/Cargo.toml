@@ -9,4 +9,5 @@ chrono.workspace = true
 diesel.workspace = true
 diesel_migrations.workspace = true
 dotenvy.workspace = true
+enum_dispatch.workspace = true
 libsqlite3-sys.workspace = true

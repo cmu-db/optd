@@ -6,7 +6,7 @@ use crate::storage::{
 };
 
 /// A physical nested loop join.
-#[derive(Debug, Queryable, Insertable)]
+#[derive(Debug, Queryable, Insertable, Selectable)]
 #[diesel(table_name = physical_nljoins)]
 #[diesel(belongs_to(RelGroup, foreign_key = left))]
 #[diesel(belongs_to(RelGroup, foreign_key = right))]

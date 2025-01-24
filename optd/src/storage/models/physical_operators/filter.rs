@@ -2,7 +2,7 @@ use diesel::prelude::*;
 
 use crate::storage::{models::rel_group::RelGroupId, schema};
 
-#[derive(Debug, Queryable, Insertable)]
+#[derive(Debug, Queryable, Insertable, Selectable)]
 #[diesel(table_name = schema::physical_filters)]
 #[diesel(belongs_to(RelGroup, foreign_key = child))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
