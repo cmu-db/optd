@@ -1,19 +1,17 @@
 use diesel::prelude::*;
 
 use crate::storage::{
-    models::{common::JoinType, physical_expr::PhysicalExprId, rel_group::RelGroupId},
-    schema,
+    models::{common::JoinType, rel_group::RelGroupId},
+    schema::physical_nljoins,
 };
 
-#[derive(Debug, Queryable, Selectable, Identifiable, AsChangeset)]
-#[diesel(table_name = schema::physical_nljoins)]
-#[diesel(primary_key(physical_expr_id))]
-#[diesel(belongs_to(PhysicalExpr))]
+/// A physical nested loop join.
+#[derive(Debug, Queryable, Insertable)]
+#[diesel(table_name = physical_nljoins)]
 #[diesel(belongs_to(RelGroup, foreign_key = left))]
 #[diesel(belongs_to(RelGroup, foreign_key = right))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct PhysicalNLJoin {
-    pub physical_expr_id: PhysicalExprId,
     /// The type of join to perform.
     pub join_type: JoinType,
     /// The group on the left side of the join.

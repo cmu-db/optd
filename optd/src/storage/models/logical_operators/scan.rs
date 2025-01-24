@@ -1,14 +1,11 @@
 use diesel::prelude::*;
 
-use crate::storage::{models::logical_expr::LogicalExprId, schema};
+use crate::storage::schema::logical_scans;
 
-#[derive(Debug, Queryable, Selectable, Identifiable, AsChangeset)]
-#[diesel(table_name = schema::logical_scans)]
-#[diesel(primary_key(logical_expr_id))]
-#[diesel(belongs_to(LogicalExpr))]
+#[derive(Debug, Queryable, Insertable, Selectable)]
+#[diesel(table_name = logical_scans)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct LogicalScan {
-    pub logical_expr_id: LogicalExprId,
     /// The name of the table to scan.
     /// TODO(yuchen): Eventually this should become the unique identifier
     /// for the table in the catalog.

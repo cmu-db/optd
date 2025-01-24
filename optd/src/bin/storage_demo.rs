@@ -6,7 +6,9 @@ use optd::storage::{
     models::{
         common::JoinType,
         logical_expr::LogicalExprId,
-        logical_operators::{LogicalFilter, LogicalJoin, LogicalOpKind, LogicalOpKindId},
+        logical_operators::{
+            LogicalFilter, LogicalJoin, LogicalOpKind, LogicalOpKindId, LogicalScan,
+        },
         physical_operators::PhysicalOpKind,
         rel_group::RelGroupId,
     },
@@ -82,120 +84,194 @@ fn main() -> anyhow::Result<()> {
         // - LogicalScan (t1)
         use optd::storage::schema::logical_exprs;
         use optd::storage::schema::rel_groups;
-        let rel_group_id = diesel::insert_into(rel_groups::table)
-            .default_values()
-            .returning(rel_groups::id)
-            .get_result::<RelGroupId>(&mut storage.conn)?;
 
-        println!("created group_id={:?}", rel_group_id);
+        let scan = LogicalScan {
+            table_name: "t1".to_string(),
+        };
 
-        let logical_expr_id = diesel::insert_into(logical_exprs::table)
-            .values((
-                logical_exprs::logical_op_kind_id.eq(logical_scan_id),
-                logical_exprs::group_id.eq(rel_group_id),
-            ))
-            .returning(logical_exprs::id)
-            .get_result::<LogicalExprId>(&mut storage.conn)?;
+        if let Some(expr_id) = logical_scans::table
+            .filter(logical_scans::table_name.eq(&scan.table_name))
+            .select(logical_scans::logical_expr_id)
+            .first::<LogicalExprId>(&mut storage.conn)
+            .ok()
+        {
+            let rel_group_id = logical_exprs::table
+                .filter(logical_exprs::id.eq(expr_id))
+                .select(logical_exprs::group_id)
+                .first::<RelGroupId>(&mut storage.conn)?;
+            println!(
+                "found rel_group_id={:?}, expr_id={:?} for table_name={}",
+                rel_group_id, expr_id, scan.table_name
+            );
+            rel_group_id
+        } else {
+            let rel_group_id = diesel::insert_into(rel_groups::table)
+                .default_values()
+                .returning(rel_groups::id)
+                .get_result::<RelGroupId>(&mut storage.conn)?;
 
-        diesel::insert_into(logical_scans::table)
-            .values((
-                logical_scans::logical_expr_id.eq(logical_expr_id),
-                logical_scans::table_name.eq("t1"),
-            ))
-            .execute(&mut storage.conn)?;
-        rel_group_id
+            println!("created group_id={:?}", rel_group_id);
+
+            let logical_expr_id = diesel::insert_into(logical_exprs::table)
+                .values((
+                    logical_exprs::logical_op_kind_id.eq(logical_scan_id),
+                    logical_exprs::group_id.eq(rel_group_id),
+                ))
+                .returning(logical_exprs::id)
+                .get_result::<LogicalExprId>(&mut storage.conn)?;
+
+            diesel::insert_into(logical_scans::table)
+                .values((logical_scans::logical_expr_id.eq(logical_expr_id), scan))
+                .execute(&mut storage.conn)?;
+            rel_group_id
+        }
     };
 
     let scan2_group_id = {
         // - LogicalScan (t2)
         use optd::storage::schema::logical_exprs;
         use optd::storage::schema::rel_groups;
-        let rel_group_id = diesel::insert_into(rel_groups::table)
-            .default_values()
-            .returning(rel_groups::id)
-            .get_result::<RelGroupId>(&mut storage.conn)?;
 
-        println!("created group_id={:?}", rel_group_id);
+        let scan = LogicalScan {
+            table_name: "t2".to_string(),
+        };
 
-        let logical_expr_id = diesel::insert_into(logical_exprs::table)
-            .values((
-                logical_exprs::logical_op_kind_id.eq(logical_scan_id),
-                logical_exprs::group_id.eq(rel_group_id),
-            ))
-            .returning(logical_exprs::id)
-            .get_result::<LogicalExprId>(&mut storage.conn)?;
+        if let Some(expr_id) = logical_scans::table
+            .filter(logical_scans::table_name.eq(&scan.table_name))
+            .select(logical_scans::logical_expr_id)
+            .first::<LogicalExprId>(&mut storage.conn)
+            .ok()
+        {
+            let rel_group_id = logical_exprs::table
+                .filter(logical_exprs::id.eq(expr_id))
+                .select(logical_exprs::group_id)
+                .first::<RelGroupId>(&mut storage.conn)?;
+            println!(
+                "found rel_group_id={:?}, expr_id={:?} for table_name={}",
+                rel_group_id, expr_id, scan.table_name
+            );
+            rel_group_id
+        } else {
+            let rel_group_id = diesel::insert_into(rel_groups::table)
+                .default_values()
+                .returning(rel_groups::id)
+                .get_result::<RelGroupId>(&mut storage.conn)?;
 
-        diesel::insert_into(logical_scans::table)
-            .values((
-                logical_scans::logical_expr_id.eq(logical_expr_id),
-                logical_scans::table_name.eq("t2"),
-            ))
-            .execute(&mut storage.conn)?;
-        rel_group_id
+            println!("created group_id={:?}", rel_group_id);
+
+            let logical_expr_id = diesel::insert_into(logical_exprs::table)
+                .values((
+                    logical_exprs::logical_op_kind_id.eq(logical_scan_id),
+                    logical_exprs::group_id.eq(rel_group_id),
+                ))
+                .returning(logical_exprs::id)
+                .get_result::<LogicalExprId>(&mut storage.conn)?;
+
+            diesel::insert_into(logical_scans::table)
+                .values((logical_scans::logical_expr_id.eq(logical_expr_id), scan))
+                .execute(&mut storage.conn)?;
+            rel_group_id
+        }
     };
 
     let join_group_id = {
         // - LogicalJoin (inner, on t1.v1 = t2.v1)
         use optd::storage::schema::logical_exprs;
         use optd::storage::schema::rel_groups;
-        let rel_group_id = diesel::insert_into(rel_groups::table)
-            .default_values()
-            .returning(rel_groups::id)
-            .get_result::<RelGroupId>(&mut storage.conn)?;
-
-        println!("created group_id={:?}", rel_group_id);
-
-        let logical_expr_id = diesel::insert_into(logical_exprs::table)
-            .values((
-                logical_exprs::logical_op_kind_id.eq(logical_join_id),
-                logical_exprs::group_id.eq(rel_group_id),
-            ))
-            .returning(logical_exprs::id)
-            .get_result::<LogicalExprId>(&mut storage.conn)?;
 
         let join = LogicalJoin {
-            logical_expr_id,
             join_type: JoinType::Inner,
             left: scan1_group_id,
             right: scan2_group_id,
             join_cond: "t1.v1 = t2.v1".to_string(),
         };
 
-        diesel::insert_into(logical_joins::table)
-            .values(join)
-            .execute(&mut storage.conn)?;
+        if let Some(expr_id) = logical_joins::table
+            .filter(logical_joins::left.eq(&join.left))
+            .filter(logical_joins::right.eq(&join.right))
+            .filter(logical_joins::join_type.eq(&join.join_type))
+            .filter(logical_joins::join_cond.eq(&join.join_cond))
+            .select(logical_joins::logical_expr_id)
+            .first::<LogicalExprId>(&mut storage.conn)
+            .ok()
+        {
+            let rel_group_id = logical_exprs::table
+                .filter(logical_exprs::id.eq(expr_id))
+                .select(logical_exprs::group_id)
+                .first::<RelGroupId>(&mut storage.conn)?;
+            println!(
+                "found rel_group_id={:?}, expr_id={:?} for {:?}",
+                rel_group_id, expr_id, join,
+            );
+            rel_group_id
+        } else {
+            let rel_group_id = diesel::insert_into(rel_groups::table)
+                .default_values()
+                .returning(rel_groups::id)
+                .get_result::<RelGroupId>(&mut storage.conn)?;
 
-        rel_group_id
+            println!("created group_id={:?}", rel_group_id);
+
+            let logical_expr_id = diesel::insert_into(logical_exprs::table)
+                .values((
+                    logical_exprs::logical_op_kind_id.eq(logical_join_id),
+                    logical_exprs::group_id.eq(rel_group_id),
+                ))
+                .returning(logical_exprs::id)
+                .get_result::<LogicalExprId>(&mut storage.conn)?;
+
+            diesel::insert_into(logical_joins::table)
+                .values((logical_joins::logical_expr_id.eq(logical_expr_id), join))
+                .execute(&mut storage.conn)?;
+
+            rel_group_id
+        }
     };
 
     {
         // - LogicalFilter (on: t1.v2 = 'foo')
         use optd::storage::schema::logical_exprs;
         use optd::storage::schema::rel_groups;
-        let rel_group_id = diesel::insert_into(rel_groups::table)
-            .default_values()
-            .returning(rel_groups::id)
-            .get_result::<RelGroupId>(&mut storage.conn)?;
-
-        println!("created group_id={:?}", rel_group_id);
-
-        let logical_expr_id = diesel::insert_into(logical_exprs::table)
-            .values((
-                logical_exprs::logical_op_kind_id.eq(logical_filter_id),
-                logical_exprs::group_id.eq(rel_group_id),
-            ))
-            .returning(logical_exprs::id)
-            .get_result::<LogicalExprId>(&mut storage.conn)?;
 
         let filter = LogicalFilter {
-            logical_expr_id,
             child: join_group_id,
             predicate: "t1.v2 = 'foo'".to_string(),
         };
 
-        diesel::insert_into(logical_filters::table)
-            .values(filter)
-            .execute(&mut storage.conn)?;
+        if let Ok(expr_id) = logical_filters::table
+            .filter(logical_filters::child.eq(&filter.child))
+            .filter(logical_filters::predicate.eq(&filter.predicate))
+            .select(logical_filters::logical_expr_id)
+            .first::<LogicalExprId>(&mut storage.conn)
+        {
+            let rel_group_id = logical_exprs::table
+                .filter(logical_exprs::id.eq(expr_id))
+                .select(logical_exprs::group_id)
+                .first::<RelGroupId>(&mut storage.conn)?;
+            println!(
+                "found rel_group_id={:?}, expr_id={:?} for {:?}",
+                rel_group_id, expr_id, filter,
+            );
+        } else {
+            let rel_group_id = diesel::insert_into(rel_groups::table)
+                .default_values()
+                .returning(rel_groups::id)
+                .get_result::<RelGroupId>(&mut storage.conn)?;
+
+            println!("created group_id={:?}", rel_group_id);
+
+            let logical_expr_id = diesel::insert_into(logical_exprs::table)
+                .values((
+                    logical_exprs::logical_op_kind_id.eq(logical_filter_id),
+                    logical_exprs::group_id.eq(rel_group_id),
+                ))
+                .returning(logical_exprs::id)
+                .get_result::<LogicalExprId>(&mut storage.conn)?;
+
+            diesel::insert_into(logical_filters::table)
+                .values((logical_filters::logical_expr_id.eq(logical_expr_id), filter))
+                .execute(&mut storage.conn)?;
+        }
     };
 
     // Run `sqlite3 test_memo.db` and follow query gives you all logical exprs in the database.
