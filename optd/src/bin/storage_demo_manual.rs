@@ -41,11 +41,10 @@ pub fn demo(mut storage: StorageManager) -> anyhow::Result<()> {
             table_name: "t1".to_string(),
         };
 
-        if let Some(expr_id) = logical_scans::table
+        if let Ok(expr_id) = logical_scans::table
             .filter(logical_scans::table_name.eq(&scan.table_name))
             .select(logical_scans::logical_expr_id)
             .first::<LogicalExprId>(&mut storage.conn)
-            .ok()
         {
             let rel_group_id = logical_exprs::table
                 .filter(logical_exprs::id.eq(expr_id))
@@ -88,11 +87,10 @@ pub fn demo(mut storage: StorageManager) -> anyhow::Result<()> {
             table_name: "t2".to_string(),
         };
 
-        if let Some(expr_id) = logical_scans::table
+        if let Ok(expr_id) = logical_scans::table
             .filter(logical_scans::table_name.eq(&scan.table_name))
             .select(logical_scans::logical_expr_id)
             .first::<LogicalExprId>(&mut storage.conn)
-            .ok()
         {
             let rel_group_id = logical_exprs::table
                 .filter(logical_exprs::id.eq(expr_id))
@@ -138,14 +136,13 @@ pub fn demo(mut storage: StorageManager) -> anyhow::Result<()> {
             join_cond: "t1.v1 = t2.v1".to_string(),
         };
 
-        if let Some(expr_id) = logical_joins::table
+        if let Ok(expr_id) = logical_joins::table
             .filter(logical_joins::left.eq(&join.left))
             .filter(logical_joins::right.eq(&join.right))
             .filter(logical_joins::join_type.eq(&join.join_type))
             .filter(logical_joins::join_cond.eq(&join.join_cond))
             .select(logical_joins::logical_expr_id)
             .first::<LogicalExprId>(&mut storage.conn)
-            .ok()
         {
             let rel_group_id = logical_exprs::table
                 .filter(logical_exprs::id.eq(expr_id))

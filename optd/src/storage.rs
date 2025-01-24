@@ -32,7 +32,7 @@ impl StorageManager {
     }
     /// Create a new `StorageManager` instance.
     pub fn new(database_url: &str) -> anyhow::Result<Self> {
-        let connection = SqliteConnection::establish(&database_url)?;
+        let connection = SqliteConnection::establish(database_url)?;
         Ok(Self { conn: connection })
     }
 
@@ -105,13 +105,13 @@ impl StorageManager {
     /// Gets the group id of a logical expression.
     fn rel_group_of_logical_expr(&mut self, logical_expr: LogicalExprId) -> RelGroupId {
         use schema::logical_exprs::dsl::*;
-        let rel_group_id = logical_exprs
+        
+
+        logical_exprs
             .filter(id.eq(logical_expr))
             .select(group_id)
             .first(&mut self.conn)
-            .expect("Invalid database state: logical expression must belongs to a group");
-
-        rel_group_id
+            .expect("Invalid database state: logical expression must belongs to a group")
     }
 
     fn create_rel_group(&mut self) -> RelGroupId {
