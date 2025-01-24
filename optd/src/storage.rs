@@ -105,7 +105,6 @@ impl StorageManager {
     /// Gets the group id of a logical expression.
     fn rel_group_of_logical_expr(&mut self, logical_expr: LogicalExprId) -> RelGroupId {
         use schema::logical_exprs::dsl::*;
-        
 
         logical_exprs
             .filter(id.eq(logical_expr))
