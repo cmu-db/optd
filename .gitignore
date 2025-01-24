@@ -22,7 +22,7 @@ Cargo.lock
 
 ### Project Specific ###
 
-# The memo table database for testing purposes.
-test_memo.db
+# Database files.
+*.db
 # Storing environment variables.
 .env
