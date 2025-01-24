@@ -9,4 +9,4 @@ CREATE TABLE physical_filters (
     FOREIGN KEY (child) REFERENCES rel_groups(id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
-INSERT INTO physical_op_descs (name) VALUES ('PhysicalFilter');
+INSERT INTO physical_op_kinds (name) VALUES ('PhysicalFilter');

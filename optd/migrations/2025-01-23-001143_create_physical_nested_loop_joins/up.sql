@@ -14,4 +14,4 @@ CREATE TABLE physical_nljoins (
     FOREIGN KEY (right) REFERENCES rel_groups(id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
-INSERT INTO physical_op_descs (name) VALUES ('PhysicalNLJoin');
+INSERT INTO physical_op_kinds (name) VALUES ('PhysicalNLJoin');

@@ -14,4 +14,4 @@ CREATE TABLE logical_joins (
     FOREIGN KEY (right) REFERENCES rel_groups(id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
-INSERT INTO logical_op_descs (name) VALUES ('LogicalJoin');
+INSERT INTO logical_op_kinds (name) VALUES ('LogicalJoin');

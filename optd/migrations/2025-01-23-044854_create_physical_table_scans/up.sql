@@ -7,4 +7,4 @@ CREATE TABLE physical_table_scans (
     FOREIGN KEY (physical_expr_id) REFERENCES physical_expr_id(id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
-INSERT INTO physical_op_descs (name) VALUES ('PhysicalTableScan');
+INSERT INTO physical_op_kinds (name) VALUES ('PhysicalTableScan');

@@ -7,4 +7,4 @@ CREATE TABLE logical_scans (
     FOREIGN KEY (logical_expr_id) REFERENCES logical_exprs(id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
-INSERT INTO logical_op_descs (name) VALUES ('LogicalScan');
+INSERT INTO logical_op_kinds (name) VALUES ('LogicalScan');

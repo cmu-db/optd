@@ -6,11 +6,11 @@ use optd::storage::{
     models::{
         common::JoinType,
         logical_expr::LogicalExprId,
-        logical_operators::{LogicalFilter, LogicalJoin, LogicalOpDesc, LogicalOpDescId},
-        physical_operators::PhysicalOpDesc,
+        logical_operators::{LogicalFilter, LogicalJoin, LogicalOpKind, LogicalOpKindId},
+        physical_operators::PhysicalOpKind,
         rel_group::RelGroupId,
     },
-    schema::{logical_filters, logical_joins, logical_op_descs, logical_scans},
+    schema::{logical_filters, logical_joins, logical_op_kinds, logical_scans},
     StorageManager,
 };
 
@@ -20,21 +20,21 @@ fn main() -> anyhow::Result<()> {
     let mut storage = StorageManager::new(&database_url)?;
     storage.migration_run()?;
     {
-        use optd::storage::schema::logical_op_descs::dsl::*;
-        let descs = logical_op_descs
-            .select(LogicalOpDesc::as_select())
+        use optd::storage::schema::logical_op_kinds::dsl::*;
+        let kinds = logical_op_kinds
+            .select(LogicalOpKind::as_select())
             .load(&mut storage.conn)?;
 
-        println!("logical operator support (n={})", descs.len());
-        for desc in descs {
-            println!("+ {}", desc.name);
+        println!("logical operator support (n={})", kinds.len());
+        for kind in kinds {
+            println!("+ {}", kind.name);
         }
     }
 
     {
-        use optd::storage::schema::physical_op_descs::dsl::*;
-        let descs = physical_op_descs
-            .select(PhysicalOpDesc::as_select())
+        use optd::storage::schema::physical_op_kinds::dsl::*;
+        let descs = physical_op_kinds
+            .select(PhysicalOpKind::as_select())
             .load(&mut storage.conn)?;
 
         println!("physical operator support (n={})", descs.len());
@@ -44,9 +44,9 @@ fn main() -> anyhow::Result<()> {
     }
 
     {
-        use optd::storage::schema::physical_op_descs::dsl::*;
-        let descs = physical_op_descs
-            .select(PhysicalOpDesc::as_select())
+        use optd::storage::schema::physical_op_kinds::dsl::*;
+        let descs = physical_op_kinds
+            .select(PhysicalOpKind::as_select())
             .load(&mut storage.conn)?;
 
         println!("physical operator support (n={})", descs.len());
@@ -63,20 +63,20 @@ fn main() -> anyhow::Result<()> {
     //     - LogicalScan (t1)
     //     - LogicalScan (t2)
 
-    let logical_scan_id = logical_op_descs::table
-        .filter(logical_op_descs::name.eq("LogicalScan"))
-        .select(logical_op_descs::id)
-        .first::<LogicalOpDescId>(&mut storage.conn)?;
+    let logical_scan_id = logical_op_kinds::table
+        .filter(logical_op_kinds::name.eq("LogicalScan"))
+        .select(logical_op_kinds::id)
+        .first::<LogicalOpKindId>(&mut storage.conn)?;
 
-    let logical_join_id = logical_op_descs::table
-        .filter(logical_op_descs::name.eq("LogicalJoin"))
-        .select(logical_op_descs::id)
-        .first::<LogicalOpDescId>(&mut storage.conn)?;
+    let logical_join_id = logical_op_kinds::table
+        .filter(logical_op_kinds::name.eq("LogicalJoin"))
+        .select(logical_op_kinds::id)
+        .first::<LogicalOpKindId>(&mut storage.conn)?;
 
-    let logical_filter_id = logical_op_descs::table
-        .filter(logical_op_descs::name.eq("LogicalFilter"))
-        .select(logical_op_descs::id)
-        .first::<LogicalOpDescId>(&mut storage.conn)?;
+    let logical_filter_id = logical_op_kinds::table
+        .filter(logical_op_kinds::name.eq("LogicalFilter"))
+        .select(logical_op_kinds::id)
+        .first::<LogicalOpKindId>(&mut storage.conn)?;
 
     let scan1_group_id = {
         // - LogicalScan (t1)
@@ -91,7 +91,7 @@ fn main() -> anyhow::Result<()> {
 
         let logical_expr_id = diesel::insert_into(logical_exprs::table)
             .values((
-                logical_exprs::logical_op_desc_id.eq(logical_scan_id),
+                logical_exprs::logical_op_kind_id.eq(logical_scan_id),
                 logical_exprs::group_id.eq(rel_group_id),
             ))
             .returning(logical_exprs::id)
@@ -119,7 +119,7 @@ fn main() -> anyhow::Result<()> {
 
         let logical_expr_id = diesel::insert_into(logical_exprs::table)
             .values((
-                logical_exprs::logical_op_desc_id.eq(logical_scan_id),
+                logical_exprs::logical_op_kind_id.eq(logical_scan_id),
                 logical_exprs::group_id.eq(rel_group_id),
             ))
             .returning(logical_exprs::id)
@@ -147,7 +147,7 @@ fn main() -> anyhow::Result<()> {
 
         let logical_expr_id = diesel::insert_into(logical_exprs::table)
             .values((
-                logical_exprs::logical_op_desc_id.eq(logical_join_id),
+                logical_exprs::logical_op_kind_id.eq(logical_join_id),
                 logical_exprs::group_id.eq(rel_group_id),
             ))
             .returning(logical_exprs::id)
@@ -181,7 +181,7 @@ fn main() -> anyhow::Result<()> {
 
         let logical_expr_id = diesel::insert_into(logical_exprs::table)
             .values((
-                logical_exprs::logical_op_desc_id.eq(logical_filter_id),
+                logical_exprs::logical_op_kind_id.eq(logical_filter_id),
                 logical_exprs::group_id.eq(rel_group_id),
             ))
             .returning(logical_exprs::id)
@@ -200,8 +200,8 @@ fn main() -> anyhow::Result<()> {
 
     // Run `sqlite3 test_memo.db` and follow query gives you all logical exprs in the database.
     // select l.id, l.group_id, l.created_at, desc.name
-    // from logical_exprs as l, logical_op_descs as desc
-    // where l.logical_op_desc_id = desc.id;
+    // from logical_exprs as l, logical_op_kinds as desc
+    // where l.logical_op_kind_id = desc.id;
 
     Ok(())
 }

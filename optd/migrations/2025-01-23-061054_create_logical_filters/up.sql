@@ -9,4 +9,4 @@ CREATE TABLE logical_filters (
     FOREIGN KEY (child) REFERENCES rel_groups(id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
-INSERT INTO logical_op_descs (name) VALUES ('LogicalFilter');
+INSERT INTO logical_op_kinds (name) VALUES ('LogicalFilter');
