@@ -1,7 +1,6 @@
 //! The logical expression object.
 
 use diesel::{prelude::*, sql_types::BigInt};
-use enum_dispatch::enum_dispatch;
 
 use crate::{
     define_diesel_new_id_type_from_to_sql,
@@ -32,7 +31,6 @@ pub struct LogicalExprRecord {
     pub created_at: chrono::NaiveDateTime,
 }
 
-#[enum_dispatch(LogicalExprStorage)]
 #[derive(Debug)]
 pub enum LogicalExpr {
     Scan(LogicalScan),
@@ -46,19 +44,18 @@ pub struct LogicalExprWithId {
     pub inner: LogicalExpr,
 }
 
-pub trait LogicalOp {
-    const NAME: &'static str;
-
-    fn get(id: LogicalExprId, storage: &mut StorageManager) -> Self;
-}
-
-#[enum_dispatch]
-pub trait LogicalExprStorage {
-    fn name(&self) -> &'static str;
+/// This trait defines the interface for working with logical expression in storage.
+pub trait LogicalOperatorStorage {
+    /// Gets the name of the logical operator.
+    fn op_name() -> &'static str;
 
     /// Gets the logical expression id if it is already in the database.
     fn id(&self, storage: &mut StorageManager) -> Option<LogicalExprId>;
 
+    /// Gets the logical expression using the id.
+    fn get(id: LogicalExprId, storage: &mut StorageManager) -> Self;
+
+    /// Inserts the logical operator into its own operator table.
     fn insert_op(&self, id: LogicalExprId, storage: &mut StorageManager);
 
     /// Gets the logical operator kind id.
@@ -66,7 +63,7 @@ pub trait LogicalExprStorage {
         use crate::storage::schema::logical_op_kinds::dsl::*;
 
         logical_op_kinds
-            .filter(name.eq(self.name()))
+            .filter(name.eq(Self::op_name()))
             .select(id)
             .first::<LogicalOpKindId>(&mut storage.conn)
             .expect("Failed to get logical operator kind id for LogicalScan")
@@ -95,6 +92,10 @@ pub trait LogicalExprStorage {
         }
     }
 
+    /// Adds the logical expression to an existing relational group.
+    /// If the logical expression is already in the database, it returns
+    /// the logical expression id. Otherwise, it inserts the logical expression
+    /// and returns the generated logical expression id.
     fn add_to_group(
         &self,
         rel_group_id: RelGroupId,

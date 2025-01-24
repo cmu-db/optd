@@ -3,7 +3,7 @@ use diesel::prelude::*;
 use crate::storage::{
     models::{
         common::JoinType,
-        logical_expr::{LogicalExprId, LogicalExprStorage, LogicalOp},
+        logical_expr::{LogicalExprId, LogicalOperatorStorage},
         rel_group::RelGroupId,
     },
     schema::logical_joins,
@@ -26,20 +26,7 @@ pub struct LogicalJoin {
     pub join_cond: String,
 }
 
-impl LogicalOp for LogicalJoin {
-    const NAME: &'static str = "LogicalJoin";
-
-    fn get(id: LogicalExprId, storage: &mut StorageManager) -> Self {
-        use crate::storage::schema::logical_joins::dsl::*;
-        logical_joins
-            .filter(logical_expr_id.eq(id))
-            .select(LogicalJoin::as_select())
-            .first::<LogicalJoin>(&mut storage.conn)
-            .expect("failed to get logical join")
-    }
-}
-
-impl LogicalExprStorage for LogicalJoin {
+impl LogicalOperatorStorage for LogicalJoin {
     fn id(&self, storage: &mut StorageManager) -> Option<LogicalExprId> {
         use self::logical_joins::dsl::*;
         logical_joins
@@ -60,7 +47,16 @@ impl LogicalExprStorage for LogicalJoin {
             .expect("failed to insert new logical join");
     }
 
-    fn name(&self) -> &'static str {
-        <Self as LogicalOp>::NAME
+    fn op_name() -> &'static str {
+        "LogicalJoin"
+    }
+
+    fn get(id: LogicalExprId, storage: &mut StorageManager) -> Self {
+        use crate::storage::schema::logical_joins::dsl::*;
+        logical_joins
+            .filter(logical_expr_id.eq(id))
+            .select(LogicalJoin::as_select())
+            .first::<LogicalJoin>(&mut storage.conn)
+            .expect("failed to get logical join")
     }
 }

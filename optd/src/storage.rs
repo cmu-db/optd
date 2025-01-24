@@ -2,8 +2,7 @@ use diesel::prelude::*;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations};
 use models::{
     logical_expr::{
-        LogicalExpr, LogicalExprId, LogicalExprRecord, LogicalExprStorage, LogicalExprWithId,
-        LogicalOp,
+        LogicalExpr, LogicalExprId, LogicalExprRecord, LogicalExprWithId, LogicalOperatorStorage,
     },
     logical_operators::{LogicalFilter, LogicalJoin, LogicalOpKindId, LogicalScan},
     rel_group::RelGroupId,
@@ -42,8 +41,11 @@ impl StorageManager {
     }
 
     pub fn add_logical_expr(&mut self, logical_expr: LogicalExpr) -> (LogicalExprId, RelGroupId) {
-        let (logical_expr_id, rel_group_id) = logical_expr.add(self);
-        (logical_expr_id, rel_group_id)
+        match logical_expr {
+            LogicalExpr::Scan(logical_scan) => logical_scan.add(self),
+            LogicalExpr::Filter(logical_filter) => logical_filter.add(self),
+            LogicalExpr::Join(logical_join) => logical_join.add(self),
+        }
     }
 
     pub fn add_logical_expr_to_group(
@@ -51,21 +53,32 @@ impl StorageManager {
         logical_expr: LogicalExpr,
         rel_group_id: RelGroupId,
     ) -> LogicalExprId {
-        logical_expr.add_to_group(rel_group_id, self)
+        match logical_expr {
+            LogicalExpr::Scan(logical_scan) => logical_scan.add_to_group(rel_group_id, self),
+            LogicalExpr::Filter(logical_filter) => logical_filter.add_to_group(rel_group_id, self),
+            LogicalExpr::Join(logical_join) => logical_join.add_to_group(rel_group_id, self),
+        }
     }
 
     pub fn get_logical_expr_identifiers(
         &mut self,
         logical_expr: &LogicalExpr,
     ) -> Option<(LogicalExprId, RelGroupId)> {
-        logical_expr.get_identifiers(self)
+        match logical_expr {
+            LogicalExpr::Scan(logical_scan) => logical_scan.get_identifiers(self),
+            LogicalExpr::Filter(logical_filter) => logical_filter.get_identifiers(self),
+            LogicalExpr::Join(logical_join) => logical_join.get_identifiers(self),
+        }
     }
 
+    /// Get all equivalent logical expressions in a relational group.
     pub fn get_all_logical_exprs_in_group(
         &mut self,
         rel_group_id: RelGroupId,
     ) -> Vec<LogicalExprWithId> {
         use schema::logical_exprs::dsl::*;
+
+        // Get all the logical expression records in the group.
         let records = logical_exprs
             .inner_join(schema::logical_op_kinds::dsl::logical_op_kinds)
             .filter(group_id.eq(rel_group_id))
@@ -79,16 +92,18 @@ impl StorageManager {
 
         let mut exprs = Vec::with_capacity(records.len());
 
+        // For each record, fit it into a type-safe ogical expression
+        // based on its operator kind.
         for (record, name) in records {
             // TODO(yuchen): there is a better way to do this.
             let expr = match name {
-                name if name == LogicalScan::NAME => {
+                name if name == LogicalScan::op_name() => {
                     LogicalExpr::Scan(LogicalScan::get(record.id, self))
                 }
-                name if name == LogicalFilter::NAME => {
+                name if name == LogicalFilter::op_name() => {
                     LogicalExpr::Filter(LogicalFilter::get(record.id, self))
                 }
-                name if name == LogicalJoin::NAME => {
+                name if name == LogicalJoin::op_name() => {
                     LogicalExpr::Join(LogicalJoin::get(record.id, self))
                 }
                 _ => unreachable!(),
@@ -113,6 +128,7 @@ impl StorageManager {
             .expect("Invalid database state: logical expression must belongs to a group")
     }
 
+    /// Creates a new relational group and returns the group id.
     fn create_rel_group(&mut self) -> RelGroupId {
         use schema::rel_groups::dsl::*;
         diesel::insert_into(rel_groups)
@@ -122,6 +138,8 @@ impl StorageManager {
             .expect("Failed to create a new relational group")
     }
 
+    /// Adds a logical expression record to the logical expression base table.
+    /// Returns the newly generated logical expression id.
     fn add_logical_expr_record(
         &mut self,
         logical_op_kind_id: LogicalOpKindId,

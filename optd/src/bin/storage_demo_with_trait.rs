@@ -4,7 +4,7 @@ use dotenvy::dotenv;
 use optd::storage::{
     models::{
         common::JoinType,
-        logical_expr::{LogicalExpr, LogicalExprStorage},
+        logical_expr::LogicalExpr,
         logical_operators::{LogicalFilter, LogicalJoin, LogicalOpKind, LogicalScan},
         physical_operators::PhysicalOpKind,
     },
@@ -12,6 +12,10 @@ use optd::storage::{
 };
 
 fn demo(mut storage: StorageManager) -> anyhow::Result<()> {
+    // - LogicalFilter (on: t1.v2 = 'foo')
+    //   - LogicalJoin (inner, on t1.v1 = t2.v1)
+    //     - LogicalScan (t1)
+    //     - LogicalScan (t2)
     let scan1 = LogicalExpr::Scan(LogicalScan {
         table_name: "t1".to_string(),
     });
@@ -51,7 +55,7 @@ fn demo(mut storage: StorageManager) -> anyhow::Result<()> {
     let exprs = storage.get_all_logical_exprs_in_group(filter_group);
     assert_eq!(exprs[0].id, filter_expr_id);
     assert_eq!(
-        exprs[0].inner.get_identifiers(&mut storage),
+        storage.get_logical_expr_identifiers(&exprs[0].inner),
         Some((filter_expr_id, filter_group))
     );
     let child_group = match &exprs[0].inner {
@@ -64,11 +68,11 @@ fn demo(mut storage: StorageManager) -> anyhow::Result<()> {
 
     let exprs = storage.get_all_logical_exprs_in_group(child_group);
     assert_eq!(
-        exprs[0].inner.get_identifiers(&mut storage),
+        storage.get_logical_expr_identifiers(&exprs[0].inner),
         Some((join_expr_id, join_group))
     );
     assert_eq!(
-        exprs[1].inner.get_identifiers(&mut storage),
+        storage.get_logical_expr_identifiers(&exprs[1].inner),
         Some((join_alt_expr_id, join_group))
     );
 
@@ -94,7 +98,7 @@ fn demo(mut storage: StorageManager) -> anyhow::Result<()> {
     let exprs = storage.get_all_logical_exprs_in_group(left_group);
     assert_eq!(exprs[0].id, scan_1_expr_id);
     assert_eq!(
-        exprs[0].inner.get_identifiers(&mut storage),
+        storage.get_logical_expr_identifiers(&exprs[0].inner),
         Some((scan_1_expr_id, scan_1_group))
     );
     match &exprs[0].inner {
@@ -107,7 +111,7 @@ fn demo(mut storage: StorageManager) -> anyhow::Result<()> {
     let exprs = storage.get_all_logical_exprs_in_group(right_group);
     assert_eq!(exprs[0].id, scan_2_expr_id);
     assert_eq!(
-        exprs[0].inner.get_identifiers(&mut storage),
+        storage.get_logical_expr_identifiers(&exprs[0].inner),
         Some((scan_2_expr_id, scan_2_group))
     );
     match &exprs[0].inner {

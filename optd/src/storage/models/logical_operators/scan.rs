@@ -1,7 +1,7 @@
 use diesel::prelude::*;
 
 use crate::storage::{
-    models::logical_expr::{LogicalExprId, LogicalExprStorage, LogicalOp},
+    models::logical_expr::{LogicalExprId, LogicalOperatorStorage},
     schema::logical_scans,
     StorageManager,
 };
@@ -16,20 +16,7 @@ pub struct LogicalScan {
     pub table_name: String,
 }
 
-impl LogicalOp for LogicalScan {
-    const NAME: &'static str = "LogicalScan";
-
-    fn get(id: LogicalExprId, storage: &mut StorageManager) -> Self {
-        use crate::storage::schema::logical_scans::dsl::*;
-        logical_scans
-            .filter(logical_expr_id.eq(id))
-            .select(LogicalScan::as_select())
-            .first::<LogicalScan>(&mut storage.conn)
-            .expect("failed to get logical scan")
-    }
-}
-
-impl LogicalExprStorage for LogicalScan {
+impl LogicalOperatorStorage for LogicalScan {
     fn id(&self, storage: &mut StorageManager) -> Option<LogicalExprId> {
         use self::logical_scans::dsl::*;
         logical_scans
@@ -47,7 +34,16 @@ impl LogicalExprStorage for LogicalScan {
             .expect("failed to insert new logical scan");
     }
 
-    fn name(&self) -> &'static str {
-        <Self as LogicalOp>::NAME
+    fn op_name() -> &'static str {
+        "LogicalScan"
+    }
+
+    fn get(id: LogicalExprId, storage: &mut StorageManager) -> Self {
+        use crate::storage::schema::logical_scans::dsl::*;
+        logical_scans
+            .filter(logical_expr_id.eq(id))
+            .select(LogicalScan::as_select())
+            .first::<LogicalScan>(&mut storage.conn)
+            .expect("failed to get logical scan")
     }
 }

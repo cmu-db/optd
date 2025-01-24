@@ -2,7 +2,7 @@ use diesel::prelude::*;
 
 use crate::storage::{
     models::{
-        logical_expr::{LogicalExprId, LogicalExprStorage, LogicalOp},
+        logical_expr::{LogicalExprId, LogicalOperatorStorage},
         rel_group::RelGroupId,
     },
     schema::logical_filters,
@@ -20,20 +20,7 @@ pub struct LogicalFilter {
     pub predicate: String,
 }
 
-impl LogicalOp for LogicalFilter {
-    const NAME: &'static str = "LogicalFilter";
-
-    fn get(id: LogicalExprId, storage: &mut StorageManager) -> Self {
-        use crate::storage::schema::logical_filters::dsl::*;
-        logical_filters
-            .filter(logical_expr_id.eq(id))
-            .select(LogicalFilter::as_select())
-            .first::<LogicalFilter>(&mut storage.conn)
-            .expect("failed to get logical filter")
-    }
-}
-
-impl LogicalExprStorage for LogicalFilter {
+impl LogicalOperatorStorage for LogicalFilter {
     fn id(&self, storage: &mut StorageManager) -> Option<LogicalExprId> {
         use self::logical_filters::dsl::*;
         logical_filters
@@ -52,7 +39,16 @@ impl LogicalExprStorage for LogicalFilter {
             .expect("failed to insert new logical filter");
     }
 
-    fn name(&self) -> &'static str {
-        <Self as LogicalOp>::NAME
+    fn op_name() -> &'static str {
+        "LogicalFilter"
+    }
+
+    fn get(id: LogicalExprId, storage: &mut StorageManager) -> Self {
+        use crate::storage::schema::logical_filters::dsl::*;
+        logical_filters
+            .filter(logical_expr_id.eq(id))
+            .select(LogicalFilter::as_select())
+            .first::<LogicalFilter>(&mut storage.conn)
+            .expect("failed to get logical filter")
     }
 }
