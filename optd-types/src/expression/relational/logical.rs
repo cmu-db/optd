@@ -1,12 +1,12 @@
 /// A type representing different kinds of logical expressions in the memo table.
 pub enum LogicalExpr {
-    Scan(LogicalScan),
-    Filter(LogicalFilter),
-    Join(LogicalJoin),
+    Scan(LogicalScanExpr),
+    Filter(LogicalFilterExpr),
+    Join(LogicalJoinExpr),
 }
 
-pub struct LogicalScan;
+pub struct LogicalScanExpr;
 
-pub struct LogicalFilter;
+pub struct LogicalFilterExpr;
 
-pub struct LogicalJoin;
+pub struct LogicalJoinExpr;

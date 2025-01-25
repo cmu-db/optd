@@ -1,12 +1,12 @@
 /// A type representing different kinds of physical expressions in the memo table.
 pub enum PhysicalExpr {
-    TableScan(TableScan),
-    Filter(PhysicalFilter),
-    HashJoin(HashJoin),
+    TableScan(TableScanExpr),
+    Filter(PhysicalFilterExpr),
+    HashJoin(HashJoinExpr),
 }
 
-pub struct TableScan;
+pub struct TableScanExpr;
 
-pub struct PhysicalFilter;
+pub struct PhysicalFilterExpr;
 
-pub struct HashJoin;
+pub struct HashJoinExpr;

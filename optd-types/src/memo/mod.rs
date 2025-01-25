@@ -1,5 +1,7 @@
-use crate::expression::{Expr, LogicalExpr};
-use crate::{GroupId, LogicalExprId, PartialLogicalPlan, PartialPhysicalPlan};
+use crate::expression::{relational::logical::LogicalExpr, Expr};
+use crate::plan::partial_logical_plan::PartialLogicalPlan;
+use crate::plan::partial_physical_plan::PartialPhysicalPlan;
+use crate::{GroupId, LogicalExprId};
 
 /// A type representing a transformation or implementation rule for query operators.
 ///

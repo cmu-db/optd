@@ -1,11 +1,8 @@
-mod logical;
-pub use logical::LogicalExpr;
-
-mod physical;
-pub use physical::PhysicalExpr;
+pub mod logical;
+pub mod physical;
 
 /// A type representing logical or physical expressions in the memo table.
 pub enum RelationalExpr {
-    Logical(LogicalExpr),
-    Physical(PhysicalExpr),
+    Logical(logical::LogicalExpr),
+    Physical(physical::PhysicalExpr),
 }

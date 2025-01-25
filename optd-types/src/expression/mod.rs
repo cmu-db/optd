@@ -1,11 +1,8 @@
-mod relational;
-mod scalar;
-
-pub use relational::{LogicalExpr, PhysicalExpr, RelationalExpr};
-pub use scalar::ScalarExpr;
+pub mod relational;
+pub mod scalar;
 
 /// A type representing an optimization operator in the memo table.
 pub enum Expr {
-    Relational(RelationalExpr),
-    Scalar(ScalarExpr),
+    Relational(relational::RelationalExpr),
+    Scalar(scalar::ScalarExpr),
 }
