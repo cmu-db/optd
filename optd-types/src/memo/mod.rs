@@ -1,5 +1,5 @@
 use crate::expression::{Expr, LogicalExpr};
-use crate::{PartialLogicalPlan, PartialPhysicalPlan};
+use crate::{GroupId, LogicalExprId, PartialLogicalPlan, PartialPhysicalPlan};
 
 /// A type representing a transformation or implementation rule for query operators.
 ///
@@ -39,23 +39,41 @@ impl Memo {
         todo!()
     }
 
-    pub fn apply_transformation(
-        &mut self,
-        expr: PartialLogicalPlan,
-        rule: Rule,
-    ) -> Vec<Expr> {
+    pub fn apply_transformation(&mut self, expr: PartialLogicalPlan, rule: Rule) -> Vec<Expr> {
         todo!()
     }
 
-    pub fn apply_implementation(
-        &mut self,
-        expr: PartialPhysicalPlan,
-        rule: Rule,
-    ) -> Vec<Expr> {
+    pub fn apply_implementation(&mut self, expr: PartialPhysicalPlan, rule: Rule) -> Vec<Expr> {
         todo!()
     }
 
-    pub async fn add_expressions(&mut self, new_exprs: Vec<Expr>) {
+    pub async fn add_logical_expr(
+        &mut self,
+        logical_expr: LogicalExpr,
+    ) -> (LogicalExprId, GroupId) {
+        todo!()
+    }
+
+    pub async fn add_logical_expr_to_group(
+        &mut self,
+        logical_expr: LogicalExpr,
+        group_id: GroupId,
+    ) -> LogicalExprId {
+        todo!()
+    }
+
+    pub async fn get_group_logical_exprs(
+        &mut self,
+        group_id: GroupId,
+    ) -> Vec<(LogicalExprId, LogicalExpr)> {
+        todo!()
+    }
+
+    pub async fn get_group_of_logical_expr(&mut self, logical_expr_id: LogicalExprId) -> GroupId {
+        todo!()
+    }
+
+    pub async fn create_new_group(&mut self) -> GroupId {
         todo!()
     }
 }
