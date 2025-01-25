@@ -1,13 +1,13 @@
-use relation::RelationExpression;
-use scalar::ScalarExpression;
+use relation::RelationalExpr;
+use scalar::ScalarExpr;
 
 mod relation;
 mod scalar;
 
-pub use relation::{LogicalExpression, PhysicalExpression};
+pub use relation::{LogicalExpr, PhysicalExpr};
 
 /// A type representing an optimization operator in the memo table.
-pub enum Expression {
-    RelationExpression(RelationExpression),
-    ScalarExpression(ScalarExpression),
+pub enum Expr {
+    Relational(RelationalExpr),
+    ScalarExpr(ScalarExpr),
 }

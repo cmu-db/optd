@@ -1,4 +1,4 @@
-use crate::expression::{Expression, LogicalExpression};
+use crate::expression::{Expr, LogicalExpr};
 use crate::{PartialLogicalPlan, PartialPhysicalPlan};
 
 /// A type representing a transformation or implementation rule for query operators.
@@ -25,7 +25,7 @@ impl Memo {
     /// materialize two expressions `Filter(e1)` and `Filter(e2)`.
     pub async fn check_transformation(
         &self,
-        expr: LogicalExpression,
+        expr: LogicalExpr,
         rule: Rule,
     ) -> Vec<PartialLogicalPlan> {
         todo!()
@@ -33,7 +33,7 @@ impl Memo {
 
     pub async fn check_implementation(
         &self,
-        expr: LogicalExpression,
+        expr: LogicalExpr,
         rule: Rule,
     ) -> Vec<PartialPhysicalPlan> {
         todo!()
@@ -43,7 +43,7 @@ impl Memo {
         &mut self,
         expr: PartialLogicalPlan,
         rule: Rule,
-    ) -> Vec<Expression> {
+    ) -> Vec<Expr> {
         todo!()
     }
 
@@ -51,11 +51,11 @@ impl Memo {
         &mut self,
         expr: PartialPhysicalPlan,
         rule: Rule,
-    ) -> Vec<Expression> {
+    ) -> Vec<Expr> {
         todo!()
     }
 
-    pub async fn add_expressions(&mut self, new_exprs: Vec<Expression>) {
+    pub async fn add_expressions(&mut self, new_exprs: Vec<Expr>) {
         todo!()
     }
 }

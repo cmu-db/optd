@@ -1,29 +1,17 @@
 use crate::GroupId;
 
 /// A type representing different kinds of logical expressions in the memo table.
-pub enum LogicalExpression {
-    Scan(Scan),
-    Filter(Filter),
-    Join(Join),
-    Sort(Sort),
+pub enum LogicalExpr {
+    Scan(LogicalScan),
+    Filter(LogicalFilter),
+    Join(LogicalJoin),
+    Sort(LogicalSort),
 }
 
-struct Scan {
-    table_name: String,
-}
+struct LogicalScan;
 
-struct Filter {
-    child: GroupId,
-    predicate: GroupId,
-}
+struct LogicalFilter;
 
-struct Join {
-    left: GroupId,
-    right: GroupId,
-    condition: GroupId,
-}
+struct LogicalJoin;
 
-struct Sort {
-    child: GroupId,
-    sort_expr: GroupId,
-}
+struct LogicalSort;

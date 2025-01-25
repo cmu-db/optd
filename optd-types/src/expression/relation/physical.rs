@@ -1,37 +1,20 @@
 use crate::GroupId;
 
 /// A type representing different kinds of physical expressions in the memo table.
-pub enum PhysicalExpression {
+pub enum PhysicalExpr {
     TableScan(TableScan),
-    PhysicalFilter(PhysicalFilter),
+    Filter(PhysicalFilter),
     SortMergeJoin(SortMergeJoin),
     HashJoin(HashJoin),
     MergeSort(MergeSort),
 }
 
-struct TableScan {
-    table_name: String,
-}
+struct TableScan;
 
-struct PhysicalFilter {
-    child: GroupId,
-    predicate: GroupId,
-}
+struct PhysicalFilter;
 
-struct SortMergeJoin {
-    left: GroupId,
-    right: GroupId,
-    condition: GroupId,
-    sort_expr: GroupId,
-}
+struct SortMergeJoin;
 
-struct HashJoin {
-    left: GroupId,
-    right: GroupId,
-    condition: GroupId,
-}
+struct HashJoin;
 
-struct MergeSort {
-    child: GroupId,
-    sort_expr: GroupId,
-}
+struct MergeSort;
