@@ -4,17 +4,11 @@ use crate::GroupId;
 pub enum PhysicalExpr {
     TableScan(TableScan),
     Filter(PhysicalFilter),
-    SortMergeJoin(SortMergeJoin),
     HashJoin(HashJoin),
-    MergeSort(MergeSort),
 }
 
 struct TableScan;
 
 struct PhysicalFilter;
 
-struct SortMergeJoin;
-
 struct HashJoin;
-
-struct MergeSort;

@@ -6,6 +6,6 @@ pub use physical::PhysicalExpr;
 
 /// A type representing logical or physical expressions in the memo table.
 pub enum RelationalExpr {
-    LogicalExpression(LogicalExpr),
-    PhysicalExpression(PhysicalExpr),
+    Logical(LogicalExpr),
+    Physical(PhysicalExpr),
 }

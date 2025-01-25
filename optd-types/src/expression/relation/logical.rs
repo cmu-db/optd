@@ -5,7 +5,6 @@ pub enum LogicalExpr {
     Scan(LogicalScan),
     Filter(LogicalFilter),
     Join(LogicalJoin),
-    Sort(LogicalSort),
 }
 
 struct LogicalScan;
@@ -13,5 +12,3 @@ struct LogicalScan;
 struct LogicalFilter;
 
 struct LogicalJoin;
-
-struct LogicalSort;
