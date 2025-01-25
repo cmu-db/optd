@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 mod expression;
 mod memo;
 mod plan;

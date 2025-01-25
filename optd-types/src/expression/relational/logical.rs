@@ -5,8 +5,8 @@ pub enum LogicalExpr {
     Join(LogicalJoin),
 }
 
-struct LogicalScan;
+pub struct LogicalScan;
 
-struct LogicalFilter;
+pub struct LogicalFilter;
 
-struct LogicalJoin;
+pub struct LogicalJoin;

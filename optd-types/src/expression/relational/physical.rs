@@ -5,8 +5,8 @@ pub enum PhysicalExpr {
     HashJoin(HashJoin),
 }
 
-struct TableScan;
+pub struct TableScan;
 
-struct PhysicalFilter;
+pub struct PhysicalFilter;
 
-struct HashJoin;
+pub struct HashJoin;
