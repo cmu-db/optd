@@ -11,9 +11,7 @@ use std::sync::Arc;
 ///
 /// The root of the plan DAG _cannot_ be a scalar operator (and thus for now can only be a logical
 /// operator).
-pub enum LogicalPlan {
-    LogicalRoot(LogicalOperator<LogicalLink>),
-}
+pub struct LogicalPlan(LogicalOperator<LogicalLink>);
 
 /// A link in a [`LogicalPlan`] to a node.
 ///

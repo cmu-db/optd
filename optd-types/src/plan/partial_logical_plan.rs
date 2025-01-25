@@ -15,12 +15,9 @@ use std::sync::Arc;
 /// operator).
 ///
 /// [`LogicalPlan`]: crate::plan::logical_plan::LogicalPlan
-pub enum PartialLogicalPlan {
-    LogicalRoot(LogicalOperator<LogicalLink>),
-}
+pub struct PartialLogicalPlan(LogicalOperator<LogicalLink>);
 
 /// A link in a [`PartialLogicalPlan`] to a node.
-///
 ///
 /// A `LogicalLink` can be one of three things: it can be a `LogicalNode` that points to a
 /// `LogicalOperator`, it can be a `ScalarNode` that points to a `ScalarOperator`, or it can be a
