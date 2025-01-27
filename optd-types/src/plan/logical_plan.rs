@@ -11,7 +11,10 @@ use std::sync::Arc;
 ///
 /// The root of the plan DAG _cannot_ be a scalar operator (and thus for now can only be a logical
 /// operator).
-pub struct LogicalPlan(LogicalOperator<LogicalLink>);
+#[derive(Clone)]
+pub enum LogicalPlan {
+    LogicalRoot(Arc<LogicalOperator<LogicalLink>>),
+}
 
 /// A link in a [`LogicalPlan`] to a node.
 ///
@@ -37,9 +40,10 @@ pub struct LogicalPlan(LogicalOperator<LogicalLink>);
 /// [`PhysicalPlan`]: crate::plan::physical_plan::PhysicalPlan
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
 /// [`PartialPhysicalPlan`]: crate::plan::partial_physical_plan::PartialPhysicalPlan
+#[derive(Clone)]
 pub enum LogicalLink {
-    LogicalNode(LogicalOperator<LogicalLink>),
-    ScalarNode(ScalarOperator<ScalarLink>),
+    LogicalNode(Arc<LogicalOperator<LogicalLink>>),
+    ScalarNode(Arc<ScalarOperator<ScalarLink>>),
 }
 
 /// A link in a [`LogicalPlan`] to a scalar node. A `ScalarLink` can only be a `ScalarNode` that
@@ -49,6 +53,7 @@ pub enum LogicalLink {
 /// modules.
 ///
 /// TODO Add detailed docs here.
+#[derive(Clone)]
 pub enum ScalarLink {
-    ScalarNode(ScalarOperator<ScalarLink>),
+    ScalarNode(Arc<ScalarOperator<ScalarLink>>),
 }

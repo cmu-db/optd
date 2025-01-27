@@ -2,6 +2,7 @@ use crate::operator::{logical::LogicalOperator, physical::PhysicalOperator, Scal
 use std::sync::Arc;
 
 /// TODO Add docs.
+#[derive(Clone)]
 pub enum PhysicalPlan {
     LogicalRoot(LogicalLink),
     PhysicalRoot(PhysicalLink),
@@ -9,19 +10,22 @@ pub enum PhysicalPlan {
 
 /// TODO Add docs.
 #[allow(clippy::enum_variant_names)]
+#[derive(Clone)]
 pub enum LogicalLink {
-    LogicalNode(LogicalOperator<LogicalLink>),
-    PhysicalNode(PhysicalOperator<PhysicalLink>),
-    ScalarNode(ScalarOperator<ScalarLink>),
+    LogicalNode(Arc<LogicalOperator<LogicalLink>>),
+    PhysicalNode(Arc<PhysicalOperator<PhysicalLink>>),
+    ScalarNode(Arc<ScalarOperator<ScalarLink>>),
 }
 
 /// TODO Add docs.
+#[derive(Clone)]
 pub enum PhysicalLink {
-    PhysicalNode(PhysicalOperator<PhysicalLink>),
-    ScalarNode(ScalarOperator<ScalarLink>),
+    PhysicalNode(Arc<PhysicalOperator<PhysicalLink>>),
+    ScalarNode(Arc<ScalarOperator<ScalarLink>>),
 }
 
 /// TODO Add docs.
+#[derive(Clone)]
 pub enum ScalarLink {
-    ScalarNode(ScalarOperator<ScalarLink>),
+    ScalarNode(Arc<ScalarOperator<ScalarLink>>),
 }

@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+//! Type representations of physical operators in (materialized) query plans.
 
 /// A type representing a physical operator in an output physical query execution plan.
 ///
@@ -25,19 +25,20 @@ pub enum PhysicalOperator<Link> {
 
 /// TODO Add docs.
 pub struct TableScanOperator<Link> {
-    stuff: (),
-    _phantom: PhantomData<Link>,
+    table_name: String,
+    predicate: Link,
 }
 
 /// TODO Add docs.
 pub struct PhysicalFilterOperator<Link> {
-    child: Arc<Link>,
-    predicate: Arc<Link>,
+    child: Link,
+    predicate: Link,
 }
 
 /// TODO Add docs.
 pub struct HashJoinOperator<Link> {
-    left: Arc<Link>,
-    right: Arc<Link>,
-    condition: Arc<Link>,
+    join_type: (),
+    left: Link,
+    right: Link,
+    condition: Link,
 }

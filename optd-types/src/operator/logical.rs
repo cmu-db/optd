@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+//! Type representations of logical operators in (materialized) query plans.
 
 /// A type representing a logical operator in an input logical query plan.
 ///
@@ -24,19 +24,20 @@ pub enum LogicalOperator<Link> {
 
 /// TODO Add docs.
 pub struct LogicalScanOperator<Link> {
-    stuff: (),
-    _phantom: PhantomData<Link>,
+    table_name: String,
+    predicate: Link,
 }
 
 /// TODO Add docs.
 pub struct LogicalFilterOperator<Link> {
-    child: Arc<Link>,
-    predicate: Arc<Link>,
+    child: Link,
+    predicate: Link,
 }
 
 /// TODO Add docs.
 pub struct LogicalJoinOperator<Link> {
-    left: Arc<Link>,
-    right: Arc<Link>,
-    condition: Arc<Link>,
+    join_type: (),
+    left: Link,
+    right: Link,
+    condition: Link,
 }

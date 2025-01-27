@@ -15,7 +15,10 @@ use std::sync::Arc;
 /// operator).
 ///
 /// [`LogicalPlan`]: crate::plan::logical_plan::LogicalPlan
-pub struct PartialLogicalPlan(LogicalOperator<LogicalLink>);
+#[derive(Clone)]
+pub enum PartialLogicalPlan {
+    LogicalRoot(Arc<LogicalOperator<LogicalLink>>),
+}
 
 /// A link in a [`PartialLogicalPlan`] to a node.
 ///
@@ -42,9 +45,10 @@ pub struct PartialLogicalPlan(LogicalOperator<LogicalLink>);
 /// [`PhysicalPlan`]: crate::plan::physical_plan::PhysicalPlan
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
 /// [`PartialPhysicalPlan`]: crate::plan::partial_physical_plan::PartialPhysicalPlan
+#[derive(Clone)]
 pub enum LogicalLink {
-    LogicalNode(LogicalOperator<LogicalLink>),
-    ScalarNode(ScalarOperator<ScalarLink>),
+    LogicalNode(Arc<LogicalOperator<LogicalLink>>),
+    ScalarNode(Arc<ScalarOperator<ScalarLink>>),
     Group(GroupId),
 }
 
@@ -55,7 +59,8 @@ pub enum LogicalLink {
 /// modules.
 ///
 /// TODO Add detailed docs here.
+#[derive(Clone)]
 pub enum ScalarLink {
-    ScalarNode(ScalarOperator<ScalarLink>),
+    ScalarNode(Arc<ScalarOperator<ScalarLink>>),
     Group(GroupId),
 }

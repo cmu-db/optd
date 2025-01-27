@@ -3,28 +3,32 @@ use crate::GroupId;
 use std::sync::Arc;
 
 /// TODO Add docs.
+#[derive(Clone)]
 pub enum PartialPhysicalPlan {
     LogicalRoot(LogicalLink),
     PhysicalRoot(PhysicalLink),
 }
 
 /// TODO Add docs.
+#[derive(Clone)]
 pub enum LogicalLink {
-    LogicalNode(LogicalOperator<LogicalLink>),
-    PhysicalNode(PhysicalOperator<PhysicalLink>),
-    ScalarNode(ScalarOperator<ScalarLink>),
+    LogicalNode(Arc<LogicalOperator<LogicalLink>>),
+    PhysicalNode(Arc<PhysicalOperator<PhysicalLink>>),
+    ScalarNode(Arc<ScalarOperator<ScalarLink>>),
     Group(GroupId),
 }
 
 /// TODO Add docs.
+#[derive(Clone)]
 pub enum PhysicalLink {
-    PhysicalNode(PhysicalOperator<PhysicalLink>),
-    ScalarNode(ScalarOperator<ScalarLink>),
+    PhysicalNode(Arc<PhysicalOperator<PhysicalLink>>),
+    ScalarNode(Arc<ScalarOperator<ScalarLink>>),
     Group(GroupId),
 }
 
 /// TODO Add docs.
+#[derive(Clone)]
 pub enum ScalarLink {
-    ScalarNode(ScalarOperator<ScalarLink>),
+    ScalarNode(Arc<ScalarOperator<ScalarLink>>),
     Group(GroupId),
 }
