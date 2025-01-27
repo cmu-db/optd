@@ -1,9 +1,9 @@
 #![allow(unused)]
 
-mod expression;
-mod memo;
-mod operator;
-mod plan;
+pub mod expression;
+pub mod memo;
+pub mod operator;
+pub mod plan;
 
 /// TODO make distinction between relational groups and scalar groups.
 #[repr(transparent)]

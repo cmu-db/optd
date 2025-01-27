@@ -4,6 +4,7 @@ use crate::{
     plan::{partial_logical_plan::PartialLogicalPlan, partial_physical_plan::PartialPhysicalPlan},
 };
 
+#[trait_variant::make(Send)]
 pub trait TransformationRule {
     /// Checks if the transformation rule matches the current expression and its children.
     /// Returns a vector of partially materialized logical plans.
@@ -15,8 +16,8 @@ pub trait TransformationRule {
     /// expressions `e1 = Join(Join(A, B), C)` and `e2 = Join(A, Join(B, C))`.
     ///
     /// If the rule wants to match against `Filter(Join(?L, ?R))`, then this function will partially
-    /// materialize two expressions `Filter(e1)` and `Filter(e2)`. It is then up to the [`apply`]
-    /// function to apply modifications to the partially materialized logical plans (for example, a
+    /// materialize two expressions `Filter(e1)` and `Filter(e2)`. It is then up to the memo table
+    /// API to apply modifications to the partially materialized logical plans (for example, a
     /// filter pushdown under a `Join`).
     ///
     /// TODO: Ideally this should return a `Stream` instead of a fully materialized Vector.
@@ -29,6 +30,7 @@ pub trait TransformationRule {
     fn apply(&self, expr: PartialLogicalPlan) -> Vec<Expr>;
 }
 
+#[trait_variant::make(Send)]
 pub trait ImplementationRule {
     /// Checks if the implementation rule matches the current expression and its children.
     /// Returns a vector of partially materialized physical plans.
@@ -41,7 +43,7 @@ pub trait ImplementationRule {
     ///
     /// If the rule wants to match against `Filter(HashJoin(?L, ?R))`, then this function will
     /// partially materialize two expressions `Filter(e1)` and `Filter(e2)`. It is then up to the
-    /// [`apply`] function to apply modifications to the partially materialized physical plans (for
+    /// memo table API to apply modifications to the partially materialized physical plans (for
     /// example, a pushing a filter predicate into the condition of the `HashJoin`).
     ///
     /// TODO: Ideally this should return a `Stream` instead of a fully materialized Vector.

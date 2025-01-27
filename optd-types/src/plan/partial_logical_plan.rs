@@ -59,6 +59,8 @@ pub enum LogicalLink {
 /// modules.
 ///
 /// TODO Add detailed docs here.
+///
+/// [`LogicalPlan`]: crate::plan::logical_plan::LogicalPlan
 #[derive(Clone)]
 pub enum ScalarLink {
     ScalarNode(Arc<ScalarOperator<ScalarLink>>),
