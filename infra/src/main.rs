@@ -19,12 +19,10 @@ async fn main() -> Result<()> {
     let ctx = query_planner::create_df_context(
         Some(session_config.clone()),
         Some(rt_config.clone()),
-        None,
-        false, // TODO
+        None
     )
     .await
-    .unwrap()
-    .ctx;
+    .unwrap();
 
     // Create a DataFrame with the input query
     let queries = io::read_to_string(io::stdin())?;
