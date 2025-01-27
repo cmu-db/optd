@@ -1,16 +1,11 @@
 #![doc = include_str!("../../README.md")]
 #![allow(unused)]
 
-
 use datafusion::common::Result;
 use datafusion::execution::context::SessionContext;
 use datafusion::prelude::*;
 
-
-pub mod expression;
-pub mod memo;
-pub mod operator;
-pub mod plan;
+pub mod types;
 
 /// TODO make distinction between relational groups and scalar groups.
 #[repr(transparent)]

@@ -1,4 +1,4 @@
-use crate::operator::{logical::LogicalOperator, physical::PhysicalOperator, ScalarOperator};
+use crate::types::operator::{logical::LogicalOperator, physical::PhysicalOperator, ScalarOperator};
 use std::sync::Arc;
 
 /// TODO Add docs.
