@@ -1,4 +1,4 @@
-use super::Children;
+use std::{marker::PhantomData, sync::Arc};
 
 /// A type representing a physical operator in an output physical query execution plan.
 ///
@@ -26,17 +26,18 @@ pub enum PhysicalOperator<Link> {
 /// TODO Add docs.
 pub struct TableScanOperator<Link> {
     stuff: (),
-    children: Children<Link>,
+    _phantom: PhantomData<Link>,
 }
 
 /// TODO Add docs.
 pub struct PhysicalFilterOperator<Link> {
-    stuff: (),
-    children: Children<Link>,
+    child: Arc<Link>,
+    predicate: Arc<Link>,
 }
 
 /// TODO Add docs.
 pub struct HashJoinOperator<Link> {
-    stuff: (),
-    children: Children<Link>,
+    left: Arc<Link>,
+    right: Arc<Link>,
+    condition: Arc<Link>,
 }

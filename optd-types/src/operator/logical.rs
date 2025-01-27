@@ -1,4 +1,4 @@
-use super::Children;
+use std::{marker::PhantomData, sync::Arc};
 
 /// A type representing a logical operator in an input logical query plan.
 ///
@@ -25,17 +25,18 @@ pub enum LogicalOperator<Link> {
 /// TODO Add docs.
 pub struct LogicalScanOperator<Link> {
     stuff: (),
-    children: Children<Link>,
+    _phantom: PhantomData<Link>,
 }
 
 /// TODO Add docs.
 pub struct LogicalFilterOperator<Link> {
-    stuff: (),
-    children: Children<Link>,
+    child: Arc<Link>,
+    predicate: Arc<Link>,
 }
 
 /// TODO Add docs.
 pub struct LogicalJoinOperator<Link> {
-    stuff: (),
-    children: Children<Link>,
+    left: Arc<Link>,
+    right: Arc<Link>,
+    condition: Arc<Link>,
 }
