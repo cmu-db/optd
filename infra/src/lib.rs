@@ -24,4 +24,3 @@ pub async fn tpch_ctx() -> Result<SessionContext> {
 
     Ok(ctx)
 }
-

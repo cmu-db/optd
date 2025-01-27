@@ -4,7 +4,7 @@
 // https://opensource.org/licenses/MIT.
 
 #![allow(clippy::new_without_default)]
-
+#[allow(deprecated)]
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -19,12 +19,12 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
 use datafusion::prelude::{SessionConfig, SessionContext};
 
-struct DatafusionOptimizer {}
+struct OptdOptimizer {}
 
 pub struct OptdPlanContext<'a> {
     tables: HashMap<String, Arc<dyn TableSource>>,
     session_state: &'a SessionState,
-    pub optimizer: Option<&'a DatafusionOptimizer>,
+    pub optimizer: Option<&'a OptdOptimizer>,
 }
 
 impl<'a> OptdPlanContext<'a> {
@@ -38,7 +38,7 @@ impl<'a> OptdPlanContext<'a> {
 }
 
 pub struct OptdQueryPlanner {
-    pub optimizer: Arc<Mutex<Option<Box<DatafusionOptimizer>>>>,
+    pub optimizer: Arc<Mutex<Option<Box<OptdOptimizer>>>>,
 }
 
 impl OptdQueryPlanner {
@@ -104,7 +104,7 @@ impl OptdQueryPlanner {
             .map_err(|e| anyhow::anyhow!(e))
     }
 
-    pub fn new(optimizer: DatafusionOptimizer) -> Self {
+    pub fn new(optimizer: OptdOptimizer) -> Self {
         Self {
             optimizer: Arc::new(Mutex::new(Some(Box::new(optimizer)))),
         }
@@ -194,7 +194,7 @@ pub async fn create_df_context(
         .with_catalog_list(catalog.clone())
         .with_default_features();
 
-    let optimizer = DatafusionOptimizer {};
+    let optimizer = OptdOptimizer {};
     if !use_df_logical {
         // clean up optimizer rules so that we can plug in our own optimizer
         builder = builder.with_optimizer_rules(vec![]);
