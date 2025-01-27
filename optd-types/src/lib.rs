@@ -11,7 +11,4 @@ mod plan;
 pub struct GroupId(u64);
 
 /// TODO Add docs.
-pub struct LogicalExprId(u64);
-
-/// TODO Add docs.
-pub struct PhysicalExprId(u64);
+pub struct ExprId(u64);
