@@ -12,8 +12,8 @@ use std::sync::Arc;
 /// The root of the plan DAG _cannot_ be a scalar operator (and thus for now can only be a logical
 /// operator).
 #[derive(Clone)]
-pub enum LogicalPlan {
-    LogicalRoot(Arc<LogicalOperator<LogicalLink>>),
+pub struct LogicalPlan {
+    root: Arc<LogicalOperator<LogicalLink>>,
 }
 
 /// A link in a [`LogicalPlan`] to a node.
@@ -26,9 +26,6 @@ pub enum LogicalPlan {
 ///
 /// - [`super::logical_plan::LogicalLink`] only allows a logical operator to have other logical
 ///   operators or scalar operators as children since that is all [`LogicalPlan`] needs
-/// - [`super::physical_plan::LogicalLink`] allows a logical operator to also have a physical
-///   operator as a child (since [`PhysicalPlan`] needs to encode both logical and physical
-///   operators).
 /// - [`super::partial_logical_plan::LogicalLink`] allows a logical operator to also have a
 ///   [`GroupId`] as a child (since the [`PartialLogicalPlan`] is a partially materialized query
 ///   plan).
