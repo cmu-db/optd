@@ -24,20 +24,20 @@ pub enum LogicalOperator<Link> {
 
 /// TODO Add docs.
 pub struct LogicalScanOperator<Link> {
-    table_name: String,
-    predicate: Link,
+    pub table_name: String,
+    pub predicate: Link,
 }
 
 /// TODO Add docs.
 pub struct LogicalFilterOperator<Link> {
-    child: Link,
-    predicate: Link,
+    pub child: Link,
+    pub predicate: Link,
 }
 
 /// TODO Add docs.
 pub struct LogicalJoinOperator<Link> {
-    join_type: (),
-    left: Link,
-    right: Link,
-    condition: Link,
+    pub join_type: (),
+    pub left: Link,
+    pub right: Link,
+    pub condition: Link,
 }
