@@ -4,6 +4,7 @@
 // https://opensource.org/licenses/MIT.
 
 #![allow(clippy::new_without_default)]
+use core::panic;
 #[allow(deprecated)]
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -32,13 +33,82 @@ mod types;
 use types::operator::logical::{
     LogicalFilterOperator, LogicalJoinOperator, LogicalOperator, LogicalScanOperator,
 };
+use types::operator::physical::{
+    HashJoinOperator, PhysicalFilterOperator, PhysicalOperator, TableScanOperator,
+};
 use types::operator::ScalarOperator;
 use types::plan::logical_plan::{LogicalLink, LogicalPlan as OptDLogicalPlan, ScalarLink};
+use types::plan::partial_physical_plan::PhysicalLink;
+use types::plan::physical_plan::PhysicalPlan;
 
 struct OptdOptimizer {}
 
+impl OptdOptimizer {
+    fn conv_logical_to_physical(
+        logical_node: Arc<LogicalOperator<LogicalLink>>,
+    ) -> Arc<PhysicalOperator<PhysicalLink>> {
+        match &*logical_node {
+            LogicalOperator::Scan(logical_scan_operator) => {
+                Arc::new(PhysicalOperator::TableScan(TableScanOperator::<
+                    PhysicalLink,
+                > {
+                    table_name: logical_scan_operator.table_name.clone(),
+                    predicate: None,
+                }))
+            }
+            LogicalOperator::Filter(logical_filter_operator) => {
+                let LogicalLink::LogicalNode(ref child) = logical_filter_operator.child else {
+                    panic!("The child of filter is not a logical node")
+                };
+
+                let LogicalLink::ScalarNode(ref predicate) = logical_filter_operator.predicate
+                else {
+                    panic!("The predicate of filter is not a scalar node")
+                };
+                Arc::new(PhysicalOperator::Filter(PhysicalFilterOperator::<
+                    PhysicalLink,
+                > {
+                    child: PhysicalLink::PhysicalNode(Self::conv_logical_to_physical(
+                        child.clone(),
+                    )),
+                    predicate: PhysicalLink::ScalarNode(todo!()),
+                }))
+            }
+            LogicalOperator::Join(logical_join_operator) => {
+                let LogicalLink::LogicalNode(ref left_join) = logical_join_operator.left else {
+                    panic!("The left child of join is not a logical node")
+                };
+
+                let LogicalLink::LogicalNode(ref right_join) = logical_join_operator.right else {
+                    panic!("The right child of join is not a logical node")
+                };
+
+                let LogicalLink::ScalarNode(ref condition) = logical_join_operator.condition else {
+                    panic!("The condition child of join is not a Scalar Node")
+                };
+
+                Arc::new(PhysicalOperator::HashJoin(
+                    HashJoinOperator::<PhysicalLink> {
+                        join_type: (),
+                        left: PhysicalLink::PhysicalNode(Self::conv_logical_to_physical(
+                            left_join.clone(),
+                        )),
+                        right: PhysicalLink::PhysicalNode(Self::conv_logical_to_physical(
+                            right_join.clone(),
+                        )),
+                        condition: PhysicalLink::ScalarNode(todo!()),
+                    },
+                ))
+            }
+        }
+    }
+    pub fn mock_optimize(logical_plan: OptDLogicalPlan) -> PhysicalPlan {
+        todo!()
+    }
+}
+
 pub struct OptdQueryPlanner {
-    pub optimizer: Arc<Mutex<Option<Box<OptdOptimizer>>>>,
+    pub optimizer: Arc<OptdOptimizer>,
 }
 
 impl OptdQueryPlanner {
@@ -78,7 +148,9 @@ impl OptdQueryPlanner {
     }
 
     fn get_optd_logical_plan(plan_node: &LogicalPlan) -> OptDLogicalPlan {
-        OptDLogicalPlan { root: Self::convert_into_optd_logical(plan_node) }
+        OptDLogicalPlan {
+            root: Self::convert_into_optd_logical(plan_node),
+        }
     }
 
     async fn create_physical_plan_inner(
@@ -99,7 +171,7 @@ impl OptdQueryPlanner {
         // TODO: convert the logical plan to OptD
         // let mut optd_rel = ctx.conv_into_optd(logical_plan)?;
         let optdLogicalPlan = Self::get_optd_logical_plan(logical_plan);
-        let mut optimizer = self.optimizer.lock().unwrap().take().unwrap();
+        let mut optimizer = self.optimizer.clone();
 
         // For now we are not sending anything to Opt-D
         // instead we are making datafusion create a physical plan for us and return it
@@ -112,7 +184,7 @@ impl OptdQueryPlanner {
 
     pub fn new(optimizer: OptdOptimizer) -> Self {
         Self {
-            optimizer: Arc::new(Mutex::new(Some(Box::new(optimizer)))),
+            optimizer: Arc::new(optimizer),
         }
     }
 }
