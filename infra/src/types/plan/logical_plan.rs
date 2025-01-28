@@ -13,7 +13,7 @@ use std::sync::Arc;
 /// operator).
 #[derive(Clone)]
 pub struct LogicalPlan {
-    root: Arc<LogicalOperator<LogicalLink>>,
+    pub root: Arc<LogicalOperator<LogicalLink>>,
 }
 
 /// A link in a [`LogicalPlan`] to a node.

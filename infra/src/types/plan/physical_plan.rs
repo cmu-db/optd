@@ -16,7 +16,7 @@ use std::sync::Arc;
 /// TODO Add docs.
 #[derive(Clone)]
 pub struct PhysicalPlan {
-    root: Arc<PhysicalOperator<PhysicalLink>>,
+    pub root: Arc<PhysicalOperator<PhysicalLink>>,
 }
 
 /// TODO This is hacky prototype code, DO NOT USE!
@@ -55,7 +55,7 @@ impl PhysicalOperator<PhysicalLink> {
             }
             PhysicalOperator::Filter(PhysicalFilterOperator { child, predicate }) => {
                 let PhysicalLink::PhysicalNode(child_operator) = child else {
-                    panic!();
+                    unimplemented!("encountered a scalar operator");
                 };
 
                 let predicate_expr = Arc::new(NoOp {}); // TODO FIX THIS!
@@ -70,10 +70,10 @@ impl PhysicalOperator<PhysicalLink> {
                 condition,
             }) => {
                 let PhysicalLink::PhysicalNode(left_operator) = left else {
-                    panic!();
+                    unimplemented!("encountered a scalar operator");
                 };
                 let PhysicalLink::PhysicalNode(right_operator) = right else {
-                    panic!();
+                    unimplemented!("encountered a scalar operator");
                 };
 
                 let left_plan = left_operator.as_datafusion_execution_plan();
