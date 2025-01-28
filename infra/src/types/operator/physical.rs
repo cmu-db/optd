@@ -18,27 +18,27 @@
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
 /// [`PartialPhysicalPlan`]: crate::plan::partial_physical_plan::PartialPhysicalPlan
 pub enum PhysicalOperator<Link> {
-    Scan(TableScanOperator<Link>),
+    TableScan(TableScanOperator<Link>),
     Filter(PhysicalFilterOperator<Link>),
-    Join(HashJoinOperator<Link>),
+    HashJoin(HashJoinOperator<Link>),
 }
 
 /// TODO Add docs.
 pub struct TableScanOperator<Link> {
-    table_name: String,
-    predicate: Link,
+    pub table_name: String,
+    pub predicate: Link,
 }
 
 /// TODO Add docs.
 pub struct PhysicalFilterOperator<Link> {
-    child: Link,
-    predicate: Link,
+    pub child: Link,
+    pub predicate: Link,
 }
 
 /// TODO Add docs.
 pub struct HashJoinOperator<Link> {
-    join_type: (),
-    left: Link,
-    right: Link,
-    condition: Link,
+    pub join_type: (),
+    pub left: Link,
+    pub right: Link,
+    pub condition: Link,
 }
