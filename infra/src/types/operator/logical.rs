@@ -25,7 +25,7 @@ pub enum LogicalOperator<Link> {
 /// TODO Add docs.
 pub struct LogicalScanOperator<Link> {
     pub table_name: String,
-    pub predicate: Link,
+    pub predicate: Option<Link>,
 }
 
 /// TODO Add docs.

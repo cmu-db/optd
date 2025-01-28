@@ -6,8 +6,8 @@ use datafusion::physical_plan::ExecutionPlanProperties;
 use datafusion::physical_plan::Partitioning;
 use datafusion::prelude::SessionConfig;
 use futures::StreamExt;
-use std::{io, time::SystemTime};
 use infra::create_df_context;
+use std::{io, time::SystemTime};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -16,13 +16,9 @@ async fn main() -> Result<()> {
 
     let session_config = SessionConfig::from_env()?.with_information_schema(true);
 
-    let ctx = crate::create_df_context(
-        Some(session_config.clone()),
-        Some(rt_config.clone()),
-        None
-    )
-    .await
-    .unwrap();
+    let ctx = crate::create_df_context(Some(session_config.clone()), Some(rt_config.clone()), None)
+        .await
+        .unwrap();
 
     // Create a DataFrame with the input query
     let queries = io::read_to_string(io::stdin())?;

@@ -1,4 +1,6 @@
-use crate::types::operator::{logical::LogicalOperator, physical::PhysicalOperator, ScalarOperator};
+use crate::types::operator::{
+    logical::LogicalOperator, physical::PhysicalOperator, ScalarOperator,
+};
 use crate::GroupId;
 use std::sync::Arc;
 

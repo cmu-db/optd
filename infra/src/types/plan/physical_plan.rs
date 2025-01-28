@@ -4,12 +4,15 @@ use crate::types::operator::{
     ScalarOperator,
 };
 use datafusion::{
-    common::{arrow::datatypes::Schema, JoinType}, datasource::physical_plan::{CsvExecBuilder, FileScanConfig}, execution::object_store::ObjectStoreUrl, physical_plan::{
+    common::{arrow::datatypes::Schema, JoinType},
+    datasource::physical_plan::{CsvExecBuilder, FileScanConfig},
+    execution::object_store::ObjectStoreUrl,
+    physical_plan::{
         expressions::NoOp,
         filter::FilterExec,
         joins::{HashJoinExec, PartitionMode},
         ExecutionPlan,
-    }
+    },
 };
 use std::sync::Arc;
 

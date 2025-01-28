@@ -17,7 +17,7 @@ use datafusion::execution::SessionStateBuilder;
 use datafusion::logical_expr::{Explain, LogicalPlan, PlanType, TableSource, ToStringifiedPlan};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
-use datafusion::prelude::{SessionConfig, SessionContext};
+use datafusion::prelude::{Expr, SessionConfig, SessionContext};
 
 /// TODO make distinction between relational groups and scalar groups.
 #[repr(transparent)]
@@ -29,7 +29,11 @@ pub struct GroupId(u64);
 pub struct ExprId(u64);
 
 mod types;
-use types::plan::logical_plan::LogicalPlan as OptDLogicalPlan;
+use types::operator::logical::{
+    LogicalFilterOperator, LogicalJoinOperator, LogicalOperator, LogicalScanOperator,
+};
+use types::operator::ScalarOperator;
+use types::plan::logical_plan::{LogicalLink, LogicalPlan as OptDLogicalPlan, ScalarLink};
 
 struct OptdOptimizer {}
 
@@ -38,14 +42,47 @@ pub struct OptdQueryPlanner {
 }
 
 impl OptdQueryPlanner {
-    fn convert_into_optd_logical(plan_node: LogicalPlan) -> OptDLogicalPlan {
-        match plan_node {
-            LogicalPlan::Filter(filter) => todo!(),
-            LogicalPlan::Join(join) => todo!(),
-            LogicalPlan::TableScan(table_scan) => todo!(),
+    fn convert_into_optd_scalar(predicate_expr: Expr) -> Arc<ScalarOperator<ScalarLink>> {
+        // TODO: Implement the conversion logic here
+        Arc::new(ScalarOperator::new())
+    }
+
+    fn convert_into_optd_logical(plan_node: Arc<LogicalPlan>) -> Arc<LogicalOperator<LogicalLink>> {
+        match &*plan_node {
+            LogicalPlan::Filter(filter) => {
+                Arc::new(LogicalOperator::Filter(LogicalFilterOperator {
+                    child: LogicalLink::LogicalNode(Self::convert_into_optd_logical(
+                        filter.input.clone(),
+                    )),
+                    predicate: LogicalLink::ScalarNode(Self::convert_into_optd_scalar(
+                        filter.predicate.clone(),
+                    )),
+                }))
+            }
+
+            LogicalPlan::Join(join) => Arc::new(LogicalOperator::Join(
+                (LogicalJoinOperator {
+                    join_type: (),
+                    left: LogicalLink::LogicalNode(Self::convert_into_optd_logical(
+                        join.left.clone(),
+                    )),
+                    right: LogicalLink::LogicalNode(Self::convert_into_optd_logical(
+                        join.right.clone(),
+                    )),
+                    condition: LogicalLink::ScalarNode(Arc::new(todo!())),
+                }),
+            )),
+
+            LogicalPlan::TableScan(table_scan) => Arc::new(LogicalOperator::Scan(
+                (LogicalScanOperator {
+                    table_name: table_scan.table_name.to_quoted_string(),
+                    predicate: None, // TODO fix this: there are multiple predicates in the scan but our IR only accepts one
+                }),
+            )),
             _ => panic!("OptD does not support this type of query yet"),
         }
     }
+
     async fn create_physical_plan_inner(
         &self,
         logical_plan: &LogicalPlan,

@@ -1,7 +1,9 @@
 use super::Memo;
 use crate::{
     types::expression::{relational::logical::LogicalExpr, Expr},
-    types::plan::{partial_logical_plan::PartialLogicalPlan, partial_physical_plan::PartialPhysicalPlan},
+    types::plan::{
+        partial_logical_plan::PartialLogicalPlan, partial_physical_plan::PartialPhysicalPlan,
+    },
 };
 
 #[trait_variant::make(Send)]
