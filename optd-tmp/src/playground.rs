@@ -117,7 +117,7 @@ impl Optimizer {
         
         for rule in self.memo.get_all_rules() {
             let opt = self.clone();
-            set.spawn(async move { opt.apply_rule(expr).await });
+            s// et.spawn(async move { opt.apply_rule(expr).await });
         }
         
     }

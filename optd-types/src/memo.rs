@@ -1,4 +1,4 @@
-use crate::expression::Expr;
+use crate::expression::LogicalExpression as Expr;
 use crate::{ExprId, GroupId};
 
 pub struct Memo;

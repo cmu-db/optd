@@ -6,6 +6,8 @@ pub mod operator;
 pub mod plan;
 pub mod rules;
 
+// TODO: Move to appropriate module.
+
 /// TODO make distinction between relational groups and scalar groups.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
