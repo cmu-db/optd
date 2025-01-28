@@ -1,11 +1,23 @@
-#![doc = include_str!("../../README.md")]
-#![allow(unused)]
+// Copyright (c) 2023-2024 CMU Database Group
+//
+// Use of this source code is governed by an MIT-style license that can be found in the LICENSE file or at
+// https://opensource.org/licenses/MIT.
 
-use datafusion::common::Result;
-use datafusion::execution::context::SessionContext;
-use datafusion::prelude::*;
+#![allow(clippy::new_without_default)]
+#[allow(deprecated)]
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
-pub mod types;
+use async_trait::async_trait;
+use datafusion::catalog::CatalogProviderList;
+use datafusion::catalog_common::MemoryCatalogProviderList;
+use datafusion::execution::context::{QueryPlanner, SessionState};
+use datafusion::execution::runtime_env::RuntimeConfig;
+use datafusion::execution::SessionStateBuilder;
+use datafusion::logical_expr::{Explain, LogicalPlan, PlanType, TableSource, ToStringifiedPlan};
+use datafusion::physical_plan::ExecutionPlan;
+use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
+use datafusion::prelude::{SessionConfig, SessionContext};
 
 /// TODO make distinction between relational groups and scalar groups.
 #[repr(transparent)]
@@ -13,26 +25,125 @@ pub mod types;
 pub struct GroupId(u64);
 
 /// TODO Add docs.
+#[allow(dead_code)]
 pub struct ExprId(u64);
 
+mod types;
+use types::plan::logical_plan::LogicalPlan as OptDLogicalPlan;
 
-mod query_planner;
+struct OptdOptimizer {}
 
-pub async fn tpch_ctx() -> Result<SessionContext> {
-    let ctx = SessionContext::new();
+pub struct OptdQueryPlanner {
+    pub optimizer: Arc<Mutex<Option<Box<OptdOptimizer>>>>,
+}
 
-    let tables = [
-        "customer", "lineitem", "nation", "orders", "part", "partsupp", "region", "supplier",
-    ];
+impl OptdQueryPlanner {
+    fn convert_into_optd_logical(plan_node: LogicalPlan) -> OptDLogicalPlan {
+        match plan_node {
+            LogicalPlan::Filter(filter) => todo!(),
+            LogicalPlan::Join(join) => todo!(),
+            LogicalPlan::TableScan(table_scan) => todo!(),
+            _ => panic!("OptD does not support this type of query yet"),
+        }
+    }
+    async fn create_physical_plan_inner(
+        &self,
+        logical_plan: &LogicalPlan,
+        session_state: &SessionState,
+    ) -> anyhow::Result<Arc<dyn ExecutionPlan>> {
+        // Fallback to the datafusion planner for DML/DDL operations. optd cannot handle this.
+        if let LogicalPlan::Dml(_) | LogicalPlan::Ddl(_) | LogicalPlan::EmptyRelation(_) =
+            logical_plan
+        {
+            let planner = DefaultPhysicalPlanner::default();
+            return Ok(planner
+                .create_physical_plan(logical_plan, session_state)
+                .await?);
+        }
 
-    for table_name in tables {
-        ctx.register_csv(
-            table_name,
-            &format!("../data/{}.csv", table_name),
-            CsvReadOptions::new().delimiter(b'|'),
-        )
-        .await?;
+        // TODO: convert the logical plan to OptD
+        // let mut optd_rel = ctx.conv_into_optd(logical_plan)?;
+        let mut optimizer = self.optimizer.lock().unwrap().take().unwrap();
+
+        // For now we are not sending anything to Opt-D
+        // instead we are making datafusion create a physical plan for us and return it
+        let planner = DefaultPhysicalPlanner::default();
+        planner
+            .create_physical_plan(logical_plan, session_state)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
+    pub fn new(optimizer: OptdOptimizer) -> Self {
+        Self {
+            optimizer: Arc::new(Mutex::new(Some(Box::new(optimizer)))),
+        }
+    }
+}
+
+impl std::fmt::Debug for OptdQueryPlanner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "OptdQueryPlanner")
+    }
+}
+
+#[async_trait]
+impl QueryPlanner for OptdQueryPlanner {
+    async fn create_physical_plan(
+        &self,
+        logical_plan: &LogicalPlan,
+        session_state: &SessionState,
+    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+        Ok(self
+            .create_physical_plan_inner(logical_plan, session_state)
+            .await
+            .unwrap())
+    }
+}
+/// Utility function to create a session context for datafusion + optd.
+pub async fn create_df_context(
+    session_config: Option<SessionConfig>,
+    rn_config: Option<RuntimeConfig>,
+    catalog: Option<Arc<dyn CatalogProviderList>>,
+) -> anyhow::Result<SessionContext> {
+    let mut session_config = if let Some(session_config) = session_config {
+        session_config
+    } else {
+        SessionConfig::from_env()?.with_information_schema(true)
+    };
+
+    // Disable Datafusion's heuristic rule based query optimizer
+    session_config.options_mut().optimizer.max_passes = 0;
+
+    let rn_config = if let Some(rn_config) = rn_config {
+        rn_config
+    } else {
+        RuntimeConfig::new()
+    };
+    let runtime_env = Arc::new(rn_config.build()?);
+
+    let catalog = if let Some(catalog) = catalog {
+        catalog
+    } else {
+        Arc::new(MemoryCatalogProviderList::new())
+    };
+
+    let mut builder = SessionStateBuilder::new()
+        .with_config(session_config)
+        .with_runtime_env(runtime_env)
+        .with_catalog_list(catalog.clone())
+        .with_default_features();
+
+    let optimizer = OptdOptimizer {};
+    // clean up optimizer rules so that we can plug in our own optimizer
+    builder = builder.with_optimizer_rules(vec![]);
+    builder = builder.with_physical_optimizer_rules(vec![]);
+
+    // use optd-bridge query planner
+    let optimizer = Arc::new(OptdQueryPlanner::new(optimizer));
+    builder = builder.with_query_planner(optimizer.clone());
+    let state = builder.build();
+    let ctx = SessionContext::new_with_state(state).enable_url_table();
+    ctx.refresh_catalogs().await?;
     Ok(ctx)
 }
