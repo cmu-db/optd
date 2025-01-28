@@ -4,7 +4,7 @@ use std::sync::Arc;
 /// TODO Add docs.
 #[derive(Clone)]
 pub struct PhysicalPlan {
-    root: Arc<PhysicalOperator<PhysicalLink>>,
+    pub root: Arc<PhysicalOperator<PhysicalLink>>,
 }
 
 /// TODO Add docs.
