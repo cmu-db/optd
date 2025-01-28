@@ -17,7 +17,7 @@ use datafusion::execution::SessionStateBuilder;
 use datafusion::logical_expr::{Explain, LogicalPlan, PlanType, TableSource, ToStringifiedPlan};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
-use datafusion::prelude::{Expr, SessionConfig, SessionContext};
+use datafusion::prelude::{log, Expr, SessionConfig, SessionContext};
 
 /// TODO make distinction between relational groups and scalar groups.
 #[repr(transparent)]
@@ -47,13 +47,11 @@ impl OptdQueryPlanner {
         Arc::new(ScalarOperator::new())
     }
 
-    fn convert_into_optd_logical(plan_node: Arc<LogicalPlan>) -> Arc<LogicalOperator<LogicalLink>> {
-        match &*plan_node {
+    fn convert_into_optd_logical(plan_node: &LogicalPlan) -> Arc<LogicalOperator<LogicalLink>> {
+        match plan_node {
             LogicalPlan::Filter(filter) => {
                 Arc::new(LogicalOperator::Filter(LogicalFilterOperator {
-                    child: LogicalLink::LogicalNode(Self::convert_into_optd_logical(
-                        filter.input.clone(),
-                    )),
+                    child: LogicalLink::LogicalNode(Self::convert_into_optd_logical(&filter.input)),
                     predicate: LogicalLink::ScalarNode(Self::convert_into_optd_scalar(
                         filter.predicate.clone(),
                     )),
@@ -63,12 +61,8 @@ impl OptdQueryPlanner {
             LogicalPlan::Join(join) => Arc::new(LogicalOperator::Join(
                 (LogicalJoinOperator {
                     join_type: (),
-                    left: LogicalLink::LogicalNode(Self::convert_into_optd_logical(
-                        join.left.clone(),
-                    )),
-                    right: LogicalLink::LogicalNode(Self::convert_into_optd_logical(
-                        join.right.clone(),
-                    )),
+                    left: LogicalLink::LogicalNode(Self::convert_into_optd_logical(&join.left)),
+                    right: LogicalLink::LogicalNode(Self::convert_into_optd_logical(&join.right)),
                     condition: LogicalLink::ScalarNode(Arc::new(todo!())),
                 }),
             )),
@@ -81,6 +75,10 @@ impl OptdQueryPlanner {
             )),
             _ => panic!("OptD does not support this type of query yet"),
         }
+    }
+
+    fn get_optd_logical_plan(plan_node: &LogicalPlan) -> OptDLogicalPlan {
+        OptDLogicalPlan { root: Self::convert_into_optd_logical(plan_node) }
     }
 
     async fn create_physical_plan_inner(
@@ -100,6 +98,7 @@ impl OptdQueryPlanner {
 
         // TODO: convert the logical plan to OptD
         // let mut optd_rel = ctx.conv_into_optd(logical_plan)?;
+        let optdLogicalPlan = Self::get_optd_logical_plan(logical_plan);
         let mut optimizer = self.optimizer.lock().unwrap().take().unwrap();
 
         // For now we are not sending anything to Opt-D
