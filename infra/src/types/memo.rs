@@ -1,9 +1,7 @@
-use crate::types::expression::{relational::logical::LogicalExpr, Expr};
-use crate::types::plan::partial_logical_plan::PartialLogicalPlan;
-use crate::types::plan::partial_physical_plan::PartialPhysicalPlan;
+use crate::types::expression::Expr;
 use crate::{ExprId, GroupId};
 
-use super::Memo;
+pub struct Memo;
 
 impl Memo {
     pub async fn add_expr(&mut self, logical_expr: Expr) -> (ExprId, GroupId) {

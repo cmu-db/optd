@@ -1,4 +1,4 @@
-use crate::types::operator::{logical::LogicalOperator, ScalarOperator};
+use crate::types::operator::logical::LogicalOperator;
 use crate::GroupId;
 use std::sync::Arc;
 
@@ -27,42 +27,13 @@ pub enum PartialLogicalPlan {
 /// [`GroupId`], denoting the unamterialized part of the plan (thus the name `PartialLogicalPlan`).
 ///
 /// Note that this `LogicalLink` is _**different**_ from the `LogicalLink`s defined in the sibling
-/// modules:
-///
-/// - [`super::logical_plan::LogicalLink`] only allows a logical operator to have other logical
-///   operators or scalar operators as children since that is all [`LogicalPlan`] needs
-/// - [`super::physical_plan::LogicalLink`] allows a logical operator to also have a physical
-///   operator as a child (since [`PhysicalPlan`] needs to encode both logical and physical
-///   operators).
-/// - [`super::partial_logical_plan::LogicalLink`] allows a logical operator to also have a
-///   [`GroupId`] as a child (since the [`PartialLogicalPlan`] is a partially materialized query
-///   plan).
-/// - [`super::partial_physical_plan::LogicalLink`] allows a logical operator to have both physical
-///   operators _and_ [`GroupId`] as a child (since [`PartialPhysicalPlan`] needs everything).
+/// module [`super::logical_plan`]. [`LogicalPlan`] does not need to have [`GroupId`]s as children,
+/// and so its type representation does not allow that.
 ///
 /// [`GroupId`]: crate::GroupId
 /// [`LogicalPlan`]: crate::plan::logical_plan::LogicalPlan
-/// [`PhysicalPlan`]: crate::plan::physical_plan::PhysicalPlan
-/// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
-/// [`PartialPhysicalPlan`]: crate::plan::partial_physical_plan::PartialPhysicalPlan
 #[derive(Clone)]
 pub enum LogicalLink {
     LogicalNode(Arc<LogicalOperator<LogicalLink>>),
-    ScalarNode(Arc<ScalarOperator<ScalarLink>>),
-    Group(GroupId),
-}
-
-/// A link in a [`LogicalPlan`] to a scalar node. A `ScalarLink` can be either a `ScalarNode` that
-/// points to a `ScalarOperator` or a `GroupId`.
-///
-/// Note that this `ScalarLink` is _**different**_ from the `ScalarLink`s defined in the sibling
-/// modules.
-///
-/// TODO Add detailed docs here.
-///
-/// [`LogicalPlan`]: crate::plan::logical_plan::LogicalPlan
-#[derive(Clone)]
-pub enum ScalarLink {
-    ScalarNode(Arc<ScalarOperator<ScalarLink>>),
     Group(GroupId),
 }
