@@ -1,5 +1,7 @@
 //! Type representations of physical operators in (materialized) query plans.
 
+use std::sync::Arc;
+
 use crate::types::operator::Scalar;
 
 /// A type representing a physical operator in an output physical query execution plan.
@@ -41,5 +43,5 @@ pub struct HashJoinOperator<Link> {
     pub join_type: (),
     pub left: Link,
     pub right: Link,
-    pub condition: Scalar,
+    pub condition: Arc<Vec<(Scalar, Scalar)>>,
 }

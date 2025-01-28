@@ -36,10 +36,9 @@ use types::operator::logical::{
 use types::operator::physical::{
     HashJoinOperator, PhysicalFilterOperator, PhysicalOperator, TableScanOperator,
 };
-use types::operator::ScalarOperator;
-use types::plan::logical_plan::{LogicalLink, LogicalPlan as OptDLogicalPlan, ScalarLink};
-use types::plan::partial_physical_plan::PhysicalLink;
-use types::plan::physical_plan::PhysicalPlan;
+use types::operator::Scalar;
+use types::plan::logical_plan::{LogicalLink, LogicalPlan as OptDLogicalPlan};
+use types::plan::physical_plan::{PhysicalLink, PhysicalPlan};
 
 struct OptdOptimizer {}
 
@@ -49,44 +48,27 @@ impl OptdOptimizer {
     ) -> Arc<PhysicalOperator<PhysicalLink>> {
         match &*logical_node {
             LogicalOperator::Scan(logical_scan_operator) => {
-                Arc::new(PhysicalOperator::TableScan(TableScanOperator::<
-                    PhysicalLink,
-                > {
+                Arc::new(PhysicalOperator::TableScan(TableScanOperator {
                     table_name: logical_scan_operator.table_name.clone(),
                     predicate: None,
                 }))
             }
             LogicalOperator::Filter(logical_filter_operator) => {
-                let LogicalLink::LogicalNode(ref child) = logical_filter_operator.child else {
-                    panic!("The child of filter is not a logical node")
-                };
-
-                let LogicalLink::ScalarNode(ref predicate) = logical_filter_operator.predicate
-                else {
-                    panic!("The predicate of filter is not a scalar node")
-                };
+                let LogicalLink::LogicalNode(ref child) = logical_filter_operator.child;
+                let predicate = logical_filter_operator.predicate.clone();
                 Arc::new(PhysicalOperator::Filter(PhysicalFilterOperator::<
                     PhysicalLink,
                 > {
                     child: PhysicalLink::PhysicalNode(Self::conv_logical_to_physical(
                         child.clone(),
                     )),
-                    predicate: PhysicalLink::ScalarNode(todo!()),
+                    predicate: predicate,
                 }))
             }
             LogicalOperator::Join(logical_join_operator) => {
-                let LogicalLink::LogicalNode(ref left_join) = logical_join_operator.left else {
-                    panic!("The left child of join is not a logical node")
-                };
-
-                let LogicalLink::LogicalNode(ref right_join) = logical_join_operator.right else {
-                    panic!("The right child of join is not a logical node")
-                };
-
-                let LogicalLink::ScalarNode(ref condition) = logical_join_operator.condition else {
-                    panic!("The condition child of join is not a Scalar Node")
-                };
-
+                let LogicalLink::LogicalNode(ref left_join) = logical_join_operator.left;
+                let LogicalLink::LogicalNode(ref right_join) = logical_join_operator.right;
+                let condition = logical_join_operator.condition.clone();
                 Arc::new(PhysicalOperator::HashJoin(
                     HashJoinOperator::<PhysicalLink> {
                         join_type: (),
@@ -96,7 +78,7 @@ impl OptdOptimizer {
                         right: PhysicalLink::PhysicalNode(Self::conv_logical_to_physical(
                             right_join.clone(),
                         )),
-                        condition: PhysicalLink::ScalarNode(todo!()),
+                        condition: condition,
                     },
                 ))
             }
@@ -112,9 +94,9 @@ pub struct OptdQueryPlanner {
 }
 
 impl OptdQueryPlanner {
-    fn convert_into_optd_scalar(predicate_expr: Expr) -> Arc<ScalarOperator<ScalarLink>> {
+    fn convert_into_optd_scalar(predicate_expr: Expr) -> Scalar {
         // TODO: Implement the conversion logic here
-        Arc::new(ScalarOperator::new())
+        Scalar {}
     }
 
     fn convert_into_optd_logical(plan_node: &LogicalPlan) -> Arc<LogicalOperator<LogicalLink>> {
@@ -122,27 +104,32 @@ impl OptdQueryPlanner {
             LogicalPlan::Filter(filter) => {
                 Arc::new(LogicalOperator::Filter(LogicalFilterOperator {
                     child: LogicalLink::LogicalNode(Self::convert_into_optd_logical(&filter.input)),
-                    predicate: LogicalLink::ScalarNode(Self::convert_into_optd_scalar(
-                        filter.predicate.clone(),
-                    )),
+                    predicate: Self::convert_into_optd_scalar(filter.predicate.clone()),
                 }))
             }
 
-            LogicalPlan::Join(join) => Arc::new(LogicalOperator::Join(
-                (LogicalJoinOperator {
-                    join_type: (),
-                    left: LogicalLink::LogicalNode(Self::convert_into_optd_logical(&join.left)),
-                    right: LogicalLink::LogicalNode(Self::convert_into_optd_logical(&join.right)),
-                    condition: LogicalLink::ScalarNode(Arc::new(todo!())),
-                }),
-            )),
+            LogicalPlan::Join(join) => Arc::new(LogicalOperator::Join(LogicalJoinOperator {
+                join_type: (),
+                left: LogicalLink::LogicalNode(Self::convert_into_optd_logical(&join.left)),
+                right: LogicalLink::LogicalNode(Self::convert_into_optd_logical(&join.right)),
+                condition: Arc::new(
+                    join.on
+                        .iter()
+                        .map(|(left, right)| {
+                            let left_scalar = Self::convert_into_optd_scalar(left.clone());
+                            let right_scalar = Self::convert_into_optd_scalar(right.clone());
+                            (left_scalar, right_scalar)
+                        })
+                        .collect(),
+                ),
+            })),
 
-            LogicalPlan::TableScan(table_scan) => Arc::new(LogicalOperator::Scan(
-                (LogicalScanOperator {
+            LogicalPlan::TableScan(table_scan) => {
+                Arc::new(LogicalOperator::Scan(LogicalScanOperator {
                     table_name: table_scan.table_name.to_quoted_string(),
                     predicate: None, // TODO fix this: there are multiple predicates in the scan but our IR only accepts one
-                }),
-            )),
+                }))
+            }
             _ => panic!("OptD does not support this type of query yet"),
         }
     }

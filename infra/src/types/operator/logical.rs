@@ -1,5 +1,7 @@
 //! Type representations of logical operators in (materialized) query plans.
 
+use std::sync::Arc;
+
 use crate::types::operator::Scalar;
 
 /// A type representing a logical operator in an input logical query plan.
@@ -40,5 +42,5 @@ pub struct LogicalJoinOperator<Link> {
     pub join_type: (),
     pub left: Link,
     pub right: Link,
-    pub condition: Scalar,
+    pub condition: Arc<Vec<(Scalar, Scalar)>>,
 }
