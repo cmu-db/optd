@@ -1,9 +1,10 @@
-#![allow(unused)]
+#![allow(unused_variables)]
 
 pub mod expression;
 pub mod memo;
 pub mod operator;
 pub mod plan;
+pub mod rules;
 
 /// TODO make distinction between relational groups and scalar groups.
 #[repr(transparent)]
@@ -11,4 +12,5 @@ pub mod plan;
 pub struct GroupId(u64);
 
 /// TODO Add docs.
+#[allow(dead_code)]
 pub struct ExprId(u64);
