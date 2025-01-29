@@ -13,12 +13,11 @@ use constants::Constant;
 /// - `ScalarLink`: Specifies whether the children scalars are other scalar operators or a group id.
 ///
 /// This makes it possible to reuse the `ScalarOperator` type in [`LogicalPlan`],
-/// [`PhysicalPlan`], [`PartialLogicalPlan`], and [`ScalarExpr`].
+/// [`PhysicalPlan`], and [`PartialLogicalPlan`].
 ///
 /// [`LogicalPlan`]: crate::plan::logical_plan::LogicalPlan
 /// [`PhysicalPlan`]: crate::plan::physical_plan::PhysicalPlan
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
-/// [`ScalarExpr`]: crate::expression::scalar::ScalarExpr
 #[derive(Clone)]
 pub enum ScalarOperator<ScalarLink> {
     Add(Add<ScalarLink>),

@@ -18,10 +18,10 @@ use scan::table_scan::TableScan;
 /// - `ScalarLink`: Specifies whether the children scalars are other scalar operators or a group id.
 ///
 /// This makes it possible to reuse the `PhysicalOperator` type in [`PhysicalPlan`]
-/// and [`PhysicalExpr`].
+/// and [`PhysicalExpression`].
 ///
 /// [`PhysicalPlan`]: crate::plan::physical_plan::PhysicalPlan
-/// [`PhysicalExpr`]: crate::expression::relational::PhysicalExpr
+/// [`PhysicalExpression`]: crate::expression::PhysicalExpression
 #[derive(Clone)]
 pub enum PhysicalOperator<RelLink, ScalarLink> {
     TableScan(TableScan<ScalarLink>),

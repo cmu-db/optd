@@ -12,7 +12,7 @@ pub trait ImplementationRule {
     ///
     /// If the input expression does not match the current rule's pattern, then this method returns
     /// `None`. Otherwise, it applies the implementation and returns the corresponding
-    /// [`PhysicalExpr`].
+    /// [`PhysicalExpression`].
     ///
     /// Implementation rules are defined to be a mapping from a logical operator to a physical
     /// operator. This method is used by the rule engine to check if an implementation / algorithm

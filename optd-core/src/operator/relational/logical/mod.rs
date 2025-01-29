@@ -17,11 +17,11 @@ use scan::Scan;
 /// - `ScalarLink`: Specifies whether the children scalars are other scalar operators or a group id.
 ///
 /// This makes it possible to reuse the `LogicalOperator` type in [`LogicalPlan`],
-/// [`PartialLogicalPlan`], and [`LogicalExpr`].
+/// [`PartialLogicalPlan`], and [`LogicalExpression`].
 ///
 /// [`LogicalPlan`]: crate::plan::logical_plan::LogicalPlan
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
-/// [`LogicalExpr`]: crate::expression::relational::LogicalExpr
+/// [`LogicalExpression`]: crate::expression::LogicalExpression
 #[derive(Clone)]
 pub enum LogicalOperator<RelLink, ScalarLink> {
     Scan(Scan<ScalarLink>),
