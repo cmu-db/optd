@@ -11,15 +11,13 @@ pub struct HashJoinRule;
 // https://github.com/cmu-db/optd/issues/15
 impl ImplementationRule for HashJoinRule {
     fn check_and_apply(&self, expr: LogicalExpression) -> Option<PhysicalExpression> {
-        if let LogicalExpression::Relational(LogicalOperator::Join(join)) = expr {
-            return Some(PhysicalExpression::Relational(PhysicalOperator::HashJoin(
-                HashJoin {
-                    join_type: join.join_type,
-                    probe_side: join.left,
-                    build_side: join.right,
-                    condition: join.condition,
-                },
-            )));
+        if let LogicalOperator::Join(join) = expr {
+            return Some(PhysicalOperator::HashJoin(HashJoin {
+                join_type: join.join_type,
+                probe_side: join.left,
+                build_side: join.right,
+                condition: join.condition,
+            }));
         }
         None
     }

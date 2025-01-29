@@ -9,13 +9,11 @@ pub struct PhysicalFilterRule;
 
 impl ImplementationRule for PhysicalFilterRule {
     fn check_and_apply(&self, expr: LogicalExpression) -> Option<PhysicalExpression> {
-        if let LogicalExpression::Relational(LogicalOperator::Filter(filter)) = expr {
-            return Some(PhysicalExpression::Relational(PhysicalOperator::Filter(
-                Filter {
-                    child: filter.child,
-                    predicate: filter.predicate,
-                },
-            )));
+        if let LogicalOperator::Filter(filter) = expr {
+            return Some(PhysicalOperator::Filter(Filter {
+                child: filter.child,
+                predicate: filter.predicate,
+            }));
         }
 
         None
