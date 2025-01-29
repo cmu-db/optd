@@ -5,7 +5,9 @@
 #[derive(Clone)]
 pub struct MergeJoin<Relation, Scalar> {
     pub join_type: String,
-    pub left_sorted: Relation,  // Left sorted relation.
-    pub right_sorted: Relation, // Right sorted relation.
+    /// Left sorted relation.
+    pub left_sorted: Relation,
+    /// Right sorted relation.
+    pub right_sorted: Relation,
     pub condition: Scalar,
 }
