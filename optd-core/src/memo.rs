@@ -7,10 +7,14 @@
 //! - Grouping logically equivalent expressions together to enable rule-based optimization
 //!
 //! # Structure
-//! - Each unique expression is assigned an [`ExprId`]
-//! - Logically equivalent expressions are grouped together under a [`GroupId`]  
+//!
+//! - Each unique expression is assigned an expression ID (either [`LogicalExpressionId`],
+//!   [`PhysicalExpressionId`], or [`ScalarExpressionId`])
+//! - Logically equivalent expressions are grouped together under a [`GroupId`]
+//! - Logically equivalent scalar expressions are grouped toegether under a [`ScalarGroupId`]
 //!
 //! # Usage
+//!
 //! The memo table provides methods to:
 //! - Add new expressions and get their IDs
 //! - Add expressions to existing groups
@@ -20,26 +24,42 @@
 
 use crate::expression::LogicalExpression;
 
-/// A unique identifier for an expression in the memo table.
+/// A unique identifier for a logical expression in the memo table.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ExprId(u64);
+pub struct LogicalExpressionId(u64);
 
-/// A unique identifier for a group of expressions in the memo table.
+/// A unique identifier for a physical expression in the memo table.
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PhysicalExpressionId(u64);
+
+/// A unique identifier for a scalar expression in the memo table.
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ScalarExpressionId(u64);
+
+/// A unique identifier for a group of relational expressions in the memo table.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GroupId(u64);
+
+/// A unique identifier for a group of scalar expressions in the memo table.
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ScalarGroupId(u64);
 
 /// TODO(alexis) Add fields & link to storage layer.
 pub struct Memo;
 
 /// TODO(alexis) Stabilize API by first expanding the Python code.
 impl Memo {
+    /// TODO(alexis) Add docs.
     pub async fn add_logical_expr_to_group(
         &mut self,
-        _logical_expr: LogicalExpression,
         _group_id: GroupId,
-    ) -> ExprId {
+        _logical_expr: LogicalExpression,
+    ) -> LogicalExpressionId {
         todo!()
     }
 }
