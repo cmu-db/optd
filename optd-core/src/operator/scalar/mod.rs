@@ -10,7 +10,7 @@ use constants::Constant;
 /// Each variant of `ScalarOperator` represents a specific kind of scalar operator.
 ///
 /// This type is generic over one type:
-/// - `ScalarLink`: Specifies whether the children scalars are other scalar operators or a group id.
+/// - `Scalar`: Specifies whether the children scalars are other scalar operators or a group id.
 ///
 /// This makes it possible to reuse the `ScalarOperator` type in [`LogicalPlan`],
 /// [`PhysicalPlan`], and [`PartialLogicalPlan`].
@@ -19,8 +19,8 @@ use constants::Constant;
 /// [`PhysicalPlan`]: crate::plan::physical_plan::PhysicalPlan
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
 #[derive(Clone)]
-pub enum ScalarOperator<ScalarLink> {
-    Add(Add<ScalarLink>),
+pub enum ScalarOperator<Scalar> {
+    Add(Add<Scalar>),
     ColumnRef(ColumnRef),
     Constant(Constant),
 }

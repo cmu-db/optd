@@ -1,9 +1,9 @@
 /// Logical project operator that specifies output columns.
 ///
-/// Takes input relation (`RelLink`) and defines output columns/expressions
-/// (`ScalarLink`).
+/// Takes input relation (`Relation`) and defines output columns/expressions
+/// (`Scalar`).
 #[derive(Clone)]
-pub struct Project<RelLink, ScalarLink> {
-    pub child: RelLink,
-    pub fields: Vec<ScalarLink>,
+pub struct Project<Relation, Scalar> {
+    pub child: Relation,
+    pub fields: Vec<Scalar>,
 }

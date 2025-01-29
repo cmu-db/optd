@@ -1,8 +1,8 @@
 /// Logical filter operator that selects rows matching a condition.
 ///
-/// Takes input relation (`RelLink`) and filters rows using a boolean predicate (`ScalarLink`).
+/// Takes input relation (`Relation`) and filters rows using a boolean predicate (`Scalar`).
 #[derive(Clone)]
-pub struct Filter<RelLink, ScalarLink> {
-    pub child: RelLink,
-    pub predicate: ScalarLink,
+pub struct Filter<Relation, Scalar> {
+    pub child: Relation,
+    pub predicate: Scalar,
 }

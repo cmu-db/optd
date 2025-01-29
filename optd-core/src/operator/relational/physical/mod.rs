@@ -13,9 +13,9 @@ use scan::table_scan::TableScan;
 /// Each variant of `PhysicalOperator` represents a specific kind of physical operator.
 ///
 /// This type is generic over two types:
-/// - `RelLink`: Specifies whether the children relations are other physical operators or a group
+/// - `Relation`: Specifies whether the children relations are other physical operators or a group
 ///   id.
-/// - `ScalarLink`: Specifies whether the children scalars are other scalar operators or a group id.
+/// - `Scalar`: Specifies whether the children scalars are other scalar operators or a group id.
 ///
 /// This makes it possible to reuse the `PhysicalOperator` type in [`PhysicalPlan`]
 /// and [`PhysicalExpression`].
@@ -23,11 +23,11 @@ use scan::table_scan::TableScan;
 /// [`PhysicalPlan`]: crate::plan::physical_plan::PhysicalPlan
 /// [`PhysicalExpression`]: crate::expression::PhysicalExpression
 #[derive(Clone)]
-pub enum PhysicalOperator<RelLink, ScalarLink> {
-    TableScan(TableScan<ScalarLink>),
-    Filter(Filter<RelLink, ScalarLink>),
-    Project(Project<RelLink, ScalarLink>),
-    HashJoin(HashJoin<RelLink, ScalarLink>),
-    NLJoin(NLJoin<RelLink, ScalarLink>),
-    SortMergeJoin(SortMergeJoin<RelLink, ScalarLink>),
+pub enum PhysicalOperator<Relation, Scalar> {
+    TableScan(TableScan<Scalar>),
+    Filter(Filter<Relation, Scalar>),
+    Project(Project<Relation, Scalar>),
+    HashJoin(HashJoin<Relation, Scalar>),
+    NLJoin(NLJoin<Relation, Scalar>),
+    SortMergeJoin(SortMergeJoin<Relation, Scalar>),
 }

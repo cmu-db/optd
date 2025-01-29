@@ -13,8 +13,8 @@ use scan::Scan;
 /// Each variant of `LogicalOperator` represents a specific kind of logical operator.
 ///
 /// This type is generic over two types:
-/// - `RelLink`: Specifies whether the children relations are other logical operators or a group id.
-/// - `ScalarLink`: Specifies whether the children scalars are other scalar operators or a group id.
+/// - `Relation`: Specifies whether the children relations are other logical operators or a group id.
+/// - `Scalar`: Specifies whether the children scalars are other scalar operators or a group id.
 ///
 /// This makes it possible to reuse the `LogicalOperator` type in [`LogicalPlan`],
 /// [`PartialLogicalPlan`], and [`LogicalExpression`].
@@ -23,9 +23,9 @@ use scan::Scan;
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
 /// [`LogicalExpression`]: crate::expression::LogicalExpression
 #[derive(Clone)]
-pub enum LogicalOperator<RelLink, ScalarLink> {
-    Scan(Scan<ScalarLink>),
-    Filter(Filter<RelLink, ScalarLink>),
-    Project(Project<RelLink, ScalarLink>),
-    Join(Join<RelLink, ScalarLink>),
+pub enum LogicalOperator<Relation, Scalar> {
+    Scan(Scan<Scalar>),
+    Filter(Filter<Relation, Scalar>),
+    Project(Project<Relation, Scalar>),
+    Join(Join<Relation, Scalar>),
 }

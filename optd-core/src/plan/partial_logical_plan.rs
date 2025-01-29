@@ -18,13 +18,13 @@ use std::sync::Arc;
 ///
 /// # Type Parameters
 ///
-/// The plan uses [`RelLink`] and [`ScalarLink`] to represent its node connections,
+/// The plan uses [`Relation`] and [`Scalar`] to represent its node connections,
 /// allowing mixing of materialized nodes and group references.
 ///
 /// [`LogicalPlan`]: crate::plan::logical_plan::LogicalPlan
 #[derive(Clone)]
 pub struct PartialLogicalPlan {
-    pub node: Arc<LogicalOperator<RelLink, ScalarLink>>,
+    pub node: Arc<LogicalOperator<Relation, Scalar>>,
 }
 
 /// A link to a relational node in a [`PartialLogicalPlan`].
@@ -33,8 +33,8 @@ pub struct PartialLogicalPlan {
 /// - A materialized logical operator node
 /// - A reference to an unmaterialized memo group
 #[derive(Clone)]
-pub enum RelLink {
-    Operator(Arc<LogicalOperator<RelLink, ScalarLink>>),
+pub enum Relation {
+    Operator(Arc<LogicalOperator<Relation, Scalar>>),
     GroupId(GroupId),
 }
 
@@ -44,7 +44,7 @@ pub enum RelLink {
 /// - A materialized scalar operator node
 /// - A reference to an unmaterialized memo group
 #[derive(Clone)]
-pub enum ScalarLink {
-    Operator(Arc<ScalarOperator<ScalarLink>>),
+pub enum Scalar {
+    Operator(Arc<ScalarOperator<Scalar>>),
     Group(GroupId),
 }
