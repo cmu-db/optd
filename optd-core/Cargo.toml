@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 trait-variant = "0.1.2"
+
+# Pin more recent versions for `-Zminimal-versions`.
+proc-macro2 = "1.0.60" # For a missing feature (https://github.com/rust-lang/rust/issues/113152).
