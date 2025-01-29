@@ -7,6 +7,8 @@ use crate::operator::relational::{
 /// Implementation rule that converts a logical join into a hash join physical operator
 pub struct HashJoinRule;
 
+// TODO: rule may fail, need to check join condition
+// https://github.com/cmu-db/optd/issues/15
 impl ImplementationRule for HashJoinRule {
     fn check_and_apply(&self, expr: LogicalExpression) -> Option<PhysicalExpression> {
         if let LogicalExpression::Relational(LogicalOperator::Join(join)) = expr {

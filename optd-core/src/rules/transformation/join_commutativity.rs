@@ -11,7 +11,7 @@ impl TransformationRule for JoinCommutativityRule {
         todo!()
     }
 
-    fn apply(&self, _expr: PartialLogicalPlan) -> Vec<LogicalExpression> {
+    fn apply(&self, _expr: PartialLogicalPlan) -> PartialLogicalPlan {
         todo!()
     }
 }

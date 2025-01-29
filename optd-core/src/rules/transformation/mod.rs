@@ -31,7 +31,7 @@ pub trait TransformationRule {
     ///
     /// These changes can create new logical or scalar expressions. However, note that
     /// transformation rules will _not_ create new physical expressions.
-    fn apply(&self, expr: PartialLogicalPlan) -> Vec<LogicalExpression>;
+    fn apply(&self, expr: PartialLogicalPlan) -> PartialLogicalPlan;
 }
 
 pub mod join_associativity;

@@ -5,7 +5,9 @@
 #[derive(Clone)]
 pub struct NLJoin<Relation, Scalar> {
     pub join_type: String,
-    pub outer: Relation, // Outer relation.
-    pub inner: Relation, // Inner relation scanned for each outer row.
+    /// Outer relation.
+    pub outer: Relation,
+    /// Inner relation scanned for each outer row.
+    pub inner: Relation,
     pub condition: Scalar,
 }

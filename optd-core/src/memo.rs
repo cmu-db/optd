@@ -18,7 +18,7 @@
 //! - Look up group membership of expressions
 //! - Create new groups for expressions
 
-use crate::expression::Expression;
+use crate::expression::LogicalExpression;
 
 /// A unique identifier for an expression in the memo table.
 #[repr(transparent)]
@@ -35,27 +35,11 @@ pub struct Memo;
 
 /// TODO(alexis) Stabilize API by first expanding the Python code.
 impl Memo {
-    pub async fn add_expr(&mut self, _logical_expr: Expression) -> (ExprId, GroupId) {
-        todo!()
-    }
-
-    pub async fn add_expr_to_group(
+    pub async fn add_logical_expr_to_group(
         &mut self,
-        _logical_expr: Expression,
+        _logical_expr: LogicalExpression,
         _group_id: GroupId,
     ) -> ExprId {
-        todo!()
-    }
-
-    pub async fn get_group_exprs(&mut self, _group_id: GroupId) -> Vec<(ExprId, Expression)> {
-        todo!()
-    }
-
-    pub async fn get_expr_group(&mut self, _logical_expr_id: ExprId) -> GroupId {
-        todo!()
-    }
-
-    pub async fn create_new_group(&mut self) -> GroupId {
         todo!()
     }
 }

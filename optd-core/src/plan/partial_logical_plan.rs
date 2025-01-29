@@ -46,5 +46,5 @@ pub enum Relation {
 #[derive(Clone)]
 pub enum Scalar {
     Operator(Arc<ScalarOperator<Scalar>>),
-    Group(GroupId),
+    GroupId(GroupId),
 }
