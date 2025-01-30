@@ -13,5 +13,7 @@ pub struct Join<Relation, Scalar> {
     /// The right input relation.
     pub right: Relation,
     /// The join expression denoting the join condition that links the two input relations.
+    ///
+    /// For example, a join operation could have a condition on `t1.id = t2.id` (an equijoin).
     pub condition: Scalar,
 }
