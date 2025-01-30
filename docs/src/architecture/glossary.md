@@ -126,7 +126,7 @@ See the following sections for more information.
 
 A logical expression is a version of a [Relational Expression].
 
-TODO(connor) Add more details.
+TODO(connor): Add more details.
 
 Examples of logical expressions include Logical Scan, Logical Join, or Logical Sort expressions
 (which can just be shorthanded to Scan, Join, or Sort).
@@ -135,7 +135,7 @@ Examples of logical expressions include Logical Scan, Logical Join, or Logical S
 
 A physical expression is a version of a [Relational Expression].
 
-TODO(connor) Add more details.
+TODO(connor): Add more details.
 
 Examples of physical expressions include Table Scan, Index Scan, Hash Join, or Sort Merge Join.
 

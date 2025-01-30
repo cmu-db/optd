@@ -19,6 +19,9 @@ impl ImplementationRule for PhysicalFilterRule {
             return None;
         };
 
-        Some(PhysicalOperator::Filter(PhysicalFilter { child, predicate }))
+        Some(PhysicalOperator::Filter(PhysicalFilter {
+            child,
+            predicate,
+        }))
     }
 }

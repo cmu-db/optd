@@ -33,7 +33,7 @@ pub trait TransformationRule {
     ///
     /// These changes can create new logical or scalar expressions. However, note that
     /// transformation rules will _not_ create new physical expressions.
-    /// 
+    ///
     /// TODO(everyone) Figure out what the return type should really be.
     fn apply(&self, expr: PartialLogicalPlan) -> PartialLogicalPlan;
 }

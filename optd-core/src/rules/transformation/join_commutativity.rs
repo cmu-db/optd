@@ -1,11 +1,11 @@
 //! The rule for join commutativity.
-//! 
+//!
 //! See [`JoinCommutativityRule`] for more information.
 
 use super::*;
 
 /// A unit / marker struct for join commutativity.
-/// 
+///
 /// Since joining is an commutative operation, we can convert a `Join(A, B)` into a `Join(B, C)`.
 pub struct JoinCommutativityRule;
 

@@ -1,7 +1,7 @@
 //! This module contains the implementation rule trait / API, as well as the rules that implement
 //! said trait.
 //!
-//! TODO(connor) Add more docs.
+//! TODO(connor): Add more docs.
 
 use crate::expression::{LogicalExpression, PhysicalExpression};
 
