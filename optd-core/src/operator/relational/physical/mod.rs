@@ -10,6 +10,8 @@ use join::{hash_join::HashJoin, merge_join::MergeJoin, nested_loop_join::NestedL
 use project::project::Project;
 use scan::table_scan::TableScan;
 
+use super::RelationChildren;
+
 /// Each variant of `PhysicalOperator` represents a specific kind of physical operator.
 ///
 /// This type is generic over two types:
@@ -24,10 +26,41 @@ use scan::table_scan::TableScan;
 /// [`PhysicalExpression`]: crate::expression::PhysicalExpression
 #[derive(Clone)]
 pub enum PhysicalOperator<Relation, Scalar> {
-    TableScan(TableScan<Scalar>),
+    TableScan(TableScan<Relation, Scalar>),
     Filter(Filter<Relation, Scalar>),
     Project(Project<Relation, Scalar>),
     HashJoin(HashJoin<Relation, Scalar>),
     NestedLoopJoin(NestedLoopJoin<Relation, Scalar>),
     SortMergeJoin(MergeJoin<Relation, Scalar>),
+}
+
+impl<Relation, Scalar> RelationChildren for PhysicalOperator<Relation, Scalar>
+where
+    Relation: Clone,
+    Scalar: Clone,
+{
+    type Relation = Relation;
+    type Scalar = Scalar;
+
+    fn children_relations(&self) -> Vec<Self::Relation> {
+        match self {
+            PhysicalOperator::TableScan(scan) => scan.children_relations(),
+            PhysicalOperator::Filter(filter) => filter.children_relations(),
+            PhysicalOperator::Project(project) => project.children_relations(),
+            PhysicalOperator::HashJoin(join) => join.children_relations(),
+            PhysicalOperator::NestedLoopJoin(join) => join.children_relations(),
+            PhysicalOperator::SortMergeJoin(join) => join.children_relations(),
+        }
+    }
+
+    fn children_scalars(&self) -> Vec<Self::Scalar> {
+        match self {
+            PhysicalOperator::TableScan(scan) => scan.children_scalars(),
+            PhysicalOperator::Filter(filter) => filter.children_scalars(),
+            PhysicalOperator::Project(project) => project.children_scalars(),
+            PhysicalOperator::HashJoin(join) => join.children_scalars(),
+            PhysicalOperator::NestedLoopJoin(join) => join.children_scalars(),
+            PhysicalOperator::SortMergeJoin(join) => join.children_scalars(),
+        }
+    }
 }

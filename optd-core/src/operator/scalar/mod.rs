@@ -24,3 +24,11 @@ pub enum ScalarOperator<Scalar> {
     ColumnRef(ColumnRef),
     Constant(Constant),
 }
+
+/// Trait for getting the children scalars of a scalar operator.
+pub trait ScalarChildren {
+    type Scalar;
+
+    /// Get the children scalars of this scalar operator.
+    fn children_scalars(&self) -> Vec<Self::Scalar>;
+}

@@ -10,6 +10,8 @@ use join::Join;
 use project::Project;
 use scan::Scan;
 
+use super::RelationChildren;
+
 /// Each variant of `LogicalOperator` represents a specific kind of logical operator.
 ///
 /// This type is generic over two types:
@@ -24,8 +26,35 @@ use scan::Scan;
 /// [`LogicalExpression`]: crate::expression::LogicalExpression
 #[derive(Clone)]
 pub enum LogicalOperator<Relation, Scalar> {
-    Scan(Scan<Scalar>),
+    Scan(Scan<Relation, Scalar>),
     Filter(Filter<Relation, Scalar>),
     Project(Project<Relation, Scalar>),
     Join(Join<Relation, Scalar>),
+}
+
+impl<Relation, Scalar> RelationChildren for LogicalOperator<Relation, Scalar>
+where
+    Relation: Clone,
+    Scalar: Clone,
+{
+    type Relation = Relation;
+    type Scalar = Scalar;
+
+    fn children_relations(&self) -> Vec<Self::Relation> {
+        match self {
+            LogicalOperator::Scan(scan) => scan.children_relations(),
+            LogicalOperator::Filter(filter) => filter.children_relations(),
+            LogicalOperator::Project(project) => project.children_relations(),
+            LogicalOperator::Join(join) => join.children_relations(),
+        }
+    }
+
+    fn children_scalars(&self) -> Vec<Self::Scalar> {
+        match self {
+            LogicalOperator::Scan(scan) => scan.children_scalars(),
+            LogicalOperator::Filter(filter) => filter.children_scalars(),
+            LogicalOperator::Project(project) => project.children_scalars(),
+            LogicalOperator::Join(join) => join.children_scalars(),
+        }
+    }
 }
