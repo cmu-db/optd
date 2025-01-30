@@ -1,4 +1,8 @@
 //! Type definitions for scalar operators.
+
+// For now, we can hold off on documenting stuff here until that is stabilized.
+#![allow(missing_docs)]
+
 pub mod add;
 pub mod column_ref;
 pub mod constants;

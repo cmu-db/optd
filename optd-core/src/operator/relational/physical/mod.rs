@@ -1,5 +1,11 @@
 //! Type definitions of physical operators in optd.
 
+// TODO(connor):
+// The module structure here is somewhat questionable, as it has multiple physical operators that
+// should really only have 1 implementor (filter and project).
+// For now, we can hold off on documenting stuff here until that is stabilized.
+#![allow(missing_docs)]
+
 pub mod filter;
 pub mod join;
 pub mod project;
@@ -22,6 +28,7 @@ use scan::table_scan::TableScan;
 ///
 /// [`PhysicalPlan`]: crate::plan::physical_plan::PhysicalPlan
 /// [`PhysicalExpression`]: crate::expression::PhysicalExpression
+#[allow(missing_docs)]
 #[derive(Clone)]
 pub enum PhysicalOperator<Relation, Scalar> {
     TableScan(TableScan<Scalar>),
