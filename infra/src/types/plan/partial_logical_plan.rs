@@ -1,39 +1,50 @@
-use crate::types::operator::logical::LogicalOperator;
-use crate::GroupId;
+use crate::memo::GroupId;
+use crate::operator::relational::logical::LogicalOperator;
+use crate::operator::scalar::ScalarOperator;
 use std::sync::Arc;
 
-/// A representation of a partially materialized logical query plan DAG.
+/// A partially materialized logical query plan represented as a DAG (directed acyclic graph).
 ///
-/// Similar to a [`LogicalPlan`], the `PartialLogicalPlan` DAG consists of both logical and scalar
-/// operator nodes, but it can also have unmaterialized [`GroupId`]s representing entire memo groups
-/// as children.
+/// While a [`LogicalPlan`] contains fully materialized operator nodes, a `PartialLogicalPlan`
+/// can contain both materialized nodes and references to unmaterialized memo groups. This enables
+/// efficient plan exploration and transformation during query optimization.
 ///
-/// Note that while logical nodes can have both logical and scalar nodes as children, scalar nodes can only have other scalar
-/// nodes as children.
+/// # Structure
 ///
-/// Note that the root of the plan _cannot_ be a scalar operator (and thus can only be a logical
-/// operator).
+/// - Nodes can be either materialized operators or group references.
+/// - Relational nodes can have both relational and scalar children.
+/// - Scalar nodes can only have scalar children.
+/// - The root must be a relational operator.
+///
+/// # Type Parameters
+///
+/// The plan uses [`Relation`] and [`Scalar`] to represent its node connections,
+/// allowing mixing of materialized nodes and group references.
 ///
 /// [`LogicalPlan`]: crate::plan::logical_plan::LogicalPlan
 #[derive(Clone)]
-pub enum PartialLogicalPlan {
-    LogicalRoot(Arc<LogicalOperator<LogicalLink>>),
+pub struct PartialLogicalPlan {
+    pub node: Arc<LogicalOperator<Relation, Scalar>>,
 }
 
-/// A link in a [`PartialLogicalPlan`] to a node.
+/// A link to a relational node in a [`PartialLogicalPlan`].
 ///
-/// A `LogicalLink` can be one of three things: it can be a `LogicalNode` that points to a
-/// `LogicalOperator`, it can be a `ScalarNode` that points to a `ScalarOperator`, or it can be a
-/// [`GroupId`], denoting the unamterialized part of the plan (thus the name `PartialLogicalPlan`).
-///
-/// Note that this `LogicalLink` is _**different**_ from the `LogicalLink`s defined in the sibling
-/// module [`super::logical_plan`]. [`LogicalPlan`] does not need to have [`GroupId`]s as children,
-/// and so its type representation does not allow that.
-///
-/// [`GroupId`]: crate::GroupId
-/// [`LogicalPlan`]: crate::plan::logical_plan::LogicalPlan
+/// Can be either:
+/// - A materialized logical operator node
+/// - A reference to an unmaterialized memo group
 #[derive(Clone)]
-pub enum LogicalLink {
-    LogicalNode(Arc<LogicalOperator<LogicalLink>>),
-    Group(GroupId),
+pub enum Relation {
+    Operator(Arc<LogicalOperator<Relation, Scalar>>),
+    GroupId(GroupId),
+}
+
+/// A link to a scalar node in a [`PartialLogicalPlan`].
+///
+/// Can be either:
+/// - A materialized scalar operator node
+/// - A reference to an unmaterialized memo group
+#[derive(Clone)]
+pub enum Scalar {
+    Operator(Arc<ScalarOperator<Scalar>>),
+    GroupId(GroupId),
 }

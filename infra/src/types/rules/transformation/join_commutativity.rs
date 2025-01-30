@@ -3,11 +3,15 @@ use super::*;
 pub struct JoinCommutativityRule;
 
 impl TransformationRule for JoinCommutativityRule {
-    async fn check_pattern(&self, expr: LogicalExpr, memo: &Memo) -> Vec<PartialLogicalPlan> {
+    async fn check_pattern(
+        &self,
+        _expr: LogicalExpression,
+        _memo: &Memo,
+    ) -> Vec<PartialLogicalPlan> {
         todo!()
     }
 
-    fn apply(&self, expr: PartialLogicalPlan) -> Vec<Expr> {
+    fn apply(&self, _expr: PartialLogicalPlan) -> PartialLogicalPlan {
         todo!()
     }
 }

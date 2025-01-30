@@ -1,14 +1,17 @@
+//! This module contains the transformation rule trait / API, as well as the rules that implement
+//! said trait.
+//!
+//! TODO(connor) Add more docs.
+
 use crate::{
-    expression::{relational::logical::LogicalExpr, Expr},
-    memo::Memo,
-    plan::partial_logical_plan::PartialLogicalPlan,
+    expression::LogicalExpression, memo::Memo, plan::partial_logical_plan::PartialLogicalPlan,
 };
 
-#[allow(dead_code)]
 #[trait_variant::make(Send)]
+#[allow(dead_code)]
 pub trait TransformationRule {
-    /// Checks if the transformation rule matches the current expression and its children.
-    /// Returns a vector of partially materialized logical plans.
+    /// Checks if the transformation rule matches the current expression and its childrenm, and
+    /// returns a vector of partially materialized logical plans.
     ///
     /// This returns a vector because the rule matching the input root expression could have matched
     /// with multiple child expressions.
@@ -22,13 +25,13 @@ pub trait TransformationRule {
     /// filter pushdown under a `Join`).
     ///
     /// TODO: Ideally this should return a `Stream` instead of a fully materialized Vector.
-    async fn check_pattern(&self, expr: LogicalExpr, memo: &Memo) -> Vec<PartialLogicalPlan>;
+    async fn check_pattern(&self, expr: LogicalExpression, memo: &Memo) -> Vec<PartialLogicalPlan>;
 
-    /// Applys modifications to a partially materialized logical plan.
+    /// Applies modifications to a partially materialized logical plan.
     ///
     /// These changes can create new logical or scalar expressions. However, note that
     /// transformation rules will _not_ create new physical expressions.
-    fn apply(&self, expr: PartialLogicalPlan) -> Vec<Expr>;
+    fn apply(&self, expr: PartialLogicalPlan) -> PartialLogicalPlan;
 }
 
 pub mod join_associativity;
