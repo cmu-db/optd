@@ -5,6 +5,8 @@
 
 use crate::expression::{LogicalExpression, PhysicalExpression};
 
+/// The interface for implementation rules, which help convert logical plans into physical
+/// (executable) query plans.
 #[trait_variant::make(Send)]
 #[allow(dead_code)]
 pub trait ImplementationRule {

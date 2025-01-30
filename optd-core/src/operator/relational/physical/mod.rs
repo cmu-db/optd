@@ -5,7 +5,7 @@ pub mod join;
 pub mod project;
 pub mod scan;
 
-use filter::filter::Filter;
+use filter::filter::PhysicalFilter;
 use join::{hash_join::HashJoin, merge_join::MergeJoin, nested_loop_join::NestedLoopJoin};
 use project::project::Project;
 use scan::table_scan::TableScan;
@@ -25,7 +25,7 @@ use scan::table_scan::TableScan;
 #[derive(Clone)]
 pub enum PhysicalOperator<Relation, Scalar> {
     TableScan(TableScan<Scalar>),
-    Filter(Filter<Relation, Scalar>),
+    Filter(PhysicalFilter<Relation, Scalar>),
     Project(Project<Relation, Scalar>),
     HashJoin(HashJoin<Relation, Scalar>),
     NestedLoopJoin(NestedLoopJoin<Relation, Scalar>),

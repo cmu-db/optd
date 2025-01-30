@@ -20,7 +20,7 @@ use constants::Constant;
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
 #[derive(Clone)]
 pub enum ScalarOperator<Scalar> {
-    Add(Add<Scalar>),
-    ColumnRef(ColumnRef),
     Constant(Constant),
+    ColumnRef(ColumnRef),
+    Add(Add<Scalar>),
 }

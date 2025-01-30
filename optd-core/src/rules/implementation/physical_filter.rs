@@ -1,21 +1,24 @@
+//! The rule for implementing a logical `Filter` as a physical `Filter`.
+//!
+//! See [`PhysicalFilterRule`] for more information.
+
 use super::*;
 use crate::operator::relational::{
-    logical::LogicalOperator,
-    physical::{filter::filter::Filter, PhysicalOperator},
+    logical::{filter::Filter as LogicalFilter, LogicalOperator},
+    physical::{filter::filter::PhysicalFilter, PhysicalOperator},
 };
 
-/// Implementation rule that converts a logical filter into a filter physical operator.
+/// A unit / marker struct for implementing `PhysicalFilterRule`.
+///
+/// This mplementation rule converts a logical `Filter` into a physical `Filter` operator.
 pub struct PhysicalFilterRule;
 
 impl ImplementationRule for PhysicalFilterRule {
     fn check_and_apply(&self, expr: LogicalExpression) -> Option<PhysicalExpression> {
-        if let LogicalOperator::Filter(filter) = expr {
-            return Some(PhysicalOperator::Filter(Filter {
-                child: filter.child,
-                predicate: filter.predicate,
-            }));
-        }
+        let LogicalOperator::Filter(LogicalFilter { child, predicate }) = expr else {
+            return None;
+        };
 
-        None
+        Some(PhysicalOperator::Filter(PhysicalFilter { child, predicate }))
     }
 }
