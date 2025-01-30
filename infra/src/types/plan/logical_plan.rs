@@ -2,7 +2,7 @@
 //! plan from SQL.
 
 use super::scalar_plan::ScalarPlan;
-use crate::operator::relational::logical::LogicalOperator;
+use crate::types::operator::relational::logical::LogicalOperator;
 use std::sync::Arc;
 
 /// A representation of a logical query plan DAG (directed acyclic graph).

@@ -3,7 +3,7 @@
 //!
 //! TODO(connor) Add more docs.
 
-use crate::expression::{LogicalExpression, PhysicalExpression};
+use crate::types::expression::{LogicalExpression, PhysicalExpression};
 
 #[trait_variant::make(Send)]
 #[allow(dead_code)]

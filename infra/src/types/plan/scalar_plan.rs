@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::operator::scalar::ScalarOperator;
+use crate::types::operator::scalar::ScalarOperator;
 
 /// A representation of a scalar query plan DAG (directed acyclic graph).
 #[derive(Clone)]

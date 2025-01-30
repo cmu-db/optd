@@ -1,4 +1,4 @@
-use crate::operator::relational::{
+use crate::types::operator::relational::{
     logical::LogicalOperator,
     physical::{scan::table_scan::TableScan, PhysicalOperator},
 };

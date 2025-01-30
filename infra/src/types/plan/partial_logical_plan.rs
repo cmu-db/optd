@@ -1,6 +1,6 @@
-use crate::memo::GroupId;
-use crate::operator::relational::logical::LogicalOperator;
-use crate::operator::scalar::ScalarOperator;
+use crate::types::memo::GroupId;
+use crate::types::operator::relational::logical::LogicalOperator;
+use crate::types::operator::scalar::ScalarOperator;
 use std::sync::Arc;
 
 /// A partially materialized logical query plan represented as a DAG (directed acyclic graph).

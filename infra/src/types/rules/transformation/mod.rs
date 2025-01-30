@@ -3,7 +3,7 @@
 //!
 //! TODO(connor) Add more docs.
 
-use crate::{
+use crate::types::{
     expression::LogicalExpression, memo::Memo, plan::partial_logical_plan::PartialLogicalPlan,
 };
 

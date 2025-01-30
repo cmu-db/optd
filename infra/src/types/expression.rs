@@ -1,8 +1,8 @@
 //! Types for logical and physical expressions in the optimizer.
 
-use crate::memo::GroupId;
-use crate::operator::relational::logical::LogicalOperator;
-use crate::operator::relational::physical::PhysicalOperator;
+use crate::types::memo::GroupId;
+use crate::types::operator::relational::logical::LogicalOperator;
+use crate::types::operator::relational::physical::PhysicalOperator;
 
 /// A logical expression in the memo table.
 ///

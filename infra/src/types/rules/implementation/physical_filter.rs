@@ -1,5 +1,5 @@
 use super::*;
-use crate::operator::relational::{
+use crate::types::operator::relational::{
     logical::LogicalOperator,
     physical::{filter::filter::Filter, PhysicalOperator},
 };

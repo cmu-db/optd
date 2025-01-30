@@ -22,7 +22,7 @@
 //! - Look up group membership of expressions
 //! - Create new groups for expressions
 
-use crate::expression::LogicalExpression;
+use crate::types::expression::LogicalExpression;
 
 /// A unique identifier for a logical expression in the memo table.
 #[repr(transparent)]

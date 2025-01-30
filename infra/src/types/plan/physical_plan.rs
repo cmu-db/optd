@@ -2,7 +2,7 @@
 //! execution plan that can be sent to a query execution engine.
 
 use super::scalar_plan::ScalarPlan;
-use crate::operator::relational::physical::PhysicalOperator;
+use crate::types::operator::relational::physical::PhysicalOperator;
 use std::sync::Arc;
 
 /// A representation of a physical query plan DAG (directed acyclic graph).
