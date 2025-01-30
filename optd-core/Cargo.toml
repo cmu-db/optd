@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+sqlx = { version = "0.8", features = [ "sqlite" ] }
 trait-variant = "0.1.2"
 
 # Pin more recent versions for `-Zminimal-versions`.
