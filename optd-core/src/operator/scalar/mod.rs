@@ -1,5 +1,6 @@
 //! Type definitions for scalar operators.
 pub mod add;
+pub mod and;
 pub mod column_ref;
 pub mod constants;
 

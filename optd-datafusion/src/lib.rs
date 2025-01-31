@@ -14,7 +14,8 @@ use datafusion::catalog::CatalogProviderList;
 use datafusion::catalog_common::MemoryCatalogProviderList;
 use datafusion::execution::context::{QueryPlanner, SessionState};
 use datafusion::execution::runtime_env::RuntimeConfig;
-use datafusion::execution::SessionStateBuilder;
+use datafusion::execution::{session_state, SessionStateBuilder};
+use datafusion::logical_expr::utils::conjunction;
 use datafusion::logical_expr::{
     Explain, LogicalPlan as DatafusionLogicalPlan, PlanType, TableSource, ToStringifiedPlan,
 };
@@ -22,10 +23,13 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
 use datafusion::prelude::{log, Expr, SessionConfig, SessionContext};
 use optd_core::operator::relational::logical::filter::Filter as OptdLogicalFilter;
+use optd_core::operator::relational::logical::scan::Scan as OptdLogicalScan;
 use optd_core::operator::relational::logical::LogicalOperator;
 use optd_core::operator::scalar::column_ref::ColumnRef;
+use optd_core::operator::scalar::constants::Constant;
+use optd_core::operator::scalar::ScalarOperator;
 use optd_core::plan::logical_plan::LogicalPlan;
-use optd_core::plan::scalar_plan::ScalarPlan;
+use optd_core::plan::scalar_plan::{self, ScalarPlan};
 
 /// TODO make distinction between relational groups and scalar groups.
 #[repr(transparent)]
@@ -36,53 +40,18 @@ pub struct GroupId(u64);
 #[allow(dead_code)]
 pub struct ExprId(u64);
 
-struct OptdOptimizer {}
+struct OptdOptimizer {
+    tables: HashMap<String, Arc<dyn TableSource>>,
+    session_state: Option<SessionState>,
+}
 
 impl OptdOptimizer {
-    // fn conv_logical_to_physical(
-    //     logical_node: Arc<LogicalOperator<LogicalLink>>,
-    // ) -> Arc<PhysicalOperator<PhysicalLink>> {
-    //     match &*logical_node {
-    //         LogicalOperator::Scan(logical_scan_operator) => {
-    //             Arc::new(PhysicalOperator::TableScan(TableScanOperator {
-    //                 table_name: logical_scan_operator.table_name.clone(),
-    //                 predicate: None,
-    //             }))
-    //         }
-    //         LogicalOperator::Filter(logical_filter_operator) => {
-    //             let LogicalLink::LogicalNode(ref child) = logical_filter_operator.child;
-    //             let predicate = logical_filter_operator.predicate.clone();
-    //             Arc::new(PhysicalOperator::Filter(PhysicalFilterOperator::<
-    //                 PhysicalLink,
-    //             > {
-    //                 child: PhysicalLink::PhysicalNode(Self::conv_logical_to_physical(
-    //                     child.clone(),
-    //                 )),
-    //                 predicate: predicate,
-    //             }))
-    //         }
-    //         LogicalOperator::Join(logical_join_operator) => {
-    //             let LogicalLink::LogicalNode(ref left_join) = logical_join_operator.left;
-    //             let LogicalLink::LogicalNode(ref right_join) = logical_join_operator.right;
-    //             let condition = logical_join_operator.condition.clone();
-    //             Arc::new(PhysicalOperator::HashJoin(
-    //                 HashJoinOperator::<PhysicalLink> {
-    //                     join_type: (),
-    //                     left: PhysicalLink::PhysicalNode(Self::conv_logical_to_physical(
-    //                         left_join.clone(),
-    //                     )),
-    //                     right: PhysicalLink::PhysicalNode(Self::conv_logical_to_physical(
-    //                         right_join.clone(),
-    //                     )),
-    //                     condition: condition,
-    //                 },
-    //             ))
-    //         }
-    //     }
-    // }
-    // pub fn mock_optimize(logical_plan: OptDLogicalPlan) -> PhysicalPlan {
-    //     todo!()
-    // }
+    pub fn new() -> Self {
+        Self {
+            tables: HashMap::new(),
+            session_state: None,
+        }
+    }
 }
 
 pub struct OptdQueryPlanner {
@@ -90,46 +59,6 @@ pub struct OptdQueryPlanner {
 }
 
 impl OptdQueryPlanner {
-    // fn convert_into_optd_scalar(predicate_expr: Expr) -> Scalar {
-    //     // TODO: Implement the conversion logic here
-    //     Scalar {}
-    // }
-
-    // fn convert_into_optd_logical(plan_node: &LogicalPlan) -> Arc<LogicalOperator<LogicalLink>> {
-    //     match plan_node {
-    //         LogicalPlan::Filter(filter) => {
-    //             Arc::new(LogicalOperator::Filter(LogicalFilterOperator {
-    //                 child: LogicalLink::LogicalNode(Self::convert_into_optd_logical(&filter.input)),
-    //                 predicate: Self::convert_into_optd_scalar(filter.predicate.clone()),
-    //             }))
-    //         }
-
-    //         LogicalPlan::Join(join) => Arc::new(LogicalOperator::Join(LogicalJoinOperator {
-    //             join_type: (),
-    //             left: LogicalLink::LogicalNode(Self::convert_into_optd_logical(&join.left)),
-    //             right: LogicalLink::LogicalNode(Self::convert_into_optd_logical(&join.right)),
-    //             condition: Arc::new(
-    //                 join.on
-    //                     .iter()
-    //                     .map(|(left, right)| {
-    //                         let left_scalar = Self::convert_into_optd_scalar(left.clone());
-    //                         let right_scalar = Self::convert_into_optd_scalar(right.clone());
-    //                         (left_scalar, right_scalar)
-    //                     })
-    //                     .collect(),
-    //             ),
-    //         })),
-
-    //         LogicalPlan::TableScan(table_scan) => {
-    //             Arc::new(LogicalOperator::Scan(LogicalScanOperator {
-    //                 table_name: table_scan.table_name.to_quoted_string(),
-    //                 predicate: None, // TODO fix this: there are multiple predicates in the scan but our IR only accepts one
-    //             }))
-    //         }
-    //         _ => panic!("OptD does not support this type of query yet"),
-    //     }
-    // }
-
     async fn create_physical_plan_inner(
         &self,
         logical_plan: &DatafusionLogicalPlan,
@@ -168,8 +97,28 @@ impl OptdQueryPlanner {
 
     fn conv_df_to_optd_scalar(df_expr: &Expr) -> ScalarPlan {
         let node = match df_expr {
-            Expr::Column(column) => todo!(),
-            Expr::Literal(scalar_value) => todo!(),
+            Expr::Column(column) => Arc::new(ScalarOperator::<ScalarPlan>::ColumnRef(ColumnRef {
+                column_idx: todo!(),
+            })),
+            Expr::Literal(scalar_value) => match scalar_value {
+                datafusion::scalar::ScalarValue::Boolean(val) => {
+                    Arc::new(ScalarOperator::<ScalarPlan>::Constant(Constant::Boolean(
+                        val.clone().unwrap(),
+                    )))
+                }
+                datafusion::scalar::ScalarValue::Float64(val) => {
+                    Arc::new(ScalarOperator::<ScalarPlan>::Constant(Constant::Float(
+                        val.clone().unwrap(),
+                    )))
+                }
+                datafusion::scalar::ScalarValue::Int64(val) => Arc::new(
+                    ScalarOperator::<ScalarPlan>::Constant(Constant::Integer(val.clone().unwrap())),
+                ),
+                datafusion::scalar::ScalarValue::Utf8(val) => Arc::new(
+                    ScalarOperator::<ScalarPlan>::Constant(Constant::String(val.clone().unwrap())),
+                ),
+                _ => panic!("OptD Only supports a limited number of literals"),
+            },
             Expr::BinaryExpr(binary_expr) => todo!(),
             _ => panic!("OptD does not support this scalar expression"),
         };
@@ -187,7 +136,18 @@ impl OptdQueryPlanner {
                 Arc::new(op)
             }
             DatafusionLogicalPlan::Join(join) => todo!(),
-            DatafusionLogicalPlan::TableScan(table_scan) => todo!(),
+            DatafusionLogicalPlan::TableScan(table_scan) => {
+                let combine_filters = conjunction(table_scan.filters.to_vec());
+                let logical_optd_scan = OptdLogicalScan::<ScalarPlan> {
+                    table_name: table_scan.table_name.to_quoted_string(),
+                    predicate: match combine_filters {
+                        Some(df_expr) => Some(Self::conv_df_to_optd_scalar(&df_expr)),
+                        None => None,
+                    },
+                };
+                let op = LogicalOperator::<LogicalPlan, ScalarPlan>::Scan(logical_optd_scan);
+                Arc::new(op)
+            }
             _ => panic!("OptD does not support this operator"),
         };
         LogicalPlan { node: node }
@@ -247,14 +207,15 @@ pub async fn create_df_context(
         .with_catalog_list(catalog.clone())
         .with_default_features();
 
-    let optimizer = OptdOptimizer {};
+    let optimizer = OptdOptimizer::new();
+    let optimizer = Arc::new(OptdQueryPlanner::new(optimizer));
     // clean up optimizer rules so that we can plug in our own optimizer
     builder = builder.with_optimizer_rules(vec![]);
     builder = builder.with_physical_optimizer_rules(vec![]);
 
     // use optd-bridge query planner
-    let optimizer = Arc::new(OptdQueryPlanner::new(optimizer));
     builder = builder.with_query_planner(optimizer.clone());
+
     let state = builder.build();
     let ctx = SessionContext::new_with_state(state).enable_url_table();
     ctx.refresh_catalogs().await?;
