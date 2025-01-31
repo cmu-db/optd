@@ -5,6 +5,7 @@ pub mod column_ref;
 pub mod constants;
 
 use add::Add;
+use and::And;
 use column_ref::ColumnRef;
 use constants::Constant;
 
@@ -21,6 +22,7 @@ use constants::Constant;
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
 #[derive(Clone)]
 pub enum ScalarOperator<Scalar> {
+    And(And<Scalar>),
     Add(Add<Scalar>),
     ColumnRef(ColumnRef),
     Constant(Constant),
