@@ -1,5 +1,5 @@
 [package]
-name = "infra"
+name = "optd-datafusion"
 version = "0.1.0"
 edition = "2021"
 
@@ -16,3 +16,5 @@ tokio = { version = "1.43", default-features = false, features = [
     "macros",
 ] }
 trait-variant = "0.1.2"
+optd-core = { path = "../optd-core" }
+

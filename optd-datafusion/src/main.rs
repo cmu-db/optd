@@ -6,7 +6,7 @@ use datafusion::physical_plan::ExecutionPlanProperties;
 use datafusion::physical_plan::Partitioning;
 use datafusion::prelude::SessionConfig;
 use futures::StreamExt;
-use infra::create_df_context;
+use optd_datafusion::create_df_context;
 use std::{io, time::SystemTime};
 
 #[tokio::main]

@@ -21,11 +21,11 @@ use datafusion::logical_expr::{
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
 use datafusion::prelude::{log, Expr, SessionConfig, SessionContext};
-use types::operator::relational::logical::filter::Filter as OptdLogicalFilter;
-use types::operator::relational::logical::LogicalOperator;
-use types::operator::scalar::column_ref::ColumnRef;
-use types::plan::logical_plan::LogicalPlan;
-use types::plan::scalar_plan::ScalarPlan;
+use optd_core::operator::relational::logical::filter::Filter as OptdLogicalFilter;
+use optd_core::operator::relational::logical::LogicalOperator;
+use optd_core::operator::scalar::column_ref::ColumnRef;
+use optd_core::plan::logical_plan::LogicalPlan;
+use optd_core::plan::scalar_plan::ScalarPlan;
 
 /// TODO make distinction between relational groups and scalar groups.
 #[repr(transparent)]
@@ -35,8 +35,6 @@ pub struct GroupId(u64);
 /// TODO Add docs.
 #[allow(dead_code)]
 pub struct ExprId(u64);
-
-mod types;
 
 struct OptdOptimizer {}
 
