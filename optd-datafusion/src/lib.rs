@@ -140,6 +140,10 @@ impl ConversionContext {
         };
         LogicalPlan { node: node }
     }
+    
+    fn conv_optd_to_df_relational(&self, optimized_plan: PhysicalPlan) -> anyhow::Result<Arc<dyn ExecutionPlan>> {
+        todo!()
+    }
 }
 
 pub struct OptdQueryPlanner {
@@ -166,17 +170,16 @@ impl OptdQueryPlanner {
         // TODO: convert the logical plan to OptD
         // let mut optd_rel = ctx.conv_into_optd(logical_plan)?;
         let mut converter = ConversionContext::new();
-        let optdLogicalPlan = converter.conv_df_to_optd_relational(logical_plan);
+        let optd_logical_plan = converter.conv_df_to_optd_relational(logical_plan);
         let optimizer = self.optimizer.clone();
-        let optimized_plan = optimizer.mock_optimize(optdLogicalPlan);
+        let optd_optimized_physical_plan = optimizer.mock_optimize(optd_logical_plan);
+
 
         // For now we are not sending anything to Opt-D
         // instead we are making datafusion create a physical plan for us and return it
-        let planner = DefaultPhysicalPlanner::default();
-        planner
-            .create_physical_plan(logical_plan, session_state)
-            .await
+        converter.conv_optd_to_df_relational(optd_optimized_physical_plan)
             .map_err(|e| anyhow::anyhow!(e))
+        
     }
 
     pub fn new(optimizer: OptdOptimizer) -> Self {
