@@ -6,7 +6,7 @@ use crate::operator::relational::RelationChildren;
 /// (`Scalar`) that evaluates to true/false. Only rows where predicate is true
 /// are emitted.
 #[derive(Clone)]
-pub struct Filter<Relation, Scalar> {
+pub struct PhysicalFilter<Relation, Scalar> {
     pub child: Relation,
     pub predicate: Scalar,
 }

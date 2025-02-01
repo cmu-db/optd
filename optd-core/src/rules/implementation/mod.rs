@@ -1,10 +1,12 @@
 //! This module contains the implementation rule trait / API, as well as the rules that implement
 //! said trait.
 //!
-//! TODO(connor) Add more docs.
+//! TODO(connor): Add more docs.
 
 use crate::expression::{LogicalExpression, PhysicalExpression};
 
+/// The interface for implementation rules, which help convert logical plans into physical
+/// (executable) query plans.
 #[trait_variant::make(Send)]
 #[allow(dead_code)]
 pub trait ImplementationRule {

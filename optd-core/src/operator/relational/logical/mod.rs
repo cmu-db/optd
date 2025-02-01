@@ -24,6 +24,7 @@ use super::RelationChildren;
 /// [`LogicalPlan`]: crate::plan::logical_plan::LogicalPlan
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
 /// [`LogicalExpression`]: crate::expression::LogicalExpression
+#[allow(missing_docs)]
 #[derive(Clone)]
 pub enum LogicalOperator<Relation, Scalar> {
     Scan(Scan<Relation, Scalar>),

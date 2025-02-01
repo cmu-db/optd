@@ -1,3 +1,5 @@
+//! A logical join.
+
 use crate::operator::relational::RelationChildren;
 
 /// Logical join operator that combines rows from two relations.
@@ -6,9 +8,15 @@ use crate::operator::relational::RelationChildren;
 /// (`Scalar`).
 #[derive(Clone)]
 pub struct Join<Relation, Scalar> {
+    /// TODO(alexis) Mocked for now.
     pub join_type: String,
+    /// The left input relation.
     pub left: Relation,
+    /// The right input relation.
     pub right: Relation,
+    /// The join expression denoting the join condition that links the two input relations.
+    ///
+    /// For example, a join operation could have a condition on `t1.id = t2.id` (an equijoin).
     pub condition: Scalar,
 }
 

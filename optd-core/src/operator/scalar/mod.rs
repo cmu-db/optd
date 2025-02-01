@@ -1,4 +1,8 @@
 //! Type definitions for scalar operators.
+
+// For now, we can hold off on documenting stuff here until that is stabilized.
+#![allow(missing_docs)]
+
 pub mod add;
 pub mod column_ref;
 pub mod constants;
@@ -20,9 +24,9 @@ use constants::Constant;
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
 #[derive(Clone)]
 pub enum ScalarOperator<Scalar> {
-    Add(Add<Scalar>),
-    ColumnRef(ColumnRef),
     Constant(Constant),
+    ColumnRef(ColumnRef),
+    Add(Add<Scalar>),
 }
 
 /// Trait for getting the children scalars of a scalar operator.

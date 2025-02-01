@@ -1,3 +1,5 @@
+//! A logical projection.
+
 use crate::operator::relational::RelationChildren;
 
 /// Logical project operator that specifies output columns.
@@ -6,7 +8,9 @@ use crate::operator::relational::RelationChildren;
 /// (`Scalar`).
 #[derive(Clone)]
 pub struct Project<Relation, Scalar> {
+    /// The input relation.
     pub child: Relation,
+    /// TODO(everyone): What exactly is going on here?
     pub fields: Vec<Scalar>,
 }
 

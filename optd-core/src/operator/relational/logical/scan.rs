@@ -1,3 +1,5 @@
+//! A logical scan.
+
 use std::marker::PhantomData;
 
 use crate::operator::relational::RelationChildren;
@@ -8,7 +10,12 @@ use crate::operator::relational::RelationChildren;
 /// (`Scalar`).
 #[derive(Clone)]
 pub struct Scan<Relation, Scalar> {
-    pub table_name: String, // TODO(alexis): Mocked for now.
+    /// TODO(alexis) Mocked for now.
+    pub table_name: String,
+    /// An optional filter expression for predicate pushdown into scan operators.
+    ///
+    /// For example, a `Filter(Scan(A), column_a < 42)` can be converted into a predicate pushdown
+    /// `Scan(A, column < 42)` to prevent having to materialize many tuples.
     pub predicate: Option<Scalar>,
     _phantom: PhantomData<Relation>,
 }

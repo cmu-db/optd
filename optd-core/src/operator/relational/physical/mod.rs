@@ -1,11 +1,17 @@
 //! Type definitions of physical operators in optd.
 
+// TODO(connor):
+// The module structure here is somewhat questionable, as it has multiple physical operators that
+// should really only have 1 implementor (filter and project).
+// For now, we can hold off on documenting stuff here until that is stabilized.
+#![allow(missing_docs)]
+
 pub mod filter;
 pub mod join;
 pub mod project;
 pub mod scan;
 
-use filter::filter::Filter;
+use filter::filter::PhysicalFilter;
 use join::{hash_join::HashJoin, merge_join::MergeJoin, nested_loop_join::NestedLoopJoin};
 use project::project::Project;
 use scan::table_scan::TableScan;
@@ -24,10 +30,11 @@ use super::RelationChildren;
 ///
 /// [`PhysicalPlan`]: crate::plan::physical_plan::PhysicalPlan
 /// [`PhysicalExpression`]: crate::expression::PhysicalExpression
+#[allow(missing_docs)]
 #[derive(Clone)]
 pub enum PhysicalOperator<Relation, Scalar> {
     TableScan(TableScan<Relation, Scalar>),
-    Filter(Filter<Relation, Scalar>),
+    Filter(PhysicalFilter<Relation, Scalar>),
     Project(Project<Relation, Scalar>),
     HashJoin(HashJoin<Relation, Scalar>),
     NestedLoopJoin(NestedLoopJoin<Relation, Scalar>),

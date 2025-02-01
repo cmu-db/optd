@@ -1,12 +1,14 @@
 //! This module contains the transformation rule trait / API, as well as the rules that implement
 //! said trait.
 //!
-//! TODO(connor) Add more docs.
+//! TODO(everyone) Add more docs.
 
 use crate::{
     expression::LogicalExpression, memo::Memo, plan::partial_logical_plan::PartialLogicalPlan,
 };
 
+/// The interface for transformation rules, which help enumerate logically equivalent plans during
+/// the optimization search.
 #[trait_variant::make(Send)]
 #[allow(dead_code)]
 pub trait TransformationRule {
@@ -31,6 +33,8 @@ pub trait TransformationRule {
     ///
     /// These changes can create new logical or scalar expressions. However, note that
     /// transformation rules will _not_ create new physical expressions.
+    ///
+    /// TODO(everyone) Figure out what the return type should really be.
     fn apply(&self, expr: PartialLogicalPlan) -> PartialLogicalPlan;
 }
 
