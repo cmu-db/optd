@@ -1,3 +1,4 @@
+pub mod analyzers;
 pub mod operators;
 pub mod patterns;
 pub mod plan;

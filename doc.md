@@ -238,9 +238,8 @@ The additional arguments are always user defined types (expressions allowed).
 
 Rule applications are evaluated in order, with each result available to subsequent applications.
 
-### 3.4 Application Expressions
-
-Application expressions define how a rule produces its output. The system distinguishes between three types of applications, each with specific capabilities and constraints:
+### 3.4 Output Expressions
+Output expressions define how Rules and Analyzers produce their results. The system distinguishes between three types...
 
 #### Type Applications
 These expressions operate on and produce optd types:
@@ -375,7 +374,7 @@ This rule recursively evaluates expressions, producing an analysis result that t
 
 ```
 # Extract table references from expressions like ((A.d = 4) AND (B.c = 6) AND ...)
-RULE get_table_refs:
+ANALYZER get_table_refs:
     MATCH: Eq {
         scalar_children: {
             left: Bind("col", 
@@ -390,7 +389,7 @@ RULE get_table_refs:
     WITH:
         left_refs = get_table_refs(Ref("left"))
         right_refs = get_table_refs(Ref("right"))
-    APPLY: concat(left_refs, right_refs)  # Combine table references
+    RETURN: concat(left_refs, right_refs)  # Combine table references
 
     MATCH: And {
         scalar_children: {
@@ -401,7 +400,7 @@ RULE get_table_refs:
     WITH:
         left_refs = get_table_refs(Ref("left"))
         right_refs = get_table_refs(Ref("right"))
-    APPLY: concat(left_refs, right_refs)  # Combine table references
+    RETURN: concat(left_refs, right_refs)  # Combine table references
 
 # Main filter pushdown rule
 RULE filter_pushdown:
@@ -445,15 +444,26 @@ This last example might contain lots of boilerplate code, and only pushes down i
 
 ### 3.6 Execution Model
 
-Rule execution follows these steps:
+OPTD executes Rules and Analyzers following the same pattern matching process but with distinct outputs:
 
-1. Match input against each pattern in sequence
+#### Rule Execution
+1. Match input plan against each pattern in sequence
 2. For first successful match:
    - Bind pattern variables to matched partial plans
-   - Execute WITH clause rule applications in order
-   - Evaluate APPLY expression with control flow
-3. If pattern match or WITH clause fails (i.e. any rule inside fails), or APPLY fails (i.e. returns None) try next pattern
+   - Execute WITH clause applications in order
+   - Evaluate TRANSFORM expression with control flow
+3. If any step fails (pattern match, WITH clause, or TRANSFORM), try next pattern
 4. If no patterns succeed, rule application fails
-5. Success produces either a new plan or user-defined type
+5. Success produces a new partial plan
 
-This model enables both structural transformation and analytical processing while maintaining type safety and compositionality through the optimization pipeline.
+#### Analyzer Execution
+1. Match input plan against each pattern in sequence
+2. For first successful match:
+   - Bind pattern variables to matched partial plans
+   - Execute WITH clause applications in order
+   - Evaluate ANALYZE expression with control flow
+3. If any step fails (pattern match, WITH clause, or ANALYZE), try next pattern
+4. If no patterns succeed, analyzer application fails
+5. Success produces a user-defined type
+
+Both Rules and Analyzers share the same pattern matching and composition mechanisms, differing only in their output types. This unified execution model enables composition of transformations and analysis while maintaining type safety through the optimization pipeline.
