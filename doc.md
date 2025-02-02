@@ -118,21 +118,40 @@ LOGICAL Project
   - Can have both logical and scalar children
   - Can have fixed or variable number of either type
 
+## 3. Rules and Analysis
 
+### 3.1 Transformations and Analysis
 
-## 3. Rules and Pattern Matching
+OPTD supports two fundamental kinds of tree operations:
 
-The rule system provides the core transformation and analysis capabilities of OPTD. Each rule defines how to match tree patterns, compose transformations, and produce either new plan structures or analytical results.
+1. Rules: Transform trees into new trees
+   - LogicalRule: PartialLogicalPlan → PartialLogicalPlan
+   - ScalarRule: PartialScalarPlan → PartialScalarPlan
 
-### 3.1 Rule Definition and Output Types
+2. Analyzers: Extract information from trees
+   - LogicalAnalyzer: PartialLogicalPlan → UserType
+   - ScalarAnalyzer: PartialScalarPlan → UserType
 
-A rule always takes a partial logical plan as input but can produce one of two types of output:
+Both Rules and Analyzers share the same pattern matching mechanism but differ in their output types. This distinction makes it clearer when we're transforming structure versus computing properties.
 
-1. A Partial Logical Plan: These rules perform structural transformations on the input plan, such as commuting joins or pushing down filters. The output maintains the plan structure while reorganizing its components.
+Future extensions:
+- Pure functions (UserType → UserType) that operate on analysis results without pattern matching
+- Combined analyzers that work on both logical and scalar trees
 
-2. An OPTD Type: These rules analyze plan structures and produce custom data types as results. They enable extraction of information, analysis of properties, and computation of metrics about plan fragments.
+Example:
+```
+# A Rule transforms structure
+RULE join_commute:
+    MATCH: Join(...)
+    TRANSFORM: Join(...)  # Returns new plan
 
-All APPLY expressions within a single rule must produce the same type of output, ensuring type consistency regardless of which pattern matches.
+# An Analyzer extracts information
+ANALYZER get_table_refs:
+    MATCH: Filter(...)
+    ANALYZE: TableRefs(...)  # Returns user type
+```
+
+This separation makes it clearer that we have two distinct operations: tree transformation and tree analysis, even though they use the same matching machinery.
 
 ### 3.2 Pattern Matching
 
