@@ -1,6 +1,6 @@
-pub mod analyzers;
+// TODO(Alexis): Add docs
+
+pub mod engine;
 pub mod operators;
-pub mod patterns;
-pub mod plan;
-pub mod rules;
+pub mod plans;
 pub mod types;

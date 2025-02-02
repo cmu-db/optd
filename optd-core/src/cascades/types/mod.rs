@@ -14,6 +14,7 @@ pub enum OptdType {
     /// Complex Types
     Enum(Vec<OptdType>),
     Array(Vec<OptdType>),
+    // TODO(Alexis): add Optional type too (though it could be implemented as an Enum)...
 }
 
 /// Expressions that can be evaluated on OptdTypes.

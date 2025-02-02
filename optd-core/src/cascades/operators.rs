@@ -22,6 +22,8 @@
 
 use std::collections::HashSet;
 
+// TODO(Alexis): split up in directory to keep nice structure.
+
 /// A logical operator node in the IR tree.
 ///
 /// Generic parameters:
