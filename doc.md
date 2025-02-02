@@ -145,17 +145,7 @@ pattern ::=
     | ANY                          # Matches any subtree without binding
     | Bind(name, pattern)          # Binds the result of matching pattern to name
     | NOT(pattern)                 # Negative matching
-    | TYPE(operator_type) {        # Matches operator type with children patterns (type safe)
-        logical_children: {
-            name: pattern,
-            ...
-        },
-        scalar_children: {
-            name: pattern,
-            ...
-        }
-    }
-    | operator(                    # Matches operator with children (type safe)
+    | operator(                    # Matches operator with children
         content: {
             field: pattern,
             ...
@@ -262,7 +252,7 @@ RULE constant_fold:
     TRANSFORM: left_val + right_val
 
     # Base case - match an integer constant
-    MATCH: Bind("const", TYPE(Constant) {
+    MATCH: Bind("const", Constant {
         metadata: {
             value: Bind("val", ANY)
         }
@@ -278,13 +268,15 @@ This rule recursively evaluates expressions, producing an analysis result that t
 # Extract table references from expressions like ((A.d = 4) AND (B.c = 6) AND ...)
 RULE get_table_refs:
     MATCH: Eq {
-	      scalar_children: {
-	          left: Bind("col", ColumnRef {
-                metadata: {
-                table: Bind("table", ANY)
-           },
+        scalar_children: {
+            left: Bind("col", 
+                ColumnRef {
+                    metadata: {
+                        table: Bind("table", ANY)
+                    },
+                })
             right: TYPE(Constant)
-	      }
+	    }
     }
     WITH:
         left_refs = get_table_refs(Ref("left"))
