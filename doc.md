@@ -331,10 +331,10 @@ RULE filter_pushdown:
                     right: Ref("right")
                 }
                 scalar_children: {
-	                  predicate: And {
-	                     left: Ref("join_pred"),
-	                     right: Ref("filter_pred")
-	                  }
+	                predicate: And {
+	                    left: Ref("join_pred"),
+	                    right: Ref("filter_pred")
+	                }
                 }
             )
         ELSE
