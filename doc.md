@@ -122,13 +122,13 @@ LOGICAL Project
 
 ### 3.1 Transformations and Analysis
 
-OPTD supports two fundamental kinds of tree operations:
+OPTD supports two fundamental kinds of operations:
 
-1. Rules: Transform trees into new trees
+1. Rules: Transform partial plans into new partial plans
    - LogicalRule: PartialLogicalPlan → PartialLogicalPlan
    - ScalarRule: PartialScalarPlan → PartialScalarPlan
 
-2. Analyzers: Extract information from trees
+2. Analyzers: Extract information from partial plans
    - LogicalAnalyzer: PartialLogicalPlan → UserType
    - ScalarAnalyzer: PartialScalarPlan → UserType
 
@@ -136,7 +136,7 @@ Both Rules and Analyzers share the same pattern matching mechanism but differ in
 
 Future extensions:
 - Pure functions (UserType → UserType) that operate on analysis results without pattern matching
-- Combined analyzers that work on both logical and scalar trees
+- Combined analyzers that work on both logical and scalar plans
 
 Example:
 ```
@@ -151,18 +151,18 @@ ANALYZER get_table_refs:
     ANALYZE: TableRefs(...)  # Returns user type
 ```
 
-This separation makes it clearer that we have two distinct operations: tree transformation and tree analysis, even though they use the same matching machinery.
+This separation makes it clearer that we have two distinct operations: partial plan transformation and partial plan analysis, even though they use the same matching machinery.
 
 ### 3.2 Pattern Matching
 
-The pattern matching system distinguishes between three distinct types of patterns, each tailored to match different components of the optimization tree:
+The pattern matching system distinguishes between three distinct types of patterns, each tailored to match different components of the optimization graph:
 
 #### Logical Patterns
-Logical patterns match against logical operators in the plan tree. Their structure encompasses:
+Logical patterns match against logical operators in the plan graph. Their structure encompasses:
 ```
 LogicalPattern ::=
     | ANY                          # Matches any logical operator
-    | Bind(name, pattern)          # Binds a logical subtree
+    | Bind(name, pattern)          # Binds a logical subplan
     | NOT(pattern)                 # Negative logical matching
     | Operator {                   # Matches specific logical operator
         op_type: string,           # Operator type to match
@@ -177,7 +177,7 @@ Scalar patterns match against scalar expressions, with a more restricted structu
 ```
 ScalarPattern ::=
     | ANY                          # Matches any scalar expression
-    | Bind(name, pattern)          # Binds a scalar subtree
+    | Bind(name, pattern)          # Binds a scalar subplan
     | Operator {                   # Matches specific scalar operator
         op_type: string,           # Operator type to match
         metadata: TypePattern,  # Metadata pattern
@@ -215,22 +215,22 @@ Operator {
 
 ### 3.3 Rule Composition
 
-The WITH clause enables rules to build complex transformations by composing simpler rules. This composition mechanism allows rules to analyze subtrees and use the results in their final transformation.
+The WITH clause enables rules to build complex transformations by composing simpler rules. This composition mechanism allows rules to analyze subplans and use the results in their final transformation.
 
 Rule composition follows this structure:
 ```
 WITH:
-    result1 = rule1(tree_ref, arg1, arg2)
+    result1 = rule1(ref, arg1, arg2)
     result2 = rule2(another_ref)
 ```
 
 Each composition statement:
 1. Names the result for later use
 2. Specifies which rule to apply
-3. Provides a tree reference as its first argument
+3. Provides a reference as its first argument
 4. Optionally provides additional arguments specific to that rule
 
-The tree reference must be either:
+The reference must be either:
 - A pattern binding from the MATCH phase
 - A result from a previous rule application
 
@@ -449,7 +449,7 @@ Rule execution follows these steps:
 
 1. Match input against each pattern in sequence
 2. For first successful match:
-   - Bind pattern variables to matched subtrees
+   - Bind pattern variables to matched partial plans
    - Execute WITH clause rule applications in order
    - Evaluate APPLY expression with control flow
 3. If pattern match or WITH clause fails (i.e. any rule inside fails), or APPLY fails (i.e. returns None) try next pattern
