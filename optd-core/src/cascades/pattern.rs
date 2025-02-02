@@ -1,7 +1,11 @@
+//! Pattern matching as described in doc.md.
+//! We need to separate the three types of patterns: logical, scalar and user type patterns.
+
 use std::sync::Arc;
 
 use super::user_type::UserType;
 
+#[derive(Clone)]
 pub enum LogicalPattern {
     /// Match any subtree.
     Any,
@@ -18,6 +22,7 @@ pub enum LogicalPattern {
     },
 }
 
+#[derive(Clone)]
 pub enum ScalarPattern {
     /// Match any scalar expression.
     Any,
@@ -31,6 +36,7 @@ pub enum ScalarPattern {
     },
 }
 
+#[derive(Clone)]
 pub enum UserTypePattern {
     /// Match any user type.
     Any,

@@ -134,64 +134,156 @@ A rule always takes a partial logical plan as input but can produce one of two t
 
 2. A User-Defined Type: These rules analyze plan structures and produce custom data types as results. They enable extraction of information, analysis of properties, and computation of metrics about plan fragments.
 
-All TRANSFORM expressions within a single rule must produce the same type of output, ensuring type consistency regardless of which pattern matches.
+All APPLY expressions within a single rule must produce the same type of output, ensuring type consistency regardless of which pattern matches.
 
 ### 3.2 Pattern Matching
 
-The pattern system enables structural matching with precise control over operator structure and bindings. The pattern grammar is:
+The pattern matching system distinguishes between three distinct types of patterns, each tailored to match different components of the optimization tree:
 
+#### Logical Patterns
+Logical patterns match against logical operators in the plan tree. Their structure encompasses:
 ```
-pattern ::=
-    | ANY                          # Matches any subtree without binding
-    | Bind(name, pattern)          # Binds the result of matching pattern to name
-    | NOT(pattern)                 # Negative matching
-    | operator(                    # Matches operator with children
-        content: {
-            field: pattern,
-            ...
-        },
-        logical_children: {
-            name: pattern,
-            ...
-        },
-        scalar_children: {
-            name: pattern,
-            ...
-        }
-    )
+LogicalPattern ::=
+    | ANY                          # Matches any logical operator
+    | Bind(name, pattern)          # Binds a logical subtree
+    | NOT(pattern)                 # Negative logical matching
+    | Operator {                   # Matches specific logical operator
+        op_type: string,           # Operator type to match
+        content: UserTypePattern[],# Metadata patterns
+        logical_children: LogicalPattern[], # Logical child patterns
+        scalar_children: ScalarPattern[]  # Scalar child patterns
+    }
 ```
 
-### 3.3 Rule Application
-
-The WITH clause enables rule composition through explicit rule application:
-
+#### Scalar Patterns
+Scalar patterns match against scalar expressions, with a more restricted structure:
 ```
-binding = rule_name(arg1, arg2, ...)
-```
-
-Arguments can come from pattern bindings, previous rule applications, or rule parameters. The binding captures the result for use in subsequent clauses. The first argument of any rule composition should always be a partial logical tree to match on.
-
-### 3.4 Transformation and Control Flow
-
-The TRANSFORM clause combines operator construction, control flow, and collection manipulation:
-
-```
-transform ::=
-    | Ref(name)                   # Reference to bound variable
-    | operator(                   # Construct new operator
-        content: {...},
-        logical_children: {...},
-        scalar_children: {...}
-    )
-    | IF condition THEN transform ELSE transform
+ScalarPattern ::=
+    | ANY                          # Matches any scalar expression
+    | Bind(name, pattern)          # Binds a scalar subtree
+    | Operator {                   # Matches specific scalar operator
+        op_type: string,           # Operator type to match
+        content: UserTypePattern,  # Metadata pattern
+        scalar_children: ScalarPattern[] # Only scalar children allowed
+    }
 ```
 
-Built-in operations include:
-- Array operations: isEmpty(), length(), contains(), toArray(), append()
-- Boolean operations: and(), or(), not()
-- Enum handling: match() for pattern matching on variants
-- Type checking: is(), as() for runtime type verification
-- Collection building: collect(), flatten() for manipulating result sets
+#### User Type Patterns
+User type patterns handle matching against metadata values:
+```
+UserTypePattern ::=
+    | ANY                          # Matches any metadata value
+    | Bind(name, value)            # Binds a metadata value
+```
+
+This three-tier pattern system ensures type safety throughout the matching process. Each pattern type enforces appropriate constraints:
+- Logical patterns can match both logical and scalar children
+- Scalar patterns can only match scalar children
+- User type patterns match leaf values in metadata
+
+For example, matching a join operator with specific metadata would look like:
+```
+Operator {
+    op_type: "Join",
+    content: [Bind("join_type", "Inner")],
+    logical_children: [
+        Bind("left", ANY),
+        Bind("right", ANY)
+    ],
+    scalar_children: [
+        Bind("condition", ANY)
+    ]
+}
+```
+
+### 3.3 Rule Composition
+
+The WITH clause enables rules to build complex transformations by composing simpler rules. This composition mechanism allows rules to analyze subtrees and use the results in their final transformation.
+
+Rule composition follows this structure:
+```
+WITH:
+    result1 = rule1(tree_ref, arg1, arg2)
+    result2 = rule2(another_ref)
+```
+
+Each composition statement:
+1. Names the result for later use
+2. Specifies which rule to apply
+3. Provides a tree reference as its first argument
+4. Optionally provides additional arguments specific to that rule
+
+The tree reference must be either:
+- A pattern binding from the MATCH phase
+- A result from a previous rule application
+
+The additional arguments are always user defined types (expressions allowed).
+
+Rule applications are evaluated in order, with each result available to subsequent applications.
+
+### 3.4 Application Expressions
+
+Application expressions define how a rule produces its output. The system distinguishes between three types of applications, each with specific capabilities and constraints:
+
+#### User Type Applications
+These expressions operate on and produce user-defined types:
+```
+UserTypeExpr ::=
+    | UserTypeRef(String)                # Reference to bound user type
+    | IfThenElse {
+        condition: UserTypeExpr,
+        then_branch: UserTypeExpr,
+        else_branch: UserTypeExpr
+    }
+    | Eq {                               # Value equality comparison
+        left: UserTypeExpr,
+        right: UserTypeExpr
+    }
+    | Match {                            # Pattern matching on user types
+        expr: UserTypeExpr,
+        cases: [(UserTypeExpr, UserTypeExpr)]
+    }
+```
+
+#### Scalar Applications
+These expressions construct scalar operators, but their conditions must be user type expressions:
+```
+ScalarExpr ::=
+    | ScalarRef(String)                  # Reference to bound scalar
+    | IfThenElse {
+        condition: UserTypeExpr,         # Condition must be user type
+        then_branch: ScalarExpr,
+        else_branch: ScalarExpr
+    }
+    | Match {                            # Pattern match on user type
+        expr: UserTypeExpr,
+        cases: [(UserTypeExpr, ScalarExpr)]
+    }
+```
+
+#### Logical Applications
+Similar to scalar applications, logical expressions construct plan operators:
+```
+LogicalExpr ::=
+    | LogicalRef(String)                 # Reference to bound logical plan
+    | IfThenElse {
+        condition: UserTypeExpr,         # Condition must be user type
+        then_branch: LogicalExpr,
+        else_branch: LogicalExpr
+    }
+    | Match {                            # Pattern match on user type
+        expr: UserTypeExpr,
+        cases: [(UserTypeExpr, LogicalExpr)]
+    }
+```
+
+Key constraints:
+1. Conditions in all control flow constructs must be user type expressions
+2. Each application type can only reference bindings of its corresponding type
+3. Match expressions must have consistent result types across all cases
+4. All application expressions within a single rule must produce the same type
+
+This strict typing ensures that transformations remain type-safe while enabling sophisticated control flow based on analysis results.
 
 ### 3.5 Complete Examples
 
@@ -217,7 +309,7 @@ RULE join_commute:
             condition: Bind("cond", ANY)
         }
     )
-    TRANSFORM: Join(
+    APPLY: Join(
         metadata: {
             join_type: "Inner"
         },
@@ -249,7 +341,7 @@ RULE constant_fold:
     WITH:
         left_val = constant_fold(Ref("left"))
         right_val = constant_fold(Ref("right"))
-    TRANSFORM: left_val + right_val
+    APPLY: left_val + right_val
 
     # Base case - match an integer constant
     MATCH: Bind("const", Constant {
@@ -257,7 +349,7 @@ RULE constant_fold:
             value: Bind("val", ANY)
         }
     })
-    TRANSFORM: Ref("val")  # Simply return the integer value
+    APPLY: Ref("val")  # Simply return the integer value
    ```
 
 This rule recursively evaluates expressions, producing an analysis result that tracks constant values. The transformation uses pattern matching on the analysis results to determine whether folding is possible.
@@ -281,7 +373,7 @@ RULE get_table_refs:
     WITH:
         left_refs = get_table_refs(Ref("left"))
         right_refs = get_table_refs(Ref("right"))
-    TRANSFORM: concat(left_refs, right_refs)  # Combine table references
+    APPLY: concat(left_refs, right_refs)  # Combine table references
 
     MATCH: And {
         scalar_children: {
@@ -292,7 +384,7 @@ RULE get_table_refs:
     WITH:
         left_refs = get_table_refs(Ref("left"))
         right_refs = get_table_refs(Ref("right"))
-    TRANSFORM: concat(left_refs, right_refs)  # Combine table references
+    APPLY: concat(left_refs, right_refs)  # Combine table references
 
 # Main filter pushdown rule
 RULE filter_pushdown:
@@ -315,7 +407,7 @@ RULE filter_pushdown:
     WITH:
         pred_refs = get_table_refs(Ref("filter_pred"))
         join_refs = get_table_refs(Ref("join_pred"))
-    TRANSFORM:
+    APPLY:
         IF pred_refs IN join_refs THEN
             Join(
                 logical_children: {
@@ -342,8 +434,8 @@ Rule execution follows these steps:
 2. For first successful match:
    - Bind pattern variables to matched subtrees
    - Execute WITH clause rule applications in order
-   - Evaluate TRANSFORM expression with control flow
-3. If pattern match or WITH clause fails (i.e. any rule inside fails), or TRANSFORM fails (i.e. returns None) try next pattern
+   - Evaluate APPLY expression with control flow
+3. If pattern match or WITH clause fails (i.e. any rule inside fails), or APPLY fails (i.e. returns None) try next pattern
 4. If no patterns succeed, rule application fails
 5. Success produces either a new plan or user-defined type
 
