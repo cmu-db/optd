@@ -3,11 +3,9 @@
 ## 1. Type System
 
 ### 1.1 Basic Types
-The language provides a fixed set of primitive types for use in operator content:
+The language provides a fixed set of primitive types for use in operator metadata:
 
 - `int64`: 64-bit signed integer, range [-2^63, 2^63-1]
-- `uint64`: 64-bit unsigned integer, range [0, 2^64-1]
-- `float64`: 64-bit IEEE 754 floating point number
 - `string`: UTF-8 encoded string of arbitrary length
 - `bool`: Boolean value (true/false)
 
@@ -58,15 +56,15 @@ The system defines two distinct categories of operators:
 
 ### 2.2 Operator Definition Structure
 
-An operator defines its category (SCALAR or LOGICAL) followed by optional sections for content, logical children (for logical operators), and scalar children. Each section can contain any number of fields, including zero. There are no required fields or sections.
+An operator defines its category (SCALAR or LOGICAL) followed by optional sections for metadata, logical children (for logical operators), and scalar children. Each section can contain any number of fields, including zero. There are no required fields or sections.
 
 Fields can be variable size `ARRAY`, or `Optional`.
 
 ```
 [CATEGORY] OperatorName
     DOC: "Documentation string"
-    CONTENT
-        # Any number of content fields (or none)
+    METADATA
+        # Any number of metadata fields (or none)
         field1: Type1
         field2: Type2
         ...
@@ -99,13 +97,13 @@ LOGICAL Join
 	    predicate: Option<Scalar>
 
 SCALAR Constant
-    # A constant with only content
-    CONTENT
+    # A constant with only metadata
+    METADATA
         value: float64
 
 LOGICAL Project
-    # A project with both scalar children and content
-    CONTENT
+    # A project with both scalar children and metadata
+    METADATA
         schema: string
     SCALAR_CHILDREN
         expressions: Array<Scalar>
@@ -132,7 +130,7 @@ A rule always takes a partial logical plan as input but can produce one of two t
 
 1. A Partial Logical Plan: These rules perform structural transformations on the input plan, such as commuting joins or pushing down filters. The output maintains the plan structure while reorganizing its components.
 
-2. A User-Defined Type: These rules analyze plan structures and produce custom data types as results. They enable extraction of information, analysis of properties, and computation of metrics about plan fragments.
+2. An OPTD Type: These rules analyze plan structures and produce custom data types as results. They enable extraction of information, analysis of properties, and computation of metrics about plan fragments.
 
 All APPLY expressions within a single rule must produce the same type of output, ensuring type consistency regardless of which pattern matches.
 
@@ -149,7 +147,7 @@ LogicalPattern ::=
     | NOT(pattern)                 # Negative logical matching
     | Operator {                   # Matches specific logical operator
         op_type: string,           # Operator type to match
-        content: UserTypePattern[],# Metadata patterns
+        metadata: TypePattern[],# Metadata patterns
         logical_children: LogicalPattern[], # Logical child patterns
         scalar_children: ScalarPattern[]  # Scalar child patterns
     }
@@ -163,15 +161,15 @@ ScalarPattern ::=
     | Bind(name, pattern)          # Binds a scalar subtree
     | Operator {                   # Matches specific scalar operator
         op_type: string,           # Operator type to match
-        content: UserTypePattern,  # Metadata pattern
+        metadata: TypePattern,  # Metadata pattern
         scalar_children: ScalarPattern[] # Only scalar children allowed
     }
 ```
 
-#### User Type Patterns
-User type patterns handle matching against metadata values:
+#### Type Patterns
+OPTD type patterns handle matching against metadata values:
 ```
-UserTypePattern ::=
+TypePattern ::=
     | ANY                          # Matches any metadata value
     | Bind(name, value)            # Binds a metadata value
 ```
@@ -179,13 +177,13 @@ UserTypePattern ::=
 This three-tier pattern system ensures type safety throughout the matching process. Each pattern type enforces appropriate constraints:
 - Logical patterns can match both logical and scalar children
 - Scalar patterns can only match scalar children
-- User type patterns match leaf values in metadata
+- OPTD type patterns match leaf values in metadata
 
 For example, matching a join operator with specific metadata would look like:
 ```
 Operator {
     op_type: "Join",
-    content: [Bind("join_type", "Inner")],
+    metadata: [Bind("join_type", "Inner")],
     logical_children: [
         Bind("left", ANY),
         Bind("right", ANY)
@@ -225,39 +223,39 @@ Rule applications are evaluated in order, with each result available to subseque
 
 Application expressions define how a rule produces its output. The system distinguishes between three types of applications, each with specific capabilities and constraints:
 
-#### User Type Applications
-These expressions operate on and produce user-defined types:
+#### Type Applications
+These expressions operate on and produce optd types:
 ```
-UserTypeExpr ::=
-    | UserTypeRef(String)                # Reference to bound user type
+TypeExpr ::=
+    | TypeRef(String)                # Reference to bound optd type
     | IfThenElse {
-        condition: UserTypeExpr,
-        then_branch: UserTypeExpr,
-        else_branch: UserTypeExpr
+        condition: TypeExpr,
+        then_branch: TypeExpr,
+        else_branch: TypeExpr
     }
     | Eq {                               # Value equality comparison
-        left: UserTypeExpr,
-        right: UserTypeExpr
+        left: TypeExpr,
+        right: TypeExpr
     }
-    | Match {                            # Pattern matching on user types
-        expr: UserTypeExpr,
-        cases: [(UserTypeExpr, UserTypeExpr)]
+    | Match {                            # Pattern matching on optd types
+        expr: TypeExpr,
+        cases: [(TypeExpr, TypeExpr)]
     }
 ```
 
 #### Scalar Applications
-These expressions construct scalar operators, but their conditions must be user type expressions:
+These expressions construct scalar operators, but their conditions must be optd type expressions:
 ```
 ScalarExpr ::=
     | ScalarRef(String)                  # Reference to bound scalar
     | IfThenElse {
-        condition: UserTypeExpr,         # Condition must be user type
+        condition: TypeExpr,         # Condition must be optd type
         then_branch: ScalarExpr,
         else_branch: ScalarExpr
     }
-    | Match {                            # Pattern match on user type
-        expr: UserTypeExpr,
-        cases: [(UserTypeExpr, ScalarExpr)]
+    | Match {                            # Pattern match on optd type
+        expr: TypeExpr,
+        cases: [(TypeExpr, ScalarExpr)]
     }
 ```
 
@@ -267,18 +265,18 @@ Similar to scalar applications, logical expressions construct plan operators:
 LogicalExpr ::=
     | LogicalRef(String)                 # Reference to bound logical plan
     | IfThenElse {
-        condition: UserTypeExpr,         # Condition must be user type
+        condition: TypeExpr,         # Condition must be optd type
         then_branch: LogicalExpr,
         else_branch: LogicalExpr
     }
-    | Match {                            # Pattern match on user type
-        expr: UserTypeExpr,
-        cases: [(UserTypeExpr, LogicalExpr)]
+    | Match {                            # Pattern match on optd type
+        expr: TypeExpr,
+        cases: [(TypeExpr, LogicalExpr)]
     }
 ```
 
 Key constraints:
-1. Conditions in all control flow constructs must be user type expressions
+1. Conditions in all control flow constructs must be optd type expressions
 2. Each application type can only reference bindings of its corresponding type
 3. Match expressions must have consistent result types across all cases
 4. All application expressions within a single rule must produce the same type

@@ -1,5 +1,5 @@
-pub mod operator;
-pub mod pattern;
+pub mod operators;
+pub mod patterns;
 pub mod plan;
 pub mod rules;
-pub mod user_type;
+pub mod types;
