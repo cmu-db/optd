@@ -322,7 +322,7 @@ RULE filter_pushdown:
     )
     WITH:
         pred_refs = get_table_refs(Ref("filter_pred"))
-        join_refs = get_table_refs(Ref("join_pred")
+        join_refs = get_table_refs(Ref("join_pred"))
     TRANSFORM:
         IF pred_refs IN join_refs THEN
             Join(
