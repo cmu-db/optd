@@ -179,7 +179,7 @@ The WITH clause enables rule composition through explicit rule application:
 binding = rule_name(arg1, arg2, ...)
 ```
 
-Arguments can come from pattern bindings, previous rule applications, or rule parameters. The binding captures the result for use in subsequent clauses.
+Arguments can come from pattern bindings, previous rule applications, or rule parameters. The binding captures the result for use in subsequent clauses. The first argument of any rule composition should always be a partial logical tree to match on.
 
 ### 3.4 Transformation and Control Flow
 
