@@ -24,7 +24,7 @@ CREATE TABLE projects (
 
     FOREIGN KEY (logical_expression_id) REFERENCES logical_expressions (id)
     ON UPDATE CASCADE ON DELETE CASCADE,
-    FOREIGN KEY (child_group_id) REFERENCES relation_groups (representative_group_id)
+    FOREIGN KEY (child_group_id) REFERENCES relation_groups (id)
     ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (fields_id) REFERENCES _projection_fields (id) 
     ON UPDATE CASCADE ON DELETE CASCADE

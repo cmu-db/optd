@@ -14,5 +14,3 @@ CREATE TABLE relation_groups (
     FOREIGN KEY (representative_group_id) REFERENCES relation_groups (id) 
     ON UPDATE CASCADE ON DELETE CASCADE
 );
-
-CREATE UNIQUE INDEX relation_groups_representative_group_id ON relation_groups (representative_group_id);

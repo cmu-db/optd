@@ -13,5 +13,3 @@ CREATE TABLE scalar_groups (
     FOREIGN KEY (representative_group_id) REFERENCES scalar_groups (id) 
     ON UPDATE CASCADE ON DELETE CASCADE
 );
-
-CREATE UNIQUE INDEX scalar_groups_representative_group_id ON scalar_groups (representative_group_id);

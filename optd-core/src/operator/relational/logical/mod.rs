@@ -44,26 +44,35 @@ pub enum LogicalOperatorKind {
     Join,
 }
 
-impl<Relation, Scalar> LogicalOperator<Relation, Scalar> {
-    /// Creates a scan logical operator.
-    pub fn scan(table_name: &str, predicate: Scalar) -> Self {
-        Self::Scan(Scan::new(table_name, predicate))
-    }
+/// Creates a scan logical operator.
+pub fn scan<Relation, Scalar>(
+    table_name: &str,
+    predicate: Scalar,
+) -> LogicalOperator<Relation, Scalar> {
+    LogicalOperator::Scan(Scan::new(table_name, predicate))
+}
 
-    /// Creates a filter logical operator.
-    pub fn filter(child: Relation, predicate: Scalar) -> Self {
-        Self::Filter(Filter::new(child, predicate))
-    }
+/// Creates a filter logical operator.
+pub fn filter<Relation, Scalar>(
+    child: Relation,
+    predicate: Scalar,
+) -> LogicalOperator<Relation, Scalar> {
+    LogicalOperator::Filter(Filter::new(child, predicate))
+}
 
-    /// Creates a join logical operator.
-    pub fn join(join_type: JoinType, left: Relation, right: Relation, condition: Scalar) -> Self {
-        Self::Join(Join {
-            join_type,
-            left,
-            right,
-            condition,
-        })
-    }
+/// Creates a join logical operator.
+pub fn join<Relation, Scalar>(
+    join_type: JoinType,
+    left: Relation,
+    right: Relation,
+    condition: Scalar,
+) -> LogicalOperator<Relation, Scalar> {
+    LogicalOperator::Join(Join {
+        join_type,
+        left,
+        right,
+        condition,
+    })
 }
 
 impl<Relation, Scalar> RelationChildren for LogicalOperator<Relation, Scalar>

@@ -13,6 +13,27 @@ pub struct PersistentMemo {
 }
 
 impl PersistentMemo {
+    /// Create a new persistent memo table backed by a SQLite database at the given URL.
+    pub async fn new(database_url: &str) -> anyhow::Result<Self> {
+        let storage = StorageManager::new(database_url).await?;
+        storage.migrate().await?;
+        let get_all_logical_exprs_in_group_query = get_all_logical_exprs_in_group_query();
+        storage
+            .db()
+            .await?
+            .prepare(&get_all_logical_exprs_in_group_query)
+            .await?;
+        Ok(Self {
+            storage,
+            get_all_logical_exprs_in_group_query,
+        })
+    }
+
+    /// Create a new persistent memo table backed by an in-memory SQLite database.
+    pub async fn new_in_memory() -> anyhow::Result<Self> {
+        Self::new("sqlite::memory:").await
+    }
+
     /// Creates a new scalar group for testing purposes.
     #[cfg(test)]
     pub async fn new_scalar_group_for_test(&self) -> anyhow::Result<ScalarGroupId> {
@@ -28,20 +49,6 @@ impl PersistentMemo {
         .await?;
         txn.commit().await?;
         Ok(scalar_group_id)
-    }
-
-    /// Create a new persistent memo table.
-    pub async fn new(storage: StorageManager) -> anyhow::Result<Self> {
-        let get_all_logical_exprs_in_group_query = get_all_logical_exprs_in_group_query();
-        storage
-            .db()
-            .await?
-            .prepare(&get_all_logical_exprs_in_group_query)
-            .await?;
-        Ok(Self {
-            storage,
-            get_all_logical_exprs_in_group_query,
-        })
     }
 
     async fn get_representative_group_id(
@@ -287,18 +294,19 @@ fn get_all_logical_exprs_in_group_query() -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::operator::relational::{logical::join::JoinType, RelationChildren};
+    use crate::operator::relational::{
+        logical::{self, join::JoinType},
+        RelationChildren,
+    };
 
     use super::*;
 
     #[tokio::test]
     async fn test_insert_logical_expr_with_memo() -> anyhow::Result<()> {
-        let storage = StorageManager::new_in_memory().await?;
-        storage.migrate().await?;
-        let memo = PersistentMemo::new(storage).await?;
+        let memo = PersistentMemo::new_in_memory().await?;
 
         let predicate_group_id = memo.new_scalar_group_for_test().await?;
-        let scan1 = LogicalExpression::scan("t1", predicate_group_id);
+        let scan1 = logical::scan("t1", predicate_group_id);
         let scan1_group = memo.add_logical_expr(&scan1).await?;
         let dup_scan1_group = memo.add_logical_expr(&scan1).await?;
         assert_eq!(scan1_group, dup_scan1_group);
@@ -306,7 +314,7 @@ mod tests {
         assert_eq!(status, ExplorationStatus::Unexplored);
 
         let predicate_group_id = memo.new_scalar_group_for_test().await?;
-        let scan2 = LogicalExpression::scan("t2", predicate_group_id);
+        let scan2 = logical::scan("t2", predicate_group_id);
         let scan2_group = memo.add_logical_expr(&scan2).await?;
         let dup_scan2_group = memo.add_logical_expr(&scan2).await?;
         assert_eq!(scan2_group, dup_scan2_group);
@@ -314,7 +322,7 @@ mod tests {
         assert_eq!(status, ExplorationStatus::Unexplored);
 
         let join_cond_group_id = memo.new_scalar_group_for_test().await?;
-        let join = LogicalExpression::join(
+        let join = logical::join(
             JoinType::Inner,
             scan1_group,
             scan2_group,
@@ -329,7 +337,7 @@ mod tests {
         memo.set_group_exploration_status(join_group, ExplorationStatus::Exploring)
             .await?;
 
-        let join_alt = LogicalExpression::join(
+        let join_alt = logical::join(
             JoinType::Inner,
             scan2_group,
             scan1_group,
@@ -371,32 +379,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_group() -> anyhow::Result<()> {
-        let storage = StorageManager::new("sqlite://memo.db?mode=rwc").await?;
-        storage.migrate().await?;
-        let memo = PersistentMemo::new(storage).await?;
+        let memo = PersistentMemo::new_in_memory().await?;
 
         let true_predicate_group = memo.new_scalar_group_for_test().await?;
-        let scan = LogicalExpression::scan("t1", true_predicate_group);
+        let scan = logical::scan("t1", true_predicate_group);
         let scan_group = memo.add_logical_expr(&scan).await?;
 
-        let filter = LogicalExpression::filter(scan_group, true_predicate_group);
+        let filter = logical::filter(scan_group, true_predicate_group);
         let filter_group = memo.add_logical_expr(&filter).await?;
         let one_equal_one_predicate_group = memo.new_scalar_group_for_test().await?;
-        let top_filter = LogicalExpression::filter(filter_group, one_equal_one_predicate_group);
+        let top_filter = logical::filter(filter_group, one_equal_one_predicate_group);
         let top_filter_group = memo.add_logical_expr(&top_filter).await?;
-        let top_filter_2 = LogicalExpression::filter(scan_group, one_equal_one_predicate_group);
+        let top_filter_2 = logical::filter(scan_group, one_equal_one_predicate_group);
         let top_filter_2_group = memo
             .add_logical_expr_to_group(&top_filter_2, top_filter_group)
             .await?;
         assert_eq!(top_filter_group, top_filter_2_group);
-        let new_group = memo
+        let _ = memo
             .add_logical_expr_to_group(&scan, top_filter_group)
             .await?;
 
-        println!("new group: {new_group:?}");
-
-        // Filter: true
-        // - Scan: t1
         Ok(())
     }
 }

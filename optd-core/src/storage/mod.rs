@@ -16,6 +16,42 @@ pub struct StorageManager {
     db: SqlitePool,
 }
 
+impl StorageManager {
+    /// Create a new storage manager that connects to the SQLite database at the given URL.
+    pub async fn new(database_url: &str) -> anyhow::Result<Self> {
+        let db = SqlitePool::connect(database_url).await?;
+        Ok(Self { db })
+    }
+
+    /// Begin a new transaction.
+    pub async fn begin(&self) -> anyhow::Result<Transaction<'_>> {
+        let mut txn = self.db.begin().await?;
+        let current_value = Sequence::value(&mut *txn).await?;
+
+        Ok(Transaction { txn, current_value })
+    }
+
+    /// Create a new storage manager backed by an in-memory SQLite database.
+    pub async fn new_in_memory() -> anyhow::Result<Self> {
+        Self::new("sqlite::memory:").await
+    }
+
+    /// Runs pending migrations.
+    pub async fn migrate(&self) -> anyhow::Result<()> {
+        // sqlx::migrate! takes the path relative to the root of the crate.
+        sqlx::migrate!("src/storage/migrations")
+            .run(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    /// Get a connection to the database.
+    pub async fn db(&self) -> anyhow::Result<PoolConnection<sqlx::Sqlite>> {
+        let connection = self.db.acquire().await?;
+        Ok(connection)
+    }
+}
+
 /// A transaction that wraps a SQLite transaction.
 pub struct Transaction<'c> {
     /// An active SQLite transaction.
@@ -71,41 +107,5 @@ impl Deref for Transaction<'_> {
 impl DerefMut for Transaction<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut *self.txn
-    }
-}
-
-impl StorageManager {
-    /// Create a new storage manager that connects to the SQLite database at the given URL.
-    pub async fn new(database_url: &str) -> anyhow::Result<Self> {
-        let db = SqlitePool::connect(database_url).await?;
-        Ok(Self { db })
-    }
-
-    /// Begin a new transaction.
-    pub async fn begin(&self) -> anyhow::Result<Transaction<'_>> {
-        let mut txn = self.db.begin().await?;
-        let current_value = Sequence::value(&mut *txn).await?;
-
-        Ok(Transaction { txn, current_value })
-    }
-
-    /// Create a new storage manager backed by an in-memory SQLite database.
-    pub async fn new_in_memory() -> anyhow::Result<Self> {
-        Self::new("sqlite::memory:").await
-    }
-
-    /// Runs pending migrations.
-    pub async fn migrate(&self) -> anyhow::Result<()> {
-        // sqlx::migrate! takes the path relative to the root of the crate.
-        sqlx::migrate!("src/storage/migrations")
-            .run(&self.db)
-            .await?;
-        Ok(())
-    }
-
-    /// Get a connection to the database.
-    pub async fn db(&self) -> anyhow::Result<PoolConnection<sqlx::Sqlite>> {
-        let connection = self.db.acquire().await?;
-        Ok(connection)
     }
 }
