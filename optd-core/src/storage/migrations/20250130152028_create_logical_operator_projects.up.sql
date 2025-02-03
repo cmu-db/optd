@@ -29,13 +29,6 @@ BEGIN
     UPDATE OR REPLACE projects SET child_group_id = NEW.representative_group_id WHERE child_group_id = OLD.representative_group_id;
 END;
 
-CREATE VIEW project_fields AS 
-SELECT 
-    logical_expressions.id as logical_expression_id, 
-    json_each.value as field_group_id
-FROM projects, json_each(fields_group_ids);
-
-
 -- Approach 1:
 CREATE TRIGGER update_projects_scalar_group_ids
 AFTER UPDATE OF representative_group_id ON scalar_groups
@@ -51,22 +44,28 @@ BEGIN
 END;
 
 -- Approach 2:
-CREATE TRIGGER update_projects_scalar_group_ids
-AFTER UPDATE OF representative_group_id ON scalar_groups
-BEGIN
-    UPDATE project_fields SET field_group_id = NEW.representative_group_id WHERE field_group_id = OLD.representative_group_id;
-END;
+-- CREATE VIEW project_fields AS 
+-- SELECT 
+--     logical_expressions.id as logical_expression_id, 
+--     json_each.value as field_group_id
+-- FROM projects, json_each(fields_group_ids);
 
 
-CREATE TRIGGER update_project_fields
-INSTEAD OF UPDATE ON project_fields
-BEGIN
-    UPDATE projects SET fields_group_ids = (
-        SELECT json_group_array(
-            CASE
-                WHEN value = OLD.field_group_id THEN NEW.field_group_id
-                ELSE value
-            END
-        ) FROM json_each(fields_group_ids) 
-    ) WHERE logical_expression_id = OLD.logical_expression_id;
-END;
+-- CREATE TRIGGER update_projects_scalar_group_ids
+-- AFTER UPDATE OF representative_group_id ON scalar_groups
+-- BEGIN
+--     UPDATE project_fields SET field_group_id = NEW.representative_group_id WHERE field_group_id = OLD.representative_group_id;
+-- END;
+
+-- CREATE TRIGGER update_project_fields
+-- INSTEAD OF UPDATE ON project_fields
+-- BEGIN
+--     UPDATE projects SET fields_group_ids = (
+--         SELECT json_group_array(
+--             CASE
+--                 WHEN value = OLD.field_group_id THEN NEW.field_group_id
+--                 ELSE value
+--             END
+--         ) FROM json_each(fields_group_ids) 
+--     ) WHERE logical_expression_id = OLD.logical_expression_id;
+-- END;
