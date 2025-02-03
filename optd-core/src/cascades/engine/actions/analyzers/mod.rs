@@ -8,18 +8,5 @@
 //!
 //! The output of any analyzer is always an `OptdType`.
 
-use logical::LogicalAnalyzer;
-use scalar::ScalarAnalyzer;
-
 pub mod logical;
 pub mod scalar;
-
-/// Represents an analyzer that can either be Logical or Scalar.
-/// - `LogicalAnalyzer` can compose both logical and scalar patterns.
-/// - `ScalarAnalyzer` can only compose scalar patterns.
-/// - The output of analysis is always an `OptdType`.
-#[derive(Clone)]
-pub enum Analyzer {
-    Logical(LogicalAnalyzer),
-    Scalar(ScalarAnalyzer),
-}

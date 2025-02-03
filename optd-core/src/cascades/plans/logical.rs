@@ -1,37 +1,53 @@
+//! Logical plan representations for the OPTD optimizer.
+//!
+//! Provides three levels of plan materialization:
+//! 1. Full materialization (LogicalPlan)
+//! 2. Partial materialization (PartialLogicalPlan)
+//! 3. Group references (LogicalGroupId)
+//!
+//! This allows the optimizer to work with plans at different stages
+//! of materialization during the optimization process.
+
+use super::{
+    scalar::{PartialScalarPlan, ScalarPlan},
+    PartialPlanExpr,
+};
+use crate::cascades::{operators::LogicalOperator, types::OptdType};
 use std::sync::Arc;
 
-use crate::cascades::{operators::LogicalOperator, types::OptdType};
-
-use super::scalar::{PartialScalarPlan, ScalarPlan};
-
-/// Identifier for logical operator groups in the optimizer
+/// Identifier for logical operator groups in the optimizer.
 type LogicalGroupId = usize;
 
-/// A fully materialized logical plan.
+/// A fully materialized logical query plan.
 ///
 /// Contains a complete tree of logical operators where all children
-/// (both logical and scalar) are fully materialized.
+/// (both logical and scalar) are fully materialized. Used for final
+/// plan representation after optimization is complete.
 #[derive(Clone)]
 pub struct LogicalPlan {
     operator: LogicalOperator<OptdType, LogicalPlan, ScalarPlan>,
 }
 
-/// A logical plan that may be partially materialized.
+/// A logical plan with varying levels of materialization.
 ///
-/// Represents plans during optimization where some subtrees may be:
-/// - Fully materialized (complete operator trees)
-/// - Partially materialized (mix of operators and group references)
-/// - Unmaterialized (pure group references)
+/// During optimization, plans can be in three states:
+/// - Fully materialized: Complete operator trees
+/// - Partially materialized: Single materialized operator with group references
+/// - Unmaterialized: Pure group reference
 #[derive(Clone)]
 pub enum PartialLogicalPlan {
-    /// A fully materialized subtree
+    /// Complete materialization - all operators and children concrete
     Materialized(LogicalPlan),
 
-    /// A single materialized operator with potentially unmaterialized children
+    /// Single materialized operator with potentially unmaterialized children
     PartialMaterialized {
         operator: LogicalOperator<OptdType, Arc<PartialLogicalPlan>, Arc<PartialScalarPlan>>,
     },
 
-    /// A reference to an optimization group
+    /// Reference to an optimization group containing equivalent plans
     UnMaterialized(LogicalGroupId),
 }
+
+/// Type alias for expressions that construct logical plans.
+/// See PartialPlanExpr for the available expression constructs.
+pub type PartialLogicalPlanExpr = PartialPlanExpr<PartialLogicalPlan>;

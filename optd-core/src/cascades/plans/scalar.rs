@@ -1,35 +1,50 @@
+//! Scalar expression representations for the OPTD optimizer.
+//!
+//! Provides three levels of scalar expression materialization:
+//! 1. Full materialization (ScalarPlan)
+//! 2. Partial materialization (PartialScalarPlan)
+//! 3. Group references (ScalarGroupId)
+//!
+//! This allows the optimizer to work with expressions at different stages
+//! of materialization during the optimization process.
+
+use super::PartialPlanExpr;
+use crate::cascades::{operators::ScalarOperator, types::OptdType};
 use std::sync::Arc;
 
-use crate::cascades::{operators::ScalarOperator, types::OptdType};
-
-/// Identifier for scalar expression groups in the optimizer
+/// Identifier for scalar expression groups in the optimizer.
 type ScalarGroupId = usize;
 
-/// A fully materialized scalar expression.
+/// A fully materialized scalar expression tree.
 ///
 /// Contains a complete tree of scalar operators where all children
-/// are also fully materialized.
+/// are also fully materialized. Used for final expression representation
+/// after optimization is complete.
 #[derive(Clone)]
 pub struct ScalarPlan {
     operator: ScalarOperator<OptdType, Arc<ScalarPlan>>,
 }
 
-/// A scalar expression that may be partially materialized.
+/// A scalar expression with varying levels of materialization.
 ///
-/// Similar to PartialLogicalPlan but for scalar expressions. Can represent:
-/// - Fully materialized expressions
-/// - Partially materialized expressions
-/// - References to scalar expression groups
+/// During optimization, expressions can be in three states:
+/// - Fully materialized: Complete operator trees
+/// - Partially materialized: Single materialized operator with group references
+/// - Unmaterialized: Pure group reference
 #[derive(Clone)]
 pub enum PartialScalarPlan {
-    /// A fully materialized expression
+    /// Complete materialization - all operators and children concrete
     Materialized(ScalarPlan),
 
-    /// A single materialized operator with potentially unmaterialized children
+    /// Single materialized operator with potentially unmaterialized children
     PartialMaterialized {
         operator: ScalarOperator<OptdType, Arc<PartialScalarPlan>>,
     },
 
-    /// A reference to an optimization group
+    /// Reference to an optimization group containing equivalent expressions
     UnMaterialized(ScalarGroupId),
 }
+
+/// Type alias for expressions that construct scalar plans.
+/// See PartialPlanExpr for the available expression constructs.
+pub type PartialScalarPlanExpr = PartialPlanExpr<PartialScalarPlan>;
