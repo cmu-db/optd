@@ -6,10 +6,13 @@
 pub mod add;
 pub mod column_ref;
 pub mod constants;
+pub mod equal;
 
 use add::Add;
 use column_ref::ColumnRef;
 use constants::Constant;
+use equal::Equal;
+use serde::Deserialize;
 
 /// Each variant of `ScalarOperator` represents a specific kind of scalar operator.
 ///
@@ -22,11 +25,22 @@ use constants::Constant;
 /// [`LogicalPlan`]: crate::plan::logical_plan::LogicalPlan
 /// [`PhysicalPlan`]: crate::plan::physical_plan::PhysicalPlan
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub enum ScalarOperator<Scalar> {
     Constant(Constant),
     ColumnRef(ColumnRef),
     Add(Add<Scalar>),
+    Equal(Equal<Scalar>),
+}
+
+/// The kind of scalar operator.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, sqlx::Type)]
+pub enum ScalarOperatorKind {
+    Constant,
+    ColumnRef,
+    Add,
+    Equal,
 }
 
 /// Trait for getting the children scalars of a scalar operator.

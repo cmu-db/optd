@@ -1,1 +1,1 @@
--- Add down migration script here
+DROP TABLE scalar_expressions;

@@ -16,6 +16,13 @@ pub struct Project<Relation, Scalar> {
     pub fields: Vec<Scalar>,
 }
 
+impl<Relation, Scalar> Project<Relation, Scalar> {
+    /// Create a new project operator.
+    pub fn new(child: Relation, fields: Vec<Scalar>) -> Self {
+        Self { child, fields }
+    }
+}
+
 impl<Relation, Scalar> RelationChildren for Project<Relation, Scalar>
 where
     Relation: Clone,

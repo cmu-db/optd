@@ -19,7 +19,7 @@ CREATE TABLE filters (
     ON UPDATE CASCADE ON DELETE CASCADE
 );
 
--- Unique index on join's data fields.
+-- Unique index on filter's data fields.
 CREATE UNIQUE INDEX filters_data_fields ON filters (child_group_id, predicate_group_id);
 
 CREATE TRIGGER update_filters_relation_group_ids

@@ -5,7 +5,9 @@ use std::ops::{Deref, DerefMut};
 use sequence::Sequence;
 use sqlx::{pool::PoolConnection, SqliteConnection, SqlitePool};
 
-use crate::memo::{GroupId, LogicalExpressionId, PhysicalExpressionId, ScalarGroupId};
+use crate::memo::{
+    GroupId, LogicalExpressionId, PhysicalExpressionId, ScalarExpressionId, ScalarGroupId,
+};
 
 pub mod sequence;
 
@@ -93,6 +95,13 @@ impl Transaction<'_> {
         let id = self.current_value;
         self.current_value += 1;
         Ok(PhysicalExpressionId(id))
+    }
+
+    /// Gets a new physical expression id.
+    pub async fn new_scalar_expression_id(&mut self) -> anyhow::Result<ScalarExpressionId> {
+        let id = self.current_value;
+        self.current_value += 1;
+        Ok(ScalarExpressionId(id))
     }
 }
 

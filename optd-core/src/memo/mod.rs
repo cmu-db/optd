@@ -24,9 +24,9 @@
 
 pub mod persistent_memo;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::expression::LogicalExpression;
+use crate::expression::{LogicalExpression, ScalarExpression};
 
 /// A unique identifier for a logical expression in the memo table.
 #[repr(transparent)]
@@ -48,13 +48,17 @@ pub struct ScalarExpressionId(pub(super) i64);
 
 /// A unique identifier for a group of relational expressions in the memo table.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type, Serialize, Deserialize,
+)]
 #[sqlx(transparent)]
 pub struct GroupId(pub(super) i64);
 
 /// A unique identifier for a group of scalar expressions in the memo table.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type, Serialize, Deserialize,
+)]
 #[sqlx(transparent)]
 pub struct ScalarGroupId(pub(super) i64);
 
@@ -114,6 +118,38 @@ pub trait Memoize: Send + Sync + 'static {
     /// Adds a logical expression.
     async fn add_logical_expr(&self, logical_expr: &LogicalExpression) -> anyhow::Result<GroupId>;
 
+    /// Gets the exploration status of a scalar group.
+    async fn get_scalar_group_exploration_status(
+        &self,
+        group_id: ScalarGroupId,
+    ) -> anyhow::Result<ExplorationStatus>;
+
+    /// Sets the exploration status of a scalar group.
+    async fn set_scalar_group_exploration_status(
+        &self,
+        group_id: ScalarGroupId,
+        status: ExplorationStatus,
+    ) -> anyhow::Result<()>;
+
+    /// Gets all scalar expressions in a group.
+    async fn get_all_scalar_exprs_in_group(
+        &self,
+        group_id: ScalarGroupId,
+    ) -> anyhow::Result<Vec<ScalarExpression>>;
+
+    /// Adds a scalar expression to a group.
+    async fn add_scalar_expr_to_group(
+        &self,
+        scalar_expr: &ScalarExpression,
+        group_id: ScalarGroupId,
+    ) -> anyhow::Result<ScalarGroupId>;
+
+    /// Adds a scalar expression.
+    async fn add_scalar_expr(
+        &self,
+        scalar_expr: &ScalarExpression,
+    ) -> anyhow::Result<ScalarGroupId>;
+
     // /// Gets the optimization status of a goal.
     // async fn get_goal_optimization_status(
     //     &self,
@@ -149,9 +185,6 @@ pub trait Memoize: Send + Sync + 'static {
     //     logical_expr_id: LogicalExpressionId,
     //     transformation_rule_id: u64,
     // );
-
-    // /// Gets the group id of a logical expression.
-    // async fn get_relation_group(&self, logical_expr: LogicalExpression) -> GroupId;
 
     // /// Adds a physical expression to a group.
     // async fn add_physical_expr_to_group(

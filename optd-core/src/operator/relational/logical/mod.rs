@@ -40,7 +40,7 @@ pub enum LogicalOperator<Relation, Scalar> {
 pub enum LogicalOperatorKind {
     Scan,
     Filter,
-    // Project,
+    Project,
     Join,
 }
 
@@ -58,6 +58,14 @@ pub fn filter<Relation, Scalar>(
     predicate: Scalar,
 ) -> LogicalOperator<Relation, Scalar> {
     LogicalOperator::Filter(Filter::new(child, predicate))
+}
+
+/// Creates a project logical operator.
+pub fn project<Relation, Scalar>(
+    child: Relation,
+    fields: Vec<Scalar>,
+) -> LogicalOperator<Relation, Scalar> {
+    LogicalOperator::Project(Project::new(child, fields))
 }
 
 /// Creates a join logical operator.
