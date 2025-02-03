@@ -1,11 +1,13 @@
 //! A logical filter.
 
+use serde::Deserialize;
+
 use crate::operator::relational::RelationChildren;
 
 /// Logical filter operator that selects rows matching a condition.
 ///
 /// Takes input relation (`Relation`) and filters rows using a boolean predicate (`Scalar`).
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Filter<Relation, Scalar> {
     /// The input relation.
     pub child: Relation,
@@ -14,6 +16,13 @@ pub struct Filter<Relation, Scalar> {
     /// For example, a filter predicate could be `column_a > 42`, or it could be something like
     /// `column_b < 100 AND column_c > 1000`.
     pub predicate: Scalar,
+}
+
+impl<Relation, Scalar> Filter<Relation, Scalar> {
+    /// Create a new filter operator.
+    pub fn new(child: Relation, predicate: Scalar) -> Self {
+        Self { child, predicate }
+    }
 }
 
 impl<Relation, Scalar> RelationChildren for Filter<Relation, Scalar>

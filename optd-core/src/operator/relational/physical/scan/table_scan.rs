@@ -9,15 +9,15 @@ use crate::operator::relational::RelationChildren;
 #[derive(Clone)]
 pub struct TableScan<Relation, Scalar> {
     pub table_name: String, // TODO(alexis): Mocked for now.
-    pub predicate: Option<Scalar>,
+    pub predicate: Scalar,
     _phantom: PhantomData<Relation>,
 }
 
 impl<Relation, Scalar> TableScan<Relation, Scalar> {
     /// Create a new table scan operator
-    pub fn new(table_name: String, predicate: Option<Scalar>) -> Self {
+    pub fn new(table_name: &str, predicate: Scalar) -> Self {
         Self {
-            table_name,
+            table_name: table_name.to_string(),
             predicate,
             _phantom: PhantomData,
         }
@@ -37,6 +37,6 @@ where
     }
 
     fn children_scalars(&self) -> Vec<Self::Scalar> {
-        self.predicate.iter().cloned().collect()
+        vec![self.predicate.clone()]
     }
 }

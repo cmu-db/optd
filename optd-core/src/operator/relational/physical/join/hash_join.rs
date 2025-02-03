@@ -1,4 +1,4 @@
-use crate::operator::relational::RelationChildren;
+use crate::operator::relational::{logical::join::JoinType, RelationChildren};
 
 /// Hash-based join operator that matches rows based on equality conditions.
 ///
@@ -7,7 +7,7 @@ use crate::operator::relational::RelationChildren;
 /// and probes with rows from probe side (left).
 #[derive(Clone)]
 pub struct HashJoin<Relation, Scalar> {
-    pub join_type: String,
+    pub join_type: JoinType,
     /// Left relation that probes hash table.
     pub probe_side: Relation,
     /// Right relation used to build hash table.

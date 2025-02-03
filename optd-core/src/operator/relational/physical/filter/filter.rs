@@ -11,7 +11,7 @@ pub struct PhysicalFilter<Relation, Scalar> {
     pub predicate: Scalar,
 }
 
-impl<Relation, Scalar> RelationChildren for Filter<Relation, Scalar>
+impl<Relation, Scalar> RelationChildren for PhysicalFilter<Relation, Scalar>
 where
     Relation: Clone,
     Scalar: Clone,

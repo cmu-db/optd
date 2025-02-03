@@ -11,6 +11,8 @@ CREATE TABLE relation_groups (
     -- The time at which the group is created.
     created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP) NOT NULL,
 
-    FOREIGN KEY (representative_group_id) REFERENCES relational_groups (id) 
+    FOREIGN KEY (representative_group_id) REFERENCES relation_groups (id) 
     ON UPDATE CASCADE ON DELETE CASCADE
 );
+
+CREATE UNIQUE INDEX relation_groups_representative_group_id ON relation_groups (representative_group_id);

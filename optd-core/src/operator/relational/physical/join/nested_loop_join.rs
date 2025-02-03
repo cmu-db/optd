@@ -1,4 +1,4 @@
-use crate::operator::relational::RelationChildren;
+use crate::operator::relational::{logical::join::JoinType, RelationChildren};
 
 /// Nested-loop join operator that matches rows based on a predicate.
 ///
@@ -6,7 +6,7 @@ use crate::operator::relational::RelationChildren;
 /// a join condition (`Scalar`). Scans inner relation for each outer row.
 #[derive(Clone)]
 pub struct NestedLoopJoin<Relation, Scalar> {
-    pub join_type: String,
+    pub join_type: JoinType,
     /// Outer relation.
     pub outer: Relation,
     /// Inner relation scanned for each outer row.

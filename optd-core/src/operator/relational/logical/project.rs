@@ -1,12 +1,14 @@
 //! A logical projection.
 
+use serde::Deserialize;
+
 use crate::operator::relational::RelationChildren;
 
 /// Logical project operator that specifies output columns.
 ///
 /// Takes input relation (`Relation`) and defines output columns/expressions
 /// (`Scalar`).
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Project<Relation, Scalar> {
     /// The input relation.
     pub child: Relation,

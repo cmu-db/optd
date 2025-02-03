@@ -787,7 +787,10 @@ name = "optd-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dotenvy",
  "proc-macro2",
+ "serde",
+ "serde_json",
  "sqlx",
  "tokio",
  "trait-variant",

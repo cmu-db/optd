@@ -4,7 +4,7 @@
 //! TODO(everyone) Add more docs.
 
 use crate::{
-    expression::LogicalExpression, memo::Memo, plan::partial_logical_plan::PartialLogicalPlan,
+    expression::LogicalExpression, memo::Memoize, plan::partial_logical_plan::PartialLogicalPlan,
 };
 
 /// The interface for transformation rules, which help enumerate logically equivalent plans during
@@ -27,7 +27,11 @@ pub trait TransformationRule {
     /// filter pushdown under a `Join`).
     ///
     /// TODO: Ideally this should return a `Stream` instead of a fully materialized Vector.
-    async fn check_pattern(&self, expr: LogicalExpression, memo: &Memo) -> Vec<PartialLogicalPlan>;
+    async fn check_pattern(
+        &self,
+        expr: LogicalExpression,
+        memo: &impl Memoize,
+    ) -> Vec<PartialLogicalPlan>;
 
     /// Applies modifications to a partially materialized logical plan.
     ///

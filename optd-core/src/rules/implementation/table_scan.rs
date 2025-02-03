@@ -19,14 +19,15 @@ impl ImplementationRule for TableScanRule {
         let LogicalOperator::Scan(Scan {
             table_name,
             predicate,
+            ..
         }) = expr
         else {
             return None;
         };
-      
-        Some(PhysicalOperator::TableScan(TableScan {
-            table_name,
+
+        Some(PhysicalOperator::TableScan(TableScan::new(
+            &table_name,
             predicate,
-        }))
+        )))
     }
 }

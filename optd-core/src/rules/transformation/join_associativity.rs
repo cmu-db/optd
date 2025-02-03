@@ -14,7 +14,7 @@ impl TransformationRule for JoinAssociativityRule {
     async fn check_pattern(
         &self,
         _expr: LogicalExpression,
-        _memo: &Memo,
+        _memo: &impl Memoize,
     ) -> Vec<PartialLogicalPlan> {
         todo!()
     }

@@ -1,4 +1,4 @@
-use crate::operator::relational::RelationChildren;
+use crate::operator::relational::{logical::join::JoinType, RelationChildren};
 
 /// Merge join operator that matches rows based on equality conditions.
 ///
@@ -6,7 +6,7 @@ use crate::operator::relational::RelationChildren;
 /// a join condition (`Scalar`). Both inputs must be sorted on join keys.
 #[derive(Clone)]
 pub struct MergeJoin<Relation, Scalar> {
-    pub join_type: String,
+    pub join_type: JoinType,
     /// Left sorted relation.
     pub left_sorted: Relation,
     /// Right sorted relation.

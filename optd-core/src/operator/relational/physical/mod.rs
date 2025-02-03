@@ -15,6 +15,7 @@ use filter::filter::PhysicalFilter;
 use join::{hash_join::HashJoin, merge_join::MergeJoin, nested_loop_join::NestedLoopJoin};
 use project::project::Project;
 use scan::table_scan::TableScan;
+use serde::{Deserialize, Serialize};
 
 use super::RelationChildren;
 
@@ -39,6 +40,16 @@ pub enum PhysicalOperator<Relation, Scalar> {
     HashJoin(HashJoin<Relation, Scalar>),
     NestedLoopJoin(NestedLoopJoin<Relation, Scalar>),
     SortMergeJoin(MergeJoin<Relation, Scalar>),
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum PhysicalOperatorKind {
+    TableScan,
+    Filter,
+    Project,
+    HashJoin,
+    NestedLoopJoin,
+    SortMergeJoin,
 }
 
 impl<Relation, Scalar> RelationChildren for PhysicalOperator<Relation, Scalar>

@@ -11,3 +11,6 @@ trait-variant = "0.1.2"
 proc-macro2 = "1.0.60" # For a missing feature (https://github.com/rust-lang/rust/issues/113152).
 anyhow = "1.0.95"
 tokio = { version = "1.43.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+dotenvy = "0.15"

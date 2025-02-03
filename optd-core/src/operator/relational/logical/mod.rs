@@ -6,9 +6,10 @@ pub mod project;
 pub mod scan;
 
 use filter::Filter;
-use join::Join;
+use join::{Join, JoinType};
 use project::Project;
 use scan::Scan;
+use serde::Deserialize;
 
 use super::RelationChildren;
 
@@ -25,12 +26,44 @@ use super::RelationChildren;
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
 /// [`LogicalExpression`]: crate::expression::LogicalExpression
 #[allow(missing_docs)]
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub enum LogicalOperator<Relation, Scalar> {
     Scan(Scan<Relation, Scalar>),
     Filter(Filter<Relation, Scalar>),
     Project(Project<Relation, Scalar>),
     Join(Join<Relation, Scalar>),
+}
+
+/// The kind of logical operator.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, sqlx::Type)]
+pub enum LogicalOperatorKind {
+    Scan,
+    Filter,
+    // Project,
+    Join,
+}
+
+impl<Relation, Scalar> LogicalOperator<Relation, Scalar> {
+    /// Creates a scan logical operator.
+    pub fn scan(table_name: &str, predicate: Scalar) -> Self {
+        Self::Scan(Scan::new(table_name, predicate))
+    }
+
+    /// Creates a filter logical operator.
+    pub fn filter(child: Relation, predicate: Scalar) -> Self {
+        Self::Filter(Filter::new(child, predicate))
+    }
+
+    /// Creates a join logical operator.
+    pub fn join(join_type: JoinType, left: Relation, right: Relation, condition: Scalar) -> Self {
+        Self::Join(Join {
+            join_type,
+            left,
+            right,
+            condition,
+        })
+    }
 }
 
 impl<Relation, Scalar> RelationChildren for LogicalOperator<Relation, Scalar>
