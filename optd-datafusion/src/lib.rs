@@ -4,57 +4,23 @@
 // https://opensource.org/licenses/MIT.
 
 #![allow(clippy::new_without_default)]
-use core::panic;
-#[allow(deprecated)]
-use std::collections::HashMap;
-use std::process::id;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use async_recursion::async_recursion;
-use async_trait::async_trait;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::catalog::{CatalogProviderList, Session};
+use datafusion::catalog::CatalogProviderList;
 use datafusion::catalog_common::MemoryCatalogProviderList;
-use datafusion::common::DFSchema;
-use datafusion::datasource::{provider, source_as_provider};
-use datafusion::execution::context::{self, QueryPlanner, SessionState};
+#[allow(deprecated)]
 use datafusion::execution::runtime_env::RuntimeConfig;
-use datafusion::execution::{session_state, SessionStateBuilder};
-use datafusion::logical_expr::utils::{conjunction, disjunction, split_binary, split_binary_owned};
-use datafusion::logical_expr::{
-    expr, Explain, LogicalPlan as DatafusionLogicalPlan, Operator, PlanType, TableSource,
-    ToStringifiedPlan,
-};
-use datafusion::physical_plan::expressions::{BinaryExpr, Column, Literal};
-use datafusion::physical_plan::filter::FilterExec;
-use datafusion::physical_plan::projection::ProjectionExec;
-use datafusion::physical_plan::{ExecutionPlan, PhysicalExpr};
-use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
-use datafusion::prelude::{log, Expr, SessionConfig, SessionContext};
-use datafusion::scalar::ScalarValue;
-use optd_core::operator::relational::logical::filter::Filter as OptdLogicalFilter;
-use optd_core::operator::relational::logical::project::Project as OptdLogicalProjection;
-use optd_core::operator::relational::logical::scan::Scan as OptdLogicalScan;
-use optd_core::operator::relational::logical::LogicalOperator;
-use optd_core::operator::relational::physical::filter::filter::Filter;
-use optd_core::operator::relational::physical::project::project::Project;
-use optd_core::operator::relational::physical::scan::table_scan::TableScan;
-use optd_core::operator::relational::physical::{self, PhysicalOperator};
-use optd_core::operator::scalar::add::Add;
-use optd_core::operator::scalar::and::And;
-use optd_core::operator::scalar::column_ref::ColumnRef;
-use optd_core::operator::scalar::constants::Constant;
-use optd_core::operator::scalar::ScalarOperator;
-use optd_core::plan::logical_plan::LogicalPlan;
-use optd_core::plan::physical_plan::PhysicalPlan;
-use optd_core::plan::scalar_plan::{self, ScalarPlan};
+use datafusion::execution::SessionStateBuilder;
+use datafusion::prelude::{SessionConfig, SessionContext};
 use planner::OptdOptimizer;
 use planner::OptdQueryPlanner;
 
-pub mod planner;
 pub mod converter;
+pub mod planner;
 
 /// Utility function to create a session context for datafusion + optd.
+/// The allow deprecated is for the RuntimeConfig
+#[allow(deprecated)]
 pub async fn create_df_context(
     session_config: Option<SessionConfig>,
     rn_config: Option<RuntimeConfig>,

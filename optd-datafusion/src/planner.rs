@@ -1,9 +1,23 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use optd_core::{operator::relational::{logical::LogicalOperator, physical::{filter::filter::Filter, project::project::Project, scan::table_scan::TableScan, PhysicalOperator}}, plan::{logical_plan::LogicalPlan, physical_plan::PhysicalPlan}};
+use optd_core::{
+    operator::relational::{
+        logical::LogicalOperator,
+        physical::{
+            filter::filter::Filter, project::project::Project, scan::table_scan::TableScan,
+            PhysicalOperator,
+        },
+    },
+    plan::{logical_plan::LogicalPlan, physical_plan::PhysicalPlan},
+};
 
-use datafusion::{execution::{context::QueryPlanner, SessionState}, logical_expr::LogicalPlan as DatafusionLogicalPlan, physical_plan::ExecutionPlan, physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner}};
+use datafusion::{
+    execution::{context::QueryPlanner, SessionState},
+    logical_expr::LogicalPlan as DatafusionLogicalPlan,
+    physical_plan::ExecutionPlan,
+    physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
+};
 
 use crate::converter::ConversionContext;
 
@@ -24,7 +38,7 @@ impl OptdOptimizer {
                 child: self.mock_optimize(project.child.clone()),
                 fields: project.fields.clone(),
             })),
-            LogicalOperator::Join(join) => todo!(),
+            LogicalOperator::Join(_join) => todo!(),
         };
         PhysicalPlan { node: node }
     }

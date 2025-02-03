@@ -79,10 +79,6 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[tokio::test]
-    async fn test_main() {
-    }
+    async fn test_main() {}
 }
-

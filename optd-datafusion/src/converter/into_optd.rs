@@ -1,12 +1,24 @@
 use std::sync::Arc;
 
-use datafusion::{common::DFSchema, logical_expr::{utils::conjunction, LogicalPlan as DatafusionLogicalPlan, Operator}, prelude::Expr};
-use optd_core::{operator::{relational::logical::{filter::Filter as OptdLogicalFilter, project::Project as OptdLogicalProjection, scan::Scan as OptdLogicalScan, LogicalOperator}, scalar::{add::Add, and::And, column_ref::ColumnRef, constants::Constant, ScalarOperator}}, plan::{logical_plan::LogicalPlan, scalar_plan::ScalarPlan}};
+use datafusion::{
+    common::DFSchema,
+    logical_expr::{utils::conjunction, LogicalPlan as DatafusionLogicalPlan, Operator},
+    prelude::Expr,
+};
+use optd_core::{
+    operator::{
+        relational::logical::{
+            filter::Filter as OptdLogicalFilter, project::Project as OptdLogicalProjection,
+            scan::Scan as OptdLogicalScan, LogicalOperator,
+        },
+        scalar::{add::Add, and::And, column_ref::ColumnRef, constants::Constant, ScalarOperator},
+    },
+    plan::{logical_plan::LogicalPlan, scalar_plan::ScalarPlan},
+};
 
 use super::ConversionContext;
 
 impl ConversionContext<'_> {
-
     pub fn conv_df_to_optd_scalar(&self, df_expr: &Expr, context: &DFSchema) -> ScalarPlan {
         let node = match df_expr {
             Expr::Column(column) => Arc::new(ScalarOperator::<ScalarPlan>::ColumnRef(ColumnRef {
@@ -65,7 +77,7 @@ impl ConversionContext<'_> {
                 let op = LogicalOperator::<LogicalPlan, ScalarPlan>::Filter(logical_optd_filter);
                 Arc::new(op)
             }
-            DatafusionLogicalPlan::Join(join) => todo!(),
+            DatafusionLogicalPlan::Join(_join) => todo!(),
             DatafusionLogicalPlan::TableScan(table_scan) => {
                 self.tables.insert(
                     table_scan.table_name.to_quoted_string(),
@@ -103,5 +115,4 @@ impl ConversionContext<'_> {
         };
         LogicalPlan { node: node }
     }
-
 }

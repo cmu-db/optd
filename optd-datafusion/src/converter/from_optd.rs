@@ -1,8 +1,24 @@
 use std::sync::Arc;
 
 use async_recursion::async_recursion;
-use datafusion::{arrow::datatypes::SchemaRef, datasource::source_as_provider, logical_expr::Operator, physical_plan::{expressions::{BinaryExpr, Column, Literal}, projection::ProjectionExec, ExecutionPlan, PhysicalExpr}, scalar::ScalarValue};
-use optd_core::{operator::{relational::physical::PhysicalOperator, scalar::{constants::Constant, ScalarOperator}}, plan::{physical_plan::PhysicalPlan, scalar_plan::ScalarPlan}};
+use datafusion::{
+    arrow::datatypes::SchemaRef,
+    datasource::source_as_provider,
+    logical_expr::Operator,
+    physical_plan::{
+        expressions::{BinaryExpr, Column, Literal},
+        projection::ProjectionExec,
+        ExecutionPlan, PhysicalExpr,
+    },
+    scalar::ScalarValue,
+};
+use optd_core::{
+    operator::{
+        relational::physical::PhysicalOperator,
+        scalar::{constants::Constant, ScalarOperator},
+    },
+    plan::{physical_plan::PhysicalPlan, scalar_plan::ScalarPlan},
+};
 
 use super::ConversionContext;
 
@@ -16,7 +32,7 @@ impl ConversionContext<'_> {
             PhysicalOperator::TableScan(table_scan) => {
                 let source = self.tables.get(&table_scan.table_name).unwrap();
                 let provider = source_as_provider(source)?;
-                let filters = if let Some(ref pred) = table_scan.predicate {
+                let filters = if let Some(ref _pred) = table_scan.predicate {
                     // split_binary_owned(pred, Operator::And)
                     todo!("Optd does not support filters inside table scan")
                 } else {
@@ -57,9 +73,9 @@ impl ConversionContext<'_> {
                         as Arc<dyn ExecutionPlan + 'static>,
                 )
             }
-            PhysicalOperator::HashJoin(hash_join) => todo!(),
-            PhysicalOperator::NestedLoopJoin(nested_loop_join) => todo!(),
-            PhysicalOperator::SortMergeJoin(merge_join) => todo!(),
+            PhysicalOperator::HashJoin(_hash_join) => todo!(),
+            PhysicalOperator::NestedLoopJoin(_nested_loop_join) => todo!(),
+            PhysicalOperator::SortMergeJoin(_merge_join) => todo!(),
         }
     }
 
