@@ -12,7 +12,7 @@ use super::{
     scalar::{PartialScalarPlan, ScalarPlan},
     PartialPlanExpr,
 };
-use crate::cascades::{operators::LogicalOperator, types::OptdType};
+use crate::alexis_stuff::{operators::LogicalOperator, types::OptdType};
 use std::sync::Arc;
 
 /// Identifier for logical operator groups in the optimizer.

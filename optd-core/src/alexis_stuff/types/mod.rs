@@ -29,7 +29,7 @@ pub enum OptdExpr {
         then: Box<OptdExpr>,
         otherwise: Box<OptdExpr>,
     },
-    
+
     /// Reference to a bound value
     Ref(String),
 

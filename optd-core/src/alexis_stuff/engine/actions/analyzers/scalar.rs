@@ -3,7 +3,7 @@
 //! Scalar analyzers can only compose with other scalar analyzers
 //! to extract information from scalar expressions into user-defined types.
 
-use crate::cascades::{
+use crate::alexis_stuff::{
     engine::{actions::WithBinding, patterns::scalar::ScalarPattern},
     types::OptdExpr,
 };
