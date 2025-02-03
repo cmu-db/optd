@@ -36,6 +36,9 @@ use optd_core::operator::relational::logical::filter::Filter as OptdLogicalFilte
 use optd_core::operator::relational::logical::project::Project as OptdLogicalProjection;
 use optd_core::operator::relational::logical::scan::Scan as OptdLogicalScan;
 use optd_core::operator::relational::logical::LogicalOperator;
+use optd_core::operator::relational::physical::filter::filter::Filter;
+use optd_core::operator::relational::physical::project::project::Project;
+use optd_core::operator::relational::physical::scan::table_scan::TableScan;
 use optd_core::operator::relational::physical::{self, PhysicalOperator};
 use optd_core::operator::scalar::add::Add;
 use optd_core::operator::scalar::and::And;
@@ -59,20 +62,35 @@ struct OptdOptimizer {}
 
 impl OptdOptimizer {
     pub fn mock_optimize(&self, logical_plan: LogicalPlan) -> PhysicalPlan {
-        todo!()
+        let node = match &*logical_plan.node {
+            LogicalOperator::Scan(scan) => Arc::new(PhysicalOperator::TableScan(TableScan {
+                table_name: scan.table_name.clone(),
+                predicate: scan.predicate.clone(),
+            })),
+            LogicalOperator::Filter(filter) => Arc::new(PhysicalOperator::Filter(Filter {
+                child: self.mock_optimize(filter.child.clone()),
+                predicate: filter.predicate.clone(),
+            })),
+            LogicalOperator::Project(project) => Arc::new(PhysicalOperator::Project(Project {
+                child: self.mock_optimize(project.child.clone()),
+                fields: project.fields.clone(),
+            })),
+            LogicalOperator::Join(join) => todo!(),
+        };
+        PhysicalPlan { node: node }
     }
 }
 
-struct ConversionContext {
+struct ConversionContext<'a> {
     pub tables: HashMap<String, Arc<dyn TableSource>>,
-    pub session_state: Option<SessionState>,
+    pub session_state: &'a SessionState,
 }
 
-impl ConversionContext {
-    pub fn new() -> ConversionContext {
+impl ConversionContext<'_> {
+    pub fn new(session_state: &SessionState) -> ConversionContext {
         ConversionContext {
             tables: HashMap::new(),
-            session_state: None,
+            session_state,
         }
     }
 
@@ -189,7 +207,7 @@ impl ConversionContext {
                     vec![]
                 };
                 let plan = provider
-                    .scan(self.session_state.as_ref().unwrap(), None, &filters, None)
+                    .scan(self.session_state, None, &filters, None)
                     .await?;
                 Ok(plan)
             }
@@ -289,7 +307,7 @@ impl OptdQueryPlanner {
                 .await?);
         }
 
-        let mut converter = ConversionContext::new();
+        let mut converter = ConversionContext::new(session_state);
         // convert the logical plan to OptD
         let optd_logical_plan = converter.conv_df_to_optd_relational(logical_plan);
         // run the optd optimizer
