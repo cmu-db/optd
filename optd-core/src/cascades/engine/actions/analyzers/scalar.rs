@@ -1,31 +1,50 @@
-use std::sync::Arc;
+//! Analyzers for scalar expressions.
+//!
+//! Scalar analyzers can only compose with other scalar analyzers
+//! to extract information from scalar expressions into user-defined types.
 
 use crate::cascades::{
     engine::{actions::WithBinding, patterns::scalar::ScalarPattern},
     types::OptdExpr,
 };
+use std::sync::Arc;
 
+/// Type alias for scalar analyzer composition with binding
 pub type ScalarComposition = (String, Arc<ScalarAnalyzer>);
 
-/// Scalar Analyzer:
-/// - Matches scalar patterns (`ScalarPattern`).
-/// - Can only compose with other scalar analyzers.
-/// - Produces an output of `OptdType` after matching.
+/// An analyzer for scalar expressions that produces user-defined types.
+///
+/// Scalar analyzers match against expression patterns and can compose
+/// with other scalar analyzers to extract information.
 #[derive(Clone)]
 pub struct ScalarAnalyzer {
-    pub name: String,        // Name of the scalar analyzer
-    pub matches: Vec<Match>, // List of possible matches
+    /// Name identifying this analyzer
+    pub name: String,
+
+    /// Sequence of pattern matches to try
+    pub matches: Vec<Match>,
 }
 
-/// A match in a ScalarAnalyzer:
-/// - Defines a pattern to match against.
-/// - Specifies a composition of analyzers (only Scalar allowed).
-/// - Produces an output of `OptdType`.
+/// A single pattern match attempt within a scalar analyzer.
+///
+/// Each match combines:
+/// - A pattern to identify relevant expression structures
+/// - A sequence of composed scalar analyzers
+/// - An expression to produce the final output type
 #[derive(Clone)]
 pub struct Match {
-    pub pattern: ScalarPattern,                     // Pattern to match
-    pub composition: Vec<WithBinding<Composition>>, // Composition: Only Scalar analyzers allowed
-    pub output: OptdExpr,                           // Output expression
+    /// Pattern to match against the input expression
+    pub pattern: ScalarPattern,
+
+    /// Sequence of analyzer applications with their bindings
+    pub composition: Vec<WithBinding<Composition>>,
+
+    /// Expression producing the final output type
+    pub output: OptdExpr,
 }
 
+/// Type alias for composable scalar analyzers.
+///
+/// Scalar analyzers can only compose with other scalar analyzers,
+/// so no enum needed.
 pub type Composition = Arc<ScalarAnalyzer>;

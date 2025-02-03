@@ -1,12 +1,10 @@
-//! Analyzer system for the OPTD optimizer.
+//! Analyzer definitions for extracting information from plans and expressions.
 //!
-//! This module defines analyzers for processing logical and scalar expressions
-//! within the optimizer framework. Analyzers are responsible for pattern matching
-//! and composition to determine transformations in the query plan.
-//! - `LogicalAnalyzer`: Handles logical operators and can compose both logical and scalar analyzers.
-//! - `ScalarAnalyzer`: Handles scalar expressions and can only compose with other scalar analyzers.
+//! There are two types of analyzers:
+//! - Logical analyzers: analyze logical plans
+//! - Scalar analyzers: analyze scalar expressions
 //!
-//! The output of any analyzer is always an `OptdType`.
+//! Both use pattern matching and composition to produce an `OptdType`.
 
 pub mod logical;
 pub mod scalar;
