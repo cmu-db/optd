@@ -22,7 +22,7 @@
 //! - Look up group membership of expressions
 //! - Create new groups for expressions
 
-use crate::cascades::expression::LogicalExpression;
+use crate::cascades::expressions::LogicalExpression;
 
 /// A unique identifier for a logical expression in the memo table.
 #[repr(transparent)]
@@ -42,7 +42,7 @@ pub struct ScalarExpressionId(u64);
 /// A unique identifier for a group of relational expressions in the memo table.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct GroupId(u64);
+pub struct RelationalGroupId(u64);
 
 /// A unique identifier for a group of scalar expressions in the memo table.
 #[repr(transparent)]
@@ -57,7 +57,7 @@ impl Memo {
     /// TODO(alexis) Add docs.
     pub async fn add_logical_expr_to_group(
         &mut self,
-        _group_id: GroupId,
+        _group_id: RelationalGroupId,
         _logical_expr: LogicalExpression,
     ) -> LogicalExpressionId {
         todo!()
