@@ -65,7 +65,8 @@ impl ConversionContext<'_> {
                         self.conv_optd_to_df_scalar(&field, &input_exec.schema())
                             .clone()
                     })
-                    .map(|expr| (expr, String::new()))
+                    .enumerate()
+                    .map(|(idx, expr)| (expr, format!("col{}", idx)))
                     .collect::<Vec<(Arc<dyn PhysicalExpr>, String)>>();
 
                 Ok(
