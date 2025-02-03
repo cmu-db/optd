@@ -1,4 +1,4 @@
-//! Core operator types for OPTD's internal, type-erased, IR (Intermediate Representation).
+//! Core operator types for OPTD's low-level IR (Intermediate Representation).
 //!
 //! These generic operator types serve multiple purposes in the system:
 //!
