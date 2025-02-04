@@ -8,7 +8,7 @@ CREATE TABLE projects (
     -- The input relation.
     child_group_id BIGINT NOT NULL,
     -- The projection list. A vector of scalar group ids, 
-    fields_group_ids JSONB NOT NULL,
+    fields_group_ids JSON NOT NULL,
 
     FOREIGN KEY (logical_expression_id) REFERENCES logical_expressions (id)
     ON UPDATE CASCADE ON DELETE CASCADE,
