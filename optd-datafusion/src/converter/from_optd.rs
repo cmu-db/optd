@@ -96,6 +96,7 @@ impl ConversionContext<'_> {
                     &Arc::new(filter_schema.clone()),
                 );
 
+                println!("Join type is {:?}", nested_loop_join.join_type);
                 let join_type = JoinType::from_str(&nested_loop_join.join_type)?;
 
                 let mut column_idxs = vec![];

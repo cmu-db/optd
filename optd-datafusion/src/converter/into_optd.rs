@@ -2,10 +2,7 @@ use std::sync::Arc;
 
 use datafusion::{
     common::DFSchema,
-    functions::{math::log, unicode::right},
-    logical_expr::{
-        utils::conjunction, BinaryExpr, LogicalPlan as DatafusionLogicalPlan, Operator,
-    },
+    logical_expr::{utils::conjunction, LogicalPlan as DatafusionLogicalPlan, Operator},
     prelude::Expr,
 };
 use optd_core::{
@@ -119,6 +116,7 @@ impl ConversionContext<'_> {
                 Arc::new(op)
             }
             DatafusionLogicalPlan::Join(join) => {
+                println!("{:#?}", join);
                 let mut join_cond = Vec::new();
                 for (left, right) in &join.on {
                     let left = self.conv_df_to_optd_scalar(left, join.left.schema(), 0);
@@ -126,6 +124,13 @@ impl ConversionContext<'_> {
                     let right = self.conv_df_to_optd_scalar(right, join.right.schema(), offset);
                     join_cond.push(ScalarPlan {
                         node: Arc::new(ScalarOperator::<ScalarPlan>::Equal(Equal { left, right })),
+                    });
+                }
+                if join_cond.is_empty() {
+                    join_cond.push(ScalarPlan {
+                        node: Arc::new(ScalarOperator::<ScalarPlan>::Constant(Constant::Boolean(
+                            true,
+                        ))),
                     });
                 }
                 let logical_optd_join = OptdLogicalJoin::<LogicalPlan, ScalarPlan> {

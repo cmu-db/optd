@@ -32,4 +32,13 @@ mod tests {
             .expect("Failed to read from file");
         run_queries(queries).await.expect("Failed to run queries");
     }
+
+    #[tokio::test]
+    async fn test_join() {
+        let mut file = std::fs::File::open("sql/test_join.sql").expect("Failed to open file");
+        let mut queries = String::new();
+        file.read_to_string(&mut queries)
+            .expect("Failed to read from file");
+        run_queries(queries).await.expect("Failed to run queries");
+    }
 }

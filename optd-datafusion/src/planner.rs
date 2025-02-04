@@ -38,7 +38,7 @@ impl OptdOptimizer {
                 fields: project.fields.clone(),
             })),
             LogicalOperator::Join(join) => Arc::new(PhysicalOperator::NestedLoopJoin(NestedLoopJoin {
-                join_type: "NLJ".to_string(),
+                join_type: join.join_type.clone(),
                 outer: self.mock_optimize(join.left.clone()),
                 inner: self.mock_optimize(join.right.clone()),
                 condition: join.condition.clone(),
