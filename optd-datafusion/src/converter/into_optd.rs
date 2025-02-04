@@ -33,7 +33,6 @@ impl ConversionContext<'_> {
         context: &DFSchema,
         col_offset: usize,
     ) -> ScalarPlan {
-        println!("Expresionn {:#?}", df_expr);
         let node = match df_expr {
             Expr::Column(column) => Arc::new(ScalarOperator::<ScalarPlan>::ColumnRef(ColumnRef {
                 column_idx: context.index_of_column(column).unwrap() + col_offset,
@@ -70,11 +69,20 @@ impl ConversionContext<'_> {
                     Operator::Eq => {
                         ScalarOperator::<ScalarPlan>::Equal(Equal::<ScalarPlan> { left, right })
                     }
-                    _ => panic!("OptD does not support this scalar binary expression"),
+                    _ => panic!(
+                        "OptD does not support this scalar binary expression: {:#?}",
+                        df_expr
+                    ),
                 };
                 Arc::new(op)
             }
-            _ => panic!("OptD does not support this scalar expression"),
+            Expr::Cast(cast) => {
+                return self.conv_df_to_optd_scalar(&cast.expr, context, col_offset);
+            }
+            _ => panic!(
+                "OptD does not support this scalar expression: {:#?}",
+                df_expr
+            ),
         };
 
         ScalarPlan { node: node }

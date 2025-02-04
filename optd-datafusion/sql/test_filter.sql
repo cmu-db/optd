@@ -1,11 +1,11 @@
 CREATE TABLE employees (
-    id INTEGER,
+    id BIGINT,
     name TEXT,
-    department_id INTEGER
+    department_id BIGINT
 );
 
 CREATE TABLE departments (
-    id INTEGER,
+    id BIGINT,
     department_name TEXT
 );
 
@@ -19,4 +19,4 @@ INSERT INTO departments VALUES
     (2, 'Marketing');
 
 
-SELECT * FROM employees WHERE id > 1;
+SELECT * FROM employees WHERE id = 2;
