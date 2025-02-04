@@ -13,7 +13,7 @@ pub enum ValuePattern {
     ///
     /// Note: Type bindings are always leaf nodes as they match
     /// atomic metadata values.
-    Bind(String, Box<OptdExpr>),
+    Bind(String, Box<ValuePattern>),
 
     /// Matches based on an OPTD expression evaluation.
     ///

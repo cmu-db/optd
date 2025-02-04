@@ -6,8 +6,6 @@
 //!
 //! Both types of actions use pattern matching and composition, but differ in their outputs.
 
-use std::sync::Arc;
-
 pub mod analyzers; // Analysis actions that produce user-defined types
 pub mod transformers; // Transformation actions that produce new plans
 
@@ -20,4 +18,4 @@ pub mod transformers; // Transformation actions that produce new plans
 ///
 /// The String is the binding name, and T is the type of action being bound
 /// (either an analyzer or transformer).
-type BindAs<T> = (String, Arc<T>);
+type BindAs<T> = (String, Box<T>);

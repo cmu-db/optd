@@ -3,8 +3,6 @@
 //! Transforms scalar expressions through pattern matching and rule composition.
 //! Can compose with scalar rules and analyzers only.
 
-use std::sync::Arc;
-
 use crate::{
     engine::{
         actions::{analyzers::scalar::ScalarAnalyzer, BindAs},
@@ -43,6 +41,6 @@ pub struct Match {
 /// - Scalar analyzers
 #[derive(Clone)]
 pub enum Composition {
-    ScalarTransformer(Arc<ScalarTransformer>),
-    ScalarAnalyzer(Arc<ScalarAnalyzer>),
+    ScalarTransformer(Box<ScalarTransformer>),
+    ScalarAnalyzer(Box<ScalarAnalyzer>),
 }

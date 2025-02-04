@@ -1,3 +1,5 @@
+use crate::operators::scalar::ScalarOperatorKind;
+
 use super::value::ValuePattern;
 
 /// Pattern for matching scalar expressions in a query plan.
@@ -18,9 +20,9 @@ pub enum ScalarPattern {
     /// Matches a specific scalar operator type with its content and children
     Operator {
         /// Operator type to match (e.g., "Add", "Constant")
-        op_type: String,
-        /// Pattern for matching operator metadata
-        content: Box<ValuePattern>,
+        op_type: ScalarOperatorKind,
+        /// Patterns for matching operator values
+        content: Vec<Box<ValuePattern>>,
         /// Patterns for matching scalar children
         scalar_children: Vec<Box<ScalarPattern>>,
     },

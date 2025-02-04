@@ -36,12 +36,23 @@ pub enum ScalarOperator<Value, Scalar> {
 
 /// The kind of scalar operator.
 #[allow(missing_docs)]
-#[derive(Debug, Clone, sqlx::Type)]
+#[derive(Debug, Clone, PartialEq, sqlx::Type)]
 pub enum ScalarOperatorKind {
     Constant,
     ColumnRef,
     Add,
     Equal,
+}
+
+impl<Value, Scalar> ScalarOperator<Value, Scalar> {
+    pub fn operator_kind(&self) -> ScalarOperatorKind {
+        match self {
+            ScalarOperator::Constant(_) => ScalarOperatorKind::Constant,
+            ScalarOperator::ColumnRef(_) => ScalarOperatorKind::ColumnRef,
+            ScalarOperator::Add(_) => ScalarOperatorKind::Add,
+            ScalarOperator::Equal(_) => ScalarOperatorKind::Equal,
+        }
+    }
 }
 
 impl<Value, Scalar> ScalarOperator<Value, Scalar>
@@ -55,6 +66,15 @@ where
             ScalarOperator::ColumnRef(_) => vec![],
             ScalarOperator::Add(add) => vec![add.left.clone(), add.right.clone()],
             ScalarOperator::Equal(equal) => vec![equal.left.clone(), equal.right.clone()],
+        }
+    }
+
+    pub fn values(&self) -> Vec<Value> {
+        match self {
+            ScalarOperator::Constant(constant) => vec![constant.value.clone()],
+            ScalarOperator::ColumnRef(column_ref) => vec![column_ref.column_index.clone()],
+            ScalarOperator::Add(_) => vec![],
+            ScalarOperator::Equal(_) => vec![],
         }
     }
 }

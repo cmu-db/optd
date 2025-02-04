@@ -22,7 +22,7 @@ pub enum LogicalPattern {
     Operator {
         /// Operator type to match (e.g., "Join", "Filter")
         op_type: String,
-        /// Patterns for matching operator metadata
+        /// Patterns for matching operator values
         content: Vec<Box<ValuePattern>>,
         /// Patterns for matching logical children
         logical_children: Vec<Box<LogicalPattern>>,
