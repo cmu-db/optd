@@ -1,8 +1,11 @@
-use std::time::Duration;
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use super::transaction::Transaction;
 use anyhow::Result;
-use sqlx::{SqliteConnection, SqlitePool};
+use sqlx::{
+    sqlite::{SqliteConnectOptions, SqliteJournalMode},
+    SqliteConnection, SqlitePool,
+};
 
 use crate::cascades::{
     expressions::*,
@@ -25,12 +28,21 @@ pub struct SqliteMemo {
 impl SqliteMemo {
     /// Create a new storage manager that connects to the SQLite database at the given URL.
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
-        use sqlx::sqlite::*;
-        let options = SqliteConnectOptions::new()
-            .filename(database_url)
+        let options = SqliteConnectOptions::from_str(database_url)?
+            .create_if_missing(true)
             .journal_mode(SqliteJournalMode::Wal)
-            .synchronous(SqliteSynchronous::Normal)
-            .busy_timeout(Duration::from_secs(10));
+            .busy_timeout(Duration::from_secs(30));
+        Self::new_with_options(options).await
+    }
+
+    /// Create a new storage manager backed by an in-memory SQLite database.
+    pub async fn new_in_memory() -> anyhow::Result<Self> {
+        let options = SqliteConnectOptions::from_str(":memory:")?;
+        Self::new_with_options(options).await
+    }
+
+    /// Creates a new storage manager with the given options.
+    async fn new_with_options(options: SqliteConnectOptions) -> anyhow::Result<Self> {
         let memo = Self {
             db: SqlitePool::connect_with(options).await?,
             get_all_logical_exprs_in_group_query: get_all_logical_exprs_in_group_query().into(),
@@ -38,11 +50,6 @@ impl SqliteMemo {
         };
         memo.migrate().await?;
         Ok(memo)
-    }
-
-    /// Create a new storage manager backed by an in-memory SQLite database.
-    pub async fn new_in_memory() -> anyhow::Result<Self> {
-        Self::new("sqlite::memory:").await
     }
 
     /// Runs pending migrations.
@@ -65,17 +72,20 @@ impl Memoize for SqliteMemo {
     async fn get_all_logical_exprs_in_group(
         &self,
         group_id: RelationalGroupId,
-    ) -> Result<Vec<(LogicalExpressionId, LogicalExpression)>> {
+    ) -> Result<Vec<(LogicalExpressionId, Arc<LogicalExpression>)>> {
         #[derive(sqlx::FromRow)]
         struct LogicalExprRecord {
             logical_expression_id: LogicalExpressionId,
-            data: sqlx::types::Json<LogicalExpression>,
+            data: sqlx::types::Json<Arc<LogicalExpression>>,
         }
 
         let mut txn = self.begin().await?;
+        let representative_group_id = self
+            .get_representative_group_id(&mut *txn, group_id)
+            .await?;
         let logical_exprs: Vec<LogicalExprRecord> =
             sqlx::query_as(&self.get_all_logical_exprs_in_group_query)
-                .bind(group_id)
+                .bind(representative_group_id)
                 .fetch_all(&mut *txn)
                 .await?;
 
@@ -110,17 +120,20 @@ impl Memoize for SqliteMemo {
     async fn get_all_scalar_exprs_in_group(
         &self,
         group_id: ScalarGroupId,
-    ) -> Result<Vec<(ScalarExpressionId, ScalarExpression)>> {
+    ) -> Result<Vec<(ScalarExpressionId, Arc<ScalarExpression>)>> {
         #[derive(sqlx::FromRow)]
         struct ScalarExprRecord {
             scalar_expression_id: ScalarExpressionId,
-            data: sqlx::types::Json<ScalarExpression>,
+            data: sqlx::types::Json<Arc<ScalarExpression>>,
         }
 
         let mut txn = self.begin().await?;
+        let representative_group_id = self
+            .get_representative_scalar_group_id(&mut *txn, group_id)
+            .await?;
         let scalar_exprs: Vec<ScalarExprRecord> =
             sqlx::query_as(&self.get_all_scalar_exprs_in_group_query)
-                .bind(group_id)
+                .bind(representative_group_id)
                 .fetch_all(&mut *txn)
                 .await?;
 
@@ -294,6 +307,9 @@ impl SqliteMemo {
                     ScalarOperatorKind::Add,
                 )
                 .await?;
+                println!("add: {:?}", add);
+                println!("scalar_expr_id: {:?}", scalar_expr_id);
+                println!("group_id: {:?}", group_id);
                 let group_id = sqlx::query_scalar("INSERT INTO scalar_adds (scalar_expression_id, group_id, left_group_id, right_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(scalar_expr_id)
                     .bind(group_id)
@@ -507,7 +523,7 @@ const fn get_all_logical_exprs_in_group_query() -> &'static str {
 /// The SQL query to get all scalar expressions in a group.
 const fn get_all_scalar_exprs_in_group_query() -> &'static str {
     concat!(
-        "SELECT scalar_expression_id, json(value) as data FROM scalar_constants WHERE group_id = $1",
+        "SELECT scalar_expression_id, json_object('Constant', json(value)) as data FROM scalar_constants WHERE group_id = $1",
         " UNION ALL ",
         "SELECT scalar_expression_id, json_object('ColumnRef', json_object('column_index', json(column_index))) as data FROM scalar_column_refs WHERE group_id = $1",
         " UNION ALL ",
@@ -531,12 +547,18 @@ mod tests {
         let true_predicate =
             ScalarExpression::Constant(constants::Constant::new(OptdValue::Bool(true)));
         let true_predicate_group = memo.add_scalar_expr(&true_predicate).await?;
-        let scan1 = LogicalExpression::Scan(scan::Scan::new("t1", true_predicate_group));
+        let scan1 = Arc::new(LogicalExpression::Scan(scan::Scan::new(
+            "t1",
+            true_predicate_group,
+        )));
         let scan1_group = memo.add_logical_expr(&scan1).await?;
         let dup_scan1_group = memo.add_logical_expr(&scan1).await?;
         assert_eq!(scan1_group, dup_scan1_group);
 
-        let scan2 = LogicalExpression::Scan(scan::Scan::new("t2", true_predicate_group));
+        let scan2 = Arc::new(LogicalExpression::Scan(scan::Scan::new(
+            "t2",
+            true_predicate_group,
+        )));
         let scan2_group = memo.add_logical_expr(&scan2).await?;
         let dup_scan2_group = memo.add_logical_expr(&scan2).await?;
         assert_eq!(scan2_group, dup_scan2_group);
@@ -548,29 +570,29 @@ mod tests {
 
         let join_cond = ScalarExpression::Equal(equal::Equal::new(t1v1_group_id, t2v2_group_id));
         let join_cond_group_id = memo.add_scalar_expr(&join_cond).await?;
-        let join = LogicalExpression::Join(join::Join::new(
+        let join = Arc::new(LogicalExpression::Join(join::Join::new(
             "inner",
             scan1_group,
             scan2_group,
             join_cond_group_id,
-        ));
+        )));
 
         let join_group = memo.add_logical_expr(&join).await?;
         let dup_join_group = memo.add_logical_expr(&join).await?;
         assert_eq!(join_group, dup_join_group);
 
-        let join_alt = LogicalExpression::Join(join::Join::new(
+        let join_alt = Arc::new(LogicalExpression::Join(join::Join::new(
             "inner",
             scan2_group,
             scan1_group,
             join_cond_group_id,
-        ));
+        )));
         let join_alt_group = memo
             .add_logical_expr_to_group(&join_alt, join_group)
             .await?;
         assert_eq!(join_group, join_alt_group);
 
-        let logical_exprs: Vec<LogicalExpression> = memo
+        let logical_exprs: Vec<Arc<LogicalExpression>> = memo
             .get_all_logical_exprs_in_group(join_group)
             .await?
             .into_iter()
@@ -589,7 +611,7 @@ mod tests {
         assert_eq!(children_groups[0], scan2_group);
         assert_eq!(children_groups[1], scan1_group);
 
-        let logical_exprs: Vec<LogicalExpression> = memo
+        let logical_exprs: Vec<Arc<LogicalExpression>> = memo
             .get_all_logical_exprs_in_group(scan1_group)
             .await?
             .into_iter()
@@ -598,7 +620,7 @@ mod tests {
         assert!(logical_exprs.contains(&scan1));
         assert_eq!(scan1.children_relations().len(), 0);
 
-        let logical_exprs: Vec<LogicalExpression> = memo
+        let logical_exprs: Vec<Arc<LogicalExpression>> = memo
             .get_all_logical_exprs_in_group(scan2_group)
             .await?
             .into_iter()

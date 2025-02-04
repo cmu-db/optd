@@ -7,6 +7,8 @@
 //! - Grouping logically equivalent expressions together to enable rule-based optimization
 //!
 
+use std::sync::Arc;
+
 use super::{
     expressions::{LogicalExpression, LogicalExpressionId, ScalarExpression, ScalarExpressionId},
     groups::{RelationalGroupId, ScalarGroupId},
@@ -18,7 +20,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn get_all_logical_exprs_in_group(
         &self,
         group_id: RelationalGroupId,
-    ) -> Result<Vec<(LogicalExpressionId, LogicalExpression)>>;
+    ) -> Result<Vec<(LogicalExpressionId, Arc<LogicalExpression>)>>;
 
     // Returns the group id of new group if merge happened.
     async fn add_logical_expr_to_group(
@@ -34,7 +36,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn get_all_scalar_exprs_in_group(
         &self,
         group_id: ScalarGroupId,
-    ) -> Result<Vec<(ScalarExpressionId, ScalarExpression)>>;
+    ) -> Result<Vec<(ScalarExpressionId, Arc<ScalarExpression>)>>;
 
     // Returns the group id of new group if merge happened.
     async fn add_scalar_expr_to_group(

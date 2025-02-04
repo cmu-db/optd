@@ -30,7 +30,7 @@ pub struct ScalarPlan {
 /// During optimization, expressions can be in three states:
 /// - Partially materialized: Single materialized operator with group references
 /// - Unmaterialized: Pure group reference
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PartialScalarPlan {
     /// Single materialized operator with potentially unmaterialized children
     PartialMaterialized {

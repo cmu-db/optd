@@ -11,11 +11,11 @@ CREATE TABLE scalar_adds (
 
     FOREIGN KEY (scalar_expression_id) REFERENCES scalar_expressions (id)
     ON UPDATE CASCADE ON DELETE CASCADE,
-    FOREIGN KEY (group_id) REFERENCES relation_groups (id)
+    FOREIGN KEY (group_id) REFERENCES scalar_groups (id)
     ON UPDATE CASCADE ON DELETE CASCADE,
-    FOREIGN KEY (left_group_id) REFERENCES relation_groups (id)
+    FOREIGN KEY (left_group_id) REFERENCES scalar_groups (id)
     ON UPDATE CASCADE ON DELETE CASCADE
-    FOREIGN KEY (right_group_id) REFERENCES relation_groups (id)
+    FOREIGN KEY (right_group_id) REFERENCES scalar_groups (id)
     ON UPDATE CASCADE ON DELETE CASCADE
 );
 
