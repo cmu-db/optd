@@ -8,16 +8,16 @@
 //! This allows the optimizer to work with plans at different stages
 //! of materialization during the optimization process.
 
-use crate::{operators::relational::logical::LogicalOperator, values::OptdValue};
+use crate::{
+    cascades::groups::RelationalGroupId, operators::relational::logical::LogicalOperator,
+    values::OptdValue,
+};
 
 use super::{
     scalar::{PartialScalarPlan, ScalarPlan},
     PartialPlanExpr,
 };
 use std::sync::Arc;
-
-/// Identifier for logical operator groups in the optimizer.
-type LogicalGroupId = usize;
 
 /// A fully materialized logical query plan.
 ///
@@ -42,7 +42,7 @@ pub enum PartialLogicalPlan {
     },
 
     /// Reference to an optimization group containing equivalent plans
-    UnMaterialized(LogicalGroupId),
+    UnMaterialized(RelationalGroupId),
 }
 
 /// Type alias for expressions that construct logical plans.

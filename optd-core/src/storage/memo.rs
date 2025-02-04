@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::transaction::Transaction;
 use anyhow::Result;
 use sqlx::{SqliteConnection, SqlitePool};
@@ -11,7 +13,7 @@ use crate::operators::relational::logical::LogicalOperatorKind;
 use crate::operators::scalar::ScalarOperatorKind;
 
 /// A Storage manager that manages connections to the database.
-pub struct SQLiteMemo {
+pub struct SqliteMemo {
     /// A async connection pool to the SQLite database.
     db: SqlitePool,
     /// SQL query string to get all logical expressions in a group.
@@ -20,11 +22,17 @@ pub struct SQLiteMemo {
     get_all_scalar_exprs_in_group_query: String,
 }
 
-impl SQLiteMemo {
+impl SqliteMemo {
     /// Create a new storage manager that connects to the SQLite database at the given URL.
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
+        use sqlx::sqlite::*;
+        let options = SqliteConnectOptions::new()
+            .filename(database_url)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal)
+            .busy_timeout(Duration::from_secs(10));
         let memo = Self {
-            db: SqlitePool::connect(database_url).await?,
+            db: SqlitePool::connect_with(options).await?,
             get_all_logical_exprs_in_group_query: get_all_logical_exprs_in_group_query().into(),
             get_all_scalar_exprs_in_group_query: get_all_scalar_exprs_in_group_query().into(),
         };
@@ -53,7 +61,7 @@ impl SQLiteMemo {
     }
 }
 
-impl Memoize for SQLiteMemo {
+impl Memoize for SqliteMemo {
     async fn get_all_logical_exprs_in_group(
         &self,
         group_id: RelationalGroupId,
@@ -167,7 +175,7 @@ impl Memoize for SQLiteMemo {
 }
 
 // Memoize helpers
-impl SQLiteMemo {
+impl SqliteMemo {
     async fn get_representative_group_id(
         &self,
         db: &mut SqliteConnection,
@@ -518,7 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_expr_with_memo() -> anyhow::Result<()> {
-        let memo = SQLiteMemo::new("sqlite://memo.db?mode=rwc").await?;
+        let memo = SqliteMemo::new_in_memory().await?;
 
         let true_predicate =
             ScalarExpression::Constant(constants::Constant::new(OptdValue::Bool(true)));

@@ -8,13 +8,12 @@
 //! This allows the optimizer to work with expressions at different stages
 //! of materialization during the optimization process.
 
-use crate::{operators::scalar::ScalarOperator, values::OptdValue};
+use crate::{
+    cascades::groups::ScalarGroupId, operators::scalar::ScalarOperator, values::OptdValue,
+};
 
 use super::PartialPlanExpr;
 use std::sync::Arc;
-
-/// Identifier for scalar expression groups in the optimizer.
-type ScalarGroupId = usize;
 
 /// A fully materialized scalar expression tree.
 ///

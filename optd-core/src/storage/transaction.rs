@@ -106,13 +106,13 @@ impl DerefMut for Transaction<'_> {
 #[cfg(test)]
 mod tests {
 
-    use crate::storage::memo::SQLiteMemo;
+    use crate::storage::memo::SqliteMemo;
 
     use super::*;
 
     #[tokio::test]
     async fn test_sequence() -> anyhow::Result<()> {
-        let storage = SQLiteMemo::new_in_memory().await?;
+        let storage = SqliteMemo::new_in_memory().await?;
 
         // Make sure the sequence is initialized.
         {
