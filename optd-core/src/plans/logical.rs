@@ -8,7 +8,7 @@
 //! This allows the optimizer to work with plans at different stages
 //! of materialization during the optimization process.
 
-use crate::{operators::relational::logical::LogicalOperator, types::OptdType};
+use crate::{operators::relational::logical::LogicalOperator, values::OptdValue};
 
 use super::{
     scalar::{PartialScalarPlan, ScalarPlan},
@@ -26,7 +26,7 @@ type LogicalGroupId = usize;
 /// plan representation after optimization is complete.
 #[derive(Clone)]
 pub struct LogicalPlan {
-    operator: LogicalOperator<OptdType, Arc<LogicalPlan>, Arc<ScalarPlan>>,
+    operator: LogicalOperator<OptdValue, Arc<LogicalPlan>, Arc<ScalarPlan>>,
 }
 
 /// A logical plan with varying levels of materialization.
@@ -38,7 +38,7 @@ pub struct LogicalPlan {
 pub enum PartialLogicalPlan {
     /// Single materialized operator with potentially unmaterialized children
     PartialMaterialized {
-        operator: LogicalOperator<OptdType, Arc<PartialLogicalPlan>, Arc<PartialScalarPlan>>,
+        operator: LogicalOperator<OptdValue, Arc<PartialLogicalPlan>, Arc<PartialScalarPlan>>,
     },
 
     /// Reference to an optimization group containing equivalent plans

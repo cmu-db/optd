@@ -4,7 +4,7 @@
 //! - Logical analyzers: analyze logical plans
 //! - Scalar analyzers: analyze scalar expressions
 //!
-//! Both use pattern matching and composition to produce an `OptdType`.
+//! Both use pattern matching and composition to produce an `OptdValue`.
 
 pub mod logical;
 pub mod scalar;

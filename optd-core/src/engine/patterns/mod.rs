@@ -11,4 +11,4 @@
 
 pub mod logical;
 pub mod scalar;
-pub mod typ;
+pub mod value;

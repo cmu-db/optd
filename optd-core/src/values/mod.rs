@@ -3,25 +3,21 @@
 
 pub mod interpreter;
 
-/// All types supported by the OPTD-DSL.
+/// All values supported by the OPTD-DSL.
 #[derive(Clone, PartialEq, Debug)]
-pub enum OptdType {
+pub enum OptdValue {
     /// Primitive Types
     Int64(i64),
     String(String),
     Bool(bool),
-
-    /// Complex Types
-    Enum(Vec<OptdType>),
-    Array(Vec<OptdType>), // TODO(Alexis): this is wrong
-    // TODO(Alexis): add Optional type too (though it could be implemented as an Enum)...
+    // Complex Types: TODO(alexis). Enums, Optionals, Arrays, etc.
 }
 
-/// Expressions that can be evaluated on OptdTypes.
+/// Expressions that can be evaluated on OptdValues.
 /// TODO(alexis): In the future, it would be nice to support user defined
 /// functions on top of the basic expressions. This would enable the support
 /// of custom defined checks on the metadata.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum OptdExpr {
     /// Control Flow
     IfThenElse {
@@ -34,7 +30,7 @@ pub enum OptdExpr {
     Ref(String),
 
     /// Direct value
-    Value(OptdType),
+    Value(OptdValue),
 
     /// Comparisons
     Eq {
@@ -46,23 +42,6 @@ pub enum OptdExpr {
         right: Box<OptdExpr>,
     },
     Gt {
-        left: Box<OptdExpr>,
-        right: Box<OptdExpr>,
-    },
-
-    /// Pattern Matching
-    Match {
-        expr: Box<OptdExpr>,
-        cases: Vec<(Box<OptdExpr>, Box<OptdExpr>)>,
-    },
-
-    /// Array Operations
-    ArrayLen(Box<OptdExpr>),
-    ArrayGet {
-        array: Box<OptdExpr>,
-        index: Box<OptdExpr>,
-    },
-    ArrayConcat {
         left: Box<OptdExpr>,
         right: Box<OptdExpr>,
     },

@@ -2,8 +2,6 @@
 
 use serde::Deserialize;
 
-use crate::operator::relational::RelationChildren;
-
 /// Logical filter operator that selects rows matching a condition.
 ///
 /// Takes input relation (`Relation`) and filters rows using a boolean predicate (`Scalar`).
@@ -22,22 +20,5 @@ impl<Relation, Scalar> Filter<Relation, Scalar> {
     /// Create a new filter operator.
     pub fn new(child: Relation, predicate: Scalar) -> Self {
         Self { child, predicate }
-    }
-}
-
-impl<Relation, Scalar> RelationChildren for Filter<Relation, Scalar>
-where
-    Relation: Clone,
-    Scalar: Clone,
-{
-    type Relation = Relation;
-    type Scalar = Scalar;
-
-    fn children_relations(&self) -> Vec<Self::Relation> {
-        vec![self.child.clone()]
-    }
-
-    fn children_scalars(&self) -> Vec<Self::Scalar> {
-        vec![self.predicate.clone()]
     }
 }

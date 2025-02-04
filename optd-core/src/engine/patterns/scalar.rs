@@ -1,10 +1,10 @@
-use super::typ::TypePattern;
+use super::value::ValuePattern;
 
 /// Pattern for matching scalar expressions in a query plan.
 ///
 /// Scalar patterns can only match scalar children, reflecting the
 /// more limited structure of scalar operators in the plan IR.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ScalarPattern {
     /// Matches any scalar expression without binding
     Any,
@@ -20,7 +20,7 @@ pub enum ScalarPattern {
         /// Operator type to match (e.g., "Add", "Constant")
         op_type: String,
         /// Pattern for matching operator metadata
-        content: Box<TypePattern>,
+        content: Box<ValuePattern>,
         /// Patterns for matching scalar children
         scalar_children: Vec<Box<ScalarPattern>>,
     },

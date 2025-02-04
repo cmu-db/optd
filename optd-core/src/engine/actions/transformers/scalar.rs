@@ -3,14 +3,15 @@
 //! Transforms scalar expressions through pattern matching and rule composition.
 //! Can compose with scalar rules and analyzers only.
 
-use crate::alexis_stuff::{
+use std::sync::Arc;
+
+use crate::{
     engine::{
-        actions::{analyzers::scalar::ScalarAnalyzer, WithBinding},
+        actions::{analyzers::scalar::ScalarAnalyzer, BindAs},
         patterns::scalar::ScalarPattern,
     },
     plans::scalar::PartialScalarPlanExpr,
 };
-use std::sync::Arc;
 
 /// A transformer for scalar expressions that produces new scalar expressions.
 #[derive(Clone)]
@@ -29,7 +30,7 @@ pub struct Match {
     pub pattern: ScalarPattern,
 
     /// Sequence of rule applications with their bindings
-    pub composition: Vec<WithBinding<Composition>>,
+    pub composition: Vec<BindAs<Composition>>,
 
     /// Expression constructing the output expression
     pub output: PartialScalarPlanExpr,

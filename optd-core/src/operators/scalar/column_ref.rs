@@ -1,26 +1,18 @@
 use serde::{Deserialize, Serialize};
 
-use super::ScalarOperator;
+use crate::values::OptdValue;
 
 /// Column reference
-// TODO(yuchen): add proper catalog integration, mock for now.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ColumnRef<Metadata> {
-    pub table_name: Metadata,
-    pub column_name: Metadata,
+pub struct ColumnRef<Value> {
+    pub column_index: Value,
 }
 
-/// Create a new column reference operator.
-/// TODO(alexis): this should be somewhere else
-pub fn unqualified_column_ref<Scalar>(column_name: &str) -> ScalarOperator<Scalar> {
-    ScalarOperator::ColumnRef(ColumnRef {
-        column_name: column_name.to_string(),
-        table_name: None,
-    })
-}
-pub fn qualified_column_ref<Scalar>(table_name: &str, column_name: &str) -> ScalarOperator<Scalar> {
-    ScalarOperator::ColumnRef(ColumnRef {
-        column_name: column_name.to_string(),
-        table_name: Some(table_name.to_string()),
-    })
+impl ColumnRef<OptdValue> {
+    /// Create a new column reference.
+    pub fn new(column_index: i64) -> Self {
+        Self {
+            column_index: OptdValue::Int64(column_index),
+        }
+    }
 }

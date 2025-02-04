@@ -8,7 +8,7 @@
 //! This allows the optimizer to work with expressions at different stages
 //! of materialization during the optimization process.
 
-use crate::{operators::scalar::ScalarOperator, types::OptdType};
+use crate::{operators::scalar::ScalarOperator, values::OptdValue};
 
 use super::PartialPlanExpr;
 use std::sync::Arc;
@@ -23,7 +23,7 @@ type ScalarGroupId = usize;
 /// after optimization is complete.
 #[derive(Clone)]
 pub struct ScalarPlan {
-    operator: ScalarOperator<OptdType, Arc<ScalarPlan>>,
+    operator: ScalarOperator<OptdValue, Arc<ScalarPlan>>,
 }
 
 /// A scalar expression with varying levels of materialization.
@@ -35,7 +35,7 @@ pub struct ScalarPlan {
 pub enum PartialScalarPlan {
     /// Single materialized operator with potentially unmaterialized children
     PartialMaterialized {
-        operator: ScalarOperator<OptdType, Arc<PartialScalarPlan>>,
+        operator: ScalarOperator<OptdValue, Arc<PartialScalarPlan>>,
     },
 
     /// Reference to an optimization group containing equivalent expressions

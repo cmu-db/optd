@@ -2,16 +2,14 @@
 
 pub mod filter;
 pub mod join;
-pub mod project;
 pub mod scan;
 
 use filter::Filter;
-use join::{Join, JoinType};
-use project::Project;
+use join::Join;
 use scan::Scan;
 use serde::Deserialize;
 
-use super::RelationChildren;
+use crate::values::OptdValue;
 
 /// Each variant of `LogicalOperator` represents a specific kind of logical operator.
 ///
@@ -27,20 +25,17 @@ use super::RelationChildren;
 /// [`LogicalExpression`]: crate::expression::LogicalExpression
 #[allow(missing_docs)]
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-pub enum LogicalOperator<Metadata, Relation, Scalar> {
-    Scan(Scan<Metadata, Scalar>),
+pub enum LogicalOperator<Value, Relation, Scalar> {
+    Scan(Scan<Value, Scalar>),
     Filter(Filter<Relation, Scalar>),
-    Project(Project<Relation, Scalar>),
-    Join(Join<Metadata, Relation, Scalar>),
+    Join(Join<Value, Relation, Scalar>),
 }
 
 /// The kind of logical operator.
-#[allow(missing_docs)]
-#[derive(Debug, Clone, sqlx::Type)]
+#[derive(Debug, Clone)]
 pub enum LogicalOperatorKind {
     Scan,
     Filter,
-    Project,
     Join,
 }
 
@@ -48,7 +43,7 @@ pub enum LogicalOperatorKind {
 pub fn scan<Relation, Scalar>(
     table_name: &str,
     predicate: Scalar,
-) -> LogicalOperator<Relation, Scalar> {
+) -> LogicalOperator<OptdValue, Relation, Scalar> {
     LogicalOperator::Scan(Scan::new(table_name, predicate))
 }
 
@@ -56,56 +51,39 @@ pub fn scan<Relation, Scalar>(
 pub fn filter<Relation, Scalar>(
     child: Relation,
     predicate: Scalar,
-) -> LogicalOperator<Relation, Scalar> {
+) -> LogicalOperator<OptdValue, Relation, Scalar> {
     LogicalOperator::Filter(Filter::new(child, predicate))
-}
-
-/// Creates a project logical operator.
-pub fn project<Relation, Scalar>(
-    child: Relation,
-    fields: Vec<Scalar>,
-) -> LogicalOperator<Relation, Scalar> {
-    LogicalOperator::Project(Project::new(child, fields))
 }
 
 /// Creates a join logical operator.
 pub fn join<Relation, Scalar>(
-    join_type: JoinType,
+    join_type: &str,
     left: Relation,
     right: Relation,
     condition: Scalar,
-) -> LogicalOperator<Relation, Scalar> {
-    LogicalOperator::Join(Join {
-        join_type,
-        left,
-        right,
-        condition,
-    })
+) -> LogicalOperator<OptdValue, Relation, Scalar> {
+    LogicalOperator::Join(Join::new(join_type, left, right, condition))
 }
 
-impl<Relation, Scalar> RelationChildren for LogicalOperator<Relation, Scalar>
+impl<Value, Relation, Scalar> LogicalOperator<Value, Relation, Scalar>
 where
+    Value: Clone,
     Relation: Clone,
     Scalar: Clone,
 {
-    type Relation = Relation;
-    type Scalar = Scalar;
-
-    fn children_relations(&self) -> Vec<Self::Relation> {
+    fn children_relations(&self) -> Vec<Relation> {
         match self {
-            LogicalOperator::Scan(scan) => scan.children_relations(),
-            LogicalOperator::Filter(filter) => filter.children_relations(),
-            LogicalOperator::Project(project) => project.children_relations(),
-            LogicalOperator::Join(join) => join.children_relations(),
+            LogicalOperator::Scan(_) => vec![],
+            LogicalOperator::Filter(filter) => vec![filter.child.clone()],
+            LogicalOperator::Join(join) => vec![join.left.clone(), join.right.clone()],
         }
     }
 
-    fn children_scalars(&self) -> Vec<Self::Scalar> {
+    fn children_scalars(&self) -> Vec<Scalar> {
         match self {
-            LogicalOperator::Scan(scan) => scan.children_scalars(),
-            LogicalOperator::Filter(filter) => filter.children_scalars(),
-            LogicalOperator::Project(project) => project.children_scalars(),
-            LogicalOperator::Join(join) => join.children_scalars(),
+            LogicalOperator::Scan(scan) => vec![scan.predicate.clone()],
+            LogicalOperator::Filter(filter) => vec![filter.predicate.clone()],
+            LogicalOperator::Join(join) => vec![join.condition.clone()],
         }
     }
 }

@@ -3,17 +3,18 @@
 //! Transforms logical plans through pattern matching and rule composition.
 //! Can compose with both logical and scalar rules, as well as analyzers.
 
-use super::scalar::ScalarTransformer;
-use crate::alexis_stuff::{
+use crate::{
     engine::{
         actions::{
             analyzers::{logical::LogicalAnalyzer, scalar::ScalarAnalyzer},
-            WithBinding,
+            BindAs,
         },
         patterns::scalar::ScalarPattern,
     },
     plans::logical::PartialLogicalPlanExpr,
 };
+
+use super::scalar::ScalarTransformer;
 
 /// A transformer for logical plans that produces new logical plans.
 #[derive(Clone)]
@@ -32,7 +33,7 @@ pub struct Match {
     pub pattern: ScalarPattern,
 
     /// Sequence of rule applications with their bindings
-    pub composition: Vec<WithBinding<Composition>>,
+    pub composition: Vec<BindAs<Composition>>,
 
     /// Expression constructing the output plan
     pub output: PartialLogicalPlanExpr,

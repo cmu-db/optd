@@ -1,15 +1,69 @@
 //! The storage module provides the storage interface for the optimizer.
 
+use sequence::Sequence;
+use serde::{Deserialize, Serialize};
+use sqlx::{pool::PoolConnection, SqliteConnection, SqlitePool};
 use std::ops::{Deref, DerefMut};
 
-use sequence::Sequence;
-use sqlx::{pool::PoolConnection, SqliteConnection, SqlitePool};
-
-use crate::memo::{
-    GroupId, LogicalExpressionId, PhysicalExpressionId, ScalarExpressionId, ScalarGroupId,
-};
-
 pub mod sequence;
+
+/// A unique identifier for a logical expression in the memo table.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type, Deserialize)]
+#[sqlx(transparent)]
+pub struct LogicalExpressionId(pub i64);
+
+/// A unique identifier for a physical expression in the memo table.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type)]
+#[sqlx(transparent)]
+pub struct PhysicalExpressionId(pub i64);
+
+/// A unique identifier for a scalar expression in the memo table.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type)]
+#[sqlx(transparent)]
+pub struct ScalarExpressionId(pub i64);
+
+/// A unique identifier for a group of relational expressions in the memo table.
+#[repr(transparent)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type, Serialize, Deserialize,
+)]
+#[sqlx(transparent)]
+pub struct RelationalGroupId(pub i64);
+
+/// A unique identifier for a group of scalar expressions in the memo table.
+#[repr(transparent)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type, Serialize, Deserialize,
+)]
+#[sqlx(transparent)]
+pub struct ScalarGroupId(pub i64);
+
+/// The exploration status of a group or a logical expression in the memo table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type)]
+#[repr(i32)]
+pub enum ExplorationStatus {
+    /// The group or the logical expression has not been explored.
+    Unexplored,
+    /// The group or the logical expression is currently being explored.
+    Exploring,
+    /// The group or the logical expression has been explored.
+    Explored,
+}
+
+/// The optimization status of a goal or a physical expression in the memo table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type)]
+#[repr(i32)]
+pub enum OptimizationStatus {
+    /// The group or the physical expression has not been optimized.
+    Unoptimized,
+    /// The group or the physical expression is currently being optimized.
+    Pending,
+    /// The group or the physical expression has been optimized.
+    Optimized,
+}
 
 /// A Storage manager that manages connections to the database.
 pub struct StorageManager {
@@ -70,10 +124,10 @@ impl Transaction<'_> {
     }
 
     /// Gets a new group id.
-    pub async fn new_group_id(&mut self) -> anyhow::Result<GroupId> {
+    pub async fn new_relational_group_id(&mut self) -> anyhow::Result<RelationalGroupId> {
         let id = self.current_value;
         self.current_value += 1;
-        Ok(GroupId(id))
+        Ok(RelationalGroupId(id))
     }
 
     /// Gets a new scalar group id.
@@ -102,5 +156,19 @@ impl Transaction<'_> {
         let id = self.current_value;
         self.current_value += 1;
         Ok(ScalarExpressionId(id))
+    }
+}
+
+impl Deref for Transaction<'_> {
+    type Target = SqliteConnection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.txn
+    }
+}
+
+impl DerefMut for Transaction<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.txn
     }
 }

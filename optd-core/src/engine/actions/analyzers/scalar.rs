@@ -3,20 +3,19 @@
 //! Scalar analyzers can only compose with other scalar analyzers
 //! to extract information from scalar expressions into user-defined types.
 
-use crate::alexis_stuff::{
-    engine::{actions::WithBinding, patterns::scalar::ScalarPattern},
-    types::OptdExpr,
+use crate::{
+    engine::{actions::BindAs, patterns::scalar::ScalarPattern},
+    values::OptdExpr,
 };
-use std::sync::Arc;
 
 /// Type alias for scalar analyzer composition with binding
-pub type ScalarComposition = (String, Arc<ScalarAnalyzer>);
+pub type ScalarComposition = (String, Box<ScalarAnalyzer>);
 
 /// An analyzer for scalar expressions that produces user-defined types.
 ///
 /// Scalar analyzers match against expression patterns and can compose
 /// with other scalar analyzers to extract information.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ScalarAnalyzer {
     /// Name identifying this analyzer
     pub name: String,
@@ -31,13 +30,13 @@ pub struct ScalarAnalyzer {
 /// - A pattern to identify relevant expression structures
 /// - A sequence of composed scalar analyzers
 /// - An expression to produce the final output type
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Match {
     /// Pattern to match against the input expression
     pub pattern: ScalarPattern,
 
     /// Sequence of analyzer applications with their bindings
-    pub composition: Vec<WithBinding<Composition>>,
+    pub composition: Vec<BindAs<Composition>>,
 
     /// Expression producing the final output type
     pub output: OptdExpr,
@@ -47,4 +46,4 @@ pub struct Match {
 ///
 /// Scalar analyzers can only compose with other scalar analyzers,
 /// so no enum needed.
-pub type Composition = Arc<ScalarAnalyzer>;
+pub type Composition = Box<ScalarAnalyzer>;

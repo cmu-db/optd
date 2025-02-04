@@ -3,8 +3,7 @@
 //! Provides a generic expression type for building both logical and scalar
 //! plans during optimization, with control flow and reference capabilities.
 
-use crate::types::OptdExpr;
-
+use crate::values::OptdExpr;
 
 pub mod logical;
 pub mod scalar;

@@ -2,15 +2,15 @@
 
 use serde::Deserialize;
 
-use crate::operator::relational::RelationChildren;
+use crate::values::OptdValue;
 
 /// Logical join operator that combines rows from two relations.
 ///
 /// Takes left and right relations (`Relation`) and joins their rows using a join condition
 /// (`Scalar`).
-#[derive(Clone)]
-pub struct Join<Metadata, Relation, Scalar> {
-    pub join_type: Metadata,
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Join<Value, Relation, Scalar> {
+    pub join_type: Value,
     pub left: Relation,
     /// The right input relation.
     pub right: Relation,
@@ -20,39 +20,14 @@ pub struct Join<Metadata, Relation, Scalar> {
     pub condition: Scalar,
 }
 
-// TODO(yuchen): add support for other join types (SHOULD BE STRING FOR NOW until we resolve enum stuff Alexis)
-/// The type of join.
-#[derive(Debug, Clone, Copy, PartialEq, sqlx::Type, Deserialize)]
-pub enum JoinType {
-    /// Inner join.
-    Inner,
-}
-
-impl<Relation, Scalar> Join<Relation, Scalar> {
+impl<Relation, Scalar> Join<OptdValue, Relation, Scalar> {
     /// Create a new join operator.
-    pub fn new(join_type: JoinType, left: Relation, right: Relation, condition: Scalar) -> Self {
+    pub fn new(join_type: &str, left: Relation, right: Relation, condition: Scalar) -> Self {
         Self {
-            join_type,
+            join_type: OptdValue::String(join_type.into()),
             left,
             right,
             condition,
         }
-    }
-}
-
-impl<Relation, Scalar> RelationChildren for Join<Relation, Scalar>
-where
-    Relation: Clone,
-    Scalar: Clone,
-{
-    type Relation = Relation;
-    type Scalar = Scalar;
-
-    fn children_relations(&self) -> Vec<Self::Relation> {
-        vec![self.left.clone(), self.right.clone()]
-    }
-
-    fn children_scalars(&self) -> Vec<Self::Scalar> {
-        vec![self.condition.clone()]
     }
 }

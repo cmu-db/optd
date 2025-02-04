@@ -1,17 +1,12 @@
-use crate::operator::relational::{logical::join::JoinType, RelationChildren};
+use serde::Deserialize;
 
 /// Merge join operator that matches rows based on equality conditions.
 ///
 /// Takes sorted left and right relations (`Relation`) and joins their rows using
 /// a join condition (`Scalar`). Both inputs must be sorted on join keys.
-#[derive(Clone)]
-<<<<<<< HEAD:optd-core/src/operators/relational/physical/join/merge_join.rs
-pub struct MergeJoin<Metadata, Relation, Scalar> {
-    pub join_type: Metadata,
-=======
-pub struct MergeJoin<Relation, Scalar> {
-    pub join_type: JoinType,
->>>>>>> origin/yuchen/initial-storage:optd-core/src/operator/relational/physical/join/merge_join.rs
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct MergeJoin<Value, Relation, Scalar> {
+    pub join_type: Value,
     /// Left sorted relation.
     pub left_sorted: Relation,
     /// Right sorted relation.
@@ -19,19 +14,19 @@ pub struct MergeJoin<Relation, Scalar> {
     pub condition: Scalar,
 }
 
-impl<Relation, Scalar> RelationChildren for MergeJoin<Relation, Scalar>
-where
-    Relation: Clone,
-    Scalar: Clone,
-{
-    type Relation = Relation;
-    type Scalar = Scalar;
-
-    fn children_relations(&self) -> Vec<Self::Relation> {
-        vec![self.left_sorted.clone(), self.right_sorted.clone()]
-    }
-
-    fn children_scalars(&self) -> Vec<Self::Scalar> {
-        vec![self.condition.clone()]
+impl<Relation, Scalar> MergeJoin<String, Relation, Scalar> {
+    /// Create a new merge join operator.
+    pub fn new(
+        join_type: &str,
+        left_sorted: Relation,
+        right_sorted: Relation,
+        condition: Scalar,
+    ) -> Self {
+        Self {
+            join_type: join_type.into(),
+            left_sorted,
+            right_sorted,
+            condition,
+        }
     }
 }

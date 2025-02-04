@@ -27,9 +27,9 @@ use serde::Deserialize;
 /// [`PartialLogicalPlan`]: crate::plan::partial_logical_plan::PartialLogicalPlan
 /// TODO(Alexis): deprecated doc
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-pub enum ScalarOperator<Metadata, Scalar> {
-    Constant(Constant<Metadata>),
-    ColumnRef(ColumnRef<Metadata>),
+pub enum ScalarOperator<Value, Scalar> {
+    Constant(Constant<Value>),
+    ColumnRef(ColumnRef<Value>),
     Add(Add<Scalar>),
     Equal(Equal<Scalar>),
 }
@@ -44,10 +44,17 @@ pub enum ScalarOperatorKind {
     Equal,
 }
 
-/// Trait for getting the children scalars of a scalar operator.
-pub trait ScalarChildren {
-    type Scalar;
-
-    /// Get the children scalars of this scalar operator.
-    fn children_scalars(&self) -> Vec<Self::Scalar>;
+impl<Value, Scalar> ScalarOperator<Value, Scalar>
+where
+    Value: Clone,
+    Scalar: Clone,
+{
+    pub fn children_scalars(&self) -> Vec<Scalar> {
+        match self {
+            ScalarOperator::Constant(_) => vec![],
+            ScalarOperator::ColumnRef(_) => vec![],
+            ScalarOperator::Add(add) => vec![add.left.clone(), add.right.clone()],
+            ScalarOperator::Equal(equal) => vec![equal.left.clone(), equal.right.clone()],
+        }
+    }
 }

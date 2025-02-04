@@ -20,4 +20,4 @@ pub mod transformers; // Transformation actions that produce new plans
 ///
 /// The String is the binding name, and T is the type of action being bound
 /// (either an analyzer or transformer).
-type WithBinding<T> = (String, Arc<T>);
+type BindAs<T> = (String, Arc<T>);

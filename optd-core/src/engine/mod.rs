@@ -21,7 +21,7 @@
 //! Extract information from plans:
 //! - LogicalAnalyzer: Analyzes logical plans
 //! - ScalarAnalyzer: Analyzes scalar expressions
-//! - Both produce `OptdType` as output
+//! - Both produce `OptdValue` as output
 //!
 //! ## Transformers
 //! Transform plans into new plans:

@@ -1,10 +1,10 @@
-use super::{scalar::ScalarPattern, typ::TypePattern};
+use super::{scalar::ScalarPattern, value::ValuePattern};
 
 /// Pattern for matching logical operators in a query plan.
 ///
 /// Logical patterns can match against both logical and scalar children,
 /// reflecting the structure of logical operators in the plan IR.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum LogicalPattern {
     /// Matches any logical subtree without binding.
     Any,
@@ -23,7 +23,7 @@ pub enum LogicalPattern {
         /// Operator type to match (e.g., "Join", "Filter")
         op_type: String,
         /// Patterns for matching operator metadata
-        content: Vec<Box<TypePattern>>,
+        content: Vec<Box<ValuePattern>>,
         /// Patterns for matching logical children
         logical_children: Vec<Box<LogicalPattern>>,
         /// Patterns for matching scalar children

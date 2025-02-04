@@ -1,18 +1,18 @@
 use serde::{Deserialize, Serialize};
 
-use super::ScalarOperator;
+use crate::values::OptdValue;
 
 /// Constants that can appear in scalar expressions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Constant<Metadata> {
-    value: Metadata,
+pub struct Constant<Value> {
+    value: Value,
 }
 
-// TODO(alexis): problemmmmm
-pub fn boolean<Scalar>(value: bool) -> ScalarOperator<Scalar> {
-    ScalarOperator::Constant(Constant::Boolean(value))
-}
-
-pub fn integer<Scalar>(value: i64) -> ScalarOperator<Scalar> {
-    ScalarOperator::Constant(Constant::Integer(value))
+impl Constant<OptdValue> {
+    /// Create a new constant (TODO(alexis): make enum later)
+    pub fn new(value: i64) -> Self {
+        Self {
+            value: OptdValue::Int64(value),
+        }
+    }
 }

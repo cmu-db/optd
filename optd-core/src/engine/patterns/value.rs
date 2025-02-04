@@ -1,11 +1,11 @@
-use crate::alexis_stuff::types::OptdExpr;
+use crate::values::OptdExpr;
 
 /// Pattern for matching metadata values and types.
 ///
 /// Type patterns are used within operator patterns to match against
 /// the metadata fields of operators.
-#[derive(Clone)]
-pub enum TypePattern {
+#[derive(Clone, Debug)]
+pub enum ValuePattern {
     /// Matches any type value
     Any,
 
