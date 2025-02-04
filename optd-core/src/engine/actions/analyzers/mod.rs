@@ -6,5 +6,6 @@
 //!
 //! Both use pattern matching and composition to produce an `OptdValue`.
 
+pub mod interpreter;
 pub mod logical;
 pub mod scalar;

@@ -18,4 +18,4 @@ pub mod transformers; // Transformation actions that produce new plans
 ///
 /// The String is the binding name, and T is the type of action being bound
 /// (either an analyzer or transformer).
-type BindAs<T> = (String, Box<T>);
+type BindAs<T> = (String, T);

@@ -7,5 +7,6 @@
 //! Each transformer uses pattern matching and rule composition to
 //! produce new plans during optimization.
 
+pub mod interpreter;
 pub mod logical;
 pub mod scalar;

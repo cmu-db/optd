@@ -3,6 +3,8 @@
 //! Scalar analyzers can only compose with other scalar analyzers
 //! to extract information from scalar expressions into user-defined types.
 
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
     engine::{actions::BindAs, patterns::scalar::ScalarPattern},
     values::OptdExpr,
@@ -46,4 +48,4 @@ pub struct Match {
 ///
 /// Scalar analyzers can only compose with other scalar analyzers,
 /// so no enum needed.
-pub type Composition = Box<ScalarAnalyzer>;
+pub type Composition = Rc<RefCell<ScalarAnalyzer>>;

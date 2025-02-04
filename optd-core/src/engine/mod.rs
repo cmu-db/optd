@@ -37,5 +37,4 @@
 //! - Build complex transformations from simple ones
 
 pub mod actions; // Analyzers and transformers
-pub mod interpreter; // TODO(alexis) add doc
 pub mod patterns; // Pattern matching system
