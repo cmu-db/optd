@@ -5,8 +5,6 @@ pub enum Constant {
     String(String),
     /// Integer constant (e.g. 42).
     Integer(i64),
-    /// Floating point constant (e.g. 3.14).
-    Float(f64),
     /// Boolean constant (e.g. true, false).
     Boolean(bool),
 }

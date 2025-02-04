@@ -40,11 +40,6 @@ impl ConversionContext<'_> {
                         val.clone().unwrap(),
                     )))
                 }
-                datafusion::scalar::ScalarValue::Float64(val) => {
-                    Arc::new(ScalarOperator::<ScalarPlan>::Constant(Constant::Float(
-                        val.clone().unwrap(),
-                    )))
-                }
                 datafusion::scalar::ScalarValue::Int64(val) => Arc::new(
                     ScalarOperator::<ScalarPlan>::Constant(Constant::Integer(val.clone().unwrap())),
                 ),

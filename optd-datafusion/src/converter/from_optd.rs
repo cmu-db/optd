@@ -147,7 +147,6 @@ impl ConversionContext<'_> {
                 let value = match constant {
                     Constant::String(value) => ScalarValue::Utf8(Some(value.clone())),
                     Constant::Integer(value) => ScalarValue::Int64(Some(value.clone())),
-                    Constant::Float(value) => ScalarValue::Float64(Some(value.clone())),
                     Constant::Boolean(value) => ScalarValue::Boolean(Some(value.clone())),
                 };
                 Arc::new(Literal::new(value))
