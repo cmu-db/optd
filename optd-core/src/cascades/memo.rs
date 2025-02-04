@@ -7,43 +7,56 @@
 //! - Grouping logically equivalent expressions together to enable rule-based optimization
 //!
 
-use super::expressions::{LogicalExpression, ScalarExpression};
+use super::{
+    expressions::{LogicalExpression, LogicalExpressionId, ScalarExpression, ScalarExpressionId},
+    groups::{RelationalGroupId, ScalarGroupId},
+};
 use anyhow::Result;
 
 #[trait_variant::make(Send)]
 pub trait Memoize: Send + Sync + 'static {
-    type RelationalGroupId : Copy;
-    type ScalarGroupId : Copy;
-    type LogicalExpressionId : Copy;
-    type ScalarExpressionId: Copy;
-    
     async fn get_all_logical_exprs_in_group(
         &self,
-        group_id: Self::RelationalGroupId,
-    ) -> Result<Vec<(Self::LogicalExpressionId, LogicalExpression)>>;
+        group_id: RelationalGroupId,
+    ) -> Result<Vec<(LogicalExpressionId, LogicalExpression)>>;
 
     // Returns the group id of new group if merge happened.
     async fn add_logical_expr_to_group(
         &self,
         logical_expr: &LogicalExpression,
-        group_id: Self::RelationalGroupId,
-    ) -> Result<Self::RelationalGroupId>;
+        group_id: RelationalGroupId,
+    ) -> Result<RelationalGroupId>;
 
     // Returns the group id of group if already exists, otherwise creates a new group.
-    async fn add_logical_expr(&self, logical_expr: &LogicalExpression) -> Self::RelationalGroupId;
+    async fn add_logical_expr(&self, logical_expr: &LogicalExpression)
+        -> Result<RelationalGroupId>;
 
     async fn get_all_scalar_exprs_in_group(
         &self,
-        group_id: Self::ScalarGroupId,
-    ) -> Result<Vec<(Self::ScalarGroupId, ScalarExpression)>>;
+        group_id: ScalarGroupId,
+    ) -> Result<Vec<(ScalarExpressionId, ScalarExpression)>>;
 
     // Returns the group id of new group if merge happened.
     async fn add_scalar_expr_to_group(
         &self,
         scalar_expr: &ScalarExpression,
-        group_id: Self::ScalarGroupId,
-    ) -> Result<Self::ScalarGroupId>;
+        group_id: ScalarGroupId,
+    ) -> Result<ScalarGroupId>;
 
     // Returns the group id of group if already exists, otherwise creates a new group.
-    async fn add_scalar_expr(&self, scalar_expr: &ScalarExpression) -> Result<Self::ScalarGroupId>;
+    async fn add_scalar_expr(&self, scalar_expr: &ScalarExpression) -> Result<ScalarGroupId>;
+
+    // Merges two relational groups and returns the new group id.
+    async fn merge_relation_group(
+        &self,
+        from: RelationalGroupId,
+        to: RelationalGroupId,
+    ) -> Result<RelationalGroupId>;
+
+    // Merges two scalar groups and returns the new group id.
+    async fn merge_scalar_group(
+        &self,
+        from: ScalarGroupId,
+        to: ScalarGroupId,
+    ) -> Result<ScalarGroupId>;
 }

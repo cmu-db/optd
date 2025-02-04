@@ -5,7 +5,7 @@ CREATE TABLE scalar_constants (
     -- The group id of the constant.
     group_id BIGINT NOT NULL,
     -- The value of the constant.
-    payload JSONB NOT NULL,
+    value JSON NOT NULL,
 
     FOREIGN KEY (scalar_expression_id) REFERENCES scalar_expressions (id)
     ON UPDATE CASCADE ON DELETE CASCADE,
@@ -14,7 +14,7 @@ CREATE TABLE scalar_constants (
 );
 
 -- Unique index on constant's data fields.
-CREATE UNIQUE INDEX scalar_constants_data_fields ON scalar_constants (payload);
+CREATE UNIQUE INDEX scalar_constants_data_fields ON scalar_constants (value);
 
 CREATE TRIGGER update_scalar_constants_scalar_group_ids
 AFTER UPDATE OF representative_group_id ON scalar_groups

@@ -1,10 +1,12 @@
 //! Defines the type system and expressions for OPTD-DSL.
 //! This module contains only the type definitions without any execution logic.
 
+use serde::{Deserialize, Serialize};
+
 pub mod interpreter;
 
 /// All values supported by the OPTD-DSL.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub enum OptdValue {
     /// Primitive Types
     Int64(i64),

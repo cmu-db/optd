@@ -6,7 +6,7 @@ CREATE TABLE scans (
     group_id BIGINT NOT NULL,
     -- The name of the table.
     -- TODO(yuchen): changes this to table id.
-    table_name TEXT NOT NULL,
+    table_name JSON NOT NULL,
     -- An optional filter expression for predicate pushdown into scan operators.
     predicate_group_id BIGINT NOT NULL,
     FOREIGN KEY (logical_expression_id) REFERENCES logical_expressions (id)

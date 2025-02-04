@@ -8,7 +8,7 @@ use crate::values::OptdValue;
 ///
 /// Takes left and right relations (`Relation`) and joins their rows using a join condition
 /// (`Scalar`).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
 pub struct Join<Value, Relation, Scalar> {
     pub join_type: Value,
     pub left: Relation,

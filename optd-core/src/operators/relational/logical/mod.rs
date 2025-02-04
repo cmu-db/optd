@@ -32,7 +32,7 @@ pub enum LogicalOperator<Value, Relation, Scalar> {
 }
 
 /// The kind of logical operator.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::Type)]
 pub enum LogicalOperatorKind {
     Scan,
     Filter,
@@ -71,7 +71,7 @@ where
     Relation: Clone,
     Scalar: Clone,
 {
-    fn children_relations(&self) -> Vec<Relation> {
+    pub fn children_relations(&self) -> Vec<Relation> {
         match self {
             LogicalOperator::Scan(_) => vec![],
             LogicalOperator::Filter(filter) => vec![filter.child.clone()],
@@ -79,7 +79,7 @@ where
         }
     }
 
-    fn children_scalars(&self) -> Vec<Scalar> {
+    pub fn children_scalars(&self) -> Vec<Scalar> {
         match self {
             LogicalOperator::Scan(scan) => vec![scan.predicate.clone()],
             LogicalOperator::Filter(filter) => vec![filter.predicate.clone()],

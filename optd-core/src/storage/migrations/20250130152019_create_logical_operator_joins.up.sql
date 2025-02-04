@@ -5,7 +5,7 @@ CREATE TABLE joins (
     -- The group id of the join.
     group_id BIGINT NOT NULL,
     -- The type of the join.
-    join_type TEXT NOT NULL,
+    join_type JSON NOT NULL,
     -- The left input relation.
     left_group_id BIGINT NOT NULL,
     -- The right input relation.
