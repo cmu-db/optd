@@ -1,14 +1,13 @@
-use std::sync::Arc;
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use async_recursion::async_recursion;
 use datafusion::{
-    arrow::datatypes::SchemaRef,
+    arrow::datatypes::{Schema, SchemaRef},
+    common::JoinType,
     datasource::source_as_provider,
     logical_expr::Operator,
     physical_plan::{
-        expressions::{BinaryExpr, Column, Literal},
-        projection::ProjectionExec,
-        ExecutionPlan, PhysicalExpr,
+        expressions::{BinaryExpr, Column, Literal}, joins::utils::{ColumnIndex, JoinFilter}, projection::ProjectionExec, ExecutionPlan, PhysicalExpr
     },
     scalar::ScalarValue,
 };
@@ -74,8 +73,55 @@ impl ConversionContext<'_> {
                         as Arc<dyn ExecutionPlan + 'static>,
                 )
             }
+            PhysicalOperator::NestedLoopJoin(nested_loop_join) => {
+                let left_exec = self
+                    .conv_optd_to_df_relational(&nested_loop_join.outer)
+                    .await?;
+                let right_exec = self
+                    .conv_optd_to_df_relational(&nested_loop_join.inner)
+                    .await?;
+                let filter_schema = {
+                    let fields = left_exec
+                        .schema()
+                        .fields()
+                        .into_iter()
+                        .chain(right_exec.schema().fields().into_iter())
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    Schema::new_with_metadata(fields, HashMap::new())
+                };
+
+                let physical_expr = self.conv_optd_to_df_scalar(
+                    &nested_loop_join.condition,
+                    &Arc::new(filter_schema.clone()),
+                );
+
+                let join_type = JoinType::from_str(&nested_loop_join.join_type)?;
+
+                let mut column_idxs = vec![];
+                for i in 0..left_exec.schema().fields().len() {
+                    column_idxs.push(ColumnIndex {
+                        index: i,
+                        side: datafusion::common::JoinSide::Left,
+                    });
+                }
+                for i in 0..right_exec.schema().fields().len() {
+                    column_idxs.push(ColumnIndex {
+                        index: i,
+                        side: datafusion::common::JoinSide::Right,
+                    });
+                }
+
+                Ok(Arc::new(
+                    datafusion::physical_plan::joins::NestedLoopJoinExec::try_new(
+                        left_exec,
+                        right_exec,
+                        Some(JoinFilter::new(physical_expr, column_idxs, filter_schema)),
+                        &join_type,
+                    )?,
+                ) as Arc<dyn ExecutionPlan + 'static>)
+            }
             PhysicalOperator::HashJoin(_hash_join) => todo!(),
-            PhysicalOperator::NestedLoopJoin(_nested_loop_join) => todo!(),
             PhysicalOperator::SortMergeJoin(_merge_join) => todo!(),
         }
     }
@@ -113,6 +159,12 @@ impl ConversionContext<'_> {
                 let left = self.conv_optd_to_df_scalar(&add.left, context);
                 let right = self.conv_optd_to_df_scalar(&add.right, context);
                 let op = Operator::Plus;
+                Arc::new(BinaryExpr::new(left, op, right)) as Arc<dyn PhysicalExpr>
+            }
+            ScalarOperator::Equal(equal) => {
+                let left = self.conv_optd_to_df_scalar(&equal.left, context);
+                let right = self.conv_optd_to_df_scalar(&equal.right, context);
+                let op = Operator::Eq;
                 Arc::new(BinaryExpr::new(left, op, right)) as Arc<dyn PhysicalExpr>
             }
         }

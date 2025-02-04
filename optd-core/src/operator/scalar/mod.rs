@@ -3,11 +3,13 @@ pub mod add;
 pub mod and;
 pub mod column_ref;
 pub mod constants;
+pub mod equal;
 
 use add::Add;
 use and::And;
 use column_ref::ColumnRef;
 use constants::Constant;
+use equal::Equal;
 
 /// Each variant of `ScalarOperator` represents a specific kind of scalar operator.
 ///
@@ -26,4 +28,5 @@ pub enum ScalarOperator<Scalar> {
     Add(Add<Scalar>),
     ColumnRef(ColumnRef),
     Constant(Constant),
+    Equal(Equal<Scalar>),
 }
