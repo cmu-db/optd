@@ -7,7 +7,10 @@ use datafusion::{
     datasource::source_as_provider,
     logical_expr::Operator,
     physical_plan::{
-        expressions::{BinaryExpr, Column, Literal}, joins::utils::{ColumnIndex, JoinFilter}, projection::ProjectionExec, ExecutionPlan, PhysicalExpr
+        expressions::{BinaryExpr, Column, Literal},
+        joins::utils::{ColumnIndex, JoinFilter},
+        projection::ProjectionExec,
+        ExecutionPlan, PhysicalExpr,
     },
     scalar::ScalarValue,
 };
@@ -96,7 +99,6 @@ impl ConversionContext<'_> {
                     &Arc::new(filter_schema.clone()),
                 );
 
-                println!("Join type is {:?}", nested_loop_join.join_type);
                 let join_type = JoinType::from_str(&nested_loop_join.join_type)?;
 
                 let mut column_idxs = vec![];

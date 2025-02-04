@@ -116,7 +116,6 @@ impl ConversionContext<'_> {
                 Arc::new(op)
             }
             DatafusionLogicalPlan::Join(join) => {
-                println!("{:#?}", join);
                 let mut join_cond = Vec::new();
                 for (left, right) in &join.on {
                     let left = self.conv_df_to_optd_scalar(left, join.left.schema(), 0);

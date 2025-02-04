@@ -5,7 +5,8 @@ use optd_core::{
     operator::relational::{
         logical::LogicalOperator,
         physical::{
-            filter::filter::Filter, join::nested_loop_join::NestedLoopJoin, project::project::Project, scan::table_scan::TableScan, PhysicalOperator
+            filter::filter::Filter, join::nested_loop_join::NestedLoopJoin,
+            project::project::Project, scan::table_scan::TableScan, PhysicalOperator,
         },
     },
     plan::{logical_plan::LogicalPlan, physical_plan::PhysicalPlan},
@@ -37,12 +38,14 @@ impl OptdOptimizer {
                 child: self.mock_optimize(project.child.clone()),
                 fields: project.fields.clone(),
             })),
-            LogicalOperator::Join(join) => Arc::new(PhysicalOperator::NestedLoopJoin(NestedLoopJoin {
-                join_type: join.join_type.clone(),
-                outer: self.mock_optimize(join.left.clone()),
-                inner: self.mock_optimize(join.right.clone()),
-                condition: join.condition.clone(),
-            })),
+            LogicalOperator::Join(join) => {
+                Arc::new(PhysicalOperator::NestedLoopJoin(NestedLoopJoin {
+                    join_type: join.join_type.clone(),
+                    outer: self.mock_optimize(join.left.clone()),
+                    inner: self.mock_optimize(join.right.clone()),
+                    condition: join.condition.clone(),
+                }))
+            }
         };
         PhysicalPlan { node: node }
     }
