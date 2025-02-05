@@ -7,7 +7,7 @@ use crate::values::{OptdExpr, OptdValue};
 
 /// Evaluates an OptdExpr to an OptdValue value using provided bindings.
 impl OptdExpr {
-    pub fn interpret(&self, bindings: &HashMap<String, OptdValue>) -> OptdValue {
+    pub fn evaluate(&self, bindings: &HashMap<String, OptdValue>) -> OptdValue {
         match self {
             OptdExpr::Value(val) => val.clone(),
 
@@ -19,25 +19,25 @@ impl OptdExpr {
                 cond,
                 then,
                 otherwise,
-            } => match cond.interpret(bindings) {
-                OptdValue::Bool(true) => then.interpret(bindings),
-                OptdValue::Bool(false) => otherwise.interpret(bindings),
+            } => match cond.evaluate(bindings) {
+                OptdValue::Bool(true) => then.evaluate(bindings),
+                OptdValue::Bool(false) => otherwise.evaluate(bindings),
                 _ => panic!("IfThenElse condition must be boolean"),
             },
 
             OptdExpr::Eq { left, right } => {
-                OptdValue::Bool(left.interpret(bindings) == right.interpret(bindings))
+                OptdValue::Bool(left.evaluate(bindings) == right.evaluate(bindings))
             }
 
             OptdExpr::Lt { left, right } => {
-                match (left.interpret(bindings), right.interpret(bindings)) {
+                match (left.evaluate(bindings), right.evaluate(bindings)) {
                     (OptdValue::Int64(l), OptdValue::Int64(r)) => OptdValue::Bool(l < r),
                     _ => panic!("Lt requires integer operands"),
                 }
             }
 
             OptdExpr::Gt { left, right } => {
-                match (left.interpret(bindings), right.interpret(bindings)) {
+                match (left.evaluate(bindings), right.evaluate(bindings)) {
                     (OptdValue::Int64(l), OptdValue::Int64(r)) => OptdValue::Bool(l > r),
                     _ => panic!("Gt requires integer operands"),
                 }
@@ -45,7 +45,7 @@ impl OptdExpr {
 
             OptdExpr::Add { left, right } => {
                 // TODO(alexis): overflow checks
-                match (left.interpret(bindings), right.interpret(bindings)) {
+                match (left.evaluate(bindings), right.evaluate(bindings)) {
                     (OptdValue::Int64(l), OptdValue::Int64(r)) => OptdValue::Int64(l + r),
                     _ => panic!("Add requires integer operands"),
                 }
@@ -53,7 +53,7 @@ impl OptdExpr {
 
             OptdExpr::Sub { left, right } => {
                 // TODO(alexis): underflow checks
-                match (left.interpret(bindings), right.interpret(bindings)) {
+                match (left.evaluate(bindings), right.evaluate(bindings)) {
                     (OptdValue::Int64(l), OptdValue::Int64(r)) => OptdValue::Int64(l - r),
                     _ => panic!("Sub requires integer operands"),
                 }
@@ -61,7 +61,7 @@ impl OptdExpr {
 
             OptdExpr::Mul { left, right } => {
                 // TODO(alexis): overflow checks
-                match (left.interpret(bindings), right.interpret(bindings)) {
+                match (left.evaluate(bindings), right.evaluate(bindings)) {
                     (OptdValue::Int64(l), OptdValue::Int64(r)) => OptdValue::Int64(l * r),
                     _ => panic!("Mul requires integer operands"),
                 }
@@ -69,7 +69,7 @@ impl OptdExpr {
 
             OptdExpr::Div { left, right } => {
                 // TODO(alexis): div by 0 checks
-                match (left.interpret(bindings), right.interpret(bindings)) {
+                match (left.evaluate(bindings), right.evaluate(bindings)) {
                     (OptdValue::Int64(l), OptdValue::Int64(r)) => {
                         if r == 0 {
                             panic!("Division by zero");
@@ -81,20 +81,20 @@ impl OptdExpr {
             }
 
             OptdExpr::And { left, right } => {
-                match (left.interpret(bindings), right.interpret(bindings)) {
+                match (left.evaluate(bindings), right.evaluate(bindings)) {
                     (OptdValue::Bool(l), OptdValue::Bool(r)) => OptdValue::Bool(l && r),
                     _ => panic!("And requires boolean operands"),
                 }
             }
 
             OptdExpr::Or { left, right } => {
-                match (left.interpret(bindings), right.interpret(bindings)) {
+                match (left.evaluate(bindings), right.evaluate(bindings)) {
                     (OptdValue::Bool(l), OptdValue::Bool(r)) => OptdValue::Bool(l || r),
                     _ => panic!("Or requires boolean operands"),
                 }
             }
 
-            OptdExpr::Not(expr) => match expr.interpret(bindings) {
+            OptdExpr::Not(expr) => match expr.evaluate(bindings) {
                 OptdValue::Bool(b) => OptdValue::Bool(!b),
                 _ => panic!("Not requires boolean operand"),
             },
@@ -119,7 +119,7 @@ mod tests {
     fn test_basic_values() {
         let bindings = test_bindings();
         assert_eq!(
-            OptdExpr::Value(OptdValue::Int64(42)).interpret(&bindings),
+            OptdExpr::Value(OptdValue::Int64(42)).evaluate(&bindings),
             OptdValue::Int64(42)
         );
     }
@@ -128,7 +128,7 @@ mod tests {
     fn test_references() {
         let bindings = test_bindings();
         assert_eq!(
-            OptdExpr::Ref("x".to_string()).interpret(&bindings),
+            OptdExpr::Ref("x".to_string()).evaluate(&bindings),
             OptdValue::Int64(5)
         );
     }
@@ -143,7 +143,7 @@ mod tests {
                 left: Box::new(OptdExpr::Ref("x".to_string())),
                 right: Box::new(OptdExpr::Ref("y".to_string()))
             }
-            .interpret(&bindings),
+            .evaluate(&bindings),
             OptdValue::Int64(8)
         );
 
@@ -153,7 +153,7 @@ mod tests {
                 left: Box::new(OptdExpr::Ref("x".to_string())),
                 right: Box::new(OptdExpr::Ref("y".to_string()))
             }
-            .interpret(&bindings),
+            .evaluate(&bindings),
             OptdValue::Int64(15)
         );
     }
@@ -168,13 +168,13 @@ mod tests {
                 left: Box::new(OptdExpr::Ref("flag".to_string())),
                 right: Box::new(OptdExpr::Value(OptdValue::Bool(true)))
             }
-            .interpret(&bindings),
+            .evaluate(&bindings),
             OptdValue::Bool(true)
         );
 
         // NOT
         assert_eq!(
-            OptdExpr::Not(Box::new(OptdExpr::Ref("flag".to_string()))).interpret(&bindings),
+            OptdExpr::Not(Box::new(OptdExpr::Ref("flag".to_string()))).evaluate(&bindings),
             OptdValue::Bool(false)
         );
     }
@@ -192,6 +192,6 @@ mod tests {
             otherwise: Box::new(OptdExpr::Value(OptdValue::Int64(0))),
         };
 
-        assert_eq!(expr.interpret(&bindings), OptdValue::Int64(1));
+        assert_eq!(expr.evaluate(&bindings), OptdValue::Int64(1));
     }
 }
