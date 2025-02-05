@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use crate::{
-    cascades::groups::ScalarGroupId,
     operators::{
         relational::logical::{filter::Filter, join::Join, scan::Scan, LogicalOperator},
         scalar::{

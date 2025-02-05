@@ -1,29 +1,33 @@
-use crate::operators::scalar::ScalarOperatorKind;
+//! Pattern matching for scalar operators.
 
 use super::value::ValuePattern;
+use crate::operators::scalar::ScalarOperatorKind;
 
-/// Pattern for matching scalar expressions in a query plan.
+/// A pattern for matching scalar operators in a query plan.
 ///
-/// Scalar patterns can only match scalar children, reflecting the
-/// more limited structure of scalar operators in the plan IR.
+/// Supports matching against the operator type, its values, and scalar
+/// children. Unlike logical patterns, scalar patterns can only match
+/// scalar children.
 #[derive(Clone, Debug)]
 pub enum ScalarPattern {
-    /// Matches any scalar expression without binding
+    /// Matches any scalar operator.
     Any,
 
-    /// Negates a pattern match
-    Not(Box<ScalarPattern>),
+    /// Binds a matched pattern to a name.
+    Bind {
+        /// Name to bind the matched subtree to
+        binding: String,
+        /// Pattern to match
+        pattern: Box<ScalarPattern>,
+    },
 
-    /// Binds a matched scalar expression to a name
-    Bind(String, Box<ScalarPattern>),
-
-    /// Matches a specific scalar operator type with its content and children
+    /// Matches a specific scalar operator.
     Operator {
-        /// Operator type to match (e.g., "Add", "Constant")
+        /// Type of scalar operator to match
         op_type: ScalarOperatorKind,
-        /// Patterns for matching operator values
+        /// Value patterns for operator content
         content: Vec<Box<ValuePattern>>,
-        /// Patterns for matching scalar children
+        /// Patterns for scalar children
         scalar_children: Vec<Box<ScalarPattern>>,
     },
 }

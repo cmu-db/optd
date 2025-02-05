@@ -3,43 +3,18 @@
 //! Transforms logical plans through pattern matching and rule composition.
 //! Can compose with both logical and scalar rules, as well as analyzers.
 
-use std::{cell::RefCell, rc::Rc};
-
+use super::scalar::ScalarTransformer;
 use crate::{
     engine::{
         actions::{
             analyzers::{logical::LogicalAnalyzer, scalar::ScalarAnalyzer},
-            BindAs,
+            Action, Match as GenericMatch,
         },
         patterns::scalar::ScalarPattern,
     },
     plans::logical::PartialLogicalPlanExpr,
 };
-
-use super::scalar::ScalarTransformer;
-
-/// A transformer for logical plans that produces new logical plans.
-#[derive(Clone)]
-pub struct LogicalTransformer {
-    /// Name identifying this transformer
-    pub name: String,
-
-    /// Sequence of possible matches to try
-    pub matches: Vec<Match>,
-}
-
-/// A single pattern match attempt within a logical transformer.
-#[derive(Clone)]
-pub struct Match {
-    /// Pattern to match against the input plan
-    pub pattern: ScalarPattern,
-
-    /// Sequence of rule applications with their bindings
-    pub composition: Vec<BindAs<Composition>>,
-
-    /// Expression constructing the output plan
-    pub output: PartialLogicalPlanExpr,
-}
+use std::{cell::RefCell, rc::Rc};
 
 /// Types of rules that can be composed in a logical transformation.
 ///
@@ -48,11 +23,16 @@ pub struct Match {
 /// - Scalar transformers
 /// - Logical analyzers
 /// - Scalar analyzers
-/// Need Rc + RefCell to allow for recursive composition.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Composition {
     ScalarTransformer(Rc<RefCell<ScalarTransformer>>),
     ScalarAnalyzer(Rc<RefCell<ScalarAnalyzer>>),
     LogicalTransformer(Rc<RefCell<LogicalTransformer>>),
     LogicalAnalyzer(Rc<RefCell<LogicalAnalyzer>>),
 }
+
+/// A single logical transformer match.
+pub type Match = GenericMatch<ScalarPattern, Composition, PartialLogicalPlanExpr>;
+
+/// A transformer for logical plans that produces new logical plans.
+pub type LogicalTransformer = Action<Match>;

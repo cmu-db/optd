@@ -3,53 +3,30 @@
 //! Logical analyzers can compose with both logical and scalar analyzers
 //! to extract information from logical plans into user-defined types.
 
-use std::{cell::RefCell, rc::Rc};
-
+use super::scalar::ScalarAnalyzer;
 use crate::{
-    engine::{actions::BindAs, patterns::logical::LogicalPattern},
+    engine::{
+        actions::{
+            transformers::{logical::LogicalTransformer, scalar::ScalarTransformer},
+            Action, Match as GenericMatch,
+        },
+        patterns::logical::LogicalPattern,
+    },
     values::OptdExpr,
 };
-
-use super::scalar::ScalarAnalyzer;
-
-/// An analyzer for logical plans that produces user-defined types.
-///
-/// Logical analyzers match against plan patterns and can compose with
-/// both logical and scalar analyzers to extract information.
-#[derive(Clone, Debug)]
-pub struct LogicalAnalyzer {
-    /// Name identifying this analyzer
-    pub name: String,
-
-    /// Sequence of pattern matches to try
-    pub matches: Vec<Match>,
-}
-
-/// A single pattern match attempt within a logical analyzer.
-///
-/// Each match combines:
-/// - A pattern to identify relevant plan structures
-/// - A sequence of composed analyzers to extract information
-/// - An expression to produce the final output type
-#[derive(Clone, Debug)]
-pub struct Match {
-    /// Pattern to match against the input plan
-    pub pattern: LogicalPattern,
-
-    /// Sequence of analyzer applications with their bindings
-    pub composition: Vec<BindAs<Composition>>,
-
-    /// Expression producing the final output type
-    pub output: OptdExpr,
-}
+use std::{cell::RefCell, rc::Rc};
 
 /// Types of analyzers that can be composed in logical analysis.
-/// Need Rc + RefCell to allow for recursive composition.
 #[derive(Clone, Debug)]
 pub enum Composition {
-    /// Compose with another logical analyzer
     LogicalAnalyzer(Rc<RefCell<LogicalAnalyzer>>),
-
-    /// Compose with a scalar analyzer
     ScalarAnalyzer(Rc<RefCell<ScalarAnalyzer>>),
+    ScalarTransformer(Rc<RefCell<ScalarTransformer>>),
+    LogicalTransformer(Rc<RefCell<LogicalTransformer>>),
 }
+
+/// A single logical analyzer match.
+pub type Match = GenericMatch<LogicalPattern, Composition, OptdExpr>;
+
+/// An analyzer for logical plans that produces user-defined types.
+pub type LogicalAnalyzer = Action<Match>;

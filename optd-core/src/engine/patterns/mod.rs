@@ -4,7 +4,7 @@
 //! to match against different parts of a query plan:
 //! - LogicalPattern: Matches logical operators and their structure
 //! - ScalarPattern: Matches scalar expressions and their structure
-//! - TypePattern: Matches metadata values and their content
+//! - ValuePattern: Matches OPTD values and their content
 //!
 //! The pattern system mirrors the structure of the plan IR while providing
 //! additional matching capabilities like wildcards and bindings.

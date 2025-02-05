@@ -2,13 +2,37 @@ use serde::Deserialize;
 
 /// A unique identifier for a group of relational expressions in the memo table.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type, serde::Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    sqlx::Type,
+    serde::Serialize,
+    Deserialize,
+)]
 #[sqlx(transparent)]
 pub struct RelationalGroupId(pub i64);
 
 /// A unique identifier for a group of scalar expressions in the memo table.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type, serde::Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    sqlx::Type,
+    serde::Serialize,
+    Deserialize,
+)]
 #[sqlx(transparent)]
 pub struct ScalarGroupId(pub i64);
 

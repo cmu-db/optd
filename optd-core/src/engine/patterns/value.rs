@@ -1,26 +1,25 @@
+//! Pattern matching for operator values.
+
 use crate::values::OptdExpr;
 
-/// Pattern for matching metadata values and types.
+/// A pattern for matching operator metadata values.
 ///
-/// Type patterns are used within operator patterns to match against
-/// the metadata fields of operators.
+/// Used within operator patterns to match metadata fields. Type bindings
+/// are always leaf nodes as they match atomic values.
 #[derive(Clone, Debug)]
 pub enum ValuePattern {
-    /// Matches any type value
+    /// Matches any value.
     Any,
 
-    /// Binds a matched type value to a name.
-    ///
-    /// Note: Type bindings are always leaf nodes as they match
-    /// atomic metadata values.
-    Bind(String, Box<ValuePattern>),
+    /// Binds a matched value to a name.
+    Bind {
+        /// Name to bind the matched value to
+        binding: String,
+    },
 
-    /// Matches based on an OPTD expression evaluation.
-    ///
-    /// Allows complex conditions on type values using the
-    /// full OPTD expression system.
+    /// Matches using an OPTD expression.
     Match {
-        /// Expression to evaluate for matching
+        /// Expression to evaluate
         expr: Box<OptdExpr>,
     },
 }

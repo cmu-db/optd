@@ -1,32 +1,35 @@
-use super::{scalar::ScalarPattern, value::ValuePattern};
+//! Pattern matching for logical operators.
 
-/// Pattern for matching logical operators in a query plan.
+use super::{scalar::ScalarPattern, value::ValuePattern};
+use crate::operators::relational::logical::LogicalOperatorKind;
+
+/// A pattern for matching logical operators in a query plan.
 ///
-/// Logical patterns can match against both logical and scalar children,
-/// reflecting the structure of logical operators in the plan IR.
+/// Supports matching against the operator type, its values, and both
+/// logical and scalar children. Patterns can be composed to match
+/// complex subtrees and bind matched components for reuse.
 #[derive(Clone, Debug)]
 pub enum LogicalPattern {
-    /// Matches any logical subtree without binding.
+    /// Matches any logical operator.
     Any,
 
-    /// Negates a pattern match.
-    Not(Box<LogicalPattern>),
+    /// Binds a matched pattern to a name.
+    Bind {
+        /// Name to bind the matched subtree to
+        binding: String,
+        /// Pattern to match
+        pattern: Box<LogicalPattern>,
+    },
 
-    /// Binds a matched subtree to a name for later reference.
-    ///
-    /// The bound value can be referenced in rule applications
-    /// and transformations.
-    Bind(String, Box<LogicalPattern>),
-
-    /// Matches a specific logical operator type with its content and children.
+    /// Matches a specific logical operator.
     Operator {
-        /// Operator type to match (e.g., "Join", "Filter")
-        op_type: String,
-        /// Patterns for matching operator values
+        /// Type of logical operator to match
+        op_type: LogicalOperatorKind,
+        /// Value patterns for operator content
         content: Vec<Box<ValuePattern>>,
-        /// Patterns for matching logical children
+        /// Patterns for logical children
         logical_children: Vec<Box<LogicalPattern>>,
-        /// Patterns for matching scalar children
+        /// Patterns for scalar children
         scalar_children: Vec<Box<ScalarPattern>>,
     },
 }

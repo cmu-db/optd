@@ -3,51 +3,27 @@
 //! Scalar analyzers can only compose with other scalar analyzers
 //! to extract information from scalar expressions into user-defined types.
 
-use std::{cell::RefCell, rc::Rc};
-
 use crate::{
-    engine::{actions::BindAs, patterns::scalar::ScalarPattern},
+    engine::{
+        actions::{transformers::scalar::ScalarTransformer, Action, Match as GenericMatch},
+        patterns::scalar::ScalarPattern,
+    },
     values::OptdExpr,
 };
+use std::{cell::RefCell, rc::Rc};
 
-/// Type alias for scalar analyzer composition with binding
-pub type ScalarComposition = (String, Box<ScalarAnalyzer>);
+/// Types of analyzers that can be composed in scalar analysis.
+///
+/// Scalar analyzers can only compose with other scalar analyzers
+/// and transformers.
+#[derive(Clone, Debug)]
+pub enum Composition {
+    ScalarAnalyzer(Rc<RefCell<ScalarAnalyzer>>),
+    ScalarTransformer(Rc<RefCell<ScalarTransformer>>),
+}
+
+/// A single scalar analyzer match.
+pub type Match = GenericMatch<ScalarPattern, Composition, OptdExpr>;
 
 /// An analyzer for scalar expressions that produces user-defined types.
-///
-/// Scalar analyzers match against expression patterns and can compose
-/// with other scalar analyzers to extract information.
-#[derive(Clone, Debug)]
-pub struct ScalarAnalyzer {
-    /// Name identifying this analyzer
-    pub name: String,
-
-    /// Sequence of pattern matches to try
-    pub matches: Vec<Match>,
-}
-
-/// A single pattern match attempt within a scalar analyzer.
-///
-/// Each match combines:
-/// - A pattern to identify relevant expression structures
-/// - A sequence of composed scalar analyzers
-/// - An expression to produce the final output type
-#[derive(Clone, Debug)]
-pub struct Match {
-    /// Pattern to match against the input expression
-    pub pattern: ScalarPattern,
-
-    /// Sequence of analyzer applications with their bindings
-    pub composition: Vec<BindAs<Composition>>,
-
-    /// Expression producing the final output type
-    pub output: OptdExpr,
-}
-
-/// Type alias for composable scalar analyzers.
-///
-/// Scalar analyzers can only compose with other scalar analyzers,
-/// so no enum needed.
-/// 
-/// Need Rc + RefCell to allow for recursive composition.
-pub type Composition = Rc<RefCell<ScalarAnalyzer>>;
+pub type ScalarAnalyzer = Action<Match>;
