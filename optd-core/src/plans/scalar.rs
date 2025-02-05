@@ -20,7 +20,7 @@ use std::sync::Arc;
 /// Contains a complete tree of scalar operators where all children
 /// are also fully materialized. Used for final expression representation
 /// after optimization is complete.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ScalarPlan {
     operator: ScalarOperator<OptdValue, Arc<ScalarPlan>>,
 }

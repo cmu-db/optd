@@ -24,7 +24,7 @@ use std::sync::Arc;
 /// Contains a complete tree of logical operators where all children
 /// (both logical and scalar) are fully materialized. Used for final
 /// plan representation after optimization is complete.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LogicalPlan {
     operator: LogicalOperator<OptdValue, Arc<LogicalPlan>, Arc<ScalarPlan>>,
 }

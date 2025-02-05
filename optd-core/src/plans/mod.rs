@@ -12,7 +12,7 @@ pub mod scalar;
 ///
 /// Generic over the type of plan being constructed (logical or scalar)
 /// to provide a unified expression system for both plan types.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PartialPlanExpr<Plan> {
     /// Conditional plan construction
     IfThenElse {
