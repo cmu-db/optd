@@ -84,7 +84,7 @@ pub async fn ingest_partial_scalar_plan(
             }
         },
         PartialScalarPlan::UnMaterialized(group_id) => {
-            return Ok(*group_id);
+            return Ok(*group_id); // Need to do nothing.
         }
     }
 }
@@ -167,25 +167,9 @@ async fn match_any_partial_scalar_plan(
 
 #[cfg(test)]
 mod tests {
-
-    use crate::operators::scalar::{constants::Constant, ScalarOperatorKind};
-    use anyhow::Ok;
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
     use super::*;
-    use crate::{
-        engine::{
-            actions::analyzers::{
-                interpreter::scalar_analyze,
-                scalar::{Match, ScalarAnalyzer},
-            },
-            patterns::{scalar::ScalarPattern, value::ValuePattern},
-        },
-        storage::memo::SqliteMemo,
-        test_utils::*,
-        values::{OptdExpr, OptdValue},
-    };
+    use crate::{storage::memo::SqliteMemo, test_utils::*};
+    use anyhow::Ok;
 
     #[tokio::test]
     async fn test_ingest_partial_logical_plan() -> anyhow::Result<()> {
@@ -209,86 +193,6 @@ mod tests {
         let result: Arc<PartialLogicalPlan> =
             match_any_partial_logical_plan(&memo, group_id).await?;
         assert_eq!(result, partial_logical_plan);
-        Ok(())
-    }
-
-    pub fn create_constant_folder() -> Rc<RefCell<ScalarAnalyzer>> {
-        let root = Rc::new(RefCell::new(ScalarAnalyzer {
-            name: "constant_fold".to_string(),
-            matches: vec![], // Temporarily empty, will populate later
-        }));
-
-        // Now mutate `matches` to set up self-references
-        {
-            let mut root_mut = root.borrow_mut();
-            root_mut.matches = vec![
-                Match {
-                    pattern: ScalarPattern::Operator {
-                        op_type: ScalarOperatorKind::Add,
-                        content: vec![],
-                        scalar_children: vec![
-                            Box::new(ScalarPattern::Bind(
-                                "left".to_string(),
-                                Box::new(ScalarPattern::Any),
-                            )),
-                            Box::new(ScalarPattern::Bind(
-                                "right".to_string(),
-                                Box::new(ScalarPattern::Any),
-                            )),
-                        ],
-                    },
-                    composition: vec![
-                        ("left".to_string(), Rc::clone(&root)),
-                        ("right".to_string(), Rc::clone(&root)),
-                    ],
-                    output: OptdExpr::Add {
-                        left: Box::new(OptdExpr::Ref("left".to_string())),
-                        right: Box::new(OptdExpr::Ref("right".to_string())),
-                    },
-                },
-                Match {
-                    pattern: ScalarPattern::Operator {
-                        op_type: ScalarOperatorKind::Constant,
-                        content: vec![Box::new(ValuePattern::Bind(
-                            "val".to_string(),
-                            Box::new(ValuePattern::Any),
-                        ))],
-                        scalar_children: vec![],
-                    },
-                    composition: vec![],
-                    output: OptdExpr::Ref("val".to_string()),
-                },
-            ];
-        }
-
-        root
-    }
-
-    #[tokio::test]
-    async fn test_constant_fold() -> anyhow::Result<()> {
-        /*let memo = SqliteMemo::new("sqlite://memo.db").await?;
-        let group_id = ingest_partial_scalar_plan(&memo, &partial_scalar_plan).await?;*/
-        let partial_scalar_plan = PartialScalarPlan::PartialMaterialized {
-            operator: ScalarOperator::Add(Add {
-                left: add(add(int64(5), int64(3)), int64(3)),
-                right: int64(1),
-            }),
-        };
-
-        let folder = create_constant_folder();
-        let folded = scalar_analyze(partial_scalar_plan, &folder.borrow())?.unwrap();
-        assert_eq!(folded, OptdValue::Int64(12));
-
-        /*let new_plan = PartialScalarPlan::PartialMaterialized {
-                    operator: ScalarOperator::Constant(Constant {
-                        value: folded.clone(),
-                    }),
-                };
-        */
-        /*let folded_group_id = ingest_partial_scalar_plan(&memo, &new_plan).await?;
-
-        assert_ne!(group_id, folded_group_id);*/
-
         Ok(())
     }
 }

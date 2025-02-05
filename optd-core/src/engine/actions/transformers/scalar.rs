@@ -3,6 +3,8 @@
 //! Transforms scalar expressions through pattern matching and rule composition.
 //! Can compose with scalar rules and analyzers only.
 
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
     engine::{
         actions::{analyzers::scalar::ScalarAnalyzer, BindAs},
@@ -39,8 +41,9 @@ pub struct Match {
 /// Scalar transformers can only use:
 /// - Other scalar transformers
 /// - Scalar analyzers
+/// Need Rc + RefCell to allow for recursive composition.
 #[derive(Clone)]
 pub enum Composition {
-    ScalarTransformer(Box<ScalarTransformer>),
-    ScalarAnalyzer(Box<ScalarAnalyzer>),
+    ScalarTransformer(Rc<RefCell<ScalarTransformer>>),
+    ScalarAnalyzer(Rc<RefCell<ScalarAnalyzer>>),
 }

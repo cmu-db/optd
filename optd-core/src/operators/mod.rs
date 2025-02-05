@@ -19,8 +19,8 @@
 //! - Initial logical/scalar plan creation
 //! - Optimization process with group references
 //! - Pattern matching for transformations
+//!
+//! TODO(alexis): This *entire* module  will be codegened from the OPTD-DSL.
 
 pub mod relational;
 pub mod scalar;
-
-// TODO(alexis): codegened impls here.

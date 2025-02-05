@@ -37,4 +37,5 @@
 //! - Build complex transformations from simple ones
 
 pub mod actions; // Analyzers and transformers
-pub mod patterns; // Pattern matching system
+pub mod interpreter;
+pub mod patterns; // Pattern matching system // Interpreter implementation

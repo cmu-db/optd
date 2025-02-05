@@ -48,4 +48,6 @@ pub struct Match {
 ///
 /// Scalar analyzers can only compose with other scalar analyzers,
 /// so no enum needed.
+/// 
+/// Need Rc + RefCell to allow for recursive composition.
 pub type Composition = Rc<RefCell<ScalarAnalyzer>>;

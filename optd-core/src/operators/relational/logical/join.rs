@@ -1,22 +1,19 @@
 //! A logical join.
 
+use super::LogicalOperator;
+use crate::values::OptdValue;
 use serde::Deserialize;
 
-use crate::values::OptdValue;
-
 /// Logical join operator that combines rows from two relations.
-///
-/// Takes left and right relations (`Relation`) and joins their rows using a join condition
-/// (`Scalar`).
-#[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Join<Value, Relation, Scalar> {
+    /// The type of join (inner, left, right).
     pub join_type: Value,
+    /// The left input relation.
     pub left: Relation,
     /// The right input relation.
     pub right: Relation,
-    /// The join expression denoting the join condition that links the two input relations.
-    ///
-    /// For example, a join operation could have a condition on `t1.id = t2.id` (an equijoin).
+    /// The join condition.
     pub condition: Scalar,
 }
 
@@ -30,4 +27,14 @@ impl<Relation, Scalar> Join<OptdValue, Relation, Scalar> {
             condition,
         }
     }
+}
+
+/// Creates a join logical operator.
+pub fn join<Relation, Scalar>(
+    join_type: &str,
+    left: Relation,
+    right: Relation,
+    condition: Scalar,
+) -> LogicalOperator<OptdValue, Relation, Scalar> {
+    LogicalOperator::Join(Join::new(join_type, left, right, condition))
 }

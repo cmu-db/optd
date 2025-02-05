@@ -3,6 +3,8 @@
 //! Transforms logical plans through pattern matching and rule composition.
 //! Can compose with both logical and scalar rules, as well as analyzers.
 
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
     engine::{
         actions::{
@@ -46,10 +48,11 @@ pub struct Match {
 /// - Scalar transformers
 /// - Logical analyzers
 /// - Scalar analyzers
+/// Need Rc + RefCell to allow for recursive composition.
 #[derive(Clone)]
 pub enum Composition {
-    ScalarTransformer(Box<ScalarTransformer>),
-    ScalarAnalyzer(Box<ScalarAnalyzer>),
-    LogicalTransformer(Box<LogicalTransformer>),
-    LogicalAnalyzer(Box<LogicalAnalyzer>),
+    ScalarTransformer(Rc<RefCell<ScalarTransformer>>),
+    ScalarAnalyzer(Rc<RefCell<ScalarAnalyzer>>),
+    LogicalTransformer(Rc<RefCell<LogicalTransformer>>),
+    LogicalAnalyzer(Rc<RefCell<LogicalAnalyzer>>),
 }

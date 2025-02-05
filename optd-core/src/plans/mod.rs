@@ -5,7 +5,6 @@
 
 use crate::values::OptdExpr;
 
-pub mod interpreter;
 pub mod logical;
 pub mod scalar;
 
@@ -18,7 +17,7 @@ pub enum PartialPlanExpr<Plan> {
     /// Conditional plan construction
     IfThenElse {
         /// Condition (must be an OPTD expression)
-        cond: Box<OptdExpr>,
+        cond: OptdExpr,
         /// Plan to construct if condition is true
         then: Box<PartialPlanExpr<Plan>>,
         /// Plan to construct if condition is false

@@ -3,6 +3,8 @@
 //! Logical analyzers can compose with both logical and scalar analyzers
 //! to extract information from logical plans into user-defined types.
 
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
     engine::{actions::BindAs, patterns::logical::LogicalPattern},
     values::OptdExpr,
@@ -42,11 +44,12 @@ pub struct Match {
 }
 
 /// Types of analyzers that can be composed in logical analysis.
+/// Need Rc + RefCell to allow for recursive composition.
 #[derive(Clone, Debug)]
 pub enum Composition {
     /// Compose with another logical analyzer
-    LogicalAnalyzer(Box<LogicalAnalyzer>),
+    LogicalAnalyzer(Rc<RefCell<LogicalAnalyzer>>),
 
     /// Compose with a scalar analyzer
-    ScalarAnalyzer(Box<ScalarAnalyzer>),
+    ScalarAnalyzer(Rc<RefCell<ScalarAnalyzer>>),
 }

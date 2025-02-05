@@ -1,13 +1,15 @@
+//! A physical filter operator.
+
 use serde::Deserialize;
 
-/// Physical filter operator that applies a boolean predicate to filter input rows.
-///
-/// Takes a child operator (`Relation`) providing input rows and a predicate expression
-/// (`Scalar`) that evaluates to true/false. Only rows where predicate is true
-/// are emitted.
+use crate::{operators::relational::physical::PhysicalOperator, values::OptdValue};
+
+/// A physical operator that filters input rows based on a predicate.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct PhysicalFilter<Relation, Scalar> {
+    /// The input relation.
     pub child: Relation,
+    /// The filter predicate.
     pub predicate: Scalar,
 }
 
@@ -16,4 +18,12 @@ impl<Relation, Scalar> PhysicalFilter<Relation, Scalar> {
     pub fn new(child: Relation, predicate: Scalar) -> Self {
         Self { child, predicate }
     }
+}
+
+/// Creates a filter physical operator.
+pub fn filter<Relation, Scalar>(
+    child: Relation,
+    predicate: Scalar,
+) -> PhysicalOperator<OptdValue, Relation, Scalar> {
+    PhysicalOperator::Filter(PhysicalFilter::new(child, predicate))
 }

@@ -12,10 +12,6 @@ use crate::{
     values::OptdValue,
 };
 
-pub fn groupd_id(id: ScalarGroupId) -> Arc<PartialScalarPlan> {
-    Arc::new(PartialScalarPlan::UnMaterialized(id))
-}
-
 pub fn int64(value: i64) -> Arc<PartialScalarPlan> {
     Arc::new(PartialScalarPlan::PartialMaterialized {
         operator: ScalarOperator::Constant(Constant::new(OptdValue::Int64(value))),

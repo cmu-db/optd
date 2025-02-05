@@ -1,19 +1,18 @@
+//! A physical hash join operator.
+
+use crate::{operators::relational::physical::PhysicalOperator, values::OptdValue};
 use serde::Deserialize;
 
-use crate::values::OptdValue;
-
-/// Hash-based join operator that matches rows based on equality conditions.
-///
-/// Takes left and right input relations (`Relation`) and joins their rows using
-/// a join condition (`Scalar`). Builds hash table from build side (right)
-/// and probes with rows from probe side (left).
+/// A physical operator that performs a hash-based join.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct HashJoin<Value, Relation, Scalar> {
+    /// The type of join.
     pub join_type: Value,
     /// Left relation that probes hash table.
     pub probe_side: Relation,
     /// Right relation used to build hash table.
     pub build_side: Relation,
+    /// The join condition.
     pub condition: Scalar,
 }
 
@@ -32,4 +31,14 @@ impl<Relation, Scalar> HashJoin<OptdValue, Relation, Scalar> {
             condition,
         }
     }
+}
+
+/// Creates a hash join physical operator.
+pub fn hash_join<Relation, Scalar>(
+    join_type: &str,
+    probe_side: Relation,
+    build_side: Relation,
+    condition: Scalar,
+) -> PhysicalOperator<OptdValue, Relation, Scalar> {
+    PhysicalOperator::HashJoin(HashJoin::new(join_type, probe_side, build_side, condition))
 }
