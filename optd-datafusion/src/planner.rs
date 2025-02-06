@@ -21,9 +21,32 @@ use datafusion::{
 
 use crate::converter::ConversionContext;
 
+/// A mock optimizer for testing purposes.
 pub struct OptdOptimizer {}
 
 impl OptdOptimizer {
+    /// A mock optimization function for testing purposes.
+    ///
+    /// This function takes a logical plan, and for each node in the logical plan, it will
+    /// recursively traverse the node and its children and replace the node with a physical
+    /// operator. The physical operator is chosen based on the type of the logical operator.
+    /// For example, if the logical operator is a scan, the physical operator will be a
+    /// TableScan, if the logical operator is a filter, the physical operator will be a
+    /// Filter, and so on.
+    ///
+    /// The physical operators are chosen in a way that they mirror the structure of the
+    /// logical plan, but they are not actually optimized in any way. This is useful for
+    /// testing purposes, as it allows us to test the structure of the physical plan without
+    /// having to worry about the actual optimization process.
+    ///
+    /// The function returns a PhysicalPlan, which is a struct that contains the root node of
+    /// the physical plan.
+    ///
+    /// # Arguments
+    /// * `logical_plan` - The logical plan to optimize.
+    ///
+    /// # Returns
+    /// * `PhysicalPlan` - The optimized physical plan.
     pub fn mock_optimize(&self, logical_plan: LogicalPlan) -> PhysicalPlan {
         let node = match &*logical_plan.node {
             LogicalOperator::Scan(scan) => Arc::new(PhysicalOperator::TableScan(TableScan {
@@ -51,17 +74,53 @@ impl OptdOptimizer {
     }
 }
 
+/// A struct that implements the `QueryPlanner` trait for the `OptdQueryPlanner`.
+/// This trait is used to create a physical plan for a given logical plan.
+/// The physical plan is created by converting the logical plan to an OptD logical plan,
+/// and then running the optd optimizer on the logical plan and then converting it back.
+/// This is the entry point for OptD.
 pub struct OptdQueryPlanner {
     pub optimizer: Arc<OptdOptimizer>,
 }
 
 impl OptdQueryPlanner {
+    /// Creates a new instance of `OptdQueryPlanner` with the given optimizer.
+    ///
+    /// The optimizer is cloned and stored in an `Arc` so that it can be safely shared
+    /// across threads.
+    ///
+    /// # Arguments
+    /// * `optimizer` - The optimizer to use for creating the physical plan.
+    ///
+    /// # Returns
+    /// * `OptdQueryPlanner` - A new instance of `OptdQueryPlanner` with the given optimizer.
     pub fn new(optimizer: OptdOptimizer) -> Self {
         Self {
             optimizer: Arc::new(optimizer),
         }
     }
 
+    /// This function is the entry point for the physical planner. It will attempt
+    /// to optimize the logical plan using the optd optimizer. If the logical plan
+    /// is a DML/DDL operation, it will fall back to the datafusion planner.
+    ///
+    /// The steps of this function are the following:
+    ///
+    /// 1. Check if the logical plan is a DML/DDL operation. If it is, fall back
+    ///    to the datafusion planner.
+    /// 2. Convert the logical plan to an OptD logical plan.
+    /// 3. Run the optd optimizer on the logical plan.
+    /// 4. Convert the physical plan to a physical plan that can be executed by
+    ///    datafusion.
+    ///
+    /// # Arguments
+    /// * `logical_plan` - The logical plan in Datafusion's type system to optimize.
+    /// * `session_state` - The session state to use for creating the physical plan.
+    ///
+    ///
+    /// # Returns
+    /// * `anyhow::Result<Arc<dyn ExecutionPlan>>` - The physical plan that can be executed by
+    ///   datafusion.
     async fn create_physical_plan_inner(
         &self,
         logical_plan: &DatafusionLogicalPlan,
@@ -92,6 +151,7 @@ impl OptdQueryPlanner {
 }
 
 impl std::fmt::Debug for OptdQueryPlanner {
+    /// Writes the `OptdQueryPlanner` struct to a formatter, usually for debugging purposes.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "OptdQueryPlanner")
     }
@@ -99,6 +159,29 @@ impl std::fmt::Debug for OptdQueryPlanner {
 
 #[async_trait]
 impl QueryPlanner for OptdQueryPlanner {
+    /// This function is the entry point for the physical planner. It calls the inner function
+    /// `create_physical_plan_inner` to optimize the logical plan using the optd optimizer. If the logical plan
+    /// is a DML/DDL operation, it will fall back to the datafusion planner.
+    ///
+    /// The steps of this function are the following:
+    ///
+    /// 1. Check if the logical plan is a DML/DDL operation. If it is, fall back
+    ///    to the datafusion planner.
+    /// 2. Convert the logical plan to an OptD logical plan.
+    /// 3. Run the optd optimizer on the logical plan.
+    /// 4. Convert the physical plan to a physical plan that can be executed by
+    ///    datafusion.
+    ///
+    ///
+    /// # Arguments
+    /// * `datafusion_logical_plan` - The logical plan in Datafusion's type system to optimize.
+    /// * `session_state` - The session state to use for creating the physical plan.
+    ///
+    /// # Returns
+    /// * `datafusion::common::Result<Arc<dyn ExecutionPlan>>` - The physical plan that can be executed by
+    ///   datafusion.
+    ///
+    /// Also see [`OptdQueryPlanner::create_physical_plan`]
     async fn create_physical_plan(
         &self,
         datafusion_logical_plan: &DatafusionLogicalPlan,
