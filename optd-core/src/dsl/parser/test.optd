@@ -1,0 +1,144 @@
+// Shared properties for logical operators
+logical props(schema_len: i64)
+
+scalar ColumnRef(idx: i64)
+scalar Const(val: i64)
+scalar Eq(left: scalar, right: scalar)
+scalar Divide(left: scalar, right: scalar)
+scalar Not(input: scalar)
+
+// logical Operators
+logical Filter(input: logical, cond: scalar) derive {
+  schema_len = input.schema_len
+}
+
+logical Project (input: logical, exprs: [scalar]) derive {
+  schema_len = exprs.len,
+  other = expr2
+}
+
+logical Join(
+    left: logical,
+    right: logical,
+    type: String,
+    cond: scalar
+) derive {
+  schema_len = left.schema_len + right.schema_len
+}
+
+logical Sort(input: logical, keys: [scalar]) derive {
+  schema_len = input.schema_len
+}
+
+logical Aggregate(input: logical, group_keys: [scalar], aggs: [scalar]) derive {
+  schema_len = group_keys.len + aggs.len
+}
+
+// Rules demonstrating all language features
+@rule(scalar)
+def constant_fold(expr: scalar): scalar =
+    match expr
+        case op @ Add(left: _, Const(bla)) => Const(x + y),
+        case op @ Multiply(left: Const(x), right: Const(y)) => {
+            Const(x * y)
+        },
+        case And(ms) => {
+            val folded = ms.map(ms);
+            And(folded)
+        },
+        case _ => expr
+
+def rewrite_column_refs(expr: scalar, index_map: map[i64 -> i64]): scalar =
+    match expr
+        case ColumnRef(i) => ColumnRef(index_map.get(i)),
+        case _ => expr.with_children(child => rewrite_column_refs(child, index_map))
+
+@rule(scalar)
+def has_refs_in_range(expr: scalar, start: i64, end: i64): Bool =
+    match expr {
+        case ColumnRef(i) => i >= start && i < end,
+        case _ => expr.children().any(child => has_refs_in_range(child, start, end))
+    }
+
+@rule(logical)
+def join_commute(expr: logical): logical =
+    match expr
+        case Join("Inner", left, right, cond) => {
+            val left_len = l.schema_len;
+            val right_len = r.schema_len;
+            
+            val refs_remap = 
+                ((0..left_len).map(i => (i, i + right_len)) ++
+                (0..right_len).map(i => (left_len + i, i)))
+                .to_map();
+            
+            Join("Inner", r, l, rewrite_column_refs(c, refs_remap))
+        }
+
+@rule(logical)
+def join_associate(expr: logical): logical =
+    match expr
+        case Join("Inner", Join("Inner", a, b, c1), c, c2) =>
+            val a_len = a.schema_len;
+            val b_len = b.schema_len;
+            val c_len = c.schema_len;
+            if !has_refs_in_range(c2, 0, a_len) then
+                val inner_map = (a_len..(a_len + b_len + c_len))
+                    .map(i => (i, i - a_len))
+                    .to_map();
+                Join("Inner", a, Join("Inner", b, c, rewrite_column_refs(c2, inner_map)), c1)
+            else
+                fail("Cannot rewrite: outer join condition references left relation")
+
+@rule(logical)
+def complex_project(expr: logical): logical =
+    match expr
+        case project @ Project(rel, es) => {
+            if es.len == 0 then
+                fail("Empty projection list")
+            else {
+                val mapped = es.map(e => constant_fold(e));
+                val filtered = mapped.filter(e => 
+                    match e
+                        case Const(_) => false,
+                        case _ => true
+                );
+                if filtered.len == 0 then
+                    fail("All expressions folded to constants")
+                else 
+                    Project(rel, filtered)
+            }
+        }
+
+@rule(scalar)
+def simplify_not(expr: scalar): scalar =
+    match expr
+        case Not(Not(x)) => x,
+        case Not(Eq(l, r)) => {
+            val new_left = simplify_not(l);
+            val new_right = simplify_not(r);
+            Not(Eq(new_left, new_right))
+        },
+        case _ => expr
+
+@rule(logical)
+def push_filter_down(expr: logical): logical =
+    match expr
+        case Filter(Project(rel, es), cond) => {
+            val new_cond = rewrite_column_refs(cond, bla);
+            Project(Filter(rel, new_cond), es)
+        },
+        case _ => expr
+
+def optimize_sort_keys(expr: logical): logical =
+    match expr
+        case Sort(rel, ks) => {
+            val simplified = ks.map(k => constant_fold(k));
+            val filtered = simplified.filter(k => 
+                match k
+                    case Const(_) => false,
+                    case _ => true
+            );
+            Sort(rel, filtered)
+        },
+        case _ => expr
