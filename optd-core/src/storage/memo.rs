@@ -64,7 +64,7 @@ impl SqliteMemo {
     /// Begin a new transaction.
     pub(super) async fn begin(&self) -> anyhow::Result<Transaction<'_>> {
         let txn = self.db.begin().await?;
-        Ok(Transaction::new(txn).await?)
+        Transaction::new(txn).await
     }
 }
 
@@ -81,7 +81,7 @@ impl Memoize for SqliteMemo {
 
         let mut txn = self.begin().await?;
         let representative_group_id = self
-            .get_representative_group_id(&mut *txn, group_id)
+            .get_representative_group_id(&mut txn, group_id)
             .await?;
         let logical_exprs: Vec<LogicalExprRecord> =
             sqlx::query_as(&self.get_all_logical_exprs_in_group_query)
@@ -129,7 +129,7 @@ impl Memoize for SqliteMemo {
 
         let mut txn = self.begin().await?;
         let representative_group_id = self
-            .get_representative_scalar_group_id(&mut *txn, group_id)
+            .get_representative_scalar_group_id(&mut txn, group_id)
             .await?;
         let scalar_exprs: Vec<ScalarExprRecord> =
             sqlx::query_as(&self.get_all_scalar_exprs_in_group_query)
@@ -168,7 +168,7 @@ impl Memoize for SqliteMemo {
         to: RelationalGroupId,
     ) -> Result<RelationalGroupId> {
         let mut txn = self.begin().await?;
-        self.set_representative_group_id(&mut *txn, from, to)
+        self.set_representative_group_id(&mut txn, from, to)
             .await?;
         txn.commit().await?;
         Ok(to)
@@ -180,7 +180,7 @@ impl Memoize for SqliteMemo {
         to: ScalarGroupId,
     ) -> Result<ScalarGroupId> {
         let mut txn = self.begin().await?;
-        self.set_representative_scalar_group_id(&mut *txn, from, to)
+        self.set_representative_scalar_group_id(&mut txn, from, to)
             .await?;
         txn.commit().await?;
         Ok(to)
@@ -275,13 +275,13 @@ impl SqliteMemo {
                     ScalarOperatorKind::Constant,
                 )
                 .await?;
-                let group_id = sqlx::query_scalar("INSERT INTO scalar_constants (scalar_expression_id, group_id, value) VALUES ($1, $2, $3) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                
+                sqlx::query_scalar("INSERT INTO scalar_constants (scalar_expression_id, group_id, value) VALUES ($1, $2, $3) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(scalar_expr_id)
                     .bind(group_id)
                     .bind(serde_json::to_string(&constant)?)
                     .fetch_one(&mut *txn)
-                    .await?;
-                group_id
+                    .await?
             }
             ScalarExpression::ColumnRef(column_ref) => {
                 Self::insert_into_scalar_expressions(
@@ -291,13 +291,13 @@ impl SqliteMemo {
                     ScalarOperatorKind::ColumnRef,
                 )
                 .await?;
-                let group_id = sqlx::query_scalar("INSERT INTO scalar_column_refs (scalar_expression_id, group_id, column_index) VALUES ($1, $2, $3) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                
+                sqlx::query_scalar("INSERT INTO scalar_column_refs (scalar_expression_id, group_id, column_index) VALUES ($1, $2, $3) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(scalar_expr_id)
                     .bind(group_id)
                     .bind(serde_json::to_string(&column_ref.column_index)?)
                     .fetch_one(&mut *txn)
-                    .await?;
-                group_id
+                    .await?
             }
             ScalarExpression::Add(add) => {
                 Self::insert_into_scalar_expressions(
@@ -310,14 +310,14 @@ impl SqliteMemo {
                 println!("add: {:?}", add);
                 println!("scalar_expr_id: {:?}", scalar_expr_id);
                 println!("group_id: {:?}", group_id);
-                let group_id = sqlx::query_scalar("INSERT INTO scalar_adds (scalar_expression_id, group_id, left_group_id, right_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                
+                sqlx::query_scalar("INSERT INTO scalar_adds (scalar_expression_id, group_id, left_group_id, right_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(scalar_expr_id)
                     .bind(group_id)
                     .bind(add.left)
                     .bind(add.right)
                     .fetch_one(&mut *txn)
-                    .await?;
-                group_id
+                    .await?
             }
             ScalarExpression::Equal(equal) => {
                 Self::insert_into_scalar_expressions(
@@ -327,14 +327,14 @@ impl SqliteMemo {
                     ScalarOperatorKind::Equal,
                 )
                 .await?;
-                let group_id = sqlx::query_scalar("INSERT INTO scalar_equals (scalar_expression_id, group_id, left_group_id, right_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                
+                sqlx::query_scalar("INSERT INTO scalar_equals (scalar_expression_id, group_id, left_group_id, right_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(scalar_expr_id)
                     .bind(group_id)
                     .bind(equal.left)
                     .bind(equal.right)
                     .fetch_one(&mut *txn)
-                    .await?;
-                group_id
+                    .await?
             }
         };
 
@@ -417,14 +417,14 @@ impl SqliteMemo {
                     LogicalOperatorKind::Scan,
                 )
                 .await?;
-                let group_id= sqlx::query_scalar("INSERT INTO scans (logical_expression_id, group_id, table_name, predicate_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                
+                sqlx::query_scalar("INSERT INTO scans (logical_expression_id, group_id, table_name, predicate_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(logical_expr_id)
                     .bind(group_id)
                     .bind(serde_json::to_string(&scan.table_name)?)
                     .bind(scan.predicate)
                     .fetch_one(&mut *txn)
-                    .await?;
-                group_id
+                    .await?
             }
             LogicalExpression::Filter(filter) => {
                 Self::insert_into_logical_expressions(
@@ -434,14 +434,14 @@ impl SqliteMemo {
                     LogicalOperatorKind::Filter,
                 )
                 .await?;
-                let group_id = sqlx::query_scalar("INSERT INTO filters (logical_expression_id, group_id, child_group_id, predicate_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                
+                sqlx::query_scalar("INSERT INTO filters (logical_expression_id, group_id, child_group_id, predicate_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(logical_expr_id)
                     .bind(group_id)
                     .bind(filter.child)
                     .bind(filter.predicate)
                     .fetch_one(&mut *txn)
-                    .await?;
-                group_id
+                    .await?
             }
             LogicalExpression::Join(join) => {
                 Self::insert_into_logical_expressions(
@@ -451,7 +451,8 @@ impl SqliteMemo {
                     LogicalOperatorKind::Join,
                 )
                 .await?;
-                let group_id = sqlx::query_scalar("INSERT INTO joins (logical_expression_id, group_id, join_type, left_group_id, right_group_id, condition_group_id) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                
+                sqlx::query_scalar("INSERT INTO joins (logical_expression_id, group_id, join_type, left_group_id, right_group_id, condition_group_id) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(logical_expr_id)
                     .bind(group_id)
                     .bind(serde_json::to_string(&join.join_type)?)
@@ -459,8 +460,7 @@ impl SqliteMemo {
                     .bind(join.right)
                     .bind(join.condition)
                     .fetch_one(&mut *txn)
-                    .await?;
-                group_id
+                    .await?
             }
         };
 

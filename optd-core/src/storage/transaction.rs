@@ -41,13 +41,13 @@ impl Transaction<'_> {
     pub async fn new(
         mut txn: sqlx::Transaction<'_, sqlx::Sqlite>,
     ) -> anyhow::Result<Transaction<'_>> {
-        let current_value = Sequence::value(&mut *txn).await?;
+        let current_value = Sequence::value(&mut txn).await?;
         Ok(Transaction { txn, current_value })
     }
 
     /// Commit the transaction.
     pub async fn commit(mut self) -> anyhow::Result<()> {
-        Sequence::set_value(&mut *self.txn, self.current_value).await?;
+        Sequence::set_value(&mut self.txn, self.current_value).await?;
         self.txn.commit().await?;
         Ok(())
     }
@@ -98,7 +98,7 @@ impl Deref for Transaction<'_> {
 
 impl DerefMut for Transaction<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.txn
+        &mut self.txn
     }
 }
 
