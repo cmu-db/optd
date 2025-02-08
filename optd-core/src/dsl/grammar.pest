@@ -3,7 +3,7 @@ COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 // Basic identifiers and literals
 identifier = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
-number = @{ ASCII_DIGIT+ }
+number = @{ "-"? ~ ASCII_DIGIT+ }
 string = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
 
 // Types
@@ -40,8 +40,6 @@ props_block = {
     ~ "}"
 }
 
-// A derive property block contains assignments to the logical properties, 
-// and can contain as many expressions as needed (but no rule definition allowed.)
 derive_props_block = {
     derive_props_annot ~ NEWLINE?
     ~ "{" ~ NEWLINE?
@@ -51,14 +49,12 @@ derive_props_block = {
 
 prop_derivation = { identifier ~ "=" ~ expr }
 
-// Functions can be either normal or rules
+// Functions
 function_def = { normal_function | rule_def }
-
 normal_function = {
     "def" ~ identifier ~ "(" ~ params? ~ ")" ~ ":" ~ type_expr ~ "=" ~ NEWLINE?
     ~ block
 }
-
 rule_def = {
     rule_annot ~ NEWLINE?
     ~ normal_function
@@ -71,19 +67,29 @@ param = { identifier ~ ":" ~ type_expr }
 pattern = {
     identifier ~ "@" ~ constructor_pattern
     | constructor_pattern
+    | identifier
     | "_"
 }
 
 constructor_pattern = {
-    identifier ~ "(" ~ (pattern_field ~ ("," ~ pattern_field)*)? ~ ")"
+    identifier ~ "(" ~ constructor_pattern_fields? ~ ")"
+}
+
+constructor_pattern_fields = {
+    pattern_field ~ ("," ~ pattern_field)*
 }
 
 pattern_field = { identifier ~ ":" ~ pattern }
 
-// Expressions - restructured to avoid left recursion
-expr = { prefix ~ (infix ~ prefix)* }
-
-prefix = _{ primary ~ postfix* }
+// Expressions with precedence
+expr = { logical_or }
+logical_or = { logical_and ~ ("||" ~ logical_and)* }
+logical_and = { comparison ~ ("&&" ~ comparison)* }
+comparison = { additive ~ (("==" | "!=" | ">=" | "<=" | ">" | "<") ~ additive)* }
+additive = { multiplicative ~ (("+" | "-") ~ multiplicative)* }
+multiplicative = { postfix ~ (("*" | "/") ~ postfix)* }
+postfix = { prefix ~ (call | member_access | array_index)* }
+prefix = { ("!" | "-")? ~ primary }
 
 primary = _{
     match_expr
@@ -91,59 +97,39 @@ primary = _{
     | val_expr
     | array_literal
     | map_literal
+    | constructor_expr
     | term
 }
-
-postfix = _{ 
-    call
-    | member_access
-    | array_index
-}
-
-call = { "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
-member_access = { "." ~ identifier }
-array_index = { "[" ~ expr ~ "]" }
-
-infix = _{
-    add
-    | subtract
-    | multiply
-    | divide
-    | concat
-    | map_op
-    | filter_op
-    | range_op
-    | comparison
-}
-
-add = { "+" }
-subtract = { "-" }
-multiply = { "*" }
-divide = { "/" }
-concat = { "++" }
-map_op = { "map" }
-filter_op = { "filter" }
-range_op = { ".." }
-comparison = { "==" | "!=" | ">=" | "<=" | ">" | "<" }
-
-array_literal = { "[" ~ (expr ~ ("," ~ expr)*)? ~ "]" }
-map_literal = { "map" ~ "[" ~ expr ~ "]" }
 
 term = _{
     number
     | string
     | identifier
     | "(" ~ expr ~ ")"
-    | constructor_expr
     | fail_expr
     | closure_expr
 }
 
-constructor_expr = { identifier ~ "(" ~ (field_value ~ ("," ~ field_value)*)? ~ ")" }
-field_value = { identifier ~ ":" ~ expr }
+// Constructor syntax
+constructor_expr = {
+    identifier ~ "(" ~ constructor_fields? ~ ")"
+}
 
+constructor_fields = {
+    field_assignment ~ ("," ~ field_assignment)*
+}
+
+field_assignment = {
+    identifier ~ ":" ~ expr
+}
+
+// Other expressions
+call = { "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
+member_access = { "." ~ identifier }
+array_index = { "[" ~ expr ~ "]" }
+array_literal = { "[" ~ (expr ~ ("," ~ expr)*)? ~ "]" }
+map_literal = { "map" ~ "[" ~ expr ~ "]" }
 closure_expr = { identifier ~ "=>" ~ expr }
-
 fail_expr = { "fail" ~ "(" ~ string ~ ")" }
 
 // Match expressions
@@ -154,9 +140,7 @@ match_expr = {
 }
 
 match_arm = { pattern ~ "=>" ~ block }
-
 if_expr = { "if" ~ expr ~ block ~ ("else" ~ block)? }
-
 val_expr = { "val" ~ identifier ~ "=" ~ expr }
 
 // Blocks

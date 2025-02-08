@@ -9,7 +9,7 @@ use pest_derive::Parser;
 #[grammar = "dsl/grammar.pest"]
 pub struct FluxParser;
 
-pub fn parse_file(input: &str) -> Result<File, String> {
+/*pub fn parse_file(input: &str) -> Result<File, String> {
     let pairs = FluxParser::parse(Rule::file, input).map_err(|e| e.to_string())?;
 
     parse_file_contents(pairs)
@@ -312,7 +312,7 @@ fn parse_derive_props(pair: Pair<Rule>) -> Result<HashMap<String, Expr>, String>
             Ok((name, expr))
         })
         .collect()
-}
+}*/
 #[cfg(test)]
 mod tests {
     use super::*;
