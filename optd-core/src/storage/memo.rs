@@ -1,3 +1,5 @@
+//! An implementation of the memo table using SQLite.
+
 use std::{str::FromStr, sync::Arc, time::Duration};
 
 use super::transaction::Transaction;
@@ -184,8 +186,9 @@ impl Memoize for SqliteMemo {
     }
 }
 
-// Memoize helpers
+// Helper functions for implementing the `Memoize` trait.
 impl SqliteMemo {
+    /// Gets the representative group id of a relational group.
     async fn get_representative_group_id(
         &self,
         db: &mut SqliteConnection,
@@ -199,6 +202,7 @@ impl SqliteMemo {
         Ok(representative_group_id)
     }
 
+    /// Sets the representative group id of a relational group.
     async fn set_representative_group_id(
         &self,
         db: &mut SqliteConnection,
@@ -213,6 +217,7 @@ impl SqliteMemo {
         Ok(())
     }
 
+    /// Gets the representative group id of a scalar group.
     async fn get_representative_scalar_group_id(
         &self,
         db: &mut SqliteConnection,
@@ -226,6 +231,7 @@ impl SqliteMemo {
         Ok(representative_group_id)
     }
 
+    /// Sets the representative group id of a scalar group.
     async fn set_representative_scalar_group_id(
         &self,
         db: &mut SqliteConnection,
@@ -240,6 +246,10 @@ impl SqliteMemo {
         Ok(())
     }
 
+    /// Inserts a scalar expression into the database. If the `add_to_group_id` is `Some`,
+    /// we will attempt to add the scalar expression to the specified group.
+    /// If the scalar expression already exists in the database, the existing group id will be returned.
+    /// Otherwise, a new group id will be created.
     async fn add_scalar_expr_to_group_inner(
         &self,
         scalar_expr: &ScalarExpression,
@@ -304,9 +314,6 @@ impl SqliteMemo {
                     ScalarOperatorKind::Add,
                 )
                 .await?;
-                println!("add: {:?}", add);
-                println!("scalar_expr_id: {:?}", scalar_expr_id);
-                println!("group_id: {:?}", group_id);
 
                 sqlx::query_scalar("INSERT INTO scalar_adds (scalar_expression_id, group_id, left_group_id, right_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(scalar_expr_id)
@@ -351,7 +358,7 @@ impl SqliteMemo {
         Ok(inserted_group_id)
     }
 
-    /// Inserts a scalar expression into the database.
+    /// Inserts an entry into the `scalar_expressions` table.
     async fn insert_into_scalar_expressions(
         db: &mut SqliteConnection,
         scalar_expr_id: ScalarExpressionId,
@@ -368,6 +375,7 @@ impl SqliteMemo {
         Ok(())
     }
 
+    /// Removes a dangling scalar expression from the `scalar_expressions` table.
     async fn remove_dangling_scalar_expr(
         &self,
         db: &mut SqliteConnection,
@@ -380,6 +388,10 @@ impl SqliteMemo {
         Ok(())
     }
 
+    /// Inserts a logical expression into the memo table. If the `add_to_group_id` is `Some`,
+    /// we will attempt to add the logical expression to the specified group.
+    /// If the logical expression already exists in the database, the existing group id will be returned.
+    /// Otherwise, a new group id will be created.
     async fn add_logical_expr_to_group_inner(
         &self,
         logical_expr: &LogicalExpression,
@@ -477,6 +489,7 @@ impl SqliteMemo {
         Ok(inserted_group_id)
     }
 
+    /// Inserts an entry into the `logical_expressions` table.
     async fn insert_into_logical_expressions(
         txn: &mut SqliteConnection,
         logical_expr_id: LogicalExpressionId,
@@ -493,6 +506,7 @@ impl SqliteMemo {
         Ok(())
     }
 
+    /// Removes a dangling logical expression from the `logical_expressions` table.
     async fn remove_dangling_logical_expr(
         &self,
         db: &mut SqliteConnection,
@@ -507,6 +521,8 @@ impl SqliteMemo {
 }
 
 /// The SQL query to get all logical expressions in a group.
+/// For each of the operators, the logical_expression_id is selected,
+/// as well as the data fields in json form.
 const fn get_all_logical_exprs_in_group_query() -> &'static str {
     concat!(
         "SELECT logical_expression_id, json_object('Scan', json_object('table_name', json(table_name), 'predicate', predicate_group_id)) as data FROM scans WHERE group_id = $1",
@@ -518,6 +534,8 @@ const fn get_all_logical_exprs_in_group_query() -> &'static str {
 }
 
 /// The SQL query to get all scalar expressions in a group.
+/// For each of the operators, the scalar_expression_id is selected,
+/// as well as the data fields in json form.
 const fn get_all_scalar_exprs_in_group_query() -> &'static str {
     concat!(
         "SELECT scalar_expression_id, json_object('Constant', json(value)) as data FROM scalar_constants WHERE group_id = $1",

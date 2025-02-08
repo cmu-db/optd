@@ -1,3 +1,5 @@
+//! A transaction that wraps a SQLite transaction while making it easy to generate new identifiers.
+
 use sqlx::SqliteConnection;
 use std::ops::{Deref, DerefMut};
 
@@ -6,38 +8,18 @@ use crate::cascades::{
     groups::{RelationalGroupId, ScalarGroupId},
 };
 
-/// Sequence is a unique generator for the entities in the optd storage layer.
-struct Sequence;
-
-impl Sequence {
-    /// Returns the current value in the sequence.
-    pub async fn value(db: &mut SqliteConnection) -> anyhow::Result<i64> {
-        let value = sqlx::query_scalar!("SELECT current_value FROM id_sequences WHERE id = 0")
-            .fetch_one(db)
-            .await?;
-        Ok(value)
-    }
-
-    /// Sets the current value of the sequence to the given value.
-    pub async fn set_value(db: &mut SqliteConnection, value: i64) -> anyhow::Result<()> {
-        sqlx::query!(
-            "UPDATE id_sequences SET current_value = ? WHERE id = 0",
-            value
-        )
-        .execute(db)
-        .await?;
-        Ok(())
-    }
-}
-
 /// A transaction that wraps a SQLite transaction.
 pub struct Transaction<'c> {
     /// An active SQLite transaction.
     txn: sqlx::Transaction<'c, sqlx::Sqlite>,
+    /// The current value of the sequence in the transaction.
+    /// The value is read from the database on transaction start and
+    /// persisted back to the database on commit.
     current_value: i64,
 }
 
 impl Transaction<'_> {
+    /// Creates a new transaction.
     pub async fn new(
         mut txn: sqlx::Transaction<'_, sqlx::Sqlite>,
     ) -> anyhow::Result<Transaction<'_>> {
@@ -102,7 +84,30 @@ impl DerefMut for Transaction<'_> {
     }
 }
 
-// TODO(alexis): This just checks the sequencing logic.
+/// Sequence is a unique generator for the entities in the optd storage layer.
+struct Sequence;
+
+impl Sequence {
+    /// Returns the current value in the sequence.
+    pub async fn value(db: &mut SqliteConnection) -> anyhow::Result<i64> {
+        let value = sqlx::query_scalar!("SELECT current_value FROM id_sequences WHERE id = 0")
+            .fetch_one(db)
+            .await?;
+        Ok(value)
+    }
+
+    /// Sets the current value of the sequence to the given value.
+    pub async fn set_value(db: &mut SqliteConnection, value: i64) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE id_sequences SET current_value = ? WHERE id = 0",
+            value
+        )
+        .execute(db)
+        .await?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -110,6 +115,7 @@ mod tests {
 
     use super::*;
 
+    /// Test if the sequence is working correctly with the transaction.
     #[tokio::test]
     async fn test_sequence() -> anyhow::Result<()> {
         let storage = SqliteMemo::new_in_memory().await?;
