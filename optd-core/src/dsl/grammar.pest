@@ -107,7 +107,6 @@ term = _{
     | identifier
     | "(" ~ expr ~ ")"
     | fail_expr
-    | closure_expr
 }
 
 // Constructor syntax
@@ -123,13 +122,16 @@ field_assignment = {
     identifier ~ ":" ~ expr
 }
 
-// Other expressions
-call = { "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
+// Calls and closures
+call = { "(" ~ (call_arg ~ ("," ~ call_arg)*)? ~ ")" }
+call_arg = { closure_expr | expr }
+closure_expr = { identifier ~ "=>" ~ expr }
+
 member_access = { "." ~ identifier }
 array_index = { "[" ~ expr ~ "]" }
 array_literal = { "[" ~ (expr ~ ("," ~ expr)*)? ~ "]" }
 map_literal = { "map" ~ "[" ~ expr ~ "]" }
-closure_expr = { identifier ~ "=>" ~ expr }
+
 fail_expr = { "fail" ~ "(" ~ string ~ ")" }
 
 // Match expressions
