@@ -1,0 +1,188 @@
+// Type system
+// Base types: i64, String, Bool, Float64
+// Complex types: map[Type->Type], array[Type], tuple[Type]
+
+// Shared properties for logical operators
+@props(logical) {
+  schema_len: i64;
+}
+
+// Scalar Operators
+@operator(scalar)
+And {
+  members: array[Scalar];
+}
+
+@operator(scalar)
+Add {
+  left: Scalar;
+  right: Scalar;
+}
+
+@operator(scalar)
+Multiply {
+  left: Scalar;
+  right: Scalar;
+}
+
+@operator(scalar)
+ColumnRef {
+  idx: i64;
+}
+
+@operator(scalar)
+Const {
+  val: i64;
+}
+
+@operator(scalar)
+Eq {
+  left: Scalar;
+  right: Scalar;
+}
+
+// Logical Operators
+@operator(logical)
+Filter {
+  input: Logical;
+  cond: Scalar;
+
+  derive_props {
+    schema_len = input.schema_len;
+  }
+}
+
+@operator(logical)
+Project {
+  input: Logical;
+  exprs: array[Scalar];
+
+  derive_props {
+    schema_len = exprs.len;
+  }
+}
+
+@operator(logical)
+Join {
+  left: Logical;
+  right: Logical;
+  type: String;
+  cond: Scalar;
+
+  derive_props {
+    schema_len = left.schema_len + right.schema_len;
+  }
+}
+
+// Rules demonstrating all language features
+@rule(scalar)
+def constant_fold(expr: Scalar): Scalar =
+  match expr 
+    // Pattern binding with @
+    op @ Add(left: Const(val: x), right: Const(val: y)) =>
+      Const(val: x + y),
+    op @ Multiply(left: Const(val: x), right: Const(val: y)) =>
+      Const(val: x * y),
+    // Array operations
+    And(members: ms) =>
+      val folded = ms.map(ms);
+      And(members: folded),
+    // Wildcard pattern
+    _ => expr
+
+
+def rewrite_column_refs(expr: Scalar, index_map: map[i64 -> i64]): Scalar =
+  match expr
+    ColumnRef(idx: i) =>
+      ColumnRef(idx: index_map.get(i)),
+    _ => expr.with_children(child => rewrite_column_refs(child, index_map))
+
+@rule(scalar)
+def has_refs_in_range(expr: Scalar, start: i64, end: i64): Bool =
+  match expr
+    ColumnRef(idx: i) => i >= start && i < end,
+    _ => expr.children().any(child => has_refs_in_range(child, start, end))
+  
+
+@rule(logical)
+def join_commute(expr: Logical): Logical =
+  match expr
+    Join(type: "Inner", left: l, right: r, cond: c) =>
+      val left_len = l.schema_len;
+      val right_len = r.schema_len;
+      
+      // Array operations: map, ++, to_map
+      val refs_remap = 
+        ((0..left_len).map(i => (i, i + right_len)) ++
+        (0..right_len).map(i => (left_len + i, i)))
+        .to_map();
+      
+      Join(
+        type: "Inner",
+        left: r,
+        right: l,
+        cond: rewrite_column_refs(c, refs_remap)
+      )
+
+@rule(logical)
+def join_associate(expr: Logical): Logical =
+  match expr
+    Join(
+      type: "Inner",
+      left: Join(
+        type: "Inner",
+        left: a,
+        right: b,
+        cond: c1
+      ),
+      right: c,
+      cond: c2
+    ) => 
+      val a_len = a.schema_len;
+      val b_len = b.schema_len;
+      val c_len = c.schema_len;
+
+      if !has_refs_in_range(c2, 0, a_len)
+        val inner_map = (a_len..(a_len + b_len + c_len))
+          .map(i => (i, i - a_len))
+          .to_map();
+
+        Join(
+          type: "Inner",
+          left: a,
+          right: Join(
+            type: "Inner",
+            left: b,
+            right: c,
+            cond: rewrite_column_refs(c2, inner_map)
+          ),
+          cond: c1
+        )
+      else 
+        fail("Cannot rewrite: outer join condition references left relation")
+      
+
+// Example demonstrating array operations and error handling
+@rule(logical)
+def complex_project(expr: Logical): Logical =
+  match expr
+    project @ Project(input: rel, exprs: es) =>
+      if es.len == 0
+        fail("Empty projection list")
+      else
+
+      val mapped = es.map(e => constant_fold(e));
+      val filtered = mapped.filter(e => 
+        match e
+          Const(_) => false,
+          _ => true 
+      );
+
+      if filtered.len == 0 
+        fail("All expressions folded to constants")
+      else
+        Project(
+          input: rel,
+          exprs: filtered
+        )
+    

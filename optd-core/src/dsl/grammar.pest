@@ -9,7 +9,7 @@ boolean = { "true" | "false" }
 
 // Types
 operator_type = { "Scalar" | "Logical" }
-base_type = { "i64" | "String" | "Bool" | "Float64" }
+base_type = { "i64" | "String" | "Bool" | "f64" }
 array_type = { "array" ~ "[" ~ type_expr ~ "]" }
 map_type = { "map" ~ "[" ~ type_expr ~ "->" ~ type_expr ~ "]" }
 tuple_type = { "tuple" ~ "[" ~ type_expr ~ ("," ~ type_expr)* ~ "]" }
@@ -54,7 +54,7 @@ prop_derivation = { identifier ~ "=" ~ expr ~ ";" }
 function_def = { normal_function | rule_def }
 normal_function = {
     "def" ~ identifier ~ "(" ~ params? ~ ")" ~ ":" ~ type_expr ~ "=" ~ NEWLINE?
-    ~ block
+    ~ expr
 }
 rule_def = {
     rule_annot ~ NEWLINE?
@@ -66,8 +66,12 @@ param = { identifier ~ ":" ~ type_expr }
 
 // Pattern matching
 pattern = {
-    identifier ~ "@" ~ constructor_pattern
-    | constructor_pattern
+    identifier ~ "@" ~ top_level_pattern
+    | top_level_pattern
+}
+
+top_level_pattern = {
+    constructor_pattern
     | enum_pattern
     | literal_pattern
     | identifier
@@ -82,10 +86,10 @@ constructor_pattern_fields = {
     pattern_field ~ ("," ~ pattern_field)*
 }
 
-pattern_field = { identifier ~ ":" ~ pattern }
+pattern_field = { identifier ~ ":" ~ top_level_pattern }
 
 enum_pattern = {
-    identifier ~ ("(" ~ pattern ~ ")")? 
+    identifier ~ ("(" ~ top_level_pattern ~ ")")? 
 }
 
 literal_pattern = {
@@ -165,17 +169,13 @@ map_literal = { "map" ~ "[" ~ expr ~ "]" }
 fail_expr = { "fail" ~ "(" ~ string ~ ")" }
 
 match_expr = {
-    "match" ~ expr ~ "{" ~ NEWLINE?
+    "match" ~ expr ~ NEWLINE?
     ~ (match_arm ~ ("," ~ NEWLINE? ~ match_arm)*)? ~ NEWLINE?
-    ~ "}"
 }
 
-match_arm = { pattern ~ "=>" ~ (block | expr) }
-if_expr = { "if" ~ expr ~ block ~ ("else" ~ block)? }
+match_arm = { pattern ~ "=>" ~ expr }
+if_expr = { "if" ~ expr ~ expr ~ "else" ~ expr }
 val_expr = { "val" ~ identifier ~ "=" ~ expr ~ ";" ~ expr }
-
-// Blocks
-block = { "{" ~ NEWLINE? ~ (expr ~ NEWLINE?)* ~ "}" }
 
 // Full file
 file = {

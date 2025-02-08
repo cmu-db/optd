@@ -322,7 +322,7 @@ mod tests {
     #[test]
     fn test_parse_operator() {
         let input =
-            fs::read_to_string("/home/alexis/optd/optd-core/src/dsl/test_files/full_example.optd").expect("Failed to read file");
+            fs::read_to_string("/home/alexis/optd/optd-core/src/dsl/test.optd").expect("Failed to read file");
 
         let pairs = FluxParser::parse(Rule::file, &input)
             .map_err(|e| e.to_string())
