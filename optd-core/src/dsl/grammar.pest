@@ -5,19 +5,20 @@ COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 identifier = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
 number = @{ "-"? ~ ASCII_DIGIT+ }
 string = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+boolean = { "true" | "false" }
 
 // Types
 operator_type = { "Scalar" | "Logical" }
 base_type = { "i64" | "String" | "Bool" | "Float64" }
 array_type = { "array" ~ "[" ~ type_expr ~ "]" }
-map_type = { "map" ~ "[" ~ type_expr ~ "," ~ type_expr ~ "]" }
+map_type = { "map" ~ "[" ~ type_expr ~ "->" ~ type_expr ~ "]" }
 tuple_type = { "tuple" ~ "[" ~ type_expr ~ ("," ~ type_expr)* ~ "]" }
-type_expr = { operator_type | base_type | array_type | map_type | tuple_type }
+function_type = { "(" ~ type_expr ~ ")" ~ "->" ~ type_expr }  // Function composition type
+type_expr = { operator_type | base_type | array_type | map_type | tuple_type | function_type }
 
 // Annotations
 operator_annot = { "@operator" ~ "(" ~ ("scalar" | "logical") ~ ")" }
 props_annot = { "@props" ~ "(" ~ "logical" ~ ")" }
-derive_props_annot = { "@derive_props" }
 rule_annot = { "@rule" ~ "(" ~ ("scalar" | "logical") ~ ")" }
 
 // Operators
@@ -25,7 +26,7 @@ operator_def = {
     operator_annot ~ NEWLINE?
     ~ identifier ~ NEWLINE?
     ~ "{" ~ NEWLINE?
-    ~ (field_def ~ ("," ~ NEWLINE?)*)* ~ NEWLINE?
+    ~ (field_def ~ ";" ~ NEWLINE?)*
     ~ derive_props_block?
     ~ "}"
 }
@@ -36,18 +37,18 @@ field_def = { identifier ~ ":" ~ type_expr }
 props_block = {
     props_annot ~ NEWLINE?
     ~ "{" ~ NEWLINE?
-    ~ (field_def ~ ("," ~ NEWLINE?)*)* ~ NEWLINE?
+    ~ (field_def ~ ";" ~ NEWLINE?)*
     ~ "}"
 }
 
 derive_props_block = {
-    derive_props_annot ~ NEWLINE?
+    "derive_props" ~ NEWLINE?
     ~ "{" ~ NEWLINE?
-    ~ (prop_derivation | normal_function | expr ~ NEWLINE?)* ~ NEWLINE?
+    ~ (prop_derivation ~ NEWLINE?)*
     ~ "}"
 }
 
-prop_derivation = { identifier ~ "=" ~ expr }
+prop_derivation = { identifier ~ "=" ~ expr ~ ";" }
 
 // Functions
 function_def = { normal_function | rule_def }
@@ -67,6 +68,8 @@ param = { identifier ~ ":" ~ type_expr }
 pattern = {
     identifier ~ "@" ~ constructor_pattern
     | constructor_pattern
+    | enum_pattern
+    | literal_pattern
     | identifier
     | "_"
 }
@@ -81,14 +84,37 @@ constructor_pattern_fields = {
 
 pattern_field = { identifier ~ ":" ~ pattern }
 
-// Expressions with precedence
-expr = { logical_or }
+enum_pattern = {
+    identifier ~ ("(" ~ pattern ~ ")")? 
+}
+
+literal_pattern = {
+    number
+    | string
+    | boolean
+    | array_literal
+    | tuple_literal
+    | map_literal
+}
+
+// Expressions with precedence (lowest to highest)
+expr = { closure | logical_or }
+
+// Closure is lowest precedence
+closure = { closure_params ~ "=>" ~ expr }
+closure_params = {
+    "(" ~ (identifier ~ ("," ~ identifier)*)? ~ ")"
+    | identifier  // Single param case
+}
+
 logical_or = { logical_and ~ ("||" ~ logical_and)* }
 logical_and = { comparison ~ ("&&" ~ comparison)* }
-comparison = { additive ~ (("==" | "!=" | ">=" | "<=" | ">" | "<") ~ additive)* }
-additive = { multiplicative ~ (("+" | "-") ~ multiplicative)* }
+comparison = { concatenation ~ (("==" | "!=" | ">=" | "<=" | ">" | "<") ~ concatenation)* }
+concatenation = { additive ~ ("++" ~ additive)* }
+additive = { range ~ (("+" | "-") ~ range)* }
+range = { multiplicative ~ (".." ~ multiplicative)* }
 multiplicative = { postfix ~ (("*" | "/") ~ postfix)* }
-postfix = { prefix ~ (call | member_access | array_index)* }
+postfix = { prefix ~ (call | member_access | array_index | member_call)* }
 prefix = { ("!" | "-")? ~ primary }
 
 primary = _{
@@ -96,6 +122,7 @@ primary = _{
     | if_expr 
     | val_expr
     | array_literal
+    | tuple_literal
     | map_literal
     | constructor_expr
     | term
@@ -104,6 +131,7 @@ primary = _{
 term = _{
     number
     | string
+    | boolean
     | identifier
     | "(" ~ expr ~ ")"
     | fail_expr
@@ -122,28 +150,29 @@ field_assignment = {
     identifier ~ ":" ~ expr
 }
 
-// Calls and closures
-call = { "(" ~ (call_arg ~ ("," ~ call_arg)*)? ~ ")" }
-call_arg = { closure_expr | expr }
-closure_expr = { identifier ~ "=>" ~ expr }
-
+// Method calls and operations
+call = { "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
 member_access = { "." ~ identifier }
+member_call = { "." ~ identifier ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")"}
 array_index = { "[" ~ expr ~ "]" }
+
+// Array and map literals
 array_literal = { "[" ~ (expr ~ ("," ~ expr)*)? ~ "]" }
+tuple_literal = { "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
 map_literal = { "map" ~ "[" ~ expr ~ "]" }
 
+// Control expressions
 fail_expr = { "fail" ~ "(" ~ string ~ ")" }
 
-// Match expressions
 match_expr = {
     "match" ~ expr ~ "{" ~ NEWLINE?
-    ~ (match_arm ~ ("," ~ NEWLINE?)*)* ~ NEWLINE?
+    ~ (match_arm ~ ("," ~ NEWLINE? ~ match_arm)*)? ~ NEWLINE?
     ~ "}"
 }
 
-match_arm = { pattern ~ "=>" ~ block }
+match_arm = { pattern ~ "=>" ~ (block | expr) }
 if_expr = { "if" ~ expr ~ block ~ ("else" ~ block)? }
-val_expr = { "val" ~ identifier ~ "=" ~ expr }
+val_expr = { "val" ~ identifier ~ "=" ~ expr ~ ";" ~ expr }
 
 // Blocks
 block = { "{" ~ NEWLINE? ~ (expr ~ NEWLINE?)* ~ "}" }
