@@ -1,0 +1,170 @@
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
+
+// Basic identifiers and literals
+identifier = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+number = @{ ASCII_DIGIT+ }
+string = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+
+// Types
+operator_type = { "Scalar" | "Logical" }
+base_type = { "i64" | "String" | "Bool" | "Float64" }
+array_type = { "array" ~ "[" ~ type_expr ~ "]" }
+map_type = { "map" ~ "[" ~ type_expr ~ "," ~ type_expr ~ "]" }
+tuple_type = { "tuple" ~ "[" ~ type_expr ~ ("," ~ type_expr)* ~ "]" }
+type_expr = { operator_type | base_type | array_type | map_type | tuple_type }
+
+// Annotations
+operator_annot = { "@operator" ~ "(" ~ ("scalar" | "logical") ~ ")" }
+props_annot = { "@props" ~ "(" ~ "logical" ~ ")" }
+derive_props_annot = { "@derive_props" }
+rule_annot = { "@rule" ~ "(" ~ ("scalar" | "logical") ~ ")" }
+
+// Operators
+operator_def = {
+    operator_annot ~ NEWLINE?
+    ~ identifier ~ NEWLINE?
+    ~ "{" ~ NEWLINE?
+    ~ (field_def ~ ("," ~ NEWLINE?)*)* ~ NEWLINE?
+    ~ derive_props_block?
+    ~ "}"
+}
+
+field_def = { identifier ~ ":" ~ type_expr }
+
+// Property blocks
+props_block = {
+    props_annot ~ NEWLINE?
+    ~ "{" ~ NEWLINE?
+    ~ (field_def ~ ("," ~ NEWLINE?)*)* ~ NEWLINE?
+    ~ "}"
+}
+
+// A derive property block contains assignments to the logical properties, 
+// and can contain as many expressions as needed (but no rule definition allowed.)
+derive_props_block = {
+    derive_props_annot ~ NEWLINE?
+    ~ "{" ~ NEWLINE?
+    ~ (prop_derivation | normal_function | expr ~ NEWLINE?)* ~ NEWLINE?
+    ~ "}"
+}
+
+prop_derivation = { identifier ~ "=" ~ expr }
+
+// Functions can be either normal or rules
+function_def = { normal_function | rule_def }
+
+normal_function = {
+    "def" ~ identifier ~ "(" ~ params? ~ ")" ~ ":" ~ type_expr ~ "=" ~ NEWLINE?
+    ~ block
+}
+
+rule_def = {
+    rule_annot ~ NEWLINE?
+    ~ normal_function
+}
+
+params = { param ~ ("," ~ param)* }
+param = { identifier ~ ":" ~ type_expr }
+
+// Pattern matching
+pattern = {
+    identifier ~ "@" ~ constructor_pattern
+    | constructor_pattern
+    | "_"
+}
+
+constructor_pattern = {
+    identifier ~ "(" ~ (pattern_field ~ ("," ~ pattern_field)*)? ~ ")"
+}
+
+pattern_field = { identifier ~ ":" ~ pattern }
+
+// Expressions - restructured to avoid left recursion
+expr = { prefix ~ (infix ~ prefix)* }
+
+prefix = _{ primary ~ postfix* }
+
+primary = _{
+    match_expr
+    | if_expr 
+    | val_expr
+    | array_literal
+    | map_literal
+    | term
+}
+
+postfix = _{ 
+    call
+    | member_access
+    | array_index
+}
+
+call = { "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
+member_access = { "." ~ identifier }
+array_index = { "[" ~ expr ~ "]" }
+
+infix = _{
+    add
+    | subtract
+    | multiply
+    | divide
+    | concat
+    | map_op
+    | filter_op
+    | range_op
+    | comparison
+}
+
+add = { "+" }
+subtract = { "-" }
+multiply = { "*" }
+divide = { "/" }
+concat = { "++" }
+map_op = { "map" }
+filter_op = { "filter" }
+range_op = { ".." }
+comparison = { "==" | "!=" | ">=" | "<=" | ">" | "<" }
+
+array_literal = { "[" ~ (expr ~ ("," ~ expr)*)? ~ "]" }
+map_literal = { "map" ~ "[" ~ expr ~ "]" }
+
+term = _{
+    number
+    | string
+    | identifier
+    | "(" ~ expr ~ ")"
+    | constructor_expr
+    | fail_expr
+    | closure_expr
+}
+
+constructor_expr = { identifier ~ "(" ~ (field_value ~ ("," ~ field_value)*)? ~ ")" }
+field_value = { identifier ~ ":" ~ expr }
+
+closure_expr = { identifier ~ "=>" ~ expr }
+
+fail_expr = { "fail" ~ "(" ~ string ~ ")" }
+
+// Match expressions
+match_expr = {
+    "match" ~ expr ~ "{" ~ NEWLINE?
+    ~ (match_arm ~ ("," ~ NEWLINE?)*)* ~ NEWLINE?
+    ~ "}"
+}
+
+match_arm = { pattern ~ "=>" ~ block }
+
+if_expr = { "if" ~ expr ~ block ~ ("else" ~ block)? }
+
+val_expr = { "val" ~ identifier ~ "=" ~ expr }
+
+// Blocks
+block = { "{" ~ NEWLINE? ~ (expr ~ NEWLINE?)* ~ "}" }
+
+// Full file
+file = {
+    SOI ~
+    (operator_def | props_block | function_def)* ~
+    EOI
+}
