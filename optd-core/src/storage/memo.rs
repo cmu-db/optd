@@ -307,9 +307,9 @@ impl SqliteMemo {
                     ScalarOperatorKind::Add,
                 )
                 .await?;
-                println!("add: {:?}", add);
-                println!("scalar_expr_id: {:?}", scalar_expr_id);
-                println!("group_id: {:?}", group_id);
+                // println!("add: {:?}", add);
+                // println!("scalar_expr_id: {:?}", scalar_expr_id);
+                // println!("group_id: {:?}", group_id);
                 let group_id = sqlx::query_scalar("INSERT INTO scalar_adds (scalar_expression_id, group_id, left_group_id, right_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(scalar_expr_id)
                     .bind(group_id)

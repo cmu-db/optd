@@ -1,25 +1,56 @@
+KEYWORD = {
+    "Bool" | 
+    "Float64" | 
+    "Int64" | 
+    "Logical" | 
+    "Map" | 
+    "Props" | 
+    "Scalar" | 
+    "String" | 
+    "case" | 
+    "def" | 
+    "derive" | 
+    "else" | 
+    "fail" | 
+    "false" | 
+    "if" | 
+    "match" | 
+    "then" | 
+    "true" | 
+    "val"
+}
+
 // Whitespace and comments
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 // Basic identifiers and literals
-identifier = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+identifier = @{ 
+    !KEYWORD ~ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* 
+}
 number = @{ "-"? ~ ASCII_DIGIT+ }
 string = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
 boolean = { "true" | "false" }
 
 // Types
-operator_type = { "scalar" | "logical" }
-base_type = { "i64" | "String" | "Bool" | "f64" }
+operator_type = { "Scalar" | "Logical" }
+base_type = { "Int64" | "String" | "Bool" | "Float64" }
 array_type = { "[" ~ type_expr ~ "]" }
-map_type = { "map" ~ "[" ~ type_expr ~ "->" ~ type_expr ~ "]" }
-tuple_type = { "[" ~ type_expr ~ ("," ~ type_expr)* ~ "]" }
+map_type = { "Map" ~ "[" ~ type_expr ~ "," ~ type_expr ~ "]" }
+tuple_type = { "(" ~ type_expr ~ "," ~ type_expr ~ ("," ~ type_expr)* ~ ")" }
 function_type = { "(" ~ type_expr ~ ")" ~ "->" ~ type_expr }  // Function composition type
-type_expr = { operator_type | base_type | array_type | map_type | tuple_type | function_type }
+type_expr = { 
+    function_type
+    | operator_type 
+    | base_type 
+    | array_type 
+    | map_type 
+    | tuple_type
+}
 
 // Annotations
-props_annot = { "logical" ~ "props" }
-rule_annot = { "@rule" ~ "(" ~ ("scalar" | "logical") ~ ")" }
+props_annot = { "Logical" ~ "Props" }
+rule_annot = { "@rule" ~ "(" ~ ("Scalar" | "Logical") ~ ")" }
 
 // Operators
 operator_def = {
@@ -55,12 +86,12 @@ prop_derivation = { identifier ~ "=" ~ expr }
 
 // Functions
 function_def = { normal_function | rule_def }
-normal_function = {
+normal_function = _{
     "def" ~ identifier ~ "(" ~ params? ~ ")" ~ ":" ~ type_expr ~ "=" ~ NEWLINE?
     ~ (expr | "{" ~ NEWLINE? ~ expr ~ NEWLINE? ~ "}")  // Braces optional
 }
 
-rule_def = {
+rule_def = _{
     rule_annot ~ NEWLINE?
     ~ normal_function
 }
@@ -74,7 +105,7 @@ pattern = {
     | top_level_pattern
 }
 
-top_level_pattern = {
+top_level_pattern = _{
     constructor_pattern
     | literal_pattern
     | wildcard_pattern
@@ -111,6 +142,15 @@ expr = {
     | (closure | logical_or)
 }
 
+// Operators as separate rules
+or_op = { "||" }
+and_op = { "&&" }
+compare_op = { "==" | "!=" | ">=" | "<=" | ">" | "<" }
+concat_op = { "++" }
+add_op = { "+" | "-" }
+range_op = { ".." }
+mult_op = { "*" | "/" }
+
 // Closure is lowest precedence
 closure = { closure_params ~ "=>" ~ expr }
 closure_params = {
@@ -118,14 +158,14 @@ closure_params = {
     | identifier  // Single param case
 }
 
-logical_or = { logical_and ~ ("||" ~ logical_and)* }
-logical_and = { comparison ~ ("&&" ~ comparison)* }
-comparison = { concatenation ~ (("==" | "!=" | ">=" | "<=" | ">" | "<") ~ concatenation)* }
-concatenation = { additive ~ ("++" ~ additive)* }
-additive = { range ~ (("+" | "-") ~ range)* }
-range = { multiplicative ~ (".." ~ multiplicative)* }
-multiplicative = { postfix ~ (("*" | "/") ~ postfix)* }
-postfix = { prefix ~ (call | member_access | array_index | member_call)* }
+logical_or = { logical_and ~ (or_op ~ logical_and)* }
+logical_and = { comparison ~ (and_op ~ comparison)* }
+comparison = { concatenation ~ (compare_op ~ concatenation)* }
+concatenation = { additive ~ (concat_op ~ additive)* }
+additive = { range ~ (add_op ~ range)* }
+range = { multiplicative ~ (range_op ~ multiplicative)* }
+multiplicative = { postfix ~ (mult_op ~ postfix)* }
+postfix = { prefix ~ (member_call | member_access | call | array_index)* }
 prefix = { ("!" | "-")? ~ primary }
 
 primary = _{
@@ -152,7 +192,7 @@ constructor_expr = {
     identifier ~ "(" ~ constructor_fields? ~ ")"
 }
 
-constructor_fields = {
+constructor_fields = _{
     expr ~ ("," ~ expr)*
 }
 
@@ -193,6 +233,7 @@ val_expr = { "val" ~ identifier ~ "=" ~ expr ~ ";" ~ expr }
 // Full file
 file = {
     SOI ~
-    (operator_def | props_block | function_def)* ~
+    props_block ~
+    (operator_def | function_def)* ~
     EOI
 }

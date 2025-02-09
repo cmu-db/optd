@@ -1,42 +1,42 @@
-// Shared properties for logical operators
-logical props(schema_len: i64)
+// Shared properties for Logical operators
+Logical Props(schema_len: Map[(Int64, (Int64) -> String), Int64])
 
-scalar ColumnRef(idx: i64)
-scalar Const(val: i64)
-scalar Eq(left: scalar, right: scalar)
-scalar Divide(left: scalar, right: scalar)
-scalar Not(input: scalar)
+Scalar ColumnRef(idx: (Int64) -> Map[(Int64, (Int64) -> String), Int64])
+Scalar Const(asd: Int64)
+Scalar Eq(left: Scalar, right: Scalar)
+Scalar Divide(left: Scalar, right: Scalar)
+Scalar Not(input: Scalar)
 
-// logical Operators
-logical Filter(input: logical, cond: scalar) derive {
+// Logical Operators
+Logical Filter(input: Logical, cond: Scalar) derive {
   schema_len = input.schema_len
 }
 
-logical Project (input: logical, exprs: [scalar]) derive {
+Logical Project (input: Logical, exprs: [Scalar]) derive {
   schema_len = exprs.len,
   other = expr2
 }
 
-logical Join(
-    left: logical,
-    right: logical,
+Logical Join(
+    left: Logical,
+    right: Logical,
     type: String,
-    cond: scalar
+    cond: Scalar
 ) derive {
   schema_len = left.schema_len + right.schema_len
 }
 
-logical Sort(input: logical, keys: [scalar]) derive {
+Logical Sort(input: Logical, keys: [Scalar]) derive {
   schema_len = input.schema_len
 }
 
-logical Aggregate(input: logical, group_keys: [scalar], aggs: [scalar]) derive {
+Logical Aggregate(input: Logical, group_keys: [Scalar], aggs: [Scalar]) derive {
   schema_len = group_keys.len + aggs.len
 }
 
 // Rules demonstrating all language features
-@rule(scalar)
-def constant_fold(expr: scalar): scalar =
+@rule(Scalar)
+def constant_fold(expr: Scalar): Scalar =
     match expr
         case op @ Add(left: _, Const(bla)) => Const(x + y),
         case op @ Multiply(left: Const(x), right: Const(y)) => {
@@ -44,24 +44,25 @@ def constant_fold(expr: scalar): scalar =
         },
         case And(ms) => {
             val folded = ms.map(ms);
+            val test = (5 + 5) * 3 ++ 87..bla;
             And(folded)
         },
         case _ => expr
 
-def rewrite_column_refs(expr: scalar, index_map: map[i64 -> i64]): scalar =
+def rewrite_column_refs(expr: Scalar, index_map: Map[Int64, Int64]): Scalar =
     match expr
         case ColumnRef(i) => ColumnRef(index_map.get(i)),
         case _ => expr.with_children(child => rewrite_column_refs(child, index_map))
 
-@rule(scalar)
-def has_refs_in_range(expr: scalar, start: i64, end: i64): Bool =
+@rule(Scalar)
+def has_refs_in_range(expr: Scalar, start: Int64, end: Int64): Bool =
     match expr {
         case ColumnRef(i) => i >= start && i < end,
         case _ => expr.children().any(child => has_refs_in_range(child, start, end))
     }
 
-@rule(logical)
-def join_commute(expr: logical): logical =
+@rule(Logical)
+def join_commute(expr: Logical): Logical =
     match expr
         case Join("Inner", left, right, cond) => {
             val left_len = l.schema_len;
@@ -75,10 +76,10 @@ def join_commute(expr: logical): logical =
             Join("Inner", r, l, rewrite_column_refs(c, refs_remap))
         }
 
-@rule(logical)
-def join_associate(expr: logical): logical =
+@rule(Logical)
+def join_associate(expr: Logical): Logical =
     match expr
-        case Join("Inner", Join("Inner", a, b, c1), c, c2) =>
+        case Join("Inner", l: Join("Inner", a, b, c1), c, c2) =>
             val a_len = a.schema_len;
             val b_len = b.schema_len;
             val c_len = c.schema_len;
@@ -90,8 +91,8 @@ def join_associate(expr: logical): logical =
             else
                 fail("Cannot rewrite: outer join condition references left relation")
 
-@rule(logical)
-def complex_project(expr: logical): logical =
+@rule(Logical)
+def complex_project(expr: Logical): Logical =
     match expr
         case project @ Project(rel, es) => {
             if es.len == 0 then
@@ -110,8 +111,8 @@ def complex_project(expr: logical): logical =
             }
         }
 
-@rule(scalar)
-def simplify_not(expr: scalar): scalar =
+@rule(Scalar)
+def simplify_not(expr: Scalar): Scalar =
     match expr
         case Not(Not(x)) => x,
         case Not(Eq(l, r)) => {
@@ -121,8 +122,8 @@ def simplify_not(expr: scalar): scalar =
         },
         case _ => expr
 
-@rule(logical)
-def push_filter_down(expr: logical): logical =
+@rule(Logical)
+def push_filter_down(expr: Logical): Logical =
     match expr
         case Filter(Project(rel, es), cond) => {
             val new_cond = rewrite_column_refs(cond, bla);
@@ -130,7 +131,7 @@ def push_filter_down(expr: logical): logical =
         },
         case _ => expr
 
-def optimize_sort_keys(expr: logical): logical =
+def optimize_sort_keys(expr: Logical): Logical =
     match expr
         case Sort(rel, ks) => {
             val simplified = ks.map(k => constant_fold(k));
