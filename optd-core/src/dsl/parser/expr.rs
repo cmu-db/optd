@@ -301,7 +301,6 @@ mod tests {
     #[test]
     fn test_parse_closure() {
         let expr = parse_expr_from_str("(x, y) => x + y");
-        println!("{:?}", expr);
         match expr {
             Expr::Closure(params, body) => {
                 assert_eq!(params, vec!["x", "y"]);
