@@ -86,8 +86,6 @@ pub enum Expr {
     Match(Box<Expr>, Vec<MatchArm>),          // Pattern matching
     If(Box<Expr>, Box<Expr>, Box<Expr>),      // If-then-else
     Val(String, Box<Expr>, Box<Expr>),        // Local binding (val x = e1; e2)
-    Array(Vec<Expr>),                         // Array literals
-    Tuple(Vec<Expr>),                         // Tuple literals
     Constructor(String, Vec<Expr>),           // Constructor application (currently only operators)
     Binary(Box<Expr>, BinOp, Box<Expr>),      // Binary operations
     Unary(UnaryOp, Box<Expr>),                // Unary operations

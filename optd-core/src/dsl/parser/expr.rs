@@ -177,13 +177,13 @@ fn parse_val_expr(pair: Pair<'_, Rule>) -> Expr {
 /// Parse an array literal
 fn parse_array_literal(pair: Pair<'_, Rule>) -> Expr {
     let exprs = pair.into_inner().map(parse_expr).collect();
-    Expr::Array(exprs)
+    Expr::Literal(Literal::Array(exprs))
 }
 
 /// Parse a tuple literal
 fn parse_tuple_literal(pair: Pair<'_, Rule>) -> Expr {
     let exprs = pair.into_inner().map(parse_expr).collect();
-    Expr::Tuple(exprs)
+    Expr::Literal(Literal::Tuple(exprs))
 }
 
 /// Parse a constructor expression
