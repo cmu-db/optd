@@ -96,7 +96,7 @@ pub enum Expr {
     Var(String),                              // Variable reference
     Literal(Literal),                         // Literal values
     Fail(String),                             // Failure with message
-    Closure(Vec<String>, Box<Expr>),          // Anonymous functions
+    Closure(Vec<String>, Box<Expr>),          // Anonymous functions  v = (x, y) => x + y;
 }
 
 /// A case in a match expression
