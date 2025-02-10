@@ -26,7 +26,7 @@ COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
 
 // Basic identifiers and literals
 identifier = @{ 
-    !KEYWORD ~ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* 
+    !(KEYWORD ~ !(ASCII_ALPHANUMERIC | "_")) ~ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")*
 }
 number = @{ "-"? ~ ASCII_DIGIT+ }
 string = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
@@ -50,7 +50,7 @@ type_expr = {
 
 // Annotations
 props_annot = { "Logical" ~ "Props" }
-rule_annot = { "@rule" ~ "(" ~ ("Scalar" | "Logical") ~ ")" }
+rule_annot = { "@rule" ~ "(" ~ operator_type ~ ")" }
 
 // Operators
 operator_def = {

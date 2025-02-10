@@ -1,9 +1,8 @@
 // Shared properties for Logical operators
-Logical Props(schema_len: Map[(Int64, (Int64) -> String), Int64])
-
-Scalar ColumnRef(idx: (Int64) -> Map[(Int64, (Int64) -> String), Int64])
+Logical Props(vale: [Int64])
+Scalar ColumnRef (idx: (Int64) -> Map[(Int64, (Int64) -> String), Int64])
 Scalar Const(asd: Int64)
-Scalar Eq(left: Scalar, right: Scalar)
+Scalar Eq(left: [Int64])
 Scalar Divide(left: Scalar, right: Scalar)
 Scalar Not(input: Scalar)
 
@@ -33,6 +32,9 @@ Logical Sort(input: Logical, keys: [Scalar]) derive {
 Logical Aggregate(input: Logical, group_keys: [Scalar], aggs: [Scalar]) derive {
   schema_len = group_keys.len + aggs.len
 }
+
+           @rule(Scalar)
+def increment(x: Int64): Int64 = x + 1
 
 // Rules demonstrating all language features
 @rule(Scalar)
