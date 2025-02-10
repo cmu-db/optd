@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE id_sequences SET current_value = ? WHERE id = 0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "7e3e214cd8404407352f23114db11e2caceea8e563f29cbfecb2d2abaaee510c"
+}

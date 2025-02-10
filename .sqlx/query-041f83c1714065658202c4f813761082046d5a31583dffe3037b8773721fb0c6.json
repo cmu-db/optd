@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT current_value FROM id_sequences WHERE id = 0",
+  "describe": {
+    "columns": [
+      {
+        "name": "current_value",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "041f83c1714065658202c4f813761082046d5a31583dffe3037b8773721fb0c6"
+}

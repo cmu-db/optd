@@ -1,13 +1,10 @@
-//! TODO Add docs. We will likely want to add a `#![doc = include_str!("../README.md")]` here.
+#[allow(dead_code)]
+pub mod cascades;
+pub mod engine;
+pub mod operators;
+pub mod plans;
+pub mod storage;
+pub mod values;
 
-#![warn(missing_docs)]
-#![warn(clippy::missing_docs_in_private_items)]
-#![warn(clippy::missing_errors_doc)]
-#![warn(clippy::missing_panics_doc)]
-#![warn(clippy::missing_safety_doc)]
-
-pub mod expression;
-pub mod memo;
-pub mod operator;
-pub mod plan;
-pub mod rules;
+#[cfg(test)]
+pub(crate) mod test_utils;
