@@ -27,7 +27,7 @@ pub struct DslParser;
 ///
 /// # Returns
 /// * `Result<File, Error<Rule>>` - The parsed AST or a parsing error
-pub fn parse_file(input: &str) -> Result<File, Error<Rule>> {
+pub fn parse_file(input: &str) -> Result<File, Box<Error<Rule>>> {
     let pairs = DslParser::parse(Rule::file, input)?
         .next()
         .unwrap()

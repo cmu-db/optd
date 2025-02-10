@@ -34,7 +34,7 @@ pub fn parse_function_def(pair: Pair<'_, Rule>) -> Function {
                 body = Some(parse_expr(inner_pair));
             }
             Rule::rule_annot => {
-                rule_type = parse_rule_annotation(inner_pair);
+                rule_type = Some(parse_rule_annotation(inner_pair));
             }
             _ => unreachable!(
                 "Unexpected function definition rule: {:?}",
@@ -90,15 +90,13 @@ fn parse_param(pair: Pair<'_, Rule>) -> (String, Type) {
 }
 
 /// Parse a rule annotation (@rule(Scalar) or @rule(Logical))
-fn parse_rule_annotation(pair: Pair<'_, Rule>) -> Option<OperatorKind> {
-    for annot_inner_pair in pair.into_inner() {
-        return Some(match annot_inner_pair.as_str() {
-            "Scalar" => OperatorKind::Scalar,
-            "Logical" => OperatorKind::Logical,
-            _ => unreachable!("Unexpected rule type: {}", annot_inner_pair.as_str()),
-        });
+fn parse_rule_annotation(pair: Pair<'_, Rule>) -> OperatorKind {
+    let annot_inner_pair = pair.into_inner().next().unwrap();
+    match annot_inner_pair.as_str() {
+        "Scalar" => OperatorKind::Scalar,
+        "Logical" => OperatorKind::Logical,
+        _ => unreachable!("Unexpected rule type: {}", annot_inner_pair.as_str()),
     }
-    None
 }
 
 #[cfg(test)]
