@@ -1,3 +1,3 @@
 [workspace]
-members = ["optd-core"]
+members = ["optd-core", "optd-datafusion"]
 resolver = "2"
