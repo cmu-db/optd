@@ -1,23 +1,30 @@
+pub mod expressions;
+pub mod goal;
+pub mod groups;
+pub mod memo;
+pub mod properties;
+
 use std::sync::Arc;
 
 use async_recursion::async_recursion;
-use expressions::{LogicalExpression, ScalarExpression};
+use expressions::{LogicalExpression, PhysicalExpression, ScalarExpression};
 use groups::{RelationalGroupId, ScalarGroupId};
 use memo::Memoize;
 
 use crate::{
     operators::{
-        relational::logical::{
-            filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator,
+        relational::{
+            logical::{filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator},
+            physical::{
+                self, filter::filter::PhysicalFilter, scan::table_scan::TableScan, PhysicalOperator,
+            },
         },
         scalar::{add::Add, and::And, equal::Equal, ScalarOperator},
     },
-    plans::{logical::PartialLogicalPlan, scalar::PartialScalarPlan},
+    plans::{
+        logical::PartialLogicalPlan, physical::PartialPhysicalPlan, scalar::PartialScalarPlan,
+    },
 };
-
-pub mod expressions;
-pub mod groups;
-pub mod memo;
 
 #[async_recursion]
 pub async fn ingest_partial_logical_plan(
@@ -63,6 +70,118 @@ pub async fn ingest_partial_scalar_plan(
             return Ok(*group_id);
         }
     }
+}
+
+/// A mock optimization function for testing purposes.
+///
+/// This function takes a logical plan, and for each node in the logical plan, it will
+/// recursively traverse the node and its children and replace the node with a physical
+/// operator. The physical operator is chosen based on the type of the logical operator.
+/// For example, if the logical operator is a scan, the physical operator will be a
+/// TableScan, if the logical operator is a filter, the physical operator will be a
+/// Filter, and so on.
+///
+/// The physical operators are chosen in a way that they mirror the structure of the
+/// logical plan, but they are not actually optimized in any way. This is useful for
+/// testing purposes, as it allows us to test the structure of the physical plan without
+/// having to worry about the actual optimization process.
+///
+/// The function returns a PhysicalPlan, which is a struct that contains the root node of
+/// the physical plan.
+///
+/// # Arguments
+/// * `logical_plan` - The logical plan to optimize.
+///
+/// # Returns
+/// * `PhysicalPlan` - The optimized physical plan.
+pub fn mock_optimize_relation(
+    partial_logical_plan: &PartialLogicalPlan,
+) -> Arc<PartialPhysicalPlan> {
+    let partial_physical_plan = match partial_logical_plan {
+        PartialLogicalPlan::PartialMaterialized { operator } => {
+            let operator = match operator {
+                LogicalOperator::Scan(scan) => PhysicalOperator::TableScan(TableScan {
+                    table_name: scan.table_name.clone(),
+                    predicate: scan.predicate.clone(),
+                }),
+                // LogicalOperator::Filter(filter) => PhysicalOperator::Filter(PhysicalFilter {
+                //     child: mock_optimize_relation(memo, &filter.child),
+                //     predicate: filter.predicate.clone(),
+                // }),
+                // LogicalOperator::Project(project) => PhysicalOperator::Project(physical::project::PhysicalProject {
+                //     child: mock_optimize_relation(memo, &project.child),
+                //     fields: project.fields.clone(),
+                // }),
+                // LogicalOperator::Join(join) => PhysicalOperator::NestedLoopJoin(physical::join::nested_loop_join::NestedLoopJoin {
+                //     join_type: join.join_type.clone(),
+                //     outer: mock_optimize_relation(memo, &join.left),
+                //     inner: mock_optimize_relation(memo, &join.right),
+                //     condition: join.condition.clone(),
+                // }),
+                _ => unimplemented!(),
+            };
+            PartialPhysicalPlan::PartialMaterialized { operator }
+        }
+        PartialLogicalPlan::UnMaterialized(group_id) => {
+            PartialPhysicalPlan::UnMaterialized(*group_id)
+        }
+    };
+    Arc::new(partial_physical_plan)
+}
+
+async fn mock_optimize_scalar_group(
+    _memo: &impl Memoize,
+    _group: ScalarGroupId,
+) -> anyhow::Result<()> {
+    Ok(())
+}
+
+async fn mock_optimize_relation_group(
+    memo: &impl Memoize,
+    group_id: RelationalGroupId,
+) -> anyhow::Result<()> {
+    let logical_exprs = memo.get_all_logical_exprs_in_group(group_id).await?;
+    let last_logical_expr = logical_exprs.last().unwrap().1.clone();
+
+    mock_optimize_relation_expr(memo, group_id, &last_logical_expr).await?;
+
+    Ok(())
+}
+
+async fn mock_optimize_relation_expr(
+    memo: &impl Memoize,
+    group_id: RelationalGroupId,
+    logical_expr: &LogicalExpression,
+) -> anyhow::Result<()> {
+    match logical_expr {
+        LogicalExpression::Scan(scan) => {
+            let physical_expr = PhysicalExpression::TableScan(TableScan {
+                table_name: scan.table_name.clone(),
+                predicate: scan.predicate.clone(),
+            });
+            memo.add_physical_expr_to_group(&physical_expr, group_id)
+                .await?;
+            mock_optimize_scalar_group(memo, scan.predicate).await?;
+        }
+        // LogicalExpression::Filter(filter) => {
+        //     mock_optimize_relation_group(memo, filter.child).await?;
+        //     mock_optimize_scalar_group(memo, filter.predicate).await?;
+        // }
+        // LogicalExpression::Join(join) => {
+        //     mock_optimize_relation_group(memo, join.left).await?;
+        //     mock_optimize_relation_group(memo, join.right).await?;
+        //     mock_optimize_scalar_group(memo, join.condition).await?;
+        // }
+        // LogicalExpression::Project(project) => {
+        //     mock_optimize_relation_group(memo, project.child).await?;
+        //     for field in project.fields.iter() {
+        //         mock_optimize_scalar_group(memo, *field).await?;
+        //     }
+        // }
+        _ => unimplemented!(),
+    }
+
+    Ok(())
 }
 
 #[async_recursion]
@@ -115,6 +234,26 @@ async fn match_any_partial_logical_plan(
                 operator: LogicalOperator::Project(Project { child, fields }),
             }))
         }
+    }
+}
+
+#[async_recursion]
+async fn match_any_partial_physical_plan(
+    memo: &impl Memoize,
+    group: RelationalGroupId,
+) -> anyhow::Result<Arc<PartialPhysicalPlan>> {
+    let physical_exprs = memo.get_all_physical_exprs_in_group(group).await?;
+    let last_physical_expr = physical_exprs.last().unwrap().1.clone();
+    match last_physical_expr.as_ref() {
+        PhysicalExpression::TableScan(table_scan) => {
+            Ok(Arc::new(PartialPhysicalPlan::PartialMaterialized {
+                operator: physical::PhysicalOperator::TableScan(TableScan {
+                    table_name: table_scan.table_name.clone(),
+                    predicate: match_any_partial_scalar_plan(memo, table_scan.predicate).await?,
+                }),
+            }))
+        }
+        _ => unimplemented!(),
     }
 }
 
@@ -223,6 +362,22 @@ mod tests {
 
         let result = match_any_partial_logical_plan(&memo, group_id).await?;
         assert_eq!(result, logical_plan);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_scan_e2e() -> anyhow::Result<()> {
+        let memo = SqliteMemo::new("sqlite://memo.db").await?;
+
+        // select * from t1;
+        let logical_plan = scan("t1", boolean(true));
+
+        let group_id = ingest_partial_logical_plan(&memo, &logical_plan).await?;
+        mock_optimize_relation_group(&memo, group_id).await?;
+        let physical_plan = match_any_partial_physical_plan(&memo, group_id).await?;
+
+        assert_eq!(physical_plan, table_scan("t1", boolean(true)));
 
         Ok(())
     }

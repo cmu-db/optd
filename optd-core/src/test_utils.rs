@@ -2,15 +2,18 @@ use std::sync::Arc;
 
 use crate::{
     operators::{
-        relational::logical::{
-            filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator,
+        relational::{
+            logical::{filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator},
+            physical::{scan::table_scan::TableScan, PhysicalOperator},
         },
         scalar::{
             add::Add, and::And, column_ref::ColumnRef, constants::Constant, equal::Equal,
             ScalarOperator,
         },
     },
-    plans::{logical::PartialLogicalPlan, scalar::PartialScalarPlan},
+    plans::{
+        logical::PartialLogicalPlan, physical::PartialPhysicalPlan, scalar::PartialScalarPlan,
+    },
     values::OptdValue,
 };
 
@@ -91,5 +94,11 @@ pub fn project(
 ) -> Arc<PartialLogicalPlan> {
     Arc::new(PartialLogicalPlan::PartialMaterialized {
         operator: LogicalOperator::Project(Project::new(child, fields)),
+    })
+}
+
+pub fn table_scan(table_name: &str, predicate: Arc<PartialScalarPlan>) -> Arc<PartialPhysicalPlan> {
+    Arc::new(PartialPhysicalPlan::PartialMaterialized {
+        operator: PhysicalOperator::TableScan(TableScan::new(table_name, predicate)),
     })
 }
