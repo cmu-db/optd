@@ -1,0 +1,15 @@
+[package]
+name = "optd-dsl"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+pest = "2.7.15"
+pest_derive = "2.7.15"
+syn = { version = "2.0", features = ["full", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0.93"
+prettyplease = "0.2"
