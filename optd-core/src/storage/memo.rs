@@ -639,6 +639,59 @@ impl SqliteMemo {
                     .fetch_one(&mut *txn)
                     .await?
             }
+            PhysicalExpression::Filter(filter) => {
+                Self::insert_into_physical_expressions(
+                    &mut txn,
+                    physical_expr_id,
+                    group_id,
+                    PhysicalOperatorKind::Filter,
+                )
+                .await?;
+
+                sqlx::query_scalar("INSERT INTO physical_filters (physical_expression_id, group_id, child_group_id, predicate_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                    .bind(physical_expr_id)
+                    .bind(group_id)
+                    .bind(filter.child)
+                    .bind(filter.predicate)
+                    .fetch_one(&mut *txn)
+                    .await?
+            }
+            PhysicalExpression::NestedLoopJoin(join) => {
+                Self::insert_into_physical_expressions(
+                    &mut txn,
+                    physical_expr_id,
+                    group_id,
+                    PhysicalOperatorKind::NestedLoopJoin,
+                )
+                .await?;
+
+                sqlx::query_scalar("INSERT INTO nested_loop_joins (physical_expression_id, group_id, join_type, outer_group_id, inner_group_id, condition_group_id) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                    .bind(physical_expr_id)
+                    .bind(group_id)
+                    .bind(serde_json::to_string(&join.join_type)?)
+                    .bind(join.outer)
+                    .bind(join.inner)
+                    .bind(join.condition)
+                    .fetch_one(&mut *txn)
+                    .await?
+            }
+            PhysicalExpression::Project(project) => {
+                Self::insert_into_physical_expressions(
+                    &mut txn,
+                    physical_expr_id,
+                    group_id,
+                    PhysicalOperatorKind::Project,
+                )
+                .await?;
+
+                sqlx::query_scalar("INSERT INTO physical_projects (physical_expression_id, group_id, child_group_id, fields_group_ids) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                    .bind(physical_expr_id)
+                    .bind(group_id)
+                    .bind(project.child)
+                    .bind(serde_json::to_value(&project.fields)?)
+                    .fetch_one(&mut *txn)
+                    .await?
+            }
             _ => unimplemented!(),
         };
         txn.commit().await?;
@@ -682,7 +735,13 @@ const fn get_all_logical_exprs_in_group_query() -> &'static str {
 
 const fn get_all_physical_exprs_in_group_query() -> &'static str {
     concat!(
-        "SELECT physical_expression_id, json_object('TableScan', json_object('table_name', json(table_name), 'predicate', predicate_group_id)) as data FROM table_scans WHERE group_id = $1"
+        "SELECT physical_expression_id, json_object('TableScan', json_object('table_name', json(table_name), 'predicate', predicate_group_id)) as data FROM table_scans WHERE group_id = $1",
+        " UNION ALL ",
+        "SELECT physical_expression_id, json_object('Filter', json_object('child', child_group_id, 'predicate', predicate_group_id)) as data FROM physical_filters WHERE group_id = $1",
+        " UNION ALL ",
+        "SELECT physical_expression_id, json_object('NestedLoopJoin', json_object('join_type', json(join_type), 'outer', outer_group_id, 'inner', inner_group_id, 'condition', condition_group_id)) as data FROM nested_loop_joins WHERE group_id = $1",
+        " UNION ALL ",
+        "SELECT physical_expression_id, json_object('Project', json_object('child', child_group_id, 'fields', json(fields_group_ids))) as data FROM physical_projects WHERE group_id = $1"
     )
 }
 

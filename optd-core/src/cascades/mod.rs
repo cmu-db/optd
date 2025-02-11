@@ -218,6 +218,37 @@ async fn match_any_partial_physical_plan(
                 }),
             }))
         }
+        PhysicalExpression::Filter(filter) => {
+            Ok(Arc::new(PartialPhysicalPlan::PartialMaterialized {
+                operator: physical::PhysicalOperator::Filter(PhysicalFilter {
+                    child: match_any_partial_physical_plan(memo, filter.child).await?,
+                    predicate: match_any_partial_scalar_plan(memo, filter.predicate).await?,
+                }),
+            }))
+        }
+        PhysicalExpression::NestedLoopJoin(nested_loop_join) => {
+            Ok(Arc::new(PartialPhysicalPlan::PartialMaterialized {
+                operator: physical::PhysicalOperator::NestedLoopJoin(NestedLoopJoin {
+                    join_type: nested_loop_join.join_type.clone(),
+                    outer: match_any_partial_physical_plan(memo, nested_loop_join.outer).await?,
+                    inner: match_any_partial_physical_plan(memo, nested_loop_join.inner).await?,
+                    condition: match_any_partial_scalar_plan(memo, nested_loop_join.condition)
+                        .await?,
+                }),
+            }))
+        }
+        PhysicalExpression::Project(project) => {
+            let mut fields = Vec::with_capacity(project.fields.len());
+            for field in project.fields.iter() {
+                fields.push(match_any_partial_scalar_plan(memo, *field).await?);
+            }
+            Ok(Arc::new(PartialPhysicalPlan::PartialMaterialized {
+                operator: physical::PhysicalOperator::Project(PhysicalProject {
+                    child: match_any_partial_physical_plan(memo, project.child).await?,
+                    fields,
+                }),
+            }))
+        }
         _ => unimplemented!(),
     }
 }
@@ -272,7 +303,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ingest_partial_logical_plan() -> anyhow::Result<()> {
-        let memo = SqliteMemo::new("sqlite://memo.db").await?;
+        let memo = SqliteMemo::new_in_memory().await?;
         // select * from t1, t2 where t1.id = t2.id and t2.name = 'Memo' and t2.v1 = 1 + 1
         let partial_logical_plan = filter(
             join(

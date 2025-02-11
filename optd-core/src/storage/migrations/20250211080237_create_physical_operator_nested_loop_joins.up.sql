@@ -1,7 +1,7 @@
--- A logical join operator combines rows from two relations.
+-- A physical join operator combines rows from two relations.
 CREATE TABLE nested_loop_joins (
-    -- The logical expression id that this scan is associated with.
-    logical_expression_id INTEGER NOT NULL PRIMARY KEY,
+    -- The physical expression id that this scan is associated with.
+    physical_expression_id INTEGER NOT NULL PRIMARY KEY,
     -- The group id of the join.
     group_id BIGINT NOT NULL,
     -- The type of the join.
@@ -13,7 +13,7 @@ CREATE TABLE nested_loop_joins (
     -- The join condition. e.g. `outer_column_a = inner_column_b`.
     condition_group_id BIGINT NOT NULL,
 
-    FOREIGN KEY (logical_expression_id) REFERENCES logical_expressions (id)
+    FOREIGN KEY (physical_expression_id) REFERENCES physical_expressions (id)
     ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (group_id) REFERENCES relation_groups (id),
     FOREIGN KEY (outer_group_id) REFERENCES relation_groups (id) 
