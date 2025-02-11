@@ -1,10 +1,8 @@
 use pest::iterators::Pair;
 
-use super::{
-    ast::{BinOp, Expr, Literal, MatchArm, UnaryOp},
-    patterns::parse_pattern,
-    Rule,
-};
+use crate::dsl::ast::upper_layer::{BinOp, Expr, Literal, MatchArm, UnaryOp};
+
+use super::{patterns::parse_pattern, Rule};
 
 /// Parse a complete expression from a pest Pair
 ///

@@ -1,6 +1,6 @@
-/*use std::collections::HashSet;
+use std::collections::HashSet;
 
-use crate::dsl::parser::ast::{Expr, File, Function, Operator, Pattern, Properties, Type};
+use crate::dsl::ast::upper_layer::{Expr, File, Function, Operator, Pattern, Properties, Type};
 
 #[derive(Debug)]
 pub struct SemanticAnalyzer {
@@ -46,6 +46,7 @@ impl SemanticAnalyzer {
     fn is_valid_scalar_type(&self, ty: &Type) -> bool {
         match ty {
             Type::Array(inner) => self.is_valid_scalar_type(inner),
+            Type::Tuple(fields) => fields.iter().all(|f| self.is_valid_scalar_type(f)),
             Type::Int64 | Type::String | Type::Bool | Type::Float64 => true,
             _ => false,
         }
@@ -54,6 +55,7 @@ impl SemanticAnalyzer {
     fn is_valid_logical_type(&self, ty: &Type) -> bool {
         match ty {
             Type::Array(inner) => self.is_valid_logical_type(inner),
+            Type::Tuple(fields) => fields.iter().all(|f| self.is_valid_logical_type(f)),
             Type::Int64 | Type::String | Type::Bool | Type::Float64 => true,
             _ => false,
         }
@@ -86,62 +88,59 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    fn validate_operator(&mut self, operator: &Operator) -> Result<(), String> {
-        match operator {
-            Operator::Scalar(scalar_op) => {
-                if self.operators.contains(&scalar_op.name) {
-                    return Err(format!("Duplicate operator name: {}", scalar_op.name));
-                }
-                self.operators.insert(scalar_op.name.clone());
+    fn validate_operator(&self, operator: &Operator) -> Result<(), String> {
+        let (name, fields, is_logical) = match operator {
+            Operator::Scalar(op) => (&op.name, &op.fields, false),
+            Operator::Logical(op) => (&op.name, &op.fields, true),
+        };
 
-                for field in &scalar_op.fields {
-                    if !self.is_valid_scalar_type(&field.ty) {
-                        return Err(format!("Invalid type in scalar operator: {:?}", field.ty));
-                    }
-                }
+        if self.operators.contains(name) {
+            return Err(format!("Duplicate operator name: {}", name));
+        }
+
+        if let Some(field) = fields.iter().find(|f| {
+            if is_logical {
+                !self.is_valid_logical_type(&f.ty)
+            } else {
+                !self.is_valid_scalar_type(&f.ty)
             }
-            Operator::Logical(logical_op) => {
-                if self.operators.contains(&logical_op.name) {
-                    return Err(format!("Duplicate operator name: {}", logical_op.name));
-                }
-                self.operators.insert(logical_op.name.clone());
+        }) {
+            return Err(format!(
+                "Invalid type in {} operator: {:?}",
+                if is_logical { "logical" } else { "scalar" },
+                field.ty
+            ));
+        }
 
-                for field in &logical_op.fields {
-                    if !self.is_valid_logical_type(&field.ty) {
-                        return Err(format!("Invalid type in logical operator: {:?}", field.ty));
-                    }
-                }
+        if let Operator::Logical(op) = operator {
+            if let Some(prop) = op
+                .derived_props
+                .keys()
+                .find(|&p| !self.operators.contains(p))
+            {
+                return Err(format!(
+                    "Derived property not found in logical properties: {}",
+                    prop
+                ));
+            }
 
-                // Check that derived properties match the logical properties fields
-                for (prop_name, _) in &logical_op.derived_props {
-                    if !self.operators.iter().any(|f| f == prop_name) {
-                        return Err(format!(
-                            "Derived property not found in logical properties: {}",
-                            prop_name
-                        ));
-                    }
-                }
-
-                // Check that all logical properties fields have corresponding derived properties
-                for field in &self.logical_properties {
-                    if !logical_op.derived_props.contains_key(field) {
-                        return Err(format!(
-                            "Logical property field '{}' is missing a derived property",
-                            field
-                        ));
-                    }
-                }
+            if let Some(field) = self
+                .logical_properties
+                .iter()
+                .find(|&f| !op.derived_props.contains_key(f))
+            {
+                return Err(format!(
+                    "Logical property field '{}' is missing a derived property",
+                    field
+                ));
             }
         }
+
         Ok(())
     }
 
-    // Validate a function definition
     fn validate_function(&mut self, function: &Function) -> Result<(), String> {
-        if self.function_names.contains(&function.name) {
-            return Err(format!("Duplicate function name: {}", function.name));
-        }
-        self.function_names.insert(function.name.clone());
+        self.add_identifier(function.name.clone())?;
 
         self.enter_scope();
         for (param_name, _) in &function.params {
@@ -153,7 +152,6 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    // Validate an expression
     fn validate_expr(&mut self, expr: &Expr) -> Result<(), String> {
         match expr {
             Expr::Var(name) => {
@@ -219,7 +217,6 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    // Validate a pattern
     fn validate_pattern(&mut self, pattern: &Pattern) -> Result<(), String> {
         match pattern {
             Pattern::Bind(name, pat) => {
@@ -240,7 +237,6 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    // Validate a complete file
     pub fn validate_file(&mut self, file: &File) -> Result<(), String> {
         self.validate_properties(&file.properties)?;
 
@@ -255,4 +251,183 @@ impl SemanticAnalyzer {
         Ok(())
     }
 }
-*/
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dsl::ast::upper_layer::{
+        Expr, Field, File, Function, Literal, LogicalOp, Operator, Properties, ScalarOp, Type,
+    };
+    use std::collections::HashMap;
+
+    fn create_test_file() -> File {
+        File {
+            properties: Properties {
+                fields: vec![
+                    Field {
+                        name: "prop1".to_string(),
+                        ty: Type::Int64,
+                    },
+                    Field {
+                        name: "prop2".to_string(),
+                        ty: Type::String,
+                    },
+                ],
+            },
+            operators: vec![
+                Operator::Scalar(ScalarOp {
+                    name: "op1".to_string(),
+                    fields: vec![Field {
+                        name: "field1".to_string(),
+                        ty: Type::Int64,
+                    }],
+                }),
+                Operator::Logical(LogicalOp {
+                    name: "op2".to_string(),
+                    fields: vec![Field {
+                        name: "field2".to_string(),
+                        ty: Type::String,
+                    }],
+                    derived_props: HashMap::from([
+                        ("prop1".to_string(), Expr::Literal(Literal::Int64(42))),
+                        (
+                            "prop2".to_string(),
+                            Expr::Literal(Literal::String("test".to_string())),
+                        ),
+                    ]),
+                }),
+            ],
+            functions: vec![Function {
+                name: "func1".to_string(),
+                params: vec![("x".to_string(), Type::Int64)],
+                return_type: Type::Int64,
+                body: Expr::Literal(Literal::Int64(42)),
+                rule_type: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn test_valid_file() {
+        let file = create_test_file();
+        let mut analyzer = SemanticAnalyzer::new();
+        analyzer.validate_file(&file).unwrap();
+        assert!(analyzer.validate_file(&file).is_ok());
+    }
+
+    #[test]
+    fn test_duplicate_operator_name() {
+        let mut file = create_test_file();
+        file.operators.push(Operator::Scalar(ScalarOp {
+            name: "op1".to_string(), // Duplicate name
+            fields: vec![Field {
+                name: "field3".to_string(),
+                ty: Type::Int64,
+            }],
+        }));
+
+        let mut analyzer = SemanticAnalyzer::new();
+        let result = analyzer.validate_file(&file);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Duplicate operator name: op1");
+    }
+
+    #[test]
+    fn test_duplicate_function_name() {
+        let mut file = create_test_file();
+        file.functions.push(Function {
+            name: "func1".to_string(), // Duplicate name
+            params: vec![("y".to_string(), Type::Int64)],
+            return_type: Type::Int64,
+            body: Expr::Literal(Literal::Int64(42)),
+            rule_type: None,
+        });
+
+        let mut analyzer = SemanticAnalyzer::new();
+        let result = analyzer.validate_file(&file);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Duplicate identifier name: func1");
+    }
+
+    #[test]
+    fn test_undefined_variable() {
+        let mut file = create_test_file();
+        file.functions[0].body = Expr::Var("undefined_var".to_string()); // Undefined variable
+
+        let mut analyzer = SemanticAnalyzer::new();
+        let result = analyzer.validate_file(&file);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Undefined identifier: undefined_var");
+    }
+
+    #[test]
+    fn test_invalid_scalar_operator_type() {
+        let mut file = create_test_file();
+        file.operators[0] = Operator::Scalar(ScalarOp {
+            name: "op1".to_string(),
+            fields: vec![Field {
+                name: "field1".to_string(),
+                ty: Type::Function(Box::new(Type::Int64), Box::new(Type::Int64)),
+            }],
+        });
+
+        let mut analyzer = SemanticAnalyzer::new();
+        let result = analyzer.validate_file(&file);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "Invalid type in scalar operator: Function(Int64)"
+        );
+    }
+
+    #[test]
+    fn test_invalid_logical_operator_type() {
+        let mut file = create_test_file();
+        file.operators[1] = Operator::Logical(LogicalOp {
+            name: "op2".to_string(),
+            fields: vec![Field {
+                name: "field2".to_string(),
+                ty: Type::Function(Box::new(Type::Int64), Box::new(Type::Int64)),
+            }],
+            derived_props: HashMap::new(),
+        });
+
+        let mut analyzer = SemanticAnalyzer::new();
+        let result = analyzer.validate_file(&file);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "Invalid type in logical operator: Function(Int64)"
+        );
+    }
+
+    #[test]
+    fn test_missing_derived_property() {
+        let mut file = create_test_file();
+        if let Operator::Logical(op) = &mut file.operators[1] {
+            op.derived_props.remove("prop2"); // Missing derived property
+        }
+
+        let mut analyzer = SemanticAnalyzer::new();
+        let result = analyzer.validate_file(&file);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "Logical property field 'prop2' is missing a derived property"
+        );
+    }
+
+    #[test]
+    fn test_invalid_property_type() {
+        let mut file = create_test_file();
+        file.properties.fields[0].ty = Type::Function(Box::new(Type::Int64), Box::new(Type::Int64));
+
+        let mut analyzer = SemanticAnalyzer::new();
+        let result = analyzer.validate_file(&file);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "Invalid type in properties: Function(Int64)"
+        );
+    }
+}

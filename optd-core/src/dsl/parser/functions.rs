@@ -1,6 +1,7 @@
 use pest::iterators::Pair;
 
-use super::ast::{Function, OperatorKind, Type};
+use crate::dsl::ast::upper_layer::{Function, OperatorKind, Type};
+
 use super::expr::parse_expr;
 use super::types::parse_type_expr;
 use super::Rule;
@@ -102,7 +103,7 @@ fn parse_rule_annotation(pair: Pair<'_, Rule>) -> OperatorKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsl::parser::ast::{BinOp, Expr, Literal, Type};
+    use crate::dsl::ast::upper_layer::{BinOp, Expr, Literal, Type};
     use crate::dsl::parser::{DslParser, Rule};
     use pest::Parser;
 

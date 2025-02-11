@@ -1,19 +1,19 @@
 use pest::{iterators::Pair, Parser};
 use pest_derive::Parser;
 
-pub mod ast;
 pub mod expr;
 pub mod functions;
 pub mod operators;
 pub mod patterns;
 pub mod types;
 
-use ast::*;
 use functions::parse_function_def;
 use operators::parse_operator_def;
 use types::parse_type_expr;
 
 use pest::error::Error;
+
+use super::ast::upper_layer::{Field, File, Properties};
 
 /// The main parser for the DSL, derived using pest
 #[derive(Parser)]
@@ -107,6 +107,8 @@ pub(crate) fn parse_field_def(pair: Pair<Rule>) -> Field {
 
 #[cfg(test)]
 mod tests {
+    use crate::dsl::ast::upper_layer::Type;
+
     use super::*;
     use pest::Parser;
 
@@ -120,10 +122,10 @@ mod tests {
 
     #[test]
     fn parse_example_files() {
-        let input = include_str!("../parser/programs/example.optd");
+        let input = include_str!("../programs/example.optd");
         parse_file(input).unwrap();
 
-        let input = include_str!("../parser/programs/working.optd");
+        let input = include_str!("../programs/working.optd");
         let out = parse_file(input).unwrap();
         println!("{:#?}", out);
     }

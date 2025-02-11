@@ -1,10 +1,7 @@
 use pest::iterators::Pair;
 
-use super::{
-    ast::{Literal, Pattern},
-    expr::parse_expr,
-    Rule,
-};
+use super::{expr::parse_expr, Rule};
+use crate::dsl::ast::upper_layer::{Literal, Pattern};
 
 /// Parse a pattern from a pest Pair
 ///
