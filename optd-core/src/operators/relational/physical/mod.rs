@@ -5,6 +5,7 @@
 
 pub mod filter;
 pub mod join;
+pub mod project;
 pub mod scan;
 
 use crate::{
@@ -16,6 +17,7 @@ use crate::{
 };
 use filter::filter::PhysicalFilter;
 use join::{hash_join::HashJoin, merge_join::MergeJoin, nested_loop_join::NestedLoopJoin};
+use project::PhysicalProject;
 use scan::table_scan::TableScan;
 use serde::Deserialize;
 
@@ -42,6 +44,7 @@ pub enum PhysicalOperator<Value, Relation, Scalar> {
     NestedLoopJoin(NestedLoopJoin<Value, Relation, Scalar>),
     /// Sort-merge join operator
     SortMergeJoin(MergeJoin<Value, Relation, Scalar>),
+    Project(PhysicalProject<Relation, Scalar>),
 }
 
 /// The kind of physical operator.
@@ -60,6 +63,8 @@ pub enum PhysicalOperatorKind {
     NestedLoopJoin,
     /// Represents a sort-merge join operation
     SortMergeJoin,
+    /// Represents a project operation
+    Project,
 }
 
 impl<Relation, Scalar> PhysicalOperator<OptdValue, Relation, Scalar>
@@ -75,6 +80,7 @@ where
             PhysicalOperator::HashJoin(_) => PhysicalOperatorKind::HashJoin,
             PhysicalOperator::NestedLoopJoin(_) => PhysicalOperatorKind::NestedLoopJoin,
             PhysicalOperator::SortMergeJoin(_) => PhysicalOperatorKind::SortMergeJoin,
+            PhysicalOperator::Project(_) => PhysicalOperatorKind::Project,
         }
     }
 
@@ -90,6 +96,7 @@ where
             PhysicalOperator::SortMergeJoin(join) => {
                 vec![join.left_sorted.clone(), join.right_sorted.clone()]
             }
+            PhysicalOperator::Project(project) => vec![project.child.clone()],
         }
     }
 
@@ -101,6 +108,7 @@ where
             PhysicalOperator::HashJoin(join) => vec![join.condition.clone()],
             PhysicalOperator::NestedLoopJoin(join) => vec![join.condition.clone()],
             PhysicalOperator::SortMergeJoin(join) => vec![join.condition.clone()],
+            PhysicalOperator::Project(project) => project.fields.clone(),
         }
     }
 
@@ -163,6 +171,15 @@ where
                     left_sorted: children_relations[0],
                     right_sorted: children_relations[1],
                     condition: children_scalars[0],
+                })
+            }
+            PhysicalOperator::Project(_) => {
+                assert_eq!(rel_size, 1, "Project: wrong number of relations");
+                // cannot make assumption about scalar size.
+
+                PhysicalExpression::Project(PhysicalProject {
+                    child: children_relations[0],
+                    fields: children_scalars.to_vec(),
                 })
             }
         }

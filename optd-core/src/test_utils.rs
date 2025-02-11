@@ -4,7 +4,10 @@ use crate::{
     operators::{
         relational::{
             logical::{filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator},
-            physical::{scan::table_scan::TableScan, PhysicalOperator},
+            physical::{
+                filter::filter::PhysicalFilter, join::nested_loop_join::NestedLoopJoin,
+                project::PhysicalProject, scan::table_scan::TableScan, PhysicalOperator,
+            },
         },
         scalar::{
             add::Add, and::And, column_ref::ColumnRef, constants::Constant, equal::Equal,
@@ -100,5 +103,36 @@ pub fn project(
 pub fn table_scan(table_name: &str, predicate: Arc<PartialScalarPlan>) -> Arc<PartialPhysicalPlan> {
     Arc::new(PartialPhysicalPlan::PartialMaterialized {
         operator: PhysicalOperator::TableScan(TableScan::new(table_name, predicate)),
+    })
+}
+
+pub fn physical_filter(
+    child: Arc<PartialPhysicalPlan>,
+    predicate: Arc<PartialScalarPlan>,
+) -> Arc<PartialPhysicalPlan> {
+    Arc::new(PartialPhysicalPlan::PartialMaterialized {
+        operator: PhysicalOperator::Filter(PhysicalFilter::new(child, predicate)),
+    })
+}
+
+pub fn nested_loop_join(
+    join_type: &str,
+    outer: Arc<PartialPhysicalPlan>,
+    inner: Arc<PartialPhysicalPlan>,
+    condition: Arc<PartialScalarPlan>,
+) -> Arc<PartialPhysicalPlan> {
+    Arc::new(PartialPhysicalPlan::PartialMaterialized {
+        operator: PhysicalOperator::NestedLoopJoin(NestedLoopJoin::new(
+            join_type, outer, inner, condition,
+        )),
+    })
+}
+
+pub fn physical_project(
+    child: Arc<PartialPhysicalPlan>,
+    fields: Vec<Arc<PartialScalarPlan>>,
+) -> Arc<PartialPhysicalPlan> {
+    Arc::new(PartialPhysicalPlan::PartialMaterialized {
+        operator: PhysicalOperator::Project(PhysicalProject::new(child, fields)),
     })
 }

@@ -55,25 +55,25 @@ impl ConversionContext<'_> {
                     )?) as Arc<dyn ExecutionPlan + 'static>,
                 )
             }
-            // PhysicalOperator::Project(project) => {
-            //     let input_exec = self.conv_optd_to_df_relational(&project.child).await?;
-            //     let physical_exprs = project
-            //         .fields
-            //         .to_vec()
-            //         .into_iter()
-            //         .map(|field| {
-            //             self.conv_optd_to_df_scalar(&field, &input_exec.schema())
-            //                 .clone()
-            //         })
-            //         .enumerate()
-            //         .map(|(idx, expr)| (expr, format!("col{}", idx)))
-            //         .collect::<Vec<(Arc<dyn PhysicalExpr>, String)>>();
+            PhysicalOperator::Project(project) => {
+                let input_exec = self.conv_optd_to_df_relational(&project.child).await?;
+                let physical_exprs = project
+                    .fields
+                    .to_vec()
+                    .into_iter()
+                    .map(|field| {
+                        self.conv_optd_to_df_scalar(&field, &input_exec.schema())
+                            .clone()
+                    })
+                    .enumerate()
+                    .map(|(idx, expr)| (expr, format!("col{}", idx)))
+                    .collect::<Vec<(Arc<dyn PhysicalExpr>, String)>>();
 
-            //     Ok(
-            //         Arc::new(ProjectionExec::try_new(physical_exprs, input_exec)?)
-            //             as Arc<dyn ExecutionPlan + 'static>,
-            //     )
-            // }
+                Ok(
+                    Arc::new(ProjectionExec::try_new(physical_exprs, input_exec)?)
+                        as Arc<dyn ExecutionPlan + 'static>,
+                )
+            }
             PhysicalOperator::NestedLoopJoin(join) => {
                 let left_exec = self.conv_optd_to_df_relational(&join.outer).await?;
                 let right_exec = self.conv_optd_to_df_relational(&join.inner).await?;
