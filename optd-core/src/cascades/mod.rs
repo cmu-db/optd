@@ -23,7 +23,9 @@ use crate::{
         scalar::{add::Add, and::And, equal::Equal, ScalarOperator},
     },
     plans::{
-        logical::PartialLogicalPlan, physical::PartialPhysicalPlan, scalar::PartialScalarPlan,
+        logical::{LogicalPlan, PartialLogicalPlan},
+        physical::{PartialPhysicalPlan, PhysicalPlan},
+        scalar::{PartialScalarPlan, ScalarPlan},
     },
 };
 
@@ -53,6 +55,29 @@ pub async fn ingest_partial_logical_plan(
 }
 
 #[async_recursion]
+pub async fn ingest_full_logical_plan(
+    memo: &impl Memoize,
+    logical_plan: &LogicalPlan,
+) -> anyhow::Result<RelationalGroupId> {
+    let mut children_relations = Vec::new();
+    for child in logical_plan.operator.children_relations().iter() {
+        children_relations.push(ingest_full_logical_plan(memo, child).await?);
+    }
+
+    let mut children_scalars = Vec::new();
+    for child in logical_plan.operator.children_scalars().iter() {
+        children_scalars.push(ingest_full_scalar_plan(memo, child).await?);
+    }
+
+    memo.add_logical_expr(
+        &logical_plan
+            .operator
+            .into_expr(&children_relations, &children_scalars),
+    )
+    .await
+}
+
+#[async_recursion]
 pub async fn ingest_partial_scalar_plan(
     memo: &impl Memoize,
     partial_scalar_plan: &PartialScalarPlan,
@@ -73,6 +98,20 @@ pub async fn ingest_partial_scalar_plan(
     }
 }
 
+#[async_recursion]
+pub async fn ingest_full_scalar_plan(
+    memo: &impl Memoize,
+    scalar_plan: &ScalarPlan,
+) -> anyhow::Result<ScalarGroupId> {
+    let mut children = Vec::new();
+    for child in scalar_plan.operator.children_scalars().iter() {
+        children.push(ingest_full_scalar_plan(memo, child).await?);
+    }
+
+    memo.add_scalar_expr(&scalar_plan.operator.into_expr(&children))
+        .await
+}
+
 async fn mock_optimize_scalar_group(
     _memo: &impl Memoize,
     _group: ScalarGroupId,
@@ -81,7 +120,7 @@ async fn mock_optimize_scalar_group(
 }
 
 #[async_recursion]
-async fn mock_optimize_relation_group(
+pub async fn mock_optimize_relation_group(
     memo: &impl Memoize,
     group_id: RelationalGroupId,
 ) -> anyhow::Result<()> {
@@ -150,7 +189,7 @@ async fn mock_optimize_relation_expr(
 }
 
 #[async_recursion]
-async fn match_any_partial_logical_plan(
+pub async fn match_any_partial_logical_plan(
     memo: &impl Memoize,
     group: RelationalGroupId,
 ) -> anyhow::Result<Arc<PartialLogicalPlan>> {
@@ -254,6 +293,50 @@ async fn match_any_partial_physical_plan(
 }
 
 #[async_recursion]
+pub async fn match_any_physical_plan(
+    memo: &impl Memoize,
+    group: RelationalGroupId,
+) -> anyhow::Result<Arc<PhysicalPlan>> {
+    let physical_exprs = memo.get_all_physical_exprs_in_group(group).await?;
+    let last_physical_expr = physical_exprs.last().unwrap().1.clone();
+    match last_physical_expr.as_ref() {
+        PhysicalExpression::TableScan(table_scan) => Ok(Arc::new(PhysicalPlan {
+            operator: physical::PhysicalOperator::TableScan(TableScan {
+                table_name: table_scan.table_name.clone(),
+                predicate: match_any_scalar_plan(memo, table_scan.predicate).await?,
+            }),
+        })),
+        PhysicalExpression::Filter(filter) => Ok(Arc::new(PhysicalPlan {
+            operator: physical::PhysicalOperator::Filter(PhysicalFilter {
+                child: match_any_physical_plan(memo, filter.child).await?,
+                predicate: match_any_scalar_plan(memo, filter.predicate).await?,
+            }),
+        })),
+        PhysicalExpression::NestedLoopJoin(nested_loop_join) => Ok(Arc::new(PhysicalPlan {
+            operator: physical::PhysicalOperator::NestedLoopJoin(NestedLoopJoin {
+                join_type: nested_loop_join.join_type.clone(),
+                outer: match_any_physical_plan(memo, nested_loop_join.outer).await?,
+                inner: match_any_physical_plan(memo, nested_loop_join.inner).await?,
+                condition: match_any_scalar_plan(memo, nested_loop_join.condition).await?,
+            }),
+        })),
+        PhysicalExpression::Project(project) => {
+            let mut fields = Vec::with_capacity(project.fields.len());
+            for field in project.fields.iter() {
+                fields.push(match_any_scalar_plan(memo, *field).await?);
+            }
+            Ok(Arc::new(PhysicalPlan {
+                operator: physical::PhysicalOperator::Project(PhysicalProject {
+                    child: match_any_physical_plan(memo, project.child).await?,
+                    fields,
+                }),
+            }))
+        }
+        _ => unimplemented!(),
+    }
+}
+
+#[async_recursion]
 async fn match_any_partial_scalar_plan(
     memo: &impl Memoize,
     group: ScalarGroupId,
@@ -289,6 +372,44 @@ async fn match_any_partial_scalar_plan(
             let left = match_any_partial_scalar_plan(memo, and.left).await?;
             let right = match_any_partial_scalar_plan(memo, and.right).await?;
             Ok(Arc::new(PartialScalarPlan::PartialMaterialized {
+                operator: ScalarOperator::And(And { left, right }),
+            }))
+        }
+    }
+}
+
+#[async_recursion]
+async fn match_any_scalar_plan(
+    memo: &impl Memoize,
+    group: ScalarGroupId,
+) -> anyhow::Result<Arc<ScalarPlan>> {
+    let scalar_exprs = memo.get_all_scalar_exprs_in_group(group).await?;
+    let last_scalar_expr = scalar_exprs.last().unwrap().1.clone();
+    match last_scalar_expr.as_ref() {
+        ScalarExpression::Constant(constant) => Ok(Arc::new(ScalarPlan {
+            operator: ScalarOperator::Constant(constant.clone()),
+        })),
+        ScalarExpression::ColumnRef(column_ref) => Ok(Arc::new(ScalarPlan {
+            operator: ScalarOperator::ColumnRef(column_ref.clone()),
+        })),
+        ScalarExpression::Add(add) => {
+            let left = match_any_scalar_plan(memo, add.left).await?;
+            let right = match_any_scalar_plan(memo, add.right).await?;
+            Ok(Arc::new(ScalarPlan {
+                operator: ScalarOperator::Add(Add { left, right }),
+            }))
+        }
+        ScalarExpression::Equal(equal) => {
+            let left = match_any_scalar_plan(memo, equal.left).await?;
+            let right = match_any_scalar_plan(memo, equal.right).await?;
+            Ok(Arc::new(ScalarPlan {
+                operator: ScalarOperator::Equal(Equal { left, right }),
+            }))
+        }
+        ScalarExpression::And(and) => {
+            let left = match_any_scalar_plan(memo, and.left).await?;
+            let right = match_any_scalar_plan(memo, and.right).await?;
+            Ok(Arc::new(ScalarPlan {
                 operator: ScalarOperator::And(And { left, right }),
             }))
         }

@@ -125,7 +125,7 @@ pub async fn create_df_context(
         .with_catalog_list(catalog.clone())
         .with_default_features();
 
-    let optimizer = OptdOptimizer {};
+    let optimizer = OptdOptimizer::new_in_memory().await?;
     let planner = Arc::new(OptdQueryPlanner::new(optimizer));
     // clean up optimizer rules so that we can plug in our own optimizer
     builder = builder.with_optimizer_rules(vec![]);

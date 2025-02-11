@@ -8,7 +8,9 @@ use datafusion::{
 };
 use optd_core::{
     operators::{
-        relational::logical::{filter::Filter, join::Join, scan::Scan, LogicalOperator},
+        relational::logical::{
+            filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator,
+        },
         scalar::{
             add::Add, and::And, column_ref::ColumnRef, constants::Constant, equal::Equal,
             ScalarOperator,
@@ -151,19 +153,19 @@ impl ConversionContext<'_> {
 
                 scan
             }
-            // DatafusionLogicalPlan::Projection(projection) => {
-            //     let input = self.conv_df_to_optd_relational(projection.input.as_ref());
-            //     let mut exprs = Vec::new();
-            //     for expr in &projection.expr {
-            //         exprs.push(self.conv_df_to_optd_scalar(expr, projection.input.schema(), 0));
-            //     }
-            //     let logical_optd_filter = LogicalProjection::<LogicalPlan, ScalarPlan> {
-            //         child: input,
-            //         fields: exprs,
-            //     };
-            //     let op = LogicalOperator::<LogicalPlan, ScalarPlan>::Project(logical_optd_filter);
-            //     Arc::new(op)
-            // }
+            DatafusionLogicalPlan::Projection(projection) => {
+                let input = self.conv_df_to_optd_relational(projection.input.as_ref())?;
+                let mut exprs = Vec::new();
+                for expr in &projection.expr {
+                    exprs.push(self.conv_df_to_optd_scalar(expr, projection.input.schema(), 0)?);
+                }
+                let project = LogicalOperator::Project(Project {
+                    child: input,
+                    fields: exprs,
+                });
+
+                project
+            }
             _ => bail!("optd does not support this operator"),
         };
         Ok(Arc::new(LogicalPlan { operator }))

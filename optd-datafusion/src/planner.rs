@@ -9,22 +9,24 @@ use datafusion::{
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
 use optd_core::{
-    operators::relational::{
-        logical::LogicalOperator,
-        physical::{
-            filter::filter::PhysicalFilter, join::nested_loop_join::NestedLoopJoin,
-            scan::table_scan::TableScan, PhysicalOperator,
-        },
-    },
     plans::{logical::LogicalPlan, physical::PhysicalPlan},
+    storage::memo::SqliteMemo,
 };
 
 use crate::converter::ConversionContext;
 
 /// A mock optimizer for testing purposes.
-pub struct OptdOptimizer {}
+pub struct OptdOptimizer {
+    memo: SqliteMemo,
+}
 
 impl OptdOptimizer {
+    pub async fn new_in_memory() -> anyhow::Result<Self> {
+        Ok(Self {
+            memo: SqliteMemo::new_in_memory().await?,
+        })
+    }
+
     /// A mock optimization function for testing purposes.
     ///
     /// This function takes a logical plan, and for each node in the logical plan, it will
@@ -47,31 +49,45 @@ impl OptdOptimizer {
     ///
     /// # Returns
     /// * `PhysicalPlan` - The optimized physical plan.
-    pub fn mock_optimize(&self, logical_plan: &LogicalPlan) -> Arc<PhysicalPlan> {
-        let operator = match &logical_plan.operator {
-            LogicalOperator::Scan(scan) => PhysicalOperator::TableScan(TableScan {
-                table_name: scan.table_name.clone(),
-                predicate: scan.predicate.clone(),
-            }),
-            LogicalOperator::Filter(filter) => PhysicalOperator::Filter(PhysicalFilter {
-                child: self.mock_optimize(&filter.child),
-                predicate: filter.predicate.clone(),
-            }),
-            LogicalOperator::Project(_project) => {
-                // Arc::new(PhysicalOperator::Project(PhysicalProject {
-                //     child: self.mock_optimize(project.child.clone()),
-                //     fields: project.fields.clone(),
-                // }))
-                todo!()
-            }
-            LogicalOperator::Join(join) => PhysicalOperator::NestedLoopJoin(NestedLoopJoin {
-                join_type: join.join_type.clone(),
-                outer: self.mock_optimize(&join.left),
-                inner: self.mock_optimize(&join.right),
-                condition: join.condition.clone(),
-            }),
-        };
-        Arc::new(PhysicalPlan { operator })
+    // pub fn mock_optimize(&self, logical_plan: &LogicalPlan) -> Arc<PhysicalPlan> {
+    //     let operator = match &logical_plan.operator {
+    //         LogicalOperator::Scan(scan) => PhysicalOperator::TableScan(TableScan {
+    //             table_name: scan.table_name.clone(),
+    //             predicate: scan.predicate.clone(),
+    //         }),
+    //         LogicalOperator::Filter(filter) => PhysicalOperator::Filter(PhysicalFilter {
+    //             child: self.mock_optimize(&filter.child),
+    //             predicate: filter.predicate.clone(),
+    //         }),
+    //         LogicalOperator::Project(_project) => {
+    //             Arc::new(PhysicalOperator::Project(PhysicalProject {
+    //                 child: self.mock_optimize(project.child.clone()),
+    //                 fields: project.fields.clone(),
+    //             }))
+    //             todo!()
+    //         }
+    //         LogicalOperator::Join(join) => PhysicalOperator::NestedLoopJoin(NestedLoopJoin {
+    //             join_type: join.join_type.clone(),
+    //             outer: self.mock_optimize(&join.left),
+    //             inner: self.mock_optimize(&join.right),
+    //             condition: join.condition.clone(),
+    //         }),
+    //     };
+    //     Arc::new(PhysicalPlan { operator })
+    // }
+
+    pub async fn mock_optimize(
+        &self,
+        logical_plan: &LogicalPlan,
+    ) -> anyhow::Result<Arc<PhysicalPlan>> {
+        let root_group_id =
+            optd_core::cascades::ingest_full_logical_plan(&self.memo, logical_plan).await?;
+        optd_core::cascades::mock_optimize_relation_group(&self.memo, root_group_id).await?;
+
+        let optimized_plan =
+            optd_core::cascades::match_any_physical_plan(&self.memo, root_group_id).await?;
+
+        Ok(optimized_plan)
     }
 }
 
@@ -142,7 +158,7 @@ impl OptdQueryPlanner {
         // convert the logical plan to OptD
         let logical_plan = converter.conv_df_to_optd_relational(logical_plan)?;
         // run the optd optimizer
-        let optd_optimized_physical_plan = self.optimizer.mock_optimize(&logical_plan);
+        let optd_optimized_physical_plan = self.optimizer.mock_optimize(&logical_plan).await?;
         // convert the physical plan to OptD
         converter
             .conv_optd_to_df_relational(&optd_optimized_physical_plan)
