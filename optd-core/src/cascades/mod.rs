@@ -206,4 +206,24 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_ingest_and() -> anyhow::Result<()> {
+        let memo = SqliteMemo::new_in_memory().await?;
+
+        // select * from t1 where t1.id = 1 and t1.name = 'Memo';
+        let logical_plan = filter(
+            scan("t1", boolean(true)),
+            and(boolean(true), equal(column_ref(2), string("Memo"))),
+        );
+
+        let group_id = ingest_partial_logical_plan(&memo, &logical_plan).await?;
+        let dup_group_id = ingest_partial_logical_plan(&memo, &logical_plan).await?;
+        assert_eq!(group_id, dup_group_id);
+
+        let result = match_any_partial_logical_plan(&memo, group_id).await?;
+        assert_eq!(result, logical_plan);
+
+        Ok(())
+    }
 }

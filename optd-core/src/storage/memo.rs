@@ -580,7 +580,9 @@ const fn get_all_scalar_exprs_in_group_query() -> &'static str {
         " UNION ALL ",
         "SELECT scalar_expression_id, json_object('Add', json_object('left', left_group_id, 'right', right_group_id)) as data FROM scalar_adds WHERE group_id = $1",
         " UNION ALL ",
-        "SELECT scalar_expression_id, json_object('Equal', json_object('left', left_group_id, 'right', right_group_id)) as data FROM scalar_equals WHERE group_id = $1"
+        "SELECT scalar_expression_id, json_object('Equal', json_object('left', left_group_id, 'right', right_group_id)) as data FROM scalar_equals WHERE group_id = $1",
+        " UNION ALL ",
+        "SELECT scalar_expression_id, json_object('And', json_object('left', left_group_id, 'right', right_group_id)) as data FROM scalar_ands WHERE group_id = $1"
     )
 }
 

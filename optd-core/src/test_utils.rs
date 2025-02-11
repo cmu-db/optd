@@ -6,7 +6,8 @@ use crate::{
             filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator,
         },
         scalar::{
-            add::Add, column_ref::ColumnRef, constants::Constant, equal::Equal, ScalarOperator,
+            add::Add, and::And, column_ref::ColumnRef, constants::Constant, equal::Equal,
+            ScalarOperator,
         },
     },
     plans::{logical::PartialLogicalPlan, scalar::PartialScalarPlan},
@@ -49,6 +50,12 @@ pub fn equal(
 ) -> Arc<PartialScalarPlan> {
     Arc::new(PartialScalarPlan::PartialMaterialized {
         operator: ScalarOperator::Equal(Equal::new(left, right)),
+    })
+}
+
+pub fn and(left: Arc<PartialScalarPlan>, right: Arc<PartialScalarPlan>) -> Arc<PartialScalarPlan> {
+    Arc::new(PartialScalarPlan::PartialMaterialized {
+        operator: ScalarOperator::And(And::new(left, right)),
     })
 }
 
