@@ -3,6 +3,14 @@ members = ["optd-core", "optd-datafusion"]
 resolver = "2"
 
 
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81.0"
+repository = "https://github.com/cmu-db/optd"
+
+
+
 [workspace.dependencies]
 anyhow = "1.0"
 trait-variant = "0.1.2"
