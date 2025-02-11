@@ -16,6 +16,7 @@ use optd_core::{
 use crate::converter::ConversionContext;
 
 /// A mock optimizer for testing purposes.
+#[derive(Debug)]
 pub struct OptdOptimizer {
     memo: SqliteMemo,
 }
@@ -96,6 +97,7 @@ impl OptdOptimizer {
 /// The physical plan is created by converting the logical plan to an OptD logical plan,
 /// and then running the optd optimizer on the logical plan and then converting it back.
 /// This is the entry point for OptD.
+#[derive(Debug)]
 pub struct OptdQueryPlanner {
     pub optimizer: Arc<OptdOptimizer>,
 }
@@ -167,13 +169,7 @@ impl OptdQueryPlanner {
     }
 }
 
-impl std::fmt::Debug for OptdQueryPlanner {
-    /// Writes the `OptdQueryPlanner` struct to a formatter, usually for debugging purposes.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "OptdQueryPlanner")
-    }
-}
-
+// making it `async_trait` only because datafusion is taking it.
 #[async_trait]
 impl QueryPlanner for OptdQueryPlanner {
     /// This function is the entry point for the physical planner. It calls the inner function

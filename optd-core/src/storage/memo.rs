@@ -24,6 +24,7 @@ use crate::{
 };
 
 /// A Storage manager that manages connections to the database.
+#[derive(Debug)]
 pub struct SqliteMemo {
     /// A async connection pool to the SQLite database.
     db: SqlitePool,

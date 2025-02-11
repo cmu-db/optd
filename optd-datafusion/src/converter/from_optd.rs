@@ -111,8 +111,13 @@ impl ConversionContext<'_> {
                     datafusion::physical_plan::joins::NestedLoopJoinExec::try_new(
                         left_exec,
                         right_exec,
-                        Some(JoinFilter::new(physical_expr, column_idxs, filter_schema)),
+                        Some(JoinFilter::new(
+                            physical_expr,
+                            column_idxs,
+                            Arc::new(filter_schema),
+                        )),
                         &join_type,
+                        None,
                     )?,
                 ) as Arc<dyn ExecutionPlan + 'static>)
             }

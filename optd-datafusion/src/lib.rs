@@ -6,8 +6,7 @@
 #![allow(clippy::new_without_default)]
 use std::sync::Arc;
 
-use datafusion::catalog::CatalogProviderList;
-use datafusion::catalog_common::MemoryCatalogProviderList;
+use datafusion::catalog::{CatalogProviderList, MemoryCatalogProviderList};
 use datafusion::common::Result;
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::execution::SessionStateBuilder;

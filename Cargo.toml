@@ -1,3 +1,10 @@
 [workspace]
 members = ["optd-core", "optd-datafusion"]
 resolver = "2"
+
+
+[workspace.dependencies]
+anyhow = "1.0"
+trait-variant = "0.1.2"
+async-recursion = "1.1.1"
+tokio = { version = "1.43.0", features = ["full"] }

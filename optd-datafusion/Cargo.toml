@@ -4,18 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.95"
-arrow = "54.0.0"
+anyhow.workspace = true
 async-trait = "0.1.85"
-datafusion = "44.0.0"
+datafusion = "45.0.0"
 futures = "0.3.31"
 itertools = "0.14.0"
-tokio = { version = "1.43", default-features = false, features = [
-    "rt",
-    "rt-multi-thread",
-    "macros",
-] }
-trait-variant = "0.1.2"
+tokio.workspace = true
+trait-variant.workspace = true 
 optd-core = { path = "../optd-core" }
-async-recursion = "1"
+async-recursion.workspace = true
 
