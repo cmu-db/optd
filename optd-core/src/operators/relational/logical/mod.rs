@@ -6,10 +6,12 @@
 
 pub mod filter;
 pub mod join;
+pub mod project;
 pub mod scan;
 
 use filter::Filter;
 use join::Join;
+use project::Project;
 use scan::Scan;
 use serde::Deserialize;
 
@@ -40,6 +42,8 @@ pub enum LogicalOperator<Value, Relation, Scalar> {
     Filter(Filter<Relation, Scalar>),
     /// Join operator
     Join(Join<Value, Relation, Scalar>),
+    /// Project operator
+    Project(Project<Relation, Scalar>),
 }
 
 /// The kind of logical operator.
@@ -54,6 +58,8 @@ pub enum LogicalOperatorKind {
     Filter,
     /// Represents a join operation
     Join,
+    /// Represents a projection operation
+    Project,
 }
 
 impl<Relation, Scalar> LogicalOperator<OptdValue, Relation, Scalar>
@@ -70,6 +76,7 @@ where
             LogicalOperator::Scan(_) => LogicalOperatorKind::Scan,
             LogicalOperator::Filter(_) => LogicalOperatorKind::Filter,
             LogicalOperator::Join(_) => LogicalOperatorKind::Join,
+            LogicalOperator::Project(_) => LogicalOperatorKind::Project,
         }
     }
 
@@ -84,6 +91,7 @@ where
             LogicalOperator::Scan(scan) => vec![scan.table_name.clone()],
             LogicalOperator::Filter(_) => vec![],
             LogicalOperator::Join(join) => vec![join.join_type.clone()],
+            LogicalOperator::Project(_) => vec![],
         }
     }
 
@@ -98,6 +106,7 @@ where
             LogicalOperator::Scan(_) => vec![],
             LogicalOperator::Filter(filter) => vec![filter.child.clone()],
             LogicalOperator::Join(join) => vec![join.left.clone(), join.right.clone()],
+            LogicalOperator::Project(project) => vec![project.child.clone()],
         }
     }
 
@@ -112,6 +121,7 @@ where
             LogicalOperator::Scan(scan) => vec![scan.predicate.clone()],
             LogicalOperator::Filter(filter) => vec![filter.predicate.clone()],
             LogicalOperator::Join(join) => vec![join.condition.clone()],
+            LogicalOperator::Project(project) => project.fields.clone(),
         }
     }
 
@@ -162,6 +172,14 @@ where
                     right: children_relations[1],
                     condition: children_scalars[0],
                     join_type: join.join_type.clone(),
+                })
+            }
+            LogicalOperator::Project(_) => {
+                assert_eq!(rel_size, 1, "Project: wrong number of relations");
+                // cannot make assumption about scalar size.
+                LogicalExpression::Project(Project {
+                    child: children_relations[0],
+                    fields: children_scalars.to_vec(),
                 })
             }
         }

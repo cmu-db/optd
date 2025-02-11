@@ -488,6 +488,23 @@ impl SqliteMemo {
                     .fetch_one(&mut *txn)
                     .await?
             }
+            LogicalExpression::Project(project) => {
+                Self::insert_into_logical_expressions(
+                    &mut txn,
+                    logical_expr_id,
+                    group_id,
+                    LogicalOperatorKind::Project,
+                )
+                .await?;
+
+                sqlx::query_scalar("INSERT INTO projects (logical_expression_id, group_id, child_group_id, fields_group_ids) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                    .bind(logical_expr_id)
+                    .bind(group_id)
+                    .bind(project.child)
+                    .bind(serde_json::to_value(&project.fields)?)
+                    .fetch_one(&mut *txn)
+                    .await?
+            }
         };
 
         if inserted_group_id == group_id {
@@ -546,7 +563,9 @@ const fn get_all_logical_exprs_in_group_query() -> &'static str {
         " UNION ALL ",
         "SELECT logical_expression_id, json_object('Filter', json_object('child', child_group_id, 'predicate', predicate_group_id)) as data FROM filters WHERE group_id = $1",
         " UNION ALL ",
-        "SELECT logical_expression_id, json_object('Join', json_object('join_type', json(join_type), 'left', left_group_id, 'right', right_group_id, 'condition', condition_group_id)) as data FROM joins WHERE group_id = $1"
+        "SELECT logical_expression_id, json_object('Join', json_object('join_type', json(join_type), 'left', left_group_id, 'right', right_group_id, 'condition', condition_group_id)) as data FROM joins WHERE group_id = $1",
+        " UNION ALL ",
+        "SELECT logical_expression_id, json_object('Project', json_object('child', child_group_id, 'fields', json(fields_group_ids))) as data FROM projects WHERE group_id = $1"
     )
 }
 

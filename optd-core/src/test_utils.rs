@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use crate::{
     operators::{
-        relational::logical::{filter::Filter, join::Join, scan::Scan, LogicalOperator},
+        relational::logical::{
+            filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator,
+        },
         scalar::{
             add::Add, column_ref::ColumnRef, constants::Constant, equal::Equal, ScalarOperator,
         },
@@ -73,5 +75,14 @@ pub fn join(
 ) -> Arc<PartialLogicalPlan> {
     Arc::new(PartialLogicalPlan::PartialMaterialized {
         operator: LogicalOperator::Join(Join::new(join_type, left, right, condition)),
+    })
+}
+
+pub fn project(
+    child: Arc<PartialLogicalPlan>,
+    fields: Vec<Arc<PartialScalarPlan>>,
+) -> Arc<PartialLogicalPlan> {
+    Arc::new(PartialLogicalPlan::PartialMaterialized {
+        operator: LogicalOperator::Project(Project::new(child, fields)),
     })
 }

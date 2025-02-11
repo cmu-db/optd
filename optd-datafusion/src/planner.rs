@@ -57,10 +57,13 @@ impl OptdOptimizer {
                 child: self.mock_optimize(&filter.child),
                 predicate: filter.predicate.clone(),
             }),
-            // LogicalOperator::Project(project) => Arc::new(PhysicalOperator::Project(Project {
-            //     child: self.mock_optimize(project.child.clone()),
-            //     fields: project.fields.clone(),
-            // })),
+            LogicalOperator::Project(_project) => {
+                // Arc::new(PhysicalOperator::Project(PhysicalProject {
+                //     child: self.mock_optimize(project.child.clone()),
+                //     fields: project.fields.clone(),
+                // }))
+                todo!()
+            }
             LogicalOperator::Join(join) => PhysicalOperator::NestedLoopJoin(NestedLoopJoin {
                 join_type: join.join_type.clone(),
                 outer: self.mock_optimize(&join.left),

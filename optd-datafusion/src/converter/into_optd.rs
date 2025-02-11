@@ -150,13 +150,14 @@ impl ConversionContext<'_> {
                 self.tables.insert(table_name, table_scan.source.clone());
 
                 scan
-            } // DatafusionLogicalPlan::Projection(projection) => {
+            }
+            // DatafusionLogicalPlan::Projection(projection) => {
             //     let input = self.conv_df_to_optd_relational(projection.input.as_ref());
             //     let mut exprs = Vec::new();
             //     for expr in &projection.expr {
             //         exprs.push(self.conv_df_to_optd_scalar(expr, projection.input.schema(), 0));
             //     }
-            //     let logical_optd_filter = OptdLogicalProjection::<LogicalPlan, ScalarPlan> {
+            //     let logical_optd_filter = LogicalProjection::<LogicalPlan, ScalarPlan> {
             //         child: input,
             //         fields: exprs,
             //     };

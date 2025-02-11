@@ -7,7 +7,9 @@ use memo::Memoize;
 
 use crate::{
     operators::{
-        relational::logical::{filter::Filter, join::Join, scan::Scan, LogicalOperator},
+        relational::logical::{
+            filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator,
+        },
         scalar::{add::Add, and::And, equal::Equal, ScalarOperator},
     },
     plans::{logical::PartialLogicalPlan, scalar::PartialScalarPlan},
@@ -101,6 +103,18 @@ async fn match_any_partial_logical_plan(
                 }),
             }))
         }
+        LogicalExpression::Project(project) => {
+            let child = match_any_partial_logical_plan(memo, project.child).await?;
+            let mut fields = Vec::with_capacity(project.fields.len());
+
+            for field in project.fields.iter() {
+                fields.push(match_any_partial_scalar_plan(memo, *field).await?);
+            }
+
+            Ok(Arc::new(PartialLogicalPlan::PartialMaterialized {
+                operator: LogicalOperator::Project(Project { child, fields }),
+            }))
+        }
     }
 }
 
@@ -174,6 +188,22 @@ mod tests {
         let result: Arc<PartialLogicalPlan> =
             match_any_partial_logical_plan(&memo, group_id).await?;
         assert_eq!(result, partial_logical_plan);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_ingest_projection() -> anyhow::Result<()> {
+        let memo = SqliteMemo::new_in_memory().await?;
+
+        // select 1, t1.1 from t1;
+        let logical_plan = project(scan("t1", boolean(true)), vec![int64(1), column_ref(1)]);
+        let group_id = ingest_partial_logical_plan(&memo, &logical_plan).await?;
+        let dup_group_id = ingest_partial_logical_plan(&memo, &logical_plan).await?;
+        assert_eq!(group_id, dup_group_id);
+
+        let result = match_any_partial_logical_plan(&memo, group_id).await?;
+        assert_eq!(result, logical_plan);
+
         Ok(())
     }
 }
