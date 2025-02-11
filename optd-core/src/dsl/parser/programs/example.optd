@@ -1,8 +1,9 @@
 // Shared properties for Logical operators
 Logical Props(vale: [Int64])
+
 Scalar ColumnRef (idx: (Int64) -> Map[(Int64, (Int64) -> String), Int64])
 Scalar Const(asd: Int64)
-Scalar Eq(left: [Int64])
+Scalar Eq(left: Map[Int64, Int64])
 Scalar Divide(left: Scalar, right: Scalar)
 Scalar Not(input: Scalar)
 

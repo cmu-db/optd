@@ -191,7 +191,18 @@ fn parse_constructor(pair: Pair<'_, Rule>) -> Expr {
     let mut pairs = pair.into_inner();
     let name = pairs.next().unwrap().as_str().to_string();
     let args = pairs.map(parse_expr).collect();
-    Expr::Constructor(name, args)
+
+    // Check if first character is lowercase
+    // TODO(alexis): small hack until I rewrite the grammar using Chumsky
+    if name
+        .chars()
+        .next()
+        .map_or(false, |c| c.is_ascii_lowercase())
+    {
+        Expr::Call(Box::new(Expr::Var(name)), args)
+    } else {
+        Expr::Constructor(name, args)
+    }
 }
 
 /// Parse a numeric literal

@@ -119,9 +119,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_example_file() {
+    fn parse_example_files() {
         let input = include_str!("../parser/programs/example.optd");
         parse_file(input).unwrap();
+
+        let input = include_str!("../parser/programs/working.optd");
+        let out = parse_file(input).unwrap();
+        println!("{:#?}", out);
     }
 
     #[test]
