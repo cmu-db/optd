@@ -45,9 +45,8 @@ impl ConversionContext<'_> {
             }
             PhysicalOperator::Filter(filter) => {
                 let input_exec = self.conv_optd_to_df_relational(&filter.child).await?;
-                let physical_expr = self
-                    .conv_optd_to_df_scalar(&filter.predicate, &input_exec.schema())
-                    .clone();
+                let physical_expr =
+                    Self::conv_optd_to_df_scalar(&filter.predicate, &input_exec.schema()).clone();
                 Ok(
                     Arc::new(datafusion::physical_plan::filter::FilterExec::try_new(
                         physical_expr,
@@ -59,12 +58,9 @@ impl ConversionContext<'_> {
                 let input_exec = self.conv_optd_to_df_relational(&project.child).await?;
                 let physical_exprs = project
                     .fields
-                    .to_vec()
-                    .into_iter()
-                    .map(|field| {
-                        self.conv_optd_to_df_scalar(&field, &input_exec.schema())
-                            .clone()
-                    })
+                    .iter()
+                    .cloned()
+                    .map(|field| Self::conv_optd_to_df_scalar(&field, &input_exec.schema()))
                     .enumerate()
                     .map(|(idx, expr)| (expr, format!("col{}", idx)))
                     .collect::<Vec<(Arc<dyn PhysicalExpr>, String)>>();
@@ -89,7 +85,7 @@ impl ConversionContext<'_> {
                 };
 
                 let physical_expr =
-                    self.conv_optd_to_df_scalar(&join.condition, &Arc::new(filter_schema.clone()));
+                    Self::conv_optd_to_df_scalar(&join.condition, &Arc::new(filter_schema.clone()));
 
                 let join_type = JoinType::from_str(join.join_type.as_str().unwrap())?;
 
@@ -126,11 +122,7 @@ impl ConversionContext<'_> {
         }
     }
 
-    pub fn conv_optd_to_df_scalar(
-        &self,
-        pred: &ScalarPlan,
-        context: &SchemaRef,
-    ) -> Arc<dyn PhysicalExpr> {
+    pub fn conv_optd_to_df_scalar(pred: &ScalarPlan, context: &SchemaRef) -> Arc<dyn PhysicalExpr> {
         match &pred.operator {
             ScalarOperator::ColumnRef(column_ref) => {
                 let idx = column_ref.column_index.as_i64().unwrap() as usize;
@@ -149,20 +141,20 @@ impl ConversionContext<'_> {
                 Arc::new(Literal::new(value))
             }
             ScalarOperator::And(and) => {
-                let left = self.conv_optd_to_df_scalar(&and.left, context);
-                let right = self.conv_optd_to_df_scalar(&and.right, context);
+                let left = Self::conv_optd_to_df_scalar(&and.left, context);
+                let right = Self::conv_optd_to_df_scalar(&and.right, context);
                 let op = Operator::And;
                 Arc::new(BinaryExpr::new(left, op, right)) as Arc<dyn PhysicalExpr>
             }
             ScalarOperator::Add(add) => {
-                let left = self.conv_optd_to_df_scalar(&add.left, context);
-                let right = self.conv_optd_to_df_scalar(&add.right, context);
+                let left = Self::conv_optd_to_df_scalar(&add.left, context);
+                let right = Self::conv_optd_to_df_scalar(&add.right, context);
                 let op = Operator::Plus;
                 Arc::new(BinaryExpr::new(left, op, right)) as Arc<dyn PhysicalExpr>
             }
             ScalarOperator::Equal(equal) => {
-                let left = self.conv_optd_to_df_scalar(&equal.left, context);
-                let right = self.conv_optd_to_df_scalar(&equal.right, context);
+                let left = Self::conv_optd_to_df_scalar(&equal.left, context);
+                let right = Self::conv_optd_to_df_scalar(&equal.right, context);
                 let op = Operator::Eq;
                 Arc::new(BinaryExpr::new(left, op, right)) as Arc<dyn PhysicalExpr>
             }

@@ -2094,6 +2094,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "optd-core",
+ "proc-macro2",
  "tokio",
  "trait-variant",
 ]

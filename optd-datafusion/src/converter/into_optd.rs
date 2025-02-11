@@ -25,7 +25,6 @@ use super::ConversionContext;
 impl ConversionContext<'_> {
     /// The col_offset is an offset added to the column index for all column references. It is useful for joins.
     pub fn conv_df_to_optd_scalar(
-        &self,
         df_expr: &Expr,
         context: &DFSchema,
         col_offset: usize,
@@ -39,20 +38,20 @@ impl ConversionContext<'_> {
             Expr::Literal(scalar_value) => match scalar_value {
                 datafusion::scalar::ScalarValue::Boolean(val) => {
                     ScalarOperator::Constant(Constant {
-                        value: OptdValue::Bool(val.clone().unwrap()),
+                        value: OptdValue::Bool((*val).unwrap()),
                     })
                 }
                 datafusion::scalar::ScalarValue::Int64(val) => {
-                    ScalarOperator::Constant(Constant::new(OptdValue::Int64(val.clone().unwrap())))
+                    ScalarOperator::Constant(Constant::new(OptdValue::Int64((*val).unwrap())))
                 }
                 datafusion::scalar::ScalarValue::Utf8(val) => {
                     ScalarOperator::Constant(Constant::new(OptdValue::String(val.clone().unwrap())))
                 }
-                _ => panic!("OptD Only supports a limited number of literals"),
+                _ => panic!("optd Only supports a limited number of literals"),
             },
             Expr::BinaryExpr(binary_expr) => {
-                let left = self.conv_df_to_optd_scalar(&binary_expr.left, context, col_offset)?;
-                let right = self.conv_df_to_optd_scalar(&binary_expr.right, context, col_offset)?;
+                let left = Self::conv_df_to_optd_scalar(&binary_expr.left, context, col_offset)?;
+                let right = Self::conv_df_to_optd_scalar(&binary_expr.right, context, col_offset)?;
                 match binary_expr.op {
                     Operator::Plus => ScalarOperator::Add(Add { left, right }),
                     // Operator::And => ScalarOperator::And(Add { left, right }),
@@ -61,7 +60,7 @@ impl ConversionContext<'_> {
                 }
             }
             Expr::Cast(cast) => {
-                return self.conv_df_to_optd_scalar(&cast.expr, context, col_offset);
+                return Self::conv_df_to_optd_scalar(&cast.expr, context, col_offset);
             }
             _ => panic!(
                 "optd does not support this scalar expression: {:#?}",
@@ -93,23 +92,20 @@ impl ConversionContext<'_> {
         df_logical_plan: &DatafusionLogicalPlan,
     ) -> anyhow::Result<Arc<LogicalPlan>> {
         let operator = match df_logical_plan {
-            DatafusionLogicalPlan::Filter(df_filter) => {
-                let filter = LogicalOperator::Filter(Filter {
-                    child: self.conv_df_to_optd_relational(&df_filter.input)?,
-                    predicate: self.conv_df_to_optd_scalar(
-                        &df_filter.predicate,
-                        df_filter.input.schema(),
-                        0,
-                    )?,
-                });
-                filter
-            }
+            DatafusionLogicalPlan::Filter(df_filter) => LogicalOperator::Filter(Filter {
+                child: self.conv_df_to_optd_relational(&df_filter.input)?,
+                predicate: Self::conv_df_to_optd_scalar(
+                    &df_filter.predicate,
+                    df_filter.input.schema(),
+                    0,
+                )?,
+            }),
             DatafusionLogicalPlan::Join(join) => {
                 let mut join_cond = Vec::new();
                 for (left, right) in &join.on {
-                    let left = self.conv_df_to_optd_scalar(left, join.left.schema(), 0)?;
+                    let left = Self::conv_df_to_optd_scalar(left, join.left.schema(), 0)?;
                     let offset = join.left.schema().fields().len();
-                    let right = self.conv_df_to_optd_scalar(right, join.right.schema(), offset)?;
+                    let right = Self::conv_df_to_optd_scalar(right, join.right.schema(), offset)?;
                     join_cond.push(Arc::new(ScalarPlan {
                         operator: ScalarOperator::Equal(Equal { left, right }),
                     }));
@@ -122,13 +118,12 @@ impl ConversionContext<'_> {
                     }));
                 }
 
-                let join = LogicalOperator::Join(Join::new(
+                LogicalOperator::Join(Join::new(
                     &join.join_type.to_string(),
                     self.conv_df_to_optd_relational(&join.left)?,
                     self.conv_df_to_optd_relational(&join.right)?,
                     Self::flatten_scalar_as_conjunction(join_cond, 0),
-                ));
-                join
+                ))
             }
             DatafusionLogicalPlan::TableScan(table_scan) => {
                 let table_name = table_scan.table_name.to_quoted_string();
@@ -139,7 +134,7 @@ impl ConversionContext<'_> {
                     match combine_filters {
                         Some(df_expr) => {
                             let schema = DFSchema::try_from(table_scan.source.schema()).unwrap();
-                            self.conv_df_to_optd_scalar(&df_expr, &schema, 0)?
+                            Self::conv_df_to_optd_scalar(&df_expr, &schema, 0)?
                         }
                         None => Arc::new(ScalarPlan {
                             operator: ScalarOperator::Constant(Constant {
@@ -157,14 +152,17 @@ impl ConversionContext<'_> {
                 let input = self.conv_df_to_optd_relational(projection.input.as_ref())?;
                 let mut exprs = Vec::new();
                 for expr in &projection.expr {
-                    exprs.push(self.conv_df_to_optd_scalar(expr, projection.input.schema(), 0)?);
+                    exprs.push(Self::conv_df_to_optd_scalar(
+                        expr,
+                        projection.input.schema(),
+                        0,
+                    )?);
                 }
-                let project = LogicalOperator::Project(Project {
+
+                LogicalOperator::Project(Project {
                     child: input,
                     fields: exprs,
-                });
-
-                project
+                })
             }
             _ => bail!("optd does not support this operator"),
         };

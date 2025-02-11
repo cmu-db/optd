@@ -142,7 +142,7 @@ async fn mock_optimize_relation_expr(
         LogicalExpression::Scan(scan) => {
             let physical_expr = PhysicalExpression::TableScan(TableScan {
                 table_name: scan.table_name.clone(),
-                predicate: scan.predicate.clone(),
+                predicate: scan.predicate,
             });
             memo.add_physical_expr_to_group(&physical_expr, group_id)
                 .await?;
@@ -150,8 +150,8 @@ async fn mock_optimize_relation_expr(
         }
         LogicalExpression::Filter(filter) => {
             let physical_expr = PhysicalExpression::Filter(PhysicalFilter {
-                child: filter.child.clone(),
-                predicate: filter.predicate.clone(),
+                child: filter.child,
+                predicate: filter.predicate,
             });
             memo.add_physical_expr_to_group(&physical_expr, group_id)
                 .await?;

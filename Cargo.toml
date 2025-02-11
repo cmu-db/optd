@@ -8,3 +8,5 @@ anyhow = "1.0"
 trait-variant = "0.1.2"
 async-recursion = "1.1.1"
 tokio = { version = "1.43.0", features = ["full"] }
+# Pin more recent versions for `-Zminimal-versions`.
+proc-macro2 = "1.0.60" # For a missing feature (https://github.com/rust-lang/rust/issues/113152).

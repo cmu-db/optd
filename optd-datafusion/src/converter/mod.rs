@@ -6,9 +6,9 @@ pub mod from_optd;
 pub mod into_optd;
 
 /// A context for converting between optd and datafusion.
-/// It stores a map from table names to table sources and a session state.
 /// The map is used to lookup table sources when converting TableScan operators from optd to datafusion.
 pub struct ConversionContext<'a> {
+    /// Maps table names to table sources.
     pub tables: HashMap<String, Arc<dyn TableSource>>,
     pub session_state: &'a SessionState,
 }

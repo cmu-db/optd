@@ -50,33 +50,6 @@ impl OptdOptimizer {
     ///
     /// # Returns
     /// * `PhysicalPlan` - The optimized physical plan.
-    // pub fn mock_optimize(&self, logical_plan: &LogicalPlan) -> Arc<PhysicalPlan> {
-    //     let operator = match &logical_plan.operator {
-    //         LogicalOperator::Scan(scan) => PhysicalOperator::TableScan(TableScan {
-    //             table_name: scan.table_name.clone(),
-    //             predicate: scan.predicate.clone(),
-    //         }),
-    //         LogicalOperator::Filter(filter) => PhysicalOperator::Filter(PhysicalFilter {
-    //             child: self.mock_optimize(&filter.child),
-    //             predicate: filter.predicate.clone(),
-    //         }),
-    //         LogicalOperator::Project(_project) => {
-    //             Arc::new(PhysicalOperator::Project(PhysicalProject {
-    //                 child: self.mock_optimize(project.child.clone()),
-    //                 fields: project.fields.clone(),
-    //             }))
-    //             todo!()
-    //         }
-    //         LogicalOperator::Join(join) => PhysicalOperator::NestedLoopJoin(NestedLoopJoin {
-    //             join_type: join.join_type.clone(),
-    //             outer: self.mock_optimize(&join.left),
-    //             inner: self.mock_optimize(&join.right),
-    //             condition: join.condition.clone(),
-    //         }),
-    //     };
-    //     Arc::new(PhysicalPlan { operator })
-    // }
-
     pub async fn mock_optimize(
         &self,
         logical_plan: &LogicalPlan,
@@ -94,9 +67,9 @@ impl OptdOptimizer {
 
 /// A struct that implements the `QueryPlanner` trait for the `OptdQueryPlanner`.
 /// This trait is used to create a physical plan for a given logical plan.
-/// The physical plan is created by converting the logical plan to an OptD logical plan,
+/// The physical plan is created by converting the logical plan to an optd logical plan,
 /// and then running the optd optimizer on the logical plan and then converting it back.
-/// This is the entry point for OptD.
+/// This is the entry point for optd.
 #[derive(Debug)]
 pub struct OptdQueryPlanner {
     pub optimizer: Arc<OptdOptimizer>,
@@ -127,7 +100,7 @@ impl OptdQueryPlanner {
     ///
     /// 1. Check if the logical plan is a DML/DDL operation. If it is, fall back
     ///    to the datafusion planner.
-    /// 2. Convert the logical plan to an OptD logical plan.
+    /// 2. Convert the logical plan to an optd logical plan.
     /// 3. Run the optd optimizer on the logical plan.
     /// 4. Convert the physical plan to a physical plan that can be executed by
     ///    datafusion.
@@ -157,11 +130,11 @@ impl OptdQueryPlanner {
         }
 
         let mut converter = ConversionContext::new(session_state);
-        // convert the logical plan to OptD
+        // convert the logical plan to optd
         let logical_plan = converter.conv_df_to_optd_relational(logical_plan)?;
         // run the optd optimizer
         let optd_optimized_physical_plan = self.optimizer.mock_optimize(&logical_plan).await?;
-        // convert the physical plan to OptD
+        // convert the physical plan to optd
         converter
             .conv_optd_to_df_relational(&optd_optimized_physical_plan)
             .await
@@ -180,7 +153,7 @@ impl QueryPlanner for OptdQueryPlanner {
     ///
     /// 1. Check if the logical plan is a DML/DDL operation. If it is, fall back
     ///    to the datafusion planner.
-    /// 2. Convert the logical plan to an OptD logical plan.
+    /// 2. Convert the logical plan to an optd logical plan.
     /// 3. Run the optd optimizer on the logical plan.
     /// 4. Convert the physical plan to a physical plan that can be executed by
     ///    datafusion.
