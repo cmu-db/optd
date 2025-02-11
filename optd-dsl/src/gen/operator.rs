@@ -66,12 +66,18 @@ impl FieldInfo {
 fn generate_code(operators: &[Operator]) -> proc_macro2::TokenStream {
     let mut generated_code = proc_macro2::TokenStream::new();
 
-    for operator in operators {
-        let operator_code = match operator {
-            Operator::Logical(op) => generate_logical_operator(op),
-            Operator::Scalar(op) => generate_scalar_operator(op),
-        };
-        generated_code.extend(operator_code);
+    // Generate enums first
+    let logical_enum = generate_logical_enum(&logical_ops);
+    let scalar_enum = generate_scalar_enum(&scalar_ops);
+    generated_code.extend(logical_enum);
+    generated_code.extend(scalar_enum);
+
+    // Then generate individual operator modules
+    for op in logical_ops {
+        generated_code.extend(generate_logical_operator(&op));
+    }
+    for op in scalar_ops {
+        generated_code.extend(generate_scalar_operator(&op));
     }
 
     generated_code
