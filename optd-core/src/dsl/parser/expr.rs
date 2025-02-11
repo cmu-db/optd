@@ -194,11 +194,7 @@ fn parse_constructor(pair: Pair<'_, Rule>) -> Expr {
 
     // Check if first character is lowercase
     // TODO(alexis): small hack until I rewrite the grammar using Chumsky
-    if name
-        .chars()
-        .next()
-        .map_or(false, |c| c.is_ascii_lowercase())
-    {
+    if name.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
         Expr::Call(Box::new(Expr::Var(name)), args)
     } else {
         Expr::Constructor(name, args)
