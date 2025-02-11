@@ -1,7 +1,16 @@
 use std::collections::HashSet;
 
-use crate::dsl::ast::upper_layer::{Expr, File, Function, Operator, Pattern, Properties, Type};
+use crate::dsl::ast::upper_layer::{
+    Expr, File, Function, Operator, OperatorKind, Pattern, Properties, Type,
+};
 
+/// SemanticAnalyzer performs static analysis on the DSL code to ensure semantic correctness.
+/// It validates properties, operators, functions, and expressions while maintaining scope information.
+///
+/// # Fields
+/// * `logical_properties` - Set of valid logical property names defined in the current context
+/// * `operators` - Set of operator names to prevent duplicates
+/// * `identifiers` - Stack of identifier sets representing different scopes
 #[derive(Debug)]
 pub struct SemanticAnalyzer {
     logical_properties: HashSet<String>,
@@ -9,23 +18,44 @@ pub struct SemanticAnalyzer {
     identifiers: Vec<HashSet<String>>,
 }
 
+impl Default for SemanticAnalyzer {
+    /// Default implementation for SemanticAnalyzer.
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SemanticAnalyzer {
+    /// Creates a new SemanticAnalyzer instance with empty sets and a single global scope.
     pub fn new() -> Self {
         SemanticAnalyzer {
             logical_properties: HashSet::new(),
             operators: HashSet::new(),
-            identifiers: Vec::new(),
+            identifiers: vec![HashSet::new()], // Initialize with global scope
         }
     }
 
+    /// Creates a new scope for local variables.
+    /// Used when entering functions, closures, or blocks.
     fn enter_scope(&mut self) {
         self.identifiers.push(HashSet::new());
     }
 
+    /// Removes the current scope when exiting a block.
+    /// Any variables defined in this scope become inaccessible.
     fn exit_scope(&mut self) {
         self.identifiers.pop();
     }
 
+    /// Adds a new identifier to the current scope.
+    /// Returns an error if the identifier is already defined in the current scope.
+    ///
+    /// # Arguments
+    /// * `name` - The identifier name to add
+    ///
+    /// # Returns
+    /// * `Ok(())` if the identifier was added successfully
+    /// * `Err(String)` if the identifier already exists in the current scope
     fn add_identifier(&mut self, name: String) -> Result<(), String> {
         if let Some(scope) = self.identifiers.last_mut() {
             if scope.contains(&name) {
@@ -36,6 +66,15 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
+    /// Checks if an identifier is defined in any accessible scope.
+    /// Searches from innermost to outermost scope.
+    ///
+    /// # Arguments
+    /// * `name` - The identifier name to look up
+    ///
+    /// # Returns
+    /// * `true` if the identifier is found in any accessible scope
+    /// * `false` otherwise
     fn lookup_identifier(&self, name: &str) -> bool {
         self.identifiers
             .iter()
@@ -43,42 +82,80 @@ impl SemanticAnalyzer {
             .any(|scope| scope.contains(name))
     }
 
-    fn is_valid_scalar_type(&self, ty: &Type) -> bool {
+    /// Validates that a type is valid for scalar operators.
+    /// Scalar types include basic types and arrays/tuples of scalar types.
+    ///
+    /// # Arguments
+    /// * `ty` - The type to validate
+    ///
+    /// # Returns
+    /// * `true` if the type is valid for scalar operators
+    /// * `false` otherwise
+    fn is_valid_scalar_type(ty: &Type) -> bool {
         match ty {
-            Type::Array(inner) => self.is_valid_scalar_type(inner),
-            Type::Tuple(fields) => fields.iter().all(|f| self.is_valid_scalar_type(f)),
+            Type::Array(inner) => Self::is_valid_scalar_type(inner),
+            Type::Tuple(fields) => fields.iter().all(Self::is_valid_scalar_type),
             Type::Int64 | Type::String | Type::Bool | Type::Float64 => true,
+            Type::Operator(OperatorKind::Scalar) => true,
             _ => false,
         }
     }
 
-    fn is_valid_logical_type(&self, ty: &Type) -> bool {
+    /// Validates that a type is valid for logical operators.
+    /// Logical types include basic types, operators, and arrays/tuples of logical types.
+    ///
+    /// # Arguments
+    /// * `ty` - The type to validate
+    ///
+    /// # Returns
+    /// * `true` if the type is valid for logical operators
+    /// * `false` otherwise
+    fn is_valid_logical_type(ty: &Type) -> bool {
         match ty {
-            Type::Array(inner) => self.is_valid_logical_type(inner),
-            Type::Tuple(fields) => fields.iter().all(|f| self.is_valid_logical_type(f)),
+            Type::Array(inner) => Self::is_valid_logical_type(inner),
+            Type::Tuple(fields) => fields.iter().all(Self::is_valid_logical_type),
             Type::Int64 | Type::String | Type::Bool | Type::Float64 => true,
+            Type::Operator(_) => true,
             _ => false,
         }
     }
 
-    fn is_valid_property_type(&self, ty: &Type) -> bool {
+    /// Validates that a type is valid for properties.
+    /// Property types include basic types, maps, and arrays/tuples of property types.
+    ///
+    /// # Arguments
+    /// * `ty` - The type to validate
+    ///
+    /// # Returns
+    /// * `true` if the type is valid for properties
+    /// * `false` otherwise
+    fn is_valid_property_type(ty: &Type) -> bool {
         match ty {
-            Type::Array(inner) => self.is_valid_property_type(inner),
-            Type::Tuple(fields) => fields.iter().all(|f| self.is_valid_property_type(f)),
-            Type::Map(a, b) => self.is_valid_property_type(a) && self.is_valid_property_type(b),
+            Type::Array(inner) => Self::is_valid_property_type(inner),
+            Type::Tuple(fields) => fields.iter().all(Self::is_valid_property_type),
+            Type::Map(a, b) => Self::is_valid_property_type(a) && Self::is_valid_property_type(b),
             Type::Int64 | Type::String | Type::Bool | Type::Float64 => true,
-            Type::Function(_, _) => false,
-            Type::Operator(_) => false,
+            Type::Function(_, _) | Type::Operator(_) => false,
         }
     }
 
+    /// Validates property definitions and updates the logical_properties set.
+    ///
+    /// # Arguments
+    /// * `properties` - The properties to validate
+    ///
+    /// # Returns
+    /// * `Ok(())` if all properties are valid
+    /// * `Err(String)` if any property has an invalid type
     fn validate_properties(&mut self, properties: &Properties) -> Result<(), String> {
+        // Validate all property types
         for field in &properties.fields {
-            if !self.is_valid_property_type(&field.ty) {
+            if !Self::is_valid_property_type(&field.ty) {
                 return Err(format!("Invalid type in properties: {:?}", field.ty));
             }
         }
 
+        // Update logical properties set
         self.logical_properties = properties
             .fields
             .iter()
@@ -88,21 +165,32 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    fn validate_operator(&self, operator: &Operator) -> Result<(), String> {
+    /// Validates operator definitions, including field types and derived properties.
+    ///
+    /// # Arguments
+    /// * `operator` - The operator to validate
+    ///
+    /// # Returns
+    /// * `Ok(())` if the operator is valid
+    /// * `Err(String)` containing the validation error
+    fn validate_operator(&mut self, operator: &Operator) -> Result<(), String> {
         let (name, fields, is_logical) = match operator {
             Operator::Scalar(op) => (&op.name, &op.fields, false),
             Operator::Logical(op) => (&op.name, &op.fields, true),
         };
 
+        // Check for duplicate operator names
         if self.operators.contains(name) {
             return Err(format!("Duplicate operator name: {}", name));
         }
+        self.operators.insert(name.clone());
 
+        // Validate field types based on operator kind
         if let Some(field) = fields.iter().find(|f| {
             if is_logical {
-                !self.is_valid_logical_type(&f.ty)
+                !Self::is_valid_logical_type(&f.ty)
             } else {
-                !self.is_valid_scalar_type(&f.ty)
+                !Self::is_valid_scalar_type(&f.ty)
             }
         }) {
             return Err(format!(
@@ -112,11 +200,13 @@ impl SemanticAnalyzer {
             ));
         }
 
+        // Additional validation for logical operators
         if let Operator::Logical(op) = operator {
+            // Validate derived properties exist in logical properties
             if let Some(prop) = op
                 .derived_props
                 .keys()
-                .find(|&p| !self.operators.contains(p))
+                .find(|&p| !self.logical_properties.contains(p))
             {
                 return Err(format!(
                     "Derived property not found in logical properties: {}",
@@ -124,6 +214,7 @@ impl SemanticAnalyzer {
                 ));
             }
 
+            // Ensure all logical properties have derived implementations
             if let Some(field) = self
                 .logical_properties
                 .iter()
@@ -139,23 +230,48 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
+    /// Validates function definitions, including parameters and body.
+    ///
+    /// # Arguments
+    /// * `function` - The function to validate
+    ///
+    /// # Returns
+    /// * `Ok(())` if the function is valid
+    /// * `Err(String)` containing the validation error
     fn validate_function(&mut self, function: &Function) -> Result<(), String> {
+        // Add function name to current scope
         self.add_identifier(function.name.clone())?;
 
+        // Create new scope for function parameters and body
         self.enter_scope();
+
+        // Add parameters to function scope
         for (param_name, _) in &function.params {
             self.add_identifier(param_name.clone())?;
         }
+
+        // Validate function body
         self.validate_expr(&function.body)?;
+
+        // Exit function scope
         self.exit_scope();
 
         Ok(())
     }
 
+    /// Validates expressions recursively, ensuring all variables are defined
+    /// and sub-expressions are valid.
+    ///
+    /// # Arguments
+    /// * `expr` - The expression to validate
+    ///
+    /// # Returns
+    /// * `Ok(())` if the expression is valid
+    /// * `Err(String)` containing the validation error
     fn validate_expr(&mut self, expr: &Expr) -> Result<(), String> {
         match expr {
             Expr::Var(name) => {
-                if self.lookup_identifier(name) {
+                if !self.lookup_identifier(name) {
                     return Err(format!("Undefined identifier: {}", name));
                 }
             }
@@ -217,6 +333,14 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
+    /// Validates pattern matching constructs, ensuring all bindings are valid.
+    ///
+    /// # Arguments
+    /// * `pattern` - The pattern to validate
+    ///
+    /// # Returns
+    /// * `Ok(())` if the pattern is valid
+    /// * `Err(String)` containing the validation error
     fn validate_pattern(&mut self, pattern: &Pattern) -> Result<(), String> {
         match pattern {
             Pattern::Bind(name, pat) => {
@@ -228,8 +352,7 @@ impl SemanticAnalyzer {
                     self.validate_pattern(pat)?;
                 }
             }
-            Pattern::Literal(_) => {}
-            Pattern::Wildcard => {}
+            Pattern::Literal(_) | Pattern::Wildcard => {}
             Pattern::Var(name) => {
                 self.add_identifier(name.clone())?;
             }
@@ -237,6 +360,15 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
+    /// Main entry point for validating a complete DSL file.
+    /// Validates properties, operators, and functions in order.
+    ///
+    /// # Arguments
+    /// * `file` - The File AST node to validate
+    ///
+    /// # Returns
+    /// * `Ok(())` if the file is semantically valid
+    /// * `Err(String)` containing the first validation error encountered
     pub fn validate_file(&mut self, file: &File) -> Result<(), String> {
         self.validate_properties(&file.properties)?;
 
@@ -255,8 +387,11 @@ impl SemanticAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsl::ast::upper_layer::{
-        Expr, Field, File, Function, Literal, LogicalOp, Operator, Properties, ScalarOp, Type,
+    use crate::dsl::{
+        ast::upper_layer::{
+            Expr, Field, File, Function, Literal, LogicalOp, Operator, Properties, ScalarOp, Type,
+        },
+        parser::parse_file,
     };
     use std::collections::HashMap;
 
@@ -308,10 +443,17 @@ mod tests {
     }
 
     #[test]
+    fn parse_working_file() {
+        let input = include_str!("../programs/working.optd");
+        let out = parse_file(input).unwrap();
+        let mut analyzer = SemanticAnalyzer::new();
+        analyzer.validate_file(&out).unwrap();
+    }
+
+    #[test]
     fn test_valid_file() {
         let file = create_test_file();
         let mut analyzer = SemanticAnalyzer::new();
-        analyzer.validate_file(&file).unwrap();
         assert!(analyzer.validate_file(&file).is_ok());
     }
 
@@ -376,7 +518,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
-            "Invalid type in scalar operator: Function(Int64)"
+            "Invalid type in scalar operator: Function(Int64, Int64)"
         );
     }
 
@@ -397,7 +539,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
-            "Invalid type in logical operator: Function(Int64)"
+            "Invalid type in logical operator: Function(Int64, Int64)"
         );
     }
 
@@ -427,7 +569,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
-            "Invalid type in properties: Function(Int64)"
+            "Invalid type in properties: Function(Int64, Int64)"
         );
     }
 }

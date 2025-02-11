@@ -66,7 +66,7 @@ def join_commute(expr: Logical): Logical =
         )
       )
 
-def has_refs_in_range(cond: Scalar, from: Int64, to: Int64): Bool =
+def has_refs_in_range(predicate: Scalar, from: Int64, to: Int64): Bool =
   match predicate
     case ColumnRef(idx) => from <= idx && idx < to,
     case _ => predicate.children.any(child => has_refs_in_range(child, from, to))
