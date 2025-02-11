@@ -800,8 +800,6 @@ dependencies = [
  "anyhow",
  "async-recursion",
  "dotenvy",
- "pest",
- "pest_derive",
  "proc-macro2",
  "serde",
  "serde_json",
