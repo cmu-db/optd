@@ -81,7 +81,7 @@ impl SqliteMemo {
 }
 
 impl Memoize for SqliteMemo {
-    async fn create_or_get_goal(
+    async fn create_or_get_relation_group_goal(
         &self,
         group_id: RelationalGroupId,
         required_physical_props: Vec<PhysicalProperty>,

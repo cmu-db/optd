@@ -4,8 +4,10 @@ use anyhow::Ok;
 use async_trait::async_trait;
 use datafusion::{
     execution::{context::QueryPlanner, SessionState},
-    logical_expr::LogicalPlan as DatafusionLogicalPlan,
-    physical_plan::ExecutionPlan,
+    logical_expr::{
+        Explain, LogicalPlan as DFLogicalPlan, PlanType as DFPlanType, ToStringifiedPlan,
+    },
+    physical_plan::{displayable, explain::ExplainExec, ExecutionPlan},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
 use optd_core::{
@@ -115,18 +117,32 @@ impl OptdQueryPlanner {
     ///   datafusion.
     async fn create_physical_plan_inner(
         &self,
-        logical_plan: &DatafusionLogicalPlan,
+        logical_plan: &DFLogicalPlan,
         session_state: &SessionState,
     ) -> anyhow::Result<Arc<dyn ExecutionPlan>> {
         // Fallback to the datafusion planner for DML/DDL operations. optd cannot handle this.
-        if let DatafusionLogicalPlan::Dml(_)
-        | DatafusionLogicalPlan::Ddl(_)
-        | DatafusionLogicalPlan::EmptyRelation(_) = logical_plan
+        if let DFLogicalPlan::Dml(_) | DFLogicalPlan::Ddl(_) | DFLogicalPlan::EmptyRelation(_) =
+            logical_plan
         {
             let planner = DefaultPhysicalPlanner::default();
             return Ok(planner
                 .create_physical_plan(logical_plan, session_state)
                 .await?);
+        }
+
+        let (logical_plan, _verbose, mut explains) = match logical_plan {
+            DFLogicalPlan::Explain(Explain { plan, verbose, .. }) => {
+                (plan.as_ref(), *verbose, Some(Vec::new()))
+            }
+            _ => (logical_plan, false, None),
+        };
+
+        if let Some(explains) = &mut explains {
+            explains.push(
+                logical_plan.to_stringified(DFPlanType::OptimizedLogicalPlan {
+                    optimizer_name: "datafusion".to_string(),
+                }),
+            );
         }
 
         let mut converter = ConversionContext::new(session_state);
@@ -135,10 +151,26 @@ impl OptdQueryPlanner {
         // run the optd optimizer
         let optd_optimized_physical_plan = self.optimizer.mock_optimize(&logical_plan).await?;
         // convert the physical plan to optd
-        converter
+        let physical_plan = converter
             .conv_optd_to_df_relational(&optd_optimized_physical_plan)
             .await
-            .map_err(|e| anyhow::anyhow!(e))
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        if let Some(explains) = &mut explains {
+            explains.push(
+                displayable(&*physical_plan).to_stringified(false, DFPlanType::FinalPhysicalPlan),
+            );
+        }
+
+        if let Some(explains) = explains {
+            Ok(Arc::new(ExplainExec::new(
+                DFLogicalPlan::explain_schema(),
+                explains,
+                true,
+            )))
+        } else {
+            Ok(physical_plan)
+        }
     }
 }
 
@@ -170,7 +202,7 @@ impl QueryPlanner for OptdQueryPlanner {
     /// Also see [`OptdQueryPlanner::create_physical_plan`]
     async fn create_physical_plan(
         &self,
-        datafusion_logical_plan: &DatafusionLogicalPlan,
+        datafusion_logical_plan: &DFLogicalPlan,
         session_state: &SessionState,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         self.create_physical_plan_inner(datafusion_logical_plan, session_state)

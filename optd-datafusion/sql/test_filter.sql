@@ -19,4 +19,6 @@ INSERT INTO departments VALUES
     (2, 'Marketing');
 
 
+explain SELECT * FROM employees WHERE id = 2;
+
 SELECT * FROM employees WHERE id = 2;

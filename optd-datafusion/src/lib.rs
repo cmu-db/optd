@@ -42,7 +42,7 @@ pub async fn run_queries(queries: String) -> Result<()> {
         // Run our execution engine on the physical plan
         let df_physical_plan = sql.clone().create_physical_plan().await?;
         let plan = df_physical_plan.clone();
-        println!("{:#?}", df_physical_plan.clone());
+        // println!("{:#?}", df_physical_plan.clone());
         // let df_physical_plan = df_physical_plan.children()[0].clone();
         let mut print_results: Vec<RecordBatch> = vec![];
         let now = SystemTime::now();

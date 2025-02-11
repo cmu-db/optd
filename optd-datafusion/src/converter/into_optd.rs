@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::bail;
 use datafusion::{
     common::DFSchema,
-    logical_expr::{utils::conjunction, LogicalPlan as DatafusionLogicalPlan, Operator},
+    logical_expr::{utils::conjunction, LogicalPlan as DFLogicalPlan, Operator},
     prelude::Expr,
 };
 use optd_core::{
@@ -89,10 +89,10 @@ impl ConversionContext<'_> {
 
     pub fn conv_df_to_optd_relational(
         &mut self,
-        df_logical_plan: &DatafusionLogicalPlan,
+        df_logical_plan: &DFLogicalPlan,
     ) -> anyhow::Result<Arc<LogicalPlan>> {
         let operator = match df_logical_plan {
-            DatafusionLogicalPlan::Filter(df_filter) => LogicalOperator::Filter(Filter {
+            DFLogicalPlan::Filter(df_filter) => LogicalOperator::Filter(Filter {
                 child: self.conv_df_to_optd_relational(&df_filter.input)?,
                 predicate: Self::conv_df_to_optd_scalar(
                     &df_filter.predicate,
@@ -100,7 +100,7 @@ impl ConversionContext<'_> {
                     0,
                 )?,
             }),
-            DatafusionLogicalPlan::Join(join) => {
+            DFLogicalPlan::Join(join) => {
                 let mut join_cond = Vec::new();
                 for (left, right) in &join.on {
                     let left = Self::conv_df_to_optd_scalar(left, join.left.schema(), 0)?;
@@ -109,6 +109,11 @@ impl ConversionContext<'_> {
                     join_cond.push(Arc::new(ScalarPlan {
                         operator: ScalarOperator::Equal(Equal { left, right }),
                     }));
+                }
+                if let Some(filter) = &join.filter {
+                    let filter =
+                        Self::conv_df_to_optd_scalar(filter, df_logical_plan.schema().as_ref(), 0)?;
+                    join_cond.push(filter);
                 }
                 if join_cond.is_empty() {
                     join_cond.push(Arc::new(ScalarPlan {
@@ -125,7 +130,7 @@ impl ConversionContext<'_> {
                     Self::flatten_scalar_as_conjunction(join_cond, 0),
                 ))
             }
-            DatafusionLogicalPlan::TableScan(table_scan) => {
+            DFLogicalPlan::TableScan(table_scan) => {
                 let table_name = table_scan.table_name.to_quoted_string();
 
                 let combine_filters = conjunction(table_scan.filters.to_vec());
@@ -148,7 +153,7 @@ impl ConversionContext<'_> {
 
                 scan
             }
-            DatafusionLogicalPlan::Projection(projection) => {
+            DFLogicalPlan::Projection(projection) => {
                 let input = self.conv_df_to_optd_relational(projection.input.as_ref())?;
                 let mut exprs = Vec::new();
                 for expr in &projection.expr {

@@ -19,4 +19,6 @@ INSERT INTO departments VALUES
     (2, 'Marketing');
 
 
-SELECT * FROM employees JOIN departments WHERE employees.department_id = departments.id;
+explain SELECT * FROM employees INNER JOIN departments ON employees.department_id = departments.id;
+
+SELECT * FROM employees INNER JOIN departments ON employees.department_id = departments.id;

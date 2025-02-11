@@ -23,7 +23,7 @@ use anyhow::Result;
 #[trait_variant::make(Send)]
 pub trait Memoize: Send + Sync + 'static {
     /// Creates or get an optimization goal for a group with some required physical properties.
-    async fn create_or_get_goal(
+    async fn create_or_get_relation_group_goal(
         &self,
         group_id: RelationalGroupId,
         required_physical_props: Vec<PhysicalProperty>,
