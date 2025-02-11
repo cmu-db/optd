@@ -4,7 +4,7 @@ use crate::{operators::relational::physical::PhysicalOperator, values::OptdValue
 use serde::Deserialize;
 
 /// A physical operator that scans rows from a table.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct TableScan<Value, Scalar> {
     /// The name of the table to scan.
     pub table_name: Value,

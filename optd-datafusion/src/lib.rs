@@ -9,8 +9,7 @@ use std::sync::Arc;
 use datafusion::catalog::CatalogProviderList;
 use datafusion::catalog_common::MemoryCatalogProviderList;
 use datafusion::common::Result;
-#[allow(deprecated)]
-use datafusion::execution::runtime_env::RuntimeConfig;
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::execution::SessionStateBuilder;
 use datafusion::prelude::{SessionConfig, SessionContext};
 use planner::OptdOptimizer;
@@ -27,7 +26,7 @@ pub mod planner;
 
 pub async fn run_queries(queries: String) -> Result<()> {
     // Create a SessionContext with TPCH base tables
-    let rt_config = RuntimeConfig::new();
+    let rt_config = RuntimeEnvBuilder::new();
 
     let session_config = SessionConfig::from_env()?.with_information_schema(true);
 
@@ -95,7 +94,7 @@ pub async fn run_queries(queries: String) -> Result<()> {
 #[allow(deprecated)]
 pub async fn create_df_context(
     session_config: Option<SessionConfig>,
-    rn_config: Option<RuntimeConfig>,
+    rn_config: Option<RuntimeEnvBuilder>,
     catalog: Option<Arc<dyn CatalogProviderList>>,
 ) -> anyhow::Result<SessionContext> {
     let mut session_config = if let Some(session_config) = session_config {
@@ -110,7 +109,7 @@ pub async fn create_df_context(
     let rn_config = if let Some(rn_config) = rn_config {
         rn_config
     } else {
-        RuntimeConfig::new()
+        RuntimeEnvBuilder::new()
     };
     let runtime_env = Arc::new(rn_config.build()?);
 

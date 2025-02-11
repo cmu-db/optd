@@ -22,7 +22,7 @@ use std::sync::Arc;
 /// after optimization is complete.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScalarPlan {
-    operator: ScalarOperator<OptdValue, Arc<ScalarPlan>>,
+    pub operator: ScalarOperator<OptdValue, Arc<ScalarPlan>>,
 }
 
 /// A scalar expression with varying levels of materialization.

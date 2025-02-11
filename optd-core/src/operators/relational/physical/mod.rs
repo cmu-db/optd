@@ -17,6 +17,7 @@ use crate::{
 use filter::filter::PhysicalFilter;
 use join::{hash_join::HashJoin, merge_join::MergeJoin, nested_loop_join::NestedLoopJoin};
 use scan::table_scan::TableScan;
+use serde::Deserialize;
 
 /// Each variant of `PhysicalOperator` represents a specific kind of physical operator.
 ///
@@ -29,7 +30,7 @@ use scan::table_scan::TableScan;
 /// - Pattern matching: Using physical operators for matching rule patterns
 /// - Partially materialized plans: Using physical operators during optimization
 /// - Fully materialized plans: Using physical operators in physical execution
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub enum PhysicalOperator<Value, Relation, Scalar> {
     /// Table scan operator
     TableScan(TableScan<Value, Scalar>),

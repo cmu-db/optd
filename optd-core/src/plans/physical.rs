@@ -1,15 +1,15 @@
-//! Logical plan representations for the OPTD optimizer.
+//! Physical plan representations for the OPTD optimizer.
 //!
 //! Provides three levels of plan materialization:
-//! 1. Full materialization (LogicalPlan)
-//! 2. Partial materialization (PartialLogicalPlan)
-//! 3. Group references (LogicalGroupId)
+//! 1. Full materialization (PhysicalPlan)
+//! 2. Partial materialization (PartialPhysicalPlan)
+//! 3. Group references (RelationalGroupId).
 //!
 //! This allows the optimizer to work with plans at different stages
 //! of materialization during the optimization process.
 
 use crate::{
-    cascades::groups::RelationalGroupId, operators::relational::logical::LogicalOperator,
+    cascades::groups::RelationalGroupId, operators::relational::physical::PhysicalOperator,
     values::OptdValue,
 };
 
@@ -19,32 +19,32 @@ use super::{
 };
 use std::sync::Arc;
 
-/// A fully materialized logical query plan.
+/// A fully materialized physical query plan.
 ///
-/// Contains a complete tree of logical operators where all children
-/// (both logical and scalar) are fully materialized. Used for final
+/// Contains a complete tree of physical operators where all children
+/// (both physical and scalar) are fully materialized. Used for final
 /// plan representation after optimization is complete.
 #[derive(Clone, Debug, PartialEq)]
-pub struct LogicalPlan {
-    pub operator: LogicalOperator<OptdValue, Arc<LogicalPlan>, Arc<ScalarPlan>>,
+pub struct PhysicalPlan {
+    pub operator: PhysicalOperator<OptdValue, Arc<PhysicalPlan>, Arc<ScalarPlan>>,
 }
 
-/// A logical plan with varying levels of materialization.
+/// A physical plan with varying levels of materialization.
 ///
 /// During optimization, plans can be in three states:
 /// - Partially materialized: Single materialized operator with group references
 /// - Unmaterialized: Pure group reference
 #[derive(Clone, Debug, PartialEq)]
-pub enum PartialLogicalPlan {
+pub enum PartialPhysicalPlan {
     /// Single materialized operator with potentially unmaterialized children
     PartialMaterialized {
-        operator: LogicalOperator<OptdValue, Arc<PartialLogicalPlan>, Arc<PartialScalarPlan>>,
+        operator: PhysicalOperator<OptdValue, Arc<PartialPhysicalPlan>, Arc<PartialScalarPlan>>,
     },
 
     /// Reference to an optimization group containing equivalent plans
     UnMaterialized(RelationalGroupId),
 }
 
-/// Type alias for expressions that construct logical plans.
+/// Type alias for expressions that construct physical plans.
 /// See PartialPlanExpr for the available expression constructs.
-pub type PartialLogicalPlanExpr = PartialPlanExpr<PartialLogicalPlan>;
+pub type PartialPhysicalPlanExpr = PartialPlanExpr<PartialPhysicalPlan>;

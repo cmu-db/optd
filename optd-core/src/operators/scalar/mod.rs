@@ -5,6 +5,7 @@
 //! rather than relations.
 
 pub mod add;
+pub mod and;
 pub mod column_ref;
 pub mod constants;
 pub mod equal;
@@ -14,6 +15,7 @@ use crate::{
     values::OptdValue,
 };
 use add::Add;
+use and::And;
 use column_ref::ColumnRef;
 use constants::Constant;
 use equal::Equal;
@@ -39,6 +41,8 @@ pub enum ScalarOperator<Value, Scalar> {
     Add(Add<Scalar>),
     /// Equality comparison operator
     Equal(Equal<Scalar>),
+    /// Conjunction (AND) operator
+    And(And<Scalar>),
 }
 
 /// The kind of scalar operator.
@@ -55,6 +59,8 @@ pub enum ScalarOperatorKind {
     Add,
     /// Represents an equality comparison
     Equal,
+    /// Represents a conjunction (AND) operation
+    And,
 }
 
 impl<Scalar> ScalarOperator<OptdValue, Scalar>
@@ -68,6 +74,7 @@ where
             ScalarOperator::ColumnRef(_) => ScalarOperatorKind::ColumnRef,
             ScalarOperator::Add(_) => ScalarOperatorKind::Add,
             ScalarOperator::Equal(_) => ScalarOperatorKind::Equal,
+            ScalarOperator::And(_) => ScalarOperatorKind::And,
         }
     }
 
@@ -78,6 +85,7 @@ where
             ScalarOperator::ColumnRef(column_ref) => vec![column_ref.column_index.clone()],
             ScalarOperator::Add(_) => vec![],
             ScalarOperator::Equal(_) => vec![],
+            ScalarOperator::And(_) => vec![],
         }
     }
 
@@ -88,6 +96,7 @@ where
             ScalarOperator::ColumnRef(_) => vec![],
             ScalarOperator::Add(add) => vec![add.left.clone(), add.right.clone()],
             ScalarOperator::Equal(equal) => vec![equal.left.clone(), equal.right.clone()],
+            ScalarOperator::And(and) => vec![and.left.clone(), and.right.clone()],
         }
     }
 
@@ -118,6 +127,13 @@ where
             ScalarOperator::Equal(_) => {
                 assert_eq!(scalar_size, 2, "Equal: expected 2 children");
                 ScalarExpression::Equal(Equal {
+                    left: children_scalars[0],
+                    right: children_scalars[1],
+                })
+            }
+            ScalarOperator::And(_) => {
+                assert_eq!(scalar_size, 2, "And: expected 2 children");
+                ScalarExpression::And(And {
                     left: children_scalars[0],
                     right: children_scalars[1],
                 })

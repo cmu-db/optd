@@ -340,6 +340,23 @@ impl SqliteMemo {
                     .fetch_one(&mut *txn)
                     .await?
             }
+            ScalarExpression::And(and) => {
+                Self::insert_into_scalar_expressions(
+                    &mut txn,
+                    scalar_expr_id,
+                    group_id,
+                    ScalarOperatorKind::And,
+                )
+                .await?;
+
+                sqlx::query_scalar("INSERT INTO scalar_ands (scalar_expression_id, group_id, left_group_id, right_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                    .bind(scalar_expr_id)
+                    .bind(group_id)
+                    .bind(and.left)
+                    .bind(and.right)
+                    .fetch_one(&mut *txn)
+                    .await?
+            }
         };
 
         if inserted_group_id == group_id {

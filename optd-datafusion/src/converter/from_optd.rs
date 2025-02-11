@@ -15,11 +15,9 @@ use datafusion::{
     scalar::ScalarValue,
 };
 use optd_core::{
-    operator::{
-        relational::physical::PhysicalOperator,
-        scalar::{constants::Constant, ScalarOperator},
-    },
-    plan::{physical_plan::PhysicalPlan, scalar_plan::ScalarPlan},
+    operators::{relational::physical::PhysicalOperator, scalar::ScalarOperator},
+    plans::{physical::PhysicalPlan, scalar::ScalarPlan},
+    values::OptdValue,
 };
 
 use super::ConversionContext;
@@ -30,16 +28,16 @@ impl ConversionContext<'_> {
         &self,
         optimized_plan: &PhysicalPlan,
     ) -> anyhow::Result<Arc<dyn ExecutionPlan>> {
-        match &*optimized_plan.node {
+        match &optimized_plan.operator {
             PhysicalOperator::TableScan(table_scan) => {
-                let source = self.tables.get(&table_scan.table_name).unwrap();
+                let source = self
+                    .tables
+                    .get(table_scan.table_name.as_str().unwrap())
+                    .ok_or_else(|| anyhow::anyhow!("Table not found"))?;
                 let provider = source_as_provider(source)?;
-                let filters = if let Some(ref _pred) = table_scan.predicate {
-                    // split_binary_owned(pred, Operator::And)
-                    todo!("Optd does not support filters inside table scan")
-                } else {
-                    vec![]
-                };
+
+                // TODO(yuchen): support filters inside table scan.
+                let filters = vec![];
                 let plan = provider
                     .scan(self.session_state, None, &filters, None)
                     .await?;
@@ -57,32 +55,28 @@ impl ConversionContext<'_> {
                     )?) as Arc<dyn ExecutionPlan + 'static>,
                 )
             }
-            PhysicalOperator::Project(project) => {
-                let input_exec = self.conv_optd_to_df_relational(&project.child).await?;
-                let physical_exprs = project
-                    .fields
-                    .to_vec()
-                    .into_iter()
-                    .map(|field| {
-                        self.conv_optd_to_df_scalar(&field, &input_exec.schema())
-                            .clone()
-                    })
-                    .enumerate()
-                    .map(|(idx, expr)| (expr, format!("col{}", idx)))
-                    .collect::<Vec<(Arc<dyn PhysicalExpr>, String)>>();
+            // PhysicalOperator::Project(project) => {
+            //     let input_exec = self.conv_optd_to_df_relational(&project.child).await?;
+            //     let physical_exprs = project
+            //         .fields
+            //         .to_vec()
+            //         .into_iter()
+            //         .map(|field| {
+            //             self.conv_optd_to_df_scalar(&field, &input_exec.schema())
+            //                 .clone()
+            //         })
+            //         .enumerate()
+            //         .map(|(idx, expr)| (expr, format!("col{}", idx)))
+            //         .collect::<Vec<(Arc<dyn PhysicalExpr>, String)>>();
 
-                Ok(
-                    Arc::new(ProjectionExec::try_new(physical_exprs, input_exec)?)
-                        as Arc<dyn ExecutionPlan + 'static>,
-                )
-            }
-            PhysicalOperator::NestedLoopJoin(nested_loop_join) => {
-                let left_exec = self
-                    .conv_optd_to_df_relational(&nested_loop_join.outer)
-                    .await?;
-                let right_exec = self
-                    .conv_optd_to_df_relational(&nested_loop_join.inner)
-                    .await?;
+            //     Ok(
+            //         Arc::new(ProjectionExec::try_new(physical_exprs, input_exec)?)
+            //             as Arc<dyn ExecutionPlan + 'static>,
+            //     )
+            // }
+            PhysicalOperator::NestedLoopJoin(join) => {
+                let left_exec = self.conv_optd_to_df_relational(&join.outer).await?;
+                let right_exec = self.conv_optd_to_df_relational(&join.inner).await?;
                 let filter_schema = {
                     let fields = left_exec
                         .schema()
@@ -94,12 +88,10 @@ impl ConversionContext<'_> {
                     Schema::new_with_metadata(fields, HashMap::new())
                 };
 
-                let physical_expr = self.conv_optd_to_df_scalar(
-                    &nested_loop_join.condition,
-                    &Arc::new(filter_schema.clone()),
-                );
+                let physical_expr =
+                    self.conv_optd_to_df_scalar(&join.condition, &Arc::new(filter_schema.clone()));
 
-                let join_type = JoinType::from_str(&nested_loop_join.join_type)?;
+                let join_type = JoinType::from_str(join.join_type.as_str().unwrap())?;
 
                 let mut column_idxs = vec![];
                 for i in 0..left_exec.schema().fields().len() {
@@ -134,9 +126,9 @@ impl ConversionContext<'_> {
         pred: &ScalarPlan,
         context: &SchemaRef,
     ) -> Arc<dyn PhysicalExpr> {
-        match &*pred.node {
+        match &pred.operator {
             ScalarOperator::ColumnRef(column_ref) => {
-                let idx = column_ref.column_idx;
+                let idx = column_ref.column_index.as_i64().unwrap() as usize;
                 Arc::new(
                     // Datafusion checks if col expr name matches the schema, so we have to supply the name inferred by datafusion,
                     // instead of using out own logical properties
@@ -144,10 +136,10 @@ impl ConversionContext<'_> {
                 )
             }
             ScalarOperator::Constant(constant) => {
-                let value = match constant {
-                    Constant::String(value) => ScalarValue::Utf8(Some(value.clone())),
-                    Constant::Integer(value) => ScalarValue::Int64(Some(value.clone())),
-                    Constant::Boolean(value) => ScalarValue::Boolean(Some(value.clone())),
+                let value = match &constant.value {
+                    OptdValue::Int64(value) => ScalarValue::Int64(Some(*value)),
+                    OptdValue::String(value) => ScalarValue::Utf8(Some(value.clone())),
+                    OptdValue::Bool(value) => ScalarValue::Boolean(Some(*value)),
                 };
                 Arc::new(Literal::new(value))
             }

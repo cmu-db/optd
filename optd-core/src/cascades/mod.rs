@@ -8,7 +8,7 @@ use memo::Memoize;
 use crate::{
     operators::{
         relational::logical::{filter::Filter, join::Join, scan::Scan, LogicalOperator},
-        scalar::{add::Add, equal::Equal, ScalarOperator},
+        scalar::{add::Add, and::And, equal::Equal, ScalarOperator},
     },
     plans::{logical::PartialLogicalPlan, scalar::PartialScalarPlan},
 };
@@ -134,6 +134,13 @@ async fn match_any_partial_scalar_plan(
             let right = match_any_partial_scalar_plan(memo, equal.right).await?;
             Ok(Arc::new(PartialScalarPlan::PartialMaterialized {
                 operator: ScalarOperator::Equal(Equal { left, right }),
+            }))
+        }
+        ScalarExpression::And(and) => {
+            let left = match_any_partial_scalar_plan(memo, and.left).await?;
+            let right = match_any_partial_scalar_plan(memo, and.right).await?;
+            Ok(Arc::new(PartialScalarPlan::PartialMaterialized {
+                operator: ScalarOperator::And(And { left, right }),
             }))
         }
     }
