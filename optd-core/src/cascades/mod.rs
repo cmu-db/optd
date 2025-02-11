@@ -147,7 +147,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ingest_partial_logical_plan() -> anyhow::Result<()> {
-        let memo = SqliteMemo::new("sqlite://memo.db").await?;
+        let memo = SqliteMemo::new_in_memory().await?;
         // select * from t1, t2 where t1.id = t2.id and t2.name = 'Memo' and t2.v1 = 1 + 1
         let partial_logical_plan = filter(
             join(
