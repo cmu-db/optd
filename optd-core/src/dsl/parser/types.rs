@@ -1,9 +1,8 @@
 use pest::iterators::Pair;
 
-use super::{
-    ast::{OperatorKind, Type},
-    Rule,
-};
+use crate::dsl::ast::upper_layer::{OperatorKind, Type};
+
+use super::Rule;
 
 /// Parse a type expression from a pest Pair
 ///

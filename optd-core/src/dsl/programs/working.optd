@@ -18,7 +18,6 @@ Logical Filter(child: Logical, cond: Scalar) derive {
   schema_len = input.schema_len
 }
 
-
 Logical Project(child: Logical, exprs: [Scalar]) derive {
   schema_len = exprs.len
 }
@@ -32,7 +31,6 @@ Logical Join(
   schema_len = left.schema_len + right.schema_len
 }
 
-// memo(alexis): tuples should be allowed in here
 Logical Sort(child: Logical, keys: [(Scalar, String)]) derive {
   schema_len = input.schema_len
 }
@@ -43,8 +41,6 @@ Logical Aggregate(child: Logical, group_keys: [Scalar], aggs: [(Scalar, String)]
 }
 
 // Rules
-
-// memo(alexis): support member function for operators like apply_children
 def rewrite_column_refs(predicate: Scalar, map: Map[Int64, Int64]): Scalar =
   match predicate
     case ColumnRef(idx) => ColumnRef(map(idx)),
@@ -70,7 +66,7 @@ def join_commute(expr: Logical): Logical =
         )
       )
 
-def has_refs_in_range(cond: Scalar, from: Int64, to: Int64): Bool =
+def has_refs_in_range(predicate: Scalar, from: Int64, to: Int64): Bool =
   match predicate
     case ColumnRef(idx) => from <= idx && idx < to,
     case _ => predicate.children.any(child => has_refs_in_range(child, from, to))
@@ -90,25 +86,25 @@ def join_associate(expr: Logical): Logical =
         )
       else fail("")
 
-def conjunctive_normal_form(expr: Scalar): Bool = fail("unimplemented")
+@rule(Scalar)
+def conjunctive_normal_form(expr: Scalar): Scalar = fail("unimplemented")
 
-def with_optional_filter(key: String, old: Scalar, grouped: Map[String, [Scalar]]): Scalar = match grouped(key)
-    case Some(conds) => Filter(conds, old),
-    case _ => old
+def with_optional_filter(key: String, old: Scalar, grouped: Map[String, [Scalar]]): Scalar = 
+  match grouped(key)
+     case Some(conds) => Filter(conds, old),
+     case _ => old
 
 @rule(Logical)
 def filter_pushdown_join(expr: Logical): Logical =
   match expr
     case op @ Filter(Join(join_type, left, right, join_cond), cond) =>
-      val conditions_with_refs = conjunctive_normal_form(cond)
-        .map(c => (c, extract_column_refs(c)));
-
-      val grouped = conditions_with_refs.groupBy((cond, refs) => {
-        if has_refs_in_range(refs, 0, left.schema_len) && 
-           !has_refs_in_range(refs, left.schema_len, op.schema_len) then
+      val cnf = conjunctive_normal_form(cond);
+      val grouped = cnf.children.groupBy(cond => {
+        if has_refs_in_range(cond, 0, left.schema_len) && 
+           !has_refs_in_range(cond, left.schema_len, op.schema_len) then
           "left"
-        else if !has_refs_in_range(refs, 0, left.schema_len) && 
-                has_refs_in_range(refs, left.schema_len, op.schema_len) then
+        else if !has_refs_in_range(cond, 0, left.schema_len) && 
+                has_refs_in_range(cond, left.schema_len, op.schema_len) then
           "right"
         else 
           "remain"
