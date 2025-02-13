@@ -9,10 +9,7 @@ use crate::{
                 project::PhysicalProject, scan::table_scan::TableScan, PhysicalOperator,
             },
         },
-        scalar::{
-            add::Add, and::And, column_ref::ColumnRef, constants::Constant, equal::Equal,
-            ScalarOperator,
-        },
+        scalar::{column_ref::ColumnRef, constants::Constant, ScalarOperator},
     },
     plans::{
         logical::PartialLogicalPlan, physical::PartialPhysicalPlan, scalar::PartialScalarPlan,
@@ -46,7 +43,16 @@ pub fn column_ref(column_index: i64) -> Arc<PartialScalarPlan> {
 
 pub fn add(left: Arc<PartialScalarPlan>, right: Arc<PartialScalarPlan>) -> Arc<PartialScalarPlan> {
     Arc::new(PartialScalarPlan::PartialMaterialized {
-        operator: ScalarOperator::Add(Add::new(left, right)),
+        operator: crate::operators::scalar::binary_op::add(left, right),
+    })
+}
+
+pub fn minus(
+    left: Arc<PartialScalarPlan>,
+    right: Arc<PartialScalarPlan>,
+) -> Arc<PartialScalarPlan> {
+    Arc::new(PartialScalarPlan::PartialMaterialized {
+        operator: crate::operators::scalar::binary_op::minus(left, right),
     })
 }
 
@@ -55,13 +61,31 @@ pub fn equal(
     right: Arc<PartialScalarPlan>,
 ) -> Arc<PartialScalarPlan> {
     Arc::new(PartialScalarPlan::PartialMaterialized {
-        operator: ScalarOperator::Equal(Equal::new(left, right)),
+        operator: crate::operators::scalar::binary_op::equal(left, right),
     })
 }
 
-pub fn and(left: Arc<PartialScalarPlan>, right: Arc<PartialScalarPlan>) -> Arc<PartialScalarPlan> {
+pub fn neg(child: Arc<PartialScalarPlan>) -> Arc<PartialScalarPlan> {
     Arc::new(PartialScalarPlan::PartialMaterialized {
-        operator: ScalarOperator::And(And::new(left, right)),
+        operator: crate::operators::scalar::unary_op::neg(child),
+    })
+}
+
+pub fn not(child: Arc<PartialScalarPlan>) -> Arc<PartialScalarPlan> {
+    Arc::new(PartialScalarPlan::PartialMaterialized {
+        operator: crate::operators::scalar::unary_op::not(child),
+    })
+}
+
+pub fn and(children: Vec<Arc<PartialScalarPlan>>) -> Arc<PartialScalarPlan> {
+    Arc::new(PartialScalarPlan::PartialMaterialized {
+        operator: crate::operators::scalar::logic_op::and(children),
+    })
+}
+
+pub fn or(children: Vec<Arc<PartialScalarPlan>>) -> Arc<PartialScalarPlan> {
+    Arc::new(PartialScalarPlan::PartialMaterialized {
+        operator: crate::operators::scalar::logic_op::or(children),
     })
 }
 

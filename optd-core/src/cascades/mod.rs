@@ -20,7 +20,7 @@ use crate::{
                 project::PhysicalProject, scan::table_scan::TableScan,
             },
         },
-        scalar::{add::Add, and::And, equal::Equal, ScalarOperator},
+        scalar::{binary_op::BinaryOp, logic_op::LogicOp, unary_op::UnaryOp, ScalarOperator},
     },
     plans::{
         logical::{LogicalPlan, PartialLogicalPlan},
@@ -354,25 +354,30 @@ async fn match_any_partial_scalar_plan(
                 operator: ScalarOperator::ColumnRef(column_ref.clone()),
             }))
         }
-        ScalarExpression::Add(add) => {
-            let left = match_any_partial_scalar_plan(memo, add.left).await?;
-            let right = match_any_partial_scalar_plan(memo, add.right).await?;
+        ScalarExpression::BinaryOp(binary_op) => {
+            let left = match_any_partial_scalar_plan(memo, binary_op.left).await?;
+            let right = match_any_partial_scalar_plan(memo, binary_op.right).await?;
             Ok(Arc::new(PartialScalarPlan::PartialMaterialized {
-                operator: ScalarOperator::Add(Add { left, right }),
+                operator: ScalarOperator::BinaryOp(BinaryOp::new(
+                    binary_op.kind.clone(),
+                    left,
+                    right,
+                )),
             }))
         }
-        ScalarExpression::Equal(equal) => {
-            let left = match_any_partial_scalar_plan(memo, equal.left).await?;
-            let right = match_any_partial_scalar_plan(memo, equal.right).await?;
+        ScalarExpression::UnaryOp(unary_op) => {
+            let child = match_any_partial_scalar_plan(memo, unary_op.child).await?;
             Ok(Arc::new(PartialScalarPlan::PartialMaterialized {
-                operator: ScalarOperator::Equal(Equal { left, right }),
+                operator: ScalarOperator::UnaryOp(UnaryOp::new(unary_op.kind.clone(), child)),
             }))
         }
-        ScalarExpression::And(and) => {
-            let left = match_any_partial_scalar_plan(memo, and.left).await?;
-            let right = match_any_partial_scalar_plan(memo, and.right).await?;
+        ScalarExpression::LogicOp(logic) => {
+            let mut children = Vec::with_capacity(logic.children.len());
+            for child in logic.children.iter() {
+                children.push(match_any_partial_scalar_plan(memo, *child).await?);
+            }
             Ok(Arc::new(PartialScalarPlan::PartialMaterialized {
-                operator: ScalarOperator::And(And { left, right }),
+                operator: ScalarOperator::LogicOp(LogicOp::new(logic.kind.clone(), children)),
             }))
         }
     }
@@ -392,25 +397,30 @@ async fn match_any_scalar_plan(
         ScalarExpression::ColumnRef(column_ref) => Ok(Arc::new(ScalarPlan {
             operator: ScalarOperator::ColumnRef(column_ref.clone()),
         })),
-        ScalarExpression::Add(add) => {
-            let left = match_any_scalar_plan(memo, add.left).await?;
-            let right = match_any_scalar_plan(memo, add.right).await?;
+        ScalarExpression::BinaryOp(binary_op) => {
+            let left = match_any_scalar_plan(memo, binary_op.left).await?;
+            let right = match_any_scalar_plan(memo, binary_op.right).await?;
             Ok(Arc::new(ScalarPlan {
-                operator: ScalarOperator::Add(Add { left, right }),
+                operator: ScalarOperator::BinaryOp(BinaryOp::new(
+                    binary_op.kind.clone(),
+                    left,
+                    right,
+                )),
             }))
         }
-        ScalarExpression::Equal(equal) => {
-            let left = match_any_scalar_plan(memo, equal.left).await?;
-            let right = match_any_scalar_plan(memo, equal.right).await?;
+        ScalarExpression::UnaryOp(unary_op) => {
+            let child = match_any_scalar_plan(memo, unary_op.child).await?;
             Ok(Arc::new(ScalarPlan {
-                operator: ScalarOperator::Equal(Equal { left, right }),
+                operator: ScalarOperator::UnaryOp(UnaryOp::new(unary_op.kind.clone(), child)),
             }))
         }
-        ScalarExpression::And(and) => {
-            let left = match_any_scalar_plan(memo, and.left).await?;
-            let right = match_any_scalar_plan(memo, and.right).await?;
+        ScalarExpression::LogicOp(logic_op) => {
+            let mut children = Vec::with_capacity(logic_op.children.len());
+            for child in logic_op.children.iter() {
+                children.push(match_any_scalar_plan(memo, *child).await?);
+            }
             Ok(Arc::new(ScalarPlan {
-                operator: ScalarOperator::And(And { left, right }),
+                operator: ScalarOperator::LogicOp(LogicOp::new(logic_op.kind.clone(), children)),
             }))
         }
     }
@@ -470,7 +480,7 @@ mod tests {
         // select * from t1 where t1.id = 1 and t1.name = 'Memo';
         let logical_plan = filter(
             scan("t1", boolean(true)),
-            and(boolean(true), equal(column_ref(2), string("Memo"))),
+            and(vec![boolean(true), equal(column_ref(2), string("Memo"))]),
         );
 
         let group_id = ingest_partial_logical_plan(&memo, &logical_plan).await?;
@@ -508,8 +518,8 @@ mod tests {
 
         // select * from t1 where t1.#0 = 1 and true;
         let logical_plan = filter(
-            scan("t1", boolean(true)),
-            and(equal(column_ref(0), int64(1)), boolean(true)),
+            scan("t1", or(vec![boolean(true), boolean(false)])),
+            and(vec![equal(column_ref(0), int64(1)), boolean(true)]),
         );
         let group_id = ingest_partial_logical_plan(&memo, &logical_plan).await?;
 
@@ -522,8 +532,8 @@ mod tests {
         assert_eq!(
             physical_plan,
             physical_filter(
-                table_scan("t1", boolean(true)),
-                and(equal(column_ref(0), int64(1)), boolean(true))
+                table_scan("t1", or(vec![boolean(true), boolean(false)])),
+                and(vec![equal(column_ref(0), int64(1)), boolean(true)])
             )
         );
 
@@ -534,8 +544,8 @@ mod tests {
     async fn test_join_e2e() -> anyhow::Result<()> {
         let memo = SqliteMemo::new_in_memory().await?;
 
-        // select * from t1 where t1.#0 = 1 and true;
-        let scan_t1 = scan("t1", boolean(true));
+        // select * from t1 where t1.#0 = 1 and NOT false;
+        let scan_t1 = scan("t1", not(boolean(false)));
         let logical_plan = join(
             "inner",
             scan_t1.clone(),
@@ -550,7 +560,7 @@ mod tests {
         mock_optimize_relation_group(&memo, group_id).await?;
         let physical_plan = match_any_partial_physical_plan(&memo, group_id).await?;
 
-        let table_scan_t1 = table_scan("t1", boolean(true));
+        let table_scan_t1 = table_scan("t1", not(boolean(false)));
         assert_eq!(
             physical_plan,
             nested_loop_join(
@@ -568,10 +578,13 @@ mod tests {
     async fn test_project_e2e() -> anyhow::Result<()> {
         let memo = SqliteMemo::new_in_memory().await?;
 
-        // select t1.#0, t1.#1 + 1 from t1;
+        // select t1.#0, (t1.#1 + 1) - (-3) from t1;
         let logical_plan = project(
             scan("t1", boolean(true)),
-            vec![column_ref(0), add(column_ref(1), int64(1))],
+            vec![
+                column_ref(0),
+                minus(add(column_ref(1), int64(1)), neg(int64(3))),
+            ],
         );
         let group_id = ingest_partial_logical_plan(&memo, &logical_plan).await?;
 
@@ -585,7 +598,10 @@ mod tests {
             physical_plan,
             physical_project(
                 table_scan("t1", boolean(true)),
-                vec![column_ref(0), add(column_ref(1), int64(1))],
+                vec![
+                    column_ref(0),
+                    minus(add(column_ref(1), int64(1)), neg(int64(3))),
+                ],
             )
         );
 

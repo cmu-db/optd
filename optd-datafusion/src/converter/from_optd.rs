@@ -1,5 +1,6 @@
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
+use anyhow::bail;
 use async_recursion::async_recursion;
 use datafusion::{
     arrow::datatypes::{Schema, SchemaRef},
@@ -7,7 +8,7 @@ use datafusion::{
     datasource::source_as_provider,
     logical_expr::Operator,
     physical_plan::{
-        expressions::{BinaryExpr, Column, Literal},
+        expressions::{BinaryExpr, Column, Literal, NegativeExpr, NotExpr},
         joins::utils::{ColumnIndex, JoinFilter},
         projection::ProjectionExec,
         ExecutionPlan, PhysicalExpr,
@@ -46,7 +47,7 @@ impl ConversionContext<'_> {
             PhysicalOperator::Filter(filter) => {
                 let input_exec = self.conv_optd_to_df_relational(&filter.child).await?;
                 let physical_expr =
-                    Self::conv_optd_to_df_scalar(&filter.predicate, &input_exec.schema()).clone();
+                    Self::conv_optd_to_df_scalar(&filter.predicate, &input_exec.schema())?;
                 Ok(
                     Arc::new(datafusion::physical_plan::filter::FilterExec::try_new(
                         physical_expr,
@@ -60,7 +61,9 @@ impl ConversionContext<'_> {
                     .fields
                     .iter()
                     .cloned()
-                    .map(|field| Self::conv_optd_to_df_scalar(&field, &input_exec.schema()))
+                    .filter_map(|field| {
+                        Self::conv_optd_to_df_scalar(&field, &input_exec.schema()).ok()
+                    })
                     .enumerate()
                     .map(|(idx, expr)| (expr, format!("col{}", idx)))
                     .collect::<Vec<(Arc<dyn PhysicalExpr>, String)>>();
@@ -84,8 +87,10 @@ impl ConversionContext<'_> {
                     Schema::new_with_metadata(fields, HashMap::new())
                 };
 
-                let physical_expr =
-                    Self::conv_optd_to_df_scalar(&join.condition, &Arc::new(filter_schema.clone()));
+                let physical_expr = Self::conv_optd_to_df_scalar(
+                    &join.condition,
+                    &Arc::new(filter_schema.clone()),
+                )?;
 
                 let join_type = JoinType::from_str(join.join_type.as_str().unwrap())?;
 
@@ -122,15 +127,18 @@ impl ConversionContext<'_> {
         }
     }
 
-    pub fn conv_optd_to_df_scalar(pred: &ScalarPlan, context: &SchemaRef) -> Arc<dyn PhysicalExpr> {
+    pub fn conv_optd_to_df_scalar(
+        pred: &ScalarPlan,
+        context: &SchemaRef,
+    ) -> anyhow::Result<Arc<dyn PhysicalExpr>> {
         match &pred.operator {
             ScalarOperator::ColumnRef(column_ref) => {
                 let idx = column_ref.column_index.as_i64().unwrap() as usize;
-                Arc::new(
+                Ok(Arc::new(
                     // Datafusion checks if col expr name matches the schema, so we have to supply the name inferred by datafusion,
                     // instead of using out own logical properties
                     Column::new(context.fields()[idx].name(), idx),
-                )
+                ))
             }
             ScalarOperator::Constant(constant) => {
                 let value = match &constant.value {
@@ -138,25 +146,46 @@ impl ConversionContext<'_> {
                     OptdValue::String(value) => ScalarValue::Utf8(Some(value.clone())),
                     OptdValue::Bool(value) => ScalarValue::Boolean(Some(*value)),
                 };
-                Arc::new(Literal::new(value))
+                Ok(Arc::new(Literal::new(value)))
             }
-            ScalarOperator::And(and) => {
-                let left = Self::conv_optd_to_df_scalar(&and.left, context);
-                let right = Self::conv_optd_to_df_scalar(&and.right, context);
-                let op = Operator::And;
-                Arc::new(BinaryExpr::new(left, op, right)) as Arc<dyn PhysicalExpr>
+            ScalarOperator::BinaryOp(binary_op) => {
+                let left = Self::conv_optd_to_df_scalar(&binary_op.left, context)?;
+                let right = Self::conv_optd_to_df_scalar(&binary_op.right, context)?;
+                // TODO(yuchen): really need the enums!
+                let op = match binary_op.kind.as_str().unwrap() {
+                    "add" => Operator::Plus,
+                    "minus" => Operator::Minus,
+                    "equal" => Operator::Eq,
+                    s => panic!("Unsupported binary operator: {}", s),
+                };
+                Ok(Arc::new(BinaryExpr::new(left, op, right)) as Arc<dyn PhysicalExpr>)
             }
-            ScalarOperator::Add(add) => {
-                let left = Self::conv_optd_to_df_scalar(&add.left, context);
-                let right = Self::conv_optd_to_df_scalar(&add.right, context);
-                let op = Operator::Plus;
-                Arc::new(BinaryExpr::new(left, op, right)) as Arc<dyn PhysicalExpr>
+            ScalarOperator::UnaryOp(unary_op) => {
+                let child = Self::conv_optd_to_df_scalar(&unary_op.child, context)?;
+                // TODO(yuchen): really need the enums!
+                match unary_op.kind.as_str().unwrap() {
+                    "not" => Ok(Arc::new(NotExpr::new(child)) as Arc<dyn PhysicalExpr>),
+                    "neg" => Ok(Arc::new(NegativeExpr::new(child)) as Arc<dyn PhysicalExpr>),
+                    s => bail!("Unsupported unary operator: {}", s),
+                }
             }
-            ScalarOperator::Equal(equal) => {
-                let left = Self::conv_optd_to_df_scalar(&equal.left, context);
-                let right = Self::conv_optd_to_df_scalar(&equal.right, context);
-                let op = Operator::Eq;
-                Arc::new(BinaryExpr::new(left, op, right)) as Arc<dyn PhysicalExpr>
+            ScalarOperator::LogicOp(logic_op) => {
+                let op = match logic_op.kind.as_str().unwrap() {
+                    "and" => Operator::And,
+                    "or" => Operator::Or,
+                    s => bail!("Unsupported logic operator: {}", s),
+                };
+                let mut children = logic_op.children.iter();
+                let first_child = Self::conv_optd_to_df_scalar(
+                    children
+                        .next()
+                        .expect("LogicOp should have at least one child"),
+                    context,
+                )?;
+                children.try_fold(first_child, |acc, expr| {
+                    let expr = Self::conv_optd_to_df_scalar(expr, context)?;
+                    Ok(Arc::new(BinaryExpr::new(acc, op, expr)) as Arc<dyn PhysicalExpr>)
+                })
             }
         }
     }

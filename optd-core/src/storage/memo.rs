@@ -366,54 +366,55 @@ impl SqliteMemo {
                     .fetch_one(&mut *txn)
                     .await?
             }
-            ScalarExpression::Add(add) => {
+            ScalarExpression::BinaryOp(binary_op) => {
                 Self::insert_into_scalar_expressions(
                     &mut txn,
                     scalar_expr_id,
                     group_id,
-                    ScalarOperatorKind::Add,
+                    ScalarOperatorKind::Binary,
                 )
                 .await?;
 
-                sqlx::query_scalar("INSERT INTO scalar_adds (scalar_expression_id, group_id, left_group_id, right_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                sqlx::query_scalar("INSERT INTO scalar_binary_ops (scalar_expression_id, group_id, kind, left_group_id, right_group_id) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(scalar_expr_id)
                     .bind(group_id)
-                    .bind(add.left)
-                    .bind(add.right)
+                    .bind(serde_json::to_string(&binary_op.kind)?)
+                    .bind(binary_op.left)
+                    .bind(binary_op.right)
                     .fetch_one(&mut *txn)
                     .await?
             }
-            ScalarExpression::Equal(equal) => {
+            ScalarExpression::UnaryOp(unary_op) => {
                 Self::insert_into_scalar_expressions(
                     &mut txn,
                     scalar_expr_id,
                     group_id,
-                    ScalarOperatorKind::Equal,
+                    ScalarOperatorKind::Binary,
                 )
                 .await?;
 
-                sqlx::query_scalar("INSERT INTO scalar_equals (scalar_expression_id, group_id, left_group_id, right_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                sqlx::query_scalar("INSERT INTO scalar_unary_ops (scalar_expression_id, group_id, kind, child_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(scalar_expr_id)
                     .bind(group_id)
-                    .bind(equal.left)
-                    .bind(equal.right)
+                    .bind(serde_json::to_string(&unary_op.kind)?)
+                    .bind(unary_op.child)
                     .fetch_one(&mut *txn)
                     .await?
             }
-            ScalarExpression::And(and) => {
+            ScalarExpression::LogicOp(logic) => {
                 Self::insert_into_scalar_expressions(
                     &mut txn,
                     scalar_expr_id,
                     group_id,
-                    ScalarOperatorKind::And,
+                    ScalarOperatorKind::Logic,
                 )
                 .await?;
 
-                sqlx::query_scalar("INSERT INTO scalar_ands (scalar_expression_id, group_id, left_group_id, right_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                sqlx::query_scalar("INSERT INTO scalar_logic_ops (scalar_expression_id, group_id, kind, children_group_ids) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(scalar_expr_id)
                     .bind(group_id)
-                    .bind(and.left)
-                    .bind(and.right)
+                    .bind(serde_json::to_string(&logic.kind)?)
+                    .bind(serde_json::to_value(&logic.children)?)
                     .fetch_one(&mut *txn)
                     .await?
             }
@@ -755,11 +756,11 @@ const fn get_all_scalar_exprs_in_group_query() -> &'static str {
         " UNION ALL ",
         "SELECT scalar_expression_id, json_object('ColumnRef', json_object('column_index', json(column_index))) as data FROM scalar_column_refs WHERE group_id = $1",
         " UNION ALL ",
-        "SELECT scalar_expression_id, json_object('Add', json_object('left', left_group_id, 'right', right_group_id)) as data FROM scalar_adds WHERE group_id = $1",
+        "SELECT scalar_expression_id, json_object('BinaryOp', json_object('kind', json(kind), 'left', left_group_id, 'right', right_group_id)) as data FROM scalar_binary_ops WHERE group_id = $1",
         " UNION ALL ",
-        "SELECT scalar_expression_id, json_object('Equal', json_object('left', left_group_id, 'right', right_group_id)) as data FROM scalar_equals WHERE group_id = $1",
+        "SELECT scalar_expression_id, json_object('LogicOp', json_object('kind', json(kind), 'children', json(children_group_ids))) as data FROM scalar_logic_ops WHERE group_id = $1",
         " UNION ALL ",
-        "SELECT scalar_expression_id, json_object('And', json_object('left', left_group_id, 'right', right_group_id)) as data FROM scalar_ands WHERE group_id = $1"
+        "SELECT scalar_expression_id, json_object('UnaryOp', json_object('kind', json(kind), 'child', child_group_id)) as data FROM scalar_unary_ops WHERE group_id = $1",
     )
 }
 
@@ -777,46 +778,40 @@ mod tests {
         let true_predicate =
             ScalarExpression::Constant(constants::Constant::new(OptdValue::Bool(true)));
         let true_predicate_group = memo.add_scalar_expr(&true_predicate).await?;
-        let scan1 = Arc::new(LogicalExpression::Scan(scan::Scan::new(
-            "t1",
-            true_predicate_group,
-        )));
+        let scan1 = Arc::new(scan::scan("t1", true_predicate_group));
         let scan1_group = memo.add_logical_expr(&scan1).await?;
         let dup_scan1_group = memo.add_logical_expr(&scan1).await?;
         assert_eq!(scan1_group, dup_scan1_group);
 
-        let scan2 = Arc::new(LogicalExpression::Scan(scan::Scan::new(
-            "t2",
-            true_predicate_group,
-        )));
+        let scan2 = Arc::new(scan::scan("t2", true_predicate_group));
         let scan2_group = memo.add_logical_expr(&scan2).await?;
         let dup_scan2_group = memo.add_logical_expr(&scan2).await?;
         assert_eq!(scan2_group, dup_scan2_group);
 
-        let t1v1 = ScalarExpression::ColumnRef(column_ref::ColumnRef::new(1));
+        let t1v1 = column_ref::column_ref(1);
         let t1v1_group_id = memo.add_scalar_expr(&t1v1).await?;
-        let t2v2 = ScalarExpression::ColumnRef(column_ref::ColumnRef::new(2));
+        let t2v2 = column_ref::column_ref(2);
         let t2v2_group_id = memo.add_scalar_expr(&t2v2).await?;
 
-        let join_cond = ScalarExpression::Equal(equal::Equal::new(t1v1_group_id, t2v2_group_id));
+        let join_cond = binary_op::equal(t1v1_group_id, t2v2_group_id);
         let join_cond_group_id = memo.add_scalar_expr(&join_cond).await?;
-        let join = Arc::new(LogicalExpression::Join(join::Join::new(
+        let join = Arc::new(join::join(
             "inner",
             scan1_group,
             scan2_group,
             join_cond_group_id,
-        )));
+        ));
 
         let join_group = memo.add_logical_expr(&join).await?;
         let dup_join_group = memo.add_logical_expr(&join).await?;
         assert_eq!(join_group, dup_join_group);
 
-        let join_alt = Arc::new(LogicalExpression::Join(join::Join::new(
+        let join_alt = Arc::new(join::join(
             "inner",
             scan2_group,
             scan1_group,
             join_cond_group_id,
-        )));
+        ));
         let join_alt_group = memo
             .add_logical_expr_to_group(&join_alt, join_group)
             .await?;

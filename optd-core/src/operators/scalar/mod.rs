@@ -4,22 +4,22 @@
 //! Scalar operators represent expressions and computations that operate on individual values
 //! rather than relations.
 
-pub mod add;
-pub mod and;
+pub mod binary_op;
 pub mod column_ref;
 pub mod constants;
-pub mod equal;
+pub mod logic_op;
+pub mod unary_op;
 
 use crate::{
     cascades::{expressions::ScalarExpression, groups::ScalarGroupId},
     values::OptdValue,
 };
-use add::Add;
-use and::And;
+use binary_op::BinaryOp;
 use column_ref::ColumnRef;
 use constants::Constant;
-use equal::Equal;
+use logic_op::LogicOp;
 use serde::Deserialize;
+use unary_op::UnaryOp;
 
 /// Each variant of `ScalarOperator` represents a specific kind of scalar operator.
 ///
@@ -37,12 +37,12 @@ pub enum ScalarOperator<Value, Scalar> {
     Constant(Constant<Value>),
     /// Column reference operator
     ColumnRef(ColumnRef<Value>),
-    /// Addition operator
-    Add(Add<Scalar>),
-    /// Equality comparison operator
-    Equal(Equal<Scalar>),
-    /// Conjunction (AND) operator
-    And(And<Scalar>),
+    /// Binary operator (e.g., +, -, *, /, ==, >, etc.)
+    BinaryOp(BinaryOp<Value, Scalar>),
+    /// Unary operator (e.g., NOT, -)
+    UnaryOp(UnaryOp<Value, Scalar>),
+    /// Logic operator (e.g., AND, OR)
+    LogicOp(LogicOp<Value, Scalar>),
 }
 
 /// The kind of scalar operator.
@@ -55,12 +55,12 @@ pub enum ScalarOperatorKind {
     Constant,
     /// Represents a column reference
     ColumnRef,
-    /// Represents an addition operation
-    Add,
-    /// Represents an equality comparison
-    Equal,
-    /// Represents a conjunction (AND) operation
-    And,
+    /// Represents a binary operation (e.g., +, -, *, /, ==, >, etc.)
+    Binary,
+    /// Represents a unary operation (e.g., NOT, -)
+    Unary,
+    /// Represents a logic operation (e.g., AND, OR)
+    Logic,
 }
 
 impl<Scalar> ScalarOperator<OptdValue, Scalar>
@@ -72,9 +72,9 @@ where
         match self {
             ScalarOperator::Constant(_) => ScalarOperatorKind::Constant,
             ScalarOperator::ColumnRef(_) => ScalarOperatorKind::ColumnRef,
-            ScalarOperator::Add(_) => ScalarOperatorKind::Add,
-            ScalarOperator::Equal(_) => ScalarOperatorKind::Equal,
-            ScalarOperator::And(_) => ScalarOperatorKind::And,
+            ScalarOperator::BinaryOp(_) => ScalarOperatorKind::Binary,
+            ScalarOperator::UnaryOp(_) => ScalarOperatorKind::Unary,
+            ScalarOperator::LogicOp(_) => ScalarOperatorKind::Logic,
         }
     }
 
@@ -83,9 +83,11 @@ where
         match self {
             ScalarOperator::Constant(constant) => vec![constant.value.clone()],
             ScalarOperator::ColumnRef(column_ref) => vec![column_ref.column_index.clone()],
-            ScalarOperator::Add(_) => vec![],
-            ScalarOperator::Equal(_) => vec![],
-            ScalarOperator::And(_) => vec![],
+            ScalarOperator::BinaryOp(binary_op) => {
+                vec![binary_op.kind.clone()]
+            }
+            ScalarOperator::UnaryOp(unary_op) => vec![unary_op.kind.clone()],
+            ScalarOperator::LogicOp(logic_op) => vec![logic_op.kind.clone()],
         }
     }
 
@@ -94,9 +96,11 @@ where
         match self {
             ScalarOperator::Constant(_) => vec![],
             ScalarOperator::ColumnRef(_) => vec![],
-            ScalarOperator::Add(add) => vec![add.left.clone(), add.right.clone()],
-            ScalarOperator::Equal(equal) => vec![equal.left.clone(), equal.right.clone()],
-            ScalarOperator::And(and) => vec![and.left.clone(), and.right.clone()],
+            ScalarOperator::BinaryOp(binary_op) => {
+                vec![binary_op.left.clone(), binary_op.right.clone()]
+            }
+            ScalarOperator::UnaryOp(unary_op) => vec![unary_op.child.clone()],
+            ScalarOperator::LogicOp(logic_op) => logic_op.children.clone(),
         }
     }
 
@@ -117,25 +121,26 @@ where
                     column_index: column_ref.column_index.clone(),
                 })
             }
-            ScalarOperator::Add(_) => {
-                assert_eq!(scalar_size, 2, "Add: expected 2 children");
-                ScalarExpression::Add(Add {
-                    left: children_scalars[0],
-                    right: children_scalars[1],
+            ScalarOperator::BinaryOp(binary) => {
+                assert_eq!(scalar_size, 2, "Binary: expected two children");
+                ScalarExpression::BinaryOp(BinaryOp {
+                    kind: binary.kind.clone(),
+                    left: children_scalars[0].clone(),
+                    right: children_scalars[1].clone(),
                 })
             }
-            ScalarOperator::Equal(_) => {
-                assert_eq!(scalar_size, 2, "Equal: expected 2 children");
-                ScalarExpression::Equal(Equal {
-                    left: children_scalars[0],
-                    right: children_scalars[1],
+            ScalarOperator::UnaryOp(unary) => {
+                assert_eq!(scalar_size, 1, "Unary: expected one child");
+                ScalarExpression::UnaryOp(UnaryOp {
+                    kind: unary.kind.clone(),
+                    child: children_scalars[0].clone(),
                 })
             }
-            ScalarOperator::And(_) => {
-                assert_eq!(scalar_size, 2, "And: expected 2 children");
-                ScalarExpression::And(And {
-                    left: children_scalars[0],
-                    right: children_scalars[1],
+            ScalarOperator::LogicOp(logic) => {
+                assert!(scalar_size > 0, "Logic: expected at least one child");
+                ScalarExpression::LogicOp(LogicOp {
+                    kind: logic.kind.clone(),
+                    children: children_scalars.to_vec(),
                 })
             }
         }

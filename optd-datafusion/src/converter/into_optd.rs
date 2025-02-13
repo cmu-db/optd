@@ -12,8 +12,10 @@ use optd_core::{
             filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator,
         },
         scalar::{
-            add::Add, and::And, column_ref::ColumnRef, constants::Constant, equal::Equal,
-            ScalarOperator,
+            binary_op,
+            column_ref::ColumnRef,
+            constants::{self, Constant},
+            logic_op, unary_op, ScalarOperator,
         },
     },
     plans::{logical::LogicalPlan, scalar::ScalarPlan},
@@ -53,12 +55,20 @@ impl ConversionContext<'_> {
                 let left = Self::conv_df_to_optd_scalar(&binary_expr.left, context, col_offset)?;
                 let right = Self::conv_df_to_optd_scalar(&binary_expr.right, context, col_offset)?;
                 match binary_expr.op {
-                    Operator::Plus => ScalarOperator::Add(Add { left, right }),
-                    // Operator::And => ScalarOperator::And(Add { left, right }),
-                    Operator::Eq => ScalarOperator::Equal(Equal { left, right }),
+                    Operator::Plus => binary_op::add(left, right),
+                    Operator::Minus => binary_op::minus(left, right),
+                    Operator::Eq => binary_op::equal(left, right),
+                    // TODO(yuchen): flatten logic operations as an optimization.
+                    Operator::And => logic_op::and(vec![left, right]),
+                    Operator::Or => logic_op::or(vec![left, right]),
                     _ => todo!(),
                 }
             }
+            Expr::Not(expr) => unary_op::not(Self::conv_df_to_optd_scalar(
+                expr.as_ref(),
+                context,
+                col_offset,
+            )?),
             Expr::Cast(cast) => {
                 return Self::conv_df_to_optd_scalar(&cast.expr, context, col_offset);
             }
@@ -79,10 +89,10 @@ impl ConversionContext<'_> {
             join_cond[idx].clone()
         } else {
             Arc::new(ScalarPlan {
-                operator: ScalarOperator::And(And {
-                    left: join_cond[idx].clone(),
-                    right: Self::flatten_scalar_as_conjunction(join_cond.clone(), idx + 1),
-                }),
+                operator: logic_op::and(vec![
+                    join_cond[idx].clone(),
+                    Self::flatten_scalar_as_conjunction(join_cond.clone(), idx + 1),
+                ]),
             })
         }
     }
@@ -107,7 +117,7 @@ impl ConversionContext<'_> {
                     let offset = join.left.schema().fields().len();
                     let right = Self::conv_df_to_optd_scalar(right, join.right.schema(), offset)?;
                     join_cond.push(Arc::new(ScalarPlan {
-                        operator: ScalarOperator::Equal(Equal { left, right }),
+                        operator: binary_op::equal(left, right),
                     }));
                 }
                 if let Some(filter) = &join.filter {
@@ -117,9 +127,7 @@ impl ConversionContext<'_> {
                 }
                 if join_cond.is_empty() {
                     join_cond.push(Arc::new(ScalarPlan {
-                        operator: ScalarOperator::Constant(Constant {
-                            value: OptdValue::Bool(true),
-                        }),
+                        operator: constants::boolean(true),
                     }));
                 }
 

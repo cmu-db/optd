@@ -19,6 +19,6 @@ INSERT INTO departments VALUES
     (2, 'Marketing');
 
 
-explain SELECT * FROM employees INNER JOIN departments ON employees.department_id = departments.id;
+explain SELECT * FROM employees INNER JOIN departments ON employees.department_id = departments.id where (NOT (employees.name = 'Bob' AND departments.department_name = 'Engineering')) AND (NOT (employees.name = 'Bob' AND departments.department_name = 'Engineering'));
 
-SELECT * FROM employees INNER JOIN departments ON employees.department_id = departments.id;
+SELECT * FROM employees INNER JOIN departments ON employees.department_id = departments.id where (NOT (employees.name = 'Bob' AND departments.department_name = 'Engineering')) AND (NOT (employees.name = 'Bob' AND departments.department_name = 'Engineering'));
