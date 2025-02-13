@@ -703,14 +703,14 @@ impl SqliteMemo {
     /// Inserts an entry into the `physical_expressions` table.
     async fn insert_into_physical_expressions(
         txn: &mut SqliteConnection,
-        logical_expr_id: PhysicalExpressionId,
+        physical_expr_id: PhysicalExpressionId,
         group_id: RelationalGroupId,
         operator_kind: PhysicalOperatorKind,
     ) -> anyhow::Result<()> {
         sqlx::query(
             "INSERT INTO physical_expressions (id, group_id, operator_kind) VALUES ($1, $2, $3)",
         )
-        .bind(logical_expr_id)
+        .bind(physical_expr_id)
         .bind(group_id)
         .bind(operator_kind)
         .execute(&mut *txn)
