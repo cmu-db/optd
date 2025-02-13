@@ -177,7 +177,7 @@ impl ConversionContext<'_> {
                     fields: exprs,
                 })
             }
-            _ => bail!("optd does not support this operator"),
+            logical_plan => bail!("optd does not support this operator {:?}", logical_plan),
         };
         Ok(Arc::new(LogicalPlan { operator }))
     }
