@@ -88,9 +88,8 @@ pub async fn run_queries(queries: String) -> Result<()> {
     }
     Ok(())
 }
+
 /// Utility function to create a session context for datafusion + optd.
-/// The allow deprecated is for the RuntimeConfig
-#[allow(deprecated)]
 pub async fn create_df_context(
     session_config: Option<SessionConfig>,
     rn_config: Option<RuntimeEnvBuilder>,
