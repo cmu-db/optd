@@ -125,15 +125,15 @@ where
                 assert_eq!(scalar_size, 2, "Binary: expected two children");
                 ScalarExpression::BinaryOp(BinaryOp {
                     kind: binary.kind.clone(),
-                    left: children_scalars[0].clone(),
-                    right: children_scalars[1].clone(),
+                    left: children_scalars[0],
+                    right: children_scalars[1],
                 })
             }
             ScalarOperator::UnaryOp(unary) => {
                 assert_eq!(scalar_size, 1, "Unary: expected one child");
                 ScalarExpression::UnaryOp(UnaryOp {
                     kind: unary.kind.clone(),
-                    child: children_scalars[0].clone(),
+                    child: children_scalars[0],
                 })
             }
             ScalarOperator::LogicOp(logic) => {
