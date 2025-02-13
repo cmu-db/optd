@@ -64,23 +64,16 @@ impl Command {
                 let command_batch = all_commands_info();
                 print_options.print_batches(command_batch.schema(), &[command_batch], now)
             }
-            Self::ListTables => {
-                exec_and_print(ctx, print_options, "SHOW TABLES".into()).await
-            }
+            Self::ListTables => exec_and_print(ctx, print_options, "SHOW TABLES".into()).await,
             Self::DescribeTableStmt(name) => {
-                exec_and_print(ctx, print_options, format!("SHOW COLUMNS FROM {}", name))
-                    .await
+                exec_and_print(ctx, print_options, format!("SHOW COLUMNS FROM {}", name)).await
             }
             Self::Include(filename) => {
                 if let Some(filename) = filename {
                     let file = File::open(filename).map_err(|e| {
-                        DataFusionError::Execution(format!(
-                            "Error opening {:?} {}",
-                            filename, e
-                        ))
+                        DataFusionError::Execution(format!("Error opening {:?} {}", filename, e))
                     })?;
-                    exec_from_lines(ctx, &mut BufReader::new(file), print_options)
-                        .await?;
+                    exec_from_lines(ctx, &mut BufReader::new(file), print_options).await?;
                     Ok(())
                 } else {
                     exec_err!("Required filename argument is missing")
@@ -112,9 +105,9 @@ impl Command {
                     exec_err!("{function} is not a supported function")
                 }
             }
-            Self::OutputFormat(_) => exec_err!(
-                "Unexpected change output format, this should be handled outside"
-            ),
+            Self::OutputFormat(_) => {
+                exec_err!("Unexpected change output format, this should be handled outside")
+            }
         }
     }
 
@@ -124,15 +117,11 @@ impl Command {
             Self::ListTables => ("\\d", "list tables"),
             Self::DescribeTableStmt(_) => ("\\d name", "describe table"),
             Self::Help => ("\\?", "help"),
-            Self::Include(_) => {
-                ("\\i filename", "reads input from the specified filename")
-            }
+            Self::Include(_) => ("\\i filename", "reads input from the specified filename"),
             Self::ListFunctions => ("\\h", "function list"),
             Self::SearchFunctions(_) => ("\\h function", "search function"),
             Self::QuietMode(_) => ("\\quiet (true|false)?", "print or set quiet mode"),
-            Self::OutputFormat(_) => {
-                ("\\pset [NAME [VALUE]]", "set table output option\n(format)")
-            }
+            Self::OutputFormat(_) => ("\\pset [NAME [VALUE]]", "set table output option\n(format)"),
         }
     }
 }
@@ -186,16 +175,10 @@ impl FromStr for Command {
             ("h", Some(function)) => Self::SearchFunctions(function.into()),
             ("i", None) => Self::Include(None),
             ("i", Some(filename)) => Self::Include(Some(filename.to_owned())),
-            ("quiet", Some("true" | "t" | "yes" | "y" | "on")) => {
-                Self::QuietMode(Some(true))
-            }
-            ("quiet", Some("false" | "f" | "no" | "n" | "off")) => {
-                Self::QuietMode(Some(false))
-            }
+            ("quiet", Some("true" | "t" | "yes" | "y" | "on")) => Self::QuietMode(Some(true)),
+            ("quiet", Some("false" | "f" | "no" | "n" | "off")) => Self::QuietMode(Some(false)),
             ("quiet", None) => Self::QuietMode(None),
-            ("pset", Some(subcommand)) => {
-                Self::OutputFormat(Some(subcommand.to_string()))
-            }
+            ("pset", Some(subcommand)) => Self::OutputFormat(Some(subcommand.to_string())),
             ("pset", None) => Self::OutputFormat(None),
             _ => return Err(()),
         })

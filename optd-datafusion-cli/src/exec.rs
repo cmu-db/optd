@@ -150,10 +150,7 @@ pub async fn exec_from_repl(
                                         eprintln!("{e}")
                                     }
                                 } else {
-                                    eprintln!(
-                                        "'\\{}' is not a valid command",
-                                        &line[1..]
-                                    );
+                                    eprintln!("'\\{}' is not a valid command", &line[1..]);
                                 }
                             } else {
                                 println!("Output format is {:?}.", print_options.format);
@@ -184,9 +181,9 @@ pub async fn exec_from_repl(
                         },
                     }
                     // dialect might have changed
-                    rl.helper_mut().unwrap().set_dialect(
-                        &ctx.task_ctx().session_config().options().sql_parser.dialect,
-                    );
+                    rl.helper_mut()
+                        .unwrap()
+                        .set_dialect(&ctx.task_ctx().session_config().options().sql_parser.dialect);
                 }
             }
             Err(ReadlineError::Interrupted) => {
@@ -226,8 +223,7 @@ pub(super) async fn exec_and_print(
 
     let statements = DFParser::parse_sql_with_dialect(&sql, dialect.as_ref())?;
     for statement in statements {
-        let adjusted =
-            AdjustedPrintOptions::new(print_options.clone()).with_statement(&statement);
+        let adjusted = AdjustedPrintOptions::new(print_options.clone()).with_statement(&statement);
 
         let plan = create_plan(ctx, statement).await?;
         let adjusted = adjusted.with_plan(&plan);
@@ -284,9 +280,7 @@ impl AdjustedPrintOptions {
         // all rows
         if matches!(
             plan,
-            LogicalPlan::Explain(_)
-                | LogicalPlan::DescribeTable(_)
-                | LogicalPlan::Analyze(_)
+            LogicalPlan::Explain(_) | LogicalPlan::DescribeTable(_) | LogicalPlan::Analyze(_)
         ) {
             self.inner.maxrows = MaxRows::Unlimited;
         }
@@ -324,13 +318,8 @@ async fn create_plan(
     if let LogicalPlan::Ddl(DdlStatement::CreateExternalTable(cmd)) = &plan {
         // To support custom formats, treat error as None
         let format = config_file_type_from_str(&cmd.file_type);
-        register_object_store_and_config_extensions(
-            ctx,
-            &cmd.location,
-            &cmd.options,
-            format,
-        )
-        .await?;
+        register_object_store_and_config_extensions(ctx, &cmd.location, &cmd.options, format)
+            .await?;
     }
 
     if let LogicalPlan::Copy(copy_to) = &mut plan {
@@ -400,8 +389,7 @@ pub(crate) async fn register_object_store_and_config_extensions(
     table_options.alter_with_string_hash_map(options)?;
 
     // Retrieve the appropriate object store based on the scheme, URL, and modified table options
-    let store =
-        get_object_store(&ctx.session_state(), scheme, url, &table_options).await?;
+    let store = get_object_store(&ctx.session_state(), scheme, url, &table_options).await?;
 
     // Register the retrieved object store in the session context's runtime environment
     ctx.register_object_store(url, store);
@@ -424,13 +412,8 @@ mod tests {
 
         if let LogicalPlan::Ddl(DdlStatement::CreateExternalTable(cmd)) = &plan {
             let format = config_file_type_from_str(&cmd.file_type);
-            register_object_store_and_config_extensions(
-                &ctx,
-                &cmd.location,
-                &cmd.options,
-                format,
-            )
-            .await?;
+            register_object_store_and_config_extensions(&ctx, &cmd.location, &cmd.options, format)
+                .await?;
         } else {
             return plan_err!("LogicalPlan is not a CreateExternalTable");
         }
@@ -472,8 +455,7 @@ mod tests {
     async fn create_object_store_table_http() -> Result<()> {
         // Should be OK
         let location = "http://example.com/file.parquet";
-        let sql =
-            format!("CREATE EXTERNAL TABLE test STORED AS PARQUET LOCATION '{location}'");
+        let sql = format!("CREATE EXTERNAL TABLE test STORED AS PARQUET LOCATION '{location}'");
         create_external_table_test(location, &sql).await?;
 
         Ok(())
@@ -590,8 +572,10 @@ mod tests {
         let location = "gcs://bucket/path/file.parquet";
 
         // for service_account_path
-        let sql = format!("CREATE EXTERNAL TABLE test STORED AS PARQUET
-            OPTIONS('gcp.service_account_path' '{service_account_path}') LOCATION '{location}'");
+        let sql = format!(
+            "CREATE EXTERNAL TABLE test STORED AS PARQUET
+            OPTIONS('gcp.service_account_path' '{service_account_path}') LOCATION '{location}'"
+        );
         let err = create_external_table_test(location, &sql)
             .await
             .unwrap_err();
@@ -621,8 +605,7 @@ mod tests {
         let location = "path/to/file.parquet";
 
         // Ensure that local files are also registered
-        let sql =
-            format!("CREATE EXTERNAL TABLE test STORED AS PARQUET LOCATION '{location}'");
+        let sql = format!("CREATE EXTERNAL TABLE test STORED AS PARQUET LOCATION '{location}'");
         create_external_table_test(location, &sql).await.unwrap();
 
         Ok(())

@@ -48,10 +48,7 @@ pub trait CliSessionContext {
     fn register_table_options_extension_from_scheme(&self, scheme: &str);
 
     /// Execute a logical plan and return a DataFrame.
-    async fn execute_logical_plan(
-        &self,
-        plan: LogicalPlan,
-    ) -> Result<DataFrame, DataFusionError>;
+    async fn execute_logical_plan(&self, plan: LogicalPlan) -> Result<DataFrame, DataFusionError>;
 }
 
 #[async_trait::async_trait]
@@ -89,10 +86,7 @@ impl CliSessionContext for SessionContext {
         }
     }
 
-    async fn execute_logical_plan(
-        &self,
-        plan: LogicalPlan,
-    ) -> Result<DataFrame, DataFusionError> {
+    async fn execute_logical_plan(&self, plan: LogicalPlan) -> Result<DataFrame, DataFusionError> {
         self.execute_logical_plan(plan).await
     }
 }
