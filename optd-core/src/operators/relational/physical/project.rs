@@ -25,7 +25,7 @@ impl<Relation, Scalar> PhysicalProject<Relation, Scalar> {
 }
 
 /// Creates a physical project operator.
-pub fn project<Relation, Scalar>(
+pub fn physical_project<Relation, Scalar>(
     child: Relation,
     fields: Vec<Scalar>,
 ) -> PhysicalOperator<OptdValue, Relation, Scalar> {
