@@ -22,9 +22,9 @@ use optd_core::{
     values::OptdValue,
 };
 
-use super::ConversionContext;
+use super::OptdDFContext;
 
-impl ConversionContext<'_> {
+impl OptdDFContext<'_> {
     /// The col_offset is an offset added to the column index for all column references. It is useful for joins.
     pub fn conv_df_to_optd_scalar(
         df_expr: &Expr,

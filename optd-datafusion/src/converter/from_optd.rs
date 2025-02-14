@@ -21,9 +21,9 @@ use optd_core::{
     values::OptdValue,
 };
 
-use super::ConversionContext;
+use super::OptdDFContext;
 
-impl ConversionContext<'_> {
+impl OptdDFContext<'_> {
     #[async_recursion]
     pub async fn conv_optd_to_df_relational(
         &self,

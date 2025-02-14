@@ -77,13 +77,13 @@ ctor = "0.2.9"
 predicates = "3.0"
 rstest = "0.24"
 
-[profile.ci]
-inherits = "dev"
-incremental = false
+# [profile.ci]
+# inherits = "dev"
+# incremental = false
 
-# ci turns off debug info, etc for dependencies to allow for smaller binaries making caching more effective
-[profile.ci.package."*"]
-debug = false
-debug-assertions = false
-strip = "debuginfo"
-incremental = false
+# # ci turns off debug info, etc for dependencies to allow for smaller binaries making caching more effective
+# [profile.ci.package."*"]
+# debug = false
+# debug-assertions = false
+# strip = "debuginfo"
+# incremental = false

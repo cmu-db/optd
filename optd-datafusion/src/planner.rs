@@ -15,7 +15,7 @@ use optd_core::{
     storage::memo::SqliteMemo,
 };
 
-use crate::converter::ConversionContext;
+use crate::converter::OptdDFContext;
 
 /// A mock optimizer for testing purposes.
 #[derive(Debug)]
@@ -145,7 +145,7 @@ impl OptdQueryPlanner {
             );
         }
 
-        let mut converter = ConversionContext::new(session_state);
+        let mut converter = OptdDFContext::new(session_state);
         // convert the logical plan to optd
         let logical_plan = converter.conv_df_to_optd_relational(logical_plan)?;
         // run the optd optimizer
