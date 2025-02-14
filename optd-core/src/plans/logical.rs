@@ -26,7 +26,7 @@ use std::sync::Arc;
 /// plan representation after optimization is complete.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LogicalPlan {
-    operator: LogicalOperator<OptdValue, Arc<LogicalPlan>, Arc<ScalarPlan>>,
+    pub operator: LogicalOperator<OptdValue, Arc<LogicalPlan>, Arc<ScalarPlan>>,
 }
 
 /// A logical plan with varying levels of materialization.

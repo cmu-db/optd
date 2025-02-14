@@ -10,13 +10,25 @@
 use std::sync::Arc;
 
 use super::{
-    expressions::{LogicalExpression, LogicalExpressionId, ScalarExpression, ScalarExpressionId},
+    expressions::{
+        LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
+        ScalarExpression, ScalarExpressionId,
+    },
+    goal::Goal,
     groups::{RelationalGroupId, ScalarGroupId},
+    properties::PhysicalProperty,
 };
 use anyhow::Result;
 
 #[trait_variant::make(Send)]
 pub trait Memoize: Send + Sync + 'static {
+    /// Creates or get an optimization goal for a group with some required physical properties.
+    async fn create_or_get_relation_group_goal(
+        &self,
+        group_id: RelationalGroupId,
+        required_physical_props: Vec<PhysicalProperty>,
+    ) -> Result<Goal>;
+
     /// Gets all logical expressions in a group.
     async fn get_all_logical_exprs_in_group(
         &self,
@@ -67,4 +79,17 @@ pub trait Memoize: Send + Sync + 'static {
         from: ScalarGroupId,
         to: ScalarGroupId,
     ) -> Result<ScalarGroupId>;
+
+    /// Gets all logical expressions in a group.
+    async fn get_all_physical_exprs_in_group(
+        &self,
+        group_id: RelationalGroupId,
+    ) -> Result<Vec<(PhysicalExpressionId, Arc<PhysicalExpression>)>>;
+
+    /// Adds a physical expression to an existing group in the memo table.
+    async fn add_physical_expr_to_group(
+        &self,
+        physical_expr: &PhysicalExpression,
+        group_id: RelationalGroupId,
+    ) -> Result<RelationalGroupId>;
 }
