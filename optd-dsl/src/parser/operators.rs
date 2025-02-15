@@ -2,7 +2,7 @@ use pest::iterators::Pair;
 use std::collections::HashMap;
 
 use super::{expr::parse_expr, parse_field_def, Rule};
-use crate::ast::{Expr, Field, LogicalOp, Operator, OperatorKind, ScalarOp};
+use crate::irs::hir::{Expr, Field, LogicalOp, Operator, OperatorKind, ScalarOp};
 
 /// Parse an operator definition from a pest Pair
 ///
@@ -112,7 +112,8 @@ fn create_operator(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{BinOp, Type};
+    use crate::irs::hir::Type;
+    use crate::irs::BinOp;
     use crate::parser::DslParser;
     use pest::Parser;
 

@@ -1,6 +1,6 @@
-use crate::{
+/*use crate::{
     analyzer::semantic::SemanticAnalyzer,
-    ast::{Field, LogicalOp, Operator, OperatorKind, ScalarOp, Type},
+    irs::hir::{Field, LogicalOp, Operator, OperatorKind, ScalarOp, Type},
     parser::parse_file,
 };
 use proc_macro2::{Ident, TokenStream};
@@ -250,7 +250,7 @@ fn generate_scalar_operator(operator: &ScalarOp) -> TokenStream {
 
 #[test]
 fn test_generate_logical_operator() {
-    use crate::ast::{Field, LogicalOp, OperatorKind, Type};
+    use crate::irs::hir::{Field, LogicalOp, OperatorKind, Type};
     use std::collections::HashMap;
 
     // Test with both Logical and Scalar operator types
@@ -295,3 +295,4 @@ fn test_working_file() {
     let formatted = prettyplease::unparse(&syntax_tree);
     println!("Generated code:\n{}", formatted);
 }
+*/

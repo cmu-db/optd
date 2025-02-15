@@ -16,6 +16,7 @@ use crate::{
 pub mod expressions;
 pub mod groups;
 pub mod memo;
+pub mod types;
 
 #[async_recursion]
 pub async fn ingest_partial_logical_plan(

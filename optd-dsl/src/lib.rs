@@ -1,4 +1,5 @@
 mod analyzer;
-mod ast;
 mod gen;
+mod interpreter;
+mod irs;
 mod parser;

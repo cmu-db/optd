@@ -13,7 +13,7 @@ use types::parse_type_expr;
 
 use pest::error::Error;
 
-use super::ast::{Field, File, Properties};
+use crate::irs::hir::{Field, File, Properties};
 
 /// The main parser for the DSL, derived using pest
 #[derive(Parser)]
@@ -107,7 +107,7 @@ pub(crate) fn parse_field_def(pair: Pair<Rule>) -> Field {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::Type;
+    use crate::irs::hir::Type;
 
     use super::*;
     use pest::Parser;

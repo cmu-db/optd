@@ -1,7 +1,7 @@
 use pest::iterators::Pair;
 
 use super::{expr::parse_expr, Rule};
-use crate::ast::{Literal, Pattern};
+use crate::irs::hir::{Literal, Pattern};
 
 /// Parse a pattern from a pest Pair
 ///

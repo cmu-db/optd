@@ -1,6 +1,6 @@
 use pest::iterators::Pair;
 
-use crate::ast::{OperatorKind, Type};
+use crate::irs::hir::{OperatorKind, Type};
 
 use super::Rule;
 

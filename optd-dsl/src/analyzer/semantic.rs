@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::ast::{Expr, File, Function, Operator, OperatorKind, Pattern, Properties, Type};
+use crate::irs::hir::{Expr, File, Function, Operator, OperatorKind, Pattern, Properties, Type};
 
 /// SemanticAnalyzer performs static analysis on the DSL code to ensure semantic correctness.
 /// It validates properties, operators, functions, and expressions while maintaining scope information.
@@ -386,7 +386,7 @@ impl SemanticAnalyzer {
 mod tests {
     use super::*;
     use crate::{
-        ast::{
+        irs::hir::{
             Expr, Field, File, Function, Literal, LogicalOp, Operator, Properties, ScalarOp, Type,
         },
         parser::parse_file,
