@@ -1,53 +1,12 @@
-use ariadne::{Color, Label, Report, ReportKind, Source};
-use chumsky::error::{Simple, SimpleReason};
-use core::fmt;
 use std::{
-    fmt::{Display, Formatter},
+    fmt::{self, Display, Formatter},
     ops::Range,
 };
 
-pub trait Reporter {
-    fn report(&self) -> Report<(String, Range<usize>)>;
-    fn source(&self) -> (String, Source);
+use ariadne::{Color, Label, Report, ReportKind, Source};
+use chumsky::error::{Simple, SimpleReason};
 
-    fn eprint(&self) -> std::io::Result<()> {
-        let (file, source) = self.source();
-        self.report().eprint((file, source))
-    }
-}
-
-#[derive(Debug)]
-pub enum Error {
-    LexerError(LexerError),
-}
-
-impl From<LexerError> for Error {
-    fn from(e: LexerError) -> Self {
-        Error::LexerError(e)
-    }
-}
-
-impl Reporter for Error {
-    fn report(&self) -> Report<(String, Range<usize>)> {
-        match self {
-            Error::LexerError(e) => e.report(),
-        }
-    }
-
-    fn source(&self) -> (String, Source) {
-        match self {
-            Error::LexerError(e) => e.source(),
-        }
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::LexerError(e) => e.fmt(f),
-        }
-    }
-}
+use crate::errors::Reporter;
 
 #[derive(Debug)]
 pub struct LexerError {
