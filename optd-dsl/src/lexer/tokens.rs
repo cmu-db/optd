@@ -1,5 +1,3 @@
-use super::LexerError;
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     // Keywords

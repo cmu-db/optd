@@ -1,4 +1,3 @@
-use ariadne::{Color, Label, Report, ReportKind, Source};
 use chumsky::{
     error::Simple,
     prelude::{choice, end, just, none_of, skip_then_retry_until},
@@ -7,13 +6,14 @@ use chumsky::{
 };
 use std::{collections::HashMap, ops::Range};
 
+pub mod errors;
 pub mod tokens;
+
+use errors::Error;
 use tokens::Token;
 
 /// A token with its span in the source code
 pub type TokenSpan = (Token, Range<usize>);
-/// Lexer-specific error type
-pub type LexerError = Simple<char>;
 
 /// Lexes a source string into a sequence of tokens with their positions.
 /// Uses Chumsky for lexing and Ariadne for error reporting.
@@ -23,39 +23,20 @@ pub type LexerError = Simple<char>;
 /// * `file_name` - Name of the source file, used for error reporting
 ///
 /// # Returns
-/// * `Ok(Vec<TokenSpan>)` - Successfully lexed tokens with their spans
-/// * `Err(Vec<LexerError>)` - Lexing errors, which are also reported via Ariadne
-pub fn lex(source: &str, file_name: &str) -> Result<Vec<TokenSpan>, Vec<LexerError>> {
-    let result = lexer().parse(source);
+/// * `(Option<Vec<TokenSpan>>, Vec<Error>)` - Any successfully lexed tokens and errors
+pub fn lex(source: &str, file_name: &str) -> (Option<Vec<TokenSpan>>, Vec<Error>) {
+    let (tokens, errors) = lexer().parse_recovery(source);
+    let errors = errors
+        .into_iter()
+        .map(|e| errors::LexerError::new(source.to_string(), file_name.to_string(), e).into())
+        .collect();
 
-    match result {
-        Ok(tokens) => Ok(tokens),
-        Err(errors) => {
-            /*for error in errors.clone() {
-                let reason = match &error.reason() {
-                    chumsky::error::SimpleReason::Custom(msg) => msg.clone(),
-                    _ => error.to_string(),
-                };
-
-                Report::build(ReportKind::Error, (file_name, error.span()))
-                    .with_message("Lexer error")
-                    .with_label(
-                        Label::new((file_name, error.span()))
-                            .with_message(&reason)
-                            .with_color(Color::Red),
-                    )
-                    .finish()
-                    .eprint((file_name, Source::from(source)))
-                    .unwrap();
-            }*/
-            Err(errors)
-        }
-    }
+    (tokens, errors)
 }
 
 /// Creates the lexer parser. Uses immediate error recovery to maximize the number of
 /// tokens that can be successfully lexed even in the presence of errors.
-fn lexer() -> impl Parser<char, Vec<TokenSpan>, Error = LexerError> {
+fn lexer() -> impl Parser<char, Vec<TokenSpan>, Error = Simple<char>> {
     let keywords = HashMap::from([
         ("Scalar", Token::Scalar),
         ("Logical", Token::Logical),
@@ -79,14 +60,14 @@ fn lexer() -> impl Parser<char, Vec<TokenSpan>, Error = LexerError> {
             .unwrap_or(Token::Identifier(ident))
     });
 
-    let int64 = int::<char, LexerError>(10).try_map(|s, span| {
+    let int64 = int::<char, Simple<char>>(10).try_map(|s, span| {
         s.parse::<i64>()
             .map(Token::Int64)
             .map_err(|e| Simple::custom(span, e.to_string()))
     });
 
     let float64 = choice((
-        int::<char, LexerError>(10)
+        int::<char, Simple<char>>(10)
             .then(just('.').ignore_then(digits(10)))
             .try_map(|(whole, frac), span| {
                 let num_str = format!("{}.{}", whole, frac);
@@ -95,7 +76,7 @@ fn lexer() -> impl Parser<char, Vec<TokenSpan>, Error = LexerError> {
                     .map(Token::Float64)
                     .map_err(|e| Simple::custom(span, e.to_string()))
             }),
-        int::<char, LexerError>(10)
+        int::<char, Simple<char>>(10)
             .then_ignore(just('f'))
             .try_map(|num, span| {
                 num.parse::<f64>()
@@ -163,15 +144,11 @@ fn lexer() -> impl Parser<char, Vec<TokenSpan>, Error = LexerError> {
 mod tests {
     use super::*;
 
-    fn test_lex(input: &str) -> Result<Vec<TokenSpan>, Vec<LexerError>> {
-        lex(input, "test.txt")
-    }
-
     #[test]
     fn test_keyword() {
-        let result = test_lex("if then else");
-        assert!(result.is_ok());
-        let tokens = result.unwrap();
+        let (maybe_tokens, errors) = lex("if then else", "test.txt");
+        assert!(errors.is_empty());
+        let tokens = maybe_tokens.unwrap();
         assert!(tokens.contains(&(Token::If, 0..2)));
         assert!(tokens.contains(&(Token::Then, 3..7)));
         assert!(tokens.contains(&(Token::Else, 8..12)));
@@ -179,28 +156,31 @@ mod tests {
 
     #[test]
     fn test_integer_overflow() {
-        let result = test_lex("9223372036854775808");
-        assert!(result.is_err());
+        let (_, errors) = lex("9223372036854775808", "test.txt");
+        assert!(!errors.is_empty());
     }
 
     #[test]
     fn test_unterminated_string() {
-        assert!(test_lex("\"unterminated").is_err());
+        let (_, errors) = lex("\"unterminated", "test.txt");
+        assert!(!errors.is_empty());
     }
 
     #[test]
     fn test_valid_tokens() {
-        let result = test_lex("if (x == 42) { print(\"hello\"); } // comment").unwrap();
-        assert!(result.contains(&(Token::If, 0..2)));
-        assert!(result.contains(&(Token::EqEq, 6..8)));
-        assert!(result.contains(&(Token::Int64(42), 9..11)));
-        assert!(result.contains(&(Token::String("hello".to_string()), 21..28)));
+        let (maybe_tokens, errors) =
+            lex("if (x == 42) { print(\"hello\"); } // comment", "test.txt");
+        assert!(errors.is_empty());
+        let tokens = maybe_tokens.unwrap();
+        assert!(tokens.contains(&(Token::If, 0..2)));
+        assert!(tokens.contains(&(Token::EqEq, 6..8)));
+        assert!(tokens.contains(&(Token::Int64(42), 9..11)));
+        assert!(tokens.contains(&(Token::String("hello".to_string()), 21..28)));
     }
 
     #[test]
     fn test_recovery_after_error() {
-        let input = "1010 let x = 99999999++&; let y = 42; &&";
-        let (maybe_tokens, errors) = lexer().parse_recovery(input);
+        let (maybe_tokens, errors) = lex("1010 let x = 99999999++&; let y = 42; &&", "test.txt");
 
         assert!(!errors.is_empty());
         if let Some(tokens) = maybe_tokens {
