@@ -1,5 +1,6 @@
-mod analyzer;
-mod gen;
-mod interpreter;
-mod irs;
-mod parser;
+// mod analyzer;
+pub mod gen;
+// mod interpreter;
+pub mod irs;
+pub mod lexer;
+// mod parser;

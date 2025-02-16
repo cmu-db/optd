@@ -5,10 +5,7 @@ use std::collections::HashMap;
 
 use optd_core::{cascades::types::PartialLogicalPlan, values::OptdValue};
 
-use super::{BinOp, UnaryOp};
-
-// All identifiers have been validated by the analyzer
-pub type Identifier = String;
+use super::{BinOp, Identifier, UnaryOp};
 
 #[derive(Clone, Debug)]
 pub enum Expr {
@@ -91,7 +88,7 @@ pub struct Function {
     pub body: Box<Expr>,
 }
 
-/// Types supported by the language
+/// Values supported by the language
 #[derive(Debug, Clone)]
 pub enum Value {
     Array(Box<Value>),

@@ -1,6 +1,32 @@
+use super::{BinOp, Identifier, UnaryOp};
 use std::collections::HashMap;
 
-use super::{BinOp, UnaryOp};
+/// Represents a location in source code, used for error reporting and debugging
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Span {
+    /// Start position (in bytes) in source
+    pub start: usize,
+    /// End position (in bytes) in source
+    pub end: usize,
+}
+
+/// A value paired with its location in source code
+pub type Spanned<T> = (T, Span);
+
+impl Span {
+    /// Creates a new span with the given start and end positions
+    pub fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+
+    /// Combines two spans into one that covers both ranges
+    pub fn union(&self, other: &Span) -> Span {
+        Span {
+            start: self.start.min(other.start),
+            end: self.end.max(other.end),
+        }
+    }
+}
 
 /// Types supported by the language
 #[derive(Debug, Clone, PartialEq)]
@@ -9,119 +35,204 @@ pub enum Type {
     String,
     Bool,
     Float64,
-    Array(Box<Type>),               // Array types like [T]
-    Map(Box<Type>, Box<Type>),      // Map types like map[K->V]
-    Tuple(Vec<Type>),               // Tuple types like (T1, T2)
-    Function(Box<Type>, Box<Type>), // Function types like (T1)->T2
-    Operator(OperatorKind),         // Operator types (scalar/logical)
+    Void,
+
+    /// Array types like [T]
+    Array(Box<Type>),
+    /// Map types like map[K, V] where K and V are types
+    Map(Box<Type>, Box<Type>),
+    /// Tuple types like (T1, T2, T3)
+    Tuple(Vec<Type>),
+    /// Function types like (T1) => T2
+    Closure(Box<Type>, Box<Type>),
+
+    /// Scalar operators (work on individual values)
+    Scalar,
+    /// Logical operators (relational algebra operations)
+    Logical,
+    /// Physical operators (implementation details)
+    Physical,
 }
 
-/// Kinds of operators supported in the language
-#[derive(Debug, Clone, PartialEq)]
-pub enum OperatorKind {
-    Scalar,  // Scalar operators
-    Logical, // Logical operators with derivable properties
+/// Properties block that maps identifiers to their types
+#[derive(Clone, Debug)]
+pub struct Properties {
+    /// Maps property names to their types
+    pub props: HashMap<Identifier, Type>,
 }
 
-/// A field in an operator or properties block
+/// Categorizes operators into their fundamental types
+#[derive(Debug, Clone)]
+pub enum Operator {
+    /// Operations on individual values (e.g., arithmetic, comparison)
+    Scalar(ScalarOp),
+    /// Relational algebra operations (e.g., join, project)
+    Logical(LogicalOp),
+    /// Physical implementation details (e.g., hash join, merge join)
+    Physical(PhysicalOp),
+}
+
+/// Field definition within an operator
 #[derive(Debug, Clone)]
 pub struct Field {
-    pub name: String,
+    /// Name of the field
+    pub name: Identifier,
+    /// Type of the field
     pub ty: Type,
 }
 
-/// Logical properties block that must appear exactly once per file
-#[derive(Debug, Clone)]
-pub struct Properties {
-    pub fields: Vec<Field>,
-}
-
-/// Top-level operator definition
-#[derive(Debug, Clone)]
-pub enum Operator {
-    Scalar(ScalarOp),
-    Logical(LogicalOp),
-}
-
-/// Scalar operator definition
+/// Scalar operator definition (e.g., arithmetic, comparison)
 #[derive(Debug, Clone)]
 pub struct ScalarOp {
-    pub name: String,
+    /// Name of the operator
+    pub name: Identifier,
+    /// Fields this operator contains
     pub fields: Vec<Field>,
 }
 
-/// Logical operator definition with derived properties
+/// Logical operator with derived properties
 #[derive(Debug, Clone)]
 pub struct LogicalOp {
-    pub name: String,
+    /// Name of the operator
+    pub name: Identifier,
+    /// Fields this operator contains
     pub fields: Vec<Field>,
-    pub derived_props: HashMap<String, Expr>, // Maps property names to their derivation expressions
+    /// Maps property names to their derivation expressions
+    pub derived_props: HashMap<String, Spanned<Expr>>,
+}
+
+/// Physical operator (implementation of logical operators)
+#[derive(Debug, Clone)]
+pub struct PhysicalOp {
+    /// Name of the operator
+    pub name: Identifier,
+    /// Fields this operator contains
+    pub fields: Vec<Field>,
 }
 
 /// Patterns used in match expressions
 #[derive(Debug, Clone)]
 pub enum Pattern {
-    Bind(String, Box<Pattern>), // Binding patterns like x@p or x:p
-    Constructor(
-        String,       // Constructor name
-        Vec<Pattern>, // Subpatterns, can be named (x:p) or positional
-    ),
-    Literal(Literal), // Literal patterns like 42 or "hello"
-    Wildcard,         // Wildcard pattern _
-    Var(String),      // Variable binding pattern
+    /// Binding patterns like x@p, or x:a
+    Bind(String, Box<Pattern>),
+    /// Constructor patterns like Join(left, right)
+    Constructor(String, Vec<Pattern>),
+    /// Literal patterns like 42 or "hello"
+    Literal(Literal),
+    /// Wildcard pattern _
+    Wildcard,
+    /// Variable pattern like x
+    Variable(String),
 }
 
-/// Literal values
+/// Literal values in the language
 #[derive(Debug, Clone)]
 pub enum Literal {
     Int64(i64),
     String(String),
     Bool(bool),
     Float64(f64),
-    Array(Vec<Expr>), // Array literals [e1, e2, ...]
-    Tuple(Vec<Expr>), // Tuple literals (e1, e2, ...)
 }
 
-/// Expressions - the core of the language
+/// Core expression type representing all possible expressions
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Match(Box<Expr>, Vec<MatchArm>),          // Pattern matching
-    If(Box<Expr>, Box<Expr>, Box<Expr>),      // If-then-else
-    Val(String, Box<Expr>, Box<Expr>),        // Local binding (val x = e1; e2)
-    Constructor(String, Vec<Expr>),           // Constructor application (currently only operators)
-    Binary(Box<Expr>, BinOp, Box<Expr>),      // Binary operations
-    Unary(UnaryOp, Box<Expr>),                // Unary operations
-    Call(Box<Expr>, Vec<Expr>),               // Function application
-    Member(Box<Expr>, String),                // Field access (e.f)
-    MemberCall(Box<Expr>, String, Vec<Expr>), // Method call (e.f(args))
-    ArrayIndex(Box<Expr>, Box<Expr>),         // Array indexing (e[i])
-    Var(String),                              // Variable reference
-    Literal(Literal),                         // Literal values
-    Fail(String),                             // Failure with message
-    Closure(Vec<String>, Box<Expr>),          // Anonymous functions  v = (x, y) => x + y;
+    // Control flow
+    /// Pattern matching expression (match x { ... })
+    PatternMatch(Box<Spanned<Expr>>, Vec<Spanned<MatchArm>>),
+    /// Conditional expression (if x then y else z)
+    IfThenElse(Box<Spanned<Expr>>, Box<Spanned<Expr>>, Box<Spanned<Expr>>),
+
+    // Bindings and construction
+    /// Let binding (val x = expr1; expr2)
+    Val(String, Box<Spanned<Expr>>, Box<Spanned<Expr>>),
+    /// Constructor application
+    Constructor(String, Vec<Spanned<Expr>>),
+
+    // Operations
+    /// Binary operations (a + b)
+    Binary(Box<Spanned<Expr>>, BinOp, Box<Spanned<Expr>>),
+    /// Unary operations (!x)
+    Unary(UnaryOp, Box<Spanned<Expr>>),
+
+    // Function-related
+    /// Function call (f(x))
+    Call(Box<Spanned<Expr>>, Vec<Spanned<Expr>>),
+    /// Member access (obj.field)
+    MemberAccess(Box<Spanned<Expr>>, String),
+    /// Method call (obj.method(args))
+    MemberCall(Box<Spanned<Expr>>, String, Vec<Spanned<Expr>>),
+
+    // Basic expressions
+    /// Variable reference
+    Ref(String),
+    /// Literal value
+    Literal(Literal),
+    /// Failure with message
+    Fail(String),
+
+    // Complex types
+    /// Anonymous function ((x, y) => expr)
+    Closure(Vec<String>, Box<Spanned<Expr>>),
+    /// Array literal ([1, 2, 3])
+    Array(Vec<Spanned<Expr>>),
+    /// Tuple literal (1, "hello", true)
+    Tuple(Vec<Spanned<Expr>>),
+    /// Map literal ({"key" -> value})
+    Map(HashMap<Spanned<Expr>, Spanned<Expr>>),
 }
 
-/// A case in a match expression
+/// Function closure definition
+#[derive(Debug, Clone)]
+pub struct Closure {
+    /// Parameter names and optional type annotations
+    pub args: Vec<(Identifier, Option<Type>)>,
+    /// Body of the closure
+    pub body: Box<Spanned<Expr>>,
+}
+
+/// Pattern matching arm (case pattern => expr)
 #[derive(Debug, Clone)]
 pub struct MatchArm {
+    /// Pattern to match against
     pub pattern: Pattern,
+    /// Expression to evaluate if pattern matches
     pub expr: Expr,
 }
 
-/// Function definition
+/// Function or operator annotation (e.g., @rule(scalar))
 #[derive(Debug, Clone)]
-pub struct Function {
-    pub name: String,
-    pub params: Vec<(String, Type)>, // Parameter name and type pairs
-    pub return_type: Type,
-    pub body: Expr,
-    pub rule_type: Option<OperatorKind>, // Some if this is a rule, indicating what kind
+pub struct Annotation {
+    /// Name of the annotation
+    pub name: Identifier,
+    /// Arguments to the annotation
+    pub value: Vec<Identifier>,
 }
 
-/// A complete source file
+/// Top-level function definition
+#[derive(Debug, Clone)]
+pub struct Function {
+    /// Name of the function
+    pub name: String,
+    /// Parameter list with types
+    pub params: Vec<Field>,
+    /// Optional return type (can be inferred)
+    pub return_type: Option<Type>,
+    /// Function body
+    pub body: Spanned<Expr>,
+    /// Optional function annotation
+    pub annotation: Option<Annotation>,
+}
+
+/// Complete source file AST
 #[derive(Debug, Clone)]
 pub struct File {
-    pub properties: Properties,   // The single logical properties block
-    pub operators: Vec<Operator>, // All operator definitions
-    pub functions: Vec<Function>, // All function definitions
+    /// Logical properties definitions
+    pub logical_props: Properties,
+    /// Physical properties definitions
+    pub physical_props: Properties,
+    /// List of operator definitions
+    pub operators: Vec<Operator>,
+    /// List of function definitions
+    pub functions: Vec<Function>,
 }

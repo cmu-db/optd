@@ -1,5 +1,10 @@
-pub mod lir;
+//! Shared stuff across IRs
+
 pub mod hir;
+pub mod lir;
+
+/// All identifiers (variable names, function names, etc.) are strings
+pub type Identifier = String;
 
 /// Binary operators with fixed precedence
 #[derive(Debug, Clone)]
