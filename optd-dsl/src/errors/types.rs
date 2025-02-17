@@ -1,17 +1,15 @@
 use core::fmt;
-use std::{
-    fmt::{Display, Formatter},
-    ops::Range,
-};
+use std::fmt::{Display, Formatter};
 
 use ariadne::{Report, Source};
 
 use crate::lexer::errors::LexerError;
 
-pub trait Reporter {
-    fn report(&self) -> Report<(String, Range<usize>)>;
-    fn source(&self) -> (String, Source);
+use super::span::Span;
 
+pub trait Reporter {
+    fn report(&self) -> Report<Span>;
+    fn source(&self) -> (String, Source);
     fn eprint(&self) -> std::io::Result<()> {
         let (file, source) = self.source();
         self.report().eprint((file, source))
@@ -30,7 +28,7 @@ impl From<LexerError> for Error {
 }
 
 impl Reporter for Error {
-    fn report(&self) -> Report<(String, Range<usize>)> {
+    fn report(&self) -> Report<Span> {
         match self {
             Error::LexerError(e) => e.report(),
         }
