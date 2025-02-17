@@ -14,7 +14,7 @@ pub enum Token {
     TString,
     TBool,
     Map,
-    Val,    
+    Val,
     Match,
     Case,
     If,
@@ -64,6 +64,12 @@ pub enum Token {
     Colon,    // :
     At,       // @
 }
+
+pub const ALL_DELIMITERS: [(Token, Token); 3] = [
+    (Token::LParen, Token::RParen),
+    (Token::LBracket, Token::RBracket),
+    (Token::LBrace, Token::RBrace),
+];
 
 impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

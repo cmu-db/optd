@@ -27,29 +27,28 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
             }
             .map_with_span(Spanned::new);
 
-            let array_type = just(Token::LBracket)
-                .ignore_then(type_parser.clone())
-                .then_ignore(just(Token::RBracket))
+            let array_type = type_parser
+                .clone()
+                .delimited_by(just(Token::LBracket), just(Token::RBracket))
                 .map_with_span(|elem_type, span| Spanned::new(Type::Array(elem_type), span));
 
             let map_type = just(Token::Map)
-                .ignore_then(just(Token::LBracket))
-                .ignore_then(type_parser.clone())
-                .then_ignore(just(Token::Comma))
-                .then(type_parser.clone())
-                .then_ignore(just(Token::RBracket))
+                .ignore_then(
+                    type_parser
+                        .clone()
+                        .then_ignore(just(Token::Comma))
+                        .then(type_parser.clone())
+                        .delimited_by(just(Token::LBracket), just(Token::RBracket)),
+                )
                 .map_with_span(|(key_type, val_type), span| {
                     Spanned::new(Type::Map(key_type, val_type), span)
                 });
 
-            let tuple_type = just(Token::LParen)
-                .ignore_then(
-                    type_parser
-                        .clone()
-                        .separated_by(just(Token::Comma))
-                        .allow_trailing(),
-                )
-                .then_ignore(just(Token::RParen))
+            let tuple_type = type_parser
+                .clone()
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .delimited_by(just(Token::LParen), just(Token::RParen))
                 .map_with_span(|types, span| Spanned::new(Type::Tuple(types), span));
 
             let custom_type = select! {
@@ -95,13 +94,15 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
 mod tests {
     use super::*;
     use crate::lexer::lex::lex;
-    use chumsky::Stream;
+    use chumsky::{prelude::end, Stream};
 
     fn parse_type(input: &str) -> Result<Spanned<Type>, Vec<Simple<Token, Span>>> {
         let (tokens, _) = lex(input, "test.txt");
         let len = input.chars().count();
         let eoi = Span::new("test.txt".into(), len..len);
-        type_parser().parse(Stream::from_iter(eoi, tokens.unwrap().into_iter()))
+        type_parser()
+            .then_ignore(end())
+            .parse(Stream::from_iter(eoi, tokens.unwrap().into_iter()))
     }
 
     #[test]
@@ -229,8 +230,9 @@ mod tests {
             }
         }
 
-        // Test an even more complex nested type just for fun
-        let even_more_insane = "Map[TString, [Map[TInt64, [(Logical => Map[TString, [((TBool, [Scalar]) => Physical)]])]]]]]";
+        // Test an even more complex nested type
+        let even_more_insane =
+            "Map[String, Map[I64, [(Logical => Map[String, [((Bool, [Scalar]) => Physical)]])]]]";
         assert!(parse_type(even_more_insane).is_ok());
     }
 }
