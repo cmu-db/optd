@@ -7,8 +7,10 @@ pub type Identifier = String;
 // Core types
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    // Primitive types
+    // Error recovery
     Error,
+
+    // Primitive types
     Int64,
     String,
     Bool,
@@ -44,6 +46,9 @@ pub enum Literal {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
+    // Error recovery
+    Error,
+
     // Control flow
     PatternMatch(Spanned<Expr>, Vec<Spanned<MatchArm>>),
     IfThenElse(Spanned<Expr>, Spanned<Expr>, Spanned<Expr>),
@@ -76,6 +81,7 @@ pub enum Expr {
 // Pattern matching
 #[derive(Debug, Clone)]
 pub enum Pattern {
+    Error, // Error recovery
     Bind(Spanned<String>, Spanned<Pattern>),
     Constructor(Spanned<String>, Vec<Spanned<Pattern>>),
     Literal(Literal),
