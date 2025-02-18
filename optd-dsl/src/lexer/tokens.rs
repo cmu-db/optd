@@ -2,24 +2,32 @@ use ordered_float::OrderedFloat;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Token {
-    // Keywords
-    Scalar,
-    Logical,
-    Physical,
-    LogicalProps,
-    PhysicalProps,
+    // Type keywords
+    TLogicalProps,
+    TPhysicalProps,
+    TScalar,
+    TLogical,
+    TPhysical,
     TInt64,
     TFloat64,
     TString,
     TBool,
+    TUnit,
     Map,
-    Val,
+
+    // Other keywords
+    Scalar,
+    Logical,
+    Physical,
+    Data,
+    With,
+    As,
+    In,
+    Let,
     Match,
-    Case,
     If,
     Then,
     Else,
-    Derive,
 
     // Literals
     TermIdent(String),
@@ -28,6 +36,7 @@ pub enum Token {
     Float64(OrderedFloat<f64>),
     String(String),
     Bool(bool),
+    Unit, // ()
 
     // Operators
     Plus,      // +
@@ -35,7 +44,7 @@ pub enum Token {
     Mul,       // *
     Div,       // /
     Eq,        // =
-    Arrow,     // =>
+    Arrow,     // ->
     EqEq,      // ==
     NotEq,     // !=
     Greater,   // >
@@ -47,7 +56,6 @@ pub enum Token {
     Or,        // ||
     Range,     // ..
     Concat,    // ++
-    Unit,      // ()
 
     // Delimiters
     LParen,   // (
@@ -57,11 +65,10 @@ pub enum Token {
     LBracket, // [
     RBracket, // ]
     Vertical, // |
+    Backward, // \
     Comma,    // ,
     Dot,      // .
-    Semi,     // ;
     Colon,    // :
-    At,       // @
 }
 
 pub const ALL_DELIMITERS: [(Token, Token); 3] = [
@@ -73,32 +80,41 @@ pub const ALL_DELIMITERS: [(Token, Token); 3] = [
 impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            // Keywords
-            Token::Scalar => write!(f, "Scalar"),
-            Token::Logical => write!(f, "Logical"),
-            Token::Physical => write!(f, "Physical"),
-            Token::LogicalProps => write!(f, "LogicalProps"),
-            Token::PhysicalProps => write!(f, "PhysicalProps"),
-            Token::TInt64 => write!(f, "Int64"),
-            Token::TFloat64 => write!(f, "Float64"),
+            // Type keywords
+            Token::TLogicalProps => write!(f, "LogicalProps"),
+            Token::TPhysicalProps => write!(f, "PhysicalProps"),
+            Token::TScalar => write!(f, "Scalar"),
+            Token::TLogical => write!(f, "Logical"),
+            Token::TPhysical => write!(f, "Physical"),
+            Token::TInt64 => write!(f, "I64"),
+            Token::TFloat64 => write!(f, "F64"),
             Token::TString => write!(f, "String"),
             Token::TBool => write!(f, "Bool"),
+            Token::TUnit => write!(f, "Unit"),
             Token::Map => write!(f, "Map"),
-            Token::Val => write!(f, "val"),
+
+            // Other keywords
+            Token::Scalar => write!(f, "scalar"),
+            Token::Logical => write!(f, "logical"),
+            Token::Physical => write!(f, "physical"),
+            Token::Data => write!(f, "data"),
+            Token::With => write!(f, "with"),
+            Token::As => write!(f, "as"),
+            Token::In => write!(f, "in"),
+            Token::Let => write!(f, "let"),
             Token::Match => write!(f, "match"),
-            Token::Case => write!(f, "case"),
             Token::If => write!(f, "if"),
             Token::Then => write!(f, "then"),
             Token::Else => write!(f, "else"),
-            Token::Derive => write!(f, "derive"),
 
             // Literals
-            Token::TermIdent(s) => write!(f, "TermIdent({})", s),
-            Token::TypeIdent(s) => write!(f, "TypeIdent({})", s),
-            Token::Int64(n) => write!(f, "Int({})", n),
-            Token::Float64(x) => write!(f, "Float({})", x),
-            Token::String(s) => write!(f, "String(\"{}\")", s),
-            Token::Bool(b) => write!(f, "Bool({})", b),
+            Token::TermIdent(ident) => write!(f, "{}", ident),
+            Token::TypeIdent(ident) => write!(f, "{}", ident),
+            Token::Int64(num) => write!(f, "{}", num),
+            Token::Float64(num) => write!(f, "{}", num),
+            Token::String(s) => write!(f, "\"{}\"", s),
+            Token::Bool(b) => write!(f, "{}", b),
+            Token::Unit => write!(f, "()"),
 
             // Operators
             Token::Plus => write!(f, "+"),
@@ -106,7 +122,7 @@ impl std::fmt::Display for Token {
             Token::Mul => write!(f, "*"),
             Token::Div => write!(f, "/"),
             Token::Eq => write!(f, "="),
-            Token::Arrow => write!(f, "=>"),
+            Token::Arrow => write!(f, "->"),
             Token::EqEq => write!(f, "=="),
             Token::NotEq => write!(f, "!="),
             Token::Greater => write!(f, ">"),
@@ -118,7 +134,6 @@ impl std::fmt::Display for Token {
             Token::Or => write!(f, "||"),
             Token::Range => write!(f, ".."),
             Token::Concat => write!(f, "++"),
-            Token::Unit => write!(f, "()"),
 
             // Delimiters
             Token::LParen => write!(f, "("),
@@ -128,11 +143,10 @@ impl std::fmt::Display for Token {
             Token::LBracket => write!(f, "["),
             Token::RBracket => write!(f, "]"),
             Token::Vertical => write!(f, "|"),
+            Token::Backward => write!(f, "\\"),
             Token::Comma => write!(f, ","),
             Token::Dot => write!(f, "."),
-            Token::Semi => write!(f, ";"),
             Token::Colon => write!(f, ":"),
-            Token::At => write!(f, "@"),
         }
     }
 }

@@ -9,6 +9,7 @@ pub type Identifier = String;
 pub enum Type {
     // Error recovery
     Error,
+    Unknown,
 
     // Primitive types
     Int64,
@@ -16,7 +17,6 @@ pub enum Type {
     Bool,
     Float64,
     Unit,
-    Unknown,
 
     // Complex types
     Array(Spanned<Type>),
@@ -24,14 +24,8 @@ pub enum Type {
     Tuple(Vec<Spanned<Type>>),
     Closure(Spanned<Type>, Spanned<Type>),
 
-    // Operator types
-    Scalar,
-    Logical,
-    Physical,
-
-    // Property types
-    LogicalProps,
-    PhysicalProps,
+    // Custom (ADT) types
+    Custom(Identifier),
 }
 
 // Expression-related types
@@ -54,7 +48,7 @@ pub enum Expr {
     IfThenElse(Spanned<Expr>, Spanned<Expr>, Spanned<Expr>),
 
     // Bindings and constructors
-    Val(String, Spanned<Expr>, Spanned<Expr>),
+    Let(String, Spanned<Expr>, Spanned<Expr>),
     Constructor(String, Vec<Spanned<Expr>>),
 
     // Operations
@@ -131,52 +125,25 @@ pub struct Field {
     pub ty: Spanned<Type>,
 }
 
-// Operator definitions
-#[derive(Debug, Clone)]
-pub enum Operator {
-    Scalar(ScalarOp),
-    Logical(LogicalOp),
-    Physical(PhysicalOp),
-}
-
-#[derive(Debug, Clone)]
-pub struct ScalarOp {
-    pub name: Spanned<Identifier>,
-    pub fields: Vec<Spanned<Field>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LogicalOp {
-    pub name: Spanned<Identifier>,
-    pub fields: Vec<Spanned<Field>>,
-    pub derived_props: HashMap<Spanned<String>, Spanned<Expr>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PhysicalOp {
-    pub name: Spanned<Identifier>,
-    pub fields: Vec<Spanned<Field>>,
-}
-
-// Function and annotation system
 #[derive(Debug, Clone)]
 pub struct Function {
     pub name: Spanned<Identifier>,
     pub params: Vec<Spanned<Field>>,
     pub return_type: Spanned<Type>,
     pub body: Spanned<Expr>,
-    pub annotation: Option<Spanned<Annotation>>,
+    pub annotations: Vec<Spanned<Identifier>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Annotation {
-    pub name: Spanned<Identifier>,
-    pub value: Vec<Spanned<Identifier>>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Properties {
-    pub props: HashMap<Spanned<Identifier>, Spanned<Type>>,
+pub enum Adt {
+    Struct {
+        name: Spanned<Identifier>,
+        fields: Vec<Spanned<Field>>,
+    },
+    Enum {
+        name: Spanned<Identifier>,
+        variants: Vec<Spanned<Adt>>,
+    },
 }
 
 // Module-level AST
@@ -184,8 +151,6 @@ pub struct Properties {
 // Right now, we assume a program = module = file.
 #[derive(Debug, Clone)]
 pub struct Module {
-    pub logical_props: Vec<Spanned<Properties>>,
-    pub physical_props: Vec<Spanned<Properties>>,
-    pub operators: Vec<Spanned<Operator>>,
+    pub adts: Vec<Spanned<Adt>>,
     pub functions: Vec<Spanned<Function>>,
 }

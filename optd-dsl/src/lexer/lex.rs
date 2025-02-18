@@ -45,25 +45,29 @@ pub fn lex(source: &str, file_name: &str) -> (Option<Vec<(Token, Span)>>, Vec<Er
 /// tokens that can be successfully lexed even in the presence of errors.
 fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> {
     let keywords = HashMap::from([
-        ("Scalar", Token::Scalar),
-        ("Logical", Token::Logical),
-        ("Physical", Token::Physical),
-        ("LogicalProps", Token::LogicalProps),
-        ("PhysicalProps", Token::PhysicalProps),
+        ("LogicalProps", Token::TLogicalProps),
+        ("PhysicalProps", Token::TPhysicalProps),
+        ("Scalar", Token::TScalar),
+        ("Logical", Token::TLogical),
+        ("Physical", Token::TPhysical),
         ("I64", Token::TInt64),
         ("F64", Token::TFloat64),
         ("String", Token::TString),
         ("Bool", Token::TBool),
+        ("Unit", Token::TUnit),
         ("Map", Token::Map),
-        ("val", Token::Val),
+        ("scalar", Token::Scalar),
+        ("logical", Token::Logical),
+        ("physical", Token::Physical),
+        ("data", Token::Data),
+        ("with", Token::With),
+        ("as", Token::As),
+        ("in", Token::In),
+        ("let", Token::Let),
         ("match", Token::Match),
-        ("case", Token::Case),
         ("if", Token::If),
         ("then", Token::Then),
         ("else", Token::Else),
-        ("true", Token::Bool(true)),
-        ("false", Token::Bool(false)),
-        ("derive", Token::Derive),
     ]);
 
     let ident = ident().map(move |ident: String| {
@@ -112,7 +116,7 @@ fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> 
         just("!=").to(Token::NotEq),
         just(">=").to(Token::GreaterEq),
         just("<=").to(Token::LessEq),
-        just("=>").to(Token::Arrow),
+        just("->").to(Token::Arrow),
         just("&&").to(Token::And),
         just("||").to(Token::Or),
         just("++").to(Token::Concat),
@@ -136,11 +140,10 @@ fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> 
         just("[").to(Token::LBracket),
         just("]").to(Token::RBracket),
         just("|").to(Token::Vertical),
+        just("\\").to(Token::Backward),
         just(",").to(Token::Comma),
         just(".").to(Token::Dot),
-        just(";").to(Token::Semi),
         just(":").to(Token::Colon),
-        just("@").to(Token::At),
     ));
 
     let comments = just("//")
@@ -186,7 +189,7 @@ mod tests {
     #[test]
     fn test_valid_tokens() {
         let (maybe_tokens, errors) =
-            lex("if (x == 42) { print(\"hello\"); } // comment", "test.txt");
+            lex("if (x == 42) { print(\"hello\") } // comment", "test.txt");
         assert!(errors.is_empty());
         let tokens = maybe_tokens.unwrap();
         assert!(tokens.contains(&(Token::If, Span::new("test.txt".into(), 0..2))));
@@ -207,8 +210,7 @@ mod tests {
             Token::String("hello".to_string()),
             Span::new("test.txt".into(), 21..28)
         )));
-        assert!(tokens.contains(&(Token::Semi, Span::new("test.txt".into(), 29..30))));
-        assert!(tokens.contains(&(Token::RBrace, Span::new("test.txt".into(), 31..32))));
+        assert!(tokens.contains(&(Token::RBrace, Span::new("test.txt".into(), 30..31))));
     }
 
     #[test]

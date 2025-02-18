@@ -40,12 +40,7 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
                 Token::TString => Type::String,
                 Token::TBool => Type::Bool,
                 Token::TFloat64 => Type::Float64,
-                Token::Unit => Type::Unit,
-                Token::Scalar => Type::Scalar,
-                Token::Logical => Type::Logical,
-                Token::Physical => Type::Physical,
-                Token::LogicalProps => Type::LogicalProps,
-                Token::PhysicalProps => Type::PhysicalProps,
+                Token::TUnit => Type::Unit,
             }
             .map_with_span(Spanned::new);
 
@@ -76,6 +71,9 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
                 |(key_type, val_type)| Type::Map(key_type, val_type),
             ));
 
+            let data_type = select! { Token::TypeIdent(name) => Type::Custom(name) }
+                .map_with_span(Spanned::new);
+
             // Group atomic types with parentheses for precedence
             let atom_with_parens = just(Token::LParen)
                 .ignore_then(type_parser.clone())
@@ -83,6 +81,7 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
 
             choice((
                 atom_with_parens,
+                data_type,
                 map_type,
                 array_type,
                 tuple_type,
@@ -168,14 +167,14 @@ mod tests {
 
     #[test]
     fn test_closure_types() {
-        let result = parse_type("(I64) => String").unwrap();
+        let result = parse_type("(I64) -> String").unwrap();
         assert!(matches!(*result.value,
             Type::Closure(param, ret)
             if matches!(*param.value, Type::Int64)
             && matches!(*ret.value, Type::String)
         ));
 
-        let result = parse_type("I64 => String").unwrap();
+        let result = parse_type("I64 -> String").unwrap();
         assert!(matches!(*result.value,
             Type::Closure(param, ret)
             if matches!(*param.value, Type::Int64)
@@ -183,7 +182,7 @@ mod tests {
         ));
 
         // Is right-associative
-        let result = parse_type("I64 => String => String").unwrap();
+        let result = parse_type("I64 -> String -> String").unwrap();
         assert!(matches!(*result.value,
             Type::Closure(param, ret)
             if matches!(*param.value, Type::Int64)
@@ -198,7 +197,7 @@ mod tests {
     #[test]
     fn test_complex_type() {
         // Test mix of Map, Array, Tuple, and Closure
-        let insane_type = "Map[String, [((I64, [Map[String, Physical]]) => [(Logical, LogicalProps, (Bool => [Scalar]))])]]";
+        let insane_type = "Map[String, [((I64, [Map[String, Physical]]) -> [(CustomType, LogicalProps, (Bool -> [Scalar]))])]]";
         let result = parse_type(insane_type).unwrap();
 
         let map_type = result.value;
@@ -219,7 +218,7 @@ mod tests {
                             assert!(matches!(*map_array.value, Type::Map(_, _)));
                             if let Type::Map(map_key, map_val) = &*map_array.value {
                                 assert!(matches!(*map_key.value, Type::String));
-                                assert!(matches!(*map_val.value, Type::Physical));
+                                assert!(matches!(*map_val.value, Type::Custom(_)));
                             }
                         }
                     }
@@ -229,14 +228,14 @@ mod tests {
                         assert!(matches!(*ret_tuple.value, Type::Tuple(_)));
                         if let Type::Tuple(elements) = &*ret_tuple.value {
                             assert_eq!(elements.len(), 3);
-                            assert!(matches!(*elements[0].value, Type::Logical));
-                            assert!(matches!(*elements[1].value.clone(), Type::LogicalProps));
+                            assert!(matches!(*elements[0].value, Type::Custom(_)));
+                            assert!(matches!(*elements[1].value, Type::Custom(_)));
                             assert!(matches!(*elements[2].value, Type::Closure(_, _)));
                             if let Type::Closure(bool_param, scalar_arr) = &*elements[2].value {
                                 assert!(matches!(*bool_param.value, Type::Bool));
                                 assert!(matches!(*scalar_arr.value, Type::Array(_)));
                                 if let Type::Array(scalar) = &*scalar_arr.value {
-                                    assert!(matches!(*scalar.value, Type::Scalar));
+                                    assert!(matches!(*scalar.value, Type::Custom(_)));
                                 }
                             }
                         }
@@ -247,7 +246,7 @@ mod tests {
 
         // Test an even more complex nested type
         let even_more_insane =
-            "Map[String, Map[I64, [(Logical => Map[String, [((Bool, [Scalar]) => Physical)]])]]]";
+            "Map[String, Map[I64, [(Logical -> Map[String, [((Bool, [Scalar]) -> Physical)]])]]]";
         assert!(parse_type(even_more_insane).is_ok());
     }
 }
