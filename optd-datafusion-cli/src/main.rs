@@ -171,8 +171,7 @@ async fn main_inner() -> Result<()> {
     // enable dynamic file query
     let ctx = optd_datafusion::create_df_context(Some(session_config), Some(runtime_env), None)
         .await
-        .map_err(|e| DataFusionError::External(e.into()))?
-        .enable_url_table();
+        .map_err(|e| DataFusionError::External(e.into()))?;
     ctx.refresh_catalogs().await?;
     // install dynamic catalog provider that can register required object stores
     ctx.register_catalog_list(Arc::new(DynamicObjectStoreCatalog::new(
