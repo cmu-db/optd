@@ -1,15 +1,35 @@
 use chumsky::{
     error::Simple,
-    prelude::{choice, just, recursive},
+    prelude::{choice, just, nested_delimiters, recursive},
     select, Parser,
 };
 
 use crate::{
     errors::span::{Span, Spanned},
-    lexer::tokens::Token,
+    lexer::tokens::{Token, ALL_DELIMITERS},
 };
 
 use super::ast::Type;
+
+fn delimited_type_parser<T, F>(
+    parser: impl Parser<Token, T, Error = Simple<Token, Span>> + Clone,
+    open: Token,
+    close: Token,
+    f: F,
+) -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, Span>> + Clone
+where
+    F: Fn(T) -> Type + Clone + 'static,
+{
+    parser
+        .map(Some)
+        .delimited_by(just(open.clone()), just(close.clone()))
+        .recover_with(nested_delimiters(open, close, ALL_DELIMITERS, |_| None))
+        .map(move |x| match x {
+            Some(inner) => f(inner),
+            None => Type::Error,
+        })
+        .map_with_span(Spanned::new)
+}
 
 pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, Span>> + Clone {
     recursive(|type_parser| {
@@ -24,39 +44,37 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
                 Token::Scalar => Type::Scalar,
                 Token::Logical => Type::Logical,
                 Token::Physical => Type::Physical,
+                Token::LogicalProps => Type::LogicalProps,
+                Token::PhysicalProps => Type::PhysicalProps,
             }
             .map_with_span(Spanned::new);
 
-            let array_type = type_parser
-                .clone()
-                .delimited_by(just(Token::LBracket), just(Token::RBracket))
-                .map_with_span(|elem_type, span| Spanned::new(Type::Array(elem_type), span));
+            let array_type = delimited_type_parser(
+                type_parser.clone(),
+                Token::LBracket,
+                Token::RBracket,
+                Type::Array,
+            );
 
-            let map_type = just(Token::Map)
-                .ignore_then(
-                    type_parser
-                        .clone()
-                        .then_ignore(just(Token::Comma))
-                        .then(type_parser.clone())
-                        .delimited_by(just(Token::LBracket), just(Token::RBracket)),
-                )
-                .map_with_span(|(key_type, val_type), span| {
-                    Spanned::new(Type::Map(key_type, val_type), span)
-                });
+            let tuple_type = delimited_type_parser(
+                type_parser
+                    .clone()
+                    .separated_by(just(Token::Comma))
+                    .allow_trailing(),
+                Token::LParen,
+                Token::RParen,
+                Type::Tuple,
+            );
 
-            let tuple_type = type_parser
-                .clone()
-                .separated_by(just(Token::Comma))
-                .allow_trailing()
-                .delimited_by(just(Token::LParen), just(Token::RParen))
-                .map_with_span(|types, span| Spanned::new(Type::Tuple(types), span));
-
-            let custom_type = select! {
-                Token::TypeIdent(name) => name,
-            }
-            .map_with_span(|name, span: Span| {
-                Spanned::new(Type::Custom(Spanned::new(name, span.clone()), vec![]), span)
-            });
+            let map_type = just(Token::Map).ignore_then(delimited_type_parser(
+                type_parser
+                    .clone()
+                    .then_ignore(just(Token::Comma))
+                    .then(type_parser.clone()),
+                Token::LBracket,
+                Token::RBracket,
+                |(key_type, val_type)| Type::Map(key_type, val_type),
+            ));
 
             // Group atomic types with parentheses for precedence
             let atom_with_parens = just(Token::LParen)
@@ -68,7 +86,6 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
                 map_type,
                 array_type,
                 tuple_type,
-                custom_type,
                 base_type,
             ))
         };
@@ -181,7 +198,7 @@ mod tests {
     #[test]
     fn test_complex_type() {
         // Test mix of Map, Array, Tuple, and Closure
-        let insane_type = "Map[String, [((I64, [Map[String, Physical]]) => [(Logical, SomeType, (Bool => [Scalar]))])]]";
+        let insane_type = "Map[String, [((I64, [Map[String, Physical]]) => [(Logical, LogicalProps, (Bool => [Scalar]))])]]";
         let result = parse_type(insane_type).unwrap();
 
         let map_type = result.value;
@@ -213,9 +230,7 @@ mod tests {
                         if let Type::Tuple(elements) = &*ret_tuple.value {
                             assert_eq!(elements.len(), 3);
                             assert!(matches!(*elements[0].value, Type::Logical));
-                            assert!(
-                                matches!(*elements[1].value.clone(), Type::Custom(name, _) if *name.value == "SomeType")
-                            );
+                            assert!(matches!(*elements[1].value.clone(), Type::LogicalProps));
                             assert!(matches!(*elements[2].value, Type::Closure(_, _)));
                             if let Type::Closure(bool_param, scalar_arr) = &*elements[2].value {
                                 assert!(matches!(*bool_param.value, Type::Bool));

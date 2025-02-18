@@ -8,23 +8,28 @@ pub type Identifier = String;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     // Primitive types
+    Error,
     Int64,
     String,
     Bool,
     Float64,
     Unit,
+    Unknown,
 
     // Complex types
     Array(Spanned<Type>),
     Map(Spanned<Type>, Spanned<Type>),
     Tuple(Vec<Spanned<Type>>),
     Closure(Spanned<Type>, Spanned<Type>),
-    Custom(Spanned<String>, Vec<Spanned<Type>>),
 
     // Operator types
     Scalar,
     Logical,
     Physical,
+
+    // Property types
+    LogicalProps,
+    PhysicalProps,
 }
 
 // Expression-related types
@@ -43,10 +48,9 @@ pub enum Expr {
     PatternMatch(Spanned<Expr>, Vec<Spanned<MatchArm>>),
     IfThenElse(Spanned<Expr>, Spanned<Expr>, Spanned<Expr>),
 
-    // Bindings and types
+    // Bindings and constructors
     Val(String, Spanned<Expr>, Spanned<Expr>),
     Constructor(String, Vec<Spanned<Expr>>),
-    TypeDef(String, Vec<Spanned<TypeVariant>>),
 
     // Operations
     Binary(Spanned<Expr>, BinOp, Spanned<Expr>),
@@ -115,13 +119,6 @@ pub enum UnaryOp {
     Not,
 }
 
-// Type system
-#[derive(Debug, Clone)]
-pub struct TypeVariant {
-    pub name: Spanned<String>,
-    pub fields: Vec<Spanned<Field>>,
-}
-
 #[derive(Debug, Clone)]
 pub struct Field {
     pub name: Spanned<Identifier>,
@@ -160,7 +157,7 @@ pub struct PhysicalOp {
 pub struct Function {
     pub name: Spanned<Identifier>,
     pub params: Vec<Spanned<Field>>,
-    pub return_type: Option<Spanned<Type>>,
+    pub return_type: Spanned<Type>,
     pub body: Spanned<Expr>,
     pub annotation: Option<Spanned<Annotation>>,
 }
@@ -181,9 +178,8 @@ pub struct Properties {
 // Right now, we assume a program = module = file.
 #[derive(Debug, Clone)]
 pub struct Module {
-    pub logical_props: Spanned<Properties>,
-    pub physical_props: Spanned<Properties>,
-    pub types: Vec<Spanned<TypeVariant>>,
+    pub logical_props: Vec<Spanned<Properties>>,
+    pub physical_props: Vec<Spanned<Properties>>,
     pub operators: Vec<Spanned<Operator>>,
     pub functions: Vec<Spanned<Function>>,
 }

@@ -11,7 +11,7 @@ use crate::{
 
 use super::{
     ast::{Field, Function, Identifier, Module, Properties, Type},
-    types::type_parser,
+    r#type::type_parser,
 };
 
 pub fn ident_parser() -> impl Parser<Token, Spanned<Identifier>, Error = Simple<Token, Span>> + Clone

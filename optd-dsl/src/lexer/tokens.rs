@@ -8,7 +8,6 @@ pub enum Token {
     Physical,
     LogicalProps,
     PhysicalProps,
-    Type,
     TInt64,
     TFloat64,
     TString,
@@ -23,8 +22,8 @@ pub enum Token {
     Derive,
 
     // Literals
-    TypeIdent(String),
     TermIdent(String),
+    TypeIdent(String),
     Int64(i64),
     Float64(OrderedFloat<f64>),
     String(String),
@@ -80,11 +79,10 @@ impl std::fmt::Display for Token {
             Token::Physical => write!(f, "Physical"),
             Token::LogicalProps => write!(f, "LogicalProps"),
             Token::PhysicalProps => write!(f, "PhysicalProps"),
-            Token::Type => write!(f, "Type"),
-            Token::TInt64 => write!(f, "TInt64"),
-            Token::TFloat64 => write!(f, "TFloat64"),
-            Token::TString => write!(f, "TString"),
-            Token::TBool => write!(f, "TBool"),
+            Token::TInt64 => write!(f, "Int64"),
+            Token::TFloat64 => write!(f, "Float64"),
+            Token::TString => write!(f, "String"),
+            Token::TBool => write!(f, "Bool"),
             Token::Map => write!(f, "Map"),
             Token::Val => write!(f, "val"),
             Token::Match => write!(f, "match"),
@@ -95,8 +93,8 @@ impl std::fmt::Display for Token {
             Token::Derive => write!(f, "derive"),
 
             // Literals
-            Token::TypeIdent(s) => write!(f, "TypeIdent({})", s),
             Token::TermIdent(s) => write!(f, "TermIdent({})", s),
+            Token::TypeIdent(s) => write!(f, "TypeIdent({})", s),
             Token::Int64(n) => write!(f, "Int({})", n),
             Token::Float64(x) => write!(f, "Float({})", x),
             Token::String(s) => write!(f, "String(\"{}\")", s),

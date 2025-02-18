@@ -50,7 +50,6 @@ fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> 
         ("Physical", Token::Physical),
         ("LogicalProps", Token::LogicalProps),
         ("PhysicalProps", Token::PhysicalProps),
-        ("type", Token::Type),
         ("I64", Token::TInt64),
         ("F64", Token::TFloat64),
         ("String", Token::TString),
@@ -69,10 +68,10 @@ fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> 
 
     let ident = ident().map(move |ident: String| {
         keywords.get(&ident as &str).cloned().unwrap_or(
-            if ident.chars().next().unwrap().is_uppercase() {
-                Token::TypeIdent(ident)
-            } else {
+            if ident.chars().next().unwrap().is_lowercase() {
                 Token::TermIdent(ident)
+            } else {
+                Token::TypeIdent(ident)
             },
         )
     });
@@ -106,8 +105,7 @@ fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> 
         .repeated()
         .delimited_by(just('"'), just('"'))
         .collect::<String>()
-        .map(Token::String)
-        .labelled("string");
+        .map(Token::String);
 
     let op = choice((
         just("==").to(Token::EqEq),
