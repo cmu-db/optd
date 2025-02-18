@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn test_invalid_type_recovery() {
         // With an invalid type (string instead of String)
-        let input = "Physical HashJoin(build: Physical, probe: Map[string, String]});";
+        let input = "Physical HashJoin(build: Physical, probe: Map[string, String]);";
         let (result, errors) = parse_operator(input);
         println!("Result: {:?}", result);
         println!("Errors: {:?}", errors);
