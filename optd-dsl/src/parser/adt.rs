@@ -15,9 +15,9 @@ use super::utils::fields_list_parser;
 pub fn adt_parser() -> impl Parser<Token, Spanned<Adt>, Error = Simple<Token, Span>> + Clone {
     just(Token::Data).ignore_then(recursive(|inner_adt_parser| {
         let type_ident = select! { Token::TypeIdent(name) => name }.map_with_span(Spanned::new);
-
-        // Parse a struct: TypeName(fields...)
-        let struct_parser = type_ident
+        
+        // Parse a product: TypeName(fields...)
+        let product_parser = type_ident
             .then(fields_list_parser().or_not())
             .map(|(name, fields)| Adt::Struct {
                 name,
@@ -25,8 +25,8 @@ pub fn adt_parser() -> impl Parser<Token, Spanned<Adt>, Error = Simple<Token, Sp
             })
             .map_with_span(Spanned::new);
 
-        // Parse an enum with the 'with' keyword: TypeName with | V1 | V2 \ V3
-        let with_enum_parser = type_ident
+        // Parse a product with the 'with' keyword: TypeName with | V1 | V2 \ V3
+        let with_sum_parser = type_ident
             .then_ignore(just(Token::With))
             .then(
                 just(Token::Vertical)
@@ -43,7 +43,7 @@ pub fn adt_parser() -> impl Parser<Token, Spanned<Adt>, Error = Simple<Token, Sp
             })
             .map_with_span(Spanned::new);
 
-        choice((with_enum_parser, struct_parser))
+        choice((with_sum_parser, product_parser))
     }))
 }
 

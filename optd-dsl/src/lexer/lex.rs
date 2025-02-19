@@ -45,20 +45,12 @@ pub fn lex(source: &str, file_name: &str) -> (Option<Vec<(Token, Span)>>, Vec<Er
 /// tokens that can be successfully lexed even in the presence of errors.
 fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> {
     let keywords = HashMap::from([
-        ("LogicalProps", Token::TLogicalProps),
-        ("PhysicalProps", Token::TPhysicalProps),
-        ("Scalar", Token::TScalar),
-        ("Logical", Token::TLogical),
-        ("Physical", Token::TPhysical),
         ("I64", Token::TInt64),
         ("F64", Token::TFloat64),
         ("String", Token::TString),
         ("Bool", Token::TBool),
         ("Unit", Token::TUnit),
         ("Map", Token::Map),
-        ("scalar", Token::Scalar),
-        ("logical", Token::Logical),
-        ("physical", Token::Physical),
         ("data", Token::Data),
         ("with", Token::With),
         ("as", Token::As),
@@ -68,16 +60,21 @@ fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> 
         ("if", Token::If),
         ("then", Token::Then),
         ("else", Token::Else),
+        ("_", Token::UnderScore),
     ]);
 
     let ident = ident().map(move |ident: String| {
-        keywords.get(&ident as &str).cloned().unwrap_or(
-            if ident.chars().next().unwrap().is_lowercase() {
-                Token::TermIdent(ident)
-            } else {
-                Token::TypeIdent(ident)
-            },
-        )
+        if let Some(keyword) = keywords.get(ident.as_str()) {
+            keyword.clone()
+        } else {
+            match ident.chars().next() {
+                Some('_') if ident.len() == 1 => Token::UnderScore,
+                Some(c) if (!c.is_lowercase() && c.is_ascii_alphabetic()) => {
+                    Token::TypeIdent(ident)
+                }
+                _ => Token::TermIdent(ident),
+            }
+        }
     });
 
     let int64 = int::<char, Simple<char, Span>>(10).try_map(|s, span| {
@@ -223,5 +220,22 @@ mod tests {
         } else {
             panic!("Expected some tokens even after errors");
         }
+    }
+
+    #[test]
+    fn test_underscore_token() {
+        let (maybe_tokens, errors) = lex("_ _var Under_score", "test.txt");
+        assert!(errors.is_empty());
+        let tokens = maybe_tokens.unwrap();
+
+        assert!(tokens.contains(&(Token::UnderScore, Span::new("test.txt".into(), 0..1))));
+        assert!(tokens.contains(&(
+            Token::TermIdent("_var".to_string()),
+            Span::new("test.txt".into(), 2..6)
+        )),);
+        assert!(tokens.contains(&(
+            Token::TypeIdent("Under_score".to_string()),
+            Span::new("test.txt".into(), 7..18)
+        )));
     }
 }

@@ -71,7 +71,7 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
                 |(key_type, val_type)| Type::Map(key_type, val_type),
             ));
 
-            let data_type = select! { Token::TypeIdent(name) => Type::Custom(name) }
+            let data_type = select! { Token::TypeIdent(name) => Type::Adt(name) }
                 .map_with_span(Spanned::new);
 
             // Group atomic types with parentheses for precedence
@@ -218,7 +218,7 @@ mod tests {
                             assert!(matches!(*map_array.value, Type::Map(_, _)));
                             if let Type::Map(map_key, map_val) = &*map_array.value {
                                 assert!(matches!(*map_key.value, Type::String));
-                                assert!(matches!(*map_val.value, Type::Custom(_)));
+                                assert!(matches!(*map_val.value, Type::Adt(_)));
                             }
                         }
                     }
@@ -228,14 +228,14 @@ mod tests {
                         assert!(matches!(*ret_tuple.value, Type::Tuple(_)));
                         if let Type::Tuple(elements) = &*ret_tuple.value {
                             assert_eq!(elements.len(), 3);
-                            assert!(matches!(*elements[0].value, Type::Custom(_)));
-                            assert!(matches!(*elements[1].value, Type::Custom(_)));
+                            assert!(matches!(*elements[0].value, Type::Adt(_)));
+                            assert!(matches!(*elements[1].value, Type::Adt(_)));
                             assert!(matches!(*elements[2].value, Type::Closure(_, _)));
                             if let Type::Closure(bool_param, scalar_arr) = &*elements[2].value {
                                 assert!(matches!(*bool_param.value, Type::Bool));
                                 assert!(matches!(*scalar_arr.value, Type::Array(_)));
                                 if let Type::Array(scalar) = &*scalar_arr.value {
-                                    assert!(matches!(*scalar.value, Type::Custom(_)));
+                                    assert!(matches!(*scalar.value, Type::Adt(_)));
                                 }
                             }
                         }

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use ordered_float::OrderedFloat;
+
 use crate::errors::span::Spanned;
 
 pub type Identifier = String;
@@ -24,18 +26,26 @@ pub enum Type {
     Tuple(Vec<Spanned<Type>>),
     Closure(Spanned<Type>, Spanned<Type>),
 
-    // Custom (ADT) types
-    Custom(Identifier),
+    // ADT types (custom, operators & properties)
+    Adt(Identifier),
 }
 
-// Expression-related types
 #[derive(Debug, Clone)]
-pub enum Literal {
-    Int64(i64),
-    String(String),
-    Bool(bool),
-    Float64(f64),
-    Unit,
+pub struct Field {
+    pub name: Spanned<Identifier>,
+    pub ty: Spanned<Type>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Adt {
+    Struct {
+        name: Spanned<Identifier>,
+        fields: Vec<Spanned<Field>>,
+    },
+    Enum {
+        name: Spanned<Identifier>,
+        variants: Vec<Spanned<Adt>>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +82,16 @@ pub enum Expr {
     Map(HashMap<Spanned<Expr>, Spanned<Expr>>),
 }
 
+// Expression-related types
+#[derive(Debug, Clone)]
+pub enum Literal {
+    Int64(i64),
+    String(String),
+    Bool(bool),
+    Float64(OrderedFloat<f64>),
+    Unit,
+}
+
 // Pattern matching
 #[derive(Debug, Clone)]
 pub enum Pattern {
@@ -80,7 +100,6 @@ pub enum Pattern {
     Constructor(Spanned<String>, Vec<Spanned<Pattern>>),
     Literal(Literal),
     Wildcard,
-    Variable(String),
 }
 
 #[derive(Debug, Clone)]
@@ -120,30 +139,12 @@ pub enum UnaryOp {
 }
 
 #[derive(Debug, Clone)]
-pub struct Field {
-    pub name: Spanned<Identifier>,
-    pub ty: Spanned<Type>,
-}
-
-#[derive(Debug, Clone)]
 pub struct Function {
     pub name: Spanned<Identifier>,
     pub params: Vec<Spanned<Field>>,
     pub return_type: Spanned<Type>,
     pub body: Spanned<Expr>,
     pub annotations: Vec<Spanned<Identifier>>,
-}
-
-#[derive(Debug, Clone)]
-pub enum Adt {
-    Struct {
-        name: Spanned<Identifier>,
-        fields: Vec<Spanned<Field>>,
-    },
-    Enum {
-        name: Spanned<Identifier>,
-        variants: Vec<Spanned<Adt>>,
-    },
 }
 
 // Module-level AST

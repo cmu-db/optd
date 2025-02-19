@@ -3,11 +3,6 @@ use ordered_float::OrderedFloat;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Token {
     // Type keywords
-    TLogicalProps,
-    TPhysicalProps,
-    TScalar,
-    TLogical,
-    TPhysical,
     TInt64,
     TFloat64,
     TString,
@@ -16,9 +11,6 @@ pub enum Token {
     Map,
 
     // Other keywords
-    Scalar,
-    Logical,
-    Physical,
     Data,
     With,
     As,
@@ -58,17 +50,18 @@ pub enum Token {
     Concat,    // ++
 
     // Delimiters
-    LParen,   // (
-    RParen,   // )
-    LBrace,   // {
-    RBrace,   // }
-    LBracket, // [
-    RBracket, // ]
-    Vertical, // |
-    Backward, // \
-    Comma,    // ,
-    Dot,      // .
-    Colon,    // :
+    LParen,     // (
+    RParen,     // )
+    LBrace,     // {
+    RBrace,     // }
+    LBracket,   // [
+    RBracket,   // ]
+    Vertical,   // |
+    Backward,   // \
+    Comma,      // ,
+    Dot,        // .
+    Colon,      // :
+    UnderScore, // _
 }
 
 pub const ALL_DELIMITERS: [(Token, Token); 3] = [
@@ -81,11 +74,6 @@ impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             // Type keywords
-            Token::TLogicalProps => write!(f, "LogicalProps"),
-            Token::TPhysicalProps => write!(f, "PhysicalProps"),
-            Token::TScalar => write!(f, "Scalar"),
-            Token::TLogical => write!(f, "Logical"),
-            Token::TPhysical => write!(f, "Physical"),
             Token::TInt64 => write!(f, "I64"),
             Token::TFloat64 => write!(f, "F64"),
             Token::TString => write!(f, "String"),
@@ -94,9 +82,6 @@ impl std::fmt::Display for Token {
             Token::Map => write!(f, "Map"),
 
             // Other keywords
-            Token::Scalar => write!(f, "scalar"),
-            Token::Logical => write!(f, "logical"),
-            Token::Physical => write!(f, "physical"),
             Token::Data => write!(f, "data"),
             Token::With => write!(f, "with"),
             Token::As => write!(f, "as"),
@@ -147,6 +132,7 @@ impl std::fmt::Display for Token {
             Token::Comma => write!(f, ","),
             Token::Dot => write!(f, "."),
             Token::Colon => write!(f, ":"),
+            Token::UnderScore => write!(f, "_"),
         }
     }
 }
