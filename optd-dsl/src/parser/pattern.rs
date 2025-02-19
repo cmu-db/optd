@@ -179,7 +179,6 @@ mod tests {
 
     #[test]
     fn test_literal_pattern() {
-        // Int literal
         let (result, errors) = parse_pattern("42");
         assert!(
             result.is_some(),
