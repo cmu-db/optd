@@ -9,9 +9,12 @@ use sqlx::{
     SqliteConnection, SqlitePool,
 };
 
-use crate::{cascades::goal::Goal, operators::scalar::ScalarOperatorKind};
 use crate::{
-    cascades::properties::PhysicalProperty, operators::relational::logical::LogicalOperatorKind,
+    cascades::goal::{Goal, GoalId},
+    operators::scalar::ScalarOperatorKind,
+};
+use crate::{
+    cascades::properties::PhysicalProperties, operators::relational::logical::LogicalOperatorKind,
 };
 use crate::{
     cascades::{
@@ -31,7 +34,7 @@ pub struct SqliteMemo {
     /// SQL query string to get all logical expressions in a group.
     get_all_logical_exprs_in_group_query: String,
     /// SQL query string to get all physical expressions in a group.
-    get_all_physical_exprs_in_group_query: String,
+    get_all_physical_exprs_in_goal_query: String,
     /// SQL query string to get all scalar expressions in a group.
     get_all_scalar_exprs_in_group_query: String,
 }
@@ -57,7 +60,7 @@ impl SqliteMemo {
         let memo = Self {
             db: SqlitePool::connect_with(options).await?,
             get_all_logical_exprs_in_group_query: get_all_logical_exprs_in_group_query().into(),
-            get_all_physical_exprs_in_group_query: get_all_physical_exprs_in_group_query().into(),
+            get_all_physical_exprs_in_goal_query: get_all_physical_exprs_in_goal_query().into(),
             get_all_scalar_exprs_in_group_query: get_all_scalar_exprs_in_group_query().into(),
         };
         memo.migrate().await?;
@@ -81,20 +84,35 @@ impl SqliteMemo {
 }
 
 impl Memoize for SqliteMemo {
-    async fn create_or_get_relation_group_goal(
+    async fn create_or_get_goal(
         &self,
         group_id: RelationalGroupId,
-        required_physical_props: Vec<PhysicalProperty>,
-    ) -> Result<Goal> {
+        required_physical_props: PhysicalProperties,
+    ) -> Result<GoalId> {
         let mut txn = self.begin().await?;
-        let goal = sqlx::query_as(
-            "INSERT INTO relation_group_goals (group_id, required_physical_props, optimization_status) VALUES ($1, $2) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING (id, optimization_status)",
-        ).bind(group_id)
-        .bind(serde_json::to_value(&required_physical_props)?)
-        .bind(OptimizationStatus::Unoptimized)
-        .fetch_one(&mut * txn)
-        .await?;
-        Ok(goal)
+        let goal_id = txn.new_goal_id().await?;
+        let inserted_goal_id: GoalId = sqlx::query_scalar("INSERT INTO goals (id, representative_goal_id, group_id, required_physical_properties, optimization_status) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (group_id, required_physical_properties) DO UPDATE SET id = id RETURNING id")
+            .bind(goal_id)
+            .bind(goal_id)
+            .bind(group_id)
+            .bind(serde_json::to_string(&required_physical_props)?)
+            .bind(OptimizationStatus::Unoptimized)
+            .fetch_one(&mut *txn)
+            .await?;
+        if inserted_goal_id == goal_id {
+            txn.commit().await?;
+        }
+        Ok(inserted_goal_id)
+    }
+
+    async fn get_relation_goal(&self, goal_id: GoalId) -> Result<Arc<Goal>> {
+        let mut txn = self.begin().await?;
+        let goal = sqlx::query_as("SELECT id, group_id, required_physical_properties, optimization_status FROM goals WHERE id = $1")
+            .bind(goal_id)
+            .fetch_one(&mut *txn)
+            .await?;
+        txn.commit().await?;
+        Ok(Arc::new(goal))
     }
 
     async fn get_all_logical_exprs_in_group(
@@ -211,9 +229,16 @@ impl Memoize for SqliteMemo {
         Ok(to)
     }
 
-    async fn get_all_physical_exprs_in_group(
+    async fn merge_goal(&self, from: GoalId, to: GoalId) -> Result<GoalId> {
+        let mut txn = self.begin().await?;
+        self.set_representative_goal_id(&mut txn, from, to).await?;
+        txn.commit().await?;
+        Ok(to)
+    }
+
+    async fn get_all_physical_exprs_in_goal(
         &self,
-        group_id: RelationalGroupId,
+        goal_id: GoalId,
     ) -> Result<Vec<(PhysicalExpressionId, Arc<PhysicalExpression>)>> {
         #[derive(sqlx::FromRow)]
         struct PhysicalExprRecord {
@@ -222,10 +247,10 @@ impl Memoize for SqliteMemo {
         }
 
         let mut txn = self.begin().await?;
-        let representative_group_id = self.get_representative_group_id(&mut txn, group_id).await?;
+        let representative_goal_id = self.get_representative_goal_id(&mut txn, goal_id).await?;
         let logical_exprs: Vec<PhysicalExprRecord> =
-            sqlx::query_as(&self.get_all_physical_exprs_in_group_query)
-                .bind(representative_group_id)
+            sqlx::query_as(&self.get_all_physical_exprs_in_goal_query)
+                .bind(representative_goal_id)
                 .fetch_all(&mut *txn)
                 .await?;
 
@@ -236,12 +261,13 @@ impl Memoize for SqliteMemo {
             .collect())
     }
 
-    async fn add_physical_expr_to_group(
+    /// Adds a physical expression to a goal in the memo table.
+    async fn add_physical_expr_to_goal(
         &self,
         physical_expr: &PhysicalExpression,
-        group_id: RelationalGroupId,
-    ) -> Result<RelationalGroupId> {
-        self.add_physical_expr_to_group_inner(physical_expr, group_id)
+        goal_id: GoalId,
+    ) -> Result<GoalId> {
+        self.add_physical_expr_to_goal_inner(physical_expr, goal_id)
             .await
     }
 }
@@ -274,6 +300,37 @@ impl SqliteMemo {
             .bind(group_id)
             .execute(db)
             .await?;
+        Ok(())
+    }
+
+    /// Gets the representative group id of a relational group.
+    async fn get_representative_goal_id(
+        &self,
+        db: &mut SqliteConnection,
+        goal_id: GoalId,
+    ) -> anyhow::Result<GoalId> {
+        let representative_goal_id: GoalId =
+            sqlx::query_scalar("SELECT representative_goal_id FROM goals WHERE id = $1")
+                .bind(goal_id)
+                .fetch_one(db)
+                .await?;
+        Ok(representative_goal_id)
+    }
+
+    /// Sets the representative group id of a relational group.
+    async fn set_representative_goal_id(
+        &self,
+        db: &mut SqliteConnection,
+        goal_id: GoalId,
+        representative_goal_id: GoalId,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE goals SET representative_goal_id = $1 WHERE representative_goal_id = $2",
+        )
+        .bind(representative_goal_id)
+        .bind(goal_id)
+        .execute(db)
+        .await?;
         Ok(())
     }
 
@@ -614,28 +671,30 @@ impl SqliteMemo {
         Ok(())
     }
 
-    async fn add_physical_expr_to_group_inner(
+    async fn add_physical_expr_to_goal_inner(
         &self,
         physical_expr: &PhysicalExpression,
-        group_id: RelationalGroupId,
-    ) -> anyhow::Result<RelationalGroupId> {
+        representative_goal_id: GoalId,
+    ) -> anyhow::Result<GoalId> {
         let mut txn = self.begin().await?;
-        let group_id = self.get_representative_group_id(&mut txn, group_id).await?;
+        let goal_id = self
+            .get_representative_goal_id(&mut txn, representative_goal_id)
+            .await?;
         let physical_expr_id = txn.new_physical_expression_id().await?;
 
-        let inserted_group_id: RelationalGroupId = match physical_expr {
+        let inserted_goal_id: GoalId = match physical_expr {
             PhysicalExpression::TableScan(scan) => {
                 Self::insert_into_physical_expressions(
                     &mut txn,
                     physical_expr_id,
-                    group_id,
+                    goal_id,
                     PhysicalOperatorKind::TableScan,
                 )
                 .await?;
 
-                sqlx::query_scalar("INSERT INTO table_scans (physical_expression_id, group_id, table_name, predicate_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                sqlx::query_scalar("INSERT INTO table_scans (physical_expression_id, goal_id, table_name, predicate_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET goal_id = goal_id RETURNING goal_id")
                     .bind(physical_expr_id)
-                    .bind(group_id)
+                    .bind(goal_id)
                     .bind(serde_json::to_string(&scan.table_name)?)
                     .bind(scan.predicate)
                     .fetch_one(&mut *txn)
@@ -645,14 +704,14 @@ impl SqliteMemo {
                 Self::insert_into_physical_expressions(
                     &mut txn,
                     physical_expr_id,
-                    group_id,
+                    goal_id,
                     PhysicalOperatorKind::Filter,
                 )
                 .await?;
 
-                sqlx::query_scalar("INSERT INTO physical_filters (physical_expression_id, group_id, child_group_id, predicate_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                sqlx::query_scalar("INSERT INTO physical_filters (physical_expression_id, goal_id, child_goal_id, predicate_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET goal_id = goal_id RETURNING goal_id")
                     .bind(physical_expr_id)
-                    .bind(group_id)
+                    .bind(goal_id)
                     .bind(filter.child)
                     .bind(filter.predicate)
                     .fetch_one(&mut *txn)
@@ -662,14 +721,14 @@ impl SqliteMemo {
                 Self::insert_into_physical_expressions(
                     &mut txn,
                     physical_expr_id,
-                    group_id,
+                    goal_id,
                     PhysicalOperatorKind::NestedLoopJoin,
                 )
                 .await?;
 
-                sqlx::query_scalar("INSERT INTO nested_loop_joins (physical_expression_id, group_id, join_type, outer_group_id, inner_group_id, condition_group_id) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                sqlx::query_scalar("INSERT INTO nested_loop_joins (physical_expression_id, goal_id, join_type, outer_goal_id, inner_goal_id, condition_group_id) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO UPDATE SET goal_id = goal_id RETURNING goal_id")
                     .bind(physical_expr_id)
-                    .bind(group_id)
+                    .bind(goal_id)
                     .bind(serde_json::to_string(&join.join_type)?)
                     .bind(join.outer)
                     .bind(join.inner)
@@ -681,14 +740,14 @@ impl SqliteMemo {
                 Self::insert_into_physical_expressions(
                     &mut txn,
                     physical_expr_id,
-                    group_id,
+                    goal_id,
                     PhysicalOperatorKind::Project,
                 )
                 .await?;
 
-                sqlx::query_scalar("INSERT INTO physical_projects (physical_expression_id, group_id, child_group_id, fields_group_ids) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                sqlx::query_scalar("INSERT INTO physical_projects (physical_expression_id, goal_id, child_goal_id, fields_group_ids) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET goal_id = goal_id RETURNING goal_id")
                     .bind(physical_expr_id)
-                    .bind(group_id)
+                    .bind(goal_id)
                     .bind(project.child)
                     .bind(serde_json::to_value(&project.fields)?)
                     .fetch_one(&mut *txn)
@@ -698,21 +757,21 @@ impl SqliteMemo {
         };
         txn.commit().await?;
 
-        Ok(inserted_group_id)
+        Ok(inserted_goal_id)
     }
 
     /// Inserts an entry into the `physical_expressions` table.
     async fn insert_into_physical_expressions(
         txn: &mut SqliteConnection,
         physical_expr_id: PhysicalExpressionId,
-        group_id: RelationalGroupId,
+        goal_id: GoalId,
         operator_kind: PhysicalOperatorKind,
     ) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO physical_expressions (id, group_id, operator_kind) VALUES ($1, $2, $3)",
+            "INSERT INTO physical_expressions (id, goal_id, operator_kind) VALUES ($1, $2, $3)",
         )
         .bind(physical_expr_id)
-        .bind(group_id)
+        .bind(goal_id)
         .bind(operator_kind)
         .execute(&mut *txn)
         .await?;
@@ -735,15 +794,15 @@ const fn get_all_logical_exprs_in_group_query() -> &'static str {
     )
 }
 
-const fn get_all_physical_exprs_in_group_query() -> &'static str {
+const fn get_all_physical_exprs_in_goal_query() -> &'static str {
     concat!(
-        "SELECT physical_expression_id, json_object('TableScan', json_object('table_name', json(table_name), 'predicate', predicate_group_id)) as data FROM table_scans WHERE group_id = $1",
+        "SELECT physical_expression_id, json_object('TableScan', json_object('table_name', json(table_name), 'predicate', predicate_group_id)) as data FROM table_scans WHERE goal_id = $1",
         " UNION ALL ",
-        "SELECT physical_expression_id, json_object('Filter', json_object('child', child_group_id, 'predicate', predicate_group_id)) as data FROM physical_filters WHERE group_id = $1",
+        "SELECT physical_expression_id, json_object('Filter', json_object('child', child_goal_id, 'predicate', predicate_group_id)) as data FROM physical_filters WHERE goal_id = $1",
         " UNION ALL ",
-        "SELECT physical_expression_id, json_object('NestedLoopJoin', json_object('join_type', json(join_type), 'outer', outer_group_id, 'inner', inner_group_id, 'condition', condition_group_id)) as data FROM nested_loop_joins WHERE group_id = $1",
+        "SELECT physical_expression_id, json_object('NestedLoopJoin', json_object('join_type', json(join_type), 'outer', outer_goal_id, 'inner', inner_goal_id, 'condition', condition_group_id)) as data FROM nested_loop_joins WHERE goal_id = $1",
         " UNION ALL ",
-        "SELECT physical_expression_id, json_object('Project', json_object('child', child_group_id, 'fields', json(fields_group_ids))) as data FROM physical_projects WHERE group_id = $1"
+        "SELECT physical_expression_id, json_object('Project', json_object('child', child_goal_id, 'fields', json(fields_group_ids))) as data FROM physical_projects WHERE goal_id = $1"
     )
 }
 

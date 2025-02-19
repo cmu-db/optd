@@ -38,7 +38,6 @@ pub struct ScalarGroupId(pub i64);
 
 /// The exploration status of a group or a logical expression in the memo table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type)]
-#[repr(i32)]
 pub enum ExplorationStatus {
     /// The group or the logical expression has not been explored.
     Unexplored,

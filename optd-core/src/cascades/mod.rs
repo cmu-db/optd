@@ -8,8 +8,10 @@ use std::sync::Arc;
 
 use async_recursion::async_recursion;
 use expressions::{LogicalExpression, PhysicalExpression, ScalarExpression};
+use goal::GoalId;
 use groups::{RelationalGroupId, ScalarGroupId};
 use memo::Memoize;
+use properties::PhysicalProperties;
 
 use crate::{
     operators::{
@@ -123,69 +125,69 @@ async fn mock_optimize_scalar_group(
 pub async fn mock_optimize_relation_group(
     memo: &impl Memoize,
     group_id: RelationalGroupId,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<GoalId> {
     let logical_exprs = memo.get_all_logical_exprs_in_group(group_id).await?;
     let last_logical_expr = logical_exprs.last().unwrap().1.clone();
 
-    mock_optimize_relation_expr(memo, group_id, &last_logical_expr).await?;
-
-    Ok(())
+    let goal_id = memo
+        .create_or_get_goal(group_id, PhysicalProperties::default())
+        .await?;
+    println!("Optimizing goal: {:?}", goal_id);
+    mock_optimize_relation_expr(memo, goal_id, &last_logical_expr).await
 }
 
 #[async_recursion]
 async fn mock_optimize_relation_expr(
     memo: &impl Memoize,
-    group_id: RelationalGroupId,
+    goal_id: GoalId,
     logical_expr: &LogicalExpression,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<GoalId> {
     match logical_expr {
         LogicalExpression::Scan(scan) => {
+            mock_optimize_scalar_group(memo, scan.predicate).await?;
             let physical_expr = PhysicalExpression::TableScan(TableScan {
                 table_name: scan.table_name.clone(),
                 predicate: scan.predicate,
             });
-            memo.add_physical_expr_to_group(&physical_expr, group_id)
-                .await?;
-            mock_optimize_scalar_group(memo, scan.predicate).await?;
+            memo.add_physical_expr_to_goal(&physical_expr, goal_id)
+                .await
         }
         LogicalExpression::Filter(filter) => {
+            mock_optimize_scalar_group(memo, filter.predicate).await?;
+            let child = mock_optimize_relation_group(memo, filter.child).await?;
             let physical_expr = PhysicalExpression::Filter(PhysicalFilter {
-                child: filter.child,
+                child,
                 predicate: filter.predicate,
             });
-            memo.add_physical_expr_to_group(&physical_expr, group_id)
-                .await?;
-            mock_optimize_scalar_group(memo, filter.predicate).await?;
-            mock_optimize_relation_group(memo, filter.child).await?;
+            memo.add_physical_expr_to_goal(&physical_expr, goal_id)
+                .await
         }
         LogicalExpression::Join(join) => {
+            mock_optimize_scalar_group(memo, join.condition).await?;
+            let outer = mock_optimize_relation_group(memo, join.left).await?;
+            let inner = mock_optimize_relation_group(memo, join.right).await?;
             let physical_expr = PhysicalExpression::NestedLoopJoin(NestedLoopJoin {
                 join_type: join.join_type.clone(),
-                outer: join.left,
-                inner: join.right,
+                outer,
+                inner,
                 condition: join.condition,
             });
-            memo.add_physical_expr_to_group(&physical_expr, group_id)
-                .await?;
-            mock_optimize_scalar_group(memo, join.condition).await?;
-            mock_optimize_relation_group(memo, join.left).await?;
-            mock_optimize_relation_group(memo, join.right).await?;
+            memo.add_physical_expr_to_goal(&physical_expr, goal_id)
+                .await
         }
         LogicalExpression::Project(project) => {
-            let physical_expr = PhysicalExpression::Project(PhysicalProject {
-                child: project.child,
-                fields: project.fields.clone(),
-            });
-            memo.add_physical_expr_to_group(&physical_expr, group_id)
-                .await?;
-            mock_optimize_relation_group(memo, project.child).await?;
+            let child = mock_optimize_relation_group(memo, project.child).await?;
             for field in project.fields.iter() {
                 mock_optimize_scalar_group(memo, *field).await?;
             }
+            let physical_expr = PhysicalExpression::Project(PhysicalProject {
+                child,
+                fields: project.fields.clone(),
+            });
+            memo.add_physical_expr_to_goal(&physical_expr, goal_id)
+                .await
         }
     }
-
-    Ok(())
 }
 
 #[async_recursion]
@@ -244,9 +246,9 @@ pub async fn match_any_partial_logical_plan(
 #[async_recursion]
 async fn match_any_partial_physical_plan(
     memo: &impl Memoize,
-    group: RelationalGroupId,
+    goal_id: GoalId,
 ) -> anyhow::Result<Arc<PartialPhysicalPlan>> {
-    let physical_exprs = memo.get_all_physical_exprs_in_group(group).await?;
+    let physical_exprs = memo.get_all_physical_exprs_in_goal(goal_id).await?;
     let last_physical_expr = physical_exprs.last().unwrap().1.clone();
     match last_physical_expr.as_ref() {
         PhysicalExpression::TableScan(table_scan) => {
@@ -295,9 +297,9 @@ async fn match_any_partial_physical_plan(
 #[async_recursion]
 pub async fn match_any_physical_plan(
     memo: &impl Memoize,
-    group: RelationalGroupId,
+    goal_id: GoalId,
 ) -> anyhow::Result<Arc<PhysicalPlan>> {
-    let physical_exprs = memo.get_all_physical_exprs_in_group(group).await?;
+    let physical_exprs = memo.get_all_physical_exprs_in_goal(goal_id).await?;
     let last_physical_expr = physical_exprs.last().unwrap().1.clone();
     match last_physical_expr.as_ref() {
         PhysicalExpression::TableScan(table_scan) => Ok(Arc::new(PhysicalPlan {
@@ -504,8 +506,8 @@ mod tests {
         let result = match_any_partial_logical_plan(&memo, group_id).await?;
         assert_eq!(result, logical_plan);
 
-        mock_optimize_relation_group(&memo, group_id).await?;
-        let physical_plan = match_any_partial_physical_plan(&memo, group_id).await?;
+        let goal_id = mock_optimize_relation_group(&memo, group_id).await?;
+        let physical_plan = match_any_partial_physical_plan(&memo, goal_id).await?;
 
         assert_eq!(physical_plan, table_scan("t1", boolean(true)));
 
@@ -526,8 +528,8 @@ mod tests {
         let result = match_any_partial_logical_plan(&memo, group_id).await?;
         assert_eq!(result, logical_plan);
 
-        mock_optimize_relation_group(&memo, group_id).await?;
-        let physical_plan = match_any_partial_physical_plan(&memo, group_id).await?;
+        let goal_id = mock_optimize_relation_group(&memo, group_id).await?;
+        let physical_plan = match_any_partial_physical_plan(&memo, goal_id).await?;
 
         assert_eq!(
             physical_plan,
@@ -557,8 +559,8 @@ mod tests {
         let result = match_any_partial_logical_plan(&memo, group_id).await?;
         assert_eq!(result, logical_plan);
 
-        mock_optimize_relation_group(&memo, group_id).await?;
-        let physical_plan = match_any_partial_physical_plan(&memo, group_id).await?;
+        let goal_id = mock_optimize_relation_group(&memo, group_id).await?;
+        let physical_plan = match_any_partial_physical_plan(&memo, goal_id).await?;
 
         let table_scan_t1 = table_scan("t1", not(boolean(false)));
         assert_eq!(
@@ -591,8 +593,8 @@ mod tests {
         let result = match_any_partial_logical_plan(&memo, group_id).await?;
         assert_eq!(result, logical_plan);
 
-        mock_optimize_relation_group(&memo, group_id).await?;
-        let physical_plan = match_any_partial_physical_plan(&memo, group_id).await?;
+        let goal_id = mock_optimize_relation_group(&memo, group_id).await?;
+        let physical_plan = match_any_partial_physical_plan(&memo, goal_id).await?;
 
         assert_eq!(
             physical_plan,

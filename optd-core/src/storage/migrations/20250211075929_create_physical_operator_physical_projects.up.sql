@@ -3,16 +3,18 @@
 CREATE TABLE physical_projects (
     -- The physical expression id that this project is associated with.
     physical_expression_id INTEGER NOT NULL PRIMARY KEY,
-     -- The group id of the project.
-    group_id BIGINT NOT NULL,
-    -- The input relation.
-    child_group_id BIGINT NOT NULL,
+     -- The goal id of the project.
+    goal_id BIGINT NOT NULL,
+    -- The input goal.
+    child_goal_id BIGINT NOT NULL,
     -- The projection list. A vector of scalar group ids, 
     fields_group_ids JSON NOT NULL,
 
     FOREIGN KEY (physical_expression_id) REFERENCES physical_expressions (id)
     ON UPDATE CASCADE ON DELETE CASCADE,
-    FOREIGN KEY (child_group_id) REFERENCES relation_groups (id)
+    FOREIGN KEY (goal_id) REFERENCES goals (id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY (child_goal_id) REFERENCES goals (id)
     ON UPDATE CASCADE ON DELETE CASCADE
     -- (Not enforced)
     -- FOREIGN KEY json_each(fields_group_ids) REFERENCES scalar_groups (id)
@@ -20,13 +22,13 @@ CREATE TABLE physical_projects (
 );
 
 -- Unique index on project's data fields.
-CREATE UNIQUE INDEX physical_projects_data_fields ON physical_projects (child_group_id, fields_group_ids);
+CREATE UNIQUE INDEX physical_projects_data_fields ON physical_projects (child_goal_id, fields_group_ids);
 
-CREATE TRIGGER update_physical_projects_relation_group_ids
-AFTER UPDATE OF representative_group_id ON relation_groups
+CREATE TRIGGER update_physical_projects_goal_ids
+AFTER UPDATE OF representative_goal_id ON goals
 BEGIN
-    UPDATE OR REPLACE physical_projects SET group_id = NEW.representative_group_id WHERE group_id = OLD.representative_group_id;
-    UPDATE OR REPLACE physical_projects SET child_group_id = NEW.representative_group_id WHERE child_group_id = OLD.representative_group_id;
+    UPDATE OR REPLACE physical_projects SET goal_id = NEW.representative_goal_id WHERE goal_id = OLD.representative_goal_id;
+    UPDATE OR REPLACE physical_projects SET child_goal_id = NEW.representative_goal_id WHERE child_goal_id = OLD.representative_goal_id;
 END;
 
 -- Approach 1:
