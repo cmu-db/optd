@@ -49,6 +49,8 @@ fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> 
         ("F64", Token::TFloat64),
         ("String", Token::TString),
         ("Bool", Token::TBool),
+        ("true", Token::Bool(true)),
+        ("false", Token::Bool(false)),
         ("Unit", Token::TUnit),
         ("Map", Token::Map),
         ("data", Token::Data),
@@ -60,7 +62,7 @@ fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> 
         ("if", Token::If),
         ("then", Token::Then),
         ("else", Token::Else),
-        ("_", Token::UnderScore),
+        ("fail", Token::Fail),
     ]);
 
     let ident = ident().map(move |ident: String| {

@@ -16,7 +16,6 @@ pub fn adt_parser() -> impl Parser<Token, Spanned<Adt>, Error = Simple<Token, Sp
     just(Token::Data).ignore_then(recursive(|inner_adt_parser| {
         let type_ident = select! { Token::TypeIdent(name) => name }.map_with_span(Spanned::new);
         
-        // Parse a product: TypeName(fields...)
         let product_parser = type_ident
             .then(fields_list_parser().or_not())
             .map(|(name, fields)| Adt::Struct {
@@ -25,7 +24,6 @@ pub fn adt_parser() -> impl Parser<Token, Spanned<Adt>, Error = Simple<Token, Sp
             })
             .map_with_span(Spanned::new);
 
-        // Parse a product with the 'with' keyword: TypeName with | V1 | V2 \ V3
         let with_sum_parser = type_ident
             .then_ignore(just(Token::With))
             .then(

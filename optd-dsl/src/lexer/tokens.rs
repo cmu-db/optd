@@ -20,6 +20,7 @@ pub enum Token {
     If,
     Then,
     Else,
+    Fail,
 
     // Literals
     TermIdent(String),
@@ -91,6 +92,7 @@ impl std::fmt::Display for Token {
             Token::If => write!(f, "if"),
             Token::Then => write!(f, "then"),
             Token::Else => write!(f, "else"),
+            Token::Fail => write!(f, "fail"),
 
             // Literals
             Token::TermIdent(ident) => write!(f, "{}", ident),

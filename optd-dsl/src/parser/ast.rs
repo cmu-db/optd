@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use ordered_float::OrderedFloat;
 
 use crate::errors::span::Spanned;
@@ -22,9 +20,9 @@ pub enum Type {
 
     // Complex types
     Array(Spanned<Type>),
-    Map(Spanned<Type>, Spanned<Type>),
-    Tuple(Vec<Spanned<Type>>),
     Closure(Spanned<Type>, Spanned<Type>),
+    Tuple(Vec<Spanned<Type>>),
+    Map(Spanned<Type>, Spanned<Type>),
 
     // ADT types (custom, operators & properties)
     Adt(Identifier),
@@ -68,22 +66,21 @@ pub enum Expr {
     // Function-related
     Call(Spanned<Expr>, Vec<Spanned<Expr>>),
     MemberAccess(Spanned<Expr>, String),
-    MemberCall(Spanned<Expr>, String, Vec<Spanned<Expr>>),
-    Closure(Vec<Spanned<String>>, Spanned<Expr>),
+    Closure(Vec<Spanned<Field>>, Spanned<Expr>),
 
     // Basic expressions
     Ref(String),
     Literal(Literal),
-    Fail(String),
+    Fail(Spanned<Expr>),
 
     // Collections
     Array(Vec<Spanned<Expr>>),
     Tuple(Vec<Spanned<Expr>>),
-    Map(HashMap<Spanned<Expr>, Spanned<Expr>>),
+    Map(Vec<(Spanned<Expr>, Spanned<Expr>)>),
 }
 
 // Expression-related types
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Int64(i64),
     String(String),
@@ -96,8 +93,8 @@ pub enum Literal {
 #[derive(Debug, Clone)]
 pub enum Pattern {
     Error, // Error recovery
-    Bind(Spanned<String>, Spanned<Pattern>),
-    Constructor(Spanned<String>, Vec<Spanned<Pattern>>),
+    Bind(Spanned<Identifier>, Spanned<Pattern>),
+    Constructor(Spanned<Identifier>, Vec<Spanned<Pattern>>),
     Literal(Literal),
     Wildcard,
 }
@@ -109,7 +106,7 @@ pub struct MatchArm {
 }
 
 // Operators
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BinOp {
     // Arithmetic
     Add,
@@ -132,7 +129,7 @@ pub enum BinOp {
     Range,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOp {
     Neg,
     Not,
