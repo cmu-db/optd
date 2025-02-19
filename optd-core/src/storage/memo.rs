@@ -74,7 +74,7 @@ impl SqliteMemo {
     }
 
     /// Begin a new transaction.
-    pub(super) async fn begin(&self) -> anyhow::Result<Transaction<'_>> {
+    pub(crate) async fn begin(&self) -> anyhow::Result<Transaction<'_>> {
         let txn = self.db.begin().await?;
         Transaction::new(txn).await
     }
