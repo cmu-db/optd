@@ -90,6 +90,12 @@ pub trait Memoize: Send + Sync + 'static {
         goal_id: GoalId,
     ) -> Result<Vec<(PhysicalExpressionId, Arc<PhysicalExpression>)>>;
 
+    /// Gets the winner physical expression.
+    async fn get_winner_physical_expr_in_goal(
+        &self,
+        goal_id: GoalId,
+    ) -> Result<Option<(PhysicalExpressionId, Arc<PhysicalExpression>)>>;
+
     /// Adds a physical expression to a goal in the memo table.
     // TODO: cost and statistics probably is also added here.
     async fn add_physical_expr_to_goal(

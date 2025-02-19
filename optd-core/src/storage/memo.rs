@@ -91,7 +91,7 @@ impl Memoize for SqliteMemo {
     ) -> Result<GoalId> {
         let mut txn = self.begin().await?;
         let goal_id = txn.new_goal_id().await?;
-        let inserted_goal_id: GoalId = sqlx::query_scalar("INSERT INTO goals (id, representative_goal_id, group_id, required_physical_properties, optimization_status) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (group_id, required_physical_properties) DO UPDATE SET id = id RETURNING id")
+        let inserted_goal_id: GoalId = sqlx::query_scalar("INSERT INTO goals (id, representative_goal_id, group_id, required_physical_properties, optimization_status) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (group_id, required_physical_properties) DO UPDATE SET group_id = group_id RETURNING id")
             .bind(goal_id)
             .bind(goal_id)
             .bind(group_id)
@@ -99,6 +99,7 @@ impl Memoize for SqliteMemo {
             .bind(OptimizationStatus::Unoptimized)
             .fetch_one(&mut *txn)
             .await?;
+
         if inserted_goal_id == goal_id {
             txn.commit().await?;
         }
@@ -270,6 +271,14 @@ impl Memoize for SqliteMemo {
         self.add_physical_expr_to_goal_inner(physical_expr, goal_id)
             .await
     }
+
+    /// Gets the winner physical expression.
+    async fn get_winner_physical_expr_in_goal(
+        &self,
+        _goal_id: GoalId,
+    ) -> Result<Option<(PhysicalExpressionId, Arc<PhysicalExpression>)>> {
+        todo!()
+    }
 }
 
 // Helper functions for implementing the `Memoize` trait.
@@ -309,6 +318,7 @@ impl SqliteMemo {
         db: &mut SqliteConnection,
         goal_id: GoalId,
     ) -> anyhow::Result<GoalId> {
+        println!("get_representative_goal_id: {:?}", goal_id);
         let representative_goal_id: GoalId =
             sqlx::query_scalar("SELECT representative_goal_id FROM goals WHERE id = $1")
                 .bind(goal_id)
