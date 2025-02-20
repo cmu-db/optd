@@ -969,7 +969,7 @@ mod tests {
             if let Expr::Map(entries) = &*expr.value {
                 assert_eq!(entries.len(), 2, "Expected two map entries");
 
-                // First entry: "key1" -> (1, true, [1..5])
+                // First entry: "key1": (1, true, [1..5])
                 if let Expr::Literal(Literal::String(key)) = &*entries[0].0.value {
                     assert_eq!(key, "key1");
                 } else {
@@ -997,7 +997,7 @@ mod tests {
                     panic!("Expected tuple as first value");
                 }
 
-                // Second entry: someVar -> map[x -> y]
+                // Second entry: someVar: {x: y}
                 assert_expr_eq(&entries[1].0.value, &Expr::Ref("someVar".to_string()));
 
                 if let Expr::Map(nested_entries) = &*entries[1].1.value {
