@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::{
-    ast::{Field, Type},
+    ast::{Field, PostfixOp, Type},
     pattern::pattern_parser,
     r#type::type_parser,
     utils::delimited_parser,
@@ -128,15 +128,18 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
             .boxed();
 
         let closure = {
+            let param_parser = select! { Token::TermIdent(name) => name }
+                .map_with_span(Spanned::new)
+                .then(just(Token::Colon).ignore_then(type_parser()).or_not())
+                .map(|(name, type_opt)| {
+                    let ty = type_opt.unwrap_or(Spanned::new(Type::Unknown, name.span.clone()));
+                    Field { name, ty }
+                })
+                .map_with_span(Spanned::new);
+
             let param_list = delimited_parser(
-                select! { Token::TermIdent(name) => name }
-                    .map_with_span(Spanned::new)
-                    .then(just(Token::Colon).ignore_then(type_parser()).or_not())
-                    .map(|(name, type_opt)| {
-                        let ty = type_opt.unwrap_or(Spanned::new(Type::Unknown, name.span.clone()));
-                        Field { name, ty }
-                    })
-                    .map_with_span(Spanned::new)
+                param_parser
+                    .clone()
                     .separated_by(just(Token::Comma))
                     .allow_trailing(),
                 Token::LParen,
@@ -145,8 +148,9 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
             );
 
             let empty_params = just(Token::Unit).map(|_| vec![]);
+            let single_param = param_parser.map(|field| vec![field]);
 
-            choice((param_list, empty_params))
+            choice((param_list, empty_params, single_param))
                 .then_ignore(just(Token::Arrow))
                 .then(expr.clone())
                 .map(|(params, body)| Expr::Closure(params, body))
@@ -179,28 +183,33 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
             constructor,
         ));
 
-        let call_expr = atom
+        let postfix = atom
             .clone()
-            .then(delimited_parser(
-                expr.clone()
-                    .separated_by(just(Token::Comma))
-                    .allow_trailing(),
-                Token::LParen,
-                Token::RParen,
-                |args| args.unwrap_or_default(),
-            ))
-            .map_with_span(|(func, args), span| Spanned::new(Expr::Call(func, args), span))
-            .boxed();
-
-        let member_access_expr = atom
-            .clone()
-            .then(just(Token::Dot).ignore_then(select! { Token::TermIdent(name) => name }))
-            .map_with_span(|(expr, member), span| {
-                Spanned::new(Expr::MemberAccess(expr, member), span)
+            .then(
+                choice((
+                    delimited_parser(
+                        expr.clone()
+                            .separated_by(just(Token::Comma))
+                            .allow_trailing(),
+                        Token::LParen,
+                        Token::RParen,
+                        |args| args.unwrap_or_default(),
+                    )
+                    .map(PostfixOp::Call),
+                    just(Token::Unit).map(|_| PostfixOp::Call(vec![])),
+                    just(Token::Dot)
+                        .ignore_then(select! { Token::TermIdent(name) => name })
+                        .map(PostfixOp::Member),
+                ))
+                .map_with_span(|op, span| (op, span))
+                .repeated(),
+            )
+            .map(|(initial, ops)| {
+                ops.into_iter().fold(initial, |acc, (op, span)| {
+                    Spanned::new(Expr::Postfix(acc, op), span)
+                })
             })
             .boxed();
-
-        let postfix = choice((call_expr, member_access_expr, atom));
 
         let unary = choice((
             just(Token::Minus).map(|_| UnaryOp::Neg),
@@ -363,17 +372,6 @@ mod tests {
                 assert_expr_eq(&a_left.value, &e_left.value);
                 assert_expr_eq(&a_right.value, &e_right.value);
             }
-            (Expr::Call(a_func, a_args), Expr::Call(e_func, e_args)) => {
-                assert_expr_eq(&a_func.value, &e_func.value);
-                assert_eq!(a_args.len(), e_args.len());
-                for (a, e) in a_args.iter().zip(e_args.iter()) {
-                    assert_expr_eq(&a.value, &e.value);
-                }
-            }
-            (Expr::MemberAccess(a_expr, a_member), Expr::MemberAccess(e_expr, e_member)) => {
-                assert_expr_eq(&a_expr.value, &e_expr.value);
-                assert_eq!(a_member, e_member);
-            }
             (Expr::Unary(a_op, a_expr), Expr::Unary(e_op, e_expr)) => {
                 assert_eq!(a_op, e_op);
                 assert_expr_eq(&a_expr.value, &e_expr.value);
@@ -388,6 +386,25 @@ mod tests {
                 assert_eq!(a_items.len(), e_items.len());
                 for (a, e) in a_items.iter().zip(e_items.iter()) {
                     assert_expr_eq(&a.value, &e.value);
+                }
+            }
+            (Expr::Postfix(a_expr, a_op), Expr::Postfix(e_expr, e_op)) => {
+                assert_expr_eq(&a_expr.value, &e_expr.value);
+                match (a_op, e_op) {
+                    (PostfixOp::Call(a_args), PostfixOp::Call(e_args)) => {
+                        assert_eq!(a_args.len(), e_args.len());
+                        for (a, e) in a_args.iter().zip(e_args.iter()) {
+                            assert_expr_eq(&a.value, &e.value);
+                        }
+                    }
+                    (PostfixOp::Member(a_member), PostfixOp::Member(e_member)) => {
+                        assert_eq!(a_member, e_member);
+                    }
+                    _ => assert!(
+                        false,
+                        "Postfix operation mismatch: expected {:?}, got {:?}",
+                        e_op, a_op
+                    ),
                 }
             }
             _ => assert!(
@@ -709,7 +726,7 @@ mod tests {
                     &Expr::Literal(Literal::String("key".to_string())),
                 );
 
-                if let Expr::MemberAccess(expr, member) = &*entries[1].1.value {
+                if let Expr::Postfix(expr, PostfixOp::Member(member)) = &*entries[1].1.value {
                     assert_expr_eq(&expr.value, &Expr::Ref("z".to_string()));
                     assert_eq!(member, "field");
                 } else {
@@ -825,7 +842,7 @@ mod tests {
                 // Test condition with member access and binary operation
                 if let Expr::Binary(left, BinOp::Gt, right) = &*condition.value {
                     // Test member access on map expression
-                    if let Expr::MemberAccess(expr, member) = &*left.value {
+                    if let Expr::Postfix(expr, PostfixOp::Member(member)) = &*left.value {
                         assert_eq!(member, "size");
 
                         // Check that expression is a Map
@@ -931,7 +948,7 @@ mod tests {
                     }
 
                     // Function call
-                    if let Expr::Call(func, args) = &*body2.value {
+                    if let Expr::Postfix(func, PostfixOp::Call(args)) = &*body2.value {
                         assert_expr_eq(&func.value, &Expr::Ref("func".to_string()));
                         assert_eq!(args.len(), 3);
 
@@ -1220,7 +1237,7 @@ mod tests {
                 }
 
                 // Check that body is a function call
-                if let Expr::Call(func, args) = &*body.value {
+                if let Expr::Postfix(func, PostfixOp::Call(args)) = &*body.value {
                     assert_expr_eq(&func.value, &Expr::Ref("f".to_string()));
                     assert_eq!(args.len(), 1);
                     assert_expr_eq(&args[0].value, &Expr::Literal(Literal::Int64(10)));
@@ -1229,6 +1246,107 @@ mod tests {
                 }
             } else {
                 panic!("Expected let expression");
+            }
+        }
+    }
+
+    #[test]
+    fn test_chained_postfix_operations() {
+        // Test method call
+        let (result, errors) = parse_expr("obj.method(a)(a)(a)");
+
+        assert!(
+            result.is_some(),
+            "Expected successful parse for method call"
+        );
+        assert!(errors.is_empty(), "Expected no errors for method call");
+
+        if let Some(expr) = result {
+            if let Expr::Postfix(inner1, PostfixOp::Call(args1)) = &*expr.value {
+                assert_eq!(args1.len(), 1);
+                if let Expr::Postfix(inner2, PostfixOp::Call(args2)) = &*inner1.value {
+                    assert_eq!(args2.len(), 1);
+                    if let Expr::Postfix(inner3, PostfixOp::Call(args3)) = &*inner2.value {
+                        assert_eq!(args3.len(), 1);
+                        if let Expr::Postfix(obj, PostfixOp::Member(method)) = &*inner3.value {
+                            assert_expr_eq(&obj.value, &Expr::Ref("obj".to_string()));
+                            assert_eq!(method, "method");
+                        } else {
+                            panic!("Expected member access at base");
+                        }
+                    } else {
+                        panic!("Expected third call");
+                    }
+                } else {
+                    panic!("Expected second call");
+                }
+            } else {
+                panic!("Expected first call");
+            }
+        }
+
+        // Test function call followed by field access
+        let (result, errors) = parse_expr("func().field");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for func().field"
+        );
+        assert!(errors.is_empty(), "Expected no errors for func().field");
+
+        if let Some(expr) = result {
+            if let Expr::Postfix(inner, PostfixOp::Member(member)) = &*expr.value {
+                assert_eq!(member, "field");
+                if let Expr::Postfix(func, PostfixOp::Call(args)) = &*inner.value {
+                    assert_eq!(args.len(), 0);
+                    assert_expr_eq(&func.value, &Expr::Ref("func".to_string()));
+                } else {
+                    panic!("Expected call in function call");
+                }
+            } else {
+                panic!("Expected member access");
+            }
+        }
+
+        // Test complex chain of operations
+        let (result, errors) = parse_expr("obj.method().field.other_method(arg)");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for complex chain"
+        );
+        assert!(errors.is_empty(), "Expected no errors for complex chain");
+
+        if let Some(expr) = result {
+            if let Expr::Postfix(inner1, PostfixOp::Call(args)) = &*expr.value {
+                assert_eq!(args.len(), 1);
+                assert_expr_eq(&args[0].value, &Expr::Ref("arg".to_string()));
+
+                if let Expr::Postfix(inner2, PostfixOp::Member(member)) = &*inner1.value {
+                    assert_eq!(member, "other_method");
+
+                    if let Expr::Postfix(inner3, PostfixOp::Member(field)) = &*inner2.value {
+                        assert_eq!(field, "field");
+
+                        if let Expr::Postfix(inner4, PostfixOp::Call(method_args)) = &*inner3.value
+                        {
+                            assert_eq!(method_args.len(), 0);
+
+                            if let Expr::Postfix(obj, PostfixOp::Member(method)) = &*inner4.value {
+                                assert_expr_eq(&obj.value, &Expr::Ref("obj".to_string()));
+                                assert_eq!(method, "method");
+                            } else {
+                                panic!("Expected member access for initial method");
+                            }
+                        } else {
+                            panic!("Expected call for first method");
+                        }
+                    } else {
+                        panic!("Expected member access for field");
+                    }
+                } else {
+                    panic!("Expected member access for final method");
+                }
+            } else {
+                panic!("Expected call at top level");
             }
         }
     }

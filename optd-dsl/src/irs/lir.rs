@@ -2,7 +2,7 @@
 // the Cascades optimizer.
 // TODO: This entire file is a dumpster of ideas. Heavy WIP.
 
-use std::collections::HashMap;
+/*use std::collections::HashMap;
 
 use optd_core::{cascades::types::PartialLogicalPlan, values::OptdValue};
 
@@ -122,7 +122,7 @@ pub struct Program {
     pub implementations: Vec<Identifier>,
     pub enforcers: Vec<Identifier>, // Ordered from first applied to last
     pub functions: HashMap<Identifier, Function>,
-}
+}*/
 
 // TODO: support structs in MVP for phy prop and that's gonna be the input type of into phys, enforce etc.
 // TODO: val foo: Type = ...

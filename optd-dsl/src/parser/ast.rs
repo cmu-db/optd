@@ -4,7 +4,6 @@ use crate::errors::span::Spanned;
 
 pub type Identifier = String;
 
-// Core types
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     // Error recovery
@@ -64,8 +63,7 @@ pub enum Expr {
     Unary(UnaryOp, Spanned<Expr>),
 
     // Function-related
-    Call(Spanned<Expr>, Vec<Spanned<Expr>>),
-    MemberAccess(Spanned<Expr>, String),
+    Postfix(Spanned<Expr>, PostfixOp),
     Closure(Vec<Spanned<Field>>, Spanned<Expr>),
 
     // Basic expressions
@@ -79,7 +77,6 @@ pub enum Expr {
     Map(Vec<(Spanned<Expr>, Spanned<Expr>)>),
 }
 
-// Expression-related types
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Int64(i64),
@@ -89,7 +86,6 @@ pub enum Literal {
     Unit,
 }
 
-// Pattern matching
 #[derive(Debug, Clone)]
 pub enum Pattern {
     Error, // Error recovery
@@ -105,7 +101,6 @@ pub struct MatchArm {
     pub expr: Spanned<Expr>,
 }
 
-// Operators
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinOp {
     // Arithmetic
@@ -136,6 +131,12 @@ pub enum UnaryOp {
 }
 
 #[derive(Debug, Clone)]
+pub enum PostfixOp {
+    Call(Vec<Spanned<Expr>>),
+    Member(Identifier),
+}
+
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: Spanned<Identifier>,
     pub receiver: Option<Spanned<Field>>,
@@ -145,11 +146,16 @@ pub struct Function {
     pub annotations: Vec<Spanned<Identifier>>,
 }
 
+#[derive(Debug, Clone)]
+pub enum Item {
+    Adt(Spanned<Adt>),
+    Function(Spanned<Function>),
+}
+
 // Module-level AST
-// TODO(alexis): Integrate real module support.
+// TODO: Integrate real module support.
 // Right now, we assume a program = module = file.
 #[derive(Debug, Clone)]
 pub struct Module {
-    pub adts: Vec<Spanned<Adt>>,
-    pub functions: Vec<Spanned<Function>>,
+    pub items: Vec<Item>,
 }
