@@ -258,14 +258,41 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
 
         let or = binary_op(and.clone(), choice((just(Token::Or).map(|_| BinOp::Or),))).boxed();
 
-        let let_expr = just(Token::Let)
-            .ignore_then(select! { Token::TermIdent(name) => name })
+        let let_binding = select! { Token::TermIdent(name) => name }
+            .map_with_span(Spanned::new)
+            .then(just(Token::Colon).ignore_then(type_parser()).or_not())
             .then_ignore(just(Token::Eq))
             .then(expr.clone())
+            .map(|((name, type_opt), value)| {
+                let field = {
+                    let ty = type_opt.unwrap_or(Spanned::new(Type::Unknown, name.span.clone()));
+                    Spanned::new(
+                        Field {
+                            name: name.clone(),
+                            ty,
+                        },
+                        name.span.clone(),
+                    )
+                };
+                (field, value)
+            });
+
+        let let_expr = just(Token::Let)
+            .ignore_then(
+                let_binding
+                    .separated_by(just(Token::Comma))
+                    .allow_trailing(),
+            )
             .then_ignore(just(Token::In))
             .then(expr.clone())
-            .map(|((name, value), body)| Expr::Let(name, value, body))
-            .map_with_span(Spanned::new)
+            .map_with_span(|(bindings, body), span| {
+                bindings
+                    .into_iter()
+                    .rev()
+                    .fold(body, |acc_body, (field, value)| {
+                        Spanned::new(Expr::Let(field, value, acc_body), span.clone())
+                    })
+            })
             .boxed();
 
         let match_arm = pattern_parser()
@@ -847,7 +874,7 @@ mod tests {
 
                 // Test then branch with let expression
                 if let Expr::Let(name, value, body) = &*then_branch.value {
-                    assert_eq!(name, "x");
+                    assert_eq!(*name.value.name.value, "x");
                     assert_expr_eq(&value.value, &Expr::Literal(Literal::Int64(42)));
                     assert_expr_eq(&body.value, &Expr::Ref("x".to_string()));
                 } else {
@@ -1027,8 +1054,9 @@ mod tests {
         );
 
         if let Some(expr) = result {
-            if let Expr::Let(name, value, body) = &*expr.value {
-                assert_eq!(name, "x");
+            if let Expr::Let(field, value, body) = &*expr.value {
+                assert_eq!(*field.value.name.value, "x");
+                assert!(matches!(*field.value.ty.value, Type::Unknown));
                 assert_expr_eq(&value.value, &Expr::Literal(Literal::Int64(42)));
 
                 if let Expr::Binary(left, BinOp::Add, right) = &*body.value {
@@ -1042,24 +1070,102 @@ mod tests {
             }
         }
 
-        // Nested let expressions
-        let (result, errors) = parse_expr("let x = 5 in let y = x * 2 in x + y");
+        // Let with type annotation
+        let (result, errors) = parse_expr("let x: I64 = 42 in x + 10");
         assert!(
             result.is_some(),
-            "Expected successful parse for nested let expressions"
+            "Expected successful parse for let with type annotation"
         );
         assert!(
             errors.is_empty(),
-            "Expected no errors for nested let expressions"
+            "Expected no errors for let with type annotation"
         );
 
         if let Some(expr) = result {
-            if let Expr::Let(outer_name, outer_value, outer_body) = &*expr.value {
-                assert_eq!(outer_name, "x");
+            if let Expr::Let(field, value, _) = &*expr.value {
+                assert_eq!(*field.value.name.value, "x");
+                assert!(matches!(*field.value.ty.value, Type::Int64));
+                assert_expr_eq(&value.value, &Expr::Literal(Literal::Int64(42)));
+            } else {
+                panic!("Expected let expression with type annotation");
+            }
+        }
+
+        // Chained let expressions
+        let (result, errors) = parse_expr("let x = 5, y: I64 = x * 2, z = \"hello\" in x + y");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for chained let bindings"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for chained let bindings"
+        );
+
+        if let Some(expr) = result {
+            // The outermost let should be for x (first in the chain)
+            if let Expr::Let(field_x, val_x, body_x) = &*expr.value {
+                assert_eq!(*field_x.value.name.value, "x");
+                assert!(matches!(*field_x.value.ty.value, Type::Unknown));
+                assert_expr_eq(&val_x.value, &Expr::Literal(Literal::Int64(5)));
+
+                // Next level should be y with explicit I64 type
+                if let Expr::Let(field_y, val_y, body_y) = &*body_x.value {
+                    assert_eq!(*field_y.value.name.value, "y");
+                    assert!(matches!(*field_y.value.ty.value, Type::Int64));
+
+                    if let Expr::Binary(mul_left, BinOp::Mul, mul_right) = &*val_y.value {
+                        assert_expr_eq(&mul_left.value, &Expr::Ref("x".to_string()));
+                        assert_expr_eq(&mul_right.value, &Expr::Literal(Literal::Int64(2)));
+                    } else {
+                        panic!("Expected multiplication in y's value");
+                    }
+
+                    // Innermost let should be z
+                    if let Expr::Let(field_z, val_z, body_z) = &*body_y.value {
+                        assert_eq!(*field_z.value.name.value, "z");
+                        assert!(matches!(*field_z.value.ty.value, Type::Unknown));
+                        assert_expr_eq(
+                            &val_z.value,
+                            &Expr::Literal(Literal::String("hello".to_string())),
+                        );
+
+                        // The final body should be x + y
+                        if let Expr::Binary(add_left, BinOp::Add, add_right) = &*body_z.value {
+                            assert_expr_eq(&add_left.value, &Expr::Ref("x".to_string()));
+                            assert_expr_eq(&add_right.value, &Expr::Ref("y".to_string()));
+                        } else {
+                            panic!("Expected addition in final body");
+                        }
+                    } else {
+                        panic!("Expected innermost let for z");
+                    }
+                } else {
+                    panic!("Expected middle let for y");
+                }
+            } else {
+                panic!("Expected outermost let for x");
+            }
+        }
+
+        // Traditional nested let expressions should still work
+        let (result, errors) = parse_expr("let x = 5 in let y = x * 2 in x + y");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for traditional nested let expressions"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for traditional nested let expressions"
+        );
+
+        if let Some(expr) = result {
+            if let Expr::Let(outer_field, outer_value, outer_body) = &*expr.value {
+                assert_eq!(*outer_field.value.name.value, "x");
                 assert_expr_eq(&outer_value.value, &Expr::Literal(Literal::Int64(5)));
 
-                if let Expr::Let(inner_name, inner_value, inner_body) = &*outer_body.value {
-                    assert_eq!(inner_name, "y");
+                if let Expr::Let(inner_field, inner_value, inner_body) = &*outer_body.value {
+                    assert_eq!(*inner_field.value.name.value, "y");
 
                     if let Expr::Binary(mul_left, BinOp::Mul, mul_right) = &*inner_value.value {
                         assert_expr_eq(&mul_left.value, &Expr::Ref("x".to_string()));
@@ -1083,19 +1189,20 @@ mod tests {
         }
 
         // Let with complex body
-        let (result, errors) = parse_expr("let f = (x) -> x * x in f(10)");
+        let (result, errors) = parse_expr("let f: (I64) -> I64 = (x) -> x * x in f(10)");
         assert!(
             result.is_some(),
-            "Expected successful parse for let with complex body"
+            "Expected successful parse for let with complex body and type annotation"
         );
         assert!(
             errors.is_empty(),
-            "Expected no errors for let with complex body"
+            "Expected no errors for let with complex body and type annotation"
         );
 
         if let Some(expr) = result {
-            if let Expr::Let(name, value, body) = &*expr.value {
-                assert_eq!(name, "f");
+            if let Expr::Let(field, value, body) = &*expr.value {
+                assert_eq!(*field.value.name.value, "f");
+                assert!(matches!(*field.value.ty.value, Type::Closure(_, _)));
 
                 // Check that value is a closure
                 if let Expr::Closure(params, closure_body) = &*value.value {
@@ -1266,9 +1373,9 @@ mod tests {
                           | \"subtract\" -> (x, y) -> x - y \
                           | \"multiply\" -> (x, y) -> x * y \
                           | \"divide\" -> (x, y) -> if y == 0 then fail(\"Division by zero\") else x / y \
-                          \\ _ -> (x, y) -> -1 \
-                          in let calc = create_calculator(\"multiply\") \
-                          in let result = calc({\"key\": 6}.key, 7) \
+                          \\ _ -> (x, y) -> -1, \
+                            calc = create_calculator(\"multiply\"), \
+                            result = calc({\"key\": 6}.key, 7), \
                           in if result > 40 \
                              then { \
                                let final_result = (result, [1..5], {\"message\": \"High value\"}) in \
@@ -1289,14 +1396,14 @@ mod tests {
 
         // Just verify the outer structure because testing everything would be excessive
         if let Some(expr) = result {
-            if let Expr::Let(name1, _, body1) = &*expr.value {
-                assert_eq!(name1, "create_calculator");
+            if let Expr::Let(field1, _, body1) = &*expr.value {
+                assert_eq!(*field1.value.name.value, "create_calculator");
 
-                if let Expr::Let(name2, _, body2) = &*body1.value {
-                    assert_eq!(name2, "calc");
+                if let Expr::Let(field2, _, body2) = &*body1.value {
+                    assert_eq!(*field2.value.name.value, "calc");
 
-                    if let Expr::Let(name3, _, body3) = &*body2.value {
-                        assert_eq!(name3, "result");
+                    if let Expr::Let(field3, _, body3) = &*body2.value {
+                        assert_eq!(*field3.value.name.value, "result");
 
                         if let Expr::IfThenElse(_, _, _) = &*body3.value {
                             // Successfully parsed the entire structure
@@ -1311,6 +1418,62 @@ mod tests {
                 }
             } else {
                 panic!("Expected first let expression");
+            }
+        }
+
+        // Test the chained version of the let expressions
+        let chained_crazy_expr = "let \
+                                  create_calculator = (operation) -> match operation \
+                                  | \"add\" -> (x, y) -> x + y \
+                                  | \"subtract\" -> (x, y) -> x - y \
+                                  | \"multiply\" -> (x, y) -> x * y \
+                                  | \"divide\" -> (x, y) -> if y == 0 then fail(\"Division by zero\") else x / y \
+                                  \\ _ -> (x, y) -> -1, \
+                                  calc = create_calculator(\"multiply\"), \
+                                  result: I64 = calc({\"key\": 6}.key, 7) \
+                                  in if result > 40 \
+                                     then { \
+                                       let final_result = (result, [1..5], {\"message\": \"High value\"}) in \
+                                       DataResult(final_result).output \
+                                     } \
+                                     else result";
+
+        let (result, errors) = parse_expr(chained_crazy_expr);
+
+        assert!(
+            result.is_some(),
+            "Expected successful parse for chained crazy composite expression"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for chained crazy composite expression"
+        );
+
+        // Check that the chained version has the same structure
+        if let Some(expr) = result {
+            if let Expr::Let(field1, _, body1) = &*expr.value {
+                assert_eq!(*field1.value.name.value, "create_calculator");
+
+                if let Expr::Let(field2, _, body2) = &*body1.value {
+                    assert_eq!(*field2.value.name.value, "calc");
+
+                    if let Expr::Let(field3, _, body3) = &*body2.value {
+                        assert_eq!(*field3.value.name.value, "result");
+                        assert!(matches!(*field3.value.ty.value, Type::Int64));
+
+                        if let Expr::IfThenElse(_, _, _) = &*body3.value {
+                            // Successfully parsed the entire structure
+                        } else {
+                            panic!("Expected if-then-else as innermost body");
+                        }
+                    } else {
+                        panic!("Expected result let expression");
+                    }
+                } else {
+                    panic!("Expected calc let expression");
+                }
+            } else {
+                panic!("Expected create_calculator let expression");
             }
         }
     }

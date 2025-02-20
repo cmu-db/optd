@@ -56,7 +56,7 @@ pub enum Expr {
     IfThenElse(Spanned<Expr>, Spanned<Expr>, Spanned<Expr>),
 
     // Bindings and constructors
-    Let(String, Spanned<Expr>, Spanned<Expr>),
+    Let(Spanned<Field>, Spanned<Expr>, Spanned<Expr>),
     Constructor(String, Vec<Spanned<Expr>>),
 
     // Operations
