@@ -9,20 +9,29 @@ use sqlx::{
     SqliteConnection, SqlitePool,
 };
 
-use crate::cascades::{
-    expressions::*,
-    groups::{ExplorationStatus, RelationalGroupId, ScalarGroupId},
-    memo::Memoize,
+use crate::{cascades::goal::Goal, operators::scalar::ScalarOperatorKind};
+use crate::{
+    cascades::properties::PhysicalProperty, operators::relational::logical::LogicalOperatorKind,
 };
-use crate::operators::relational::logical::LogicalOperatorKind;
-use crate::operators::scalar::ScalarOperatorKind;
+use crate::{
+    cascades::{
+        expressions::*,
+        goal::OptimizationStatus,
+        groups::{ExplorationStatus, RelationalGroupId, ScalarGroupId},
+        memo::Memoize,
+    },
+    operators::relational::physical::PhysicalOperatorKind,
+};
 
 /// A Storage manager that manages connections to the database.
+#[derive(Debug)]
 pub struct SqliteMemo {
     /// A async connection pool to the SQLite database.
     db: SqlitePool,
     /// SQL query string to get all logical expressions in a group.
     get_all_logical_exprs_in_group_query: String,
+    /// SQL query string to get all physical expressions in a group.
+    get_all_physical_exprs_in_group_query: String,
     /// SQL query string to get all scalar expressions in a group.
     get_all_scalar_exprs_in_group_query: String,
 }
@@ -48,6 +57,7 @@ impl SqliteMemo {
         let memo = Self {
             db: SqlitePool::connect_with(options).await?,
             get_all_logical_exprs_in_group_query: get_all_logical_exprs_in_group_query().into(),
+            get_all_physical_exprs_in_group_query: get_all_physical_exprs_in_group_query().into(),
             get_all_scalar_exprs_in_group_query: get_all_scalar_exprs_in_group_query().into(),
         };
         memo.migrate().await?;
@@ -64,13 +74,29 @@ impl SqliteMemo {
     }
 
     /// Begin a new transaction.
-    pub(super) async fn begin(&self) -> anyhow::Result<Transaction<'_>> {
+    pub(crate) async fn begin(&self) -> anyhow::Result<Transaction<'_>> {
         let txn = self.db.begin().await?;
         Transaction::new(txn).await
     }
 }
 
 impl Memoize for SqliteMemo {
+    async fn create_or_get_relation_group_goal(
+        &self,
+        group_id: RelationalGroupId,
+        required_physical_props: Vec<PhysicalProperty>,
+    ) -> Result<Goal> {
+        let mut txn = self.begin().await?;
+        let goal = sqlx::query_as(
+            "INSERT INTO relation_group_goals (group_id, required_physical_props, optimization_status) VALUES ($1, $2) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING (id, optimization_status)",
+        ).bind(group_id)
+        .bind(serde_json::to_value(&required_physical_props)?)
+        .bind(OptimizationStatus::Unoptimized)
+        .fetch_one(&mut * txn)
+        .await?;
+        Ok(goal)
+    }
+
     async fn get_all_logical_exprs_in_group(
         &self,
         group_id: RelationalGroupId,
@@ -183,6 +209,40 @@ impl Memoize for SqliteMemo {
             .await?;
         txn.commit().await?;
         Ok(to)
+    }
+
+    async fn get_all_physical_exprs_in_group(
+        &self,
+        group_id: RelationalGroupId,
+    ) -> Result<Vec<(PhysicalExpressionId, Arc<PhysicalExpression>)>> {
+        #[derive(sqlx::FromRow)]
+        struct PhysicalExprRecord {
+            physical_expression_id: PhysicalExpressionId,
+            data: sqlx::types::Json<Arc<PhysicalExpression>>,
+        }
+
+        let mut txn = self.begin().await?;
+        let representative_group_id = self.get_representative_group_id(&mut txn, group_id).await?;
+        let logical_exprs: Vec<PhysicalExprRecord> =
+            sqlx::query_as(&self.get_all_physical_exprs_in_group_query)
+                .bind(representative_group_id)
+                .fetch_all(&mut *txn)
+                .await?;
+
+        txn.commit().await?;
+        Ok(logical_exprs
+            .into_iter()
+            .map(|record| (record.physical_expression_id, record.data.0))
+            .collect())
+    }
+
+    async fn add_physical_expr_to_group(
+        &self,
+        physical_expr: &PhysicalExpression,
+        group_id: RelationalGroupId,
+    ) -> Result<RelationalGroupId> {
+        self.add_physical_expr_to_group_inner(physical_expr, group_id)
+            .await
     }
 }
 
@@ -306,37 +366,55 @@ impl SqliteMemo {
                     .fetch_one(&mut *txn)
                     .await?
             }
-            ScalarExpression::Add(add) => {
+            ScalarExpression::BinaryOp(binary_op) => {
                 Self::insert_into_scalar_expressions(
                     &mut txn,
                     scalar_expr_id,
                     group_id,
-                    ScalarOperatorKind::Add,
+                    ScalarOperatorKind::Binary,
                 )
                 .await?;
 
-                sqlx::query_scalar("INSERT INTO scalar_adds (scalar_expression_id, group_id, left_group_id, right_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                sqlx::query_scalar("INSERT INTO scalar_binary_ops (scalar_expression_id, group_id, kind, left_group_id, right_group_id) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(scalar_expr_id)
                     .bind(group_id)
-                    .bind(add.left)
-                    .bind(add.right)
+                    .bind(serde_json::to_string(&binary_op.kind)?)
+                    .bind(binary_op.left)
+                    .bind(binary_op.right)
                     .fetch_one(&mut *txn)
                     .await?
             }
-            ScalarExpression::Equal(equal) => {
+            ScalarExpression::UnaryOp(unary_op) => {
                 Self::insert_into_scalar_expressions(
                     &mut txn,
                     scalar_expr_id,
                     group_id,
-                    ScalarOperatorKind::Equal,
+                    ScalarOperatorKind::Binary,
                 )
                 .await?;
 
-                sqlx::query_scalar("INSERT INTO scalar_equals (scalar_expression_id, group_id, left_group_id, right_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                sqlx::query_scalar("INSERT INTO scalar_unary_ops (scalar_expression_id, group_id, kind, child_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
                     .bind(scalar_expr_id)
                     .bind(group_id)
-                    .bind(equal.left)
-                    .bind(equal.right)
+                    .bind(serde_json::to_string(&unary_op.kind)?)
+                    .bind(unary_op.child)
+                    .fetch_one(&mut *txn)
+                    .await?
+            }
+            ScalarExpression::LogicOp(logic) => {
+                Self::insert_into_scalar_expressions(
+                    &mut txn,
+                    scalar_expr_id,
+                    group_id,
+                    ScalarOperatorKind::Logic,
+                )
+                .await?;
+
+                sqlx::query_scalar("INSERT INTO scalar_logic_ops (scalar_expression_id, group_id, kind, children_group_ids) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                    .bind(scalar_expr_id)
+                    .bind(group_id)
+                    .bind(serde_json::to_string(&logic.kind)?)
+                    .bind(serde_json::to_value(&logic.children)?)
                     .fetch_one(&mut *txn)
                     .await?
             }
@@ -471,6 +549,23 @@ impl SqliteMemo {
                     .fetch_one(&mut *txn)
                     .await?
             }
+            LogicalExpression::Project(project) => {
+                Self::insert_into_logical_expressions(
+                    &mut txn,
+                    logical_expr_id,
+                    group_id,
+                    LogicalOperatorKind::Project,
+                )
+                .await?;
+
+                sqlx::query_scalar("INSERT INTO projects (logical_expression_id, group_id, child_group_id, fields_group_ids) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                    .bind(logical_expr_id)
+                    .bind(group_id)
+                    .bind(project.child)
+                    .bind(serde_json::to_value(&project.fields)?)
+                    .fetch_one(&mut *txn)
+                    .await?
+            }
         };
 
         if inserted_group_id == group_id {
@@ -518,6 +613,111 @@ impl SqliteMemo {
             .await?;
         Ok(())
     }
+
+    async fn add_physical_expr_to_group_inner(
+        &self,
+        physical_expr: &PhysicalExpression,
+        group_id: RelationalGroupId,
+    ) -> anyhow::Result<RelationalGroupId> {
+        let mut txn = self.begin().await?;
+        let group_id = self.get_representative_group_id(&mut txn, group_id).await?;
+        let physical_expr_id = txn.new_physical_expression_id().await?;
+
+        let inserted_group_id: RelationalGroupId = match physical_expr {
+            PhysicalExpression::TableScan(scan) => {
+                Self::insert_into_physical_expressions(
+                    &mut txn,
+                    physical_expr_id,
+                    group_id,
+                    PhysicalOperatorKind::TableScan,
+                )
+                .await?;
+
+                sqlx::query_scalar("INSERT INTO table_scans (physical_expression_id, group_id, table_name, predicate_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                    .bind(physical_expr_id)
+                    .bind(group_id)
+                    .bind(serde_json::to_string(&scan.table_name)?)
+                    .bind(scan.predicate)
+                    .fetch_one(&mut *txn)
+                    .await?
+            }
+            PhysicalExpression::Filter(filter) => {
+                Self::insert_into_physical_expressions(
+                    &mut txn,
+                    physical_expr_id,
+                    group_id,
+                    PhysicalOperatorKind::Filter,
+                )
+                .await?;
+
+                sqlx::query_scalar("INSERT INTO physical_filters (physical_expression_id, group_id, child_group_id, predicate_group_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                    .bind(physical_expr_id)
+                    .bind(group_id)
+                    .bind(filter.child)
+                    .bind(filter.predicate)
+                    .fetch_one(&mut *txn)
+                    .await?
+            }
+            PhysicalExpression::NestedLoopJoin(join) => {
+                Self::insert_into_physical_expressions(
+                    &mut txn,
+                    physical_expr_id,
+                    group_id,
+                    PhysicalOperatorKind::NestedLoopJoin,
+                )
+                .await?;
+
+                sqlx::query_scalar("INSERT INTO nested_loop_joins (physical_expression_id, group_id, join_type, outer_group_id, inner_group_id, condition_group_id) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                    .bind(physical_expr_id)
+                    .bind(group_id)
+                    .bind(serde_json::to_string(&join.join_type)?)
+                    .bind(join.outer)
+                    .bind(join.inner)
+                    .bind(join.condition)
+                    .fetch_one(&mut *txn)
+                    .await?
+            }
+            PhysicalExpression::Project(project) => {
+                Self::insert_into_physical_expressions(
+                    &mut txn,
+                    physical_expr_id,
+                    group_id,
+                    PhysicalOperatorKind::Project,
+                )
+                .await?;
+
+                sqlx::query_scalar("INSERT INTO physical_projects (physical_expression_id, group_id, child_group_id, fields_group_ids) VALUES ($1, $2, $3, $4) ON CONFLICT DO UPDATE SET group_id = group_id RETURNING group_id")
+                    .bind(physical_expr_id)
+                    .bind(group_id)
+                    .bind(project.child)
+                    .bind(serde_json::to_value(&project.fields)?)
+                    .fetch_one(&mut *txn)
+                    .await?
+            }
+            _ => unimplemented!(),
+        };
+        txn.commit().await?;
+
+        Ok(inserted_group_id)
+    }
+
+    /// Inserts an entry into the `physical_expressions` table.
+    async fn insert_into_physical_expressions(
+        txn: &mut SqliteConnection,
+        physical_expr_id: PhysicalExpressionId,
+        group_id: RelationalGroupId,
+        operator_kind: PhysicalOperatorKind,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO physical_expressions (id, group_id, operator_kind) VALUES ($1, $2, $3)",
+        )
+        .bind(physical_expr_id)
+        .bind(group_id)
+        .bind(operator_kind)
+        .execute(&mut *txn)
+        .await?;
+        Ok(())
+    }
 }
 
 /// The SQL query to get all logical expressions in a group.
@@ -529,7 +729,21 @@ const fn get_all_logical_exprs_in_group_query() -> &'static str {
         " UNION ALL ",
         "SELECT logical_expression_id, json_object('Filter', json_object('child', child_group_id, 'predicate', predicate_group_id)) as data FROM filters WHERE group_id = $1",
         " UNION ALL ",
-        "SELECT logical_expression_id, json_object('Join', json_object('join_type', json(join_type), 'left', left_group_id, 'right', right_group_id, 'condition', condition_group_id)) as data FROM joins WHERE group_id = $1"
+        "SELECT logical_expression_id, json_object('Join', json_object('join_type', json(join_type), 'left', left_group_id, 'right', right_group_id, 'condition', condition_group_id)) as data FROM joins WHERE group_id = $1",
+        " UNION ALL ",
+        "SELECT logical_expression_id, json_object('Project', json_object('child', child_group_id, 'fields', json(fields_group_ids))) as data FROM projects WHERE group_id = $1"
+    )
+}
+
+const fn get_all_physical_exprs_in_group_query() -> &'static str {
+    concat!(
+        "SELECT physical_expression_id, json_object('TableScan', json_object('table_name', json(table_name), 'predicate', predicate_group_id)) as data FROM table_scans WHERE group_id = $1",
+        " UNION ALL ",
+        "SELECT physical_expression_id, json_object('Filter', json_object('child', child_group_id, 'predicate', predicate_group_id)) as data FROM physical_filters WHERE group_id = $1",
+        " UNION ALL ",
+        "SELECT physical_expression_id, json_object('NestedLoopJoin', json_object('join_type', json(join_type), 'outer', outer_group_id, 'inner', inner_group_id, 'condition', condition_group_id)) as data FROM nested_loop_joins WHERE group_id = $1",
+        " UNION ALL ",
+        "SELECT physical_expression_id, json_object('Project', json_object('child', child_group_id, 'fields', json(fields_group_ids))) as data FROM physical_projects WHERE group_id = $1"
     )
 }
 
@@ -542,9 +756,11 @@ const fn get_all_scalar_exprs_in_group_query() -> &'static str {
         " UNION ALL ",
         "SELECT scalar_expression_id, json_object('ColumnRef', json_object('column_index', json(column_index))) as data FROM scalar_column_refs WHERE group_id = $1",
         " UNION ALL ",
-        "SELECT scalar_expression_id, json_object('Add', json_object('left', left_group_id, 'right', right_group_id)) as data FROM scalar_adds WHERE group_id = $1",
+        "SELECT scalar_expression_id, json_object('BinaryOp', json_object('kind', json(kind), 'left', left_group_id, 'right', right_group_id)) as data FROM scalar_binary_ops WHERE group_id = $1",
         " UNION ALL ",
-        "SELECT scalar_expression_id, json_object('Equal', json_object('left', left_group_id, 'right', right_group_id)) as data FROM scalar_equals WHERE group_id = $1"
+        "SELECT scalar_expression_id, json_object('LogicOp', json_object('kind', json(kind), 'children', json(children_group_ids))) as data FROM scalar_logic_ops WHERE group_id = $1",
+        " UNION ALL ",
+        "SELECT scalar_expression_id, json_object('UnaryOp', json_object('kind', json(kind), 'child', child_group_id)) as data FROM scalar_unary_ops WHERE group_id = $1",
     )
 }
 
@@ -562,46 +778,40 @@ mod tests {
         let true_predicate =
             ScalarExpression::Constant(constants::Constant::new(OptdValue::Bool(true)));
         let true_predicate_group = memo.add_scalar_expr(&true_predicate).await?;
-        let scan1 = Arc::new(LogicalExpression::Scan(scan::Scan::new(
-            "t1",
-            true_predicate_group,
-        )));
+        let scan1 = Arc::new(scan::scan("t1", true_predicate_group));
         let scan1_group = memo.add_logical_expr(&scan1).await?;
         let dup_scan1_group = memo.add_logical_expr(&scan1).await?;
         assert_eq!(scan1_group, dup_scan1_group);
 
-        let scan2 = Arc::new(LogicalExpression::Scan(scan::Scan::new(
-            "t2",
-            true_predicate_group,
-        )));
+        let scan2 = Arc::new(scan::scan("t2", true_predicate_group));
         let scan2_group = memo.add_logical_expr(&scan2).await?;
         let dup_scan2_group = memo.add_logical_expr(&scan2).await?;
         assert_eq!(scan2_group, dup_scan2_group);
 
-        let t1v1 = ScalarExpression::ColumnRef(column_ref::ColumnRef::new(1));
+        let t1v1 = column_ref::column_ref(1);
         let t1v1_group_id = memo.add_scalar_expr(&t1v1).await?;
-        let t2v2 = ScalarExpression::ColumnRef(column_ref::ColumnRef::new(2));
+        let t2v2 = column_ref::column_ref(2);
         let t2v2_group_id = memo.add_scalar_expr(&t2v2).await?;
 
-        let join_cond = ScalarExpression::Equal(equal::Equal::new(t1v1_group_id, t2v2_group_id));
+        let join_cond = binary_op::equal(t1v1_group_id, t2v2_group_id);
         let join_cond_group_id = memo.add_scalar_expr(&join_cond).await?;
-        let join = Arc::new(LogicalExpression::Join(join::Join::new(
+        let join = Arc::new(join::join(
             "inner",
             scan1_group,
             scan2_group,
             join_cond_group_id,
-        )));
+        ));
 
         let join_group = memo.add_logical_expr(&join).await?;
         let dup_join_group = memo.add_logical_expr(&join).await?;
         assert_eq!(join_group, dup_join_group);
 
-        let join_alt = Arc::new(LogicalExpression::Join(join::Join::new(
+        let join_alt = Arc::new(join::join(
             "inner",
             scan2_group,
             scan1_group,
             join_cond_group_id,
-        )));
+        ));
         let join_alt_group = memo
             .add_logical_expr_to_group(&join_alt, join_group)
             .await?;

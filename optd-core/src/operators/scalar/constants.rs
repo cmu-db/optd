@@ -17,7 +17,17 @@ impl Constant<OptdValue> {
     }
 }
 
-/// Creates a constant scalar operator.
-pub fn constant<Scalar>(value: OptdValue) -> ScalarOperator<OptdValue, Scalar> {
-    ScalarOperator::Constant(Constant::new(value))
+/// Creates a boolean constant scalar operator.
+pub fn boolean<Scalar>(value: bool) -> ScalarOperator<OptdValue, Scalar> {
+    ScalarOperator::Constant(Constant::new(OptdValue::Bool(value)))
+}
+
+/// Creates an `int64` constant scalar operator.
+pub fn int64<Scalar>(value: bool) -> ScalarOperator<OptdValue, Scalar> {
+    ScalarOperator::Constant(Constant::new(OptdValue::Bool(value)))
+}
+
+/// Creates a string constant scalar operator.
+pub fn string<Scalar>(value: &str) -> ScalarOperator<OptdValue, Scalar> {
+    ScalarOperator::Constant(Constant::new(OptdValue::String(value.into())))
 }

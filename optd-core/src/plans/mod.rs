@@ -6,6 +6,7 @@
 use crate::values::OptdExpr;
 
 pub mod logical;
+pub mod physical;
 pub mod scalar;
 
 /// Expression type for constructing partial plans.

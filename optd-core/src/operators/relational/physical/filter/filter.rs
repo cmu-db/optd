@@ -20,8 +20,8 @@ impl<Relation, Scalar> PhysicalFilter<Relation, Scalar> {
     }
 }
 
-/// Creates a filter physical operator.
-pub fn filter<Relation, Scalar>(
+/// Creates a physical filter operator.
+pub fn physical_filter<Relation, Scalar>(
     child: Relation,
     predicate: Scalar,
 ) -> PhysicalOperator<OptdValue, Relation, Scalar> {

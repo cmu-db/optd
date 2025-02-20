@@ -21,6 +21,29 @@ pub enum OptdValue {
     // Complex Types: TODO(alexis). Enums, Optionals, Arrays, etc.
 }
 
+impl OptdValue {
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            OptdValue::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            OptdValue::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            OptdValue::Int64(i) => Some(*i),
+            _ => None,
+        }
+    }
+}
+
 /// Expressions that can be evaluated on OptdValues.
 ///
 /// This enum defines all possible expressions in the OPTD-DSL, including:

@@ -1,0 +1,18 @@
+[package]
+name = "optd-datafusion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+optd-core = { path = "../optd-core" }
+anyhow.workspace = true
+tokio.workspace = true
+trait-variant.workspace = true
+async-recursion.workspace = true
+proc-macro2.workspace = true
+async-trait = "0.1.85"
+datafusion.workspace = true
+futures = "0.3.31"
+itertools = "0.14.0"

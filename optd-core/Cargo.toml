@@ -1,17 +1,17 @@
 [package]
 name = "optd-core"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
 
 [dependencies]
+tokio.workspace = true
+anyhow.workspace = true
+async-recursion.workspace = true
+trait-variant.workspace = true
+proc-macro2.workspace = true
 sqlx = { version = "0.8", features = [ "sqlite", "runtime-tokio", "migrate" ] }
-trait-variant = "0.1.2"
-
-# Pin more recent versions for `-Zminimal-versions`.
-proc-macro2 = "1.0.60" # For a missing feature (https://github.com/rust-lang/rust/issues/113152).
-anyhow = "1.0.95"
-tokio = { version = "1.43.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 dotenvy = "0.15"
-async-recursion = "1.1.1"
