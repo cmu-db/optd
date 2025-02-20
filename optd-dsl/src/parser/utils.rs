@@ -35,3 +35,19 @@ pub(super) fn fields_list_parser(
         ))
         .map(|x| x.unwrap_or(vec![]))
 }
+
+pub(super) fn delimited_parser<T, R, F>(
+    parser: impl Parser<Token, T, Error = Simple<Token, Span>> + Clone,
+    open: Token,
+    close: Token,
+    f: F,
+) -> impl Parser<Token, R, Error = Simple<Token, Span>> + Clone
+where
+    F: Fn(Option<T>) -> R + Clone + 'static,
+{
+    parser
+        .map(Some)
+        .delimited_by(just(open.clone()), just(close.clone()))
+        .recover_with(nested_delimiters(open, close, ALL_DELIMITERS, |_| None))
+        .map(move |x| f(x))
+}

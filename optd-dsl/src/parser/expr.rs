@@ -1,12 +1,12 @@
 use chumsky::{
     error::Simple,
-    prelude::{choice, just, nested_delimiters, recursive},
+    prelude::{choice, just, recursive},
     select, Parser,
 };
 
 use crate::{
     errors::span::{Span, Spanned},
-    lexer::tokens::{Token, ALL_DELIMITERS},
+    lexer::tokens::Token,
     parser::ast::{BinOp, Expr, Literal, MatchArm, UnaryOp},
 };
 
@@ -14,24 +14,8 @@ use super::{
     ast::{Field, Type},
     pattern::pattern_parser,
     r#type::type_parser,
+    utils::delimited_parser,
 };
-
-// Generic helper for delimited parsing with error recovery (TODO: move to utils)
-fn delimited_parser<T, R, F>(
-    parser: impl Parser<Token, T, Error = Simple<Token, Span>> + Clone,
-    open: Token,
-    close: Token,
-    f: F,
-) -> impl Parser<Token, R, Error = Simple<Token, Span>> + Clone
-where
-    F: Fn(Option<T>) -> R + Clone + 'static,
-{
-    parser
-        .map(Some)
-        .delimited_by(just(open.clone()), just(close.clone()))
-        .recover_with(nested_delimiters(open, close, ALL_DELIMITERS, |_| None))
-        .map(move |x| f(x))
-}
 
 fn binary_op(
     term: impl Parser<Token, Spanned<Expr>, Error = Simple<Token, Span>> + Clone,
@@ -78,32 +62,37 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
         .boxed();
 
         let tuple = delimited_parser(
-            expr.clone()
-                .separated_by(just(Token::Comma))
-                .allow_trailing(),
+            choice((
+                expr.clone()
+                    .separated_by(just(Token::Comma))
+                    .allow_trailing()
+                    .at_least(2),
+                expr.clone()
+                    .then_ignore(just(Token::Comma))
+                    .map(|e| vec![e]),
+            )),
             Token::LParen,
             Token::RParen,
-            |items| items.map(Expr::Tuple).unwrap_or(Expr::Error),
+            |exprs_opt| exprs_opt.map(Expr::Tuple).unwrap_or(Expr::Error),
         )
         .map_with_span(Spanned::new)
         .boxed();
 
-        let map = just(Token::Map)
-            .ignore_then(delimited_parser(
-                expr.clone()
-                    .then_ignore(just(Token::Arrow))
-                    .then(expr.clone())
-                    .separated_by(just(Token::Comma))
-                    .allow_trailing(),
-                Token::LBracket,
-                Token::RBracket,
-                |items| match items {
-                    Some(items) => Expr::Map(items.into_iter().collect()),
-                    None => Expr::Error,
-                },
-            ))
-            .map_with_span(Spanned::new)
-            .boxed();
+        let map = delimited_parser(
+            expr.clone()
+                .then_ignore(just(Token::Colon))
+                .then(expr.clone())
+                .separated_by(just(Token::Comma))
+                .allow_trailing(),
+            Token::LBrace,
+            Token::RBrace,
+            |items| match items {
+                Some(items) => Expr::Map(items.into_iter().collect()),
+                None => Expr::Error,
+            },
+        )
+        .map_with_span(Spanned::new)
+        .boxed();
 
         let fail = just(Token::Fail)
             .ignore_then(delimited_parser(
@@ -165,22 +154,22 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
                 .boxed()
         };
 
-        let paren_expr =
-            delimited_parser(expr.clone(), Token::LParen, Token::RParen, |inner_expr| {
-                inner_expr.map(|e| *e.value).unwrap_or(Expr::Error)
-            })
-            .map_with_span(Spanned::new)
+        // Note: cannot apply delimiter recoveries, as they would
+        // block further successful parses (e.g. tuples & maps).
+        let paren_expr = just(Token::LParen)
+            .ignore_then(expr.clone())
+            .then_ignore(just(Token::RParen))
             .boxed();
 
-        let brace_expr =
-            delimited_parser(expr.clone(), Token::LBrace, Token::RBrace, |inner_expr| {
-                inner_expr.map(|e| *e.value).unwrap_or(Expr::Error)
-            })
-            .map_with_span(Spanned::new)
+        let brace_expr = just(Token::LBrace)
+            .ignore_then(expr.clone())
+            .then_ignore(just(Token::RBrace))
             .boxed();
 
         let atom = choice((
             closure,
+            brace_expr,
+            paren_expr,
             literal,
             reference,
             array,
@@ -188,8 +177,6 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
             map,
             fail,
             constructor,
-            paren_expr,
-            brace_expr,
         ));
 
         let call_expr = atom
@@ -579,9 +566,139 @@ mod tests {
     }
 
     #[test]
+    fn test_maps() {
+        // Empty map
+        let (result, errors) = parse_expr("{}");
+        assert!(result.is_some(), "Expected successful parse for empty map");
+        assert!(errors.is_empty(), "Expected no errors for empty map");
+        if let Some(expr) = result {
+            if let Expr::Map(entries) = &*expr.value {
+                assert!(entries.is_empty());
+            } else {
+                panic!("Expected Map expression, got {:?}", expr.value);
+            }
+        }
+
+        // Single entry map
+        let (result, errors) = parse_expr("{\"key\": 42}");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for single entry map"
+        );
+        assert!(errors.is_empty(), "Expected no errors for single entry map");
+        if let Some(expr) = result {
+            if let Expr::Map(entries) = &*expr.value {
+                assert_eq!(entries.len(), 1);
+                assert_expr_eq(
+                    &entries[0].0.value,
+                    &Expr::Literal(Literal::String("key".to_string())),
+                );
+                assert_expr_eq(&entries[0].1.value, &Expr::Literal(Literal::Int64(42)));
+            } else {
+                panic!("Expected Map expression");
+            }
+        }
+
+        // Multiple entry map
+        let (result, errors) = parse_expr("{\"a\": 1, \"b\": 2, \"c\": 3}");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for multiple entry map"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for multiple entry map"
+        );
+        if let Some(expr) = result {
+            if let Expr::Map(entries) = &*expr.value {
+                assert_eq!(entries.len(), 3);
+                assert_expr_eq(
+                    &entries[0].0.value,
+                    &Expr::Literal(Literal::String("a".to_string())),
+                );
+                assert_expr_eq(&entries[0].1.value, &Expr::Literal(Literal::Int64(1)));
+                assert_expr_eq(
+                    &entries[1].0.value,
+                    &Expr::Literal(Literal::String("b".to_string())),
+                );
+                assert_expr_eq(&entries[1].1.value, &Expr::Literal(Literal::Int64(2)));
+                assert_expr_eq(
+                    &entries[2].0.value,
+                    &Expr::Literal(Literal::String("c".to_string())),
+                );
+                assert_expr_eq(&entries[2].1.value, &Expr::Literal(Literal::Int64(3)));
+            } else {
+                panic!("Expected Map expression");
+            }
+        }
+
+        // Map with trailing comma
+        let (result, errors) = parse_expr("{\"a\": 1, \"b\": 2,}");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for map with trailing comma"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for map with trailing comma"
+        );
+        if let Some(expr) = result {
+            if let Expr::Map(entries) = &*expr.value {
+                assert_eq!(entries.len(), 2);
+            } else {
+                panic!("Expected Map expression");
+            }
+        }
+
+        // Complex map with expressions as keys and values
+        let (result, errors) = parse_expr("{x + 1: y * 2, \"key\": z.field}");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for complex map"
+        );
+        assert!(errors.is_empty(), "Expected no errors for complex map");
+        if let Some(expr) = result {
+            if let Expr::Map(entries) = &*expr.value {
+                assert_eq!(entries.len(), 2);
+
+                // First entry: x + 1: y * 2
+                if let Expr::Binary(add_left, BinOp::Add, add_right) = &*entries[0].0.value {
+                    assert_expr_eq(&add_left.value, &Expr::Ref("x".to_string()));
+                    assert_expr_eq(&add_right.value, &Expr::Literal(Literal::Int64(1)));
+                } else {
+                    panic!("Expected binary addition in first key");
+                }
+
+                if let Expr::Binary(mul_left, BinOp::Mul, mul_right) = &*entries[0].1.value {
+                    assert_expr_eq(&mul_left.value, &Expr::Ref("y".to_string()));
+                    assert_expr_eq(&mul_right.value, &Expr::Literal(Literal::Int64(2)));
+                } else {
+                    panic!("Expected binary multiplication in first value");
+                }
+
+                // Second entry: "key": z.field
+                assert_expr_eq(
+                    &entries[1].0.value,
+                    &Expr::Literal(Literal::String("key".to_string())),
+                );
+
+                if let Expr::MemberAccess(expr, member) = &*entries[1].1.value {
+                    assert_expr_eq(&expr.value, &Expr::Ref("z".to_string()));
+                    assert_eq!(member, "field");
+                } else {
+                    panic!("Expected member access in second value");
+                }
+            } else {
+                panic!("Expected Map expression");
+            }
+        }
+    }
+
+    #[test]
     fn test_complex_binary_operations() {
         // Test complex binary operation precedence and associativity
         let (result, errors) = parse_expr("1 + 2 * 3 - 4 / 2 == 5 && true || x > 10");
+
         assert!(
             result.is_some(),
             "Expected successful parse for complex binary operations"
@@ -659,13 +776,11 @@ mod tests {
         }
     }
 
-
-
     #[test]
     fn test_nested_expressions() {
         // Test deeply nested expressions with different expression types
         let (result, errors) = parse_expr(
-            "if (Map[[1 + 2, 3]->5].size > 0) then { let x = 42 in x } else fail(\"Empty map\")",
+            "if ({[1 + 2, 3]: 5}.size > 0) then { let x = 42 in x } else fail(\"Empty map\")",
         );
 
         assert!(
@@ -725,7 +840,7 @@ mod tests {
                         panic!("Expected member access in condition");
                     }
 
-                    assert_expr_eq(&right.value, &Expr::Literal(Literal::Int64(0))); // TODO: paranthesis problem & tuple, should enforce at least one , (then test); same for match (must be tested). end with giga test
+                    assert_expr_eq(&right.value, &Expr::Literal(Literal::Int64(0)));
                 } else {
                     panic!("Expected binary comparison in condition");
                 }
@@ -842,8 +957,7 @@ mod tests {
     #[test]
     fn test_map_constructor_and_collections() {
         // Test map constructor and complex collections
-        let (result, errors) =
-            parse_expr("Map[\"key1\" -> (1, true, [1..5]), someVar -> Map[x -> y]]");
+        let (result, errors) = parse_expr("{\"key1\": (1, true, [1..5]), someVar: {x: y}}");
 
         assert!(
             result.is_some(),
@@ -895,6 +1009,308 @@ mod tests {
                 }
             } else {
                 panic!("Expected map constructor");
+            }
+        }
+    }
+
+    #[test]
+    fn test_let_expressions() {
+        // Basic let expression
+        let (result, errors) = parse_expr("let x = 42 in x + 10");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for basic let expression"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for basic let expression"
+        );
+
+        if let Some(expr) = result {
+            if let Expr::Let(name, value, body) = &*expr.value {
+                assert_eq!(name, "x");
+                assert_expr_eq(&value.value, &Expr::Literal(Literal::Int64(42)));
+
+                if let Expr::Binary(left, BinOp::Add, right) = &*body.value {
+                    assert_expr_eq(&left.value, &Expr::Ref("x".to_string()));
+                    assert_expr_eq(&right.value, &Expr::Literal(Literal::Int64(10)));
+                } else {
+                    panic!("Expected binary addition in let body");
+                }
+            } else {
+                panic!("Expected let expression");
+            }
+        }
+
+        // Nested let expressions
+        let (result, errors) = parse_expr("let x = 5 in let y = x * 2 in x + y");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for nested let expressions"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for nested let expressions"
+        );
+
+        if let Some(expr) = result {
+            if let Expr::Let(outer_name, outer_value, outer_body) = &*expr.value {
+                assert_eq!(outer_name, "x");
+                assert_expr_eq(&outer_value.value, &Expr::Literal(Literal::Int64(5)));
+
+                if let Expr::Let(inner_name, inner_value, inner_body) = &*outer_body.value {
+                    assert_eq!(inner_name, "y");
+
+                    if let Expr::Binary(mul_left, BinOp::Mul, mul_right) = &*inner_value.value {
+                        assert_expr_eq(&mul_left.value, &Expr::Ref("x".to_string()));
+                        assert_expr_eq(&mul_right.value, &Expr::Literal(Literal::Int64(2)));
+                    } else {
+                        panic!("Expected multiplication in inner let value");
+                    }
+
+                    if let Expr::Binary(add_left, BinOp::Add, add_right) = &*inner_body.value {
+                        assert_expr_eq(&add_left.value, &Expr::Ref("x".to_string()));
+                        assert_expr_eq(&add_right.value, &Expr::Ref("y".to_string()));
+                    } else {
+                        panic!("Expected addition in inner let body");
+                    }
+                } else {
+                    panic!("Expected inner let expression");
+                }
+            } else {
+                panic!("Expected outer let expression");
+            }
+        }
+
+        // Let with complex body
+        let (result, errors) = parse_expr("let f = (x) -> x * x in f(10)");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for let with complex body"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for let with complex body"
+        );
+
+        if let Some(expr) = result {
+            if let Expr::Let(name, value, body) = &*expr.value {
+                assert_eq!(name, "f");
+
+                // Check that value is a closure
+                if let Expr::Closure(params, closure_body) = &*value.value {
+                    assert_eq!(params.len(), 1);
+                    assert_eq!(*params[0].value.name.value, "x");
+
+                    if let Expr::Binary(mul_left, BinOp::Mul, mul_right) = &*closure_body.value {
+                        assert_expr_eq(&mul_left.value, &Expr::Ref("x".to_string()));
+                        assert_expr_eq(&mul_right.value, &Expr::Ref("x".to_string()));
+                    } else {
+                        panic!("Expected multiplication in closure body");
+                    }
+                } else {
+                    panic!("Expected closure in let value");
+                }
+
+                // Check that body is a function call
+                if let Expr::Call(func, args) = &*body.value {
+                    assert_expr_eq(&func.value, &Expr::Ref("f".to_string()));
+                    assert_eq!(args.len(), 1);
+                    assert_expr_eq(&args[0].value, &Expr::Literal(Literal::Int64(10)));
+                } else {
+                    panic!("Expected function call in let body");
+                }
+            } else {
+                panic!("Expected let expression");
+            }
+        }
+    }
+
+    #[test]
+    fn test_match_expressions() {
+        // Simple match expression
+        let (result, errors) =
+            parse_expr("match x | 1 -> \"one\" | 2 -> \"two\" \\ _ -> \"other\"");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for simple match expression"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for simple match expression"
+        );
+
+        if let Some(expr) = result {
+            if let Expr::PatternMatch(scrutinee, arms) = &*expr.value {
+                assert_expr_eq(&scrutinee.value, &Expr::Ref("x".to_string()));
+                assert_eq!(arms.len(), 3);
+
+                // First arm: 1 -> "one"
+                if let Pattern::Literal(Literal::Int64(n)) = *arms[0].value.pattern.value {
+                    assert_eq!(n, 1);
+                } else {
+                    panic!("Expected integer literal pattern in first arm");
+                }
+                assert_expr_eq(
+                    &arms[0].value.expr.value,
+                    &Expr::Literal(Literal::String("one".to_string())),
+                );
+
+                // Second arm: 2 -> "two"
+                if let Pattern::Literal(Literal::Int64(n)) = *arms[1].value.pattern.value {
+                    assert_eq!(n, 2);
+                } else {
+                    panic!("Expected integer literal pattern in second arm");
+                }
+                assert_expr_eq(
+                    &arms[1].value.expr.value,
+                    &Expr::Literal(Literal::String("two".to_string())),
+                );
+
+                // Third arm: _ -> "other"
+                if let Pattern::Wildcard = *arms[2].value.pattern.value {
+                    // Expected wildcard pattern
+                } else {
+                    panic!("Expected wildcard pattern in third arm");
+                }
+                assert_expr_eq(
+                    &arms[2].value.expr.value,
+                    &Expr::Literal(Literal::String("other".to_string())),
+                );
+            } else {
+                panic!("Expected match expression");
+            }
+        }
+
+        // Match with complex patterns and expressions
+        let (result, errors) = parse_expr(
+            "match point | Point(x, y) -> \"first quadrant\" \
+                         | Circle(r) -> \"circle\" \
+                         | Rectangle(b: Stuff(_), h) -> \"rectangle\" \
+                         \\ _ -> \"unknown shape\"",
+        );
+        assert!(
+            result.is_some(),
+            "Expected successful parse for match with complex patterns"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for match with complex patterns"
+        );
+
+        if let Some(expr) = result {
+            if let Expr::PatternMatch(scrutinee, arms) = &*expr.value {
+                assert_expr_eq(&scrutinee.value, &Expr::Ref("point".to_string()));
+                assert_eq!(arms.len(), 4);
+
+                // First arm: Point(x, y) -> "first quadrant"
+                if let Pattern::Constructor(ref name, ref fields) = *arms[0].value.pattern.value {
+                    assert_eq!(*name.value, "Point");
+                    assert_eq!(fields.len(), 2);
+
+                    // Check that x and y are captured as variables
+                    if let Pattern::Bind(ref var_name, _) = *fields[0].value {
+                        assert_eq!(*var_name.value, "x");
+                    } else {
+                        panic!("Expected binding pattern for x");
+                    }
+
+                    if let Pattern::Bind(ref var_name, _) = *fields[1].value {
+                        assert_eq!(*var_name.value, "y");
+                    } else {
+                        panic!("Expected binding pattern for y");
+                    }
+                } else {
+                    panic!("Expected constructor pattern in first arm");
+                }
+
+                // Second arm: Circle(r) -> "circle"
+                if let Pattern::Constructor(ref name, ref fields) = *arms[1].value.pattern.value {
+                    assert_eq!(*name.value, "Circle");
+                    assert_eq!(fields.len(), 1);
+
+                    if let Pattern::Bind(ref var_name, _) = *fields[0].value {
+                        assert_eq!(*var_name.value, "r");
+                    } else {
+                        panic!("Expected binding pattern for r");
+                    }
+                } else {
+                    panic!("Expected constructor pattern in second arm");
+                }
+
+                // Third arm: Rectangle(w, h) -> "rectangle"
+                if let Pattern::Constructor(ref name, ref fields) = *arms[2].value.pattern.value {
+                    assert_eq!(*name.value, "Rectangle");
+                    assert_eq!(fields.len(), 2);
+                } else {
+                    panic!("Expected constructor pattern in third arm");
+                }
+
+                // Last arm should be a wildcard
+                if let Pattern::Wildcard = *arms[3].value.pattern.value {
+                    // Expected wildcard pattern
+                } else {
+                    panic!("Expected wildcard pattern in last arm");
+                }
+            } else {
+                panic!("Expected match expression");
+            }
+        }
+    }
+
+    #[test]
+    fn test_crazy_composite_expression() {
+        // This test creates an insanely complex nested expression with multiple features
+        let crazy_expr = "let create_calculator = (operation) -> match operation \
+                          | \"add\" -> (x, y) -> x + y \
+                          | \"subtract\" -> (x, y) -> x - y \
+                          | \"multiply\" -> (x, y) -> x * y \
+                          | \"divide\" -> (x, y) -> if y == 0 then fail(\"Division by zero\") else x / y \
+                          \\ _ -> (x, y) -> -1 \
+                          in let calc = create_calculator(\"multiply\") \
+                          in let result = calc({\"key\": 6}.key, 7) \
+                          in if result > 40 \
+                             then { \
+                               let final_result = (result, [1..5], {\"message\": \"High value\"}) in \
+                               DataResult(final_result).output \
+                             } \
+                             else result";
+
+        let (result, errors) = parse_expr(crazy_expr);
+
+        assert!(
+            result.is_some(),
+            "Expected successful parse for crazy composite expression"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for crazy composite expression"
+        );
+
+        // Just verify the outer structure because testing everything would be excessive
+        if let Some(expr) = result {
+            if let Expr::Let(name1, _, body1) = &*expr.value {
+                assert_eq!(name1, "create_calculator");
+
+                if let Expr::Let(name2, _, body2) = &*body1.value {
+                    assert_eq!(name2, "calc");
+
+                    if let Expr::Let(name3, _, body3) = &*body2.value {
+                        assert_eq!(name3, "result");
+
+                        if let Expr::IfThenElse(_, _, _) = &*body3.value {
+                            // Successfully parsed the entire structure
+                        } else {
+                            panic!("Expected if-then-else as innermost body");
+                        }
+                    } else {
+                        panic!("Expected third let expression");
+                    }
+                } else {
+                    panic!("Expected second let expression");
+                }
+            } else {
+                panic!("Expected first let expression");
             }
         }
     }

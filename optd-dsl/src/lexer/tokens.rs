@@ -8,7 +8,6 @@ pub enum Token {
     TString,
     TBool,
     TUnit,
-    Map,
 
     // Other keywords
     Data,
@@ -80,7 +79,6 @@ impl std::fmt::Display for Token {
             Token::TString => write!(f, "String"),
             Token::TBool => write!(f, "Bool"),
             Token::TUnit => write!(f, "Unit"),
-            Token::Map => write!(f, "Map"),
 
             // Other keywords
             Token::Data => write!(f, "data"),
