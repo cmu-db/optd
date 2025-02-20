@@ -33,7 +33,7 @@ pub(super) fn fields_list_parser(
             ALL_DELIMITERS,
             |_| None,
         ))
-        .map(|x| x.unwrap_or(vec![]))
+        .map(|x| x.unwrap_or_default())
 }
 
 pub(super) fn delimited_parser<T, R, F>(
@@ -49,5 +49,5 @@ where
         .map(Some)
         .delimited_by(just(open.clone()), just(close.clone()))
         .recover_with(nested_delimiters(open, close, ALL_DELIMITERS, |_| None))
-        .map(move |x| f(x))
+        .map(f)
 }

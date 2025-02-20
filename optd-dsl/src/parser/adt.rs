@@ -15,7 +15,7 @@ use super::utils::fields_list_parser;
 pub fn adt_parser() -> impl Parser<Token, Spanned<Adt>, Error = Simple<Token, Span>> + Clone {
     just(Token::Data).ignore_then(recursive(|inner_adt_parser| {
         let type_ident = select! { Token::TypeIdent(name) => name }.map_with_span(Spanned::new);
-        
+
         let product_parser = type_ident
             .then(fields_list_parser().or_not())
             .map(|(name, fields)| Adt::Struct {

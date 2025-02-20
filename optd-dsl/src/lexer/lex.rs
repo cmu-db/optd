@@ -45,6 +45,7 @@ pub fn lex(source: &str, file_name: &str) -> (Option<Vec<(Token, Span)>>, Vec<Er
 /// tokens that can be successfully lexed even in the presence of errors.
 fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> {
     let keywords = HashMap::from([
+        ("fn", Token::Fn),
         ("I64", Token::TInt64),
         ("F64", Token::TFloat64),
         ("String", Token::TString),

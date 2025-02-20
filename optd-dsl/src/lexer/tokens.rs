@@ -10,6 +10,7 @@ pub enum Token {
     TUnit,
 
     // Other keywords
+    Fn,
     Data,
     With,
     As,
@@ -81,6 +82,7 @@ impl std::fmt::Display for Token {
             Token::TUnit => write!(f, "Unit"),
 
             // Other keywords
+            Token::Fn => write!(f, "fn"),
             Token::Data => write!(f, "data"),
             Token::With => write!(f, "with"),
             Token::As => write!(f, "as"),

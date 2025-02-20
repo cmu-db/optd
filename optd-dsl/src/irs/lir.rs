@@ -1,5 +1,6 @@
 // Low lever IR of DSL, converts the AST (hir.ast) into a lower level IR that can be used by
 // the Cascades optimizer.
+// TODO: This entire file is a dumpster of ideas. Heavy WIP.
 
 use std::collections::HashMap;
 
@@ -106,11 +107,11 @@ pub enum Terminal {
 }
 
 #[derive(Clone, Debug)]
-pub struct Props(HashMap<Identifier, Value>);
+pub struct Props();
 
 /// operator tag -> (logical_prop -> derivation)
 #[derive(Clone, Debug)]
-pub struct LogicalDerives(HashMap<Identifier, Vec<(Identifier, Expr)>>);
+pub struct LogicalDerives();
 
 #[derive(Clone, Debug)]
 pub struct Program {

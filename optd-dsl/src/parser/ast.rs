@@ -138,7 +138,8 @@ pub enum UnaryOp {
 #[derive(Debug, Clone)]
 pub struct Function {
     pub name: Spanned<Identifier>,
-    pub params: Vec<Spanned<Field>>,
+    pub receiver: Option<Spanned<Field>>,
+    pub params: Option<Vec<Spanned<Field>>>,
     pub return_type: Spanned<Type>,
     pub body: Spanned<Expr>,
     pub annotations: Vec<Spanned<Identifier>>,
