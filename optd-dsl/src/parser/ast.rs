@@ -228,8 +228,8 @@ pub struct Function {
     pub params: Option<Vec<Spanned<Field>>>,
     /// Return type with source location
     pub return_type: Spanned<Type>,
-    /// Function body with source location
-    pub body: Spanned<Expr>,
+    /// Function body with source location (None for external functions)
+    pub body: Option<Spanned<Expr>>,
     /// List of annotations attached to the function
     pub annotations: Vec<Spanned<Identifier>>,
 }

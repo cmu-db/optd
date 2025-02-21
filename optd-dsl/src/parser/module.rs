@@ -125,7 +125,7 @@ mod tests {
             \ Semi
 
         [rust]
-        fn (expr: Scalar) apply_children(f: Scalar => Scalar) = ()
+        fn (expr: Scalar) apply_children(f: Scalar => Scalar): Scalar
 
         fn (pred: Predicate) remap(map: {I64 : I64}) =
             match predicate

@@ -118,6 +118,15 @@ pub struct AnnotatedExpr {
 /// 5. Preserves information about annotations for later compilation phases
 /// 6. Serves as a bridge between the frontend (parsing, type checking) and
 ///    the backend (optimization, code generation)
+///
+/// This representation differs from AST in several key ways:
+/// - HIR is more normalized and regular, making it easier for later compiler stages
+/// - AST contains source location information (spans) while HIR doesn't
+/// - HIR includes type information that wasn't available during parsing
+/// - AST preserves all parsing artifacts, while HIR is a cleaned representation
+///
+/// The HIR is intended to be consumed by later compiler stages like optimization
+/// and code generation.
 #[derive(Debug, Clone)]
 pub struct HIR {
     /// Map from function name to its annotated expression
@@ -126,3 +135,7 @@ pub struct HIR {
     /// Registry of all types used in the program
     pub types: TypeRegistry,
 }
+
+// 1. So functions it is... Need to gen it! Then add lambda.
+// 2. Problem: type conversion... Can use old type signature??? Could have a bridge to make stuff easier, but that's more cumbersome imo.
+// 3. Still needs to be 
