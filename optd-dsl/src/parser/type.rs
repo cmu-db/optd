@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn test_complex_type() {
         // Test mix of Map, Array, Tuple, and Closure
-        let insane_type = "{String : [((I64, [{String : Physical}]) -> [(CustomType, LogicalProps, (Bool -> [Scalar]))])]}";
+        let insane_type = "{String : [((I64, [{String : Physical}]) -> [(AdtType, LogicalProps, (Bool -> [Scalar]))])]}";
         let result = parse_type(insane_type).unwrap();
 
         let map_type = result.value;

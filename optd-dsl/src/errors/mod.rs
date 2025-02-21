@@ -1,2 +1,2 @@
 pub mod span;
-pub mod types;
+pub mod reporter;

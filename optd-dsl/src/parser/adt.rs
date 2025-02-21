@@ -18,7 +18,7 @@ pub fn adt_parser() -> impl Parser<Token, Spanned<Adt>, Error = Simple<Token, Sp
 
         let product_parser = type_ident
             .then(fields_list_parser().or_not())
-            .map(|(name, fields)| Adt::Struct {
+            .map(|(name, fields)| Adt::Product {
                 name,
                 fields: fields.unwrap_or_else(Vec::new),
             })
@@ -32,7 +32,7 @@ pub fn adt_parser() -> impl Parser<Token, Spanned<Adt>, Error = Simple<Token, Sp
                     .repeated()
                     .then(just(Token::Backward).ignore_then(inner_adt_parser.clone())),
             )
-            .map(|(name, (variants, end_variant))| Adt::Enum {
+            .map(|(name, (variants, end_variant))| Adt::Sum {
                 name,
                 variants: variants
                     .into_iter()
@@ -69,12 +69,12 @@ mod tests {
         assert!(errors.is_empty(), "Expected no errors");
 
         match &*result.unwrap().value {
-            Adt::Struct { fields, .. } => {
+            Adt::Product { fields, .. } => {
                 assert_eq!(fields.len(), 1);
                 assert_eq!(*fields[0].value.name.value, "bla");
                 assert!(matches!(*fields[0].value.ty.value, Type::Int64));
             }
-            _ => panic!("Expected Struct ADT"),
+            _ => panic!("Expected Product ADT"),
         }
     }
 
@@ -87,10 +87,10 @@ mod tests {
         assert!(errors.is_empty(), "Expected no errors");
 
         match &*result.unwrap().value {
-            Adt::Struct { fields, .. } => {
+            Adt::Product { fields, .. } => {
                 assert_eq!(fields.len(), 0);
             }
-            _ => panic!("Expected Struct ADT"),
+            _ => panic!("Expected Product ADT"),
         }
     }
 
@@ -105,28 +105,28 @@ mod tests {
         assert!(errors.is_empty(), "Expected no errors");
 
         match &*result.unwrap().value {
-            Adt::Enum { variants, .. } => {
+            Adt::Sum { variants, .. } => {
                 assert_eq!(variants.len(), 2);
 
                 // First variant should be Inner
                 match &*variants[0].value {
-                    Adt::Struct { name, fields } => {
+                    Adt::Product { name, fields } => {
                         assert_eq!(*name.value, "Inner");
                         assert_eq!(fields.len(), 0);
                     }
-                    _ => panic!("Expected Inner to be a Struct variant"),
+                    _ => panic!("Expected Inner to be a Product variant"),
                 }
 
                 // Second variant should be Outer
                 match &*variants[1].value {
-                    Adt::Struct { name, fields } => {
+                    Adt::Product { name, fields } => {
                         assert_eq!(*name.value, "Outer");
                         assert_eq!(fields.len(), 0);
                     }
-                    _ => panic!("Expected Outer to be a Struct variant"),
+                    _ => panic!("Expected Outer to be a Product variant"),
                 }
             }
-            _ => panic!("Expected Enum ADT"),
+            _ => panic!("Expected Sum ADT"),
         }
     }
 
@@ -142,34 +142,34 @@ mod tests {
         assert!(errors.is_empty(), "Expected no errors");
 
         match &*result.unwrap().value {
-            Adt::Enum { variants, .. } => {
+            Adt::Sum { variants, .. } => {
                 assert_eq!(variants.len(), 3);
 
                 match &*variants[0].value {
-                    Adt::Struct { name, fields } => {
+                    Adt::Product { name, fields } => {
                         assert_eq!(*name.value, "Circle");
                         assert_eq!(fields.len(), 2);
                     }
-                    _ => panic!("Expected Circle to be a Struct variant"),
+                    _ => panic!("Expected Circle to be a Product variant"),
                 }
 
                 match &*variants[1].value {
-                    Adt::Struct { name, fields } => {
+                    Adt::Product { name, fields } => {
                         assert_eq!(*name.value, "Rectangle");
                         assert_eq!(fields.len(), 3);
                     }
-                    _ => panic!("Expected Rectangle to be a Struct variant"),
+                    _ => panic!("Expected Rectangle to be a Product variant"),
                 }
 
                 match &*variants[2].value {
-                    Adt::Struct { name, fields } => {
+                    Adt::Product { name, fields } => {
                         assert_eq!(*name.value, "Triangle");
                         assert_eq!(fields.len(), 3);
                     }
-                    _ => panic!("Expected Triangle to be a Struct variant"),
+                    _ => panic!("Expected Triangle to be a Product variant"),
                 }
             }
-            _ => panic!("Expected Enum ADT"),
+            _ => panic!("Expected Sum ADT"),
         }
     }
 
@@ -189,46 +189,46 @@ mod tests {
         assert!(errors.is_empty(), "Expected no errors");
 
         match &*result.unwrap().value {
-            Adt::Enum { variants, .. } => {
+            Adt::Sum { variants, .. } => {
                 assert_eq!(variants.len(), 3);
 
                 // Check Literal and its nested enum
                 match &*variants[0].value {
-                    Adt::Enum { name, variants } => {
+                    Adt::Sum { name, variants } => {
                         assert_eq!(*name.value, "Literal");
                         assert_eq!(variants.len(), 3);
 
                         // Check IntLiteral
                         match &*variants[0].value {
-                            Adt::Struct { name, fields } => {
+                            Adt::Product { name, fields } => {
                                 assert_eq!(*name.value, "IntLiteral");
                                 assert_eq!(fields.len(), 1);
                             }
-                            _ => panic!("Expected IntLiteral to be a Struct variant"),
+                            _ => panic!("Expected IntLiteral to be a Product variant"),
                         }
                     }
-                    _ => panic!("Expected Literal to be an Enum variant"),
+                    _ => panic!("Expected Literal to be an Sum variant"),
                 }
 
                 // Check BinaryOp
                 match &*variants[1].value {
-                    Adt::Struct { name, fields } => {
+                    Adt::Product { name, fields } => {
                         assert_eq!(*name.value, "BinaryOp");
                         assert_eq!(fields.len(), 3);
                     }
-                    _ => panic!("Expected BinaryOp to be a Struct variant"),
+                    _ => panic!("Expected BinaryOp to be a Product variant"),
                 }
 
                 // Check Call
                 match &*variants[2].value {
-                    Adt::Struct { name, fields } => {
+                    Adt::Product { name, fields } => {
                         assert_eq!(*name.value, "Call");
                         assert_eq!(fields.len(), 2);
                     }
-                    _ => panic!("Expected Call to be a Struct variant"),
+                    _ => panic!("Expected Call to be a Product variant"),
                 }
             }
-            _ => panic!("Expected Enum ADT"),
+            _ => panic!("Expected Sum ADT"),
         }
     }
 
@@ -254,46 +254,46 @@ mod tests {
         assert!(errors.is_empty(), "Expected no errors");
 
         match &*result.unwrap().value {
-            Adt::Enum { name, variants } => {
+            Adt::Sum { name, variants } => {
                 assert_eq!(*name.value, "Menu");
                 assert_eq!(variants.len(), 3);
 
                 // Check File and its nested variants
                 match &*variants[0].value {
-                    Adt::Enum { name, variants } => {
+                    Adt::Sum { name, variants } => {
                         assert_eq!(*name.value, "File");
                         assert_eq!(variants.len(), 3);
 
                         // Check New and its nested variants
                         match &*variants[0].value {
-                            Adt::Enum { name, variants } => {
+                            Adt::Sum { name, variants } => {
                                 assert_eq!(*name.value, "New");
                                 assert_eq!(variants.len(), 3);
 
                                 match &*variants[0].value {
-                                    Adt::Struct { name, fields } => {
+                                    Adt::Product { name, fields } => {
                                         assert_eq!(*name.value, "Document");
                                         assert_eq!(fields.len(), 0);
                                     }
-                                    _ => panic!("Expected Document to be a Struct variant"),
+                                    _ => panic!("Expected Document to be a Product variant"),
                                 }
                             }
-                            _ => panic!("Expected New to be an Enum variant"),
+                            _ => panic!("Expected New to be an Sum variant"),
                         }
                     }
-                    _ => panic!("Expected File to be an Enum variant"),
+                    _ => panic!("Expected File to be an Sum variant"),
                 }
 
                 // Check last variant
                 match &*variants[2].value {
-                    Adt::Struct { name, fields } => {
+                    Adt::Product { name, fields } => {
                         assert_eq!(*name.value, "View");
                         assert_eq!(fields.len(), 0);
                     }
-                    _ => panic!("Expected View to be a Struct variant"),
+                    _ => panic!("Expected View to be a Product variant"),
                 }
             }
-            _ => panic!("Expected Enum ADT"),
+            _ => panic!("Expected Sum ADT"),
         }
     }
 }

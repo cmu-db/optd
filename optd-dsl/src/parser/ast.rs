@@ -23,7 +23,7 @@ pub enum Type {
     Tuple(Vec<Spanned<Type>>),
     Map(Spanned<Type>, Spanned<Type>),
 
-    // ADT types (custom, operators & properties)
+    // User defined types
     Adt(Identifier),
 }
 
@@ -35,11 +35,11 @@ pub struct Field {
 
 #[derive(Debug, Clone)]
 pub enum Adt {
-    Struct {
+    Product {
         name: Spanned<Identifier>,
         fields: Vec<Spanned<Field>>,
     },
-    Enum {
+    Sum {
         name: Spanned<Identifier>,
         variants: Vec<Spanned<Adt>>,
     },

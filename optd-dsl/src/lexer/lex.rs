@@ -8,7 +8,7 @@ use chumsky::{
 };
 use ordered_float::OrderedFloat;
 
-use crate::errors::{span::Span, types::Error};
+use crate::errors::{span::Span, reporter::Error};
 
 use super::{errors::LexerError, tokens::Token};
 
