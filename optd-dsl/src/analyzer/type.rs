@@ -13,7 +13,9 @@ pub enum Type {
     String,
     Bool,
     Float64,
+    // Special types
     Unit,
+    Universe,
     // Complex types
     Array(Box<Type>),
     Closure(Box<Type>, Box<Type>),
@@ -82,7 +84,7 @@ impl<T> Typed<T> {
 /// The TypeRegistry keeps track of the inheritance relationships between
 /// types, particularly for user-defined ADTs. It provides methods to register
 /// types and check subtyping relationships.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypeRegistry {
     subtypes: HashMap<Identifier, HashSet<Identifier>>,
 }
@@ -148,6 +150,8 @@ impl TypeRegistry {
         }
 
         match (child, parent) {
+            // Universe is the top type - everything is a subtype of Universe
+            (_, Type::Universe) => true,
             // Check transitive inheritance
             (Type::Adt(child_name), Type::Adt(parent_name)) => {
                 if child_name == parent_name {
@@ -247,12 +251,20 @@ mod type_registry_tests {
         assert!(registry.is_subtype(&Type::String, &Type::String));
         assert!(registry.is_subtype(&Type::Float64, &Type::Float64));
         assert!(registry.is_subtype(&Type::Unit, &Type::Unit));
+        assert!(registry.is_subtype(&Type::Universe, &Type::Universe));
 
         // Different primitive types should not be subtypes
         assert!(!registry.is_subtype(&Type::Int64, &Type::Bool));
         assert!(!registry.is_subtype(&Type::String, &Type::Int64));
         assert!(!registry.is_subtype(&Type::Float64, &Type::Int64));
         assert!(!registry.is_subtype(&Type::Unit, &Type::Bool));
+
+        // All types should be subtypes of Universe
+        assert!(registry.is_subtype(&Type::Int64, &Type::Universe));
+        assert!(registry.is_subtype(&Type::Bool, &Type::Universe));
+        assert!(registry.is_subtype(&Type::String, &Type::Universe));
+        assert!(registry.is_subtype(&Type::Float64, &Type::Universe));
+        assert!(registry.is_subtype(&Type::Unit, &Type::Universe));
     }
 
     #[test]
@@ -276,6 +288,9 @@ mod type_registry_tests {
             &Type::Array(Box::new(Type::Array(Box::new(Type::Int64)))),
             &Type::Array(Box::new(Type::Array(Box::new(Type::Int64))))
         ));
+
+        // Array of any type is subtype of Universe
+        assert!(registry.is_subtype(&Type::Array(Box::new(Type::Int64)), &Type::Universe));
 
         // Array with inheritance (will be tested more with ADTs)
         let mut adts_registry = TypeRegistry::new();
@@ -315,6 +330,9 @@ mod type_registry_tests {
         // Empty tuples
         assert!(registry.is_subtype(&Type::Tuple(vec![]), &Type::Tuple(vec![])));
 
+        // All tuples are subtypes of Universe
+        assert!(registry.is_subtype(&Type::Tuple(vec![Type::Int64, Type::Bool]), &Type::Universe));
+
         // Nested tuples
         assert!(registry.is_subtype(
             &Type::Tuple(vec![
@@ -349,6 +367,12 @@ mod type_registry_tests {
             &Type::Map(Box::new(Type::String), Box::new(Type::Int64)),
             &Type::Map(Box::new(Type::String), Box::new(Type::Bool))
         ));
+
+        // All maps are subtypes of Universe
+        assert!(registry.is_subtype(
+            &Type::Map(Box::new(Type::String), Box::new(Type::Int64)),
+            &Type::Universe
+        ));
     }
 
     #[test]
@@ -365,6 +389,12 @@ mod type_registry_tests {
         assert!(!registry.is_subtype(
             &Type::Closure(Box::new(Type::Int64), Box::new(Type::Bool)),
             &Type::Closure(Box::new(Type::Float64), Box::new(Type::Bool))
+        ));
+
+        // All closures are subtypes of Universe
+        assert!(registry.is_subtype(
+            &Type::Closure(Box::new(Type::Int64), Box::new(Type::Bool)),
+            &Type::Universe
         ));
 
         // Contravariant parameter types - broader param type is a subtype
@@ -444,6 +474,9 @@ mod type_registry_tests {
             &Type::Adt("Shapes".to_string())
         ));
 
+        // All ADTs are subtypes of Universe
+        assert!(registry.is_subtype(&Type::Adt("Shapes".to_string()), &Type::Universe));
+
         // Non-subtypes should return false
         assert!(!registry.is_subtype(
             &Type::Adt("Shapes".to_string()),
@@ -454,6 +487,35 @@ mod type_registry_tests {
             &Type::Adt("Circle".to_string()),
             &Type::Adt("Rectangle".to_string())
         ));
+    }
+
+    #[test]
+    fn test_universe_as_top_type() {
+        let registry = TypeRegistry::new();
+
+        // Check that Universe is a supertype of all primitive types
+        assert!(registry.is_subtype(&Type::Int64, &Type::Universe));
+        assert!(registry.is_subtype(&Type::String, &Type::Universe));
+        assert!(registry.is_subtype(&Type::Bool, &Type::Universe));
+        assert!(registry.is_subtype(&Type::Float64, &Type::Universe));
+        assert!(registry.is_subtype(&Type::Unit, &Type::Universe));
+
+        // Check that Universe is a supertype of all complex types
+        assert!(registry.is_subtype(&Type::Array(Box::new(Type::Int64)), &Type::Universe));
+        assert!(registry.is_subtype(&Type::Tuple(vec![Type::Int64, Type::Bool]), &Type::Universe));
+        assert!(registry.is_subtype(
+            &Type::Map(Box::new(Type::String), Box::new(Type::Int64)),
+            &Type::Universe
+        ));
+        assert!(registry.is_subtype(
+            &Type::Closure(Box::new(Type::Int64), Box::new(Type::Bool)),
+            &Type::Universe
+        ));
+
+        // But Universe is not a subtype of any other type
+        assert!(!registry.is_subtype(&Type::Universe, &Type::Int64));
+        assert!(!registry.is_subtype(&Type::Universe, &Type::String));
+        assert!(!registry.is_subtype(&Type::Universe, &Type::Array(Box::new(Type::Int64))));
     }
 
     #[test]
@@ -520,6 +582,11 @@ mod type_registry_tests {
             &Type::Adt("SportsCar".to_string()),
             &Type::Adt("Vehicles".to_string())
         ));
+
+        // All vehicle types are subtypes of Universe
+        assert!(registry.is_subtype(&Type::Adt("Vehicles".to_string()), &Type::Universe));
+        assert!(registry.is_subtype(&Type::Adt("Cars".to_string()), &Type::Universe));
+        assert!(registry.is_subtype(&Type::Adt("SportsCar".to_string()), &Type::Universe));
 
         // Test negative cases
         assert!(!registry.is_subtype(
@@ -613,6 +680,21 @@ mod type_registry_tests {
                     )
                 ]))))
             )
+        ));
+
+        // Any complex nested type is a subtype of Universe
+        assert!(registry.is_subtype(
+            &Type::Map(
+                Box::new(Type::String),
+                Box::new(Type::Array(Box::new(Type::Tuple(vec![
+                    Type::Adt("Dog".to_string()),
+                    Type::Closure(
+                        Box::new(Type::Adt("Animals".to_string())),
+                        Box::new(Type::Adt("Cat".to_string()))
+                    )
+                ]))))
+            ),
+            &Type::Universe
         ));
     }
 }

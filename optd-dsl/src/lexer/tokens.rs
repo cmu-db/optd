@@ -32,23 +32,24 @@ pub enum Token {
     Unit, // ()
 
     // Operators
-    Plus,      // +
-    Minus,     // -
-    Mul,       // *
-    Div,       // /
-    Eq,        // =
-    Arrow,     // ->
-    EqEq,      // ==
-    NotEq,     // !=
-    Greater,   // >
-    Less,      // <
-    GreaterEq, // >=
-    LessEq,    // <=
-    Not,       // !
-    And,       // &&
-    Or,        // ||
-    Range,     // ..
-    Concat,    // ++
+    Plus,       // +
+    Minus,      // -
+    Mul,        // *
+    Div,        // /
+    Eq,         // =
+    BigArrow,   // =>
+    SmallArrow, // ->
+    EqEq,       // ==
+    NotEq,      // !=
+    Greater,    // >
+    Less,       // <
+    GreaterEq,  // >=
+    LessEq,     // <=
+    Not,        // !
+    And,        // &&
+    Or,         // ||
+    Range,      // ..
+    Concat,     // ++
 
     // Delimiters
     LParen,     // (
@@ -109,7 +110,8 @@ impl std::fmt::Display for Token {
             Token::Mul => write!(f, "*"),
             Token::Div => write!(f, "/"),
             Token::Eq => write!(f, "="),
-            Token::Arrow => write!(f, "->"),
+            Token::BigArrow => write!(f, "=>"),
+            Token::SmallArrow => write!(f, "->"),
             Token::EqEq => write!(f, "=="),
             Token::NotEq => write!(f, "!="),
             Token::Greater => write!(f, ">"),

@@ -151,7 +151,7 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
             let single_param = param_parser.map(|field| vec![field]);
 
             choice((param_list, empty_params, single_param))
-                .then_ignore(just(Token::Arrow))
+                .then_ignore(just(Token::BigArrow))
                 .then(expr.clone())
                 .map(|(params, body)| Expr::Closure(params, body))
                 .map_with_span(Spanned::new)
@@ -200,6 +200,9 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
                     just(Token::Dot)
                         .ignore_then(select! { Token::TermIdent(name) => name })
                         .map(PostfixOp::Member),
+                    just(Token::SmallArrow)
+                        .ignore_then(select! { Token::TermIdent(name) => name })
+                        .map(PostfixOp::Compose),
                 ))
                 .map_with_span(|op, span| (op, span))
                 .repeated(),
@@ -305,7 +308,7 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
             .boxed();
 
         let match_arm = pattern_parser()
-            .then_ignore(just(Token::Arrow))
+            .then_ignore(just(Token::BigArrow))
             .then(expr.clone())
             .map(|(pattern, expr)| MatchArm { pattern, expr })
             .map_with_span(Spanned::new);
@@ -399,6 +402,9 @@ mod tests {
                     }
                     (PostfixOp::Member(a_member), PostfixOp::Member(e_member)) => {
                         assert_eq!(a_member, e_member);
+                    }
+                    (PostfixOp::Compose(a_id), PostfixOp::Compose(e_id)) => {
+                        assert_eq!(a_id, e_id);
                     }
                     _ => assert!(
                         false,
@@ -918,7 +924,7 @@ mod tests {
     fn test_nested_closures_and_calls() {
         // Test nested closures with function calls
         let (result, errors) =
-            parse_expr("(x: I64) -> (y: F64) -> func(x + 1, y * 2.5, (z) -> z && true)");
+            parse_expr("(x: I64) => (y: F64) => func(x + 1, y * 2.5, z => z && true)");
 
         assert!(
             result.is_some(),
@@ -1206,7 +1212,7 @@ mod tests {
         }
 
         // Let with complex body
-        let (result, errors) = parse_expr("let f: (I64) -> I64 = (x) -> x * x in f(10)");
+        let (result, errors) = parse_expr("let f: I64 => I64 = (x) => x * x in f(10)");
         assert!(
             result.is_some(),
             "Expected successful parse for let with complex body and type annotation"
@@ -1349,13 +1355,77 @@ mod tests {
                 panic!("Expected call at top level");
             }
         }
+
+        // Test compose operator
+        let (result, errors) = parse_expr("map(dat) -> filter");
+        
+        assert!(
+            result.is_some(),
+            "Expected successful parse for compose operator"
+        );
+        assert!(errors.is_empty(), "Expected no errors for compose operator");
+
+        if let Some(expr) = result {
+            if let Expr::Postfix(inner, PostfixOp::Compose(name)) = &*expr.value {
+                assert_eq!(name, "filter");
+
+                if let Expr::Postfix(func, PostfixOp::Call(args)) = &*inner.value {
+                    assert_expr_eq(&func.value, &Expr::Ref("map".to_string()));
+                    assert_eq!(args.len(), 1);
+                    assert_expr_eq(&args[0].value, &Expr::Ref("dat".to_string()));
+                } else {
+                    panic!("Expected function call before compose operator");
+                }
+            } else {
+                panic!("Expected compose operator");
+            }
+        }
+
+        // Test chained compose operators
+        let (result, errors) = parse_expr("transform(input) -> map -> filter -> reduce");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for chained compose operators"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for chained compose operators"
+        );
+
+        if let Some(expr) = result {
+            if let Expr::Postfix(inner1, PostfixOp::Compose(name1)) = &*expr.value {
+                assert_eq!(name1, "reduce");
+
+                if let Expr::Postfix(inner2, PostfixOp::Compose(name2)) = &*inner1.value {
+                    assert_eq!(name2, "filter");
+
+                    if let Expr::Postfix(inner3, PostfixOp::Compose(name3)) = &*inner2.value {
+                        assert_eq!(name3, "map");
+
+                        if let Expr::Postfix(func, PostfixOp::Call(args)) = &*inner3.value {
+                            assert_expr_eq(&func.value, &Expr::Ref("transform".to_string()));
+                            assert_eq!(args.len(), 1);
+                            assert_expr_eq(&args[0].value, &Expr::Ref("input".to_string()));
+                        } else {
+                            panic!("Expected function call at the beginning of chain");
+                        }
+                    } else {
+                        panic!("Expected first compose operation in chain");
+                    }
+                } else {
+                    panic!("Expected second compose operation in chain");
+                }
+            } else {
+                panic!("Expected third compose operation in chain");
+            }
+        }
     }
 
     #[test]
     fn test_match_expressions() {
         // Simple match expression
         let (result, errors) =
-            parse_expr("match x | 1 -> \"one\" | 2 -> \"two\" \\ _ -> \"other\"");
+            parse_expr("match x | 1 => \"one\" | 2 => \"two\" \\ _ => \"other\"");
         assert!(
             result.is_some(),
             "Expected successful parse for simple match expression"
@@ -1409,10 +1479,10 @@ mod tests {
 
         // Match with complex patterns and expressions
         let (result, errors) = parse_expr(
-            "match point | Point(x, y) -> \"first quadrant\" \
-                         | Circle(r) -> \"circle\" \
-                         | Rectangle(b: Stuff(_), h) -> \"rectangle\" \
-                         \\ _ -> \"unknown shape\"",
+            "match point | Point(x, y) => \"first quadrant\" \
+                         | Circle(r) => \"circle\" \
+                         | Rectangle(b: Stuff(_), h) => \"rectangle\" \
+                         \\ _ => \"unknown shape\"",
         );
         assert!(
             result.is_some(),
@@ -1486,12 +1556,12 @@ mod tests {
     #[test]
     fn test_crazy_composite_expression() {
         // This test creates an insanely complex nested expression with multiple features
-        let crazy_expr = "let create_calculator = (operation) -> match operation \
-                          | \"add\" -> (x, y) -> x + y \
-                          | \"subtract\" -> (x, y) -> x - y \
-                          | \"multiply\" -> (x, y) -> x * y \
-                          | \"divide\" -> (x, y) -> if y == 0 then fail(\"Division by zero\") else x / y \
-                          \\ _ -> (x, y) -> -1, \
+        let crazy_expr = "let create_calculator = (operation) => match operation \
+                          | \"add\" => (x, y) => x + y \
+                          | \"subtract\" => (x, y) => x - y \
+                          | \"multiply\" => (x, y) => x * y \
+                          | \"divide\" => (x, y) => if y == 0 then fail(\"Division by zero\") else x / y \
+                          \\ _ => (x, y) => -1, \
                             calc = create_calculator(\"multiply\"), \
                             result = calc({\"key\": 6}.key, 7), \
                           in if result > 40 \
@@ -1541,12 +1611,12 @@ mod tests {
 
         // Test the chained version of the let expressions
         let chained_crazy_expr = "let \
-                                  create_calculator = (operation) -> match operation \
-                                  | \"add\" -> (x, y) -> x + y \
-                                  | \"subtract\" -> (x, y) -> x - y \
-                                  | \"multiply\" -> (x, y) -> x * y \
-                                  | \"divide\" -> (x, y) -> if y == 0 then fail(\"Division by zero\") else x / y \
-                                  \\ _ -> (x, y) -> -1, \
+                                  create_calculator = (operation) => match operation \
+                                  | \"add\" => (x, y) => x + y \
+                                  | \"subtract\" => (x, y) => x - y \
+                                  | \"multiply\" => (x, y) => x * y \
+                                  | \"divide\" => (x, y) => if y == 0 then fail(\"Division by zero\") else x / y \
+                                  \\ _ => (x, y) => -1, \
                                   calc = create_calculator(\"multiply\"), \
                                   result: I64 = calc({\"key\": 6}.key, 7) \
                                   in if result > 40 \

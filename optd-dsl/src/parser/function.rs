@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn test_function_with_complex_return_type() {
-        let input = "fn process(dat: [I64]): (I64) -> {String: [Bool]} = (x) -> {\"result\": [true, false]}";
+        let input = "fn process(dat: [I64]): (I64) => {String: [Bool]} = (x) => {\"result\": [true, false]}";
         let (result, errors) = parse_function(input);
 
         assert!(result.is_some(), "Expected successful parse");
