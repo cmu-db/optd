@@ -1358,7 +1358,7 @@ mod tests {
 
         // Test compose operator
         let (result, errors) = parse_expr("map(dat) -> filter");
-        
+
         assert!(
             result.is_some(),
             "Expected successful parse for compose operator"

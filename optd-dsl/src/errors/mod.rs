@@ -1,2 +1,2 @@
-pub mod span;
 pub mod reporter;
+pub mod span;

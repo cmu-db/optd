@@ -147,7 +147,7 @@ mod tests {
                     )
         "#;
         let (module, errors) = parse_module(source);
-        
+
         assert_eq!(errors.len(), 0);
         assert!(module.is_some());
 
