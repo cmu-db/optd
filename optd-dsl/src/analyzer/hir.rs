@@ -1,19 +1,10 @@
 use super::r#type::{TypeRegistry, Typed};
+use optd_core::cascades::ir::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan};
 use ordered_float::OrderedFloat;
 use std::collections::HashMap;
 
 /// Unique identifier for variables, functions, types, etc.
 pub type Identifier = String;
-
-/// Represents literal values in the language
-#[derive(Debug, Clone, PartialEq)]
-pub enum Literal {
-    Int64(i64),
-    String(String),
-    Bool(bool),
-    Float64(OrderedFloat<f64>),
-    Unit,
-}
 
 /// Represents expressions in the High-level Intermediate Representation
 #[derive(Debug, Clone)]
@@ -30,12 +21,15 @@ pub enum Expr {
     Binary(Typed<Expr>, BinOp, Typed<Expr>),
     Unary(UnaryOp, Typed<Expr>),
 
-    // Function-related
-    Member(Typed<Expr>, Identifier),
+    // Function invocation, array, map, and field invocation
     Call(Typed<Expr>, Vec<Typed<Expr>>),
 
+    // Rust-UDF definition and closure definition
+    RustUDF(fn(Vec<Value>) -> Value),
+    Closure(Vec<Identifier>, Typed<Expr>),
+
     // Basic expressions
-    Ref(String),
+    Ref(Identifier),
     Literal(Literal),
     Fail(Typed<Expr>),
 
@@ -43,6 +37,40 @@ pub enum Expr {
     Array(Vec<Typed<Expr>>),
     Tuple(Vec<Typed<Expr>>),
     Map(Vec<(Typed<Expr>, Typed<Expr>)>),
+}
+
+#[derive(Debug, Clone)]
+pub enum Literal {
+    Int64(i64),
+    Float64(OrderedFloat<f64>),
+    String(String),
+    Bool(bool),
+    Unit,
+}
+
+/// Expressions can always be evaluated down to values
+#[derive(Debug, Clone)]
+pub enum Value {
+    Literal(Literal),
+
+    Array(Vec<Value>),
+    Tuple(Vec<Value>),
+    Map(Vec<(Value, Value)>),
+
+    Struct {
+        constructor: String,
+        fields: HashMap<String, Box<Value>>,
+    },
+    Variant {
+        constructor: String,
+        payload: Vec<Value>,
+    },
+
+    Closure(Vec<Identifier>, Box<Expr>),
+
+    Logical(PartialLogicalPlan),
+    Scalar(PartialScalarPlan),
+    Physical(PartialPhysicalPlan),
 }
 
 /// Represents patterns for pattern matching
@@ -135,7 +163,3 @@ pub struct HIR {
     /// Registry of all types used in the program
     pub types: TypeRegistry,
 }
-
-// 1. So functions it is... Need to gen it! Then add lambda.
-// 2. Problem: type conversion... Can use old type signature??? Could have a bridge to make stuff easier, but that's more cumbersome imo.
-// 3. Still needs to be 

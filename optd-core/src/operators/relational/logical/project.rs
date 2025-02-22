@@ -1,9 +1,7 @@
 //! A logical projection.
 
 use serde::Deserialize;
-
-use crate::values::OptdValue;
-
+use crate::cascades::ir::OperatorData;
 use super::LogicalOperator;
 
 /// Logical project operator that specifies output columns.
@@ -28,6 +26,6 @@ impl<Relation, Scalar> Project<Relation, Scalar> {
 pub fn project<Relation, Scalar>(
     child: Relation,
     fields: Vec<Scalar>,
-) -> LogicalOperator<OptdValue, Relation, Scalar> {
+) -> LogicalOperator<OperatorData, Relation, Scalar> {
     LogicalOperator::Project(Project::new(child, fields))
 }

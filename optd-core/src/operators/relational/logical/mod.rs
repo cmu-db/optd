@@ -15,12 +15,9 @@ use project::Project;
 use scan::Scan;
 use serde::Deserialize;
 
-use crate::{
-    cascades::{
-        expressions::LogicalExpression,
-        groups::{RelationalGroupId, ScalarGroupId},
-    },
-    values::OptdValue,
+use crate::cascades::{
+    expressions::LogicalExpression,
+    groups::{RelationalGroupId, ScalarGroupId}, ir::OperatorData,
 };
 
 /// Each variant of `LogicalOperator` represents a specific kind of logical operator.
@@ -62,7 +59,7 @@ pub enum LogicalOperatorKind {
     Project,
 }
 
-impl<Relation, Scalar> LogicalOperator<OptdValue, Relation, Scalar>
+impl<Relation, Scalar> LogicalOperator<OperatorData, Relation, Scalar>
 where
     Relation: Clone,
     Scalar: Clone,
@@ -86,7 +83,7 @@ where
     /// - Scan: table name
     /// - Filter: no values
     /// - Join: join type
-    pub fn values(&self) -> Vec<OptdValue> {
+    pub fn values(&self) -> Vec<OperatorData> {
         match self {
             LogicalOperator::Scan(scan) => vec![scan.table_name.clone()],
             LogicalOperator::Filter(_) => vec![],

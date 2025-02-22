@@ -1,7 +1,7 @@
 //! A logical filter.
 
+use crate::cascades::ir::OperatorData;
 use super::LogicalOperator;
-use crate::values::OptdValue;
 use serde::Deserialize;
 
 /// Logical filter operator that selects rows matching a condition.
@@ -24,6 +24,6 @@ impl<Relation, Scalar> Filter<Relation, Scalar> {
 pub fn filter<Relation, Scalar>(
     child: Relation,
     predicate: Scalar,
-) -> LogicalOperator<OptdValue, Relation, Scalar> {
+) -> LogicalOperator<OperatorData, Relation, Scalar> {
     LogicalOperator::Filter(Filter::new(child, predicate))
 }

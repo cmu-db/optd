@@ -767,16 +767,16 @@ const fn get_all_scalar_exprs_in_group_query() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cascades::ir::OperatorData;
     use crate::operators::relational::logical::*;
     use crate::operators::scalar::*;
-    use crate::values::OptdValue;
 
     #[tokio::test]
     async fn test_insert_expr_with_memo() -> anyhow::Result<()> {
         let memo = SqliteMemo::new_in_memory().await?;
 
         let true_predicate =
-            ScalarExpression::Constant(constants::Constant::new(OptdValue::Bool(true)));
+            ScalarExpression::Constant(constants::Constant::new(OperatorData::Bool(true)));
         let true_predicate_group = memo.add_scalar_expr(&true_predicate).await?;
         let scan1 = Arc::new(scan::scan("t1", true_predicate_group));
         let scan1_group = memo.add_logical_expr(&scan1).await?;

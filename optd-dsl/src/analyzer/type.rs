@@ -13,14 +13,17 @@ pub enum Type {
     String,
     Bool,
     Float64,
+
     // Special types
     Unit,
     Universe,
+
     // Complex types
     Array(Box<Type>),
     Closure(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
     Map(Box<Type>, Box<Type>),
+
     // User-defined types
     Adt(Identifier),
 }

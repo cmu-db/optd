@@ -1,6 +1,6 @@
 //! A scalar column reference operator.
 
-use crate::{operators::scalar::ScalarOperator, values::OptdValue};
+use crate::{cascades::ir::OperatorData, operators::scalar::ScalarOperator};
 use serde::Deserialize;
 
 /// A scalar operator that references a column by index.
@@ -10,16 +10,16 @@ pub struct ColumnRef<Value> {
     pub column_index: Value,
 }
 
-impl ColumnRef<OptdValue> {
+impl ColumnRef<OperatorData> {
     /// Create a new column reference.
     pub fn new(column_index: i64) -> Self {
         Self {
-            column_index: OptdValue::Int64(column_index),
+            column_index: OperatorData::Int64(column_index),
         }
     }
 }
 
 /// Creates a column reference scalar operator.
-pub fn column_ref<Scalar>(column_index: i64) -> ScalarOperator<OptdValue, Scalar> {
+pub fn column_ref<Scalar>(column_index: i64) -> ScalarOperator<OperatorData, Scalar> {
     ScalarOperator::ColumnRef(ColumnRef::new(column_index))
 }

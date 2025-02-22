@@ -1,6 +1,6 @@
 //! A physical hash join operator.
 
-use crate::{operators::relational::physical::PhysicalOperator, values::OptdValue};
+use crate::{cascades::ir::OperatorData, operators::relational::physical::PhysicalOperator};
 use serde::Deserialize;
 
 /// A physical operator that performs a hash-based join.
@@ -16,7 +16,7 @@ pub struct HashJoin<Value, Relation, Scalar> {
     pub condition: Scalar,
 }
 
-impl<Relation, Scalar> HashJoin<OptdValue, Relation, Scalar> {
+impl<Relation, Scalar> HashJoin<OperatorData, Relation, Scalar> {
     /// Create a new hash join operator.
     pub fn new(
         join_type: &str,
@@ -25,7 +25,7 @@ impl<Relation, Scalar> HashJoin<OptdValue, Relation, Scalar> {
         condition: Scalar,
     ) -> Self {
         Self {
-            join_type: OptdValue::String(join_type.into()),
+            join_type: OperatorData::String(join_type.into()),
             probe_side,
             build_side,
             condition,
@@ -39,6 +39,6 @@ pub fn hash_join<Relation, Scalar>(
     probe_side: Relation,
     build_side: Relation,
     condition: Scalar,
-) -> PhysicalOperator<OptdValue, Relation, Scalar> {
+) -> PhysicalOperator<OperatorData, Relation, Scalar> {
     PhysicalOperator::HashJoin(HashJoin::new(join_type, probe_side, build_side, condition))
 }

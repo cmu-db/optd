@@ -2,7 +2,7 @@
 
 use serde::Deserialize;
 
-use crate::values::OptdValue;
+use crate::cascades::ir::OperatorData;
 
 use super::PhysicalOperator;
 
@@ -28,6 +28,6 @@ impl<Relation, Scalar> PhysicalProject<Relation, Scalar> {
 pub fn physical_project<Relation, Scalar>(
     child: Relation,
     fields: Vec<Scalar>,
-) -> PhysicalOperator<OptdValue, Relation, Scalar> {
+) -> PhysicalOperator<OperatorData, Relation, Scalar> {
     PhysicalOperator::Project(PhysicalProject::new(child, fields))
 }

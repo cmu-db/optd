@@ -1,6 +1,7 @@
 pub mod expressions;
 pub mod goal;
 pub mod groups;
+pub mod ir;
 pub mod memo;
 pub mod properties;
 

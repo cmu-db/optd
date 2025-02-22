@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    operators::{
+    cascades::ir::OperatorData, operators::{
         relational::{
             logical::{filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator},
             physical::{
@@ -10,28 +10,26 @@ use crate::{
             },
         },
         scalar::{column_ref::ColumnRef, constants::Constant, ScalarOperator},
-    },
-    plans::{
+    }, plans::{
         logical::PartialLogicalPlan, physical::PartialPhysicalPlan, scalar::PartialScalarPlan,
-    },
-    values::OptdValue,
+    }
 };
 
 pub fn int64(value: i64) -> Arc<PartialScalarPlan> {
     Arc::new(PartialScalarPlan::PartialMaterialized {
-        operator: ScalarOperator::Constant(Constant::new(OptdValue::Int64(value))),
+        operator: ScalarOperator::Constant(Constant::new(OperatorData::Int64(value))),
     })
 }
 
 pub fn boolean(value: bool) -> Arc<PartialScalarPlan> {
     Arc::new(PartialScalarPlan::PartialMaterialized {
-        operator: ScalarOperator::Constant(Constant::new(OptdValue::Bool(value))),
+        operator: ScalarOperator::Constant(Constant::new(OperatorData::Bool(value))),
     })
 }
 
 pub fn string(value: &str) -> Arc<PartialScalarPlan> {
     Arc::new(PartialScalarPlan::PartialMaterialized {
-        operator: ScalarOperator::Constant(Constant::new(OptdValue::String(value.to_string()))),
+        operator: ScalarOperator::Constant(Constant::new(OperatorData::String(value.to_string()))),
     })
 }
 

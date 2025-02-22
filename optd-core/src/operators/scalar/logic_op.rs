@@ -2,7 +2,7 @@
 
 use serde::Deserialize;
 
-use crate::values::OptdValue;
+use crate::cascades::ir::OperatorData;
 
 use super::ScalarOperator;
 
@@ -23,11 +23,11 @@ impl<Value, Scalar> LogicOp<Value, Scalar> {
 }
 
 /// Creates an `and` logic scalar operator.
-pub fn and<Scalar>(children: Vec<Scalar>) -> ScalarOperator<OptdValue, Scalar> {
-    ScalarOperator::LogicOp(LogicOp::new(OptdValue::String("and".into()), children))
+pub fn and<Scalar>(children: Vec<Scalar>) -> ScalarOperator<OperatorData, Scalar> {
+    ScalarOperator::LogicOp(LogicOp::new(OperatorData::String("and".into()), children))
 }
 
 /// Creates an `and` logic scalar operator.
-pub fn or<Scalar>(children: Vec<Scalar>) -> ScalarOperator<OptdValue, Scalar> {
-    ScalarOperator::LogicOp(LogicOp::new(OptdValue::String("or".into()), children))
+pub fn or<Scalar>(children: Vec<Scalar>) -> ScalarOperator<OperatorData, Scalar> {
+    ScalarOperator::LogicOp(LogicOp::new(OperatorData::String("or".into()), children))
 }
