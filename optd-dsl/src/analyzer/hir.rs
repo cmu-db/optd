@@ -1,4 +1,3 @@
-use super::r#type::{TypeRegistry, Typed};
 use optd_core::cascades::ir::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan};
 use ordered_float::OrderedFloat;
 use std::collections::HashMap;
@@ -6,39 +5,50 @@ use std::collections::HashMap;
 /// Unique identifier for variables, functions, types, etc.
 pub type Identifier = String;
 
-/// Represents expressions in the High-level Intermediate Representation
+/// Represents the core data structures that can appear in both expressions and values
+#[derive(Debug, Clone)]
+pub enum CoreData<T> {
+    Literal(Literal),
+    Array(Vec<T>),
+    Tuple(Vec<T>),
+    Map(Vec<(T, T)>),
+    Struct(String, Vec<T>),
+    Closure(Vec<Identifier>, Box<Expr>),
+    Logical(PartialLogicalPlan),
+    Scalar(PartialScalarPlan),
+    Physical(PartialPhysicalPlan),
+}
+
+/// Represents expressions in the High-level Intermediate Representation (HIR)
+///
+/// Expressions encode computation that can be evaluated to produce values.
 #[derive(Debug, Clone)]
 pub enum Expr {
     // Control flow
-    PatternMatch(Typed<Expr>, Vec<MatchArm>),
-    IfThenElse(Typed<Expr>, Typed<Expr>, Typed<Expr>),
+    PatternMatch(Box<Expr>, Vec<MatchArm>),
+    IfThenElse(Box<Expr>, Box<Expr>, Box<Expr>),
 
     // Bindings and constructors
-    Let(Identifier, Typed<Expr>, Typed<Expr>),
-    Constructor(String, Vec<Typed<Expr>>),
+    Let(Identifier, Box<Expr>, Box<Expr>),
+    Constructor(String, Vec<Expr>),
 
     // Operations
-    Binary(Typed<Expr>, BinOp, Typed<Expr>),
-    Unary(UnaryOp, Typed<Expr>),
+    Binary(Box<Expr>, BinOp, Box<Expr>),
+    Unary(UnaryOp, Box<Expr>),
 
-    // Function invocation, array, map, and field invocation
-    Call(Typed<Expr>, Vec<Typed<Expr>>),
-
-    // Rust-UDF definition and closure definition
-    RustUDF(fn(Vec<Value>) -> Value),
-    Closure(Vec<Identifier>, Typed<Expr>),
-
-    // Basic expressions
+    // Function invocation and references
+    Call(Box<Expr>, Vec<Expr>),
     Ref(Identifier),
-    Literal(Literal),
-    Fail(Typed<Expr>),
+    Fail(Box<Expr>),
 
-    // Collections
-    Array(Vec<Typed<Expr>>),
-    Tuple(Vec<Typed<Expr>>),
-    Map(Vec<(Typed<Expr>, Typed<Expr>)>),
+    // Rust User-Defined Function
+    RustUDF(fn(Vec<Value>) -> Value),
+
+    // Core shared data structures
+    Core(CoreData<Expr>),
 }
 
+/// Literal values that can be directly represented in the language
 #[derive(Debug, Clone)]
 pub enum Literal {
     Int64(i64),
@@ -48,36 +58,19 @@ pub enum Literal {
     Unit,
 }
 
-/// Expressions can always be evaluated down to values
+/// Result of evaluating an expression
+///
+/// Values represent fully evaluated data that result from executing expressions.
 #[derive(Debug, Clone)]
-pub enum Value {
-    Literal(Literal),
-
-    Array(Vec<Value>),
-    Tuple(Vec<Value>),
-    Map(Vec<(Value, Value)>),
-
-    Struct {
-        constructor: String,
-        fields: HashMap<String, Box<Value>>,
-    },
-    Variant {
-        constructor: String,
-        payload: Vec<Value>,
-    },
-
-    Closure(Vec<Identifier>, Box<Expr>),
-
-    Logical(PartialLogicalPlan),
-    Scalar(PartialScalarPlan),
-    Physical(PartialPhysicalPlan),
+pub struct Value {
+    pub data: CoreData<Value>,
 }
 
-/// Represents patterns for pattern matching
+/// Represents patterns for pattern matching expressions
 #[derive(Debug, Clone)]
 pub enum Pattern {
-    Bind(Typed<Identifier>, Typed<Pattern>),
-    Constructor(Typed<Identifier>, Vec<Typed<Pattern>>),
+    Bind(Identifier, Box<Pattern>),
+    Constructor(Identifier, Vec<Pattern>),
     Literal(Literal),
     Wildcard,
 }
@@ -85,8 +78,8 @@ pub enum Pattern {
 /// Represents a single arm in a pattern match expression
 #[derive(Debug, Clone)]
 pub struct MatchArm {
-    pub pattern: Typed<Pattern>,
-    pub expr: Typed<Expr>,
+    pub pattern: Pattern,
+    pub expr: Expr,
 }
 
 /// Binary operators supported by the language
@@ -128,8 +121,7 @@ pub enum UnaryOp {
 #[derive(Debug, Clone)]
 pub struct AnnotatedExpr {
     /// The expression itself
-    pub expr: Typed<Expr>,
-
+    pub expr: Expr,
     /// List of annotations associated with this expression
     pub annotations: Vec<Identifier>,
 }
@@ -139,18 +131,15 @@ pub struct AnnotatedExpr {
 /// The HIR is an intermediary representation that exists after type checking and
 /// before code generation or optimization. Unlike the AST, the HIR:
 ///
-/// 1. Contains fully resolved type information for all expressions
-/// 2. Has undergone semantic analysis and type checking
-/// 3. Has simpler, more regular structure with less syntactic sugar
-/// 4. Contains only valid, well-typed expressions (error nodes are removed)
-/// 5. Preserves information about annotations for later compilation phases
-/// 6. Serves as a bridge between the frontend (parsing, type checking) and
+/// 1. Has undergone semantic analysis and type checking
+/// 2. Has simpler, more regular structure with less syntactic sugar
+/// 3. Preserves information about annotations for later compilation phases
+/// 4. Serves as a bridge between the frontend (parsing, type checking) and
 ///    the backend (optimization, code generation)
 ///
 /// This representation differs from AST in several key ways:
 /// - HIR is more normalized and regular, making it easier for later compiler stages
 /// - AST contains source location information (spans) while HIR doesn't
-/// - HIR includes type information that wasn't available during parsing
 /// - AST preserves all parsing artifacts, while HIR is a cleaned representation
 ///
 /// The HIR is intended to be consumed by later compiler stages like optimization
@@ -159,7 +148,4 @@ pub struct AnnotatedExpr {
 pub struct HIR {
     /// Map from function name to its annotated expression
     pub expressions: HashMap<Identifier, AnnotatedExpr>,
-
-    /// Registry of all types used in the program
-    pub types: TypeRegistry,
 }
