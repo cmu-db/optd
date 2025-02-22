@@ -1,7 +1,5 @@
 #[allow(dead_code)]
 pub mod cascades;
-pub mod catalog;
-pub mod dsl;
 pub mod engine;
 pub mod operators;
 pub mod plans;
