@@ -117,6 +117,7 @@ pub enum Expr {
 }
 
 /// Represents literal values in the language
+/// TODO: Remove PartialEq & OrderedFloat
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     /// 64-bit signed integer literal

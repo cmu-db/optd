@@ -1,9 +1,27 @@
 use optd_core::cascades::ir::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan};
-use ordered_float::OrderedFloat;
 use std::collections::HashMap;
 
 /// Unique identifier for variables, functions, types, etc.
 pub type Identifier = String;
+
+/// Literal values that can be directly represented in the language
+#[derive(Debug, Clone)]
+pub enum Literal {
+    Int64(i64),
+    Float64(f64),
+    String(String),
+    Bool(bool),
+    Unit,
+}
+
+/// Represents different types of functions that can exist in the system
+#[derive(Debug, Clone)]
+pub enum FunType {
+    /// User-defined function written in the DSL (closure)
+    Closure(Vec<Identifier>, Box<Expr>),
+    /// User-defined function implemented in Rust
+    RustUDF(fn(Vec<Value>) -> Value),
+}
 
 /// Represents the core data structures that can appear in both expressions and values
 #[derive(Debug, Clone)]
@@ -13,10 +31,11 @@ pub enum CoreData<T> {
     Tuple(Vec<T>),
     Map(Vec<(T, T)>),
     Struct(String, Vec<T>),
-    Closure(Vec<Identifier>, Box<Expr>),
+    Function(FunType),
     Logical(PartialLogicalPlan),
     Scalar(PartialScalarPlan),
     Physical(PartialPhysicalPlan),
+    Fail(Box<T>),
 }
 
 /// Represents expressions in the High-level Intermediate Representation (HIR)
@@ -30,7 +49,6 @@ pub enum Expr {
 
     // Bindings and constructors
     Let(Identifier, Box<Expr>, Box<Expr>),
-    Constructor(String, Vec<Expr>),
 
     // Operations
     Binary(Box<Expr>, BinOp, Box<Expr>),
@@ -39,32 +57,16 @@ pub enum Expr {
     // Function invocation and references
     Call(Box<Expr>, Vec<Expr>),
     Ref(Identifier),
-    Fail(Box<Expr>),
-
-    // Rust User-Defined Function
-    RustUDF(fn(Vec<Value>) -> Value),
 
     // Core shared data structures
     Core(CoreData<Expr>),
-}
-
-/// Literal values that can be directly represented in the language
-#[derive(Debug, Clone)]
-pub enum Literal {
-    Int64(i64),
-    Float64(OrderedFloat<f64>),
-    String(String),
-    Bool(bool),
-    Unit,
 }
 
 /// Result of evaluating an expression
 ///
 /// Values represent fully evaluated data that result from executing expressions.
 #[derive(Debug, Clone)]
-pub struct Value {
-    pub data: CoreData<Value>,
-}
+pub struct Value(pub CoreData<Value>);
 
 /// Represents patterns for pattern matching expressions
 #[derive(Debug, Clone)]
@@ -82,7 +84,7 @@ pub struct MatchArm {
     pub expr: Expr,
 }
 
-/// Binary operators supported by the language
+/// Binary operators supported by the language (normalized)
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinOp {
     // Arithmetic
@@ -91,16 +93,9 @@ pub enum BinOp {
     Mul,
     Div,
 
-    // String, list, map
-    Concat,
-
     // Comparison
-    Eq,
-    Neq,
-    Gt,
     Lt,
-    Ge,
-    Le,
+    Eq,
 
     // Logical
     And,
@@ -108,6 +103,7 @@ pub enum BinOp {
 
     // Other
     Range,
+    Concat,
 }
 
 /// Unary operators supported by the language
@@ -117,12 +113,12 @@ pub enum UnaryOp {
     Not,
 }
 
-/// Stores annotation information for a function or expression
+/// Stores annotation information for a value
 #[derive(Debug, Clone)]
-pub struct AnnotatedExpr {
-    /// The expression itself
-    pub expr: Expr,
-    /// List of annotations associated with this expression
+pub struct AnnotatedValue {
+    /// The value itself
+    pub value: Value,
+    /// List of annotations associated with this value
     pub annotations: Vec<Identifier>,
 }
 
@@ -146,6 +142,6 @@ pub struct AnnotatedExpr {
 /// and code generation.
 #[derive(Debug, Clone)]
 pub struct HIR {
-    /// Map from function name to its annotated expression
-    pub expressions: HashMap<Identifier, AnnotatedExpr>,
+    /// Map from function name to its annotated value
+    pub expressions: HashMap<Identifier, AnnotatedValue>,
 }

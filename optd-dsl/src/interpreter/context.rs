@@ -1,18 +1,18 @@
-use crate::analyzer::hir::Expr;
+use crate::analyzer::hir::Value;
 use std::collections::HashMap;
 
 /// A stack-based variable binding system that implements lexical scoping.
 ///
 /// This context maintains a stack of scopes where each scope is a hashmap
-/// mapping variable names to expressions. Variable lookup follows lexical
+/// mapping variable names to values. Variable lookup follows lexical
 /// scoping rules, searching from innermost (top of stack) to outermost
 /// (bottom of stack) scope.
 ///
 /// The context always contains at least one scope (the global scope).
 pub struct Context {
-    /// Stack of scopes, where each scope is a map of variable names to expressions.
+    /// Stack of scopes, where each scope is a map of variable names to values.
     /// The last element is the current (innermost) scope.
-    scopes: Vec<HashMap<String, Expr>>,
+    scopes: Vec<HashMap<String, Value>>,
 }
 
 impl Context {
@@ -25,7 +25,7 @@ impl Context {
     /// # Returns
     ///
     /// A new `Context` instance with one scope containing the initial bindings
-    pub fn new(initial_bindings: HashMap<String, Expr>) -> Self {
+    pub fn new(initial_bindings: HashMap<String, Value>) -> Self {
         let mut context = Self { scopes: Vec::new() };
         // Start with a scope containing the initial bindings
         context.scopes.push(initial_bindings);
@@ -63,11 +63,11 @@ impl Context {
     ///
     /// # Returns
     ///
-    /// Some reference to the expression if found, None otherwise
-    pub fn lookup(&self, name: &str) -> Option<&Expr> {
+    /// Some reference to the value if found, None otherwise
+    pub fn lookup(&self, name: &str) -> Option<&Value> {
         for scope in self.scopes.iter().rev() {
-            if let Some(expr) = scope.get(name) {
-                return Some(expr);
+            if let Some(value) = scope.get(name) {
+                return Some(value);
             }
         }
         None
@@ -81,9 +81,9 @@ impl Context {
     /// # Arguments
     ///
     /// * `name` - The name of the variable to bind
-    /// * `expr` - The expression to bind to the variable
-    pub fn bind(&mut self, name: String, expr: Expr) {
+    /// * `val` - The value to bind to the variable
+    pub fn bind(&mut self, name: String, val: Value) {
         // We're always guaranteed to have at least one scope
-        self.scopes.last_mut().unwrap().insert(name, expr);
+        self.scopes.last_mut().unwrap().insert(name, val);
     }
 }

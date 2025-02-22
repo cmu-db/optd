@@ -1,8 +1,10 @@
-use crate::analyzer::hir::{CoreData, Expr, Value, HIR};
+use crate::analyzer::hir::{AnnotatedValue, CoreData, Expr, HIR};
 use context::Context;
 use optd_core::cascades::ir::PartialLogicalPlan;
 use optd_core::cascades::memo::Memoize;
-pub mod context;
+
+mod context;
+mod evaluator;
 
 /// The interpreter for evaluating HIR expressions
 pub struct Interpreter<'a, M: Memoize> {
@@ -28,7 +30,7 @@ impl<'a, M: Memoize> Interpreter<'a, M> {
             self.hir
                 .expressions
                 .iter()
-                .map(|(id, expr)| (id.clone(), expr.expr.clone()))
+                .map(|(id, AnnotatedValue { value, .. })| (id.clone(), value.clone()))
                 .collect(),
         );
 
@@ -40,10 +42,10 @@ impl<'a, M: Memoize> Interpreter<'a, M> {
         let result = call_expr.evaluate(&mut context, self.memo);
 
         // Extract the results
-        match result.data {
+        match result.0 {
             CoreData::Array(transformations) => transformations
                 .into_iter()
-                .filter_map(|v| match v.data {
+                .filter_map(|v| match v.0 {
                     CoreData::Logical(plan) => Some(plan),
                     _ => None,
                 })
@@ -55,13 +57,5 @@ impl<'a, M: Memoize> Interpreter<'a, M> {
                 unreachable!("Rule '{}' did not return valid transformations", rule_name)
             }
         }
-    }
-}
-
-impl Expr {
-    /// Evaluate an expression in the given context with memoization
-    pub fn evaluate<'a, M: Memoize>(&self, _context: &mut Context, _memo: &M) -> Value {
-        // Implementation will go here, for now just a placeholder
-        unimplemented!("Expression evaluation not implemented yet")
     }
 }

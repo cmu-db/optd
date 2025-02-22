@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    cascades::ir::OperatorData, operators::{
+    cascades::ir::OperatorData,
+    operators::{
         relational::{
             logical::{filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator},
             physical::{
@@ -10,9 +11,10 @@ use crate::{
             },
         },
         scalar::{column_ref::ColumnRef, constants::Constant, ScalarOperator},
-    }, plans::{
+    },
+    plans::{
         logical::PartialLogicalPlan, physical::PartialPhysicalPlan, scalar::PartialScalarPlan,
-    }
+    },
 };
 
 pub fn int64(value: i64) -> Arc<PartialScalarPlan> {

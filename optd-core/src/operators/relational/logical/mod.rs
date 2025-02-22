@@ -17,7 +17,8 @@ use serde::Deserialize;
 
 use crate::cascades::{
     expressions::LogicalExpression,
-    groups::{RelationalGroupId, ScalarGroupId}, ir::OperatorData,
+    groups::{RelationalGroupId, ScalarGroupId},
+    ir::OperatorData,
 };
 
 /// Each variant of `LogicalOperator` represents a specific kind of logical operator.

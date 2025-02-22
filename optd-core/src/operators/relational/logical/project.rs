@@ -1,8 +1,8 @@
 //! A logical projection.
 
-use serde::Deserialize;
-use crate::cascades::ir::OperatorData;
 use super::LogicalOperator;
+use crate::cascades::ir::OperatorData;
+use serde::Deserialize;
 
 /// Logical project operator that specifies output columns.
 ///

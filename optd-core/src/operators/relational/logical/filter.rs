@@ -1,7 +1,7 @@
 //! A logical filter.
 
-use crate::cascades::ir::OperatorData;
 use super::LogicalOperator;
+use crate::cascades::ir::OperatorData;
 use serde::Deserialize;
 
 /// Logical filter operator that selects rows matching a condition.
