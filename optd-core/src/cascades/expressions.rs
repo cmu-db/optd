@@ -5,13 +5,14 @@ use crate::operators::scalar::ScalarOperator;
 use crate::{operators::relational::logical::LogicalOperator, values::OptdValue};
 use serde::Deserialize;
 
+use super::goal::GoalId;
 use super::groups::{RelationalGroupId, ScalarGroupId};
 
 /// A logical expression in the memo table.
 pub type LogicalExpression = LogicalOperator<OptdValue, RelationalGroupId, ScalarGroupId>;
 
 /// A physical expression in the memo table.
-pub type PhysicalExpression = PhysicalOperator<OptdValue, RelationalGroupId, ScalarGroupId>;
+pub type PhysicalExpression = PhysicalOperator<OptdValue, GoalId, ScalarGroupId>;
 
 /// A scalar expression in the memo table.
 pub type ScalarExpression = ScalarOperator<OptdValue, ScalarGroupId>;

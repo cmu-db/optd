@@ -25,6 +25,7 @@ use datafusion::error::{DataFusionError, Result};
 use datafusion::execution::context::SessionConfig;
 use datafusion::execution::memory_pool::{FairSpillPool, GreedyMemoryPool, MemoryPool};
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::prelude::SessionContext;
 use optd_datafusion_cli::catalog::DynamicObjectStoreCatalog;
 use optd_datafusion_cli::functions::ParquetMetadataFunc;
 use optd_datafusion_cli::{
@@ -122,6 +123,9 @@ struct Args {
 
     #[clap(long, help = "Enables console syntax highlighting")]
     color: bool,
+
+    #[clap(long, help = "Disable the optd optimizer")]
+    disable_optd: bool,
 }
 
 #[tokio::main]
@@ -169,9 +173,14 @@ async fn main_inner() -> Result<()> {
     let runtime_env = rt_builder.build_arc()?;
 
     // enable dynamic file query
-    let ctx = optd_datafusion::create_df_context(Some(session_config), Some(runtime_env), None)
-        .await
-        .map_err(|e| DataFusionError::External(e.into()))?;
+    let ctx = if args.disable_optd {
+        SessionContext::new_with_config_rt(session_config, runtime_env).enable_url_table()
+    } else {
+        optd_datafusion::create_df_context(Some(session_config), Some(runtime_env), None)
+            .await
+            .map_err(|e| DataFusionError::External(e.into()))?
+    };
+
     ctx.refresh_catalogs().await?;
     // install dynamic catalog provider that can register required object stores
     ctx.register_catalog_list(Arc::new(DynamicObjectStoreCatalog::new(
