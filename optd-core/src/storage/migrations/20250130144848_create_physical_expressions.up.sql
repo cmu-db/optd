@@ -5,6 +5,8 @@ CREATE TABLE physical_expressions (
     goal_id BIGINT NOT NULL ON CONFLICT REPLACE,
     -- The kind of the physical operator.
     operator_kind TEXT NOT NULL,
+    -- The cost of the physical expression.
+    cost DOUBLE NOT NULL,
     -- The time at which the physical expression is created.
     created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP) NOT NULL,
     -- When group merging happens, the group id of the physical expression is also updated.

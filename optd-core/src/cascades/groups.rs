@@ -1,5 +1,3 @@
-use serde::Deserialize;
-
 /// A unique identifier for a group of relational expressions in the memo table.
 #[repr(transparent)]
 #[derive(
@@ -13,7 +11,7 @@ use serde::Deserialize;
     Hash,
     sqlx::Type,
     serde::Serialize,
-    Deserialize,
+    serde::Deserialize,
 )]
 #[sqlx(transparent)]
 pub struct RelationalGroupId(pub i64);
@@ -31,7 +29,7 @@ pub struct RelationalGroupId(pub i64);
     Hash,
     sqlx::Type,
     serde::Serialize,
-    Deserialize,
+    serde::Deserialize,
 )]
 #[sqlx(transparent)]
 pub struct ScalarGroupId(pub i64);

@@ -14,6 +14,7 @@ use memo::Memoize;
 use properties::PhysicalProperties;
 
 use crate::{
+    cost_model::Cost,
     operators::{
         relational::{
             logical::{filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator},
@@ -142,6 +143,8 @@ async fn mock_optimize_relation_expr(
     goal_id: GoalId,
     logical_expr: &LogicalExpression,
 ) -> anyhow::Result<GoalId> {
+    let fake_cost = Cost(1.);
+
     match logical_expr {
         LogicalExpression::Scan(scan) => {
             mock_optimize_scalar_group(memo, scan.predicate).await?;
@@ -149,7 +152,7 @@ async fn mock_optimize_relation_expr(
                 table_name: scan.table_name.clone(),
                 predicate: scan.predicate,
             });
-            memo.add_physical_expr_to_goal(&physical_expr, goal_id)
+            memo.add_physical_expr_to_goal(&physical_expr, fake_cost, goal_id)
                 .await
         }
         LogicalExpression::Filter(filter) => {
@@ -159,7 +162,7 @@ async fn mock_optimize_relation_expr(
                 child,
                 predicate: filter.predicate,
             });
-            memo.add_physical_expr_to_goal(&physical_expr, goal_id)
+            memo.add_physical_expr_to_goal(&physical_expr, fake_cost, goal_id)
                 .await
         }
         LogicalExpression::Join(join) => {
@@ -172,7 +175,7 @@ async fn mock_optimize_relation_expr(
                 inner,
                 condition: join.condition,
             });
-            memo.add_physical_expr_to_goal(&physical_expr, goal_id)
+            memo.add_physical_expr_to_goal(&physical_expr, fake_cost, goal_id)
                 .await
         }
         LogicalExpression::Project(project) => {
@@ -184,7 +187,7 @@ async fn mock_optimize_relation_expr(
                 child,
                 fields: project.fields.clone(),
             });
-            memo.add_physical_expr_to_goal(&physical_expr, goal_id)
+            memo.add_physical_expr_to_goal(&physical_expr, fake_cost, goal_id)
                 .await
         }
     }
@@ -244,51 +247,67 @@ pub async fn match_any_partial_logical_plan(
 }
 
 #[async_recursion]
-async fn match_any_partial_physical_plan(
+async fn get_best_partial_physical_plan(
     memo: &impl Memoize,
     goal_id: GoalId,
-) -> anyhow::Result<Arc<PartialPhysicalPlan>> {
-    let physical_exprs = memo.get_all_physical_exprs_in_goal(goal_id).await?;
-    let last_physical_expr = physical_exprs.last().unwrap().1.clone();
-    match last_physical_expr.as_ref() {
+) -> anyhow::Result<Option<Arc<PartialPhysicalPlan>>> {
+    // let winner_expr =
+    // let physical_exprs = memo.get_all_physical_exprs_in_goal(goal_id).await?;
+    let Some((_id, winner_physical_expr, _cost)) =
+        memo.get_winner_physical_expr_in_goal(goal_id).await?
+    else {
+        return Ok(None);
+    };
+    match winner_physical_expr.as_ref() {
         PhysicalExpression::TableScan(table_scan) => {
-            Ok(Arc::new(PartialPhysicalPlan::PartialMaterialized {
+            Ok(Some(Arc::new(PartialPhysicalPlan::PartialMaterialized {
                 operator: physical::PhysicalOperator::TableScan(TableScan {
                     table_name: table_scan.table_name.clone(),
                     predicate: match_any_partial_scalar_plan(memo, table_scan.predicate).await?,
                 }),
-            }))
+            })))
         }
         PhysicalExpression::Filter(filter) => {
-            Ok(Arc::new(PartialPhysicalPlan::PartialMaterialized {
+            let Some(child) = get_best_partial_physical_plan(memo, filter.child).await? else {
+                return Ok(None);
+            };
+            Ok(Some(Arc::new(PartialPhysicalPlan::PartialMaterialized {
                 operator: physical::PhysicalOperator::Filter(PhysicalFilter {
-                    child: match_any_partial_physical_plan(memo, filter.child).await?,
+                    child,
                     predicate: match_any_partial_scalar_plan(memo, filter.predicate).await?,
                 }),
-            }))
+            })))
         }
         PhysicalExpression::NestedLoopJoin(nested_loop_join) => {
-            Ok(Arc::new(PartialPhysicalPlan::PartialMaterialized {
+            let Some(outer) = get_best_partial_physical_plan(memo, nested_loop_join.outer).await?
+            else {
+                return Ok(None);
+            };
+            let Some(inner) = get_best_partial_physical_plan(memo, nested_loop_join.inner).await?
+            else {
+                return Ok(None);
+            };
+            Ok(Some(Arc::new(PartialPhysicalPlan::PartialMaterialized {
                 operator: physical::PhysicalOperator::NestedLoopJoin(NestedLoopJoin {
                     join_type: nested_loop_join.join_type.clone(),
-                    outer: match_any_partial_physical_plan(memo, nested_loop_join.outer).await?,
-                    inner: match_any_partial_physical_plan(memo, nested_loop_join.inner).await?,
+                    outer,
+                    inner,
                     condition: match_any_partial_scalar_plan(memo, nested_loop_join.condition)
                         .await?,
                 }),
-            }))
+            })))
         }
         PhysicalExpression::Project(project) => {
             let mut fields = Vec::with_capacity(project.fields.len());
             for field in project.fields.iter() {
                 fields.push(match_any_partial_scalar_plan(memo, *field).await?);
             }
-            Ok(Arc::new(PartialPhysicalPlan::PartialMaterialized {
-                operator: physical::PhysicalOperator::Project(PhysicalProject {
-                    child: match_any_partial_physical_plan(memo, project.child).await?,
-                    fields,
-                }),
-            }))
+            let Some(child) = get_best_partial_physical_plan(memo, project.child).await? else {
+                return Ok(None);
+            };
+            Ok(Some(Arc::new(PartialPhysicalPlan::PartialMaterialized {
+                operator: physical::PhysicalOperator::Project(PhysicalProject { child, fields }),
+            })))
         }
         _ => unimplemented!(),
     }
@@ -507,9 +526,9 @@ mod tests {
         assert_eq!(result, logical_plan);
 
         let goal_id = mock_optimize_relation_group(&memo, group_id).await?;
-        let physical_plan = match_any_partial_physical_plan(&memo, goal_id).await?;
+        let physical_plan = get_best_partial_physical_plan(&memo, goal_id).await?;
 
-        assert_eq!(physical_plan, table_scan("t1", boolean(true)));
+        assert_eq!(physical_plan, Some(table_scan("t1", boolean(true))));
 
         Ok(())
     }
@@ -529,14 +548,14 @@ mod tests {
         assert_eq!(result, logical_plan);
 
         let goal_id = mock_optimize_relation_group(&memo, group_id).await?;
-        let physical_plan = match_any_partial_physical_plan(&memo, goal_id).await?;
+        let physical_plan = get_best_partial_physical_plan(&memo, goal_id).await?;
 
         assert_eq!(
             physical_plan,
-            physical_filter(
+            Some(physical_filter(
                 table_scan("t1", or(vec![boolean(true), boolean(false)])),
                 and(vec![equal(column_ref(0), int64(1)), boolean(true)])
-            )
+            ))
         );
 
         Ok(())
@@ -560,17 +579,17 @@ mod tests {
         assert_eq!(result, logical_plan);
 
         let goal_id = mock_optimize_relation_group(&memo, group_id).await?;
-        let physical_plan = match_any_partial_physical_plan(&memo, goal_id).await?;
+        let physical_plan = get_best_partial_physical_plan(&memo, goal_id).await?;
 
         let table_scan_t1 = table_scan("t1", not(boolean(false)));
         assert_eq!(
             physical_plan,
-            nested_loop_join(
+            Some(nested_loop_join(
                 "inner",
                 table_scan_t1.clone(),
                 table_scan_t1,
                 equal(column_ref(0), column_ref(0)),
-            )
+            ))
         );
 
         Ok(())
@@ -594,17 +613,17 @@ mod tests {
         assert_eq!(result, logical_plan);
 
         let goal_id = mock_optimize_relation_group(&memo, group_id).await?;
-        let physical_plan = match_any_partial_physical_plan(&memo, goal_id).await?;
+        let physical_plan = get_best_partial_physical_plan(&memo, goal_id).await?;
 
         assert_eq!(
             physical_plan,
-            physical_project(
+            Some(physical_project(
                 table_scan("t1", boolean(true)),
                 vec![
                     column_ref(0),
                     minus(add(column_ref(1), int64(1)), neg(int64(3))),
                 ],
-            )
+            ))
         );
 
         Ok(())

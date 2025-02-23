@@ -11,6 +11,7 @@ use sqlx::{
 
 use crate::{
     cascades::goal::{Goal, GoalId},
+    cost_model::Cost,
     operators::scalar::ScalarOperatorKind,
 };
 use crate::{
@@ -33,10 +34,12 @@ pub struct SqliteMemo {
     db: SqlitePool,
     /// SQL query string to get all logical expressions in a group.
     get_all_logical_exprs_in_group_query: String,
-    /// SQL query string to get all physical expressions in a group.
-    get_all_physical_exprs_in_goal_query: String,
     /// SQL query string to get all scalar expressions in a group.
     get_all_scalar_exprs_in_group_query: String,
+    /// SQL query string to get the winner physical epxression for a goal.
+    get_winner_physical_expr_in_goal_query: String,
+    /// SQL query string to get all physical expressions in a group.
+    get_all_physical_exprs_in_goal_query: String,
 }
 
 impl SqliteMemo {
@@ -60,8 +63,9 @@ impl SqliteMemo {
         let memo = Self {
             db: SqlitePool::connect_with(options).await?,
             get_all_logical_exprs_in_group_query: get_all_logical_exprs_in_group_query().into(),
-            get_all_physical_exprs_in_goal_query: get_all_physical_exprs_in_goal_query().into(),
             get_all_scalar_exprs_in_group_query: get_all_scalar_exprs_in_group_query().into(),
+            get_winner_physical_expr_in_goal_query: get_winner_physical_expr_in_goal_query().into(),
+            get_all_physical_exprs_in_goal_query: get_all_physical_exprs_in_goal_query().into(),
         };
         memo.migrate().await?;
         Ok(memo)
@@ -106,7 +110,7 @@ impl Memoize for SqliteMemo {
         Ok(inserted_goal_id)
     }
 
-    async fn get_relation_goal(&self, goal_id: GoalId) -> Result<Arc<Goal>> {
+    async fn get_goal(&self, goal_id: GoalId) -> Result<Arc<Goal>> {
         let mut txn = self.begin().await?;
         let goal = sqlx::query_as("SELECT id, group_id, required_physical_properties, optimization_status FROM goals WHERE id = $1")
             .bind(goal_id)
@@ -262,22 +266,41 @@ impl Memoize for SqliteMemo {
             .collect())
     }
 
-    /// Adds a physical expression to a goal in the memo table.
     async fn add_physical_expr_to_goal(
         &self,
         physical_expr: &PhysicalExpression,
+        cost: Cost,
         goal_id: GoalId,
     ) -> Result<GoalId> {
-        self.add_physical_expr_to_goal_inner(physical_expr, goal_id)
+        self.add_physical_expr_to_goal_inner(physical_expr, cost, goal_id)
             .await
     }
 
-    /// Gets the winner physical expression.
     async fn get_winner_physical_expr_in_goal(
         &self,
-        _goal_id: GoalId,
-    ) -> Result<Option<(PhysicalExpressionId, Arc<PhysicalExpression>)>> {
-        todo!()
+        goal_id: GoalId,
+    ) -> Result<Option<(PhysicalExpressionId, Arc<PhysicalExpression>, Cost)>> {
+        #[derive(sqlx::FromRow)]
+        struct PhysicalExprRecord {
+            physical_expression_id: PhysicalExpressionId,
+            data: sqlx::types::Json<Arc<PhysicalExpression>>,
+            cost: Cost,
+        }
+
+        let mut txn = self.begin().await?;
+        let representative_goal_id = self.get_representative_goal_id(&mut txn, goal_id).await?;
+
+        let winner: Option<PhysicalExprRecord> =
+            sqlx::query_as(&self.get_winner_physical_expr_in_goal_query)
+                .bind(representative_goal_id)
+                .fetch_optional(&mut *txn)
+                .await?;
+
+        let winner =
+            winner.map(|record| (record.physical_expression_id, record.data.0, record.cost));
+
+        txn.commit().await?;
+        Ok(winner)
     }
 }
 
@@ -684,6 +707,7 @@ impl SqliteMemo {
     async fn add_physical_expr_to_goal_inner(
         &self,
         physical_expr: &PhysicalExpression,
+        cost: Cost,
         representative_goal_id: GoalId,
     ) -> anyhow::Result<GoalId> {
         let mut txn = self.begin().await?;
@@ -699,6 +723,7 @@ impl SqliteMemo {
                     physical_expr_id,
                     goal_id,
                     PhysicalOperatorKind::TableScan,
+                    cost,
                 )
                 .await?;
 
@@ -716,6 +741,7 @@ impl SqliteMemo {
                     physical_expr_id,
                     goal_id,
                     PhysicalOperatorKind::Filter,
+                    cost,
                 )
                 .await?;
 
@@ -733,6 +759,7 @@ impl SqliteMemo {
                     physical_expr_id,
                     goal_id,
                     PhysicalOperatorKind::NestedLoopJoin,
+                    cost,
                 )
                 .await?;
 
@@ -752,6 +779,7 @@ impl SqliteMemo {
                     physical_expr_id,
                     goal_id,
                     PhysicalOperatorKind::Project,
+                    cost,
                 )
                 .await?;
 
@@ -776,13 +804,15 @@ impl SqliteMemo {
         physical_expr_id: PhysicalExpressionId,
         goal_id: GoalId,
         operator_kind: PhysicalOperatorKind,
+        cost: Cost,
     ) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO physical_expressions (id, goal_id, operator_kind) VALUES ($1, $2, $3)",
+            "INSERT INTO physical_expressions (id, goal_id, operator_kind, cost) VALUES ($1, $2, $3, $4)",
         )
         .bind(physical_expr_id)
         .bind(goal_id)
         .bind(operator_kind)
+        .bind(cost)
         .execute(&mut *txn)
         .await?;
         Ok(())
@@ -804,18 +834,6 @@ const fn get_all_logical_exprs_in_group_query() -> &'static str {
     )
 }
 
-const fn get_all_physical_exprs_in_goal_query() -> &'static str {
-    concat!(
-        "SELECT physical_expression_id, json_object('TableScan', json_object('table_name', json(table_name), 'predicate', predicate_group_id)) as data FROM table_scans WHERE goal_id = $1",
-        " UNION ALL ",
-        "SELECT physical_expression_id, json_object('Filter', json_object('child', child_goal_id, 'predicate', predicate_group_id)) as data FROM physical_filters WHERE goal_id = $1",
-        " UNION ALL ",
-        "SELECT physical_expression_id, json_object('NestedLoopJoin', json_object('join_type', json(join_type), 'outer', outer_goal_id, 'inner', inner_goal_id, 'condition', condition_group_id)) as data FROM nested_loop_joins WHERE goal_id = $1",
-        " UNION ALL ",
-        "SELECT physical_expression_id, json_object('Project', json_object('child', child_goal_id, 'fields', json(fields_group_ids))) as data FROM physical_projects WHERE goal_id = $1"
-    )
-}
-
 /// The SQL query to get all scalar expressions in a group.
 /// For each of the operators, the scalar_expression_id is selected,
 /// as well as the data fields in json form.
@@ -830,6 +848,41 @@ const fn get_all_scalar_exprs_in_group_query() -> &'static str {
         "SELECT scalar_expression_id, json_object('LogicOp', json_object('kind', json(kind), 'children', json(children_group_ids))) as data FROM scalar_logic_ops WHERE group_id = $1",
         " UNION ALL ",
         "SELECT scalar_expression_id, json_object('UnaryOp', json_object('kind', json(kind), 'child', child_group_id)) as data FROM scalar_unary_ops WHERE group_id = $1",
+    )
+}
+
+/// The SQL query to get the winner physical expression in a goal.
+/// For each of the operators, the physical_expression_id and the
+/// associated cost is selected as well as the data fields in json form.
+const fn get_winner_physical_expr_in_goal_query() -> &'static str {
+    concat!(
+        " WITH winner(id, operator_kind, cost) AS (",
+        " SELECT id, operator_kind, min(cost) FROM physical_expressions WHERE goal_id = $1",
+        " ) SELECT winner.id as physical_expression_id, CASE",
+        "     WHEN winner.operator_kind = 'TableScan'",
+        "        THEN (SELECT json_object('TableScan', json_object('table_name', json(table_name), 'predicate', predicate_group_id)) FROM table_scans WHERE physical_expression_id = winner.id)",
+        "     WHEN winner.operator_kind = 'Filter'",
+        "        THEN (SELECT json_object('Filter', json_object('child', child_goal_id, 'predicate', predicate_group_id)) FROM physical_filters WHERE physical_expression_id = winner.id)",
+        "     WHEN winner.operator_kind = 'NestedLoopJoin'",
+        "        THEN (SELECT json_object('NestedLoopJoin', json_object('join_type', json(join_type), 'outer', outer_goal_id, 'inner', inner_goal_id, 'condition', condition_group_id)) FROM nested_loop_joins WHERE physical_expression_id = winner.id)",
+        "     WHEN winner.operator_kind = 'Project'",
+        "        THEN (SELECT json_object('Project', json_object('child', child_goal_id, 'fields', json(fields_group_ids))) FROM physical_projects WHERE physical_expression_id = winner.id)",
+        " END as data, winner.cost as cost FROM winner"
+    )
+}
+
+/// The SQL query to get all physical expressions in a goal.
+/// For each of the operators, the physical_expression_id is selected,
+/// as well as the data fields in json form.
+const fn get_all_physical_exprs_in_goal_query() -> &'static str {
+    concat!(
+        "SELECT physical_expression_id, json_object('TableScan', json_object('table_name', json(table_name), 'predicate', predicate_group_id)) as data FROM table_scans WHERE goal_id = $1",
+        " UNION ALL ",
+        "SELECT physical_expression_id, json_object('Filter', json_object('child', child_goal_id, 'predicate', predicate_group_id)) as data FROM physical_filters WHERE goal_id = $1",
+        " UNION ALL ",
+        "SELECT physical_expression_id, json_object('NestedLoopJoin', json_object('join_type', json(join_type), 'outer', outer_goal_id, 'inner', inner_goal_id, 'condition', condition_group_id)) as data FROM nested_loop_joins WHERE goal_id = $1",
+        " UNION ALL ",
+        "SELECT physical_expression_id, json_object('Project', json_object('child', child_goal_id, 'fields', json(fields_group_ids))) as data FROM physical_projects WHERE goal_id = $1"
     )
 }
 
