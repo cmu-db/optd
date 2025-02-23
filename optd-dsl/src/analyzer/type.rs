@@ -89,6 +89,12 @@ pub struct TypeRegistry {
     subtypes: HashMap<Identifier, HashSet<Identifier>>,
 }
 
+impl Default for TypeRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TypeRegistry {
     /// Creates a new empty TypeRegistry
     pub fn new() -> Self {
@@ -117,7 +123,7 @@ impl TypeRegistry {
                 self.subtypes.entry(enum_name.clone()).or_default();
                 for variant in variants {
                     let variant_adt = variant.value.as_ref();
-                    self.register_adt(&variant_adt);
+                    self.register_adt(variant_adt);
                     let variant_name = match variant_adt {
                         Adt::Product { name, .. } => name.value.clone(),
                         Adt::Sum { name, .. } => name.value.clone(),
@@ -158,7 +164,7 @@ impl TypeRegistry {
                     return true;
                 }
 
-                self.subtypes.get(parent_name).map_or(false, |children| {
+                self.subtypes.get(parent_name).is_some_and(|children| {
                     children.iter().any(|subtype_child_name| {
                         self.is_subtype(
                             &Type::Adt(child_name.clone()),
@@ -230,10 +236,7 @@ mod type_registry_tests {
     }
 
     fn create_sum_adt(name: &str, variants: Vec<Adt>) -> Adt {
-        let spanned_variants: Vec<Spanned<Adt>> = variants
-            .into_iter()
-            .map(|variant| spanned(variant))
-            .collect();
+        let spanned_variants: Vec<Spanned<Adt>> = variants.into_iter().map(spanned).collect();
 
         Adt::Sum {
             name: spanned(name.to_string()),

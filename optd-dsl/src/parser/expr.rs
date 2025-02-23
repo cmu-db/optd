@@ -347,6 +347,8 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
 
 #[cfg(test)]
 mod tests {
+    use core::f64;
+
     use super::*;
     use crate::{
         errors::span::Span,
@@ -406,15 +408,13 @@ mod tests {
                     (PostfixOp::Compose(a_id), PostfixOp::Compose(e_id)) => {
                         assert_eq!(a_id, e_id);
                     }
-                    _ => assert!(
-                        false,
+                    _ => panic!(
                         "Postfix operation mismatch: expected {:?}, got {:?}",
                         e_op, a_op
                     ),
                 }
             }
-            _ => assert!(
-                false,
+            _ => panic!(
                 "Expression mismatch: expected {:?}, got {:?}",
                 expected, actual
             ),
@@ -430,12 +430,12 @@ mod tests {
         assert_expr_eq(&result.unwrap().value, &Expr::Literal(Literal::Int64(42)));
 
         // Floats
-        let (result, errors) = parse_expr("3.14");
+        let (result, errors) = parse_expr(format!("{}", f64::consts::PI).as_str());
         assert!(result.is_some(), "Expected successful parse for float");
         assert!(errors.is_empty(), "Expected no errors for float");
         assert_expr_eq(
             &result.unwrap().value,
-            &Expr::Literal(Literal::Float64(OrderedFloat(3.14))),
+            &Expr::Literal(Literal::Float64(OrderedFloat(f64::consts::PI))),
         );
 
         // Strings
