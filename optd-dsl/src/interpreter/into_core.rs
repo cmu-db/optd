@@ -1,10 +1,10 @@
-use crate::analyzer::hir::{Literal, CoreData, Materializable, Value};
+use crate::analyzer::hir::{CoreData, Literal, Materializable, Value};
 use optd_core::cascades::{
     groups::{RelationalGroupId, ScalarGroupId},
     ir::{Children, OperatorData, PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan},
 };
-use Literal::*;
 use CoreData::*;
+use Literal::*;
 use Materializable::*;
 
 /// Helper trait to convert from Value to partial plans

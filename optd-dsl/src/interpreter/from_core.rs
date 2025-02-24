@@ -1,11 +1,11 @@
 use crate::analyzer::hir::{
-    Literal, CoreData, LogicalOp, Materializable, PhysicalOp, ScalarOp, Value,
+    CoreData, Literal, LogicalOp, Materializable, PhysicalOp, ScalarOp, Value,
 };
 use optd_core::cascades::ir::{
     Children, OperatorData, PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan,
 };
-use Literal::*;
 use CoreData::*;
+use Literal::*;
 use Materializable::*;
 
 /// Helper trait to convert children to Value
