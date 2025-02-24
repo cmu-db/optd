@@ -90,7 +90,7 @@ pub struct Value(pub CoreData<Value>);
 #[derive(Debug, Clone)]
 pub enum Pattern {
     Bind(Identifier, Box<Pattern>),
-    Constructor(Identifier, Vec<Pattern>),
+    Constructor(Identifier, Vec<Pattern>), // TODO: Support more here, then implement pattern match.
     Literal(Literal),
     Wildcard,
 }

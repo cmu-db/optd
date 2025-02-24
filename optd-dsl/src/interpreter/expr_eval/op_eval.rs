@@ -45,6 +45,11 @@ pub(super) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
             result.extend(r.iter().cloned());
             Value(Array(result))
         }
+        (Map(l), Concat, Map(r)) => {
+            let mut result = l.clone();
+            result.extend(r.iter().cloned());
+            Value(Map(result))
+        }
         _ => panic!("Invalid binary operation"),
     }
 }
