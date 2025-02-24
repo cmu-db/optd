@@ -50,7 +50,7 @@ fn convert_operator_data(data: &[OperatorData]) -> Vec<Value> {
 }
 
 /// Converts a PartialLogicalPlan into a HIR Value representation
-pub(super) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
+pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
     match plan {
         PartialLogicalPlan::UnMaterialized(group_id) => Value(Logical(Group(group_id.0))),
         PartialLogicalPlan::PartialMaterialized {
@@ -68,7 +68,7 @@ pub(super) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
 }
 
 /// Converts a PartialScalarPlan into a HIR Value representation
-pub(super) fn partial_scalar_to_value(plan: &PartialScalarPlan) -> Value {
+pub(crate) fn partial_scalar_to_value(plan: &PartialScalarPlan) -> Value {
     match plan {
         PartialScalarPlan::UnMaterialized(group_id) => Value(Scalar(Group(group_id.0))),
         PartialScalarPlan::PartialMaterialized {
@@ -84,7 +84,7 @@ pub(super) fn partial_scalar_to_value(plan: &PartialScalarPlan) -> Value {
 }
 
 /// Converts a PartialPhysicalPlan into a HIR Value representation
-pub(super) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
+pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
     match plan {
         PartialPhysicalPlan::UnMaterialized(group_id) => Value(Physical(Group(group_id.0))),
         PartialPhysicalPlan::PartialMaterialized {

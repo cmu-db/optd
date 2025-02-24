@@ -1,14 +1,12 @@
+use bridge::{from_optd::partial_logical_to_value, into_optd::value_to_partial_logical};
 use context::Context;
-use from_core::partial_logical_to_value;
-use into_core::value_to_partial_logical;
 use optd_core::cascades::{ir::PartialLogicalPlan, memo::Memoize};
 
 use crate::analyzer::hir::{AnnotatedValue, CoreData, Expr, Literal, Value, HIR};
 
+mod bridge;
 mod context;
-mod evaluator;
-mod from_core;
-mod into_core;
+mod expr_eval;
 
 /// The interpreter for evaluating HIR expressions
 pub struct Interpreter<'a, M: Memoize> {
