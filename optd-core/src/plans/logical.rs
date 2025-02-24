@@ -9,7 +9,8 @@
 //! of materialization during the optimization process.
 
 use crate::{
-    cascades::groups::RelationalGroupId, operators::relational::logical::LogicalOperator,
+    cascades::{expressions::LogicalExpression, groups::RelationalGroupId},
+    operators::relational::logical::LogicalOperator,
     values::OptdValue,
 };
 
@@ -43,6 +44,17 @@ pub enum PartialLogicalPlan {
 
     /// Reference to an optimization group containing equivalent plans
     UnMaterialized(RelationalGroupId),
+}
+
+impl PartialLogicalPlan {
+    pub fn from_expr(expr: &LogicalExpression) -> Self {
+        match expr {
+            LogicalOperator::Scan(_) => todo!(),
+            LogicalOperator::Filter(_) => todo!(),
+            LogicalOperator::Join(_) => todo!(),
+            LogicalOperator::Project(_) => todo!(),
+        }
+    }
 }
 
 /// Type alias for expressions that construct logical plans.

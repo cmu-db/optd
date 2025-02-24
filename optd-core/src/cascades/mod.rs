@@ -3,6 +3,8 @@ pub mod goal;
 pub mod groups;
 pub mod memo;
 pub mod properties;
+pub mod rules;
+pub mod tasks;
 
 use std::sync::Arc;
 
@@ -130,11 +132,11 @@ pub async fn mock_optimize_relation_group(
     let logical_exprs = memo.get_all_logical_exprs_in_group(group_id).await?;
     let last_logical_expr = logical_exprs.last().unwrap().1.clone();
 
-    let goal_id = memo
+    let goal = memo
         .create_or_get_goal(group_id, PhysicalProperties::default())
         .await?;
-    println!("Optimizing goal: {:?}", goal_id);
-    mock_optimize_relation_expr(memo, goal_id, &last_logical_expr).await
+    println!("Optimizing goal: {:?}", goal);
+    mock_optimize_relation_expr(memo, goal.representative_goal_id, &last_logical_expr).await
 }
 
 #[async_recursion]

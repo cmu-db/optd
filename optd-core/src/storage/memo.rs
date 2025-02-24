@@ -10,14 +10,6 @@ use sqlx::{
 };
 
 use crate::{
-    cascades::goal::{Goal, GoalId},
-    cost_model::Cost,
-    operators::scalar::ScalarOperatorKind,
-};
-use crate::{
-    cascades::properties::PhysicalProperties, operators::relational::logical::LogicalOperatorKind,
-};
-use crate::{
     cascades::{
         expressions::*,
         goal::OptimizationStatus,
@@ -25,6 +17,18 @@ use crate::{
         memo::Memoize,
     },
     operators::relational::physical::PhysicalOperatorKind,
+};
+use crate::{
+    cascades::{
+        goal::{Goal, GoalId},
+        rules::ImplementationRuleId,
+    },
+    cost_model::Cost,
+    operators::scalar::ScalarOperatorKind,
+};
+use crate::{
+    cascades::{properties::PhysicalProperties, rules::TransformationRuleId},
+    operators::relational::logical::LogicalOperatorKind,
 };
 
 /// A Storage manager that manages connections to the database.
@@ -92,10 +96,10 @@ impl Memoize for SqliteMemo {
         &self,
         group_id: RelationalGroupId,
         required_physical_props: PhysicalProperties,
-    ) -> Result<GoalId> {
+    ) -> Result<Arc<Goal>> {
         let mut txn = self.begin().await?;
         let goal_id = txn.new_goal_id().await?;
-        let inserted_goal_id: GoalId = sqlx::query_scalar("INSERT INTO goals (id, representative_goal_id, group_id, required_physical_properties, optimization_status) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (group_id, required_physical_properties) DO UPDATE SET group_id = group_id RETURNING id")
+        let goal: Goal = sqlx::query_as("INSERT INTO goals (id, representative_goal_id, group_id, required_physical_properties, optimization_status) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (group_id, required_physical_properties) DO UPDATE SET group_id = group_id RETURNING *")
             .bind(goal_id)
             .bind(goal_id)
             .bind(group_id)
@@ -104,20 +108,66 @@ impl Memoize for SqliteMemo {
             .fetch_one(&mut *txn)
             .await?;
 
-        if inserted_goal_id == goal_id {
+        let goal = Arc::new(goal);
+
+        if goal.representative_goal_id == goal_id {
             txn.commit().await?;
         }
-        Ok(inserted_goal_id)
+        Ok(goal)
     }
 
     async fn get_goal(&self, goal_id: GoalId) -> Result<Arc<Goal>> {
         let mut txn = self.begin().await?;
-        let goal = sqlx::query_as("SELECT id, group_id, required_physical_properties, optimization_status FROM goals WHERE id = $1")
+        let goal = sqlx::query_as("SELECT representative_goal_id, group_id, required_physical_properties, optimization_status FROM goals WHERE id = $1")
             .bind(goal_id)
             .fetch_one(&mut *txn)
             .await?;
         txn.commit().await?;
         Ok(Arc::new(goal))
+    }
+
+    async fn update_goal_optimization_status(
+        &self,
+        goal_id: GoalId,
+        status: OptimizationStatus,
+    ) -> Result<()> {
+        let mut txn = self.begin().await?;
+        sqlx::query("UPDATE goals SET optimization_status = $1 WHERE id = $2")
+            .bind(status)
+            .bind(goal_id)
+            .execute(&mut *txn)
+            .await?;
+        txn.commit().await?;
+        Ok(())
+    }
+
+    async fn update_group_exploration_status(
+        &self,
+        group_id: RelationalGroupId,
+        status: ExplorationStatus,
+    ) -> Result<()> {
+        let mut txn = self.begin().await?;
+        sqlx::query("UPDATE relation_groups SET exploration_status = $1 WHERE id = $2")
+            .bind(status)
+            .bind(group_id)
+            .execute(&mut *txn)
+            .await?;
+        txn.commit().await?;
+        Ok(())
+    }
+
+    async fn get_group_exploration_status(
+        &self,
+        group_id: RelationalGroupId,
+    ) -> Result<ExplorationStatus> {
+        let mut txn = self.begin().await?;
+        let status: ExplorationStatus =
+            sqlx::query_scalar("SELECT exploration_status FROM relation_groups WHERE id = $1")
+                .bind(group_id)
+                .fetch_one(&mut *txn)
+                .await?;
+        txn.commit().await?;
+        Ok(status)
     }
 
     async fn get_all_logical_exprs_in_group(
@@ -301,6 +351,20 @@ impl Memoize for SqliteMemo {
 
         txn.commit().await?;
         Ok(winner)
+    }
+
+    async fn get_matching_transformation_rules(
+        &self,
+        logical_expr: &LogicalExpression,
+    ) -> Result<Vec<TransformationRuleId>> {
+        todo!()
+    }
+
+    async fn get_matching_implementation_rules(
+        &self,
+        physical_expr: &LogicalExpression,
+    ) -> Result<Vec<ImplementationRuleId>> {
+        todo!()
     }
 }
 

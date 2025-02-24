@@ -16,9 +16,10 @@ use super::{
         LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
         ScalarExpression, ScalarExpressionId,
     },
-    goal::{Goal, GoalId},
-    groups::{RelationalGroupId, ScalarGroupId},
+    goal::{Goal, GoalId, OptimizationStatus},
+    groups::{ExplorationStatus, RelationalGroupId, ScalarGroupId},
     properties::PhysicalProperties,
+    rules::{ImplementationRuleId, TransformationRuleId},
 };
 use anyhow::Result;
 
@@ -29,7 +30,24 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         group_id: RelationalGroupId,
         required_physical_props: PhysicalProperties,
-    ) -> Result<GoalId>;
+    ) -> Result<Arc<Goal>>;
+
+    async fn update_goal_optimization_status(
+        &self,
+        goal_id: GoalId,
+        status: OptimizationStatus,
+    ) -> Result<()>;
+
+    async fn get_group_exploration_status(
+        &self,
+        group_id: RelationalGroupId,
+    ) -> Result<ExplorationStatus>;
+
+    async fn update_group_exploration_status(
+        &self,
+        group_id: RelationalGroupId,
+        status: ExplorationStatus,
+    ) -> Result<()>;
 
     /// Gets the metadata that describes a goal.
     async fn get_goal(&self, goal_id: GoalId) -> Result<Arc<Goal>>;
@@ -107,4 +125,14 @@ pub trait Memoize: Send + Sync + 'static {
         cost: Cost,
         goal_id: GoalId,
     ) -> Result<GoalId>;
+
+    async fn get_matching_transformation_rules(
+        &self,
+        logical_expr: &LogicalExpression,
+    ) -> Result<Vec<TransformationRuleId>>;
+
+    async fn get_matching_implementation_rules(
+        &self,
+        physical_expr: &LogicalExpression,
+    ) -> Result<Vec<ImplementationRuleId>>;
 }

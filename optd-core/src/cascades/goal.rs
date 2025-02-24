@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use serde::Deserialize;
 
 use super::{groups::RelationalGroupId, properties::PhysicalProperties};
@@ -39,7 +41,7 @@ pub struct Goal {
     pub group_id: RelationalGroupId,
     /// The required physical properties for the goal.
     #[sqlx(json)]
-    pub required_physical_properties: PhysicalProperties,
+    pub required_physical_properties: Arc<PhysicalProperties>,
     /// The optimization status of the goal.
     pub optimization_status: OptimizationStatus,
 }
