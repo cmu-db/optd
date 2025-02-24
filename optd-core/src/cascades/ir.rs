@@ -1,3 +1,4 @@
+use super::groups::{RelationalGroupId, ScalarGroupId};
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
@@ -7,10 +8,7 @@ pub enum OperatorData {
     Float64(OrderedFloat<f64>),
     String(String),
     Bool(bool),
-    Struct {
-        name: String,
-        elements: Vec<OperatorData>,
-    },
+    Struct(String, Vec<OperatorData>),
     Array(Vec<OperatorData>),
 }
 
@@ -38,14 +36,20 @@ impl OperatorData {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum Children<T> {
+    Singleton(T),
+    VarLength(Vec<T>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum PartialLogicalPlan {
     PartialMaterialized {
         tag: String,
         data: Vec<OperatorData>,
-        relational_children: Vec<Vec<PartialLogicalPlan>>,
-        scalar_children: Vec<Vec<PartialScalarPlan>>,
+        relational_children: Vec<Children<PartialLogicalPlan>>,
+        scalar_children: Vec<Children<PartialScalarPlan>>,
     },
-    UnMaterialized(i64),
+    UnMaterialized(RelationalGroupId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -53,9 +57,9 @@ pub enum PartialScalarPlan {
     PartialMaterialized {
         tag: String,
         data: Vec<OperatorData>,
-        scalar_children: Vec<Vec<PartialScalarPlan>>,
+        scalar_children: Vec<Children<PartialScalarPlan>>,
     },
-    UnMaterialized(i64),
+    UnMaterialized(ScalarGroupId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -63,8 +67,8 @@ pub enum PartialPhysicalPlan {
     PartialMaterialized {
         tag: String,
         data: Vec<OperatorData>,
-        relational_children: Vec<Vec<PartialPhysicalPlan>>,
-        scalar_children: Vec<Vec<PartialScalarPlan>>,
+        relational_children: Vec<Children<PartialPhysicalPlan>>,
+        scalar_children: Vec<Children<PartialScalarPlan>>,
     },
-    UnMaterialized(i64),
+    UnMaterialized(RelationalGroupId),
 }

@@ -148,10 +148,7 @@ impl OptdDFContext<'_> {
                     OperatorData::Float64(ordered_float) => {
                         ScalarValue::Float64(Some(**ordered_float))
                     }
-                    OperatorData::Struct {
-                        name: _,
-                        elements: _,
-                    } => todo!(),
+                    OperatorData::Struct(..) => todo!(),
                     OperatorData::Array(_) => todo!(),
                 };
                 Ok(Arc::new(Literal::new(value)))

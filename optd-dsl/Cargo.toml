@@ -8,3 +8,4 @@ optd-core = { path = "../optd-core" }
 chumsky = "0.9.3"
 ariadne = "0.5.0"
 ordered-float = "4.6.0"
+anyhow.workspace = true

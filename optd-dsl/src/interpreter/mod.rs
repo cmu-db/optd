@@ -1,10 +1,14 @@
-use crate::analyzer::hir::{AnnotatedValue, CoreData, Expr, HIR};
 use context::Context;
-use optd_core::cascades::ir::PartialLogicalPlan;
-use optd_core::cascades::memo::Memoize;
+use from_core::partial_logical_to_value;
+use into_core::value_to_partial_logical;
+use optd_core::cascades::{ir::PartialLogicalPlan, memo::Memoize};
+
+use crate::analyzer::hir::{AnnotatedValue, CoreData, Expr, Literal, Value, HIR};
 
 mod context;
 mod evaluator;
+mod from_core;
+mod into_core;
 
 /// The interpreter for evaluating HIR expressions
 pub struct Interpreter<'a, M: Memoize> {
@@ -23,9 +27,8 @@ impl<'a, M: Memoize> Interpreter<'a, M> {
     pub fn match_and_apply_logical_rule(
         &self,
         rule_name: &str,
-        input: PartialLogicalPlan,
+        plan: PartialLogicalPlan,
     ) -> Vec<PartialLogicalPlan> {
-        // Create a context for evaluation
         let mut context = Context::new(
             self.hir
                 .expressions
@@ -34,28 +37,17 @@ impl<'a, M: Memoize> Interpreter<'a, M> {
                 .collect(),
         );
 
-        // Create input expression and call expression
-        let input_expr = Expr::Core(CoreData::Logical(input));
-        let call_expr = Expr::Call(Box::new(Expr::Ref(rule_name.to_string())), vec![input_expr]);
+        let call = Expr::Call(
+            Expr::CoreVal(Value(CoreData::Literal(Literal::String(
+                rule_name.to_string(),
+            ))))
+            .into(),
+            vec![Expr::CoreVal(partial_logical_to_value(&plan))],
+        );
 
-        // Evaluate the expression with our context and memo
-        let result = call_expr.evaluate(&mut context, self.memo);
-
-        // Extract the results
-        match result.0 {
-            CoreData::Array(transformations) => transformations
-                .into_iter()
-                .filter_map(|v| match v.0 {
-                    CoreData::Logical(plan) => Some(plan),
-                    _ => None,
-                })
-                .collect(),
-            CoreData::Logical(single_plan) => {
-                vec![single_plan]
-            }
-            _ => {
-                unreachable!("Rule '{}' did not return valid transformations", rule_name)
-            }
-        }
+        call.evaluate(&mut context, self.memo)
+            .iter()
+            .map(|v| value_to_partial_logical(v))
+            .collect()
     }
 }
