@@ -5,12 +5,13 @@ use crate::{
 use anyhow::Error;
 use async_recursion::async_recursion;
 use core_eval::evaluate_core_expr;
+use futures::future::try_join_all;
 use op_eval::{eval_binary_op, eval_unary_op};
 
+use pat_eval::match_pattern;
 use CoreData::*;
 use Expr::*;
 use FunKind::*;
-
 mod core_eval;
 mod op_eval;
 mod pat_eval;
@@ -55,10 +56,40 @@ where
 }
 
 impl Expr {
+    // TODO: Handle the context copying better. Right now it is a bit inefficient and
+    // hurts parallelization. There are many places where we could try_join_all.
+    // Probably making the context owned is a good approach, and slightly change the Context API.
     #[async_recursion]
     pub(super) async fn evaluate(&self, context: &mut Context) -> Result<Vec<Value>, Error> {
         match self {
-            PatternMatch(expr, match_arms) => todo!(),
+            PatternMatch(expr, match_arms) => {
+                let expr_values = expr.evaluate(context).await?;
+                let result_futures = expr_values.iter().map(|value| {
+                    let ctx_clone = context.clone();
+                    async move {
+                        for arm in match_arms {
+                            let matched_contexts =
+                                match_pattern(value, &arm.pattern, ctx_clone.clone()).await?;
+
+                            if !matched_contexts.is_empty() {
+                                let mut all_results = Vec::new();
+
+                                for mut match_ctx in matched_contexts {
+                                    let results = arm.expr.evaluate(&mut match_ctx).await?;
+                                    all_results.extend(results);
+                                }
+
+                                return Ok::<_, Error>(all_results);
+                            }
+                        }
+
+                        panic!("No pattern matched for value: {:?}", value);
+                    }
+                });
+
+                let results = try_join_all(result_futures).await?;
+                Ok(results.into_iter().flatten().collect())
+            }
 
             IfThenElse(cond, then_expr, else_expr) => {
                 let cond_values = cond.evaluate(context).await?;

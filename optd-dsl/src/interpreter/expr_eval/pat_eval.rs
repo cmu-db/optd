@@ -47,7 +47,7 @@ where
 }
 
 /// Cascades call!
-async fn expand_group(group_id: i64, kind: OperatorKind) -> Result<Vec<Operator<Value>>, Error> {
+async fn expand_group(_group_id: i64, _kind: OperatorKind) -> Result<Vec<Operator<Value>>, Error> {
     todo!()
 }
 
