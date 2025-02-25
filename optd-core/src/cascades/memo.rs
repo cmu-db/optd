@@ -60,6 +60,8 @@ pub trait Memoize: Send + Sync + 'static {
 
     /// Adds a logical expression to an existing group.
     /// Returns the group id of new group if merge happened.
+    // TODO: need to indicate if a new logical expression is added.
+    // Option<LogicalExpressionId>
     async fn add_logical_expr_to_group(
         &self,
         logical_expr: &LogicalExpression,
@@ -68,6 +70,8 @@ pub trait Memoize: Send + Sync + 'static {
 
     /// Adds a logical expression to the memo table.
     /// Returns the group id of group if already exists, otherwise creates a new group.
+    // TODO: need to indicate if a new logical expression is added.
+    // Option<LogicalExpressionId>
     async fn add_logical_expr(&self, logical_expr: &LogicalExpression)
         -> Result<RelationalGroupId>;
 

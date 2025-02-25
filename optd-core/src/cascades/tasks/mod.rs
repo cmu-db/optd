@@ -4,10 +4,11 @@ use crate::plans::{logical::PartialLogicalPlan, physical::PartialPhysicalPlan};
 
 use super::{
     expressions::{LogicalExpression, PhysicalExpression},
-    goal::{self, Goal, GoalId, OptimizationStatus},
+    goal::{Goal, GoalId, OptimizationStatus},
     groups::{ExplorationStatus, RelationalGroupId},
     ingest_partial_logical_plan,
     memo::Memoize,
+    mock_optimize_relation_expr,
     properties::PhysicalProperties,
     rules::{ImplementationRuleId, TransformationRuleId},
 };
@@ -17,12 +18,11 @@ use tokio::task::JoinSet;
 
 struct TaskContext<M: Memoize> {
     memo: M,
-    intepreter: Intepreter,
 }
 
 impl<'a, M: Memoize> TaskContext<M> {
-    pub fn new(memo: M, intepreter: Intepreter) -> Arc<Self> {
-        Arc::new(Self { memo, intepreter })
+    pub fn new(memo: M) -> Arc<Self> {
+        Arc::new(Self { memo })
     }
 
     #[async_recursion]
@@ -119,15 +119,8 @@ impl<'a, M: Memoize> TaskContext<M> {
             let ctx = self.clone();
             let expr = logical_expr.clone();
             let g = goal.clone();
-            join_set.spawn(async move {
-                ctx.match_and_apply_implementation_rule(
-                    expr,
-                    goal.representative_goal_id,
-                    rule,
-                    goal.required_physical_properties,
-                )
-                .await
-            });
+            join_set
+                .spawn(async move { ctx.match_and_apply_implementation_rule(expr, rule, g).await });
         }
 
         join_set
@@ -173,6 +166,7 @@ impl<'a, M: Memoize> TaskContext<M> {
 
         let mut join_set = JoinSet::new();
         for rule in rules {
+            // Check if rule is applied, then:
             let ctx = self.clone();
             let expr = logical_expr.clone();
             join_set.spawn(async move {
@@ -190,14 +184,6 @@ impl<'a, M: Memoize> TaskContext<M> {
         Ok(())
     }
 
-    // pub async fn optimize_physical_expr(
-    //     self: &Arc<Self>,
-    //     physical_expr: PhysicalExpression,
-    //     goal: &Arc<Goal>,
-    // ) -> Result<()> {
-    //     Ok(())
-    // }
-
     pub async fn match_and_apply_transformation_rule(
         self: Arc<Self>,
         logical_expr: Arc<LogicalExpression>,
@@ -214,6 +200,7 @@ impl<'a, M: Memoize> TaskContext<M> {
         let mut join_set = JoinSet::new();
         for partial_logical_output in partial_logical_outputs {
             // TODO: need to return logical expression with id.
+            // VERY WRONG
             let logical_expr_output = logical_expr.clone();
             let group_id = ingest_partial_logical_plan(&self.memo, &partial_logical_output).await?;
             let ctx = self.clone();
@@ -222,6 +209,12 @@ impl<'a, M: Memoize> TaskContext<M> {
                     .await
             });
         }
+
+        join_set
+            .join_all()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?;
         Ok(())
     }
 
@@ -231,13 +224,37 @@ impl<'a, M: Memoize> TaskContext<M> {
         rule_id: ImplementationRuleId,
         goal: Arc<Goal>,
     ) -> Result<()> {
+        let partial_logical_input = PartialLogicalPlan::from_expr(&logical_expr);
+
+        let partial_physical_outputs = self
+            .intepreter
+            .eval_implementation_rule(
+                rule_id,
+                partial_logical_input,
+                &goal.required_physical_properties,
+            )
+            .await;
+
+        let mut join_set = JoinSet::new();
+        for _partial_physical_output in partial_physical_outputs {
+            // TODO: need to return logical expression with id.
+            let physical_expr_output: Option<Arc<PhysicalExpression>> = None;
+            let physical_expr_output = physical_expr_output.unwrap();
+            let ctx = self.clone();
+            let g = goal.clone();
+            join_set
+                .spawn(async move { ctx.optimize_physical_expr(physical_expr_output, &g).await });
+        }
+
         Ok(())
     }
 }
 
-struct Intepreter;
+struct Intepreter<M: Memoize> {
+    ctx: Arc<TaskContext<M>>,
+}
 
-impl Intepreter {
+impl<M: Memoize> Intepreter<M> {
     async fn eval_transformation_rule(
         &self,
         rule_id: TransformationRuleId,
@@ -250,7 +267,7 @@ impl Intepreter {
         &self,
         rule_id: ImplementationRuleId,
         partial_logical_plan: PartialLogicalPlan,
-        required_physical_properties: PhysicalProperties,
+        required_physical_properties: &PhysicalProperties,
     ) -> Vec<PartialPhysicalPlan> {
         todo!()
     }

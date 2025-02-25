@@ -729,6 +729,7 @@ impl SqliteMemo {
             // Merge the two groups.
             self.set_representative_group_id(&mut txn, group_id, inserted_group_id)
                 .await?;
+            // TODO: merge group here, move all expressions to the representative group.
 
             // We should remove the dangling logical expression. We waste one id here but it is ok.
             self.remove_dangling_logical_expr(&mut txn, logical_expr_id)
