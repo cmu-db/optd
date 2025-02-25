@@ -1,8 +1,9 @@
 use crate::{
-    analyzer::hir::{CoreData, Expr, LogicalOp, Materializable, PhysicalOp, ScalarOp, Value},
+    analyzer::hir::{CoreData, Expr, Materializable, Operator, Value},
     interpreter::Context,
 };
-use optd_core::cascades::memo::Memoize;
+use anyhow::Error;
+use CoreData::*;
 use Materializable::*;
 
 use super::evaluate_all_combinations;
@@ -16,66 +17,49 @@ use super::evaluate_all_combinations;
 ///
 /// The function generates a cartesian product of all possible values for each component,
 /// then constructs operator instances for each combination using the provided value_constructor.
-fn evaluate_operator<M: Memoize, T>(
-    tag: &str,
-    operator_data: &[Expr],
-    relational_children: Option<&[Expr]>,
-    scalar_children: &[Expr],
-    value_constructor: fn(String, Vec<Value>, Option<Vec<Value>>, Vec<Value>) -> T,
+async fn evaluate_operator(
+    op: &Operator<Expr>,
     context: &mut Context,
-    memo: &M,
-) -> Vec<Value>
-where
-    T: Clone,
-    Value: From<T>,
-{
-    let operator_data_values = evaluate_all_combinations(operator_data.iter(), context, memo);
-    let scalar_values = evaluate_all_combinations(scalar_children.iter(), context, memo);
-    let relational_values = relational_children
-        .map(|rel_children| evaluate_all_combinations(rel_children.iter(), context, memo));
+) -> Result<Vec<Value>, Error> {
+    let operator_data_values = evaluate_all_combinations(op.operator_data.iter(), context).await?;
+    let scalar_values = evaluate_all_combinations(op.scalar_children.iter(), context).await?;
 
-    operator_data_values
-        .into_iter()
-        .flat_map(|op_data| match &relational_values {
-            Some(rel_combinations) => rel_combinations
-                .iter()
-                .flat_map(|rel_children| {
-                    scalar_values.iter().map(|scalar_children| {
-                        Value::from((value_constructor)(
-                            tag.to_string(),
-                            op_data.clone(),
-                            Some(rel_children.clone()),
-                            scalar_children.clone(),
-                        ))
-                    })
-                })
-                .collect::<Vec<_>>(),
-            None => scalar_values
-                .iter()
-                .map(|scalar_children| {
-                    Value::from((value_constructor)(
-                        tag.to_string(),
-                        op_data.clone(),
-                        None,
-                        scalar_children.clone(),
-                    ))
-                })
-                .collect(),
-        })
-        .collect()
+    let relational_values = if !op.relational_children.is_empty() {
+        evaluate_all_combinations(op.relational_children.iter(), context).await?
+    } else {
+        vec![vec![]]
+    };
+
+    let mut results = Vec::new();
+
+    for op_data in &operator_data_values {
+        for rel_children in &relational_values {
+            for scalar_children_val in &scalar_values {
+                results.push(Value(Operator(Data(Operator {
+                    kind: op.kind.clone(),
+                    tag: op.tag.clone(),
+                    operator_data: op_data.clone(),
+                    relational_children: rel_children.clone(),
+                    scalar_children: scalar_children_val.clone(),
+                }))));
+            }
+        }
+    }
+
+    Ok(results)
 }
 
-pub(super) fn evaluate_core_expr<M: Memoize>(
+pub(super) async fn evaluate_core_expr(
     data: &CoreData<Expr>,
     context: &mut Context,
-    memo: &M,
-) -> Vec<Value> {
-    use CoreData::*;
+) -> Result<Vec<Value>, Error> {
     match data {
-        Literal(lit) => vec![Value(Literal(lit.clone()))],
+        Literal(lit) => Ok(vec![Value(Literal(lit.clone()))]),
 
         Array(items) | Tuple(items) | Struct(_, items) => {
-            evaluate_all_combinations(items.iter(), context, memo)
+            let item_combinations = evaluate_all_combinations(items.iter(), context).await?;
+
+            let results = item_combinations
                 .into_iter()
                 .map(|items| match data {
                     Array(_) => Value(Array(items)),
@@ -83,84 +67,44 @@ pub(super) fn evaluate_core_expr<M: Memoize>(
                     Struct(name, _) => Value(Struct(name.clone(), items)),
                     _ => unreachable!(),
                 })
-                .collect()
+                .collect();
+
+            Ok(results)
         }
 
         Map(items) => {
-            let key_comb = evaluate_all_combinations(items.iter().map(|(k, _)| k), context, memo);
-            let value_comb = evaluate_all_combinations(items.iter().map(|(_, v)| v), context, memo);
+            let key_comb = evaluate_all_combinations(items.iter().map(|(k, _)| k), context).await?;
+            let value_comb =
+                evaluate_all_combinations(items.iter().map(|(_, v)| v), context).await?;
 
-            key_comb
-                .into_iter()
-                .flat_map(|keys| {
-                    value_comb.iter().map(move |values| {
-                        Value(Map(keys.clone().into_iter().zip(values.clone()).collect()))
-                    })
-                })
-                .collect()
+            let mut results = Vec::new();
+            for keys in &key_comb {
+                for values in &value_comb {
+                    results.push(Value(Map(keys
+                        .clone()
+                        .into_iter()
+                        .zip(values.clone())
+                        .collect())));
+                }
+            }
+
+            Ok(results)
         }
 
-        Function(fun_type) => vec![Value(Function(fun_type.clone()))],
+        Function(fun_type) => Ok(vec![Value(Function(fun_type.clone()))]),
 
-        Fail(msg) => msg
-            .evaluate(context, memo)
-            .into_iter()
-            .map(|m| Value(Fail(Box::new(m))))
-            .collect(),
+        Fail(msg) => {
+            let msg_values = msg.evaluate(context).await?;
+            let results = msg_values
+                .into_iter()
+                .map(|m| Value(Fail(Box::new(m))))
+                .collect();
 
-        Logical(Data(logical_op)) => evaluate_operator(
-            &logical_op.tag,
-            &logical_op.operator_data,
-            Some(&logical_op.relational_children),
-            &logical_op.scalar_children,
-            |tag, op_data, rel_children, scalar_children| {
-                Value(Logical(Data(LogicalOp {
-                    tag,
-                    operator_data: op_data,
-                    relational_children: rel_children.unwrap(),
-                    scalar_children,
-                })))
-            },
-            context,
-            memo,
-        ),
+            Ok(results)
+        }
 
-        Scalar(Data(scalar_op)) => evaluate_operator(
-            &scalar_op.tag,
-            &scalar_op.operator_data,
-            None,
-            &scalar_op.scalar_children,
-            |tag, op_data, _rel_children, scalar_children| {
-                Value(Scalar(Data(ScalarOp {
-                    tag,
-                    operator_data: op_data,
-                    scalar_children,
-                })))
-            },
-            context,
-            memo,
-        ),
+        Operator(Data(op)) => evaluate_operator(op, context).await,
 
-        Physical(Data(physical_op)) => evaluate_operator(
-            &physical_op.tag,
-            &physical_op.operator_data,
-            Some(&physical_op.relational_children),
-            &physical_op.scalar_children,
-            |tag, op_data, rel_children, scalar_children| {
-                Value(Physical(Materializable::Data(PhysicalOp {
-                    tag,
-                    operator_data: op_data,
-                    relational_children: rel_children.unwrap(),
-                    scalar_children,
-                })))
-            },
-            context,
-            memo,
-        ),
-
-        // TODO: Memo table call.
-        &CoreData::Logical(Materializable::Group(_))
-        | &CoreData::Scalar(Materializable::Group(_))
-        | &CoreData::Physical(Materializable::Group(_)) => todo!(),
+        Operator(Group(id, kind)) => Ok(vec![Value(Operator(Group(*id, *kind)))]),
     }
 }

@@ -1,8 +1,11 @@
-use super::context::Context;
-use crate::analyzer::hir::{CoreData, Expr, FunKind, Literal, Value};
+use crate::{
+    analyzer::hir::{CoreData, Expr, FunKind, Literal, Value},
+    utils::context::Context,
+};
+use anyhow::Error;
+use async_recursion::async_recursion;
 use core_eval::evaluate_core_expr;
 use op_eval::{eval_binary_op, eval_unary_op};
-use optd_core::cascades::memo::Memoize;
 
 use CoreData::*;
 use Expr::*;
@@ -10,6 +13,7 @@ use FunKind::*;
 
 mod core_eval;
 mod op_eval;
+mod pat_eval;
 
 /// Evaluates a collection of expressions to generate all possible combinations of their values.
 ///
@@ -23,101 +27,136 @@ mod op_eval;
 /// 1. Function arguments where each argument might evaluate to multiple values
 /// 2. Collection literals (arrays, tuples) where each element might be non-deterministic
 /// 3. Struct fields where each field might have multiple possible values
-pub(super) fn evaluate_all_combinations<'a, I, M>(
+pub(super) async fn evaluate_all_combinations<'a, I>(
     items: I,
     context: &mut Context,
-    memo: &M,
-) -> Vec<Vec<Value>>
+) -> Result<Vec<Vec<Value>>, Error>
 where
     I: Iterator<Item = &'a Expr>,
-    M: Memoize,
 {
-    items.fold(vec![vec![]], |acc, item| {
-        acc.into_iter()
-            .flat_map(|current| {
-                item.evaluate(context, memo).into_iter().map(move |value| {
-                    let mut new_items = current.clone();
-                    new_items.push(value);
-                    new_items
-                })
-            })
-            .collect()
-    })
+    let mut result = vec![vec![]];
+
+    for item in items {
+        let item_values = item.evaluate(context).await?;
+        let mut new_result = Vec::new();
+
+        for current in result {
+            for value in &item_values {
+                let mut new_items = current.clone();
+                new_items.push(value.clone());
+                new_result.push(new_items);
+            }
+        }
+
+        result = new_result;
+    }
+
+    Ok(result)
 }
 
 impl Expr {
-    pub(super) fn evaluate<M: Memoize>(&self, context: &mut Context, memo: &M) -> Vec<Value> {
+    #[async_recursion]
+    pub(super) async fn evaluate(&self, context: &mut Context) -> Result<Vec<Value>, Error> {
         match self {
-            PatternMatch(_expr, _match_arms) => todo!(),
+            PatternMatch(expr, match_arms) => todo!(),
 
-            IfThenElse(cond, then_expr, else_expr) => cond
-                .evaluate(context, memo)
-                .into_iter()
-                .flat_map(|cond| match cond.0 {
-                    Literal(Literal::Bool(b)) => {
-                        if b { then_expr } else { else_expr }.evaluate(context, memo)
+            IfThenElse(cond, then_expr, else_expr) => {
+                let cond_values = cond.evaluate(context).await?;
+                let mut results = Vec::new();
+
+                for cond in cond_values {
+                    match cond.0 {
+                        Literal(Literal::Bool(b)) => {
+                            let branch_results = if b {
+                                then_expr.evaluate(context).await?
+                            } else {
+                                else_expr.evaluate(context).await?
+                            };
+                            results.extend(branch_results);
+                        }
+                        _ => panic!("Expected boolean in condition"),
                     }
-                    _ => panic!("Expected boolean in condition"),
-                })
-                .collect(),
+                }
 
-            Let(ident, expr, body) => expr
-                .evaluate(context, memo)
-                .into_iter()
-                .flat_map(|value| {
+                Ok(results)
+            }
+
+            Let(ident, expr, body) => {
+                let expr_values = expr.evaluate(context).await?;
+                let mut results = Vec::new();
+
+                for value in expr_values {
                     let mut new_ctx = context.clone();
                     new_ctx.bind(ident.to_string(), value);
-                    body.evaluate(&mut new_ctx, memo)
-                })
-                .collect(),
+                    let body_results = body.evaluate(&mut new_ctx).await?;
+                    results.extend(body_results);
+                }
 
-            Binary(left, op, right) => left
-                .evaluate(context, memo)
-                .into_iter()
-                .flat_map(|l| {
-                    right
-                        .evaluate(context, memo)
-                        .into_iter()
-                        .map(move |r| eval_binary_op(l.clone(), op, r))
-                })
-                .collect(),
+                Ok(results)
+            }
 
-            Unary(op, expr) => expr
-                .evaluate(context, memo)
-                .into_iter()
-                .map(|e| eval_unary_op(op, e))
-                .collect(),
+            Binary(left, op, right) => {
+                let left_values = left.evaluate(context).await?;
+                let right_values = right.evaluate(context).await?;
+                let mut results = Vec::new();
+
+                for l in &left_values {
+                    for r in &right_values {
+                        results.push(eval_binary_op(l.clone(), op, r.clone()));
+                    }
+                }
+
+                Ok(results)
+            }
+
+            Unary(op, expr) => {
+                let expr_values = expr.evaluate(context).await?;
+                let results = expr_values
+                    .into_iter()
+                    .map(|e| eval_unary_op(op, e))
+                    .collect();
+
+                Ok(results)
+            }
 
             Call(fun, args) => {
-                let fun_values = fun.evaluate(context, memo);
-                let arg_combinations = evaluate_all_combinations(args.iter(), context, memo);
+                let fun_values = fun.evaluate(context).await?;
+                let arg_combinations = evaluate_all_combinations(args.iter(), context).await?;
+                let mut results = Vec::new();
 
-                fun_values
-                    .into_iter()
-                    .flat_map(|fun| match &fun.0 {
-                        Function(Closure(params, body)) => arg_combinations
-                            .iter()
-                            .flat_map(|args| {
+                for fun in fun_values {
+                    match &fun.0 {
+                        Function(Closure(params, body)) => {
+                            for args in &arg_combinations {
                                 let mut new_ctx = context.clone();
                                 new_ctx.push_scope();
                                 params.iter().zip(args).for_each(|(p, a)| {
                                     new_ctx.bind(p.clone(), a.clone());
                                 });
-                                body.evaluate(&mut new_ctx, memo)
-                            })
-                            .collect::<Vec<_>>(),
-                        Function(RustUDF(udf)) => arg_combinations
-                            .iter()
-                            .map(|args| udf(args.clone()))
-                            .collect(),
+                                let body_results = body.evaluate(&mut new_ctx).await?;
+                                results.extend(body_results);
+                            }
+                        }
+                        Function(RustUDF(udf)) => {
+                            for args in &arg_combinations {
+                                results.push(udf(args.clone()));
+                            }
+                        }
                         _ => panic!("Expected function value"),
-                    })
-                    .collect()
+                    }
+                }
+
+                Ok(results)
             }
 
-            Ref(ident) => vec![context.lookup(ident).expect("Variable not found").clone()],
-            CoreExpr(expr) => evaluate_core_expr(expr, context, memo),
-            CoreVal(val) => vec![val.clone()],
+            Ref(ident) => Ok(vec![context
+                .lookup(ident)
+                .expect("Variable not found")
+                .clone()]),
+
+            CoreExpr(expr) => evaluate_core_expr(expr, context).await,
+
+            CoreVal(val) => Ok(vec![val.clone()]),
         }
     }
 }

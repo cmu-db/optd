@@ -1,12 +1,11 @@
-use crate::analyzer::hir::{
-    CoreData, Literal, LogicalOp, Materializable, PhysicalOp, ScalarOp, Value,
-};
+use crate::analyzer::hir::{CoreData, Literal, Materializable, Operator, OperatorKind, Value};
 use optd_core::cascades::ir::{
     Children, OperatorData, PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan,
 };
 use CoreData::*;
 use Literal::*;
 use Materializable::*;
+use OperatorKind::*;
 
 /// Helper trait to convert children to Value
 trait ToValue {
@@ -52,13 +51,14 @@ fn convert_operator_data(data: &[OperatorData]) -> Vec<Value> {
 /// Converts a PartialLogicalPlan into a HIR Value representation
 pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
     match plan {
-        PartialLogicalPlan::UnMaterialized(group_id) => Value(Logical(Group(group_id.0))),
+        PartialLogicalPlan::UnMaterialized(group_id) => Value(Operator(Group(group_id.0, Logical))),
         PartialLogicalPlan::PartialMaterialized {
             tag,
             data,
             relational_children,
             scalar_children,
-        } => Value(Logical(Data(LogicalOp {
+        } => Value(Operator(Data(Operator {
+            kind: Logical,
             tag: tag.clone(),
             operator_data: convert_operator_data(data),
             relational_children: convert_children(relational_children),
@@ -70,14 +70,16 @@ pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
 /// Converts a PartialScalarPlan into a HIR Value representation
 pub(crate) fn partial_scalar_to_value(plan: &PartialScalarPlan) -> Value {
     match plan {
-        PartialScalarPlan::UnMaterialized(group_id) => Value(Scalar(Group(group_id.0))),
+        PartialScalarPlan::UnMaterialized(group_id) => Value(Operator(Group(group_id.0, Scalar))),
         PartialScalarPlan::PartialMaterialized {
             tag,
             data,
             scalar_children,
-        } => Value(Scalar(Data(ScalarOp {
+        } => Value(Operator(Data(Operator {
+            kind: Scalar,
             tag: tag.clone(),
             operator_data: convert_operator_data(data),
+            relational_children: vec![], // Scalar ops don't have relational children
             scalar_children: convert_children(scalar_children),
         }))),
     }
@@ -86,13 +88,16 @@ pub(crate) fn partial_scalar_to_value(plan: &PartialScalarPlan) -> Value {
 /// Converts a PartialPhysicalPlan into a HIR Value representation
 pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
     match plan {
-        PartialPhysicalPlan::UnMaterialized(group_id) => Value(Physical(Group(group_id.0))),
+        PartialPhysicalPlan::UnMaterialized(group_id) => {
+            Value(Operator(Group(group_id.0, Physical)))
+        }
         PartialPhysicalPlan::PartialMaterialized {
             tag,
             data,
             relational_children,
             scalar_children,
-        } => Value(Physical(Data(PhysicalOp {
+        } => Value(Operator(Data(Operator {
+            kind: Physical,
             tag: tag.clone(),
             operator_data: convert_operator_data(data),
             relational_children: convert_children(relational_children),

@@ -23,30 +23,22 @@ pub enum FunKind {
 /// Either grouped or concrete data
 #[derive(Debug, Clone)]
 pub enum Materializable<T> {
-    Group(i64),
+    Group(i64, OperatorKind),
     Data(T),
 }
 
-/// Logical operator node in query plan
-#[derive(Debug, Clone)]
-pub struct LogicalOp<T> {
-    pub tag: String,
-    pub operator_data: Vec<T>,
-    pub relational_children: Vec<T>,
-    pub scalar_children: Vec<T>,
+/// Operator kind to differentiate between operator types
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub enum OperatorKind {
+    Logical,
+    Physical,
+    Scalar,
 }
 
-/// Scalar operator node in query plan
+/// Unified operator node structure for all operator types
 #[derive(Debug, Clone)]
-pub struct ScalarOp<T> {
-    pub tag: String,
-    pub operator_data: Vec<T>,
-    pub scalar_children: Vec<T>,
-}
-
-/// Physical operator node in execution plan
-#[derive(Debug, Clone)]
-pub struct PhysicalOp<T> {
+pub struct Operator<T> {
+    pub kind: OperatorKind,
     pub tag: String,
     pub operator_data: Vec<T>,
     pub relational_children: Vec<T>,
@@ -60,12 +52,10 @@ pub enum CoreData<T> {
     Array(Vec<T>),
     Tuple(Vec<T>),
     Map(Vec<(T, T)>),
-    Struct(String, Vec<T>),
+    Struct(Identifier, Vec<T>),
     Function(FunKind),
     Fail(Box<T>),
-    Logical(Materializable<LogicalOp<T>>),
-    Scalar(Materializable<ScalarOp<T>>),
-    Physical(Materializable<PhysicalOp<T>>),
+    Operator(Materializable<Operator<T>>),
 }
 
 /// Expression nodes in the HIR
@@ -90,8 +80,9 @@ pub struct Value(pub CoreData<Value>);
 #[derive(Debug, Clone)]
 pub enum Pattern {
     Bind(Identifier, Box<Pattern>),
-    Constructor(Identifier, Vec<Pattern>), // TODO: Support more here, then implement pattern match.
     Literal(Literal),
+    Struct(Identifier, Vec<Pattern>),
+    Operator(Operator<Pattern>),
     Wildcard,
 }
 

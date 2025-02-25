@@ -5,9 +5,9 @@ use chumsky::{
 };
 
 use crate::{
-    errors::span::{Span, Spanned},
     lexer::tokens::Token,
     parser::ast::Function,
+    utils::span::{Span, Spanned},
 };
 
 use super::{
@@ -124,7 +124,6 @@ pub fn function_parser(
 mod tests {
     use super::*;
     use crate::{
-        errors::span::Span,
         lexer::lex::lex,
         parser::ast::{Expr, Type},
     };

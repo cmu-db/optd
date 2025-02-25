@@ -3156,7 +3156,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ariadne",
+ "async-recursion",
  "chumsky",
+ "futures",
+ "itertools 0.14.0",
  "optd-core",
  "ordered-float 4.6.0",
 ]

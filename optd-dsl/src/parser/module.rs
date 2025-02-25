@@ -1,5 +1,5 @@
-use crate::errors::span::Span;
 use crate::lexer::tokens::Token;
+use crate::utils::span::Span;
 use chumsky::prelude::*;
 
 use super::adt::adt_parser;

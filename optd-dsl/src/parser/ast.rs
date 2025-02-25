@@ -1,4 +1,4 @@
-use crate::errors::span::Spanned;
+use crate::utils::span::Spanned;
 use ordered_float::OrderedFloat;
 
 /// Unique identifier for variables, functions, types, etc.

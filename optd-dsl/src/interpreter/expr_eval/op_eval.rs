@@ -1,10 +1,10 @@
 use crate::analyzer::hir::{BinOp, CoreData, Literal, UnaryOp, Value};
 use BinOp::*;
+use CoreData::*;
 use Literal::*;
 use UnaryOp::*;
 
 pub(super) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
-    use CoreData::*;
     match (&left.0, op, &right.0) {
         (Literal(l), op, Literal(r)) => match (l, op, r) {
             (Int64(l), Add | Sub | Mul | Div | Eq | Lt, Int64(r)) => Value(Literal(match op {

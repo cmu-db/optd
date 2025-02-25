@@ -10,7 +10,7 @@ use std::collections::HashMap;
 ///
 /// The context always contains at least one scope (the global scope).
 #[derive(Debug, Clone)]
-pub(super) struct Context {
+pub(crate) struct Context {
     /// Stack of scopes, where each scope is a map of variable names to values.
     /// The last element is the current (innermost) scope.
     scopes: Vec<HashMap<String, Value>>,
@@ -26,7 +26,7 @@ impl Context {
     /// # Returns
     ///
     /// A new `Context` instance with one scope containing the initial bindings
-    pub(super) fn new(initial_bindings: HashMap<String, Value>) -> Self {
+    pub(crate) fn new(initial_bindings: HashMap<String, Value>) -> Self {
         let mut context = Self { scopes: Vec::new() };
         // Start with a scope containing the initial bindings
         context.scopes.push(initial_bindings);
@@ -37,7 +37,7 @@ impl Context {
     ///
     /// This creates a new lexical scope in which variables can be bound
     /// without affecting bindings in outer scopes.
-    pub(super) fn push_scope(&mut self) {
+    pub(crate) fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
     }
 
@@ -47,7 +47,7 @@ impl Context {
     ///
     /// Panics if attempting to pop the last remaining scope (global scope)
     #[allow(dead_code)]
-    pub(super) fn pop_scope(&mut self) {
+    pub(crate) fn pop_scope(&mut self) {
         if self.scopes.len() <= 1 {
             panic!("Cannot pop global scope");
         }
@@ -66,7 +66,7 @@ impl Context {
     /// # Returns
     ///
     /// Some reference to the value if found, None otherwise
-    pub(super) fn lookup(&self, name: &str) -> Option<&Value> {
+    pub(crate) fn lookup(&self, name: &str) -> Option<&Value> {
         for scope in self.scopes.iter().rev() {
             if let Some(value) = scope.get(name) {
                 return Some(value);
@@ -84,7 +84,7 @@ impl Context {
     ///
     /// * `name` - The name of the variable to bind
     /// * `val` - The value to bind to the variable
-    pub(super) fn bind(&mut self, name: String, val: Value) {
+    pub(crate) fn bind(&mut self, name: String, val: Value) {
         // We're always guaranteed to have at least one scope
         self.scopes.last_mut().unwrap().insert(name, val);
     }

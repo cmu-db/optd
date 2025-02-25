@@ -5,8 +5,8 @@ use chumsky::{
 };
 
 use crate::{
-    errors::span::{Span, Spanned},
     lexer::tokens::{Token, ALL_DELIMITERS},
+    utils::span::{Span, Spanned},
 };
 
 use super::{ast::Field, r#type::type_parser};

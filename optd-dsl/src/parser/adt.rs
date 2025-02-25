@@ -5,9 +5,9 @@ use chumsky::{
 };
 
 use crate::{
-    errors::span::{Span, Spanned},
     lexer::tokens::Token,
     parser::ast::Adt,
+    utils::span::{Span, Spanned},
 };
 
 use super::utils::fields_list_parser;
