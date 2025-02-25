@@ -1,3 +1,4 @@
+use super::evaluate_all_combinations;
 use crate::{
     analyzer::hir::{CoreData, Expr, Materializable, Operator, Value},
     interpreter::Context,
@@ -5,8 +6,6 @@ use crate::{
 use anyhow::Error;
 use CoreData::*;
 use Materializable::*;
-
-use super::evaluate_all_combinations;
 
 /// Evaluates an operator by generating all possible combinations of its components.
 ///
@@ -17,13 +16,11 @@ use super::evaluate_all_combinations;
 ///
 /// The function generates a cartesian product of all possible values for each component,
 /// then constructs operator instances for each combination using the provided value_constructor.
-async fn evaluate_operator(
-    op: &Operator<Expr>,
-    context: &mut Context,
-) -> Result<Vec<Value>, Error> {
-    let operator_data_values = evaluate_all_combinations(op.operator_data.iter(), context).await?;
-    let scalar_values = evaluate_all_combinations(op.scalar_children.iter(), context).await?;
-
+async fn evaluate_operator(op: &Operator<Expr>, context: Context) -> Result<Vec<Value>, Error> {
+    let operator_data_values =
+        evaluate_all_combinations(op.operator_data.iter(), context.clone()).await?;
+    let scalar_values =
+        evaluate_all_combinations(op.scalar_children.iter(), context.clone()).await?;
     let relational_values = if !op.relational_children.is_empty() {
         evaluate_all_combinations(op.relational_children.iter(), context).await?
     } else {
@@ -31,7 +28,6 @@ async fn evaluate_operator(
     };
 
     let mut results = Vec::new();
-
     for op_data in &operator_data_values {
         for rel_children in &relational_values {
             for scalar_children_val in &scalar_values {
@@ -45,20 +41,18 @@ async fn evaluate_operator(
             }
         }
     }
-
     Ok(results)
 }
 
 pub(super) async fn evaluate_core_expr(
     data: &CoreData<Expr>,
-    context: &mut Context,
+    context: Context,
 ) -> Result<Vec<Value>, Error> {
     match data {
         Literal(lit) => Ok(vec![Value(Literal(lit.clone()))]),
 
         Array(items) | Tuple(items) | Struct(_, items) => {
             let item_combinations = evaluate_all_combinations(items.iter(), context).await?;
-
             let results = item_combinations
                 .into_iter()
                 .map(|items| match data {
@@ -68,12 +62,12 @@ pub(super) async fn evaluate_core_expr(
                     _ => unreachable!(),
                 })
                 .collect();
-
             Ok(results)
         }
 
         Map(items) => {
-            let key_comb = evaluate_all_combinations(items.iter().map(|(k, _)| k), context).await?;
+            let key_comb =
+                evaluate_all_combinations(items.iter().map(|(k, _)| k), context.clone()).await?;
             let value_comb =
                 evaluate_all_combinations(items.iter().map(|(_, v)| v), context).await?;
 
@@ -87,7 +81,6 @@ pub(super) async fn evaluate_core_expr(
                         .collect())));
                 }
             }
-
             Ok(results)
         }
 
@@ -99,7 +92,6 @@ pub(super) async fn evaluate_core_expr(
                 .into_iter()
                 .map(|m| Value(Fail(Box::new(m))))
                 .collect();
-
             Ok(results)
         }
 

@@ -51,7 +51,7 @@ impl Interpreter {
         rule_name: &str,
         plan: PartialLogicalPlan,
     ) -> Result<Vec<PartialLogicalPlan>, Error> {
-        let mut context = Context::new(
+        let context = Context::new(
             self.hir
                 .expressions
                 .iter()
@@ -64,7 +64,7 @@ impl Interpreter {
             vec![CoreVal(partial_logical_to_value(&plan))],
         );
 
-        let results = call.evaluate(&mut context).await?;
+        let results = call.evaluate(context).await?;
 
         self.check_for_failures(&results)?;
 

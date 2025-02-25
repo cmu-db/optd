@@ -5,7 +5,7 @@ use crate::{
 use anyhow::Error;
 use async_recursion::async_recursion;
 use core_eval::evaluate_core_expr;
-use futures::future::try_join_all;
+use futures::{future::try_join_all, stream, StreamExt};
 use op_eval::{eval_binary_op, eval_unary_op};
 
 use pat_eval::match_pattern;
@@ -30,56 +30,60 @@ mod pat_eval;
 /// 3. Struct fields where each field might have multiple possible values
 pub(super) async fn evaluate_all_combinations<'a, I>(
     items: I,
-    context: &mut Context,
+    context: Context,
 ) -> Result<Vec<Vec<Value>>, Error>
 where
     I: Iterator<Item = &'a Expr>,
 {
-    let mut result = vec![vec![]];
+    let result = stream::iter(items)
+        .fold(
+            Ok(vec![vec![]]),
+            |acc_result: Result<_, Error>, item| async {
+                let acc = acc_result?;
+                let item_values = item.evaluate(context.clone()).await?;
 
-    for item in items {
-        let item_values = item.evaluate(context).await?;
-        let mut new_result = Vec::new();
+                let new_combinations = acc
+                    .into_iter()
+                    .flat_map(|current_combination| {
+                        item_values.iter().map(move |value| {
+                            let mut new_combination = current_combination.clone();
+                            new_combination.push(value.clone());
+                            new_combination
+                        })
+                    })
+                    .collect();
 
-        for current in result {
-            for value in &item_values {
-                let mut new_items = current.clone();
-                new_items.push(value.clone());
-                new_result.push(new_items);
-            }
-        }
-
-        result = new_result;
-    }
+                Ok(new_combinations)
+            },
+        )
+        .await?;
 
     Ok(result)
 }
 
 impl Expr {
-    // TODO: Handle the context copying better. Right now it is a bit inefficient and
-    // hurts parallelization. There are many places where we could try_join_all.
-    // Probably making the context owned is a good approach, and slightly change the Context API.
     #[async_recursion]
-    pub(super) async fn evaluate(&self, context: &mut Context) -> Result<Vec<Value>, Error> {
+    pub(super) async fn evaluate(&self, context: Context) -> Result<Vec<Value>, Error> {
         match self {
             PatternMatch(expr, match_arms) => {
-                let expr_values = expr.evaluate(context).await?;
+                let expr_values = expr.evaluate(context.clone()).await?;
                 let result_futures = expr_values.iter().map(|value| {
                     let ctx_clone = context.clone();
+                    let match_arms = match_arms.clone();
                     async move {
                         for arm in match_arms {
                             let matched_contexts =
                                 match_pattern(value, &arm.pattern, ctx_clone.clone()).await?;
 
                             if !matched_contexts.is_empty() {
-                                let mut all_results = Vec::new();
+                                let result_futures = matched_contexts
+                                    .into_iter()
+                                    .map(|match_ctx| arm.expr.evaluate(match_ctx));
 
-                                for mut match_ctx in matched_contexts {
-                                    let results = arm.expr.evaluate(&mut match_ctx).await?;
-                                    all_results.extend(results);
-                                }
-
-                                return Ok::<_, Error>(all_results);
+                                let results = try_join_all(result_futures).await?;
+                                return Ok::<_, Error>(
+                                    results.into_iter().flatten().collect::<Vec<_>>(),
+                                );
                             }
                         }
 
@@ -87,55 +91,58 @@ impl Expr {
                     }
                 });
 
-                let results = try_join_all(result_futures).await?;
+                let results: Vec<_> = try_join_all(result_futures).await?;
                 Ok(results.into_iter().flatten().collect())
             }
 
             IfThenElse(cond, then_expr, else_expr) => {
-                let cond_values = cond.evaluate(context).await?;
-                let mut results = Vec::new();
+                let cond_values = cond.evaluate(context.clone()).await?;
 
-                for cond in cond_values {
-                    match cond.0 {
-                        Literal(Literal::Bool(b)) => {
-                            let branch_results = if b {
-                                then_expr.evaluate(context).await?
-                            } else {
-                                else_expr.evaluate(context).await?
-                            };
-                            results.extend(branch_results);
+                let branch_result_futures = cond_values.into_iter().map(|cond_value| {
+                    let ctx = context.clone();
+                    async move {
+                        match cond_value.0 {
+                            Literal(Literal::Bool(b)) => {
+                                if b {
+                                    then_expr.evaluate(ctx.clone()).await
+                                } else {
+                                    else_expr.evaluate(ctx).await
+                                }
+                            }
+                            _ => panic!("Expected boolean in condition"),
                         }
-                        _ => panic!("Expected boolean in condition"),
                     }
-                }
+                });
 
-                Ok(results)
+                let branch_results = try_join_all(branch_result_futures).await?;
+                Ok(branch_results.into_iter().flatten().collect())
             }
 
             Let(ident, expr, body) => {
-                let expr_values = expr.evaluate(context).await?;
-                let mut results = Vec::new();
+                let expr_values = expr.evaluate(context.clone()).await?;
 
-                for value in expr_values {
+                let body_futures = expr_values.into_iter().map(|value| {
                     let mut new_ctx = context.clone();
                     new_ctx.bind(ident.to_string(), value);
-                    let body_results = body.evaluate(&mut new_ctx).await?;
-                    results.extend(body_results);
-                }
+                    body.evaluate(new_ctx)
+                });
 
-                Ok(results)
+                let body_results = try_join_all(body_futures).await?;
+                Ok(body_results.into_iter().flatten().collect())
             }
 
             Binary(left, op, right) => {
-                let left_values = left.evaluate(context).await?;
-                let right_values = right.evaluate(context).await?;
-                let mut results = Vec::new();
+                let left_values = left.evaluate(context.clone()).await?;
+                let right_values = right.evaluate(context.clone()).await?;
 
-                for l in &left_values {
-                    for r in &right_values {
-                        results.push(eval_binary_op(l.clone(), op, r.clone()));
-                    }
-                }
+                let results = left_values
+                    .iter()
+                    .flat_map(|l| {
+                        right_values
+                            .iter()
+                            .map(move |r| eval_binary_op(l.clone(), op, r.clone()))
+                    })
+                    .collect();
 
                 Ok(results)
             }
@@ -151,33 +158,46 @@ impl Expr {
             }
 
             Call(fun, args) => {
-                let fun_values = fun.evaluate(context).await?;
-                let arg_combinations = evaluate_all_combinations(args.iter(), context).await?;
-                let mut results = Vec::new();
+                let fun_values = fun.evaluate(context.clone()).await?;
+                let arg_combinations =
+                    evaluate_all_combinations(args.iter(), context.clone()).await?;
 
-                for fun in fun_values {
-                    match &fun.0 {
+                let mut all_results = Vec::new();
+
+                for fun_value in fun_values {
+                    match &fun_value.0 {
                         Function(Closure(params, body)) => {
-                            for args in &arg_combinations {
-                                let mut new_ctx = context.clone();
-                                new_ctx.push_scope();
-                                params.iter().zip(args).for_each(|(p, a)| {
-                                    new_ctx.bind(p.clone(), a.clone());
-                                });
-                                let body_results = body.evaluate(&mut new_ctx).await?;
-                                results.extend(body_results);
+                            let mut futures = Vec::new();
+
+                            for args in arg_combinations.clone() {
+                                let context_clone = context.clone();
+
+                                let future = async move {
+                                    let mut new_ctx = context_clone;
+                                    new_ctx.push_scope();
+                                    params.iter().zip(args).for_each(|(p, a)| {
+                                        new_ctx.bind(p.clone(), a.clone());
+                                    });
+                                    body.evaluate(new_ctx).await
+                                };
+
+                                futures.push(future);
                             }
+
+                            let results = try_join_all(futures).await?;
+                            all_results.extend(results.into_iter().flatten());
                         }
                         Function(RustUDF(udf)) => {
-                            for args in &arg_combinations {
-                                results.push(udf(args.clone()));
+                            for args in arg_combinations.clone() {
+                                let result = udf(args);
+                                all_results.push(result);
                             }
                         }
                         _ => panic!("Expected function value"),
                     }
                 }
 
-                Ok(results)
+                Ok(all_results)
             }
 
             Ref(ident) => Ok(vec![context
