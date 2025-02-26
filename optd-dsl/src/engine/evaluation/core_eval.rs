@@ -1,12 +1,14 @@
 use super::expr_eval::evaluate_all_combinations;
 use super::ValueStream;
+use crate::engine::errors::EngineError;
 use crate::engine::evaluation::stream_cache::StreamCache;
 use crate::{
     analyzer::hir::{CoreData, Expr, Materializable, Operator, Value},
-    engine::{Context},
+    engine::Context,
 };
+use futures::stream::Iter;
+use futures::FutureExt;
 use futures::{stream, StreamExt};
-use futures::{FutureExt};
 use CoreData::*;
 use Materializable::*;
 
@@ -27,6 +29,20 @@ fn evaluate_operator(op: &Operator<Expr>, context: Context) -> ValueStream {
         exprs.iter().cloned().collect()
     }
 
+    async fn evaluate_children(
+        exprs: Vec<Expr>,
+        context: Context,
+        cache: StreamCache<Vec<Result<Vec<Value>, EngineError>>>,
+    ) -> Iter<std::vec::IntoIter<Result<Vec<Value>, EngineError>>> {
+        stream::iter(
+            cache
+                .get_or_compute(|| {
+                    evaluate_all_combinations(exprs.iter().cloned(), context).collect::<Vec<_>>()
+                })
+                .await,
+        )
+    }
+
     let op_data_exprs = extract_exprs(&op.operator_data);
     let scalar_exprs = extract_exprs(&op.scalar_children);
     let rel_exprs = extract_exprs(&op.relational_children);
@@ -34,54 +50,38 @@ fn evaluate_operator(op: &Operator<Expr>, context: Context) -> ValueStream {
     let scalar_cache = StreamCache::new();
     let rel_cache = StreamCache::new();
 
-    Box::new(
-        evaluate_all_combinations(op_data_exprs.iter().cloned(), context.clone())
-            .flat_map_unordered(None, move |op_data_result| {
-                let tag = tag.clone();
-                let scalar_exprs = scalar_exprs.clone();
-                let rel_exprs = rel_exprs.clone();
-                let context = context.clone();
-                let scalar_cache = scalar_cache.clone();
-                let rel_cache = rel_cache.clone();
+    let stream = evaluate_all_combinations(op_data_exprs.iter().cloned(), context.clone())
+        .flat_map_unordered(None, move |op_data_result| {
+            let tag = tag.clone();
+            let scalar_exprs = scalar_exprs.clone();
+            let rel_exprs = rel_exprs.clone();
+            let context = context.clone();
+            let scalar_cache = scalar_cache.clone();
+            let rel_cache = rel_cache.clone();
 
-                op_data_result
-                    .map(|op_data| {
-                        async move {
-                            stream::iter(
-                                scalar_cache
-                                    .get_or_compute(|| {
-                                        evaluate_all_combinations(
-                                            scalar_exprs.iter().cloned(),
-                                            context.clone(),
-                                        )
-                                        .collect::<Vec<_>>()
-                                    })
-                                    .await,
-                            )
-                            .flat_map_unordered(
-                                None,
-                                move |scalar_result| {
-                                    let tag = tag.clone();
-                                    let op_data = op_data.clone();
-                                    let rel_exprs = rel_exprs.clone();
-                                    let context = context.clone();
-                                    let rel_cache = rel_cache.clone();
+            op_data_result
+                .map(|op_data| {
+                    async move {
+                        evaluate_children(scalar_exprs.clone(), context.clone(), scalar_cache)
+                            .await
+                            .flat_map_unordered(None, move |scalar_result| {
+                                let tag = tag.clone();
+                                let op_data = op_data.clone();
+                                let rel_exprs = rel_exprs.clone();
+                                let context = context.clone();
+                                let rel_cache = rel_cache.clone();
 
-                                    scalar_result
-                                        .map(|scalar_children| {
-                                            async move {
-                                                stream::iter(
-                                                    rel_cache
-                                                        .get_or_compute(|| {
-                                                            evaluate_all_combinations(
-                                                                rel_exprs.iter().cloned(),
-                                                                context,
-                                                            )
-                                                            .collect::<Vec<_>>()
-                                                        })
-                                                        .await,
-                                                )
-                                                .map(move |rel_result| {
+                                scalar_result
+                                    .map(|scalar_children| {
+                                        async move {
+                                            evaluate_children(
+                                                rel_exprs.clone(),
+                                                context.clone(),
+                                                rel_cache,
+                                            )
+                                            .await
+                                            .map(
+                                                move |rel_result| {
                                                     rel_result.map(|rel_children| {
                                                         Value(Operator(Data(Operator {
                                                             kind: kind.clone(),
@@ -92,23 +92,22 @@ fn evaluate_operator(op: &Operator<Expr>, context: Context) -> ValueStream {
                                                                 .clone(),
                                                         })))
                                                     })
-                                                })
-                                            }
-                                            .flatten_stream()
-                                            .boxed()
-                                        })
-                                        .unwrap_or_else(|e| {
-                                            stream::once(async move { Err(e) }).boxed()
-                                        })
-                                },
-                            )
-                        }
-                        .flatten_stream()
-                        .boxed()
-                    })
-                    .unwrap_or_else(|e| stream::once(async move { Err(e) }).boxed())
-            }),
-    )
+                                                },
+                                            )
+                                        }
+                                        .flatten_stream()
+                                        .boxed()
+                                    })
+                                    .unwrap_or_else(|e| stream::once(async move { Err(e) }).boxed())
+                            })
+                    }
+                    .flatten_stream()
+                    .boxed()
+                })
+                .unwrap_or_else(|e| stream::once(async move { Err(e) }).boxed())
+        });
+
+    Box::new(stream)
 }
 
 pub(super) fn evaluate_core_expr(data: &CoreData<Expr>, context: Context) -> ValueStream {
