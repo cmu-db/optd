@@ -34,6 +34,14 @@ use crate::{
     },
 };
 
+/// Gets the cost of a physical plan by calling the cost model.
+/// It also stores the cost in the memo table.
+/// It also updates
+async fn get_physical_plan_cost(physical_plan: &PhysicalPlan) -> anyhow::Result<Cost> {
+    todo!("Unimiplemented cost model")
+}
+
+
 #[async_recursion]
 pub async fn ingest_partial_logical_plan(
     memo: &impl Memoize,

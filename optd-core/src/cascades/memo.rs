@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use crate::cost_model::Cost;
+use crate::{cost_model::Cost, plans::physical::PhysicalPlan};
 
 use super::{
     expressions::{
@@ -19,7 +19,7 @@ use super::{
     goal::{Goal, GoalId, OptimizationStatus},
     groups::{ExplorationStatus, RelationalGroupId, ScalarGroupId},
     properties::PhysicalProperties,
-    rules::{ImplementationRuleId, TransformationRuleId},
+    rules::{ImplementationRuleId, RuleId, TransformationRuleId},
 };
 use anyhow::Result;
 
@@ -130,13 +130,20 @@ pub trait Memoize: Send + Sync + 'static {
         goal_id: GoalId,
     ) -> Result<GoalId>;
 
+    /// Adds a physical expression to a goal in the memo table.
+    /// TODO (Sarvesh): This is not correct and we should not be doing this at all. My next commit will probably change this
+    // TODO: cost and statistics probably is also added here.
+    async fn add_physical_plan_top_node(
+        &self,
+        physical_plan: &PhysicalPlan,
+        cost: Cost,
+        goal_id: GoalId,
+    ) -> Result<GoalId>;
+
     async fn get_matching_transformation_rules(
         &self,
         logical_expr: &LogicalExpression,
     ) -> Result<Vec<TransformationRuleId>>;
 
-    async fn get_matching_implementation_rules(
-        &self,
-        physical_expr: &LogicalExpression,
-    ) -> Result<Vec<ImplementationRuleId>>;
+    async fn get_matching_rules(&self, physical_expr: &LogicalExpression) -> Result<Vec<RuleId>>;
 }

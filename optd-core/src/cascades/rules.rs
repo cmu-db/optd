@@ -33,3 +33,8 @@ pub struct TransformationRuleId(pub i64);
 )]
 #[sqlx(transparent)]
 pub struct ImplementationRuleId(pub i64);
+
+pub enum RuleId {
+    TransformationRule(TransformationRuleId),
+    ImplementationRule(ImplementationRuleId),
+}

@@ -14,9 +14,9 @@ use crate::{
         expressions::*,
         goal::OptimizationStatus,
         groups::{ExplorationStatus, RelationalGroupId, ScalarGroupId},
-        memo::Memoize,
+        memo::Memoize, rules::RuleId,
     },
-    operators::relational::physical::PhysicalOperatorKind,
+    operators::relational::physical::PhysicalOperatorKind, plans::physical::PhysicalPlan,
 };
 use crate::{
     cascades::{
@@ -360,10 +360,16 @@ impl Memoize for SqliteMemo {
         todo!()
     }
 
-    async fn get_matching_implementation_rules(
+    async fn get_matching_rules(
         &self,
         physical_expr: &LogicalExpression,
-    ) -> Result<Vec<ImplementationRuleId>> {
+    ) -> Result<Vec<RuleId>> {
+        todo!()
+    }
+    
+    #[doc = " Adds a physical expression to a goal in the memo table."]
+    #[doc = " TODO (Sarvesh): This is not correct and we should not be doing this at all. My next commit will probably change this"]
+    async fn add_physical_plan_top_node(&self,physical_plan: &PhysicalPlan,cost:Cost,goal_id:GoalId,) -> Result<GoalId> {
         todo!()
     }
 }

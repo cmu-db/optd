@@ -10,7 +10,9 @@
 
 use crate::{
     cascades::{expressions::LogicalExpression, groups::RelationalGroupId},
-    operators::relational::logical::LogicalOperator,
+    operators::relational::logical::{
+        filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator,
+    },
     values::OptdValue,
 };
 
@@ -49,10 +51,62 @@ pub enum PartialLogicalPlan {
 impl PartialLogicalPlan {
     pub fn from_expr(expr: &LogicalExpression) -> Self {
         match expr {
-            LogicalOperator::Scan(_) => todo!(),
-            LogicalOperator::Filter(_) => todo!(),
-            LogicalOperator::Join(_) => todo!(),
-            LogicalOperator::Project(_) => todo!(),
+            LogicalOperator::Scan(scan) => PartialLogicalPlan::PartialMaterialized {
+                operator: LogicalOperator::<
+                    OptdValue,
+                    Arc<PartialLogicalPlan>,
+                    Arc<PartialScalarPlan>,
+                >::Scan(Scan::<OptdValue, Arc<PartialScalarPlan>> {
+                    table_name: scan.table_name.clone(),
+                    predicate: Arc::new(PartialScalarPlan::UnMaterialized(scan.predicate)),
+                }),
+            },
+            LogicalOperator::Filter(filter) => PartialLogicalPlan::PartialMaterialized {
+                operator: LogicalOperator::<
+                    OptdValue,
+                    Arc<PartialLogicalPlan>,
+                    Arc<PartialScalarPlan>,
+                >::Filter(Filter::<
+                    Arc<PartialLogicalPlan>,
+                    Arc<PartialScalarPlan>,
+                > {
+                    predicate: Arc::new(PartialScalarPlan::UnMaterialized(filter.predicate)),
+                    child: Arc::new(PartialLogicalPlan::UnMaterialized(filter.child)),
+                }),
+            },
+            LogicalOperator::Join(join) => PartialLogicalPlan::PartialMaterialized {
+                operator: LogicalOperator::<
+                    OptdValue,
+                    Arc<PartialLogicalPlan>,
+                    Arc<PartialScalarPlan>,
+                >::Join(Join::<
+                    OptdValue,
+                    Arc<PartialLogicalPlan>,
+                    Arc<PartialScalarPlan>,
+                > {
+                    join_type: join.join_type.clone(),
+                    left: Arc::new(PartialLogicalPlan::UnMaterialized(join.left)),
+                    right: Arc::new(PartialLogicalPlan::UnMaterialized(join.right)),
+                    condition: Arc::new(PartialScalarPlan::UnMaterialized(join.condition)),
+                }),
+            },
+            LogicalOperator::Project(project) => PartialLogicalPlan::PartialMaterialized {
+                operator: LogicalOperator::<
+                    OptdValue,
+                    Arc<PartialLogicalPlan>,
+                    Arc<PartialScalarPlan>,
+                >::Project(Project::<
+                    Arc<PartialLogicalPlan>,
+                    Arc<PartialScalarPlan>,
+                > {
+                    child: Arc::new(PartialLogicalPlan::UnMaterialized(project.child)),
+                    fields: project
+                        .fields
+                        .iter()
+                        .map(|field| Arc::new(PartialScalarPlan::UnMaterialized(*field)))
+                        .collect(),
+                }),
+            },
         }
     }
 }

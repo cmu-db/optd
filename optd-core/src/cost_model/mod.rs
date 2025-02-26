@@ -5,3 +5,7 @@
 #[repr(transparent)]
 #[sqlx(transparent)]
 pub struct Cost(pub f64);
+
+impl Cost {
+    pub const INFINITY: Cost = Cost(f64::INFINITY);
+}
