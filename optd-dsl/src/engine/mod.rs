@@ -3,7 +3,7 @@ use crate::{
     utils::context::Context,
 };
 use bridge::{from_optd::partial_logical_to_value, into_optd::value_to_partial_logical};
-use expr_eval::EngineError;
+use errors::EngineError;
 use futures::{Stream, StreamExt};
 use optd_core::cascades::ir::PartialLogicalPlan;
 use std::sync::Arc;
@@ -13,7 +13,11 @@ use Expr::*;
 use Literal::*;
 
 mod bridge;
-mod expr_eval;
+mod errors;
+mod evaluation;
+
+pub type PartialLogicalPlanStream =
+    Box<dyn Stream<Item = Result<PartialLogicalPlan, EngineError>> + Send + Unpin>;
 
 /// The interpreter for evaluating HIR expressions
 pub struct Interpreter {
@@ -32,7 +36,7 @@ impl Interpreter {
         &self,
         rule_name: &str,
         plan: PartialLogicalPlan,
-    ) -> Box<dyn Stream<Item = Result<PartialLogicalPlan, EngineError>> + Send + Unpin> {
+    ) -> PartialLogicalPlanStream {
         let context = Context::new(
             self.hir
                 .expressions

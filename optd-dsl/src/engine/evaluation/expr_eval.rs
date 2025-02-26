@@ -1,35 +1,27 @@
-use std::sync::Arc;
-
 use crate::{
     analyzer::hir::{CoreData, Expr, FunKind, Literal, Value},
+    engine::errors::EngineError,
     utils::context::Context,
 };
-use core_eval::evaluate_core_expr;
-use futures::{lock::Mutex, FutureExt};
-use futures::{stream, Stream, StreamExt};
-use op_eval::{eval_binary_op, eval_unary_op};
+use futures::stream;
+use futures::{FutureExt, StreamExt};
 
 use CoreData::*;
 use Expr::*;
 use FunKind::*;
-mod core_eval;
-mod op_eval;
-mod pat_eval;
 
-#[derive(Clone)]
-pub enum EngineError {
-    Placeholder(String),
-}
+use super::{
+    core_eval::evaluate_core_expr,
+    op_eval::{eval_binary_op, eval_unary_op},
+    stream_cache::StreamCache,
+    ValueStream, VecValueStream,
+};
 
-fn propagate_error(
-    e: EngineError,
-) -> Box<dyn Stream<Item = Result<Value, EngineError>> + Send + Unpin> {
+pub(super) fn propagate_error(e: EngineError) -> ValueStream {
     Box::new(stream::once(async move { Err(e) }).boxed())
 }
 
-fn propagate_value(
-    value: Value,
-) -> Box<dyn Stream<Item = Result<Value, EngineError>> + Send + Unpin> {
+pub(super) fn propagate_value(value: Value) -> ValueStream {
     Box::new(stream::once(async move { Ok(value) }).boxed())
 }
 
@@ -55,10 +47,7 @@ fn propagate_value(
 /// - Function arguments with multiple possible values
 /// - Collection literals with non-deterministic elements
 /// - Struct fields that may have multiple possible values
-pub(super) fn evaluate_all_combinations<I>(
-    mut items: I,
-    context: Context,
-) -> Box<dyn Stream<Item = Result<Vec<Value>, EngineError>> + Send + Unpin>
+pub(super) fn evaluate_all_combinations<I>(mut items: I, context: Context) -> VecValueStream
 where
     I: Iterator<Item = Expr> + Send + Clone,
 {
@@ -73,33 +62,28 @@ where
                     .boxed()
             } else {
                 let remaining_items = items.collect::<Vec<_>>();
-                let cache: Arc<Mutex<Option<Vec<_>>>> = Arc::new(Mutex::new(None));
+                let cache = StreamCache::new();
+
                 first
                     .evaluate(context.clone())
                     .flat_map_unordered(None, {
-                        let cache = Arc::clone(&cache);
+                        let cache = cache.clone();
                         move |first_result| match first_result {
                             Ok(first_val) => {
-                                let cache = Arc::clone(&cache);
+                                let cache = cache.clone();
                                 let remaining_items = remaining_items.clone();
                                 let context_clone = context.clone();
 
                                 async move {
-                                    let rest_results = {
-                                        let mut cache_lock = cache.lock().await;
-                                        if let Some(ref cached_results) = *cache_lock {
-                                            cached_results.clone()
-                                        } else {
-                                            let computed_results = evaluate_all_combinations(
+                                    let rest_results = cache
+                                        .get_or_compute(|| {
+                                            evaluate_all_combinations(
                                                 remaining_items.into_iter(),
                                                 context_clone,
                                             )
                                             .collect::<Vec<_>>()
-                                            .await;
-                                            *cache_lock = Some(computed_results.clone());
-                                            computed_results
-                                        }
-                                    };
+                                        })
+                                        .await;
 
                                     stream::iter(rest_results).map(move |rest_result| {
                                         rest_result.map(|rest_vals| {
@@ -122,10 +106,7 @@ where
 }
 
 impl Expr {
-    pub(super) fn evaluate(
-        &self,
-        context: Context,
-    ) -> Box<dyn Stream<Item = Result<Value, EngineError>> + Send + Unpin> {
+    pub(crate) fn evaluate(&self, context: Context) -> ValueStream {
         match self {
             PatternMatch(_expr, _match_arms) => todo!(),
 

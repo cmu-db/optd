@@ -3159,6 +3159,7 @@ dependencies = [
  "futures",
  "optd-core",
  "ordered-float 4.6.0",
+ "tokio",
 ]
 
 [[package]]
