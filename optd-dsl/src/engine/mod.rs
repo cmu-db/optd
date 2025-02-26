@@ -3,21 +3,18 @@ use crate::{
     utils::context::Context,
 };
 use bridge::{from_optd::partial_logical_to_value, into_optd::value_to_partial_logical};
-use errors::EngineError;
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use optd_core::cascades::ir::PartialLogicalPlan;
 use std::sync::Arc;
+use utils::{errors::Error, streams::PartialLogicalPlanStream};
 
 use CoreData::*;
 use Expr::*;
 use Literal::*;
 
 mod bridge;
-mod errors;
-mod evaluation;
-
-pub type PartialLogicalPlanStream =
-    Box<dyn Stream<Item = Result<PartialLogicalPlan, EngineError>> + Send + Unpin>;
+mod eval;
+mod utils;
 
 /// The interpreter for evaluating HIR expressions
 pub struct Interpreter {
@@ -58,7 +55,7 @@ impl Interpreter {
                     result.and_then(|value| match &value.0 {
                         Fail(boxed_msg) => match &boxed_msg.0 {
                             Literal(String(error_message)) => {
-                                Err(EngineError::Placeholder(error_message.clone()))
+                                Err(Error::Placeholder(error_message.clone()))
                             }
                             _ => panic!("Fail expression must evaluate to a string message"),
                         },

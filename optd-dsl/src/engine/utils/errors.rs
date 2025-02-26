@@ -1,4 +1,4 @@
 #[derive(Clone)]
-pub enum EngineError {
+pub enum Error {
     Placeholder(String),
 }

@@ -2,18 +2,18 @@ use futures::lock::Mutex;
 use std::sync::Arc;
 
 #[derive(Clone)]
-pub(super) struct StreamCache<T> {
+pub(crate) struct StreamCache<T> {
     cache: Arc<Mutex<Option<T>>>,
 }
 
 impl<T: Clone> StreamCache<T> {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             cache: Arc::new(Mutex::new(None)),
         }
     }
 
-    pub(super) async fn get_or_compute<F, Fut>(&self, compute_fn: F) -> T
+    pub(crate) async fn get_or_compute<F, Fut>(&self, compute_fn: F) -> T
     where
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = T>,

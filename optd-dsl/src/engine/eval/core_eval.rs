@@ -1,7 +1,8 @@
 use super::expr_eval::evaluate_all_combinations;
-use super::ValueStream;
-use crate::engine::errors::EngineError;
-use crate::engine::evaluation::stream_cache::StreamCache;
+use crate::capture;
+use crate::engine::utils::cache::StreamCache;
+use crate::engine::utils::errors::Error;
+use crate::engine::utils::streams::ValueStream;
 use crate::{
     analyzer::hir::{CoreData, Expr, Materializable, Operator, Value},
     engine::Context,
@@ -32,8 +33,8 @@ fn evaluate_operator(op: &Operator<Expr>, context: Context) -> ValueStream {
     async fn evaluate_children(
         exprs: Vec<Expr>,
         context: Context,
-        cache: StreamCache<Vec<Result<Vec<Value>, EngineError>>>,
-    ) -> Iter<std::vec::IntoIter<Result<Vec<Value>, EngineError>>> {
+        cache: StreamCache<Vec<Result<Vec<Value>, Error>>>,
+    ) -> Iter<std::vec::IntoIter<Result<Vec<Value>, Error>>> {
         stream::iter(
             cache
                 .get_or_compute(|| {
@@ -51,61 +52,58 @@ fn evaluate_operator(op: &Operator<Expr>, context: Context) -> ValueStream {
     let rel_cache = StreamCache::new();
 
     let stream = evaluate_all_combinations(op_data_exprs.iter().cloned(), context.clone())
-        .flat_map_unordered(None, move |op_data_result| {
-            let tag = tag.clone();
-            let scalar_exprs = scalar_exprs.clone();
-            let rel_exprs = rel_exprs.clone();
-            let context = context.clone();
-            let scalar_cache = scalar_cache.clone();
-            let rel_cache = rel_cache.clone();
-
-            op_data_result
-                .map(|op_data| {
-                    async move {
-                        evaluate_children(scalar_exprs.clone(), context.clone(), scalar_cache)
-                            .await
-                            .flat_map_unordered(None, move |scalar_result| {
-                                let tag = tag.clone();
-                                let op_data = op_data.clone();
-                                let rel_exprs = rel_exprs.clone();
-                                let context = context.clone();
-                                let rel_cache = rel_cache.clone();
-
-                                scalar_result
-                                    .map(|scalar_children| {
-                                        async move {
-                                            evaluate_children(
-                                                rel_exprs.clone(),
-                                                context.clone(),
-                                                rel_cache,
-                                            )
-                                            .await
-                                            .map(
-                                                move |rel_result| {
-                                                    rel_result.map(|rel_children| {
-                                                        Value(Operator(Data(Operator {
-                                                            kind: kind.clone(),
-                                                            tag: tag.clone(),
-                                                            operator_data: op_data.clone(),
-                                                            relational_children: rel_children,
-                                                            scalar_children: scalar_children
-                                                                .clone(),
-                                                        })))
-                                                    })
-                                                },
-                                            )
+        .flat_map_unordered(None, 
+            move |op_data_result| {
+                op_data_result
+                    .map(capture!([tag, scalar_exprs, rel_exprs, context, scalar_cache, rel_cache], 
+                        |op_data| {
+                            async move {
+                                evaluate_children(scalar_exprs.clone(), context.clone(), scalar_cache)
+                                    .await
+                                    .flat_map_unordered(None, capture!([tag, op_data, rel_exprs, context, rel_cache], 
+                                        move |scalar_result| {
+                                            scalar_result
+                                                .map(capture!([tag, op_data, rel_exprs, context, rel_cache], 
+                                                    |scalar_children| {
+                                                        async move {
+                                                            evaluate_children(
+                                                                rel_exprs.clone(),
+                                                                context.clone(),
+                                                                rel_cache,
+                                                            )
+                                                            .await
+                                                            .map(
+                                                                capture!([tag, op_data, scalar_children, kind], 
+                                                                    move |rel_result| {
+                                                                        rel_result.map(|rel_children| {
+                                                                            Value(Operator(Data(Operator {
+                                                                                kind: kind.clone(),
+                                                                                tag: tag.clone(),
+                                                                                operator_data: op_data.clone(),
+                                                                                relational_children: rel_children,
+                                                                                scalar_children: scalar_children
+                                                                                    .clone(),
+                                                                            })))
+                                                                        })
+                                                                    }
+                                                                ),
+                                                            )
+                                                        }
+                                                        .flatten_stream()
+                                                        .boxed()
+                                                    }
+                                                ))
+                                                .unwrap_or_else(|e| stream::once(async move { Err(e) }).boxed())
                                         }
-                                        .flatten_stream()
-                                        .boxed()
-                                    })
-                                    .unwrap_or_else(|e| stream::once(async move { Err(e) }).boxed())
-                            })
-                    }
-                    .flatten_stream()
-                    .boxed()
-                })
-                .unwrap_or_else(|e| stream::once(async move { Err(e) }).boxed())
-        });
+                                    ))
+                            }
+                            .flatten_stream()
+                            .boxed()
+                        }
+                    ))
+                    .unwrap_or_else(|e| stream::once(async move { Err(e) }).boxed())
+            }
+        );
 
     Box::new(stream)
 }
