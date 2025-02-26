@@ -41,7 +41,6 @@ async fn get_physical_plan_cost(physical_plan: &PhysicalPlan) -> anyhow::Result<
     todo!("Unimiplemented cost model")
 }
 
-
 #[async_recursion]
 pub async fn ingest_partial_logical_plan(
     memo: &impl Memoize,
@@ -66,6 +65,34 @@ pub async fn ingest_partial_logical_plan(
         PartialLogicalPlan::UnMaterialized(group_id) => Ok(*group_id),
     }
 }
+
+// #[async_recursion]
+// pub async fn ingest_full_physical_plan(
+//     memo: &impl Memoize,
+//     physical_plan: &PhysicalPlan,
+//     cost: Cost,
+//     goal_id: GoalId,
+// ) -> anyhow::Result<RelationalGroupId> {
+//     let mut children_relations = Vec::new();
+//     for child in physical_plan.operator.children_relations().iter() {
+//         children_relations.push(ingest_full_physical_plan(memo, child, Cost::INFINITY, goal_id).await?);
+
+//     }
+
+//     let mut children_scalars = Vec::new();
+//     for child in physical_plan.operator.children_scalars().iter() {
+//         children_scalars.push(ingest_full_scalar_plan(memo, child).await?);
+//     }
+
+//     memo.add_physical_expr_to_goal(
+//         &physical_plan
+//             .operator
+//             .into_expr(&children_relations, &children_scalars),
+//         cost,
+//         goal_id,
+//     )
+//     .await
+// }
 
 #[async_recursion]
 pub async fn ingest_full_logical_plan(

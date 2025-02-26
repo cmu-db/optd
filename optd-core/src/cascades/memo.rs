@@ -140,6 +140,18 @@ pub trait Memoize: Send + Sync + 'static {
         goal_id: GoalId,
     ) -> Result<GoalId>;
 
+    /// Gets the group id from a logical expression.
+    async fn get_group_id_from_logical_expr(
+        &self,
+        logical_expr: &LogicalExpression,
+    ) -> Result<RelationalGroupId>;
+
+    /// Gets the goal id from a physical expression.
+    async fn get_goal_id_from_physical_expr(
+        &self,
+        physical_expr: &PhysicalExpression,
+    ) -> Result<GoalId>;
+
     async fn get_matching_transformation_rules(
         &self,
         logical_expr: &LogicalExpression,

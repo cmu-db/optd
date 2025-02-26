@@ -14,9 +14,11 @@ use crate::{
         expressions::*,
         goal::OptimizationStatus,
         groups::{ExplorationStatus, RelationalGroupId, ScalarGroupId},
-        memo::Memoize, rules::RuleId,
+        memo::Memoize,
+        rules::RuleId,
     },
-    operators::relational::physical::PhysicalOperatorKind, plans::physical::PhysicalPlan,
+    operators::relational::physical::PhysicalOperatorKind,
+    plans::physical::PhysicalPlan,
 };
 use crate::{
     cascades::{
@@ -360,16 +362,32 @@ impl Memoize for SqliteMemo {
         todo!()
     }
 
-    async fn get_matching_rules(
-        &self,
-        physical_expr: &LogicalExpression,
-    ) -> Result<Vec<RuleId>> {
+    async fn get_matching_rules(&self, physical_expr: &LogicalExpression) -> Result<Vec<RuleId>> {
         todo!()
     }
-    
+
     #[doc = " Adds a physical expression to a goal in the memo table."]
     #[doc = " TODO (Sarvesh): This is not correct and we should not be doing this at all. My next commit will probably change this"]
-    async fn add_physical_plan_top_node(&self,physical_plan: &PhysicalPlan,cost:Cost,goal_id:GoalId,) -> Result<GoalId> {
+    async fn add_physical_plan_top_node(
+        &self,
+        physical_plan: &PhysicalPlan,
+        cost: Cost,
+        goal_id: GoalId,
+    ) -> Result<GoalId> {
+        todo!()
+    }
+
+    async fn get_group_id_from_logical_expr(
+        &self,
+        logical_expr: &LogicalExpression,
+    ) -> Result<RelationalGroupId> {
+        todo!()
+    }
+
+    async fn get_goal_id_from_physical_expr(
+        &self,
+        physical_expr: &PhysicalExpression,
+    ) -> Result<GoalId> {
         todo!()
     }
 }

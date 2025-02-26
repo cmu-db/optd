@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{
     cost_model::Cost,
     plans::{
-        logical::PartialLogicalPlan,
+        logical::{LogicalPlan, PartialLogicalPlan},
         physical::{PartialPhysicalPlan, PhysicalPlan},
     },
 };
@@ -17,7 +17,7 @@ use super::{
     get_physical_plan_cost,
     goal::{Goal, GoalId, OptimizationStatus},
     groups::{ExplorationStatus, RelationalGroupId},
-    ingest_partial_logical_plan,
+    ingest_full_logical_plan, ingest_partial_logical_plan,
     memo::Memoize,
     mock_optimize_relation_expr,
     properties::PhysicalProperties,
@@ -42,11 +42,27 @@ impl<'a, M: Memoize> TaskContext<M> {
         })
     }
 
+    /// The main entry point for the optimizer.
+    pub async fn optimize(
+        self: Arc<Self>,
+        logical_plan: LogicalPlan,
+    ) -> Result<(Cost, Option<PhysicalPlan>)> {
+        let group_id = ingest_full_logical_plan(&self.memo, &logical_plan).await?;
+        let goal = self
+            .memo
+            .create_or_get_goal(group_id, PhysicalProperties::default())
+            .await?;
+        self.optimize_goal(goal.representative_goal_id).await
+    }
+
+    /// This function is used to optimize a goal. It will be called by the entry point `optimize`.
+    /// It will also be called by the interpreter when it needs to optimize a children goals.
     #[async_recursion]
     pub async fn optimize_goal(
         self: Arc<Self>,
-        goal: Arc<Goal>,
+        goal: GoalId,
     ) -> Result<(Cost, Option<PhysicalPlan>)> {
+        let goal = self.memo.get_goal(goal).await?;
         let group_id = goal.group_id;
         if self.memo.get_group_exploration_status(group_id).await? == ExplorationStatus::Unexplored
         {
