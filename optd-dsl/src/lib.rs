@@ -1,5 +1,5 @@
 pub mod analyzer;
-pub mod interpreter;
+pub mod engine;
 pub mod lexer;
 pub mod parser;
 pub mod utils;

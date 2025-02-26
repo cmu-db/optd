@@ -2,8 +2,9 @@ use crate::{
     analyzer::hir::{AnnotatedValue, CoreData, Expr, Literal, Value, HIR},
     utils::context::Context,
 };
-use anyhow::Error;
 use bridge::{from_optd::partial_logical_to_value, into_optd::value_to_partial_logical};
+use expr_eval::EngineError;
+use futures::{Stream, StreamExt};
 use optd_core::cascades::ir::PartialLogicalPlan;
 use std::sync::Arc;
 
@@ -24,25 +25,6 @@ impl Interpreter {
         Self { hir }
     }
 
-    /// Helper function to check results for failures and convert them to appropriate errors
-    /// Returns the original results if no failures are found
-    fn check_for_failures(&self, results: &[Value]) -> Result<(), Error> {
-        if results.is_empty() {
-            panic!("Interpreter returned no results");
-        }
-
-        let first_result = &results[0];
-        match &first_result.0 {
-            Fail(boxed_msg) => match &boxed_msg.0 {
-                Literal(String(error_message)) => {
-                    return Err(anyhow::anyhow!("{}", error_message));
-                }
-                _ => panic!("Fail expression must evaluate to a string message"),
-            },
-            _ => Ok(()),
-        }
-    }
-
     /// Interpret a function with the given name and input
     /// This applies a logical rule to an input plan and returns all possible
     /// transformations of the plan according to the rule
@@ -50,7 +32,7 @@ impl Interpreter {
         &self,
         rule_name: &str,
         plan: PartialLogicalPlan,
-    ) -> Result<Vec<PartialLogicalPlan>, Error> {
+    ) -> Box<dyn Stream<Item = Result<PartialLogicalPlan, EngineError>> + Send + Unpin> {
         let context = Context::new(
             self.hir
                 .expressions
@@ -60,17 +42,26 @@ impl Interpreter {
         );
 
         let call = Call(
-            CoreVal(Value(Literal(String(rule_name.to_string())))).into(),
+            Box::new(CoreVal(Value(Literal(String(rule_name.to_string()))))),
             vec![CoreVal(partial_logical_to_value(&plan))],
         );
 
-        let results = call.evaluate(context).await?;
+        let results_stream = call.evaluate(context);
 
-        self.check_for_failures(&results)?;
-
-        Ok(results
-            .iter()
-            .map(|v| value_to_partial_logical(v))
-            .collect())
+        Box::new(
+            results_stream
+                .map(|result| {
+                    result.and_then(|value| match &value.0 {
+                        Fail(boxed_msg) => match &boxed_msg.0 {
+                            Literal(String(error_message)) => {
+                                Err(EngineError::Placeholder(error_message.clone()))
+                            }
+                            _ => panic!("Fail expression must evaluate to a string message"),
+                        },
+                        _ => Ok(value_to_partial_logical(&value)),
+                    })
+                })
+                .boxed(),
+        )
     }
 }

@@ -1,4 +1,4 @@
-use crate::{
+/*use crate::{
     analyzer::hir::{CoreData, Literal, Materializable, Operator, OperatorKind, Pattern, Value},
     utils::context::Context,
 };
@@ -150,3 +150,4 @@ pub(super) async fn match_pattern(
         _ => Ok(vec![]),
     }
 }
+*/
