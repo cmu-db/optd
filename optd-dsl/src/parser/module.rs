@@ -17,7 +17,7 @@ mod tests {
     use chumsky::Stream;
 
     use super::*;
-    use crate::lexer::lex::lex;
+    use crate::{lexer::lex::lex, utils::span::Span};
 
     fn parse_module(input: &str) -> (Option<Module>, Vec<Simple<Token, Span>>) {
         let (tokens, _) = lex(input, "test.txt");
@@ -125,7 +125,7 @@ mod tests {
             \ Semi
 
         [rust]
-        fn (expr: Scalar) apply_children(f: Scalar => Scalar): Scalar
+        fn (expr: Scalar) apply_children(f: Scalar => Scalar) = ()
 
         fn (pred: Predicate) remap(map: {I64 : I64}) =
             match predicate

@@ -1,3 +1,7 @@
+//! Provides utilities for managing variable capture in closures, particularly focused
+//! on simplifying the common pattern of cloning variables before capture to avoid ownership
+//! issues in complex nested closures and asynchronous contexts.
+
 /// A macro that automatically clones variables before they're captured by a closure.
 ///
 /// This macro takes a list of variables to clone and a closure expression.
@@ -6,7 +10,7 @@
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let tag = String::from("tag");
 /// let context = Context::new();
 ///

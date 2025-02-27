@@ -1,3 +1,6 @@
-mod core_eval;
-mod expr_eval;
-mod op_eval;
+mod binary;
+mod core;
+mod expr;
+mod operator;
+mod pattern;
+mod unary;

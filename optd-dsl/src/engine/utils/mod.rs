@@ -1,4 +1,3 @@
-pub(crate) mod cache;
-pub(crate) mod errors;
-pub(crate) mod macros;
-pub(crate) mod streams;
+pub(super) mod errors;
+pub(super) mod macros;
+pub(super) mod streams;
