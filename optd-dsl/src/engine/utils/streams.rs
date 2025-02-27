@@ -4,6 +4,7 @@
 //! stream processing pipelines.
 
 use crate::analyzer::hir::{Expr, Value};
+use crate::capture;
 use crate::engine::utils::errors::Error;
 use crate::utils::context::Context;
 use futures::{stream, Stream, StreamExt};
@@ -85,16 +86,13 @@ where
                 // Evaluate this expression, and for each result, combine with the rest
                 expr.evaluate(context.clone())
                     .flat_map(move |result| {
-                        match result {
-                            Ok(value) => {
-                                // Clone the iterator for recursive call
-                                let items_clone = items.clone();
-                                let context_clone = context.clone();
-
+                        stream_from_result(
+                            result,
+                            capture!([context, items], move |value| {
                                 // Recursively evaluate the remaining expressions
                                 // and combine with the current value
-                                evaluate_all_combinations(items_clone, context_clone)
-                                    .map(move |rest_result| {
+                                evaluate_all_combinations(items.clone(), context.clone()).map(
+                                    move |rest_result| {
                                         rest_result.map(|mut rest_values| {
                                             let mut result =
                                                 Vec::with_capacity(rest_values.len() + 1);
@@ -102,11 +100,10 @@ where
                                             result.append(&mut rest_values);
                                             result
                                         })
-                                    })
-                                    .boxed()
-                            }
-                            Err(e) => propagate_error(e),
-                        }
+                                    },
+                                )
+                            }),
+                        )
                     })
                     .boxed()
             }
@@ -149,8 +146,8 @@ where
     stream::once(async move { Ok(value) }).boxed()
 }
 
-/// Generic function to handle processing a Result, either by
-/// processing the Ok value with a success handler or propagating the error.
+/// Transforms a Result into a stream by applying a handler to success values
+/// or propagating errors.
 ///
 /// This function provides a consistent way to handle Result types in stream transformations.
 /// It applies the success_handler to Ok values and propagates errors using propagate_error.
@@ -167,7 +164,7 @@ where
 ///
 /// # Returns
 /// A boxed stream that either contains the results of the success handler or propagates the error
-pub(crate) fn process_result<'a, T, U, F, Fut>(
+pub(crate) fn stream_from_result<'a, T, U, F, Fut>(
     result: Result<T, Error>,
     success_handler: F,
 ) -> Pin<Box<dyn Stream<Item = Result<U, Error>> + Send + 'a>>

@@ -6,7 +6,7 @@ use crate::{
     capture,
     engine::{
         utils::streams::{
-            evaluate_all_combinations, process_result, propagate_success, ValueStream,
+            evaluate_all_combinations, stream_from_result, propagate_success, ValueStream,
         },
         Context,
     },
@@ -75,7 +75,7 @@ fn evaluate_map(items: Vec<(Expr, Expr)>, context: Context) -> ValueStream {
     evaluate_all_combinations(keys.into_iter(), context.clone())
         .flat_map(move |keys_result| {
             // Process keys result
-            process_result(
+            stream_from_result(
                 keys_result,
                 capture!([values, context], move |keys| {
                     // Then evaluate all value expressions

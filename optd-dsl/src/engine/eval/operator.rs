@@ -1,7 +1,7 @@
 use crate::{
     analyzer::hir::{CoreData, Expr, Materializable, Operator, OperatorKind, Value},
     capture,
-    engine::utils::streams::{evaluate_all_combinations, process_result, ValueStream},
+    engine::utils::streams::{evaluate_all_combinations, stream_from_result, ValueStream},
     utils::context::Context,
 };
 use futures::StreamExt;
@@ -41,7 +41,7 @@ fn explore_operator_data(
 ) -> ValueStream {
     evaluate_all_combinations(op_data_exprs.into_iter(), context.clone())
         .flat_map(move |op_data_result| {
-            process_result(
+            stream_from_result(
                 op_data_result,
                 capture!(
                     [kind, tag, scalar_exprs, rel_exprs, context],
@@ -74,7 +74,7 @@ fn explore_scalar_children(
         .flat_map(capture!(
             [kind, tag, op_data, rel_exprs, context],
             move |scalar_result| {
-                process_result(
+                stream_from_result(
                     scalar_result,
                     capture!(
                         [kind, tag, op_data, rel_exprs, context],

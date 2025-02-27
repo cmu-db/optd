@@ -3,12 +3,13 @@
 
 use crate::{
     analyzer::hir::{BinOp, CoreData, Expr, FunKind, Literal, UnaryOp, Value},
+    capture,
     engine::utils::streams::{
-        evaluate_all_combinations, propagate_error, propagate_success, ValueStream,
+        evaluate_all_combinations, propagate_success, stream_from_result, ValueStream,
     },
     utils::context::Context,
 };
-use futures::{stream, StreamExt};
+use futures::StreamExt;
 
 use CoreData::*;
 use Expr::*;
@@ -57,23 +58,23 @@ fn evaluate_if_then_else(
 ) -> ValueStream {
     cond.evaluate(context.clone())
         .flat_map(move |cond_result| {
-            let context = context.clone();
-
-            match cond_result {
-                Ok(value) => match value.0 {
-                    // If condition is a boolean, evaluate the appropriate branch
-                    Literal(Literal::Bool(b)) => {
-                        if b {
-                            then_expr.clone().evaluate(context)
-                        } else {
-                            else_expr.clone().evaluate(context)
+            stream_from_result(
+                cond_result,
+                capture!([context, then_expr, else_expr], move |value| {
+                    match value.0 {
+                        // If condition is a boolean, evaluate the appropriate branch
+                        Literal(Literal::Bool(b)) => {
+                            if b {
+                                then_expr.evaluate(context)
+                            } else {
+                                else_expr.evaluate(context)
+                            }
                         }
+                        // Condition must be a boolean
+                        _ => panic!("Expected boolean in condition"),
                     }
-                    // Condition must be a boolean
-                    _ => panic!("Expected boolean in condition"),
-                },
-                Err(e) => propagate_error(e),
-            }
+                }),
+            )
         })
         .boxed()
 }
@@ -91,15 +92,15 @@ fn evaluate_let_binding(
     assignee
         .evaluate(context.clone())
         .flat_map(move |expr_result| {
-            match expr_result {
-                Ok(value) => {
+            stream_from_result(
+                expr_result,
+                capture!([context, after, ident], move |value| {
                     // Create updated context with the new binding
                     let mut new_ctx = context.clone();
-                    new_ctx.bind(ident.clone(), value);
-                    after.clone().evaluate(new_ctx)
-                }
-                Err(e) => propagate_error(e),
-            }
+                    new_ctx.bind(ident, value);
+                    after.evaluate(new_ctx)
+                }),
+            )
         })
         .boxed()
 }
@@ -108,10 +109,7 @@ fn evaluate_let_binding(
 ///
 /// Evaluates both operands in all possible combinations, then applies the binary operation.
 fn evaluate_binary_expr(left: Expr, op: BinOp, right: Expr, context: Context) -> ValueStream {
-    // Create a vec of expressions to evaluate
-    let exprs = vec![left, right];
-
-    evaluate_all_combinations(exprs.into_iter(), context)
+    evaluate_all_combinations(vec![left, right].into_iter(), context)
         .map(move |combo_result| {
             combo_result.map(|mut values| {
                 let right_val = values.pop().expect("Right operand not found");
@@ -140,23 +138,21 @@ fn evaluate_function_call(fun: Expr, args: Vec<Expr>, context: Context) -> Value
 
     fun_stream
         .flat_map(move |fun_result| {
-            let context = context.clone();
-            // We need to clone args here since it might be accessed in multiple branches
-            let args = args.clone();
-
-            match fun_result {
-                Ok(fun_value) => match fun_value.0 {
-                    // Handle closure (user-defined function)
-                    Function(Closure(params, body)) => {
-                        evaluate_closure_call(params, body, args, context)
+            stream_from_result(
+                fun_result,
+                capture!([context, args], move |fun_value| {
+                    match fun_value.0 {
+                        // Handle closure (user-defined function)
+                        Function(Closure(params, body)) => {
+                            evaluate_closure_call(params, body, args.clone(), context.clone())
+                        }
+                        // Handle Rust UDF (built-in function)
+                        Function(RustUDF(udf)) => evaluate_rust_udf_call(udf, args, context),
+                        // Value must be a function
+                        _ => panic!("Expected function value"),
                     }
-                    // Handle Rust UDF (built-in function)
-                    Function(RustUDF(udf)) => evaluate_rust_udf_call(udf, args, context),
-                    // Value must be a function
-                    _ => panic!("Expected function value"),
-                },
-                Err(e) => stream::once(async move { Err(e) }).boxed(),
-            }
+                }),
+            )
         })
         .boxed()
 }
@@ -173,23 +169,18 @@ fn evaluate_closure_call(
 ) -> ValueStream {
     evaluate_all_combinations(args.into_iter(), context.clone())
         .flat_map(move |args_result| {
-            let context = context.clone();
-            let params = params.clone();
-            // Need to clone because body might be evaluated multiple times
-            let body = body.clone();
-
-            match args_result {
-                Ok(args) => {
+            stream_from_result(
+                args_result,
+                capture!([context, params, body], move |args| {
                     // Create a new context with parameters bound to arguments
                     let mut new_ctx = context;
                     new_ctx.push_scope();
                     params.iter().zip(args).for_each(|(p, a)| {
                         new_ctx.bind(p.clone(), a);
                     });
-                    (*body).evaluate(new_ctx) // Dereference and consume
-                }
-                Err(e) => propagate_error(e),
-            }
+                    (*body).evaluate(new_ctx)
+                }),
+            )
         })
         .boxed()
 }
