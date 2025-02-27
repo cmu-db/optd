@@ -237,3 +237,432 @@ fn evaluate_rust_udf_call(
 fn evaluate_reference(ident: String, context: Context) -> ValueStream {
     propagate_success(context.lookup(&ident).expect("Variable not found").clone()).boxed()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        analyzer::hir::{BinOp, CoreData, Literal, MatchArm, Pattern, UnaryOp, Value},
+        engine::utils::streams::ValueStream,
+        utils::context::Context,
+    };
+    use futures::executor::block_on_stream;
+    use std::collections::HashMap;
+    use BinOp::*;
+    use UnaryOp::*;
+
+    use CoreData::{Function, Struct};
+    use Literal::{Bool, Int64, String};
+    use Pattern::{Bind, Wildcard};
+
+    // Helper functions to create values
+    fn int_val(i: i64) -> Value {
+        Value(Literal(Int64(i)))
+    }
+
+    fn string_val(s: &str) -> Value {
+        Value(Literal(String(s.to_string())))
+    }
+
+    fn bool_val(b: bool) -> Value {
+        Value(Literal(Bool(b)))
+    }
+
+    // Helper to collect all successful values from a stream
+    fn collect_stream_values(stream: ValueStream) -> Vec<Value> {
+        block_on_stream(stream).filter_map(Result::ok).collect()
+    }
+
+    // Helper to create a context with bindings
+    fn create_context_with_bindings(bindings: Vec<(std::string::String, Value)>) -> Context {
+        let mut ctx = Context::new(HashMap::new());
+        for (name, value) in bindings {
+            ctx.bind(name, value);
+        }
+        ctx
+    }
+
+    #[test]
+    fn test_evaluate_core_val() {
+        // Test evaluating a core value directly
+        let expr = CoreVal(int_val(42));
+        let context = Context::new(HashMap::new());
+
+        let stream = expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Int64(42))));
+    }
+
+    #[test]
+    fn test_evaluate_let_binding() {
+        // Test a basic let binding: let x = 42 in x + 10
+        let expr = Let(
+            "x".to_string(),
+            Box::new(CoreVal(int_val(42))),
+            Box::new(Binary(
+                Box::new(Ref("x".to_string())),
+                Add,
+                Box::new(CoreVal(int_val(10))),
+            )),
+        );
+
+        let context = Context::new(HashMap::new());
+        let stream = expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Int64(52)))); // 42 + 10 = 52
+    }
+
+    #[test]
+    fn test_evaluate_nested_let_binding() {
+        // Test nested let bindings:
+        // let x = 5 in
+        //   let y = x * 2 in
+        //     x + y
+        let expr = Let(
+            "x".to_string(),
+            Box::new(CoreVal(int_val(5))),
+            Box::new(Let(
+                "y".to_string(),
+                Box::new(Binary(
+                    Box::new(Ref("x".to_string())),
+                    Mul,
+                    Box::new(CoreVal(int_val(2))),
+                )),
+                Box::new(Binary(
+                    Box::new(Ref("x".to_string())),
+                    Add,
+                    Box::new(Ref("y".to_string())),
+                )),
+            )),
+        );
+
+        let context = Context::new(HashMap::new());
+        let stream = expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Int64(15)))); // 5 + (5 * 2) = 15
+    }
+
+    #[test]
+    fn test_evaluate_if_then_else() {
+        let context = Context::new(HashMap::new());
+
+        // Test true condition: if true then 42 else 24
+        let true_expr = IfThenElse(
+            Box::new(CoreVal(bool_val(true))),
+            Box::new(CoreVal(int_val(42))),
+            Box::new(CoreVal(int_val(24))),
+        );
+
+        let stream = true_expr.evaluate(context.clone());
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Int64(42))));
+
+        // Test false condition: if false then 42 else 24
+        let false_expr = IfThenElse(
+            Box::new(CoreVal(bool_val(false))),
+            Box::new(CoreVal(int_val(42))),
+            Box::new(CoreVal(int_val(24))),
+        );
+
+        let stream = false_expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Int64(24))));
+    }
+
+    #[test]
+    fn test_evaluate_if_then_else_with_computation() {
+        // Test if-then-else with computed condition:
+        // if 5 < 10 then "less" else "greater"
+        let expr = IfThenElse(
+            Box::new(Binary(
+                Box::new(CoreVal(int_val(5))),
+                Lt,
+                Box::new(CoreVal(int_val(10))),
+            )),
+            Box::new(CoreVal(string_val("less"))),
+            Box::new(CoreVal(string_val("greater"))),
+        );
+
+        let context = Context::new(HashMap::new());
+        let stream = expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(String(s)) if s == "less"));
+    }
+
+    #[test]
+    fn test_evaluate_binary_expr() {
+        let context = Context::new(HashMap::new());
+
+        // Test addition: 5 + 7
+        let add_expr = Binary(
+            Box::new(CoreVal(int_val(5))),
+            Add,
+            Box::new(CoreVal(int_val(7))),
+        );
+
+        let stream = add_expr.evaluate(context.clone());
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Int64(12))));
+
+        // Test complex expression: (3 * 4) + (10 / 2)
+        let complex_expr = Binary(
+            Box::new(Binary(
+                Box::new(CoreVal(int_val(3))),
+                Mul,
+                Box::new(CoreVal(int_val(4))),
+            )),
+            Add,
+            Box::new(Binary(
+                Box::new(CoreVal(int_val(10))),
+                Div,
+                Box::new(CoreVal(int_val(2))),
+            )),
+        );
+
+        let stream = complex_expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Int64(17)))); // (3 * 4) + (10 / 2) = 12 + 5 = 17
+    }
+
+    #[test]
+    fn test_evaluate_unary_expr() {
+        let context = Context::new(HashMap::new());
+
+        // Test negation: -42
+        let neg_expr = Unary(Neg, Box::new(CoreVal(int_val(42))));
+
+        let stream = neg_expr.evaluate(context.clone());
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Int64(-42))));
+
+        // Test logical not: !true
+        let not_expr = Unary(Not, Box::new(CoreVal(bool_val(true))));
+
+        let stream = not_expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Bool(false))));
+    }
+
+    #[test]
+    fn test_evaluate_variable_reference() {
+        // Create a context with a bound variable
+        let context = create_context_with_bindings(vec![("x".to_string(), int_val(42))]);
+
+        // Test referencing the variable
+        let expr = Ref("x".to_string());
+
+        let stream = expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Int64(42))));
+    }
+
+    #[test]
+    fn test_evaluate_closure_call() {
+        let context = Context::new(HashMap::new());
+
+        // Create a closure: fn(x) { x + 1 }
+        let closure_body = Binary(
+            Box::new(Ref("x".to_string())),
+            Add,
+            Box::new(CoreVal(int_val(1))),
+        );
+
+        let closure_val = Value(Function(Closure(
+            vec!["x".to_string()],
+            Box::new(closure_body),
+        )));
+
+        // Call the closure with argument 5
+        let call_expr = Call(Box::new(CoreVal(closure_val)), vec![CoreVal(int_val(5))]);
+
+        let stream = call_expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Int64(6)))); // 5 + 1 = 6
+    }
+
+    #[test]
+    fn test_evaluate_rust_udf_call() {
+        let context = Context::new(HashMap::new());
+
+        // Create a Rust UDF that squares a number
+        fn square_udf(args: Vec<Value>) -> Value {
+            if let Literal(Int64(n)) = args[0].0 {
+                int_val(n * n)
+            } else {
+                panic!("Expected integer argument")
+            }
+        }
+
+        let udf_val = Value(Function(RustUDF(square_udf)));
+
+        // Call the UDF with argument 7
+        let call_expr = Call(Box::new(CoreVal(udf_val)), vec![CoreVal(int_val(7))]);
+
+        let stream = call_expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Int64(49)))); // 7² = 49
+    }
+
+    #[test]
+    fn test_evaluate_pattern_match() {
+        let context = Context::new(HashMap::new());
+
+        // Create a pattern match expression:
+        // match 42 {
+        //   x @ _ => x
+        // }
+        let match_expr = PatternMatch(
+            Box::new(CoreVal(int_val(42))),
+            vec![MatchArm {
+                pattern: Bind("x".to_string(), Box::new(Wildcard)),
+                expr: Ref("x".to_string()),
+            }],
+        );
+
+        let stream = match_expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Int64(42))));
+    }
+
+    #[test]
+    fn test_evaluate_pattern_match_multiple_arms() {
+        let context = Context::new(HashMap::new());
+
+        // Create a pattern match expression with multiple arms:
+        // match 42 {
+        //   50 => "fifty"
+        //   42 => "forty-two"
+        //   _ => "other"
+        // }
+        let match_expr = PatternMatch(
+            Box::new(CoreVal(int_val(42))),
+            vec![
+                MatchArm {
+                    pattern: Pattern::Literal(Int64(50)),
+                    expr: CoreVal(string_val("fifty")),
+                },
+                MatchArm {
+                    pattern: Pattern::Literal(Int64(42)),
+                    expr: CoreVal(string_val("forty-two")),
+                },
+                MatchArm {
+                    pattern: Wildcard,
+                    expr: CoreVal(string_val("other")),
+                },
+            ],
+        );
+
+        let stream = match_expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(String(s)) if s == "forty-two"));
+    }
+
+    #[test]
+    fn test_evaluate_pattern_match_with_struct() {
+        let context = Context::new(HashMap::new());
+
+        // Create a struct value: Person("Alice", 30)
+        let person = Value(Struct(
+            "Person".to_string(),
+            vec![string_val("Alice"), int_val(30)],
+        ));
+
+        // Create a pattern match expression:
+        // match Person("Alice", 30) {
+        //   Person(name, age) => name
+        // }
+        let match_expr = PatternMatch(
+            Box::new(CoreVal(person)),
+            vec![MatchArm {
+                pattern: Pattern::Struct(
+                    "Person".to_string(),
+                    vec![
+                        Bind("name".to_string(), Box::new(Wildcard)),
+                        Bind("age".to_string(), Box::new(Wildcard)),
+                    ],
+                ),
+                expr: Ref("name".to_string()),
+            }],
+        );
+
+        let stream = match_expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(String(s)) if s == "Alice"));
+    }
+
+    #[test]
+    fn test_evaluate_complex_expression() {
+        let context = Context::new(HashMap::new());
+
+        // Test a complex expression:
+        // let x = 10 in
+        //   let y = 20 in
+        //     if x < y then
+        //       x + y
+        //     else
+        //       x * y
+        let expr = Let(
+            "x".to_string(),
+            Box::new(CoreVal(int_val(10))),
+            Box::new(Let(
+                "y".to_string(),
+                Box::new(CoreVal(int_val(20))),
+                Box::new(IfThenElse(
+                    Box::new(Binary(
+                        Box::new(Ref("x".to_string())),
+                        Lt,
+                        Box::new(Ref("y".to_string())),
+                    )),
+                    Box::new(Binary(
+                        Box::new(Ref("x".to_string())),
+                        Add,
+                        Box::new(Ref("y".to_string())),
+                    )),
+                    Box::new(Binary(
+                        Box::new(Ref("x".to_string())),
+                        Mul,
+                        Box::new(Ref("y".to_string())),
+                    )),
+                )),
+            )),
+        );
+
+        let stream = expr.evaluate(context);
+        let values = collect_stream_values(stream);
+
+        assert_eq!(values.len(), 1);
+        assert!(matches!(&values[0].0, Literal(Int64(30)))); // 10 + 20 = 30 (since 10 < 20)
+    }
+}
