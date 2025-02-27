@@ -8,6 +8,7 @@ use crate::capture;
 use crate::engine::utils::errors::Error;
 use crate::utils::context::Context;
 use futures::{stream, Stream, StreamExt};
+use optd_core::cascades::ir::PartialLogicalPlan;
 use std::pin::Pin;
 
 /// Type alias for a stream of evaluation results.
@@ -21,6 +22,13 @@ pub(crate) type ValueStream = Pin<Box<dyn Stream<Item = Result<Value, Error>> + 
 /// This represents a stream that yields Result<Vec<Value>, Error> items,
 /// which is useful for representing collections of values from multiple expressions.
 pub(crate) type VecValueStream = Pin<Box<dyn Stream<Item = Result<Vec<Value>, Error>> + Send>>;
+
+/// Type alias for a stream of partial logical plans.
+///
+/// This represents a stream that yields Result<PartialLogicalPlan, Error> items,
+/// which is used for returning multiple possible transformations of a plan.
+pub type PartialLogicalPlanStream =
+    Pin<Box<dyn Stream<Item = Result<PartialLogicalPlan, Error>> + Send>>;
 
 /// Generates a stream of all possible value combinations from a series of expressions.
 ///

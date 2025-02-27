@@ -1,3 +1,15 @@
+//! This module provides evaluation functionality for operator expressions.
+//!
+//! Operators represent computational units that can have various components:
+//! - Operator data: Basic parameters needed for the operator's function
+//! - Scalar children: Expressions that produce scalar values
+//! - Relational children: Expressions that produce relations (like table operations)
+//!
+//! The evaluation process generates all possible combinations of component values
+//! (a cartesian product) and constructs operator instances for each combination.
+//! This approach handles the non-deterministic nature of expression evaluation
+//! in our system, where an expression might evaluate to multiple possible values.
+
 use crate::{
     analyzer::hir::{CoreData, Expr, Materializable, Operator, OperatorKind, Value},
     capture,

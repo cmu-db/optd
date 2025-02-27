@@ -1,3 +1,10 @@
+//! This module provides implementation for unary operations on values.
+//!
+//! Unary operations transform a single value according to the operation type.
+//! Currently supported operations include:
+//! - Numeric negation for integers and floating-point numbers
+//! - Logical NOT for boolean values
+
 use crate::analyzer::hir::{CoreData, Literal, UnaryOp, Value};
 use CoreData::*;
 use Literal::*;

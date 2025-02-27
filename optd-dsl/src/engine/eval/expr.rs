@@ -2,7 +2,7 @@
 //! expression types and evaluation strategies in a non-blocking, streaming manner.
 
 use crate::{
-    analyzer::hir::{BinOp, CoreData, Expr, FunKind, Literal, UnaryOp, Value},
+    analyzer::hir::{BinOp, CoreData, Expr, FunKind, Literal, MatchArm, UnaryOp, Value},
     capture,
     engine::utils::streams::{
         evaluate_all_combinations, propagate_success, stream_from_result, ValueStream,
@@ -15,7 +15,9 @@ use CoreData::*;
 use Expr::*;
 use FunKind::*;
 
-use super::{binary::eval_binary_op, core::evaluate_core_expr, unary::eval_unary_op};
+use super::{
+    binary::eval_binary_op, core::evaluate_core_expr, r#match::try_match_arms, unary::eval_unary_op,
+};
 
 impl Expr {
     /// Evaluates an expression to a stream of possible values.
@@ -31,7 +33,7 @@ impl Expr {
     /// A stream of all possible evaluation results
     pub(crate) fn evaluate(self, context: Context) -> ValueStream {
         match self {
-            PatternMatch(_expr, _match_arms) => todo!(),
+            PatternMatch(expr, match_arms) => evaluate_pattern_match(*expr, match_arms, context),
             IfThenElse(cond, then_expr, else_expr) => {
                 evaluate_if_then_else(*cond, *then_expr, *else_expr, context)
             }
@@ -44,6 +46,37 @@ impl Expr {
             CoreVal(val) => propagate_success(val).boxed(),
         }
     }
+}
+
+/// Evaluates a pattern match expression.
+///
+/// First evaluates the expression to match, then tries each match arm in order
+/// until a pattern matches.
+///
+/// # Parameters
+/// * `expr` - The expression to match against patterns
+/// * `match_arms` - The list of pattern-expression pairs to try
+/// * `context` - The evaluation context
+///
+/// # Returns
+/// A stream of all possible evaluation results
+pub(super) fn evaluate_pattern_match(
+    expr: Expr,
+    match_arms: Vec<MatchArm>,
+    context: Context,
+) -> ValueStream {
+    // First evaluate the expression
+    expr.evaluate(context.clone())
+        .flat_map(move |expr_result| {
+            stream_from_result(
+                expr_result,
+                capture!([context, match_arms], move |value| {
+                    // Try each match arm in sequence
+                    try_match_arms(value, match_arms, context)
+                }),
+            )
+        })
+        .boxed()
 }
 
 /// Evaluates an if-then-else expression.

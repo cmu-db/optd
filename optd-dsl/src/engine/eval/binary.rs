@@ -1,3 +1,13 @@
+//! This module provides implementation for binary operations between values.
+//!
+//! Binary operations are fundamental for expression evaluation, allowing values
+//! to be combined and compared in various ways. The module supports operations on
+//! different value types, including:
+//! - Arithmetic operations on numbers (add, subtract, multiply, divide)
+//! - Comparison operations for various types (equality, less than)
+//! - Logical operations on boolean values (AND, OR)
+//! - Collection operations (concatenation, range creation)
+
 use crate::analyzer::hir::{BinOp, CoreData, Literal, Value};
 
 /// Evaluates a binary operation between two values.

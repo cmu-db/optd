@@ -1,3 +1,20 @@
+//! High-level Intermediate Representation (HIR) for the DSL.
+//!
+//! This module defines the core data structures that represent programs after the parsing
+//! and analysis phases. The HIR provides a structured representation of expressions,
+//! patterns, operators, and values that can be evaluated by the interpreter.
+//!
+//! Key components include:
+//! - `Expr`: Expression nodes representing computation to be performed
+//! - `Pattern`: Patterns for matching against expression values
+//! - `Value`: Results of expression evaluation
+//! - `Operator`: Query plan operators with their children and parameters
+//! - `CoreData`: Fundamental data structures shared across the system
+//!
+//! The HIR serves as the foundation for the evaluation system, providing a
+//! unified representation that can be transformed into optimizer-specific
+//! intermediate representations through the bridge modules.
+
 use std::collections::HashMap;
 
 /// Unique identifier for variables, functions, types, etc.

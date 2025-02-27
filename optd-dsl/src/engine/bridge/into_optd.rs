@@ -1,3 +1,10 @@
+//! Contains functions to convert from HIR Value objects to Optd-IR representations.
+//!
+//! This submodule provides the functionality to transform the DSL's internal
+//! representation (HIR) into the optimizer's intermediate representation (Optd-IR).
+//! It enables rules written in the DSL to be applied to actual query plans in the
+//! optimization engine.
+
 use crate::analyzer::hir::{CoreData, Literal, Materializable, Operator, OperatorKind, Value};
 use optd_core::cascades::{
     groups::{RelationalGroupId, ScalarGroupId},
@@ -8,6 +15,106 @@ use CoreData::*;
 use Literal::*;
 use Materializable::*;
 use OperatorKind::*;
+
+/// Converts a HIR Value into a PartialLogicalPlan representation.
+///
+/// This function transforms the DSL's internal representation of a logical operator
+/// into the optimizer's intermediate representation, allowing the optimizer to work
+/// with plans defined or modified by the DSL.
+///
+/// # Parameters
+/// * `value` - The HIR Value to convert
+///
+/// # Returns
+/// A PartialLogicalPlan representation of the input value
+///
+/// # Panics
+/// Panics if the Value does not contain an Operator with kind Logical
+pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
+    match &value.0 {
+        Operator(materialization) => {
+            validate_operator_kind(materialization, Logical);
+
+            match materialization {
+                Group(group_id, _) => {
+                    PartialLogicalPlan::UnMaterialized(RelationalGroupId(*group_id))
+                }
+                Data(op) => PartialLogicalPlan::PartialMaterialized {
+                    tag: op.tag.clone(),
+                    data: convert_from_operator_data(&op.operator_data),
+                    relational_children: convert_from_values(&op.relational_children),
+                    scalar_children: convert_from_values(&op.scalar_children),
+                },
+            }
+        }
+        _ => panic!("Expected Operator CoreData variant, found: {:?}", value.0),
+    }
+}
+
+/// Converts a HIR Value into a PartialScalarPlan representation.
+///
+/// This function transforms the DSL's internal representation of a scalar operator
+/// into the optimizer's intermediate representation.
+///
+/// # Parameters
+/// * `value` - The HIR Value to convert
+///
+/// # Returns
+/// A PartialScalarPlan representation of the input value
+///
+/// # Panics
+/// Panics if the Value does not contain an Operator with kind Scalar
+pub(crate) fn value_to_partial_scalar(value: &Value) -> PartialScalarPlan {
+    match &value.0 {
+        Operator(materialization) => {
+            validate_operator_kind(materialization, Scalar);
+
+            match materialization {
+                Group(group_id, _) => PartialScalarPlan::UnMaterialized(ScalarGroupId(*group_id)),
+                Data(op) => PartialScalarPlan::PartialMaterialized {
+                    tag: op.tag.clone(),
+                    data: convert_from_operator_data(&op.operator_data),
+                    scalar_children: convert_from_values(&op.scalar_children),
+                },
+            }
+        }
+        _ => panic!("Expected Operator CoreData variant, found: {:?}", value.0),
+    }
+}
+
+/// Converts a HIR Value into a PartialPhysicalPlan representation.
+///
+/// This function transforms the DSL's internal representation of a physical operator
+/// into the optimizer's intermediate representation.
+///
+/// # Parameters
+/// * `value` - The HIR Value to convert
+///
+/// # Returns
+/// A PartialPhysicalPlan representation of the input value
+///
+/// # Panics
+/// Panics if the Value does not contain an Operator with kind Physical
+pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
+    match &value.0 {
+        Operator(materialization) => {
+            validate_operator_kind(materialization, Physical);
+
+            match materialization {
+                Group(group_id, _) => {
+                    PartialPhysicalPlan::UnMaterialized(RelationalGroupId(*group_id))
+                }
+                Data(op) => PartialPhysicalPlan::PartialMaterialized {
+                    tag: op.tag.clone(),
+                    data: convert_from_operator_data(&op.operator_data),
+                    relational_children: convert_from_values(&op.relational_children),
+                    scalar_children: convert_from_values(&op.scalar_children),
+                },
+            }
+        }
+        _ => panic!("Expected Operator CoreData variant, found: {:?}", value.0),
+    }
+}
 
 /// Helper trait to convert from Value to partial plans
 trait FromValue {
@@ -46,69 +153,6 @@ fn convert_from_values<T: FromValue>(values: &[Value]) -> Vec<Children<T>> {
 /// Converts Values back to operator data
 fn convert_from_operator_data(values: &[Value]) -> Vec<OperatorData> {
     values.iter().map(value_to_operator_data).collect()
-}
-
-/// Converts a HIR Value back to a PartialLogicalPlan
-pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
-    match &value.0 {
-        Operator(materialization) => {
-            validate_operator_kind(materialization, Logical);
-
-            match materialization {
-                Group(group_id, _) => {
-                    PartialLogicalPlan::UnMaterialized(RelationalGroupId(*group_id))
-                }
-                Data(op) => PartialLogicalPlan::PartialMaterialized {
-                    tag: op.tag.clone(),
-                    data: convert_from_operator_data(&op.operator_data),
-                    relational_children: convert_from_values(&op.relational_children),
-                    scalar_children: convert_from_values(&op.scalar_children),
-                },
-            }
-        }
-        _ => panic!("Expected Operator CoreData variant, found: {:?}", value.0),
-    }
-}
-
-/// Converts a HIR Value back to a PartialScalarPlan
-pub(crate) fn value_to_partial_scalar(value: &Value) -> PartialScalarPlan {
-    match &value.0 {
-        Operator(materialization) => {
-            validate_operator_kind(materialization, Scalar);
-
-            match materialization {
-                Group(group_id, _) => PartialScalarPlan::UnMaterialized(ScalarGroupId(*group_id)),
-                Data(op) => PartialScalarPlan::PartialMaterialized {
-                    tag: op.tag.clone(),
-                    data: convert_from_operator_data(&op.operator_data),
-                    scalar_children: convert_from_values(&op.scalar_children),
-                },
-            }
-        }
-        _ => panic!("Expected Operator CoreData variant, found: {:?}", value.0),
-    }
-}
-
-/// Converts a HIR Value back to a PartialPhysicalPlan
-pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
-    match &value.0 {
-        Operator(materialization) => {
-            validate_operator_kind(materialization, Physical);
-
-            match materialization {
-                Group(group_id, _) => {
-                    PartialPhysicalPlan::UnMaterialized(RelationalGroupId(*group_id))
-                }
-                Data(op) => PartialPhysicalPlan::PartialMaterialized {
-                    tag: op.tag.clone(),
-                    data: convert_from_operator_data(&op.operator_data),
-                    relational_children: convert_from_values(&op.relational_children),
-                    scalar_children: convert_from_values(&op.scalar_children),
-                },
-            }
-        }
-        _ => panic!("Expected Operator CoreData variant, found: {:?}", value.0),
-    }
 }
 
 /// Converts a HIR Value back to OperatorData
