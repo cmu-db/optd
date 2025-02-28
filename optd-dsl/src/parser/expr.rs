@@ -1723,8 +1723,7 @@ mod tests {
                 }
 
                 // Third arm: [x .. [y .. []]] -> "list with two elements: " ++ x.to_string() ++ ", " ++ y.to_string()
-                if let Pattern::ArrayDecomp(outer_head, outer_tail) =
-                    &*arms[2].value.pattern.value
+                if let Pattern::ArrayDecomp(outer_head, outer_tail) = &*arms[2].value.pattern.value
                 {
                     // Check outer_head is a binding pattern for 'x'
                     if let Pattern::Bind(name, _) = &*outer_head.value {
@@ -1756,8 +1755,7 @@ mod tests {
                 }
 
                 // Fourth arm: [head .. [second .. tail]] -> { complex expression }
-                if let Pattern::ArrayDecomp(outer_head, outer_tail) =
-                    &*arms[3].value.pattern.value
+                if let Pattern::ArrayDecomp(outer_head, outer_tail) = &*arms[3].value.pattern.value
                 {
                     // Check outer_head is a binding pattern for 'head'
                     if let Pattern::Bind(name, _) = &*outer_head.value {

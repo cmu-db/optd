@@ -123,7 +123,8 @@ async fn match_pattern(value: Value, pattern: Pattern, context: Context) -> Vec<
             // For each successful head match, try to match tail
             let mut result_contexts = Vec::new();
             for head_ctx in head_contexts {
-                let tail_contexts = match_pattern(tail.clone(), (**tail_pattern).clone(), head_ctx).await;
+                let tail_contexts =
+                    match_pattern(tail.clone(), (**tail_pattern).clone(), head_ctx).await;
                 result_contexts.extend(tail_contexts);
             }
 
