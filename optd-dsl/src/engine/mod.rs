@@ -12,7 +12,7 @@ use bridge::{from_optd::partial_logical_to_value, into_optd::value_to_partial_lo
 use futures::StreamExt;
 use optd_core::cascades::ir::PartialLogicalPlan;
 use std::sync::Arc;
-use utils::{errors::Error, streams::PartialLogicalPlanStream};
+use utils::{error::Error, streams::PartialLogicalPlanStream};
 
 use CoreData::*;
 use Expr::*;

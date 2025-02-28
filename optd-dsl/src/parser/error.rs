@@ -38,7 +38,7 @@ impl Diagnose for ParserError {
                     )
                     .with_label(
                         Label::new(span.clone())
-                            .with_message(format!("Delimiter opened here"))
+                            .with_message("Delimiter opened here")
                             .with_color(Color::Cyan),
                     )
                     .with_help(format!(

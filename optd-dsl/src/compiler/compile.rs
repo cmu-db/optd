@@ -27,20 +27,18 @@ pub fn parse(source: &str, options: &CompileOptions) -> Result<Module, Vec<Compi
     let (tokens_opt, lex_errors) = lex(source, &options.source_path);
     errors.extend(lex_errors);
 
-    if tokens_opt.is_none() {
-        // Early return if lexing failed completely
-        return Err(errors);
-    }
-    let tokens = tokens_opt.unwrap();
+    match tokens_opt {
+        Some(tokens) => {
+            // Step 2: Parsing
+            let (ast_opt, parse_errors) = parse_module(tokens, source, &options.source_path);
+            errors.extend(parse_errors);
 
-    // Step 2: Parsing
-    let (ast_opt, parse_errors) = parse_module(tokens, source, &options.source_path);
-    errors.extend(parse_errors);
-
-    if errors.is_empty() && ast_opt.is_some() {
-        Ok(ast_opt.unwrap())
-    } else {
-        Err(errors)
+            match ast_opt {
+                Some(ast) if errors.is_empty() => Ok(ast),
+                _ => Err(errors),
+            }
+        }
+        None => Err(errors),
     }
 }
 

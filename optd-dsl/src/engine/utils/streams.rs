@@ -5,7 +5,7 @@
 
 use crate::analyzer::hir::{Expr, Value};
 use crate::capture;
-use crate::engine::utils::errors::Error;
+use crate::engine::utils::error::Error;
 use crate::utils::context::Context;
 use futures::{stream, Stream, StreamExt};
 use optd_core::cascades::ir::PartialLogicalPlan;

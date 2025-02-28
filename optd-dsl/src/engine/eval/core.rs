@@ -68,8 +68,8 @@ fn evaluate_collection(
 
 /// Evaluates a map expression by generating all combinations of keys and values.
 fn evaluate_map(items: Vec<(Expr, Expr)>, context: Context) -> ValueStream {
-    let keys: Vec<_> = items.iter().map(|(k, _)| k.clone()).collect();
-    let values: Vec<_> = items.iter().map(|(_, v)| v.clone()).collect();
+    let keys: Vec<_> = items.iter().map(|(k, _)| k).cloned().collect();
+    let values: Vec<_> = items.iter().map(|(_, v)| v).cloned().collect();
 
     // First evaluate all key expressions
     evaluate_all_combinations(keys.into_iter(), context.clone())
@@ -83,9 +83,7 @@ fn evaluate_map(items: Vec<(Expr, Expr)>, context: Context) -> ValueStream {
                         .map(capture!([keys], move |values_result| {
                             // Create map from keys and values
                             values_result.map(|values| {
-                                Value(CoreData::Map(
-                                    keys.clone().into_iter().zip(values).collect(),
-                                ))
+                                Value(CoreData::Map(keys.iter().cloned().zip(values).collect()))
                             })
                         }))
                         .boxed()
