@@ -58,10 +58,10 @@ impl OptdOptimizer {
     ) -> anyhow::Result<Arc<PhysicalPlan>> {
         let root_group_id =
             optd_core::cascades::ingest_full_logical_plan(&self.memo, logical_plan).await?;
-        optd_core::cascades::mock_optimize_relation_group(&self.memo, root_group_id).await?;
-
+        let goal_id =
+            optd_core::cascades::mock_optimize_relation_group(&self.memo, root_group_id).await?;
         let optimized_plan =
-            optd_core::cascades::match_any_physical_plan(&self.memo, root_group_id).await?;
+            optd_core::cascades::match_any_physical_plan(&self.memo, goal_id).await?;
 
         Ok(optimized_plan)
     }

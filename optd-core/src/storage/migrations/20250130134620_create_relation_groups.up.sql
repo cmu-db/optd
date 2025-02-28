@@ -7,7 +7,7 @@ CREATE TABLE relation_groups (
     representative_group_id BIGINT NOT NULL,
     -- The exploration status of a relation group. 
     -- It can be one of the following values: Unexplored, Exploring, Explored.
-    exploration_status INTEGER NOT NULL,
+    exploration_status TEXT NOT NULL,
     -- The time at which the group is created.
     created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP) NOT NULL,
 

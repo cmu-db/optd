@@ -1,5 +1,3 @@
-use serde::Deserialize;
-
 /// A unique identifier for a group of relational expressions in the memo table.
 #[repr(transparent)]
 #[derive(
@@ -13,7 +11,7 @@ use serde::Deserialize;
     Hash,
     sqlx::Type,
     serde::Serialize,
-    Deserialize,
+    serde::Deserialize,
 )]
 #[sqlx(transparent)]
 pub struct RelationalGroupId(pub i64);
@@ -31,14 +29,13 @@ pub struct RelationalGroupId(pub i64);
     Hash,
     sqlx::Type,
     serde::Serialize,
-    Deserialize,
+    serde::Deserialize,
 )]
 #[sqlx(transparent)]
 pub struct ScalarGroupId(pub i64);
 
 /// The exploration status of a group or a logical expression in the memo table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type)]
-#[repr(i32)]
 pub enum ExplorationStatus {
     /// The group or the logical expression has not been explored.
     Unexplored,

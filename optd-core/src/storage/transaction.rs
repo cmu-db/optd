@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut};
 
 use crate::cascades::{
     expressions::{LogicalExpressionId, PhysicalExpressionId, ScalarExpressionId},
+    goal::GoalId,
     groups::{RelationalGroupId, ScalarGroupId},
 };
 
@@ -46,6 +47,12 @@ impl Transaction<'_> {
         let id = self.current_value;
         self.current_value += 1;
         Ok(ScalarGroupId(id))
+    }
+
+    pub async fn new_goal_id(&mut self) -> anyhow::Result<GoalId> {
+        let id = self.current_value;
+        self.current_value += 1;
+        Ok(GoalId(id))
     }
 
     /// Gets a new logical expression id.

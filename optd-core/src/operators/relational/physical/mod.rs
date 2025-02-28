@@ -9,9 +9,7 @@ pub mod project;
 pub mod scan;
 
 use crate::cascades::{
-    expressions::PhysicalExpression,
-    groups::{RelationalGroupId, ScalarGroupId},
-    ir::OperatorData,
+    expressions::PhysicalExpression, goal::GoalId, groups::ScalarGroupId, ir::OperatorData,
 };
 use filter::filter::PhysicalFilter;
 use join::{hash_join::HashJoin, merge_join::MergeJoin, nested_loop_join::NestedLoopJoin};
@@ -113,7 +111,7 @@ where
     /// Converts the operator into a physical expression with the given children.
     pub fn into_expr(
         &self,
-        children_relations: &[RelationalGroupId],
+        children_relations: &[GoalId],
         children_scalars: &[ScalarGroupId],
     ) -> PhysicalExpression {
         let rel_size = children_relations.len();

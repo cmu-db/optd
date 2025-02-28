@@ -9,25 +9,30 @@
 
 use std::sync::Arc;
 
+use crate::cost_model::Cost;
+
 use super::{
     expressions::{
         LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
         ScalarExpression, ScalarExpressionId,
     },
-    goal::Goal,
+    goal::{Goal, GoalId},
     groups::{RelationalGroupId, ScalarGroupId},
-    properties::PhysicalProperty,
+    properties::PhysicalProperties,
 };
 use anyhow::Result;
 
 #[trait_variant::make(Send)]
 pub trait Memoize: Send + Sync + 'static {
     /// Creates or get an optimization goal for a group with some required physical properties.
-    async fn create_or_get_relation_group_goal(
+    async fn create_or_get_goal(
         &self,
         group_id: RelationalGroupId,
-        required_physical_props: Vec<PhysicalProperty>,
-    ) -> Result<Goal>;
+        required_physical_props: PhysicalProperties,
+    ) -> Result<GoalId>;
+
+    /// Gets the metadata that describes a goal.
+    async fn get_goal(&self, goal_id: GoalId) -> Result<Arc<Goal>>;
 
     /// Gets all logical expressions in a group.
     async fn get_all_logical_exprs_in_group(
@@ -80,16 +85,26 @@ pub trait Memoize: Send + Sync + 'static {
         to: ScalarGroupId,
     ) -> Result<ScalarGroupId>;
 
-    /// Gets all logical expressions in a group.
-    async fn get_all_physical_exprs_in_group(
+    async fn merge_goal(&self, from: GoalId, to: GoalId) -> Result<GoalId>;
+
+    /// Gets the winner physical expression.
+    async fn get_winner_physical_expr_in_goal(
         &self,
-        group_id: RelationalGroupId,
+        goal_id: GoalId,
+    ) -> Result<Option<(PhysicalExpressionId, Arc<PhysicalExpression>, Cost)>>;
+
+    /// Gets all physical expressions in a goal.
+    async fn get_all_physical_exprs_in_goal(
+        &self,
+        goal_id: GoalId,
     ) -> Result<Vec<(PhysicalExpressionId, Arc<PhysicalExpression>)>>;
 
-    /// Adds a physical expression to an existing group in the memo table.
-    async fn add_physical_expr_to_group(
+    /// Adds a physical expression to a goal in the memo table.
+    // TODO: cost and statistics probably is also added here.
+    async fn add_physical_expr_to_goal(
         &self,
         physical_expr: &PhysicalExpression,
-        group_id: RelationalGroupId,
-    ) -> Result<RelationalGroupId>;
+        cost: Cost,
+        goal_id: GoalId,
+    ) -> Result<GoalId>;
 }

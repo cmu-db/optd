@@ -7,7 +7,7 @@ CREATE TABLE logical_expressions (
     operator_kind TEXT NOT NULL,
     -- The exploration status of a logical expression.
     -- It can be one of the following values: Unexplored, Exploring, Explored.
-    exploration_status INTEGER NOT NULL,
+    exploration_status TEXT NOT NULL,
     -- The time at which the logical expression is created.
     created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP) NOT NULL,
     -- When group merging happens, the group id of the logical expression is also updated.
