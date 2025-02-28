@@ -101,6 +101,35 @@ async fn match_pattern(value: Value, pattern: Pattern, context: Context) -> Vec<
             _ => vec![],
         },
 
+        // Empty list pattern: match if value is an empty array
+        (EmptyArray, CoreData::Array(arr)) if arr.is_empty() => vec![context],
+
+        // List decomposition pattern: match first element and rest of the array
+        (ArrayDecomp(head_pattern, tail_pattern), CoreData::Array(arr)) => {
+            if arr.is_empty() {
+                return vec![];
+            }
+
+            // Split array into head and tail
+            let head = arr[0].clone();
+            let tail = Value(CoreData::Array(arr[1..].to_vec()));
+
+            // Match head against head pattern
+            let head_contexts = match_pattern(head, (**head_pattern).clone(), context).await;
+            if head_contexts.is_empty() {
+                return vec![];
+            }
+
+            // For each successful head match, try to match tail
+            let mut result_contexts = Vec::new();
+            for head_ctx in head_contexts {
+                let tail_contexts = match_pattern(tail.clone(), (**tail_pattern).clone(), head_ctx).await;
+                result_contexts.extend(tail_contexts);
+            }
+
+            result_contexts
+        }
+
         // Struct pattern: match name and recursively match fields
         (Struct(pat_name, field_patterns), CoreData::Struct(val_name, field_values)) => {
             if pat_name != val_name || field_patterns.len() != field_values.len() {
