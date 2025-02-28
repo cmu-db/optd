@@ -8,9 +8,9 @@ use chumsky::{
 };
 use ordered_float::OrderedFloat;
 
-use crate::utils::{errors::Error, span::Span};
+use crate::utils::{error::Error, span::Span};
 
-use super::{errors::LexerError, tokens::Token};
+use super::{error::LexerError, tokens::Token};
 
 /// Lexes a source string into a sequence of tokens with their positions.
 /// Uses Chumsky for lexing and Ariadne for error reporting.
