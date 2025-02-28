@@ -1,4 +1,4 @@
-use crate::errors::span::Spanned;
+use crate::utils::span::Spanned;
 use ordered_float::OrderedFloat;
 
 /// Unique identifier for variables, functions, types, etc.
@@ -117,6 +117,7 @@ pub enum Expr {
 }
 
 /// Represents literal values in the language
+/// TODO: Remove PartialEq & OrderedFloat
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     /// 64-bit signed integer literal
@@ -228,8 +229,8 @@ pub struct Function {
     pub params: Option<Vec<Spanned<Field>>>,
     /// Return type with source location
     pub return_type: Spanned<Type>,
-    /// Function body with source location
-    pub body: Spanned<Expr>,
+    /// Function body with source location (None for external functions)
+    pub body: Option<Spanned<Expr>>,
     /// List of annotations attached to the function
     pub annotations: Vec<Spanned<Identifier>>,
 }

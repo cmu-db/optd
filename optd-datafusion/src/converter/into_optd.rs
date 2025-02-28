@@ -7,6 +7,7 @@ use datafusion::{
     prelude::Expr,
 };
 use optd_core::{
+    cascades::ir::OperatorData,
     operators::{
         relational::logical::{
             filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator,
@@ -19,7 +20,6 @@ use optd_core::{
         },
     },
     plans::{logical::LogicalPlan, scalar::ScalarPlan},
-    values::OptdValue,
 };
 
 use super::OptdDFContext;
@@ -33,22 +33,22 @@ impl OptdDFContext<'_> {
     ) -> anyhow::Result<Arc<ScalarPlan>> {
         let operator = match df_expr {
             Expr::Column(column) => ScalarOperator::ColumnRef(ColumnRef {
-                column_index: OptdValue::Int64(
+                column_index: OperatorData::Int64(
                     (context.index_of_column(column).unwrap() + col_offset) as i64,
                 ),
             }),
             Expr::Literal(scalar_value) => match scalar_value {
                 datafusion::scalar::ScalarValue::Boolean(val) => {
                     ScalarOperator::Constant(Constant {
-                        value: OptdValue::Bool((*val).unwrap()),
+                        value: OperatorData::Bool((*val).unwrap()),
                     })
                 }
                 datafusion::scalar::ScalarValue::Int64(val) => {
-                    ScalarOperator::Constant(Constant::new(OptdValue::Int64((*val).unwrap())))
+                    ScalarOperator::Constant(Constant::new(OperatorData::Int64((*val).unwrap())))
                 }
-                datafusion::scalar::ScalarValue::Utf8(val) => {
-                    ScalarOperator::Constant(Constant::new(OptdValue::String(val.clone().unwrap())))
-                }
+                datafusion::scalar::ScalarValue::Utf8(val) => ScalarOperator::Constant(
+                    Constant::new(OperatorData::String(val.clone().unwrap())),
+                ),
                 _ => panic!("optd Only supports a limited number of literals"),
             },
             Expr::BinaryExpr(binary_expr) => {
@@ -151,7 +151,7 @@ impl OptdDFContext<'_> {
                         }
                         None => Arc::new(ScalarPlan {
                             operator: ScalarOperator::Constant(Constant {
-                                value: OptdValue::Bool(true),
+                                value: OperatorData::Bool(true),
                             }),
                         }),
                     },

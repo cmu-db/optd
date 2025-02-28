@@ -1,6 +1,6 @@
 //! A scalar constant operator.
 
-use crate::{operators::scalar::ScalarOperator, values::OptdValue};
+use crate::{cascades::ir::OperatorData, operators::scalar::ScalarOperator};
 use serde::{Deserialize, Serialize};
 
 /// A scalar operator representing a constant value.
@@ -10,24 +10,24 @@ pub struct Constant<Value> {
     pub value: Value,
 }
 
-impl Constant<OptdValue> {
+impl Constant<OperatorData> {
     /// Create a new constant.
-    pub fn new(value: OptdValue) -> Self {
+    pub fn new(value: OperatorData) -> Self {
         Self { value }
     }
 }
 
 /// Creates a boolean constant scalar operator.
-pub fn boolean<Scalar>(value: bool) -> ScalarOperator<OptdValue, Scalar> {
-    ScalarOperator::Constant(Constant::new(OptdValue::Bool(value)))
+pub fn boolean<Scalar>(value: bool) -> ScalarOperator<OperatorData, Scalar> {
+    ScalarOperator::Constant(Constant::new(OperatorData::Bool(value)))
 }
 
 /// Creates an `int64` constant scalar operator.
-pub fn int64<Scalar>(value: bool) -> ScalarOperator<OptdValue, Scalar> {
-    ScalarOperator::Constant(Constant::new(OptdValue::Bool(value)))
+pub fn int64<Scalar>(value: bool) -> ScalarOperator<OperatorData, Scalar> {
+    ScalarOperator::Constant(Constant::new(OperatorData::Bool(value)))
 }
 
 /// Creates a string constant scalar operator.
-pub fn string<Scalar>(value: &str) -> ScalarOperator<OptdValue, Scalar> {
-    ScalarOperator::Constant(Constant::new(OptdValue::String(value.into())))
+pub fn string<Scalar>(value: &str) -> ScalarOperator<OperatorData, Scalar> {
+    ScalarOperator::Constant(Constant::new(OperatorData::String(value.into())))
 }

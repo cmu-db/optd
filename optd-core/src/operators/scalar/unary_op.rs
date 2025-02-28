@@ -1,5 +1,5 @@
 //! A scalar binary operator.
-use crate::{operators::scalar::ScalarOperator, values::OptdValue};
+use crate::{cascades::ir::OperatorData, operators::scalar::ScalarOperator};
 use serde::Deserialize;
 
 /// A scalar operator that performs a unary operation on its child.
@@ -19,11 +19,11 @@ impl<Value, Scalar> UnaryOp<Value, Scalar> {
 }
 
 /// Creates a not unary scalar operator (e.g. `NOT true`).
-pub fn not<Scalar>(child: Scalar) -> ScalarOperator<OptdValue, Scalar> {
-    ScalarOperator::UnaryOp(UnaryOp::new(OptdValue::String("not".into()), child))
+pub fn not<Scalar>(child: Scalar) -> ScalarOperator<OperatorData, Scalar> {
+    ScalarOperator::UnaryOp(UnaryOp::new(OperatorData::String("not".into()), child))
 }
 
 /// Creates a negation unary scalar operator (e.g. `-1`).
-pub fn neg<Scalar>(child: Scalar) -> ScalarOperator<OptdValue, Scalar> {
-    ScalarOperator::UnaryOp(UnaryOp::new(OptdValue::String("neg".into()), child))
+pub fn neg<Scalar>(child: Scalar) -> ScalarOperator<OperatorData, Scalar> {
+    ScalarOperator::UnaryOp(UnaryOp::new(OperatorData::String("neg".into()), child))
 }

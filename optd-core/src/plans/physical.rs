@@ -9,14 +9,11 @@
 //! of materialization during the optimization process.
 
 use crate::{
-    cascades::groups::RelationalGroupId, operators::relational::physical::PhysicalOperator,
-    values::OptdValue,
+    cascades::{groups::RelationalGroupId, ir::OperatorData},
+    operators::relational::physical::PhysicalOperator,
 };
 
-use super::{
-    scalar::{PartialScalarPlan, ScalarPlan},
-    PartialPlanExpr,
-};
+use super::scalar::{PartialScalarPlan, ScalarPlan};
 use std::sync::Arc;
 
 /// A fully materialized physical query plan.
@@ -26,7 +23,7 @@ use std::sync::Arc;
 /// plan representation after optimization is complete.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PhysicalPlan {
-    pub operator: PhysicalOperator<OptdValue, Arc<PhysicalPlan>, Arc<ScalarPlan>>,
+    pub operator: PhysicalOperator<OperatorData, Arc<PhysicalPlan>, Arc<ScalarPlan>>,
 }
 
 /// A physical plan with varying levels of materialization.
@@ -38,13 +35,9 @@ pub struct PhysicalPlan {
 pub enum PartialPhysicalPlan {
     /// Single materialized operator with potentially unmaterialized children
     PartialMaterialized {
-        operator: PhysicalOperator<OptdValue, Arc<PartialPhysicalPlan>, Arc<PartialScalarPlan>>,
+        operator: PhysicalOperator<OperatorData, Arc<PartialPhysicalPlan>, Arc<PartialScalarPlan>>,
     },
 
     /// Reference to an optimization group containing equivalent plans
     UnMaterialized(RelationalGroupId),
 }
-
-/// Type alias for expressions that construct physical plans.
-/// See PartialPlanExpr for the available expression constructs.
-pub type PartialPhysicalPlanExpr = PartialPlanExpr<PartialPhysicalPlan>;

@@ -9,10 +9,10 @@
 //! of materialization during the optimization process.
 
 use crate::{
-    cascades::groups::ScalarGroupId, operators::scalar::ScalarOperator, values::OptdValue,
+    cascades::{groups::ScalarGroupId, ir::OperatorData},
+    operators::scalar::ScalarOperator,
 };
 
-use super::PartialPlanExpr;
 use std::sync::Arc;
 
 /// A fully materialized scalar expression tree.
@@ -22,7 +22,7 @@ use std::sync::Arc;
 /// after optimization is complete.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScalarPlan {
-    pub operator: ScalarOperator<OptdValue, Arc<ScalarPlan>>,
+    pub operator: ScalarOperator<OperatorData, Arc<ScalarPlan>>,
 }
 
 /// A scalar expression with varying levels of materialization.
@@ -34,13 +34,9 @@ pub struct ScalarPlan {
 pub enum PartialScalarPlan {
     /// Single materialized operator with potentially unmaterialized children
     PartialMaterialized {
-        operator: ScalarOperator<OptdValue, Arc<PartialScalarPlan>>,
+        operator: ScalarOperator<OperatorData, Arc<PartialScalarPlan>>,
     },
 
     /// Reference to an optimization group containing equivalent expressions
     UnMaterialized(ScalarGroupId),
 }
-
-/// Type alias for expressions that construct scalar plans.
-/// See PartialPlanExpr for the available expression constructs.
-pub type PartialScalarPlanExpr = PartialPlanExpr<PartialScalarPlan>;

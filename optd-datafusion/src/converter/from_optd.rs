@@ -16,9 +16,9 @@ use datafusion::{
     scalar::ScalarValue,
 };
 use optd_core::{
+    cascades::ir::OperatorData,
     operators::{relational::physical::PhysicalOperator, scalar::ScalarOperator},
     plans::{physical::PhysicalPlan, scalar::ScalarPlan},
-    values::OptdValue,
 };
 
 use super::OptdDFContext;
@@ -142,9 +142,14 @@ impl OptdDFContext<'_> {
             }
             ScalarOperator::Constant(constant) => {
                 let value = match &constant.value {
-                    OptdValue::Int64(value) => ScalarValue::Int64(Some(*value)),
-                    OptdValue::String(value) => ScalarValue::Utf8(Some(value.clone())),
-                    OptdValue::Bool(value) => ScalarValue::Boolean(Some(*value)),
+                    OperatorData::Int64(value) => ScalarValue::Int64(Some(*value)),
+                    OperatorData::String(value) => ScalarValue::Utf8(Some(value.clone())),
+                    OperatorData::Bool(value) => ScalarValue::Boolean(Some(*value)),
+                    OperatorData::Float64(ordered_float) => {
+                        ScalarValue::Float64(Some(**ordered_float))
+                    }
+                    OperatorData::Struct(..) => todo!(),
+                    OperatorData::Array(_) => todo!(),
                 };
                 Ok(Arc::new(Literal::new(value)))
             }

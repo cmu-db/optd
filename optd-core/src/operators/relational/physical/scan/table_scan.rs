@@ -1,6 +1,6 @@
 //! A physical table scan operator.
 
-use crate::{operators::relational::physical::PhysicalOperator, values::OptdValue};
+use crate::{cascades::ir::OperatorData, operators::relational::physical::PhysicalOperator};
 use serde::Deserialize;
 
 /// A physical operator that scans rows from a table.
@@ -12,11 +12,11 @@ pub struct TableScan<Value, Scalar> {
     pub predicate: Scalar,
 }
 
-impl<Scalar> TableScan<OptdValue, Scalar> {
+impl<Scalar> TableScan<OperatorData, Scalar> {
     /// Create a new table scan operator.
     pub fn new(table_name: &str, predicate: Scalar) -> Self {
         Self {
-            table_name: OptdValue::String(table_name.to_string()),
+            table_name: OperatorData::String(table_name.to_string()),
             predicate,
         }
     }
@@ -26,6 +26,6 @@ impl<Scalar> TableScan<OptdValue, Scalar> {
 pub fn table_scan<Relation, Scalar>(
     table_name: &str,
     predicate: Scalar,
-) -> PhysicalOperator<OptdValue, Relation, Scalar> {
+) -> PhysicalOperator<OperatorData, Relation, Scalar> {
     PhysicalOperator::TableScan(TableScan::new(table_name, predicate))
 }

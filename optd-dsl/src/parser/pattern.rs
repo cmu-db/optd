@@ -5,9 +5,9 @@ use chumsky::{
 };
 
 use crate::{
-    errors::span::{Span, Spanned},
     lexer::tokens::{Token, ALL_DELIMITERS},
     parser::ast::{Literal, Pattern},
+    utils::span::{Span, Spanned},
 };
 
 pub fn pattern_parser() -> impl Parser<Token, Spanned<Pattern>, Error = Simple<Token, Span>> + Clone

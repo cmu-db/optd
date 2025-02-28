@@ -1,7 +1,7 @@
 //! A logical join.
 
 use super::LogicalOperator;
-use crate::values::OptdValue;
+use crate::cascades::ir::OperatorData;
 use serde::Deserialize;
 
 /// Logical join operator that combines rows from two relations.
@@ -17,11 +17,11 @@ pub struct Join<Value, Relation, Scalar> {
     pub condition: Scalar,
 }
 
-impl<Relation, Scalar> Join<OptdValue, Relation, Scalar> {
+impl<Relation, Scalar> Join<OperatorData, Relation, Scalar> {
     /// Create a new join operator.
     pub fn new(join_type: &str, left: Relation, right: Relation, condition: Scalar) -> Self {
         Self {
-            join_type: OptdValue::String(join_type.into()),
+            join_type: OperatorData::String(join_type.into()),
             left,
             right,
             condition,
@@ -35,6 +35,6 @@ pub fn join<Relation, Scalar>(
     left: Relation,
     right: Relation,
     condition: Scalar,
-) -> LogicalOperator<OptdValue, Relation, Scalar> {
+) -> LogicalOperator<OperatorData, Relation, Scalar> {
     LogicalOperator::Join(Join::new(join_type, left, right, condition))
 }

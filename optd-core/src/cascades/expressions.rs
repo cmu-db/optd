@@ -1,21 +1,22 @@
 //! Types for logical and physical expressions in the optimizer.
 
+use crate::operators::relational::logical::LogicalOperator;
 use crate::operators::relational::physical::PhysicalOperator;
 use crate::operators::scalar::ScalarOperator;
-use crate::{operators::relational::logical::LogicalOperator, values::OptdValue};
 use serde::Deserialize;
 
 use super::goal::GoalId;
 use super::groups::{RelationalGroupId, ScalarGroupId};
+use super::ir::OperatorData;
 
 /// A logical expression in the memo table.
-pub type LogicalExpression = LogicalOperator<OptdValue, RelationalGroupId, ScalarGroupId>;
+pub type LogicalExpression = LogicalOperator<OperatorData, RelationalGroupId, ScalarGroupId>;
 
 /// A physical expression in the memo table.
-pub type PhysicalExpression = PhysicalOperator<OptdValue, GoalId, ScalarGroupId>;
+pub type PhysicalExpression = PhysicalOperator<OperatorData, GoalId, ScalarGroupId>;
 
 /// A scalar expression in the memo table.
-pub type ScalarExpression = ScalarOperator<OptdValue, ScalarGroupId>;
+pub type ScalarExpression = ScalarOperator<OperatorData, ScalarGroupId>;
 
 /// A unique identifier for a logical expression in the memo table.
 #[repr(transparent)]

@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Formatter};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use chumsky::error::{Simple, SimpleReason};
 
-use crate::errors::{reporter::Reporter, span::Span};
+use crate::utils::{errors::Reporter, span::Span};
 
 #[derive(Debug)]
 pub struct LexerError {

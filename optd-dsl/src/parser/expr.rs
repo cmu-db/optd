@@ -5,9 +5,9 @@ use chumsky::{
 };
 
 use crate::{
-    errors::span::{Span, Spanned},
     lexer::tokens::Token,
     parser::ast::{BinOp, Expr, Literal, MatchArm, UnaryOp},
+    utils::span::{Span, Spanned},
 };
 
 use super::{
@@ -351,7 +351,6 @@ mod tests {
 
     use super::*;
     use crate::{
-        errors::span::Span,
         lexer::lex::lex,
         parser::ast::{Expr, Literal, Pattern},
     };

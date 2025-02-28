@@ -1,5 +1,5 @@
-use crate::errors::span::Span;
 use crate::lexer::tokens::Token;
+use crate::utils::span::Span;
 use chumsky::prelude::*;
 
 use super::adt::adt_parser;
@@ -17,7 +17,7 @@ mod tests {
     use chumsky::Stream;
 
     use super::*;
-    use crate::lexer::lex::lex;
+    use crate::{lexer::lex::lex, utils::span::Span};
 
     fn parse_module(input: &str) -> (Option<Module>, Vec<Simple<Token, Span>>) {
         let (tokens, _) = lex(input, "test.txt");

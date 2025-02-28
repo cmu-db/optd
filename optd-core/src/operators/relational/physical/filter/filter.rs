@@ -2,7 +2,7 @@
 
 use serde::Deserialize;
 
-use crate::{operators::relational::physical::PhysicalOperator, values::OptdValue};
+use crate::{cascades::ir::OperatorData, operators::relational::physical::PhysicalOperator};
 
 /// A physical operator that filters input rows based on a predicate.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -24,6 +24,6 @@ impl<Relation, Scalar> PhysicalFilter<Relation, Scalar> {
 pub fn physical_filter<Relation, Scalar>(
     child: Relation,
     predicate: Scalar,
-) -> PhysicalOperator<OptdValue, Relation, Scalar> {
+) -> PhysicalOperator<OperatorData, Relation, Scalar> {
     PhysicalOperator::Filter(PhysicalFilter::new(child, predicate))
 }
