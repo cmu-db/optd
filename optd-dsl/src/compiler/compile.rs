@@ -1,10 +1,7 @@
-use chumsky::prelude::end;
-use chumsky::{Parser, Stream};
-
 use crate::lexer::lex::lex;
-use crate::parser::module::module_parser;
-use crate::utils::span::Span;
-use crate::{analyzer::hir::HIR, utils::error::Error};
+use crate::parser::ast::Module;
+use crate::parser::module::parse_module;
+use crate::utils::error::CompileError;
 
 /// Compilation options for the DSL
 pub struct CompileOptions {
@@ -12,16 +9,18 @@ pub struct CompileOptions {
     pub source_path: String,
 }
 
-/// Result of the compilation process
-pub struct CompileResult {
-    /// The resulting HIR if compilation was successful
-    pub hir: Option<HIR>,
-    /// Any errors encountered during compilation
-    pub errors: Vec<Error>,
-}
-
-/// Compile DSL source code to HIR
-pub fn compile(source: &str, options: CompileOptions) -> Result<HIR, Vec<Error>> {
+/// Parse DSL source code to AST
+///
+/// This function performs lexing and parsing stages of compilation,
+/// returning either the parsed AST Module or collected errors.
+///
+/// # Arguments
+/// * `source` - The source code to parse
+/// * `options` - Compilation options including source path
+///
+/// # Returns
+/// * `Result<Module, Vec<CompileError>>` - The parsed AST or errors
+pub fn parse(source: &str, options: &CompileOptions) -> Result<Module, Vec<CompileError>> {
     let mut errors = Vec::new();
 
     // Step 1: Lexing
@@ -35,16 +34,34 @@ pub fn compile(source: &str, options: CompileOptions) -> Result<HIR, Vec<Error>>
     let tokens = tokens_opt.unwrap();
 
     // Step 2: Parsing
-    let len = source.chars().count();
-    let eoi = Span::new(options.source_path.clone(), len..len);
+    let (ast_opt, parse_errors) = parse_module(tokens, source, &options.source_path);
+    errors.extend(parse_errors);
 
-    let (ast_opt, parse_errors) = module_parser()
-        .then_ignore(end())
-        .parse_recovery(Stream::from_iter(eoi, tokens.into_iter()));
+    if errors.is_empty() && ast_opt.is_some() {
+        Ok(ast_opt.unwrap())
+    } else {
+        Err(errors)
+    }
+}
 
-    println!("{:?}", ast_opt);
-    println!("{:?}", parse_errors);
-    println!("{:?}", errors);
+/// Compile DSL source code to HIR
+///
+/// This function performs the full compilation pipeline including lexing,
+/// parsing, and semantic analysis to produce HIR.
+///
+/// # Arguments
+/// * `source` - The source code to compile
+/// * `options` - Compilation options including source path
+///
+/// # Returns
+/// * `Result<HIR, Vec<CompileError>>` - The compiled HIR or errors
+pub fn compile(
+    source: &str,
+    options: &CompileOptions,
+) -> Result<crate::analyzer::hir::HIR, Vec<CompileError>> {
+    // Step 1 & 2: Parse to AST
+    let _ast = parse(source, options)?;
 
-    todo!()
+    // Step 3: Semantic analysis to HIR
+    todo!("Implement semantic analysis to convert AST to HIR")
 }

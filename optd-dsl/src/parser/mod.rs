@@ -1,5 +1,5 @@
 mod adt;
-mod ast;
+pub mod ast;
 pub mod error;
 mod expr;
 mod function;
