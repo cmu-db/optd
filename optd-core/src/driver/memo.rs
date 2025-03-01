@@ -9,19 +9,19 @@
 
 use std::sync::Arc;
 
-use crate::{cost_model::Cost, plans::physical::PhysicalPlan};
+use anyhow::Result;
 
-use super::{
+use crate::ir::{
+    cost::Cost,
     expressions::{
         LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
-        ScalarExpression, ScalarExpressionId, StoredLogicalExpression,
+        ScalarExpression, ScalarExpressionId,
     },
-    goal::{Goal, GoalId, OptimizationStatus},
+    goal::{GoalId, OptimizationStatus},
     groups::{ExplorationStatus, RelationalGroupId, ScalarGroupId},
-    properties::{self, PhysicalProperties},
-    rules::{ImplementationRuleId, RuleId, TransformationRuleId},
+    properties::PhysicalProperties,
+    rules::{RuleId, TransformationRuleId},
 };
-use anyhow::Result;
 
 #[trait_variant::make(Send)]
 pub trait Memoize: Send + Sync + 'static {
@@ -30,7 +30,7 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         group_id: RelationalGroupId,
         required_physical_props: PhysicalProperties,
-    ) -> Result<Arc<Goal>>;
+    ) -> Result<GoalId>;
 
     async fn update_goal_optimization_status(
         &self,
@@ -49,8 +49,13 @@ pub trait Memoize: Send + Sync + 'static {
         status: ExplorationStatus,
     ) -> Result<()>;
 
+    async fn get_group_optimization_status(&self, goal_id: GoalId) -> Result<OptimizationStatus>;
+
     /// Gets the metadata that describes a goal.
-    async fn get_goal(&self, goal_id: GoalId) -> Result<Arc<Goal>>;
+    async fn get_goal_details(
+        &self,
+        goal_id: GoalId,
+    ) -> Result<(PhysicalProperties, OptimizationStatus, RelationalGroupId)>;
 
     /// Gets all logical expressions in a group.
     async fn get_all_logical_exprs_in_group(
@@ -130,16 +135,6 @@ pub trait Memoize: Send + Sync + 'static {
         cost: Cost,
         goal_id: GoalId,
     ) -> Result<(GoalId, PhysicalExpressionId)>;
-
-    /// Adds a physical expression to a goal in the memo table.
-    /// TODO (Sarvesh): This is not correct and we should not be doing this at all. My next commit will probably change this
-    // TODO: cost and statistics probably is also added here.
-    async fn add_physical_plan_top_node(
-        &self,
-        physical_plan: &PhysicalPlan,
-        cost: Cost,
-        goal_id: GoalId,
-    ) -> Result<GoalId>;
 
     /// Gets the group id from a logical expression. If the logical expression is not in the memo table, it will be created and added to the memo table and the group id will be returned.
     async fn get_group_id_from_logical_expr(

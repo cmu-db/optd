@@ -1,28 +1,10 @@
-pub mod expressions;
-pub mod goal;
-pub mod groups;
-pub mod ir;
+pub mod cascades;
 pub mod memo;
-pub mod properties;
-pub mod rules;
-pub mod tasks;
 
 use std::sync::Arc;
 
 use async_recursion::async_recursion;
-use expressions::{PhysicalExpression, StoredLogicalExpression, StoredPhysicalExpression};
-use goal::{Goal, GoalId};
-use groups::{RelationalGroupId, ScalarGroupId};
 use memo::Memoize;
-
-use crate::{
-    cost_model::Cost,
-    plans::{
-        logical::{LogicalPlan, PartialLogicalPlan},
-        physical::PartialPhysicalPlan,
-        scalar::{PartialScalarPlan, ScalarPlan},
-    },
-};
 
 /// Gets the cost of a physical plan by calling the cost model.
 /// It also stores the cost in the memo table.

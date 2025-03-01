@@ -1,26 +1,15 @@
 use std::sync::Arc;
 
-use crate::cost_model::Cost;
 use futures::{
     stream::{self, Stream},
     StreamExt,
 };
 
-use super::{
-    expressions::{
-        LogicalExpression, PhysicalExpression, StoredLogicalExpression, StoredPhysicalExpression,
-    },
-    get_physical_expression_cost,
-    goal::Goal,
-    groups::{ExplorationStatus, RelationalGroupId},
-    ingest_full_logical_plan, ingest_partial_logical_plan, ingest_partial_physical_plan,
-    ir::{LogicalPlan, PhysicalProperties},
-    memo::Memoize,
-    rules::{ImplementationRuleId, RuleId, TransformationRuleId},
-};
 use anyhow::Result;
 use async_recursion::async_recursion;
 use tokio::task::JoinSet;
+
+use super::memo::Memoize;
 
 struct TaskContext<M: Memoize> {
     memo: M,
