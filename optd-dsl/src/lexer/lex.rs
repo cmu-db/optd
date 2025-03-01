@@ -8,9 +8,9 @@ use chumsky::{
 };
 use ordered_float::OrderedFloat;
 
-use crate::utils::{errors::Error, span::Span};
+use crate::utils::{error::CompileError, span::Span};
 
-use super::{errors::LexerError, tokens::Token};
+use super::{error::LexerError, tokens::Token};
 
 /// Lexes a source string into a sequence of tokens with their positions.
 /// Uses Chumsky for lexing and Ariadne for error reporting.
@@ -21,7 +21,7 @@ use super::{errors::LexerError, tokens::Token};
 ///
 /// # Returns
 /// * `(Option<Vec<(Token, Span)>>, Vec<Error>)` - Any successfully lexed tokens and errors
-pub fn lex(source: &str, file_name: &str) -> (Option<Vec<(Token, Span)>>, Vec<Error>) {
+pub fn lex(source: &str, file_name: &str) -> (Option<Vec<(Token, Span)>>, Vec<CompileError>) {
     let len = source.chars().count();
     let eoi = Span::new(file_name.into(), len..len);
 

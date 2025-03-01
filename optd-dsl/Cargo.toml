@@ -11,3 +11,13 @@ ordered-float = "5.0.0"
 futures = "0.3.31"
 tokio.workspace = true
 async-recursion.workspace = true
+enum_dispatch = "0.3.13"
+clap = { version = "4.5.31", features = ["derive"] }
+
+[lib]
+name = "optd_dsl"
+path = "src/lib.rs"
+
+[[bin]]
+name = "optd-cli"
+path = "src/cli/main.rs"
