@@ -20,13 +20,14 @@ pub struct Driver<M: Memoize> {
 
 impl<M: Memoize> Driver<M> {
     pub fn new(memo: M) -> Arc<Self> {
-        Arc::new_cyclic(|this| Self {
+        todo!()
+        /*Arc::new_cyclic(|this| Self {
             memo,
             rule_engine: Arc::new(Engine {
                 context: this.upgrade().unwrap(),
                 driver: todo!(),
             }),
-        })
+        })*/
     }
 }
 /*

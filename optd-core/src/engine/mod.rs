@@ -8,7 +8,7 @@ use crate::{
     driver::{cascades::Driver, memo::Memoize},
     ir::plans::PartialLogicalPlan,
 };
-use bridge::{from_optd::partial_logical_to_value, into_optd::value_to_partial_logical};
+// use bridge::{from_optd::partial_logical_to_value, into_optd::value_to_partial_logical};
 use eval::Evaluate;
 use futures::StreamExt;
 use optd_dsl::analyzer::{
@@ -21,7 +21,7 @@ use CoreData::*;
 use Expr::*;
 use Literal::*;
 
-mod bridge;
+// mod bridge;
 mod eval;
 mod utils;
 
@@ -35,7 +35,7 @@ pub struct Engine<M: Memoize> {
     driver: Arc<Driver<M>>,
 }
 
-impl<M: Memoize> Engine<M> {
+/*impl<M: Memoize> Engine<M> {
     /// Creates a new engine with the given context and driver.
     pub fn new(context: Context, driver: Arc<Driver<M>>) -> Self {
         Self { context, driver }
@@ -70,3 +70,4 @@ impl<M: Memoize> Engine<M> {
             .boxed()
     }
 }
+*/

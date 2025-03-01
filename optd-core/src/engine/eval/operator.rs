@@ -9,7 +9,7 @@
 //! (a cartesian product) and constructs operator instances for each combination.
 //! This approach handles the non-deterministic nature of expression evaluation
 //! in our system, where an expression might evaluate to multiple possible values.
-
+/* 
 use crate::{
     capture,
     engine::utils::streams::{evaluate_all_combinations, stream_from_result, ValueStream},
@@ -134,3 +134,4 @@ fn explore_relational_children(
         ))
         .boxed()
 }
+*/

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use async_recursion::async_recursion;
 use memo::Memoize;
-
+/*
 /// Gets the cost of a physical plan by calling the cost model.
 /// It also stores the cost in the memo table.
 async fn get_physical_expression_cost(
@@ -188,3 +188,4 @@ pub async fn ingest_full_scalar_plan(
     memo.add_scalar_expr(&scalar_plan.operator.into_expr(&children))
         .await
 }
+ */

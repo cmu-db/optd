@@ -172,15 +172,15 @@ where
 ///
 /// # Returns
 /// A boxed stream that either contains the results of the success handler or propagates the error
-pub(crate) fn stream_from_result<T, U, F, Fut>(
+pub(crate) fn stream_from_result<'a, T, U, F, Fut>(
     result: Result<T, Error>,
     success_handler: F,
-) -> Pin<Box<dyn Stream<Item = Result<U, Error>> + Send>>
+) -> Pin<Box<dyn Stream<Item = Result<U, Error>> + Send + 'a>>
 where
     T: Send,
     U: Send,
     F: FnOnce(T) -> Fut + Send,
-    Fut: Stream<Item = Result<U, Error>> + Send,
+    Fut: Stream<Item = Result<U, Error>> + Send + 'a,
 {
     match result {
         Ok(value) => Box::pin(success_handler(value)),

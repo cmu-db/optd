@@ -1,6 +1,6 @@
 //! This module provides evaluation functions for core expression types, transforming
 //! expressions into value streams that handle all possible evaluation paths.
-
+/* 
 use super::{operator::evaluate_operator, Evaluate};
 use crate::{
     capture,
@@ -378,3 +378,4 @@ mod tests {
         }
     }
 }
+*/

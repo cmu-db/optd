@@ -40,7 +40,7 @@ impl Evaluate for Expr {
             Let(ident, assignee, after) => evaluate_let_binding(ident, assignee, after, context),
             Binary(left, op, right) => evaluate_binary_expr(left, op, right, context),
             Unary(op, expr) => evaluate_unary_expr(op, expr, context),
-            Call(fun, args) => evaluate_function_call(fun, args, context),
+            Call(fun, args) => todo!(), // evaluate_function_call(fun, args, context),
             Ref(ident) => evaluate_reference(ident, context),
             CoreExpr(_expr) => todo!(), // evaluate_core_expr(expr, context),
             CoreVal(val) => propagate_success(val.clone()).boxed(),
@@ -60,11 +60,11 @@ impl Evaluate for Expr {
 ///
 /// # Returns
 /// A stream of all possible evaluation results
-pub(super) fn evaluate_pattern_match(
-    expr: &Expr,
-    match_arms: &[MatchArm],
+pub(super) fn evaluate_pattern_match<'a>(
+    expr: &'a Expr,
+    match_arms: &'a [MatchArm],
     context: Context,
-) -> ValueStream {
+) -> ValueStream<'a> {
     // First evaluate the expression
     expr.evaluate(context.clone())
         .flat_map(move |expr_result| {
@@ -83,12 +83,12 @@ pub(super) fn evaluate_pattern_match(
 ///
 /// First evaluates the condition, then either the 'then' branch if the condition is true,
 /// or the 'else' branch if the condition is false.
-fn evaluate_if_then_else(
-    cond: &Expr,
-    then_expr: &Expr,
-    else_expr: &Expr,
+fn evaluate_if_then_else<'a>(
+    cond: &'a Expr,
+    then_expr: &'a Expr,
+    else_expr: &'a Expr,
     context: Context,
-) -> ValueStream {
+) -> ValueStream<'a> {
     cond.evaluate(context.clone())
         .flat_map(move |cond_result| {
             stream_from_result(
@@ -187,13 +187,10 @@ fn evaluate_function_call<'a>(
                 fun_result,
                 capture!([context], move |fun_value| {
                     match fun_value.0 {
-                        // Handle closure (user-defined function)
                         Function(Closure(params, body)) => {
-                            evaluate_closure_call(&params, &body, args, context.clone())
-                         }
-                        // Handle Rust UDF (built-in function)
+                            evaluate_closure_call(params, (*body).clone(), args, context.clone())
+                        }
                         // Function(RustUDF(udf)) => evaluate_rust_udf_call(*udf, args, context),
-                        // Value must be a function
                         _ => panic!("Expected function value"),
                     }
                 }),
@@ -207,8 +204,8 @@ fn evaluate_function_call<'a>(
 /// Evaluates the arguments, binds them to the parameters in a new context,
 /// then evaluates the function body in that context.
 fn evaluate_closure_call<'a>(
-    params: &'a [String],
-    body: &'a Expr,
+    params: Vec<String>,
+    body: Expr,
     args: &'a [Expr],
     context: Context,
 ) -> ValueStream<'a> {
@@ -219,14 +216,14 @@ fn evaluate_closure_call<'a>(
         .flat_map(move |args_result| {
             stream_from_result(
                 args_result,
-                capture!([context, params], move |args| {
+                capture!([context, body, params], move |args| {
                     // Create a new context with parameters bound to arguments
                     let mut new_ctx = context;
                     new_ctx.push_scope();
                     params.iter().zip(args).for_each(|(p, a)| {
                         new_ctx.bind(p.clone(), a);
                     });
-                    body.evaluate(new_ctx)
+                    body.clone().evaluate(new_ctx)
                 }),
             )
         })
