@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use super::{groups::RelationalGroupId, ir::PhysicalProperties};
+use super::{groups::RelationalGroupId, properties::PhysicalProperties};
 
 /// A unique identifier for a goal in the memo table.
 #[repr(transparent)]
