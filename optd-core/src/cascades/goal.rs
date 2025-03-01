@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use super::{groups::RelationalGroupId, properties::PhysicalProperties};
+use super::{groups::RelationalGroupId, ir::PhysicalProperties};
 
 /// A unique identifier for a goal in the memo table.
 #[repr(transparent)]
@@ -45,5 +45,3 @@ pub struct Goal {
     /// The optimization status of the goal.
     pub optimization_status: OptimizationStatus,
 }
-
-pub type GoalID = usize; // Example definition, adjust as needed

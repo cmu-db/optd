@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    cascades::properties::PhysicalProperties, operators::{
     cascades::ir::OperatorData,
+    cascades::properties::PhysicalProperties,
     operators::{
         relational::{
             logical::{filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator},
@@ -12,9 +12,9 @@ use crate::{
             },
         },
         scalar::{column_ref::ColumnRef, constants::Constant, ScalarOperator},
-    }, plans::{
+    },
+    plans::{
         logical::PartialLogicalPlan, physical::PartialPhysicalPlan, scalar::PartialScalarPlan,
-    }
     },
 };
 

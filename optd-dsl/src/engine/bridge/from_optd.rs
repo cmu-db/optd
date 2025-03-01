@@ -6,7 +6,7 @@
 
 use crate::analyzer::hir::{CoreData, Literal, Materializable, Operator, OperatorKind, Value};
 use optd_core::cascades::ir::{
-    Children, OperatorData, PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan,
+    Child, OperatorData, PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan,
 };
 use CoreData::*;
 use Literal::*;
@@ -123,12 +123,12 @@ impl ToValue for PartialPhysicalPlan {
 }
 
 /// Convert a Vec of Children to Vec of Values
-fn convert_children<T: ToValue>(children: &[Children<T>]) -> Vec<Value> {
+fn convert_children<T: ToValue>(children: &[Child<T>]) -> Vec<Value> {
     children
         .iter()
         .map(|child_group| match child_group {
-            Children::Singleton(child) => child.to_value(),
-            Children::VarLength(children) => Value(Array(
+            Child::Singleton(child) => child.to_value(),
+            Child::VarLength(children) => Value(Array(
                 children.iter().map(|child| child.to_value()).collect(),
             )),
         })

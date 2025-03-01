@@ -1,4 +1,4 @@
-use crate::values::OptdValue;
+use crate::values::OperatorData;
 
 use super::groups::{RelationalGroupId, ScalarGroupId};
 
@@ -6,7 +6,7 @@ use super::groups::{RelationalGroupId, ScalarGroupId};
 pub enum PartialLogicalPlan {
     PartialMaterialized {
         tag: String,
-        values: Vec<OptdValue>,
+        values: Vec<OperatorData>,
         relational_children: Vec<Vec<Box<PartialLogicalPlan>>>,
         scalar_children: Vec<Vec<Box<PartialScalarPlan>>>,
     },
@@ -17,7 +17,7 @@ pub enum PartialLogicalPlan {
 pub enum PartialScalarPlan {
     PartialMaterialized {
         tag: String,
-        values: Vec<OptdValue>,
+        values: Vec<OperatorData>,
         scalar_children: Vec<Vec<Box<PartialScalarPlan>>>,
     },
     UnMaterialized(ScalarGroupId),
