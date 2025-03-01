@@ -16,3 +16,4 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 dotenvy = "0.15"
 futures = "0.3"
+ordered-float = { version = "5.0.0", features = ["serde"] }

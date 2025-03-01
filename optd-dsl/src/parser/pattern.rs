@@ -5,9 +5,9 @@ use chumsky::{
 };
 
 use crate::{
-    errors::span::{Span, Spanned},
     lexer::tokens::{Token, ALL_DELIMITERS},
     parser::ast::{Literal, Pattern},
+    utils::span::{Span, Spanned},
 };
 
 pub fn pattern_parser() -> impl Parser<Token, Spanned<Pattern>, Error = Simple<Token, Span>> + Clone
@@ -71,6 +71,19 @@ pub fn pattern_parser() -> impl Parser<Token, Spanned<Pattern>, Error = Simple<T
             })
             .map_with_span(Spanned::new);
 
+        let empty_list = just(Token::LBracket)
+            .then(just(Token::RBracket))
+            .map(|_| Pattern::EmptyArray)
+            .map_with_span(Spanned::new);
+
+        let list_decomposition = just(Token::LBracket)
+            .ignore_then(pattern_parser.clone())
+            .then_ignore(just(Token::Range))
+            .then(pattern_parser.clone())
+            .then_ignore(just(Token::RBracket))
+            .map(|(head, tail)| Pattern::ArrayDecomp(head, tail))
+            .map_with_span(Spanned::new);
+
         choice((
             wildcard,
             binding_with_pattern,
@@ -78,6 +91,8 @@ pub fn pattern_parser() -> impl Parser<Token, Spanned<Pattern>, Error = Simple<T
             literal,
             simple_constructor,
             simple_binding,
+            empty_list,
+            list_decomposition,
         ))
     })
 }
@@ -245,6 +260,93 @@ mod tests {
                     }
                 }
                 _ => panic!("Expected Constructor pattern at top level"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_empty_list_pattern() {
+        let (result, errors) = parse_pattern("[]");
+
+        assert!(result.is_some(), "Expected successful parse for empty list");
+        assert!(errors.is_empty(), "Expected no errors for empty list");
+
+        if let Some(pattern) = result {
+            match *pattern.value {
+                Pattern::EmptyArray => {}
+                _ => panic!("Expected EmptyList pattern, got {:?}", pattern.value),
+            }
+        }
+    }
+
+    #[test]
+    fn test_list_decomposition_pattern() {
+        let (result, errors) = parse_pattern("[x .. xs]");
+
+        assert!(
+            result.is_some(),
+            "Expected successful parse for list decomposition"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for list decomposition"
+        );
+
+        if let Some(pattern) = result {
+            match *pattern.value {
+                Pattern::ArrayDecomp(head, tail) => {
+                    // Check that head is a pattern binding 'x'
+                    match *head.value {
+                        Pattern::Bind(name, _) => {
+                            assert_eq!(*name.value, "x", "Expected head binding named 'x'");
+                        }
+                        _ => panic!("Expected head to be a binding pattern"),
+                    }
+
+                    // Check that tail is a pattern binding 'xs'
+                    match *tail.value {
+                        Pattern::Bind(name, _) => {
+                            assert_eq!(*name.value, "xs", "Expected tail binding named 'xs'");
+                        }
+                        _ => panic!("Expected tail to be a binding pattern"),
+                    }
+                }
+                _ => panic!("Expected ListDecomposition pattern"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_list_decomposition_with_empty_tail() {
+        let (result, errors) = parse_pattern("[x .. []]");
+
+        assert!(
+            result.is_some(),
+            "Expected successful parse for decomposition with empty tail"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for decomposition with empty tail"
+        );
+
+        if let Some(pattern) = result {
+            match *pattern.value {
+                Pattern::ArrayDecomp(head, tail) => {
+                    // Check that head is a pattern binding 'x'
+                    match *head.value {
+                        Pattern::Bind(name, _) => {
+                            assert_eq!(*name.value, "x", "Expected head binding named 'x'");
+                        }
+                        _ => panic!("Expected head to be a binding pattern"),
+                    }
+
+                    // Check that tail is an empty list pattern
+                    match *tail.value {
+                        Pattern::EmptyArray => {}
+                        _ => panic!("Expected tail to be an empty list pattern"),
+                    }
+                }
+                _ => panic!("Expected ListDecomposition pattern"),
             }
         }
     }

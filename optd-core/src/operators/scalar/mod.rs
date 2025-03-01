@@ -10,10 +10,7 @@ pub mod constants;
 pub mod logic_op;
 pub mod unary_op;
 
-use crate::{
-    cascades::{expressions::ScalarExpression, groups::ScalarGroupId},
-    values::OptdValue,
-};
+use crate::cascades::{expressions::ScalarExpression, groups::ScalarGroupId, ir::OperatorData};
 use binary_op::BinaryOp;
 use column_ref::ColumnRef;
 use constants::Constant;
@@ -63,7 +60,7 @@ pub enum ScalarOperatorKind {
     Logic,
 }
 
-impl<Scalar> ScalarOperator<OptdValue, Scalar>
+impl<Scalar> ScalarOperator<OperatorData, Scalar>
 where
     Scalar: Clone,
 {
@@ -79,7 +76,7 @@ where
     }
 
     /// Returns a vector of values associated with this operator.
-    pub fn values(&self) -> Vec<OptdValue> {
+    pub fn values(&self) -> Vec<OperatorData> {
         match self {
             ScalarOperator::Constant(constant) => vec![constant.value.clone()],
             ScalarOperator::ColumnRef(column_ref) => vec![column_ref.column_index.clone()],

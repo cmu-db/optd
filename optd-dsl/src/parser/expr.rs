@@ -5,9 +5,9 @@ use chumsky::{
 };
 
 use crate::{
-    errors::span::{Span, Spanned},
     lexer::tokens::Token,
     parser::ast::{BinOp, Expr, Literal, MatchArm, UnaryOp},
+    utils::span::{Span, Spanned},
 };
 
 use super::{
@@ -151,7 +151,7 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
             let single_param = param_parser.map(|field| vec![field]);
 
             choice((param_list, empty_params, single_param))
-                .then_ignore(just(Token::BigArrow))
+                .then_ignore(just(Token::SmallArrow))
                 .then(expr.clone())
                 .map(|(params, body)| Expr::Closure(params, body))
                 .map_with_span(Spanned::new)
@@ -200,9 +200,6 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
                     just(Token::Dot)
                         .ignore_then(select! { Token::TermIdent(name) => name })
                         .map(PostfixOp::Member),
-                    just(Token::SmallArrow)
-                        .ignore_then(select! { Token::TermIdent(name) => name })
-                        .map(PostfixOp::Compose),
                 ))
                 .map_with_span(|op, span| (op, span))
                 .repeated(),
@@ -308,7 +305,7 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
             .boxed();
 
         let match_arm = pattern_parser()
-            .then_ignore(just(Token::BigArrow))
+            .then_ignore(just(Token::SmallArrow))
             .then(expr.clone())
             .map(|(pattern, expr)| MatchArm { pattern, expr })
             .map_with_span(Spanned::new);
@@ -351,7 +348,6 @@ mod tests {
 
     use super::*;
     use crate::{
-        errors::span::Span,
         lexer::lex::lex,
         parser::ast::{Expr, Literal, Pattern},
     };
@@ -404,9 +400,6 @@ mod tests {
                     }
                     (PostfixOp::Member(a_member), PostfixOp::Member(e_member)) => {
                         assert_eq!(a_member, e_member);
-                    }
-                    (PostfixOp::Compose(a_id), PostfixOp::Compose(e_id)) => {
-                        assert_eq!(a_id, e_id);
                     }
                     _ => panic!(
                         "Postfix operation mismatch: expected {:?}, got {:?}",
@@ -924,7 +917,7 @@ mod tests {
     fn test_nested_closures_and_calls() {
         // Test nested closures with function calls
         let (result, errors) =
-            parse_expr("(x: I64) => (y: F64) => func(x + 1, y * 2.5, z => z && true)");
+            parse_expr("(x: I64) -> (y: F64) -> func(x + 1, y * 2.5, z -> z && true)");
 
         assert!(
             result.is_some(),
@@ -1212,7 +1205,7 @@ mod tests {
         }
 
         // Let with complex body
-        let (result, errors) = parse_expr("let f: I64 => I64 = (x) => x * x in f(10)");
+        let (result, errors) = parse_expr("let f: I64 -> I64 = (x) -> x * x in f(10)");
         assert!(
             result.is_some(),
             "Expected successful parse for let with complex body and type annotation"
@@ -1357,7 +1350,7 @@ mod tests {
         }
 
         // Test compose operator
-        let (result, errors) = parse_expr("map(dat) -> filter");
+        let (result, errors) = parse_expr("map(dat).filter");
 
         assert!(
             result.is_some(),
@@ -1366,7 +1359,7 @@ mod tests {
         assert!(errors.is_empty(), "Expected no errors for compose operator");
 
         if let Some(expr) = result {
-            if let Expr::Postfix(inner, PostfixOp::Compose(name)) = &*expr.value {
+            if let Expr::Postfix(inner, PostfixOp::Member(name)) = &*expr.value {
                 assert_eq!(name, "filter");
 
                 if let Expr::Postfix(func, PostfixOp::Call(args)) = &*inner.value {
@@ -1382,7 +1375,7 @@ mod tests {
         }
 
         // Test chained compose operators
-        let (result, errors) = parse_expr("transform(input) -> map -> filter -> reduce");
+        let (result, errors) = parse_expr("transform(input).map.filter.reduce");
         assert!(
             result.is_some(),
             "Expected successful parse for chained compose operators"
@@ -1393,13 +1386,13 @@ mod tests {
         );
 
         if let Some(expr) = result {
-            if let Expr::Postfix(inner1, PostfixOp::Compose(name1)) = &*expr.value {
+            if let Expr::Postfix(inner1, PostfixOp::Member(name1)) = &*expr.value {
                 assert_eq!(name1, "reduce");
 
-                if let Expr::Postfix(inner2, PostfixOp::Compose(name2)) = &*inner1.value {
+                if let Expr::Postfix(inner2, PostfixOp::Member(name2)) = &*inner1.value {
                     assert_eq!(name2, "filter");
 
-                    if let Expr::Postfix(inner3, PostfixOp::Compose(name3)) = &*inner2.value {
+                    if let Expr::Postfix(inner3, PostfixOp::Member(name3)) = &*inner2.value {
                         assert_eq!(name3, "map");
 
                         if let Expr::Postfix(func, PostfixOp::Call(args)) = &*inner3.value {
@@ -1425,7 +1418,7 @@ mod tests {
     fn test_match_expressions() {
         // Simple match expression
         let (result, errors) =
-            parse_expr("match x | 1 => \"one\" | 2 => \"two\" \\ _ => \"other\"");
+            parse_expr("match x | 1 -> \"one\" | 2 -> \"two\" \\ _ -> \"other\"");
         assert!(
             result.is_some(),
             "Expected successful parse for simple match expression"
@@ -1479,10 +1472,10 @@ mod tests {
 
         // Match with complex patterns and expressions
         let (result, errors) = parse_expr(
-            "match point | Point(x, y) => \"first quadrant\" \
-                         | Circle(r) => \"circle\" \
-                         | Rectangle(b: Stuff(_), h) => \"rectangle\" \
-                         \\ _ => \"unknown shape\"",
+            "match point | Point(x, y) -> \"first quadrant\" \
+                         | Circle(r) -> \"circle\" \
+                         | Rectangle(b: Stuff(_), h) -> \"rectangle\" \
+                         \\ _ -> \"unknown shape\"",
         );
         assert!(
             result.is_some(),
@@ -1556,12 +1549,12 @@ mod tests {
     #[test]
     fn test_crazy_composite_expression() {
         // This test creates an insanely complex nested expression with multiple features
-        let crazy_expr = "let create_calculator = (operation) => match operation \
-                          | \"add\" => (x, y) => x + y \
-                          | \"subtract\" => (x, y) => x - y \
-                          | \"multiply\" => (x, y) => x * y \
-                          | \"divide\" => (x, y) => if y == 0 then fail(\"Division by zero\") else x / y \
-                          \\ _ => (x, y) => -1, \
+        let crazy_expr = "let create_calculator = (operation) -> match operation \
+                          | \"add\" -> (x, y) -> x + y \
+                          | \"subtract\" -> (x, y) -> x - y \
+                          | \"multiply\" -> (x, y) -> x * y \
+                          | \"divide\" -> (x, y) -> if y == 0 then fail(\"Division by zero\") else x / y \
+                          \\ _ -> (x, y) -> -1, \
                             calc = create_calculator(\"multiply\"), \
                             result = calc({\"key\": 6}.key, 7), \
                           in if result > 40 \
@@ -1611,12 +1604,12 @@ mod tests {
 
         // Test the chained version of the let expressions
         let chained_crazy_expr = "let \
-                                  create_calculator = (operation) => match operation \
-                                  | \"add\" => (x, y) => x + y \
-                                  | \"subtract\" => (x, y) => x - y \
-                                  | \"multiply\" => (x, y) => x * y \
-                                  | \"divide\" => (x, y) => if y == 0 then fail(\"Division by zero\") else x / y \
-                                  \\ _ => (x, y) => -1, \
+                                  create_calculator = (operation) -> match operation \
+                                  | \"add\" -> (x, y) -> x + y \
+                                  | \"subtract\" -> (x, y) -> x - y \
+                                  | \"multiply\" -> (x, y) -> x * y \
+                                  | \"divide\" -> (x, y) -> if y == 0 then fail(\"Division by zero\") else x / y \
+                                  \\ _ -> (x, y) -> -1, \
                                   calc = create_calculator(\"multiply\"), \
                                   result: I64 = calc({\"key\": 6}.key, 7) \
                                   in if result > 40 \
@@ -1662,6 +1655,158 @@ mod tests {
                 }
             } else {
                 panic!("Expected create_calculator let expression");
+            }
+        }
+    }
+
+    #[test]
+    fn test_list_decomposition_match() {
+        // Complex match expression with list decomposition patterns
+        let (result, errors) = parse_expr(
+        "match numbers \
+         | [] -> \"empty list\" \
+         | [x .. []] -> \"list with one element: \" ++ x.to_string() \
+         | [x .. [y .. []]] -> \"list with two elements: \" ++ x.to_string() ++ \", \" ++ y.to_string() \
+         | [head .. [second .. tail]] -> { \
+           let sum = head + second, \
+               rest_count = tail.length() \
+           in \"list with \" ++ (rest_count + 2).to_string() ++ \" elements, first two sum: \" ++ sum.to_string() \
+         } \
+         \\ _ -> \"not a list\"",
+    );
+
+        assert!(
+            result.is_some(),
+            "Expected successful parse for match with list decomposition patterns"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for match with list decomposition patterns"
+        );
+
+        if let Some(expr) = result {
+            if let Expr::PatternMatch(scrutinee, arms) = &*expr.value {
+                assert_expr_eq(&scrutinee.value, &Expr::Ref("numbers".to_string()));
+                assert_eq!(arms.len(), 5, "Expected 5 match arms");
+
+                // First arm: [] -> "empty list"
+                if let Pattern::EmptyArray = *arms[0].value.pattern.value {
+                    // Empty list pattern is correct
+                } else {
+                    panic!(
+                        "Expected EmptyList pattern in first arm, got {:?}",
+                        arms[0].value.pattern.value
+                    );
+                }
+                assert_expr_eq(
+                    &arms[0].value.expr.value,
+                    &Expr::Literal(Literal::String("empty list".to_string())),
+                );
+
+                // Second arm: [x .. []] -> "list with one element: " ++ x.to_string()
+                if let Pattern::ArrayDecomp(head, tail) = &*arms[1].value.pattern.value {
+                    // Check head is a binding pattern for 'x'
+                    if let Pattern::Bind(name, _) = &*head.value {
+                        assert_eq!(*name.value, "x", "Expected head binding named 'x'");
+                    } else {
+                        panic!("Expected binding pattern for head in second arm");
+                    }
+
+                    // Check tail is an empty list
+                    if let Pattern::EmptyArray = *tail.value {
+                        // Empty list is correct
+                    } else {
+                        panic!("Expected EmptyList pattern for tail in second arm");
+                    }
+                } else {
+                    panic!("Expected ListDecomposition pattern in second arm");
+                }
+
+                // Third arm: [x .. [y .. []]] -> "list with two elements: " ++ x.to_string() ++ ", " ++ y.to_string()
+                if let Pattern::ArrayDecomp(outer_head, outer_tail) = &*arms[2].value.pattern.value
+                {
+                    // Check outer_head is a binding pattern for 'x'
+                    if let Pattern::Bind(name, _) = &*outer_head.value {
+                        assert_eq!(*name.value, "x", "Expected outer head binding named 'x'");
+                    } else {
+                        panic!("Expected binding pattern for outer head in third arm");
+                    }
+
+                    // Check outer_tail is another list decomposition
+                    if let Pattern::ArrayDecomp(inner_head, inner_tail) = &*outer_tail.value {
+                        // Check inner_head is a binding pattern for 'y'
+                        if let Pattern::Bind(name, _) = &*inner_head.value {
+                            assert_eq!(*name.value, "y", "Expected inner head binding named 'y'");
+                        } else {
+                            panic!("Expected binding pattern for inner head in third arm");
+                        }
+
+                        // Check inner_tail is an empty list
+                        if let Pattern::EmptyArray = *inner_tail.value {
+                            // Empty list is correct
+                        } else {
+                            panic!("Expected EmptyList pattern for inner tail in third arm");
+                        }
+                    } else {
+                        panic!("Expected nested ListDecomposition pattern in third arm");
+                    }
+                } else {
+                    panic!("Expected ListDecomposition pattern in third arm");
+                }
+
+                // Fourth arm: [head .. [second .. tail]] -> { complex expression }
+                if let Pattern::ArrayDecomp(outer_head, outer_tail) = &*arms[3].value.pattern.value
+                {
+                    // Check outer_head is a binding pattern for 'head'
+                    if let Pattern::Bind(name, _) = &*outer_head.value {
+                        assert_eq!(
+                            *name.value, "head",
+                            "Expected outer head binding named 'head'"
+                        );
+                    } else {
+                        panic!("Expected binding pattern for outer head in fourth arm");
+                    }
+
+                    // Check outer_tail is another list decomposition
+                    if let Pattern::ArrayDecomp(inner_head, inner_tail) = &*outer_tail.value {
+                        // Check inner_head is a binding pattern for 'second'
+                        if let Pattern::Bind(name, _) = &*inner_head.value {
+                            assert_eq!(
+                                *name.value, "second",
+                                "Expected inner head binding named 'second'"
+                            );
+                        } else {
+                            panic!("Expected binding pattern for inner head in fourth arm");
+                        }
+
+                        // Check inner_tail is a binding pattern for 'tail'
+                        if let Pattern::Bind(name, _) = &*inner_tail.value {
+                            assert_eq!(
+                                *name.value, "tail",
+                                "Expected inner tail binding named 'tail'"
+                            );
+                        } else {
+                            panic!("Expected binding pattern for inner tail in fourth arm");
+                        }
+                    } else {
+                        panic!("Expected nested ListDecomposition pattern in fourth arm");
+                    }
+                } else {
+                    panic!("Expected ListDecomposition pattern in fourth arm");
+                }
+
+                // Fifth arm: _ -> "not a list"
+                if let Pattern::Wildcard = *arms[4].value.pattern.value {
+                    // Wildcard pattern is correct
+                } else {
+                    panic!("Expected Wildcard pattern in fifth arm");
+                }
+                assert_expr_eq(
+                    &arms[4].value.expr.value,
+                    &Expr::Literal(Literal::String("not a list".to_string())),
+                );
+            } else {
+                panic!("Expected pattern match expression");
             }
         }
     }

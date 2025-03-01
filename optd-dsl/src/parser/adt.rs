@@ -5,9 +5,9 @@ use chumsky::{
 };
 
 use crate::{
-    errors::span::{Span, Spanned},
     lexer::tokens::Token,
     parser::ast::Adt,
+    utils::span::{Span, Spanned},
 };
 
 use super::utils::fields_list_parser;
@@ -25,7 +25,7 @@ pub fn adt_parser() -> impl Parser<Token, Spanned<Adt>, Error = Simple<Token, Sp
             .map_with_span(Spanned::new);
 
         let with_sum_parser = type_ident
-            .then_ignore(just(Token::With))
+            .then_ignore(just(Token::Eq))
             .then(
                 just(Token::Vertical)
                     .ignore_then(inner_adt_parser.clone())
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn test_enum_adt() {
-        let input = "data JoinType with
+        let input = "data JoinType =
                          | Inner 
                          \\ Outer";
         let (result, errors) = parse_adt(input);
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn test_enum_with_struct_variants() {
-        let input = "data Shape with
+        let input = "data Shape =
                          | Circle(center: Point, radius: F64)
                          | Rectangle(topLeft: Point, width: F64, height: F64)
                          \\ Triangle(p1: Point, p2: Point, p3: Point)";
@@ -175,8 +175,8 @@ mod tests {
 
     #[test]
     fn test_nested_enum() {
-        let input = "data Expression with
-                         | Literal with
+        let input = "data Expression =
+                         | Literal =
                              | IntLiteral(value: I64)
                              | BoolLiteral(value: Bool)
                              \\ StringLiteral(value: String)
@@ -234,15 +234,15 @@ mod tests {
 
     #[test]
     fn test_double_nested_enum() {
-        let input = "data Menu with
-                         | File with
-                             | New with
+        let input = "data Menu =
+                         | File =
+                             | New =
                                  | Document
                                  | Project
                                  \\ Template
                              | Open
                              \\ Save
-                         | Edit with
+                         | Edit =
                              | Cut
                              | Copy
                              \\ Paste

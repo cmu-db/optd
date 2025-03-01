@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::values::OptdValue;
+use crate::cascades::ir::OperatorData;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 pub struct PhysicalProperties {
@@ -11,5 +11,5 @@ pub struct PhysicalProperties {
 pub struct SortProperty {
     /// Each tuple is a column index, direction pair.
     /// e.g. vec![(0, Asc), (1, Desc)]
-    pub sort_orders: Vec<(OptdValue, OptdValue)>,
+    pub sort_orders: Vec<(OperatorData, OperatorData)>,
 }

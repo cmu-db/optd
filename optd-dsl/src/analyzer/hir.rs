@@ -1,128 +1,148 @@
-use super::r#type::{TypeRegistry, Typed};
-use ordered_float::OrderedFloat;
+//! High-level Intermediate Representation (HIR) for the DSL.
+//!
+//! This module defines the core data structures that represent programs after the parsing
+//! and analysis phases. The HIR provides a structured representation of expressions,
+//! patterns, operators, and values that can be evaluated by the interpreter.
+//!
+//! Key components include:
+//! - `Expr`: Expression nodes representing computation to be performed
+//! - `Pattern`: Patterns for matching against expression values
+//! - `Value`: Results of expression evaluation
+//! - `Operator`: Query plan operators with their children and parameters
+//! - `CoreData`: Fundamental data structures shared across the system
+//!
+//! The HIR serves as the foundation for the evaluation system, providing a
+//! unified representation that can be transformed into optimizer-specific
+//! intermediate representations through the bridge modules.
+
 use std::collections::HashMap;
 
 /// Unique identifier for variables, functions, types, etc.
 pub type Identifier = String;
 
-/// Represents literal values in the language
-#[derive(Debug, Clone, PartialEq)]
+/// Values that can be directly represented in the language
+#[derive(Debug, Clone)]
 pub enum Literal {
     Int64(i64),
+    Float64(f64),
     String(String),
     Bool(bool),
-    Float64(OrderedFloat<f64>),
     Unit,
 }
 
-/// Represents expressions in the High-level Intermediate Representation
+/// Types of functions in the system
+#[derive(Debug, Clone)]
+pub enum FunKind {
+    Closure(Vec<Identifier>, Box<Expr>),
+    RustUDF(fn(Vec<Value>) -> Value),
+}
+
+/// Either grouped or concrete data
+#[derive(Debug, Clone)]
+pub enum Materializable<T> {
+    Group(i64, OperatorKind),
+    Data(T),
+}
+
+/// Operator kind to differentiate between operator types
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub enum OperatorKind {
+    Logical,
+    Physical,
+    Scalar,
+}
+
+/// Unified operator node structure for all operator types
+#[derive(Debug, Clone)]
+pub struct Operator<T> {
+    pub kind: OperatorKind,
+    pub tag: String,
+    pub operator_data: Vec<T>,
+    pub relational_children: Vec<T>,
+    pub scalar_children: Vec<T>,
+}
+
+/// Core data structures shared across the system
+#[derive(Debug, Clone)]
+pub enum CoreData<T> {
+    Literal(Literal),
+    Array(Vec<T>),
+    Tuple(Vec<T>),
+    Map(Vec<(T, T)>),
+    Struct(Identifier, Vec<T>),
+    Function(FunKind),
+    Fail(Box<T>),
+    Operator(Materializable<Operator<T>>),
+}
+
+/// Expression nodes in the HIR
 #[derive(Debug, Clone)]
 pub enum Expr {
-    // Control flow
-    PatternMatch(Typed<Expr>, Vec<MatchArm>),
-    IfThenElse(Typed<Expr>, Typed<Expr>, Typed<Expr>),
-
-    // Bindings and constructors
-    Let(Identifier, Typed<Expr>, Typed<Expr>),
-    Constructor(String, Vec<Typed<Expr>>),
-
-    // Operations
-    Binary(Typed<Expr>, BinOp, Typed<Expr>),
-    Unary(UnaryOp, Typed<Expr>),
-
-    // Function-related
-    Member(Typed<Expr>, Identifier),
-    Call(Typed<Expr>, Vec<Typed<Expr>>),
-
-    // Basic expressions
-    Ref(String),
-    Literal(Literal),
-    Fail(Typed<Expr>),
-
-    // Collections
-    Array(Vec<Typed<Expr>>),
-    Tuple(Vec<Typed<Expr>>),
-    Map(Vec<(Typed<Expr>, Typed<Expr>)>),
+    PatternMatch(Box<Expr>, Vec<MatchArm>),
+    IfThenElse(Box<Expr>, Box<Expr>, Box<Expr>),
+    Let(Identifier, Box<Expr>, Box<Expr>),
+    Binary(Box<Expr>, BinOp, Box<Expr>),
+    Unary(UnaryOp, Box<Expr>),
+    Call(Box<Expr>, Vec<Expr>),
+    Ref(Identifier),
+    CoreExpr(CoreData<Expr>),
+    CoreVal(Value),
 }
 
-/// Represents patterns for pattern matching
+/// Evaluated expression result
+#[derive(Debug, Clone)]
+pub struct Value(pub CoreData<Value>);
+
+/// Pattern for matching
 #[derive(Debug, Clone)]
 pub enum Pattern {
-    Bind(Typed<Identifier>, Typed<Pattern>),
-    Constructor(Typed<Identifier>, Vec<Typed<Pattern>>),
+    Bind(Identifier, Box<Pattern>),
     Literal(Literal),
+    Struct(Identifier, Vec<Pattern>),
+    Operator(Operator<Pattern>),
     Wildcard,
+    EmptyArray,
+    ArrayDecomp(Box<Pattern>, Box<Pattern>),
 }
 
-/// Represents a single arm in a pattern match expression
+/// Match arm combining pattern and expression
 #[derive(Debug, Clone)]
 pub struct MatchArm {
-    pub pattern: Typed<Pattern>,
-    pub expr: Typed<Expr>,
+    pub pattern: Pattern,
+    pub expr: Expr,
 }
 
-/// Binary operators supported by the language
+/// Standard binary operators
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinOp {
-    // Arithmetic
     Add,
     Sub,
     Mul,
     Div,
-
-    // String, list, map
-    Concat,
-
-    // Comparison
-    Eq,
-    Neq,
-    Gt,
     Lt,
-    Ge,
-    Le,
-
-    // Logical
+    Eq,
     And,
     Or,
-
-    // Other
     Range,
+    Concat,
 }
 
-/// Unary operators supported by the language
+/// Standard unary operators
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOp {
     Neg,
     Not,
 }
 
-/// Stores annotation information for a function or expression
+/// Value with annotations
 #[derive(Debug, Clone)]
-pub struct AnnotatedExpr {
-    /// The expression itself
-    pub expr: Typed<Expr>,
-
-    /// List of annotations associated with this expression
+pub struct AnnotatedValue {
+    pub value: Value,
     pub annotations: Vec<Identifier>,
 }
 
-/// The High-level Intermediate Representation (HIR) for a program.
-///
-/// The HIR is an intermediary representation that exists after type checking and
-/// before code generation or optimization. Unlike the AST, the HIR:
-///
-/// 1. Contains fully resolved type information for all expressions
-/// 2. Has undergone semantic analysis and type checking
-/// 3. Has simpler, more regular structure with less syntactic sugar
-/// 4. Contains only valid, well-typed expressions (error nodes are removed)
-/// 5. Preserves information about annotations for later compilation phases
-/// 6. Serves as a bridge between the frontend (parsing, type checking) and
-///    the backend (optimization, code generation)
+/// Program representation after the analysis phase
 #[derive(Debug, Clone)]
 pub struct HIR {
-    /// Map from function name to its annotated expression
-    pub expressions: HashMap<Identifier, AnnotatedExpr>,
-
-    /// Registry of all types used in the program
-    pub types: TypeRegistry,
+    pub expressions: HashMap<Identifier, AnnotatedValue>,
 }

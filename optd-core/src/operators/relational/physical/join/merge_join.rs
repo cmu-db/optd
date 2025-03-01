@@ -1,6 +1,6 @@
 //! A physical merge join operator.
 
-use crate::{operators::relational::physical::PhysicalOperator, values::OptdValue};
+use crate::{cascades::ir::OperatorData, operators::relational::physical::PhysicalOperator};
 use serde::Deserialize;
 
 /// A physical operator that performs a sort-merge join.
@@ -16,7 +16,7 @@ pub struct MergeJoin<Value, Relation, Scalar> {
     pub condition: Scalar,
 }
 
-impl<Relation, Scalar> MergeJoin<OptdValue, Relation, Scalar> {
+impl<Relation, Scalar> MergeJoin<OperatorData, Relation, Scalar> {
     /// Create a new merge join operator.
     pub fn new(
         join_type: &str,
@@ -25,7 +25,7 @@ impl<Relation, Scalar> MergeJoin<OptdValue, Relation, Scalar> {
         condition: Scalar,
     ) -> Self {
         Self {
-            join_type: OptdValue::String(join_type.into()),
+            join_type: OperatorData::String(join_type.into()),
             left_sorted,
             right_sorted,
             condition,
@@ -39,7 +39,7 @@ pub fn merge_join<Relation, Scalar>(
     left_sorted: Relation,
     right_sorted: Relation,
     condition: Scalar,
-) -> PhysicalOperator<OptdValue, Relation, Scalar> {
+) -> PhysicalOperator<OperatorData, Relation, Scalar> {
     PhysicalOperator::SortMergeJoin(MergeJoin::new(
         join_type,
         left_sorted,

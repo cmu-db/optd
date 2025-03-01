@@ -1,7 +1,7 @@
 //! A logical scan.
 
 use super::LogicalOperator;
-use crate::values::OptdValue;
+use crate::cascades::ir::OperatorData;
 use serde::Deserialize;
 
 /// Logical scan operator that reads from a base table.
@@ -13,11 +13,11 @@ pub struct Scan<Value, Scalar> {
     pub predicate: Scalar,
 }
 
-impl<Scalar> Scan<OptdValue, Scalar> {
+impl<Scalar> Scan<OperatorData, Scalar> {
     /// Create a new scan operator.
     pub fn new(table_name: &str, predicate: Scalar) -> Self {
         Self {
-            table_name: OptdValue::String(table_name.into()),
+            table_name: OperatorData::String(table_name.into()),
             predicate,
         }
     }
@@ -27,6 +27,6 @@ impl<Scalar> Scan<OptdValue, Scalar> {
 pub fn scan<Relation, Scalar>(
     table_name: &str,
     predicate: Scalar,
-) -> LogicalOperator<OptdValue, Relation, Scalar> {
+) -> LogicalOperator<OperatorData, Relation, Scalar> {
     LogicalOperator::Scan(Scan::new(table_name, predicate))
 }

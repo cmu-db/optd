@@ -8,9 +8,8 @@ pub mod join;
 pub mod project;
 pub mod scan;
 
-use crate::{
-    cascades::{expressions::PhysicalExpression, goal::GoalId, groups::ScalarGroupId},
-    values::OptdValue,
+use crate::cascades::{
+    expressions::PhysicalExpression, goal::GoalId, groups::ScalarGroupId, ir::OperatorData,
 };
 use filter::filter::PhysicalFilter;
 use join::{hash_join::HashJoin, merge_join::MergeJoin, nested_loop_join::NestedLoopJoin};
@@ -64,7 +63,7 @@ pub enum PhysicalOperatorKind {
     Project,
 }
 
-impl<Relation, Scalar> PhysicalOperator<OptdValue, Relation, Scalar>
+impl<Relation, Scalar> PhysicalOperator<OperatorData, Relation, Scalar>
 where
     Relation: Clone,
     Scalar: Clone,

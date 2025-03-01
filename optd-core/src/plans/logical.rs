@@ -14,12 +14,11 @@ use crate::{
         filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator,
     },
     values::OptdValue,
+    cascades::{groups::RelationalGroupId, ir::OperatorData},
+    operators::relational::logical::LogicalOperator,
 };
 
-use super::{
-    scalar::{PartialScalarPlan, ScalarPlan},
-    PartialPlanExpr,
-};
+use super::scalar::{PartialScalarPlan, ScalarPlan};
 use std::sync::Arc;
 
 /// A fully materialized logical query plan.
@@ -29,7 +28,7 @@ use std::sync::Arc;
 /// plan representation after optimization is complete.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LogicalPlan {
-    pub operator: LogicalOperator<OptdValue, Arc<LogicalPlan>, Arc<ScalarPlan>>,
+    pub operator: LogicalOperator<OperatorData, Arc<LogicalPlan>, Arc<ScalarPlan>>,
 }
 
 /// A logical plan with varying levels of materialization.
@@ -41,7 +40,7 @@ pub struct LogicalPlan {
 pub enum PartialLogicalPlan {
     /// Single materialized operator with potentially unmaterialized children
     PartialMaterialized {
-        operator: LogicalOperator<OptdValue, Arc<PartialLogicalPlan>, Arc<PartialScalarPlan>>,
+        operator: LogicalOperator<OperatorData, Arc<PartialLogicalPlan>, Arc<PartialScalarPlan>>,
     },
 
     /// Reference to an optimization group containing equivalent plans

@@ -1,4 +1,4 @@
-use crate::errors::span::Spanned;
+use crate::utils::span::Spanned;
 use ordered_float::OrderedFloat;
 
 /// Unique identifier for variables, functions, types, etc.
@@ -117,6 +117,7 @@ pub enum Expr {
 }
 
 /// Represents literal values in the language
+/// TODO: Remove PartialEq & OrderedFloat
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     /// 64-bit signed integer literal
@@ -144,6 +145,10 @@ pub enum Pattern {
     Literal(Literal),
     /// Wildcard pattern: matches any value
     Wildcard,
+    /// Empty array pattern: matches an empty array
+    EmptyArray,
+    /// Array decomposition pattern: matches an array with head and rest elements
+    ArrayDecomp(Spanned<Pattern>, Spanned<Pattern>),
 }
 
 /// Represents a single arm in a pattern match expression
@@ -211,8 +216,6 @@ pub enum UnaryOp {
 pub enum PostfixOp {
     /// Function or method call with arguments
     Call(Vec<Spanned<Expr>>),
-    /// Function composition operator
-    Compose(Identifier),
     /// Member/field access
     Member(Identifier),
 }
@@ -228,8 +231,8 @@ pub struct Function {
     pub params: Option<Vec<Spanned<Field>>>,
     /// Return type with source location
     pub return_type: Spanned<Type>,
-    /// Function body with source location
-    pub body: Spanned<Expr>,
+    /// Function body with source location (None for external functions)
+    pub body: Option<Spanned<Expr>>,
     /// List of annotations attached to the function
     pub annotations: Vec<Spanned<Identifier>>,
 }
