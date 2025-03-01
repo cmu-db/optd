@@ -1,4 +1,9 @@
-use super::groups::{RelationalGroupId, ScalarGroupId};
+use std::sync::Arc;
+
+use super::{
+    goal::GoalId,
+    groups::{RelationalGroupId, ScalarGroupId},
+};
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
@@ -35,8 +40,8 @@ impl OperatorData {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum Children<T> {
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Child<T> {
     Singleton(T),
     VarLength(Vec<T>),
 }
@@ -46,8 +51,9 @@ pub enum PartialLogicalPlan {
     PartialMaterialized {
         tag: String,
         data: Vec<OperatorData>,
-        relational_children: Vec<Children<PartialLogicalPlan>>,
-        scalar_children: Vec<Children<PartialScalarPlan>>,
+        relational_children: Vec<Child<PartialLogicalPlan>>,
+        scalar_children: Vec<Child<PartialScalarPlan>>,
+        group_id: RelationalGroupId,
     },
     UnMaterialized(RelationalGroupId),
 }
@@ -57,7 +63,8 @@ pub enum PartialScalarPlan {
     PartialMaterialized {
         tag: String,
         data: Vec<OperatorData>,
-        scalar_children: Vec<Children<PartialScalarPlan>>,
+        scalar_children: Vec<Child<PartialScalarPlan>>,
+        group_id: ScalarGroupId,
     },
     UnMaterialized(ScalarGroupId),
 }
@@ -67,8 +74,52 @@ pub enum PartialPhysicalPlan {
     PartialMaterialized {
         tag: String,
         data: Vec<OperatorData>,
-        relational_children: Vec<Children<PartialPhysicalPlan>>,
-        scalar_children: Vec<Children<PartialScalarPlan>>,
+        relational_children: Vec<Child<PartialPhysicalPlan>>,
+        scalar_children: Vec<Child<PartialScalarPlan>>,
+        properties: PhysicalProperties,
+        group_id: RelationalGroupId,
     },
-    UnMaterialized(RelationalGroupId),
+    UnMaterialized(GoalId),
+}
+
+/// A fully materialized physical query plan.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PhysicalPlan {
+    tag: String,
+    relational_children: Vec<Child<PhysicalPlan>>,
+    scalar_children: Vec<Child<PhysicalPlan>>,
+    data: Vec<OperatorData>,
+}
+
+/// A fully materialized scalar query plan.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScalarPlan {
+    tag: String,
+    children: Vec<Child<ScalarPlan>>,
+    data: Vec<OperatorData>,
+}
+
+/// A fully materialized logical query plan.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LogicalPlan {
+    tag: String,
+    relational_children: Vec<Child<LogicalPlan>>,
+    scalar_children: Vec<Child<ScalarPlan>>,
+    data: Vec<OperatorData>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct PhysicalProperties {
+    data: Vec<PropertyData>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct LogicalProperties {
+    data: Vec<PropertyData>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub enum PropertyData {
+    Int64(i64),
+    Scalar(ScalarPlan),
 }
