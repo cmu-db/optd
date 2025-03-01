@@ -17,6 +17,8 @@
 
 use std::collections::HashMap;
 
+use super::context::Context;
+
 /// Unique identifier for variables, functions, types, etc.
 pub type Identifier = String;
 
@@ -138,7 +140,7 @@ pub enum UnaryOp {
 }
 
 /// Program representation after the analysis phase
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct HIR {
     pub context: Context,
     pub annotations: HashMap<Identifier, Vec<Annotation>>,

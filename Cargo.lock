@@ -3095,6 +3095,7 @@ dependencies = [
  "async-recursion",
  "dotenvy",
  "futures",
+ "optd-dsl",
  "ordered-float 5.0.0",
  "proc-macro2",
  "serde",
@@ -3163,7 +3164,6 @@ dependencies = [
  "clap",
  "enum_dispatch",
  "futures",
- "optd-core",
  "ordered-float 5.0.0",
  "tokio",
 ]

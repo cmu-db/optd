@@ -9,6 +9,8 @@ use anyhow::Result;
 use async_recursion::async_recursion;
 use tokio::task::JoinSet;
 
+use crate::engine::Engine;
+
 use super::memo::Memoize;
 
 struct Driver<M: Memoize> {

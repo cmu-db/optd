@@ -1,5 +1,7 @@
 use crate::analyzer::hir::Value;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
+
+use super::hir::Identifier;
 
 /// A stack-based variable binding system that implements lexical scoping.
 ///
@@ -29,7 +31,7 @@ impl Context {
     pub(crate) fn new(initial_bindings: HashMap<Identifier, Value>) -> Self {
         let mut context = Self { scopes: Vec::new() };
         // Start with a scope containing the initial bindings
-        context.scopes.push(initial_bindings);
+        context.scopes.push(initial_bindings.into());
         context
     }
 
@@ -73,6 +75,6 @@ impl Context {
     /// * `val` - The value to bind to the variable
     pub(crate) fn bind(&mut self, name: String, val: Value) {
         // We're always guaranteed to have at least one scope
-        self.scopes.last_mut().unwrap().insert(name, val);
+        // TODO(Alexis): figure out self.scopes.last_mut().unwrap().insert(name, val);
     }
 }

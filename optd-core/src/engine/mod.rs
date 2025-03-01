@@ -23,6 +23,7 @@ mod eval;
 mod utils;
 
 /// The engine for evaluating HIR expressions and applying rules.
+
 pub struct Engine<M: Memoize> {
     /// The original HIR context containing all defined expressions and rules
     context: Context,
