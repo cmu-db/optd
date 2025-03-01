@@ -15,14 +15,13 @@ use std::pin::Pin;
 ///
 /// This represents a stream that yields Result<Value, Error> items,
 /// allowing for asynchronous processing of values that might fail with errors.
-pub(crate) type ValueStream<'a> = Pin<Box<dyn Stream<Item = Result<Value, Error>> + Send + 'a>>;
+pub(crate) type ValueStream = Pin<Box<dyn Stream<Item = Result<Value, Error>> + Send>>;
 
 /// Type alias for a stream of vector evaluation results.
 ///
 /// This represents a stream that yields Result<Vec<Value>, Error> items,
 /// which is useful for representing collections of values from multiple expressions.
-pub(crate) type VecValueStream<'a> =
-    Pin<Box<dyn Stream<Item = Result<Vec<Value>, Error>> + Send + 'a>>;
+pub(crate) type VecValueStream = Pin<Box<dyn Stream<Item = Result<Vec<Value>, Error>> + Send>>;
 
 /// Type alias for a stream of partial logical plans.
 ///
@@ -75,9 +74,9 @@ pub type PartialLogicalPlanStream =
 ///
 /// # Returns
 /// A stream of all possible combinations of values from the expressions
-pub(crate) fn evaluate_all_combinations<'a, I>(mut items: I, context: Context) -> VecValueStream<'a>
+pub(crate) fn evaluate_all_combinations<I>(mut items: I, context: Context) -> VecValueStream
 where
-    I: Iterator<Item = &'a Expr> + Send + Clone + 'a,
+    I: Iterator<Item = Expr> + Send + Clone + 'static,
 {
     match items.next() {
         // Base case: no expressions

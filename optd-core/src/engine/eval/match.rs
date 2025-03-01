@@ -15,6 +15,7 @@ use optd_dsl::analyzer::{
     context::Context,
     hir::{CoreData, Literal, MatchArm, Materializable, Operator, OperatorKind, Pattern, Value},
 };
+
 use Literal::*;
 use Pattern::*;
 
@@ -32,7 +33,7 @@ use Pattern::*;
 /// A stream of evaluation results from the first matching arm
 pub(super) fn try_match_arms(
     value: Value,
-    match_arms: &[MatchArm],
+    match_arms: Vec<MatchArm>,
     context: Context,
 ) -> ValueStream {
     if match_arms.is_empty() {
@@ -40,24 +41,25 @@ pub(super) fn try_match_arms(
         panic!("Pattern match exhausted: no pattern matched the value");
     }
 
-    let arm = &match_arms[0];
-    let remaining_arms = &match_arms[1..];
+    // Take the first arm
+    let arm = match_arms[0].clone();
+    let remaining_arms = match_arms[1..].to_vec();
 
-    let pattern_match_future = match_pattern(value.clone(), &arm.pattern, context.clone());
+    let pattern_match_future = match_pattern(value.clone(), arm.pattern, context.clone());
 
     stream::once(pattern_match_future)
         .flat_map(move |matched_contexts| {
             if !matched_contexts.is_empty() {
                 // If we have matches, evaluate the arm's expression with all matched contexts
                 stream::iter(matched_contexts)
-                    .flat_map(move |new_context| {
-                        // Directly evaluate the expression by reference
-                        (&arm.expr).evaluate(new_context)
+                    .flat_map({
+                        let expr = arm.expr.clone();
+                        move |new_context| expr.clone().evaluate(new_context)
                     })
                     .boxed()
             } else {
                 // If no matches, try the remaining arms
-                try_match_arms(value.clone(), remaining_arms, context.clone())
+                try_match_arms(value.clone(), remaining_arms.clone(), context.clone())
             }
         })
         .boxed()
@@ -76,8 +78,8 @@ pub(super) fn try_match_arms(
 /// # Returns
 /// A future resolving to a vector of updated contexts with bound variables if the match succeeds
 #[async_recursion]
-async fn match_pattern(value: Value, pattern: &Pattern, context: Context) -> Vec<Context> {
-    match (pattern, &value.0) {
+async fn match_pattern(value: Value, pattern: Pattern, context: Context) -> Vec<Context> {
+    match (&pattern, &value.0) {
         // Wildcard pattern matches anything
         (Wildcard, _) => vec![context],
 
@@ -85,7 +87,7 @@ async fn match_pattern(value: Value, pattern: &Pattern, context: Context) -> Vec
         (Bind(ident, inner_pattern), _) => {
             let mut new_ctx = context;
             new_ctx.bind(ident.clone(), value.clone());
-            match_pattern(value, inner_pattern, new_ctx).await
+            match_pattern(value, (**inner_pattern).clone(), new_ctx).await
         }
 
         // Literal pattern: match if literals are equal
@@ -112,7 +114,7 @@ async fn match_pattern(value: Value, pattern: &Pattern, context: Context) -> Vec
             let tail = Value(CoreData::Array(arr[1..].to_vec()));
 
             // Match head against head pattern
-            let head_contexts = match_pattern(head, head_pattern, context).await;
+            let head_contexts = match_pattern(head, (**head_pattern).clone(), context).await;
             if head_contexts.is_empty() {
                 return vec![];
             }
@@ -120,7 +122,8 @@ async fn match_pattern(value: Value, pattern: &Pattern, context: Context) -> Vec
             // For each successful head match, try to match tail
             let mut result_contexts = Vec::new();
             for head_ctx in head_contexts {
-                let tail_contexts = match_pattern(tail.clone(), tail_pattern, head_ctx).await;
+                let tail_contexts =
+                    match_pattern(tail.clone(), (**tail_pattern).clone(), head_ctx).await;
                 result_contexts.extend(tail_contexts);
             }
 
@@ -221,7 +224,7 @@ async fn match_pattern(value: Value, pattern: &Pattern, context: Context) -> Vec
                         .map(|expanded_op| {
                             let expanded_value =
                                 Value(CoreData::Operator(Materializable::Data(expanded_op)));
-                            match_pattern(expanded_value, pattern, context.clone())
+                            match_pattern(expanded_value, pattern.clone(), context.clone())
                         })
                         .collect::<Vec<_>>();
 
@@ -272,7 +275,7 @@ where
         // For each context, match the pattern-value pair and collect all resulting contexts
         let next_context_futures = current_contexts
             .into_iter()
-            .map(|ctx| match_pattern(value.clone(), pattern, ctx))
+            .map(|ctx| match_pattern(value.clone(), pattern.clone(), ctx))
             .collect::<Vec<_>>();
 
         // Await all futures and collect all contexts

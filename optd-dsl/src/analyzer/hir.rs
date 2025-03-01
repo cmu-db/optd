@@ -16,7 +16,7 @@
 //! intermediate representations through the bridge modules.
 
 use super::context::Context;
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 /// Unique identifier for variables, functions, types, etc.
 pub type Identifier = String;
@@ -37,7 +37,7 @@ pub enum Literal {
 /// Types of functions in the system
 #[derive(Debug, Clone)]
 pub enum FunKind {
-    Closure(Vec<Identifier>, Arc<Expr>),
+    Closure(Vec<Identifier>, Box<Expr>),
     RustUDF(fn(Vec<Value>) -> Value),
 }
 
@@ -75,19 +75,19 @@ pub enum CoreData<T> {
     Map(Vec<(T, T)>),
     Struct(Identifier, Vec<T>),
     Function(FunKind),
-    Fail(Arc<T>),
+    Fail(Box<T>),
     Operator(Materializable<Operator<T>>),
 }
 
 /// Expression nodes in the HIR
 #[derive(Debug, Clone)]
 pub enum Expr {
-    PatternMatch(Arc<Expr>, Vec<MatchArm>),
-    IfThenElse(Arc<Expr>, Arc<Expr>, Arc<Expr>),
-    Let(Identifier, Arc<Expr>, Arc<Expr>),
-    Binary(Arc<Expr>, BinOp, Arc<Expr>),
-    Unary(UnaryOp, Arc<Expr>),
-    Call(Arc<Expr>, Vec<Expr>),
+    PatternMatch(Box<Expr>, Vec<MatchArm>),
+    IfThenElse(Box<Expr>, Box<Expr>, Box<Expr>),
+    Let(Identifier, Box<Expr>, Box<Expr>),
+    Binary(Box<Expr>, BinOp, Box<Expr>),
+    Unary(UnaryOp, Box<Expr>),
+    Call(Box<Expr>, Vec<Expr>),
     Ref(Identifier),
     CoreExpr(CoreData<Expr>),
     CoreVal(Value),
@@ -100,13 +100,13 @@ pub struct Value(pub CoreData<Value>);
 /// Pattern for matching
 #[derive(Debug, Clone)]
 pub enum Pattern {
-    Bind(Identifier, Arc<Pattern>),
+    Bind(Identifier, Box<Pattern>),
     Literal(Literal),
     Struct(Identifier, Vec<Pattern>),
     Operator(Operator<Pattern>),
     Wildcard,
     EmptyArray,
-    ArrayDecomp(Arc<Pattern>, Arc<Pattern>),
+    ArrayDecomp(Box<Pattern>, Box<Pattern>),
 }
 
 /// Match arm combining pattern and expression

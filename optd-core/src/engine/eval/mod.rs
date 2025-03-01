@@ -36,5 +36,5 @@ mod unary;
 /// Expression types from HIR must implement this trait to be evaluated
 /// by the engine.
 pub(crate) trait Evaluate {
-    fn evaluate(&self, context: Context) -> ValueStream;
+    fn evaluate(self, context: Context) -> ValueStream;
 }
