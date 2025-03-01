@@ -22,19 +22,19 @@ mod bridge;
 mod eval;
 mod utils;
 
-/// The engine for evaluating HIR expressions and applying optimization rules.
-pub struct Engine {
-    /// The HIR containing all defined expressions and rules
-    hir: Arc<HIR>,
+/// The engine for evaluating HIR expressions and applying rules.
+pub struct Engine<M: Memoize> {
+    /// The original HIR context containing all defined expressions and rules
+    context: Context,
 
     /// The optimization driver instance
-    _driver: (),
+    driver: Arc<Driver<M>>,
 }
 
 impl Engine {
-    /// Creates a new engine with the given HIR.
-    pub fn new(hir: Arc<HIR>) -> Self {
-        Self { hir, _driver: () }
+    /// Creates a new engine with the given context and driver.
+    pub fn new(context: Context, driver: Arc<Driver<M>>) -> Self {
+        Self { context, driver }
     }
 
     /// Interprets a function with the given name and input.

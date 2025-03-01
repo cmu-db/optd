@@ -20,6 +20,9 @@ use std::collections::HashMap;
 /// Unique identifier for variables, functions, types, etc.
 pub type Identifier = String;
 
+/// A function annotation (e.g. rule, rust, etc.)
+pub type Annotation = String;
+
 /// Values that can be directly represented in the language
 #[derive(Debug, Clone)]
 pub enum Literal {
@@ -134,15 +137,9 @@ pub enum UnaryOp {
     Not,
 }
 
-/// Value with annotations
-#[derive(Debug, Clone)]
-pub struct AnnotatedValue {
-    pub value: Value,
-    pub annotations: Vec<Identifier>,
-}
-
 /// Program representation after the analysis phase
 #[derive(Debug, Clone)]
 pub struct HIR {
-    pub expressions: HashMap<Identifier, AnnotatedValue>,
+    pub context: Context,
+    pub annotations: HashMap<Identifier, Vec<Annotation>>,
 }

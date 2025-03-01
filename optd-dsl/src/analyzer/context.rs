@@ -13,7 +13,7 @@ use std::collections::HashMap;
 pub(crate) struct Context {
     /// Stack of scopes, where each scope is a map of variable names to values.
     /// The last element is the current (innermost) scope.
-    scopes: Vec<HashMap<String, Value>>,
+    scopes: Vec<Arc<HashMap<Identifier, Value>>>,
 }
 
 impl Context {
@@ -26,7 +26,7 @@ impl Context {
     /// # Returns
     ///
     /// A new `Context` instance with one scope containing the initial bindings
-    pub(crate) fn new(initial_bindings: HashMap<String, Value>) -> Self {
+    pub(crate) fn new(initial_bindings: HashMap<Identifier, Value>) -> Self {
         let mut context = Self { scopes: Vec::new() };
         // Start with a scope containing the initial bindings
         context.scopes.push(initial_bindings);
@@ -38,20 +38,7 @@ impl Context {
     /// This creates a new lexical scope in which variables can be bound
     /// without affecting bindings in outer scopes.
     pub(crate) fn push_scope(&mut self) {
-        self.scopes.push(HashMap::new());
-    }
-
-    /// Pops the topmost scope from the stack.
-    ///
-    /// # Panics
-    ///
-    /// Panics if attempting to pop the last remaining scope (global scope)
-    #[allow(dead_code)]
-    pub(crate) fn pop_scope(&mut self) {
-        if self.scopes.len() <= 1 {
-            panic!("Cannot pop global scope");
-        }
-        self.scopes.pop();
+        self.scopes.push(HashMap::new().into());
     }
 
     /// Looks up a variable in the context, starting from the innermost scope.

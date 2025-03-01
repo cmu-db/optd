@@ -11,16 +11,16 @@ use tokio::task::JoinSet;
 
 use super::memo::Memoize;
 
-struct TaskContext<M: Memoize> {
+struct Driver<M: Memoize> {
     memo: M,
-    interpreter: Arc<Intepreter<M>>,
+    rule_engine: Arc<Engine<M>>,
 }
 
-impl<'a, M: Memoize> TaskContext<M> {
+impl<'a, M: Memoize> Driver<M> {
     pub fn new(memo: M) -> Arc<Self> {
         Arc::new_cyclic(|this| Self {
             memo,
-            interpreter: Arc::new(Intepreter {
+            rule_engine: Arc::new(Intepreter {
                 ctx: this.upgrade().unwrap(),
             }),
         })
@@ -216,7 +216,7 @@ impl<'a, M: Memoize> TaskContext<M> {
         let partial_logical_input = PartialLogicalPlan::from_expr(&logical_expr);
 
         let partial_logical_outputs = self
-            .interpreter
+            .rule_engine
             .match_and_apply_transformation_rule(rule_id, partial_logical_input)
             .await;
 
@@ -241,7 +241,7 @@ impl<'a, M: Memoize> TaskContext<M> {
         let partial_logical_input = PartialLogicalPlan::from_expr(&logical_expr);
 
         let physical_outputs = self
-            .interpreter
+            .rule_engine
             .match_and_apply_implementation_rule(
                 rule_id,
                 partial_logical_input,
@@ -268,7 +268,7 @@ impl<'a, M: Memoize> TaskContext<M> {
 }
 
 struct Intepreter<M: Memoize> {
-    ctx: Arc<TaskContext<M>>,
+    ctx: Arc<Driver<M>>,
 }
 
 impl<M: Memoize> Intepreter<M> {
