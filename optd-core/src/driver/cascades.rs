@@ -1,12 +1,6 @@
 use std::sync::Arc;
 
-use crate::{
-    cost_model::Cost,
-    plans::{
-        logical::{LogicalPlan, PartialLogicalPlan},
-        physical::{PartialPhysicalPlan, PhysicalPlan},
-    },
-};
+use crate::cost_model::Cost;
 use futures::{
     stream::{self, Stream},
     StreamExt,
@@ -17,12 +11,11 @@ use super::{
         LogicalExpression, PhysicalExpression, StoredLogicalExpression, StoredPhysicalExpression,
     },
     get_physical_expression_cost,
-    goal::{Goal, GoalId, OptimizationStatus},
+    goal::Goal,
     groups::{ExplorationStatus, RelationalGroupId},
     ingest_full_logical_plan, ingest_partial_logical_plan, ingest_partial_physical_plan,
+    ir::{LogicalPlan, PhysicalProperties},
     memo::Memoize,
-    mock_optimize_relation_expr,
-    properties::PhysicalProperties,
     rules::{ImplementationRuleId, RuleId, TransformationRuleId},
 };
 use anyhow::Result;
@@ -52,8 +45,8 @@ impl<'a, M: Memoize> TaskContext<M> {
         logical_plan: LogicalPlan,
     ) -> Result<Option<StoredPhysicalExpression>> {
         let group_id = ingest_full_logical_plan(&self.memo, &logical_plan).await?;
-        self.optimize_goal(group_id, PhysicalProperties::default())
-            .await
+        let required_physical_props = PhysicalProperties { data: vec![] };
+        self.optimize_goal(group_id, required_physical_props).await
     }
 
     /// This function is used to optimize a goal. It will be called by the entry point `optimize`.

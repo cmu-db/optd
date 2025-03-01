@@ -132,7 +132,7 @@ pub struct LogicalPlan {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct PhysicalProperties {
-    data: Vec<PropertyData>,
+    pub data: Vec<PropertyData>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]

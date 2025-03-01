@@ -45,3 +45,9 @@ pub struct Goal {
     /// The optimization status of the goal.
     pub optimization_status: OptimizationStatus,
 }
+
+impl Goal {
+    pub fn required_physical_properties(&self) -> &Arc<PhysicalProperties> {
+        &self.required_physical_properties
+    }
+}
