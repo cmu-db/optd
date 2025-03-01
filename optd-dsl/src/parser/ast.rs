@@ -145,6 +145,10 @@ pub enum Pattern {
     Literal(Literal),
     /// Wildcard pattern: matches any value
     Wildcard,
+    /// Empty array pattern: matches an empty array
+    EmptyArray,
+    /// Array decomposition pattern: matches an array with head and rest elements
+    ArrayDecomp(Spanned<Pattern>, Spanned<Pattern>),
 }
 
 /// Represents a single arm in a pattern match expression
@@ -212,8 +216,6 @@ pub enum UnaryOp {
 pub enum PostfixOp {
     /// Function or method call with arguments
     Call(Vec<Spanned<Expr>>),
-    /// Function composition operator
-    Compose(Identifier),
     /// Member/field access
     Member(Identifier),
 }

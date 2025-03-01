@@ -101,6 +101,8 @@ pub enum Pattern {
     Struct(Identifier, Vec<Pattern>),
     Operator(Operator<Pattern>),
     Wildcard,
+    EmptyArray,
+    ArrayDecomp(Box<Pattern>, Box<Pattern>),
 }
 
 /// Match arm combining pattern and expression

@@ -57,19 +57,19 @@ mod tests {
         let source = r#"
         data LogicalProps(schema_len: I64)
 
-        data Scalar with
+        data Scalar =
             | ColumnRef(idx: Int64)
-            | Literal with
+            | Literal =
                 | IntLiteral(value: Int64)
                 | StringLiteral(value: String)
                 | BoolLiteral(value: Bool)
                 \ NullLiteral
-            | Arithmetic with
+            | Arithmetic =
                 | Mult(left: Scalar, right: Scalar)
                 | Add(left: Scalar, right: Scalar)
                 | Sub(left: Scalar, right: Scalar)
                 \ Div(left: Scalar, right: Scalar)
-            | Predicate with
+            | Predicate =
                 | And(children: [Predicate])
                 | Or(children: [Predicate])
                 | Not(child: Predicate)
@@ -81,18 +81,18 @@ mod tests {
                 | GreaterThanEqual(left: Scalar, right: Scalar)
                 | IsNull(expr: Scalar)
                 \ IsNotNull(expr: Scalar)
-            | Function with
+            | Function =
                 | Cast(expr: Scalar, target_type: String)
                 | Substring(str: Scalar, start: Scalar, length: Scalar)
                 \ Concat(args: [Scalar])
-            \ AggregateExpr with
+            \ AggregateExpr =
                 | Sum(expr: Scalar)
                 | Count(expr: Scalar)
                 | Min(expr: Scalar)
                 | Max(expr: Scalar)
                 \ Avg(expr: Scalar)
         
-        data Logical with
+        data Logical =
             | Scan(table_name: String)
             | Filter(child: Logical, cond: Predicate)
             | Project(child: Logical, exprs: [Scalar])
@@ -108,11 +108,11 @@ mod tests {
                   aggregates: [AggregateExpr]
               )
         
-        data Physical with
+        data Physical =
             | Scan(table_name: String)
             | Filter(child: Physical, cond: Predicate)
             | Project(child: Physical, exprs: [Scalar])
-            | Join with
+            | Join =
                 | HashJoin(
                       build_side: Physical,
                       probe_side: Physical,
@@ -141,7 +141,7 @@ mod tests {
                   order_by: [(Scalar, SortOrder)]
               )
         
-        data JoinType with
+        data JoinType =
             | Inner
             | Left
             | Right
@@ -149,25 +149,25 @@ mod tests {
             \ Semi
 
         [rust]
-        fn (expr: Scalar) apply_children(f: Scalar => Scalar) = ()
+        fn (expr: Scalar) apply_children(f: Scalar -> Scalar) = ()
 
         fn (pred: Predicate) remap(map: {I64 : I64}) =
             match predicate
-              | ColumnRef(idx) => ColumnRef(map(idx))
-              \ _ => predicate -> apply_children(child => rewrite_column_refs(child, map))
+              | ColumnRef(idx) -> ColumnRef(map(idx))
+              \ _ -> predicate.apply_children(child.rewrite_column_refs(child, map))
             
         [rule]
         fn (expr: Logical) join_commute = match expr
-            \ Join(left, right, Inner, cond) =>
+            \ Join(left, right, Inner, cond) ->
                 let 
                     right_indices = 0..right.schema_len,
                     left_indices = 0..left.schema_len,
-                    remapping = left_indices.map(i => (i, i + right_len)) ++ 
-                        right_indices.map(i => (left_len + i, i)).to_map,
+                    remapping = left_indices.map(i -> (i, i + right_len)) ++ 
+                        right_indices.map(i -> (left_len + i, i)).to_map,
                 in
                     Project(
                         Join(right, left, Inner, cond.remap(remapping)),
-                        right_indices.map(i => ColumnRef(i)).to_array
+                        right_indices.map(i -> ColumnRef(i)).to_array
                     )
         "#;
 

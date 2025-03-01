@@ -54,8 +54,6 @@ fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> 
         ("false", Token::Bool(false)),
         ("Unit", Token::TUnit),
         ("data", Token::Data),
-        ("with", Token::With),
-        ("as", Token::As),
         ("in", Token::In),
         ("let", Token::Let),
         ("match", Token::Match),

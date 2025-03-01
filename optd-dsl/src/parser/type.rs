@@ -84,7 +84,7 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
 
         atom.clone()
             .then(
-                just(Token::BigArrow)
+                just(Token::SmallArrow)
                     .ignore_then(type_parser)
                     .map_with_span(|ret, span| (ret, span))
                     .or_not(),
@@ -183,14 +183,14 @@ mod tests {
 
     #[test]
     fn test_closure_types() {
-        let result = parse_type("(I64) => String").unwrap();
+        let result = parse_type("(I64) -> String").unwrap();
         assert!(matches!(*result.value,
             Type::Closure(param, ret)
             if matches!(*param.value, Type::Int64)
             && matches!(*ret.value, Type::String)
         ));
 
-        let result = parse_type("I64 => String").unwrap();
+        let result = parse_type("I64 -> String").unwrap();
         assert!(matches!(*result.value,
             Type::Closure(param, ret)
             if matches!(*param.value, Type::Int64)
@@ -198,7 +198,7 @@ mod tests {
         ));
 
         // Is right-associative
-        let result = parse_type("I64 => String => String").unwrap();
+        let result = parse_type("I64 -> String -> String").unwrap();
         assert!(matches!(*result.value,
             Type::Closure(param, ret)
             if matches!(*param.value, Type::Int64)
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn test_complex_type() {
         // Test mix of Map, Array, Tuple, and Closure
-        let insane_type = "{String : [((I64, [{String : Physical}]) => [(AdtType, LogicalProps, (Bool => [Scalar]))])]}";
+        let insane_type = "{String : [((I64, [{String : Physical}]) -> [(AdtType, LogicalProps, (Bool -> [Scalar]))])]}";
         let result = parse_type(insane_type).unwrap();
 
         let map_type = result.value;
@@ -262,7 +262,7 @@ mod tests {
 
         // Test an even more complex nested type
         let even_more_insane =
-            "{String : {I64 : [(Logical => {String : [((Bool, [Scalar]) => Physical)]})]}}";
+            "{String : {I64 : [(Logical -> {String : [((Bool, [Scalar]) -> Physical)]})]}}";
         assert!(parse_type(even_more_insane).is_ok());
         assert!(parse_type(even_more_insane).is_ok());
     }

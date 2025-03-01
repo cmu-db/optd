@@ -12,8 +12,6 @@ pub enum Token {
     // Other keywords
     Fn,
     Data,
-    With,
-    As,
     In,
     Let,
     Match,
@@ -85,8 +83,6 @@ impl std::fmt::Display for Token {
             // Other keywords
             Token::Fn => write!(f, "fn"),
             Token::Data => write!(f, "data"),
-            Token::With => write!(f, "with"),
-            Token::As => write!(f, "as"),
             Token::In => write!(f, "in"),
             Token::Let => write!(f, "let"),
             Token::Match => write!(f, "match"),

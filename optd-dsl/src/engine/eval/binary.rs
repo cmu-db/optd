@@ -94,7 +94,7 @@ pub(super) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
         }
 
         // Any other combination of value types or operations is not supported
-        _ => panic!("Invalid binary operation"),
+        _ => panic!("Invalid binary operation: {:?} {:?} {:?}", left, op, right),
     }
 }
 

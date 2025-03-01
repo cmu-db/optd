@@ -665,4 +665,71 @@ mod tests {
         assert_eq!(values.len(), 1);
         assert!(matches!(&values[0].0, Literal(Int64(30)))); // 10 + 20 = 30 (since 10 < 20)
     }
+
+    #[test]
+    fn test_recursive_list_sum() {
+        let context = Context::new(HashMap::new());
+
+        // Define a recursive sum function using pattern matching
+        // sum([]) = 0
+        // sum([x .. xs]) = x + sum(xs)
+        let sum_function = Value(Function(Closure(
+            vec!["arr".to_string()],
+            Box::new(PatternMatch(
+                Box::new(Ref("arr".to_string())),
+                vec![
+                    // Base case: empty array returns 0
+                    MatchArm {
+                        pattern: Pattern::EmptyArray,
+                        expr: CoreVal(int_val(0)),
+                    },
+                    // Recursive case: add head + sum(tail)
+                    MatchArm {
+                        pattern: Pattern::ArrayDecomp(
+                            Box::new(Bind("head".to_string(), Box::new(Wildcard))),
+                            Box::new(Bind("tail".to_string(), Box::new(Wildcard))),
+                        ),
+                        expr: Binary(
+                            Box::new(Ref("head".to_string())),
+                            BinOp::Add,
+                            Box::new(Call(
+                                Box::new(Ref("sum".to_string())),
+                                vec![Ref("tail".to_string())],
+                            )),
+                        ),
+                    },
+                ],
+            )),
+        )));
+
+        // Bind the recursive function in the context
+        let mut test_context = context.clone();
+        test_context.bind("sum".to_string(), sum_function);
+
+        // Test arrays
+        let empty_array = Value(CoreData::Array(vec![]));
+        let array_123 = Value(CoreData::Array(vec![int_val(1), int_val(2), int_val(3)]));
+        let array_42 = Value(CoreData::Array(vec![int_val(42)]));
+
+        // Test 1: Sum of empty array should be 0
+        let call_empty = Call(Box::new(Ref("sum".to_string())), vec![CoreVal(empty_array)]);
+
+        let result = collect_stream_values(call_empty.evaluate(test_context.clone()));
+        assert_eq!(result.len(), 1);
+        assert!(matches!(&result[0].0, Literal(Int64(n)) if *n == 0));
+
+        // Test 2: Sum of [1, 2, 3] should be 6
+        let call_123 = Call(Box::new(Ref("sum".to_string())), vec![CoreVal(array_123)]);
+
+        let result = collect_stream_values(call_123.evaluate(test_context.clone()));
+        assert_eq!(result.len(), 1);
+        assert!(matches!(&result[0].0, Literal(Int64(n)) if *n == 6));
+
+        // Test 3: Sum of [42] should be 42
+        let call_42 = Call(Box::new(Ref("sum".to_string())), vec![CoreVal(array_42)]);
+
+        let result = collect_stream_values(call_42.evaluate(test_context));
+        assert_eq!(result.len(), 1);
+        assert!(matches!(&result[0].0, Literal(Int64(n)) if *n == 42));
+    }
 }
