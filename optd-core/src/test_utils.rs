@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    operators::{
+    cascades::properties::PhysicalProperties, operators::{
         relational::{
             logical::{filter::Filter, join::Join, project::Project, scan::Scan, LogicalOperator},
             physical::{
@@ -10,11 +10,9 @@ use crate::{
             },
         },
         scalar::{column_ref::ColumnRef, constants::Constant, ScalarOperator},
-    },
-    plans::{
+    }, plans::{
         logical::PartialLogicalPlan, physical::PartialPhysicalPlan, scalar::PartialScalarPlan,
-    },
-    values::OptdValue,
+    }, values::OptdValue
 };
 
 pub fn int64(value: i64) -> Arc<PartialScalarPlan> {
@@ -127,6 +125,7 @@ pub fn project(
 pub fn table_scan(table_name: &str, predicate: Arc<PartialScalarPlan>) -> Arc<PartialPhysicalPlan> {
     Arc::new(PartialPhysicalPlan::PartialMaterialized {
         operator: PhysicalOperator::TableScan(TableScan::new(table_name, predicate)),
+        properties: PhysicalProperties::default(),
     })
 }
 
@@ -136,6 +135,7 @@ pub fn physical_filter(
 ) -> Arc<PartialPhysicalPlan> {
     Arc::new(PartialPhysicalPlan::PartialMaterialized {
         operator: PhysicalOperator::Filter(PhysicalFilter::new(child, predicate)),
+        properties: PhysicalProperties::default(),
     })
 }
 
@@ -149,6 +149,7 @@ pub fn nested_loop_join(
         operator: PhysicalOperator::NestedLoopJoin(NestedLoopJoin::new(
             join_type, outer, inner, condition,
         )),
+        properties: PhysicalProperties::default(),
     })
 }
 
@@ -158,5 +159,6 @@ pub fn physical_project(
 ) -> Arc<PartialPhysicalPlan> {
     Arc::new(PartialPhysicalPlan::PartialMaterialized {
         operator: PhysicalOperator::Project(PhysicalProject::new(child, fields)),
+        properties: PhysicalProperties::default(),
     })
 }

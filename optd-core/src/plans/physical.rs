@@ -9,7 +9,8 @@
 //! of materialization during the optimization process.
 
 use crate::{
-    cascades::groups::RelationalGroupId, operators::relational::physical::PhysicalOperator,
+    cascades::{goal::GoalId, groups::RelationalGroupId, properties::PhysicalProperties},
+    operators::relational::physical::PhysicalOperator,
     values::OptdValue,
 };
 
@@ -39,10 +40,12 @@ pub enum PartialPhysicalPlan {
     /// Single materialized operator with potentially unmaterialized children
     PartialMaterialized {
         operator: PhysicalOperator<OptdValue, Arc<PartialPhysicalPlan>, Arc<PartialScalarPlan>>,
+        properties: PhysicalProperties,
+        group_id: RelationalGroupId,
     },
 
     /// Reference to an optimization group containing equivalent plans
-    UnMaterialized(RelationalGroupId),
+    UnMaterialized(GoalId),
 }
 
 /// Type alias for expressions that construct physical plans.

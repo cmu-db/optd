@@ -13,11 +13,13 @@ use futures::{
 };
 
 use super::{
-    expressions::{LogicalExpression, PhysicalExpression},
-    get_physical_plan_cost,
+    expressions::{
+        LogicalExpression, PhysicalExpression, StoredLogicalExpression, StoredPhysicalExpression,
+    },
+    get_physical_expression_cost,
     goal::{Goal, GoalId, OptimizationStatus},
     groups::{ExplorationStatus, RelationalGroupId},
-    ingest_full_logical_plan, ingest_partial_logical_plan,
+    ingest_full_logical_plan, ingest_partial_logical_plan, ingest_partial_physical_plan,
     memo::Memoize,
     mock_optimize_relation_expr,
     properties::PhysicalProperties,
@@ -43,16 +45,15 @@ impl<'a, M: Memoize> TaskContext<M> {
     }
 
     /// The main entry point for the optimizer.
+    /// If the cost is infinite, it will return None.
+    /// If the cost is finite, it will return the best physical expression.
     pub async fn optimize(
         self: Arc<Self>,
         logical_plan: LogicalPlan,
-    ) -> Result<(Cost, Option<PhysicalPlan>)> {
+    ) -> Result<Option<StoredPhysicalExpression>> {
         let group_id = ingest_full_logical_plan(&self.memo, &logical_plan).await?;
-        let goal = self
-            .memo
-            .create_or_get_goal(group_id, PhysicalProperties::default())
-            .await?;
-        self.optimize_goal(goal.representative_goal_id).await
+        self.optimize_goal(group_id, PhysicalProperties::default())
+            .await
     }
 
     /// This function is used to optimize a goal. It will be called by the entry point `optimize`.
@@ -60,17 +61,20 @@ impl<'a, M: Memoize> TaskContext<M> {
     #[async_recursion]
     pub async fn optimize_goal(
         self: Arc<Self>,
-        goal: GoalId,
-    ) -> Result<(Cost, Option<PhysicalPlan>)> {
-        let goal = self.memo.get_goal(goal).await?;
-        let group_id = goal.group_id;
+        group_id: RelationalGroupId,
+        required_physical_props: PhysicalProperties,
+    ) -> Result<Option<StoredPhysicalExpression>> {
+        let goal = self
+            .memo
+            .create_or_get_goal(group_id, required_physical_props)
+            .await?;
         if self.memo.get_group_exploration_status(group_id).await? == ExplorationStatus::Unexplored
         {
             self.memo
                 .update_group_exploration_status(goal.group_id, ExplorationStatus::Exploring)
                 .await?;
             let ctx = self.clone();
-            tokio::spawn(async move { ctx.explore_relation_group(group_id).await }).await??;
+            tokio::spawn(async move { ctx.explore_relation_group(group_id).await }).await?;
         }
 
         let logical_exprs = self
@@ -100,15 +104,20 @@ impl<'a, M: Memoize> TaskContext<M> {
             }
         }
 
-        Ok((best_cost, best_plan))
+        Ok(best_plan)
     }
 
+    /// This function is used to optimize a logical expression.
+    /// It will be called by the `optimize_goal` function.
+    /// It will return the best physical expression for the logical expression.
+    /// If the cost is infinite, it will return None.
+    /// If the cost is finite, it will return the best physical expression.
     #[async_recursion]
     pub async fn optimize_logical_expression(
         self: Arc<Self>,
         logical_expr: Arc<LogicalExpression>,
         goal: Arc<Goal>,
-    ) -> Result<(Cost, Option<PhysicalPlan>)> {
+    ) -> Result<(Cost, Option<StoredPhysicalExpression>)> {
         let rules = self.memo.get_matching_rules(&logical_expr).await?;
 
         let mut join_set = JoinSet::new();
@@ -126,7 +135,8 @@ impl<'a, M: Memoize> TaskContext<M> {
                 RuleId::TransformationRule(rule_id) => {
                     join_set.spawn(async move {
                         ctx.match_and_apply_transformation_rule(expr, rule_id, g.group_id)
-                            .await
+                            .await?;
+                        return Ok((Cost::INFINITY, None));
                     });
                 }
             }
@@ -155,7 +165,7 @@ impl<'a, M: Memoize> TaskContext<M> {
     pub async fn explore_relation_group(
         self: Arc<Self>,
         group_id: RelationalGroupId,
-    ) -> Result<()> {
+    ) -> Result<Vec<StoredLogicalExpression>> {
         let logical_exprs = self.memo.get_all_logical_exprs_in_group(group_id).await?;
 
         let mut join_set = JoinSet::new();
@@ -165,13 +175,18 @@ impl<'a, M: Memoize> TaskContext<M> {
                 .spawn(async move { ctx.explore_logical_expression(logical_expr, group_id).await });
         }
 
-        join_set
+        let results = join_set
             .join_all()
             .await
             .into_iter()
             .collect::<Result<Vec<_>>>()?;
 
-        Ok(())
+        let mut logical_exprs = Vec::new();
+        for result in results {
+            logical_exprs.extend(result);
+        }
+
+        Ok(logical_exprs)
     }
 
     #[async_recursion]
@@ -179,7 +194,7 @@ impl<'a, M: Memoize> TaskContext<M> {
         self: Arc<Self>,
         logical_expr: Arc<LogicalExpression>,
         group_id: RelationalGroupId,
-    ) -> Result<()> {
+    ) -> Result<Vec<StoredLogicalExpression>> {
         let rules = self
             .memo
             .get_matching_transformation_rules(&logical_expr)
@@ -196,13 +211,18 @@ impl<'a, M: Memoize> TaskContext<M> {
             });
         }
 
-        join_set
+        let results = join_set
             .join_all()
             .await
             .into_iter()
             .collect::<Result<Vec<_>>>()?;
 
-        Ok(())
+        let mut logical_exprs = Vec::new();
+        for result in results {
+            logical_exprs.extend(result);
+        }
+
+        Ok(logical_exprs)
     }
 
     pub async fn match_and_apply_transformation_rule(
@@ -210,7 +230,7 @@ impl<'a, M: Memoize> TaskContext<M> {
         logical_expr: Arc<LogicalExpression>,
         rule_id: TransformationRuleId,
         group_id: RelationalGroupId,
-    ) -> Result<(Cost, Option<PhysicalPlan>)> {
+    ) -> Result<Vec<StoredLogicalExpression>> {
         let partial_logical_input = PartialLogicalPlan::from_expr(&logical_expr);
 
         let partial_logical_outputs = self
@@ -220,11 +240,14 @@ impl<'a, M: Memoize> TaskContext<M> {
 
         let mut partial_logical_outputs = Box::pin(partial_logical_outputs);
 
+        let mut logical_exprs = Vec::new();
         while let Some(partial_logical_output) = partial_logical_outputs.next().await {
-            let group_id = ingest_partial_logical_plan(&self.memo, &partial_logical_output).await?;
+            let (logical_expr, logical_expr_id) =
+                ingest_partial_logical_plan(&self.memo, &partial_logical_output).await?;
+            logical_exprs.push((logical_expr, logical_expr_id));
         }
 
-        Ok((Cost::INFINITY, None))
+        Ok(logical_exprs)
     }
 
     pub async fn match_and_apply_implementation_rule(
@@ -232,7 +255,7 @@ impl<'a, M: Memoize> TaskContext<M> {
         logical_expr: Arc<LogicalExpression>,
         rule_id: ImplementationRuleId,
         goal: Arc<Goal>,
-    ) -> Result<(Cost, Option<PhysicalPlan>)> {
+    ) -> Result<(Cost, Option<StoredPhysicalExpression>)> {
         let partial_logical_input = PartialLogicalPlan::from_expr(&logical_expr);
 
         let physical_outputs = self
@@ -250,35 +273,15 @@ impl<'a, M: Memoize> TaskContext<M> {
         let mut best_physical_output = None;
 
         while let Some(physical_output) = physical_outputs.next().await {
-            // TODO(Sarvesh): if we just get a physical plan, how can we ingest it?
-            // we don't know the groups of the children will have to run some matching function to make sure we are ingesting the correct groups.
-            // The correct way to ingest a physical plan is to break it down into physical expressions and ingest them one by one.
-            // I don't want the interpreter to return a physical plan, I want it to return a physical expression.
-            // Then we can ingest the physical expression directly.
-            let cost = get_physical_plan_cost(&physical_output).await?;
-            let group_id = self
-                .memo
-                .add_physical_plan_top_node(&physical_output, cost, goal.representative_goal_id)
-                .await?;
+            let (cost, top_phyiscal_expression) =
+                ingest_partial_physical_plan(&self.memo, &physical_output).await?;
             if cost < best_cost {
                 best_cost = cost;
-                best_physical_output = Some(physical_output);
+                best_physical_output = Some(top_phyiscal_expression);
             }
         }
 
         Ok((best_cost, best_physical_output))
-    }
-
-    pub async fn ingest_physical_expression(
-        self: &Arc<Self>,
-        physical_expr: &PhysicalExpression,
-        cost: Cost,
-        goal_id: GoalId,
-    ) -> Result<()> {
-        self.memo
-            .add_physical_expr_to_goal(physical_expr, cost, goal_id)
-            .await?;
-        Ok(())
     }
 }
 
@@ -301,7 +304,7 @@ impl<M: Memoize> Intepreter<M> {
         rule_id: ImplementationRuleId,
         partial_logical_plan: PartialLogicalPlan,
         required_physical_properties: &PhysicalProperties,
-    ) -> impl StreamExt<Item = PhysicalPlan> {
+    ) -> impl StreamExt<Item = PartialPhysicalPlan> {
         let physical_plan = todo!();
         stream::once(async { physical_plan })
     }

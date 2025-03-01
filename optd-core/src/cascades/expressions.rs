@@ -17,6 +17,12 @@ pub type PhysicalExpression = PhysicalOperator<OptdValue, GoalId, ScalarGroupId>
 /// A scalar expression in the memo table.
 pub type ScalarExpression = ScalarOperator<OptdValue, ScalarGroupId>;
 
+/// A stored logical expression in the memo table.
+pub type StoredLogicalExpression = (LogicalExpression, LogicalExpressionId);
+
+/// A stored physical expression in the memo table.
+pub type StoredPhysicalExpression = (PhysicalExpression, PhysicalExpressionId);
+
 /// A unique identifier for a logical expression in the memo table.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::Type, Deserialize)]

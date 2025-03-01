@@ -14,11 +14,11 @@ use crate::{cost_model::Cost, plans::physical::PhysicalPlan};
 use super::{
     expressions::{
         LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
-        ScalarExpression, ScalarExpressionId,
+        ScalarExpression, ScalarExpressionId, StoredLogicalExpression,
     },
     goal::{Goal, GoalId, OptimizationStatus},
     groups::{ExplorationStatus, RelationalGroupId, ScalarGroupId},
-    properties::PhysicalProperties,
+    properties::{self, PhysicalProperties},
     rules::{ImplementationRuleId, RuleId, TransformationRuleId},
 };
 use anyhow::Result;
@@ -69,11 +69,12 @@ pub trait Memoize: Send + Sync + 'static {
     ) -> Result<RelationalGroupId>;
 
     /// Adds a logical expression to the memo table.
-    /// Returns the group id of group if already exists, otherwise creates a new group.
-    // TODO: need to indicate if a new logical expression is added.
-    // Option<LogicalExpressionId>
-    async fn add_logical_expr(&self, logical_expr: &LogicalExpression)
-        -> Result<RelationalGroupId>;
+    /// Returns the group id of group that the logical expression is added to. It might create a new group if necessary.
+    /// Returns the logical expression id of the logical expression that has just been added.
+    async fn add_logical_expr(
+        &self,
+        logical_expr: &LogicalExpression,
+    ) -> Result<(RelationalGroupId, LogicalExpressionId)>;
 
     /// Gets all scalar expressions in a group.
     async fn get_all_scalar_exprs_in_group(
@@ -128,7 +129,7 @@ pub trait Memoize: Send + Sync + 'static {
         physical_expr: &PhysicalExpression,
         cost: Cost,
         goal_id: GoalId,
-    ) -> Result<GoalId>;
+    ) -> Result<(GoalId, PhysicalExpressionId)>;
 
     /// Adds a physical expression to a goal in the memo table.
     /// TODO (Sarvesh): This is not correct and we should not be doing this at all. My next commit will probably change this
@@ -140,16 +141,17 @@ pub trait Memoize: Send + Sync + 'static {
         goal_id: GoalId,
     ) -> Result<GoalId>;
 
-    /// Gets the group id from a logical expression.
+    /// Gets the group id from a logical expression. If the logical expression is not in the memo table, it will be created and added to the memo table and the group id will be returned.
     async fn get_group_id_from_logical_expr(
         &self,
         logical_expr: &LogicalExpression,
     ) -> Result<RelationalGroupId>;
 
-    /// Gets the goal id from a physical expression.
+    /// Gets the goal id from a physical expression. If the physical expression is not in the memo table, it will be created and added to the memo table and the goal id will be returned.
     async fn get_goal_id_from_physical_expr(
         &self,
         physical_expr: &PhysicalExpression,
+        properties: &PhysicalProperties,
     ) -> Result<GoalId>;
 
     async fn get_matching_transformation_rules(

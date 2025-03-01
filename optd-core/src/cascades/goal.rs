@@ -45,3 +45,5 @@ pub struct Goal {
     /// The optimization status of the goal.
     pub optimization_status: OptimizationStatus,
 }
+
+pub type GoalID = usize; // Example definition, adjust as needed
