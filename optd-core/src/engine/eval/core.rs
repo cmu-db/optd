@@ -1,8 +1,8 @@
 //! This module provides evaluation functions for core expression types, transforming
 //! expressions into value streams that handle all possible evaluation paths.
 
+use super::{operator::evaluate_operator, Evaluate};
 use crate::{
-    analyzer::hir::{CoreData, Expr, FunKind, Literal, Materializable, OperatorKind, Value},
     capture,
     engine::{
         utils::streams::{
@@ -12,11 +12,11 @@ use crate::{
     },
 };
 use futures::StreamExt;
-
+use optd_dsl::analyzer::hir::{
+    CoreData, Expr, FunKind, Literal, Materializable, OperatorKind, Value,
+};
 use CoreData::*;
 use Materializable::*;
-
-use super::operator::evaluate_operator;
 
 /// Evaluates a core expression by generating all possible evaluation paths.
 ///
@@ -37,7 +37,7 @@ pub(super) fn evaluate_core_expr(data: CoreData<Expr>, context: Context) -> Valu
         Struct(_, items) => evaluate_collection(items, data, context),
         Map(items) => evaluate_map(items, context),
         Function(fun_type) => evaluate_function(fun_type),
-        Fail(msg) => evaluate_fail(*msg, context),
+        Fail(msg) => evaluate_fail((*msg).clone(), context),
         Operator(Data(op)) => evaluate_operator(op, context),
         Operator(Group(id, kind)) => evaluate_group(id, kind),
     }
@@ -101,7 +101,7 @@ fn evaluate_function(fun_type: FunKind) -> ValueStream {
 /// Evaluates a fail expression.
 fn evaluate_fail(msg: Expr, context: Context) -> ValueStream {
     msg.evaluate(context)
-        .map(|result| result.map(|value| Value(CoreData::Fail(Box::new(value)))))
+        .map(|result| result.map(|value| Value(CoreData::Fail(value.into()))))
         .boxed()
 }
 
@@ -115,13 +115,9 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::{
-        analyzer::hir::{
-            BinOp, CoreData, Expr, FunKind, Literal, Materializable, OperatorKind, Value,
-        },
-        engine::{utils::streams::ValueStream, Context},
-    };
+    use crate::engine::{utils::streams::ValueStream, Context};
     use futures::executor::block_on_stream;
+    use optd_dsl::analyzer::hir::{BinOp, CoreData, Expr, FunKind, Literal, Materializable, Value};
     use BinOp::*;
     use Expr::*;
     use Literal::*;
@@ -289,7 +285,7 @@ mod tests {
     #[test]
     fn test_evaluate_function() {
         // Test closure function
-        let closure = FunKind::Closure(vec!["x".to_string()], Box::new(CoreVal(int_val(42))));
+        let closure = FunKind::Closure(vec!["x".to_string()], CoreVal(int_val(42)).into());
 
         let closure_stream = evaluate_function(closure.clone());
         let values = collect_stream_values(closure_stream);
@@ -364,11 +360,7 @@ mod tests {
         // Create a complex expression: [1, 2 + 3, "hello"]
         let array_expr = CoreData::Array(vec![
             CoreVal(int_val(1)),
-            Binary(
-                Box::new(CoreVal(int_val(2))),
-                Add,
-                Box::new(CoreVal(int_val(3))),
-            ),
+            Binary(CoreVal(int_val(2)).into(), Add, CoreVal(int_val(3)).into()),
             CoreVal(string_val("hello")),
         ]);
 

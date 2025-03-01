@@ -5,15 +5,18 @@
 //! plans and manages the transformation of plans according to those rules.
 
 use crate::{
-    analyzer::hir::{AnnotatedValue, CoreData, Expr, Literal, Value, HIR},
-    utils::context::Context,
+    driver::{cascades::Driver, memo::Memoize},
+    ir::plans::PartialLogicalPlan,
 };
 use bridge::{from_optd::partial_logical_to_value, into_optd::value_to_partial_logical};
+use eval::Evaluate;
 use futures::StreamExt;
-use optd_core::cascades::ir::PartialLogicalPlan;
+use optd_dsl::analyzer::{
+    context::Context,
+    hir::{CoreData, Expr, Literal, Value},
+};
 use std::sync::Arc;
 use utils::{error::Error, streams::PartialLogicalPlanStream};
-
 use CoreData::*;
 use Expr::*;
 use Literal::*;
@@ -32,7 +35,7 @@ pub struct Engine<M: Memoize> {
     driver: Arc<Driver<M>>,
 }
 
-impl Engine {
+impl<M: Memoize> Engine<M> {
     /// Creates a new engine with the given context and driver.
     pub fn new(context: Context, driver: Arc<Driver<M>>) -> Self {
         Self { context, driver }
@@ -47,23 +50,14 @@ impl Engine {
         rule_name: &str,
         plan: PartialLogicalPlan,
     ) -> PartialLogicalPlanStream {
-        // Create a context with all expressions from the HIR
-        let context = Context::new(
-            self.hir
-                .expressions
-                .iter()
-                .map(|(id, AnnotatedValue { value, .. })| (id.clone(), value.clone()))
-                .collect(),
-        );
-
         // Create a call expression to invoke the rule
         let call = Call(
-            Box::new(CoreVal(Value(Literal(String(rule_name.to_string()))))),
+            CoreVal(Value(Literal(String(rule_name.to_string())))).into(),
             vec![CoreVal(partial_logical_to_value(&plan))],
         );
 
         // Evaluate the call and transform the results
-        call.evaluate(context)
+        call.evaluate(self.context)
             .map(|result| {
                 result.and_then(|value| match &value.0 {
                     Fail(boxed_msg) => match &boxed_msg.0 {

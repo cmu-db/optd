@@ -13,21 +13,23 @@ use crate::engine::Engine;
 
 use super::memo::Memoize;
 
-struct Driver<M: Memoize> {
-    memo: M,
-    rule_engine: Arc<Engine<M>>,
+pub struct Driver<M: Memoize> {
+    pub memo: M,
+    pub rule_engine: Engine<M>,
 }
 
-impl<'a, M: Memoize> Driver<M> {
+impl<M: Memoize> Driver<M> {
     pub fn new(memo: M) -> Arc<Self> {
         Arc::new_cyclic(|this| Self {
             memo,
-            rule_engine: Arc::new(Intepreter {
-                ctx: this.upgrade().unwrap(),
+            rule_engine: Arc::new(Engine {
+                context: this.upgrade().unwrap(),
+                driver: todo!(),
             }),
         })
     }
-
+}
+/*
     /// The main entry point for the optimizer.
     /// If the cost is infinite, it will return None.
     /// If the cost is finite, it will return the best physical expression.
@@ -293,3 +295,4 @@ impl<M: Memoize> Intepreter<M> {
         stream::once(async { physical_plan })
     }
 }
+*/

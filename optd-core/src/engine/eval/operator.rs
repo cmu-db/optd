@@ -11,13 +11,14 @@
 //! in our system, where an expression might evaluate to multiple possible values.
 
 use crate::{
-    analyzer::hir::{CoreData, Expr, Materializable, Operator, OperatorKind, Value},
     capture,
     engine::utils::streams::{evaluate_all_combinations, stream_from_result, ValueStream},
-    utils::context::Context,
 };
 use futures::StreamExt;
-
+use optd_dsl::analyzer::{
+    context::Context,
+    hir::{CoreData, Expr, Materializable, Operator, OperatorKind, Value},
+};
 use CoreData::*;
 use Materializable::*;
 

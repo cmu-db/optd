@@ -5,7 +5,7 @@
 //! - Numeric negation for integers and floating-point numbers
 //! - Logical NOT for boolean values
 
-use crate::analyzer::hir::{CoreData, Literal, UnaryOp, Value};
+use optd_dsl::analyzer::hir::{CoreData, Literal, UnaryOp, Value};
 use CoreData::*;
 use Literal::*;
 use UnaryOp::*;

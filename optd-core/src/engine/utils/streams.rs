@@ -3,25 +3,26 @@
 //! computing all possible combinations of expression values, and transforming Result types within
 //! stream processing pipelines.
 
-use crate::analyzer::hir::{Expr, Value};
-use crate::capture;
+use crate::engine::eval::Evaluate;
 use crate::engine::utils::error::Error;
-use crate::utils::context::Context;
+use crate::{capture, ir::plans::PartialLogicalPlan};
 use futures::{stream, Stream, StreamExt};
-use optd_core::cascades::ir::PartialLogicalPlan;
+use optd_dsl::analyzer::context::Context;
+use optd_dsl::analyzer::hir::{Expr, Value};
 use std::pin::Pin;
 
 /// Type alias for a stream of evaluation results.
 ///
 /// This represents a stream that yields Result<Value, Error> items,
 /// allowing for asynchronous processing of values that might fail with errors.
-pub(crate) type ValueStream = Pin<Box<dyn Stream<Item = Result<Value, Error>> + Send>>;
+pub(crate) type ValueStream<'a> = Pin<Box<dyn Stream<Item = Result<Value, Error>> + Send + 'a>>;
 
 /// Type alias for a stream of vector evaluation results.
 ///
 /// This represents a stream that yields Result<Vec<Value>, Error> items,
 /// which is useful for representing collections of values from multiple expressions.
-pub(crate) type VecValueStream = Pin<Box<dyn Stream<Item = Result<Vec<Value>, Error>> + Send>>;
+pub(crate) type VecValueStream<'a> =
+    Pin<Box<dyn Stream<Item = Result<Vec<Value>, Error>> + Send + 'a>>;
 
 /// Type alias for a stream of partial logical plans.
 ///
@@ -74,9 +75,9 @@ pub type PartialLogicalPlanStream =
 ///
 /// # Returns
 /// A stream of all possible combinations of values from the expressions
-pub(crate) fn evaluate_all_combinations<I>(mut items: I, context: Context) -> VecValueStream
+pub(crate) fn evaluate_all_combinations<'a, I>(mut items: I, context: Context) -> VecValueStream<'a>
 where
-    I: Iterator<Item = Expr> + Send + Clone + 'static,
+    I: Iterator<Item = &'a Expr> + Send + Clone + 'a,
 {
     match items.next() {
         // Base case: no expressions
@@ -148,8 +149,7 @@ where
 /// A boxed stream that yields a single Ok result
 pub(crate) fn propagate_success<T>(value: T) -> Pin<Box<dyn Stream<Item = Result<T, Error>> + Send>>
 where
-    T: Send,
-    for<'a> T: 'a,
+    T: Send + 'static,
 {
     stream::once(async move { Ok(value) }).boxed()
 }
@@ -172,15 +172,15 @@ where
 ///
 /// # Returns
 /// A boxed stream that either contains the results of the success handler or propagates the error
-pub(crate) fn stream_from_result<'a, T, U, F, Fut>(
+pub(crate) fn stream_from_result<T, U, F, Fut>(
     result: Result<T, Error>,
     success_handler: F,
-) -> Pin<Box<dyn Stream<Item = Result<U, Error>> + Send + 'a>>
+) -> Pin<Box<dyn Stream<Item = Result<U, Error>> + Send>>
 where
     T: Send,
     U: Send,
     F: FnOnce(T) -> Fut + Send,
-    Fut: Stream<Item = Result<U, Error>> + Send + 'a,
+    Fut: Stream<Item = Result<U, Error>> + Send,
 {
     match result {
         Ok(value) => Box::pin(success_handler(value)),

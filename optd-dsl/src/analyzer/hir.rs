@@ -15,9 +15,8 @@
 //! unified representation that can be transformed into optimizer-specific
 //! intermediate representations through the bridge modules.
 
-use std::collections::HashMap;
-
 use super::context::Context;
+use std::collections::HashMap;
 
 /// Unique identifier for variables, functions, types, etc.
 pub type Identifier = String;

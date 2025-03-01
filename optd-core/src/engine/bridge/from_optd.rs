@@ -4,14 +4,13 @@
 //! representation (Optd-IR) into the DSL's internal representation (HIR). It allows
 //! query plans from the optimization engine to be manipulated using the DSL.
 
-use crate::analyzer::hir::{CoreData, Literal, Materializable, Operator, OperatorKind, Value};
-use optd_core::cascades::ir::{
-    Child, OperatorData, PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan,
-};
+use optd_dsl::analyzer::hir::{CoreData, Literal, Materializable, Operator, OperatorKind, Value};
 use CoreData::*;
 use Literal::*;
 use Materializable::*;
 use OperatorKind::*;
+
+use crate::ir::plans::PartialLogicalPlan;
 
 /// Converts a PartialLogicalPlan into a HIR Value representation.
 ///

@@ -1,7 +1,6 @@
+use super::hir::Identifier;
 use crate::analyzer::hir::Value;
 use std::{collections::HashMap, sync::Arc};
-
-use super::hir::Identifier;
 
 /// A stack-based variable binding system that implements lexical scoping.
 ///
@@ -10,12 +9,15 @@ use super::hir::Identifier;
 /// scoping rules, searching from innermost (top of stack) to outermost
 /// (bottom of stack) scope.
 ///
-/// The context always contains at least one scope (the global scope).
+/// The current (innermost) scope is mutable, while all previous scopes
+/// are immutable and stored as Arc for efficient cloning.
 #[derive(Debug, Clone)]
-pub(crate) struct Context {
-    /// Stack of scopes, where each scope is a map of variable names to values.
-    /// The last element is the current (innermost) scope.
-    scopes: Vec<Arc<HashMap<Identifier, Value>>>,
+pub struct Context {
+    /// Previous scopes (outer lexical scopes), stored as immutable Arc references
+    previous_scopes: Vec<Arc<HashMap<Identifier, Value>>>,
+
+    /// Current scope (innermost) that can be directly modified
+    current_scope: HashMap<Identifier, Value>,
 }
 
 impl Context {
@@ -28,19 +30,21 @@ impl Context {
     /// # Returns
     ///
     /// A new `Context` instance with one scope containing the initial bindings
-    pub(crate) fn new(initial_bindings: HashMap<Identifier, Value>) -> Self {
-        let mut context = Self { scopes: Vec::new() };
-        // Start with a scope containing the initial bindings
-        context.scopes.push(initial_bindings.into());
-        context
+    pub fn new(initial_bindings: HashMap<Identifier, Value>) -> Self {
+        Self {
+            previous_scopes: Vec::new(),
+            current_scope: initial_bindings,
+        }
     }
 
-    /// Pushes a new empty scope onto the stack.
+    /// Pushes the current scope onto the stack of previous scopes and creates
+    /// a new empty current scope.
     ///
     /// This creates a new lexical scope in which variables can be bound
     /// without affecting bindings in outer scopes.
-    pub(crate) fn push_scope(&mut self) {
-        self.scopes.push(HashMap::new().into());
+    pub fn push_scope(&mut self) {
+        let old_scope = std::mem::take(&mut self.current_scope);
+        self.previous_scopes.push(Arc::new(old_scope));
     }
 
     /// Looks up a variable in the context, starting from the innermost scope.
@@ -55,12 +59,19 @@ impl Context {
     /// # Returns
     ///
     /// Some reference to the value if found, None otherwise
-    pub(crate) fn lookup(&self, name: &str) -> Option<&Value> {
-        for scope in self.scopes.iter().rev() {
+    pub fn lookup(&self, name: &str) -> Option<&Value> {
+        // First check the current scope
+        if let Some(value) = self.current_scope.get(name) {
+            return Some(value);
+        }
+
+        // Then check previous scopes from innermost to outermost
+        for scope in self.previous_scopes.iter().rev() {
             if let Some(value) = scope.get(name) {
                 return Some(value);
             }
         }
+
         None
     }
 
@@ -73,8 +84,7 @@ impl Context {
     ///
     /// * `name` - The name of the variable to bind
     /// * `val` - The value to bind to the variable
-    pub(crate) fn bind(&mut self, name: String, val: Value) {
-        // We're always guaranteed to have at least one scope
-        // TODO(Alexis): figure out self.scopes.last_mut().unwrap().insert(name, val);
+    pub fn bind(&mut self, name: String, val: Value) {
+        self.current_scope.insert(name, val);
     }
 }
