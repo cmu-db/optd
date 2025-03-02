@@ -1,7 +1,10 @@
 //! This module provides evaluation functions for core expression types, transforming
 //! expressions into value streams that handle all possible evaluation paths.
 
-use super::{operator::evaluate_operator, Evaluate};
+use super::{
+    operator::{evaluate_logical_operator, evaluate_physical_operator, evaluate_scalar_operator},
+    Evaluate,
+};
 use crate::{
     capture,
     engine::{
@@ -12,11 +15,8 @@ use crate::{
     },
 };
 use futures::StreamExt;
-use optd_dsl::analyzer::hir::{
-    CoreData, Expr, FunKind, Literal, Materializable, OperatorKind, Value,
-};
+use optd_dsl::analyzer::hir::{CoreData, Expr, FunKind, Literal, Value};
 use CoreData::*;
-use Materializable::*;
 
 /// Evaluates a core expression by generating all possible evaluation paths.
 ///
@@ -38,8 +38,10 @@ pub(super) fn evaluate_core_expr(data: CoreData<Expr>, context: Context) -> Valu
         Map(items) => evaluate_map(items, context),
         Function(fun_type) => evaluate_function(fun_type),
         Fail(msg) => evaluate_fail((*msg).clone(), context),
-        Operator(Data(op)) => evaluate_operator(op, context),
-        Operator(Group(id, kind)) => evaluate_group(id, kind),
+        LogicalOperator(op) => evaluate_logical_operator(op, context),
+        ScalarOperator(op) => evaluate_scalar_operator(op, context),
+        PhysicalOperator(op) => evaluate_physical_operator(op, context),
+        None => propagate_success(Value(None)),
     }
 }
 
@@ -105,19 +107,13 @@ fn evaluate_fail(msg: Expr, context: Context) -> ValueStream {
         .boxed()
 }
 
-/// Evaluates a group expression.
-fn evaluate_group(id: i64, kind: OperatorKind) -> ValueStream {
-    propagate_success(Value(CoreData::Operator(Materializable::Group(id, kind))))
-}
-
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
     use crate::engine::{utils::streams::ValueStream, Context};
     use futures::executor::block_on_stream;
-    use optd_dsl::analyzer::hir::{BinOp, CoreData, Expr, FunKind, Literal, Materializable, Value};
+    use optd_dsl::analyzer::hir::{BinOp, CoreData, Expr, FunKind, Literal, Value};
+    use std::collections::HashMap;
     use BinOp::*;
     use Expr::*;
     use Literal::*;
@@ -331,24 +327,6 @@ mod tests {
             assert!(matches!(&boxed_value.0, Literal(String(s)) if s == "Error occurred"));
         } else {
             panic!("Expected Fail, got {:?}", values[0]);
-        }
-    }
-
-    #[test]
-    fn test_evaluate_group() {
-        // Test operator group
-        let group_id = 123;
-        let kind = OperatorKind::Logical;
-
-        let group_stream = evaluate_group(group_id, kind);
-        let values = collect_stream_values(group_stream);
-
-        assert_eq!(values.len(), 1);
-        if let Operator(Materializable::Group(id, op_kind)) = &values[0].0 {
-            assert_eq!(*id, group_id);
-            assert_eq!(*op_kind, kind);
-        } else {
-            panic!("Expected Operator::Group, got {:?}", values[0]);
         }
     }
 

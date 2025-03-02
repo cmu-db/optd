@@ -29,7 +29,7 @@ pub struct Driver<M: Memoize> {
     pub rule_engine: Engine<M>,
 }
 
-impl<M: Memoize> Driver<M> {
+/*impl<M: Memoize> Driver<M> {
     pub fn new(memo: M) -> Arc<Self> {
         Arc::new_cyclic(|this| Self {
             memo,
@@ -289,3 +289,4 @@ impl<M: Memoize> Driver<M> {
         Ok((best_cost, best_physical_output))
     }
 }
+*/

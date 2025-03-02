@@ -18,4 +18,5 @@ pub enum PropertiesData {
     Struct(String, Vec<PropertiesData>),
     Array(Vec<PropertiesData>),
     Scalar(ScalarPlan),
+    None,
 }

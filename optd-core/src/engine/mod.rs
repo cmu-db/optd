@@ -8,7 +8,7 @@ use crate::{
     driver::{cascades::Driver, memo::Memoize},
     ir::plans::PartialLogicalPlan,
 };
-// use bridge::{from_optd::partial_logical_to_value, into_optd::value_to_partial_logical};
+use bridge::{from_optd::partial_logical_to_value, into_optd::value_to_partial_logical};
 use eval::Evaluate;
 use futures::StreamExt;
 use optd_dsl::analyzer::{
@@ -16,7 +16,10 @@ use optd_dsl::analyzer::{
     hir::{CoreData, Expr, Literal, Value},
 };
 use std::sync::Arc;
-use utils::{error::Error, streams::{PartialLogicalPlanStream, PartialPhysicalPlanStream}};
+use utils::{
+    error::Error,
+    streams::{PartialLogicalPlanStream, PartialPhysicalPlanStream},
+};
 use CoreData::*;
 use Expr::*;
 use Literal::*;
@@ -32,33 +35,16 @@ pub struct Engine<M: Memoize> {
     context: Context,
 
     /// The optimization driver instance
-    driver: Arc<Driver<M>>,
+    _driver: Arc<Driver<M>>,
 }
+
 impl<M: Memoize> Engine<M> {
-    pub fn new(context: Context, driver: Arc<Driver<M>>) -> Self {
-        Self { context, driver }
-    }
-    pub async fn match_and_apply_logical_rule(
-        &self,
-        rule_name: &str,
-        plan: PartialLogicalPlan,
-    ) -> PartialLogicalPlanStream {
-        todo!()
-    }
-
-    pub async fn match_and_apply_implementation_rule(
-        &self,
-        rule_name: &str,
-        plan: PartialLogicalPlan,
-    ) -> PartialPhysicalPlanStream {
-        todo!()
-    }
-}
-
-/*impl<M: Memoize> Engine<M> {
     /// Creates a new engine with the given context and driver.
     pub fn new(context: Context, driver: Arc<Driver<M>>) -> Self {
-        Self { context, driver }
+        Self {
+            context,
+            _driver: driver,
+        }
     }
 
     /// Interprets a function with the given name and input.
@@ -77,7 +63,7 @@ impl<M: Memoize> Engine<M> {
         );
 
         // Evaluate the call and transform the results
-        call.evaluate(self.context)
+        call.evaluate(self.context.clone())
             .map(|result| {
                 result.and_then(|value| match &value.0 {
                     Fail(boxed_msg) => match &boxed_msg.0 {
@@ -89,5 +75,12 @@ impl<M: Memoize> Engine<M> {
             })
             .boxed()
     }
+
+    pub async fn match_and_apply_implementation_rule(
+        &self,
+        _rule_name: &str,
+        _plan: PartialLogicalPlan,
+    ) -> PartialPhysicalPlanStream {
+        todo!()
+    }
 }
-*/
