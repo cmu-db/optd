@@ -1,5 +1,4 @@
-use std::sync::Arc;
-
+use crate::converter::OptdDFContext;
 use anyhow::Ok;
 use async_trait::async_trait;
 use datafusion::{
@@ -14,8 +13,7 @@ use optd_core::{
     plans::{logical::LogicalPlan, physical::PhysicalPlan},
     storage::memo::SqliteMemo,
 };
-
-use crate::converter::OptdDFContext;
+use std::sync::Arc;
 
 /// A mock optimizer for testing purposes.
 #[derive(Debug)]

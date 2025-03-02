@@ -1,54 +1,61 @@
+use crate::planner::OptdOptimizer;
+use crate::planner::OptdQueryPlanner;
 use datafusion::catalog::{CatalogProviderList, MemoryCatalogProviderList};
+use datafusion::common::Result;
 use datafusion::execution::runtime_env::{RuntimeEnv, RuntimeEnvBuilder};
 use datafusion::execution::SessionStateBuilder;
 use datafusion::prelude::{SessionConfig, SessionContext};
 use std::sync::Arc;
 
-use crate::planner::OptdOptimizer;
-use crate::planner::OptdQueryPlanner;
-
-/// Utility function to create a session context for datafusion + optd.
-/// TODO docs.
+/// Creates a DataFusion `SessionContext` with the given optional parameters that uses `optd` as the
+/// query planner and disables any optimizations that DataFusion itself performs.
 pub(crate) async fn create_optd_session(
     session_config: Option<SessionConfig>,
     runtime_env: Option<Arc<RuntimeEnv>>,
     datafusion_catalog: Option<Arc<dyn CatalogProviderList>>,
-) -> anyhow::Result<SessionContext> {
-    let mut session_config = match session_config {
-        Some(config) => config,
-        None => SessionConfig::from_env()?.with_information_schema(true),
+) -> Result<SessionContext> {
+    // Use the provided session configuration or create one from the environment variables.
+    let session_config = {
+        let mut config = session_config
+            .unwrap_or_else(|| {
+                SessionConfig::from_env().expect("Failed to create session config from env")
+            })
+            .with_information_schema(true);
+
+        // Disable Datafusion's heuristic rule-based optimizer by setting the passes to 1.
+        config.options_mut().optimizer.max_passes = 0;
+        config
     };
 
-    // Disable Datafusion's heuristic rule based query optimizer
-    session_config.options_mut().optimizer.max_passes = 0;
+    // Use the provided runtime environment or create the default one.
+    let runtime_env =
+        runtime_env.unwrap_or_else(|| Arc::new(RuntimeEnvBuilder::new().build().unwrap()));
 
-    let runtime_env = match runtime_env {
-        Some(runtime_env) => runtime_env,
-        None => Arc::new(RuntimeEnvBuilder::new().build()?),
-    };
+    // Use the provided catalog or create a default one.
+    let datafusion_catalog =
+        datafusion_catalog.unwrap_or_else(|| Arc::new(MemoryCatalogProviderList::new()));
 
-    let catalog = match datafusion_catalog {
-        Some(catalog) => catalog,
-        None => Arc::new(MemoryCatalogProviderList::new()),
-    };
+    // Use the `optd` optimizer as the query planner instead of the default one.
+    let optimizer = OptdOptimizer::new_in_memory()
+        .await
+        .expect("TODO FIX ERROR HANDLING");
+    let planner = Arc::new(OptdQueryPlanner::new(optimizer));
 
-    let mut builder = SessionStateBuilder::new()
+    // Build up the state for the `SessionContext`. Removes all optimizer rules so that it
+    // completely relies on `optd`.
+    let session_state = SessionStateBuilder::new()
         .with_config(session_config)
         .with_runtime_env(runtime_env)
-        .with_catalog_list(catalog.clone())
-        .with_default_features();
+        .with_catalog_list(datafusion_catalog.clone())
+        .with_default_features()
+        .with_optimizer_rules(vec![])
+        .with_physical_optimizer_rules(vec![])
+        .with_query_planner(planner)
+        .build();
 
-    let optimizer = OptdOptimizer::new_in_memory().await?;
-    let planner = Arc::new(OptdQueryPlanner::new(optimizer));
-    // clean up optimizer rules so that we can plug in our own optimizer
-    builder = builder.with_optimizer_rules(vec![]);
-    builder = builder.with_physical_optimizer_rules(vec![]);
-
-    // use optd-bridge query planner
-    builder = builder.with_query_planner(planner);
-
-    let state = builder.build();
-    let ctx = SessionContext::new_with_state(state).enable_url_table();
+    // Create the `SessionContext` and refresh the catalogs to ensure everything is up-to-date.
+    let ctx = SessionContext::new_with_state(session_state).enable_url_table();
     ctx.refresh_catalogs().await?;
+
     Ok(ctx)
 }

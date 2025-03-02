@@ -69,8 +69,9 @@ pub async fn run_queries(queries: &[&str]) -> Result<()> {
         let query_results = pretty::pretty_format_batches(&record_batches)
             .expect("Unable to format query reuslts")
             .to_string();
-        
-        println!("\n\nQuery {i} Results:");
+
+        println!("\n\nQuery {i}:");
+        println!("{query}\n");
         println!("Execution time in Milliseconds: {}", elapsed.as_millis());
         println!("Query Results:\n{query_results}\n\n");
     }

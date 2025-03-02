@@ -1,24 +1,33 @@
-CREATE TABLE employees (
-    id BIGINT,
-    name TEXT,
-    department_id BIGINT
-);
+CREATE TABLE employees (id BIGINT, name TEXT, department_id BIGINT);
 
-CREATE TABLE departments (
-    id BIGINT,
-    department_name TEXT
-);
+CREATE TABLE departments (id BIGINT, department_name TEXT);
 
-INSERT INTO employees VALUES 
+INSERT INTO
+    employees
+VALUES
     (1, 'Alice', 1),
     (2, 'Bob', 2),
     (3, 'Charlie', 1);
 
-INSERT INTO departments VALUES
+INSERT INTO
+    departments
+VALUES
     (1, 'Engineering'),
     (2, 'Marketing');
 
+explain
+SELECT
+    *
+FROM
+    employees
+WHERE
+    id = 2 + 1 - 1
+    and name = 'Bob';
 
-explain SELECT * FROM employees WHERE id = 2 + 1 - 1 and name = 'Bob';
-
-SELECT * FROM employees WHERE id = 2 + 1 - 1 and name = 'Bob';
+SELECT
+    *
+FROM
+    employees
+WHERE
+    id = 2 + 1 - 1
+    and name = 'Bob';
