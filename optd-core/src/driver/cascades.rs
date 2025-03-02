@@ -14,7 +14,7 @@ use crate::{
         goal::GoalId,
         groups::{ExplorationStatus, RelationalGroupId},
         plans::{LogicalPlan, PartialLogicalPlan},
-        properties::PhysicalProperties,
+        properties::{PhysicalProperties, PropertiesData},
         rules::{ImplementationRuleId, RuleId, TransformationRuleId},
     },
 };
@@ -44,7 +44,7 @@ pub struct Driver<M: Memoize> {
         logical_plan: LogicalPlan,
     ) -> Result<Option<StoredPhysicalExpression>> {
         let group_id = ingest_full_logical_plan(&self.memo, &logical_plan).await?;
-        let required_physical_props = PhysicalProperties { data: vec![] };
+        let required_physical_props = Arc::new(PhysicalProperties(PropertiesData::None));
         self.optimize_goal(group_id, required_physical_props).await
     }
 
@@ -54,11 +54,11 @@ pub struct Driver<M: Memoize> {
     pub async fn optimize_goal(
         self: Arc<Self>,
         group_id: RelationalGroupId,
-        required_physical_props: PhysicalProperties,
+        required_physical_props: Arc<PhysicalProperties>,
     ) -> Result<Option<StoredPhysicalExpression>> {
         let goal = self
             .memo
-            .create_or_get_goal(group_id, required_physical_props)
+            .create_or_get_goal(group_id, required_physical_props.clone())
             .await?;
         if self.memo.get_group_exploration_status(group_id).await? == ExplorationStatus::Unexplored
         {
@@ -77,6 +77,7 @@ pub struct Driver<M: Memoize> {
         for (logical_expr_id, logical_expr) in logical_exprs {
             let ctx = self.clone();
             let g = goal.clone();
+            let required_physical_props = required_physical_props.clone();
             join_set.spawn(async move {
                 ctx.optimize_logical_expression(logical_expr, g, group_id, required_physical_props)
                     .await
@@ -109,28 +110,30 @@ pub struct Driver<M: Memoize> {
     #[async_recursion]
     pub async fn optimize_logical_expression(
         self: Arc<Self>,
-        logical_expr: Arc<LogicalExpression>,
+        logical_expr: LogicalExpression,
         goal: GoalId,
         group_id: RelationalGroupId,
-        required_physical_props: PhysicalProperties,
+        required_physical_props: Arc<PhysicalProperties>,
     ) -> Result<(Cost, Option<StoredPhysicalExpression>)> {
         let rules = self.memo.get_matching_rules(&logical_expr).await?;
 
         let mut join_set = JoinSet::new();
         for rule in rules {
             let ctx = self.clone();
-            let expr = logical_expr.clone();
             let g = goal.clone();
+            // we clone here because we have to clone eventually in match_and_apply for the into conversion
+            let logical_expr = logical_expr.clone();
+            let props = required_physical_props.clone();
             match rule {
                 RuleId::ImplementationRule(rule_id) => {
                     join_set.spawn(async move {
-                        ctx.match_and_apply_implementation_rule(expr, rule_id, g)
+                        ctx.match_and_apply_implementation_rule(logical_expr, rule_id, &props)
                             .await
                     });
                 }
                 RuleId::TransformationRule(rule_id) => {
                     join_set.spawn(async move {
-                        ctx.match_and_apply_transformation_rule(expr, rule_id)
+                        ctx.match_and_apply_transformation_rule(logical_expr, rule_id)
                             .await?;
                         return Ok((MAX_COST, None));
                     });
@@ -188,7 +191,7 @@ pub struct Driver<M: Memoize> {
     #[async_recursion]
     pub async fn explore_logical_expression(
         self: Arc<Self>,
-        logical_expr: Arc<LogicalExpression>,
+        logical_expr: LogicalExpression,
         group_id: RelationalGroupId,
     ) -> Result<Vec<StoredLogicalExpression>> {
         let rules = self
@@ -201,26 +204,22 @@ pub struct Driver<M: Memoize> {
             // Check if rule is applied, then:
             let ctx = self.clone();
             let expr = logical_expr.clone();
-            join_set.spawn(async move {
-                // ctx.match_and_apply_transformation_rule(expr, rule, group_id)
-                //     .await;
-                todo!()
-            });
+            join_set
+                .spawn(async move { ctx.match_and_apply_transformation_rule(expr, rule).await });
         }
 
-        // let results = join_set
-        //     .join_all()
-        //     .await
-        //     .into_iter()
-        //     .collect::<Result<Vec<_>>>()?;
+        let results = join_set
+            .join_all()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?;
 
-        // let mut logical_exprs = Vec::new();
-        // for result in results {
-        //     logical_exprs.extend(result);
-        // }
+        let mut logical_exprs = Vec::new();
+        for result in results {
+            logical_exprs.extend(result);
+        }
 
-        // Ok(logical_exprs)
-        todo!()
+        Ok(logical_exprs)
     }
 
     pub async fn match_and_apply_transformation_rule(
@@ -257,13 +256,17 @@ pub struct Driver<M: Memoize> {
         self: &Arc<Self>,
         logical_expr: LogicalExpression,
         rule_id: ImplementationRuleId,
-        goal: GoalId,
+        required_physical_props: &PhysicalProperties,
     ) -> Result<(Cost, Option<StoredPhysicalExpression>)> {
         let partial_logical_input = logical_expr.into();
 
         let mut physical_outputs = self
             .rule_engine
-            .match_and_apply_implementation_rule(&rule_id.0, partial_logical_input)
+            .match_and_apply_implementation_rule(
+                &rule_id.0,
+                partial_logical_input,
+                required_physical_props,
+            )
             .await;
 
         let mut best_cost = MAX_COST;

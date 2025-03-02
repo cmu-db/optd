@@ -29,7 +29,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn create_or_get_goal(
         &self,
         group_id: RelationalGroupId,
-        required_physical_props: PhysicalProperties,
+        required_physical_props: Arc<PhysicalProperties>,
     ) -> Result<GoalId>;
 
     async fn update_goal_optimization_status(
@@ -61,7 +61,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn get_all_logical_exprs_in_group(
         &self,
         group_id: RelationalGroupId,
-    ) -> Result<Vec<(LogicalExpressionId, Arc<LogicalExpression>)>>;
+    ) -> Result<Vec<(LogicalExpressionId, LogicalExpression)>>;
 
     /// Adds a logical expression to an existing group.
     /// Returns the group id of new group if merge happened.
