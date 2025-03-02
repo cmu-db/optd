@@ -1,5 +1,5 @@
 [workspace]
-members = ["optd-core", "optd-dsl", "optd-datafusion", "optd-datafusion-cli"]
+members = ["optd-core", "optd-dsl", "optd-datafusion"]
 resolver = "2"
 
 [workspace.package]

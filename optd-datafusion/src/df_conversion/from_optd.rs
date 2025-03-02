@@ -1,11 +1,9 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
-
+use super::context::OptdDFContext;
 use anyhow::bail;
 use async_recursion::async_recursion;
 use datafusion::{
     arrow::datatypes::{Schema, SchemaRef},
     common::JoinType,
-    datasource::source_as_provider,
     logical_expr::Operator,
     physical_plan::{
         expressions::{BinaryExpr, Column, Literal, NegativeExpr, NotExpr},
@@ -20,34 +18,39 @@ use optd_core::{
     operators::{relational::physical::PhysicalOperator, scalar::ScalarOperator},
     plans::{physical::PhysicalPlan, scalar::ScalarPlan},
 };
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
-use super::OptdDFContext;
-
-impl OptdDFContext<'_> {
+impl OptdDFContext {
     #[async_recursion]
-    pub async fn conv_optd_to_df_relational(
+    pub(crate) async fn optd_to_df_relational(
         &self,
         optimized_plan: &PhysicalPlan,
     ) -> anyhow::Result<Arc<dyn ExecutionPlan>> {
         match &optimized_plan.operator {
             PhysicalOperator::TableScan(table_scan) => {
-                let source = self
-                    .tables
-                    .get(table_scan.table_name.as_str().unwrap())
+                let provider = self
+                    .providers
+                    .get(
+                        table_scan
+                            .table_name
+                            .as_str()
+                            .expect("Table name is not valid"),
+                    )
                     .ok_or_else(|| anyhow::anyhow!("Table not found"))?;
-                let provider = source_as_provider(source)?;
 
                 // TODO(yuchen): support filters inside table scan.
                 let filters = vec![];
                 let plan = provider
-                    .scan(self.session_state, None, &filters, None)
+                    .scan(&self.session_state, None, &filters, None)
                     .await?;
+
                 Ok(plan)
             }
             PhysicalOperator::Filter(filter) => {
-                let input_exec = self.conv_optd_to_df_relational(&filter.child).await?;
+                let input_exec = self.optd_to_df_relational(&filter.child).await?;
                 let physical_expr =
-                    Self::conv_optd_to_df_scalar(&filter.predicate, &input_exec.schema())?;
+                    Self::optd_to_df_scalar(&filter.predicate, &input_exec.schema())?;
+
                 Ok(
                     Arc::new(datafusion::physical_plan::filter::FilterExec::try_new(
                         physical_expr,
@@ -56,14 +59,12 @@ impl OptdDFContext<'_> {
                 )
             }
             PhysicalOperator::Project(project) => {
-                let input_exec = self.conv_optd_to_df_relational(&project.child).await?;
+                let input_exec = self.optd_to_df_relational(&project.child).await?;
                 let physical_exprs = project
                     .fields
                     .iter()
                     .cloned()
-                    .filter_map(|field| {
-                        Self::conv_optd_to_df_scalar(&field, &input_exec.schema()).ok()
-                    })
+                    .filter_map(|field| Self::optd_to_df_scalar(&field, &input_exec.schema()).ok())
                     .enumerate()
                     .map(|(idx, expr)| (expr, format!("col{}", idx)))
                     .collect::<Vec<(Arc<dyn PhysicalExpr>, String)>>();
@@ -74,8 +75,8 @@ impl OptdDFContext<'_> {
                 )
             }
             PhysicalOperator::NestedLoopJoin(join) => {
-                let left_exec = self.conv_optd_to_df_relational(&join.outer).await?;
-                let right_exec = self.conv_optd_to_df_relational(&join.inner).await?;
+                let left_exec = self.optd_to_df_relational(&join.outer).await?;
+                let right_exec = self.optd_to_df_relational(&join.inner).await?;
                 let filter_schema = {
                     let fields = left_exec
                         .schema()
@@ -87,12 +88,11 @@ impl OptdDFContext<'_> {
                     Schema::new_with_metadata(fields, HashMap::new())
                 };
 
-                let physical_expr = Self::conv_optd_to_df_scalar(
-                    &join.condition,
-                    &Arc::new(filter_schema.clone()),
-                )?;
+                let physical_expr =
+                    Self::optd_to_df_scalar(&join.condition, &Arc::new(filter_schema.clone()))?;
 
-                let join_type = JoinType::from_str(join.join_type.as_str().unwrap())?;
+                let join_type =
+                    JoinType::from_str(join.join_type.as_str().expect("Invalid join type"))?;
 
                 let mut column_idxs = vec![];
                 for i in 0..left_exec.schema().fields().len() {
@@ -127,7 +127,7 @@ impl OptdDFContext<'_> {
         }
     }
 
-    pub fn conv_optd_to_df_scalar(
+    pub(crate) fn optd_to_df_scalar(
         pred: &ScalarPlan,
         context: &SchemaRef,
     ) -> anyhow::Result<Arc<dyn PhysicalExpr>> {
@@ -135,8 +135,8 @@ impl OptdDFContext<'_> {
             ScalarOperator::ColumnRef(column_ref) => {
                 let idx = column_ref.column_index.as_i64().unwrap() as usize;
                 Ok(Arc::new(
-                    // Datafusion checks if col expr name matches the schema, so we have to supply the name inferred by datafusion,
-                    // instead of using out own logical properties
+                    // Datafusion checks if col expr name matches the schema, so we have to supply
+                    // the name inferred by datafusion, instead of using out own logical properties.
                     Column::new(context.fields()[idx].name(), idx),
                 ))
             }
@@ -151,11 +151,12 @@ impl OptdDFContext<'_> {
                     OperatorData::Struct(..) => todo!(),
                     OperatorData::Array(_) => todo!(),
                 };
+
                 Ok(Arc::new(Literal::new(value)))
             }
             ScalarOperator::BinaryOp(binary_op) => {
-                let left = Self::conv_optd_to_df_scalar(&binary_op.left, context)?;
-                let right = Self::conv_optd_to_df_scalar(&binary_op.right, context)?;
+                let left = Self::optd_to_df_scalar(&binary_op.left, context)?;
+                let right = Self::optd_to_df_scalar(&binary_op.right, context)?;
                 // TODO(yuchen): really need the enums!
                 let op = match binary_op.kind.as_str().unwrap() {
                     "add" => Operator::Plus,
@@ -163,10 +164,11 @@ impl OptdDFContext<'_> {
                     "equal" => Operator::Eq,
                     s => panic!("Unsupported binary operator: {}", s),
                 };
+
                 Ok(Arc::new(BinaryExpr::new(left, op, right)) as Arc<dyn PhysicalExpr>)
             }
             ScalarOperator::UnaryOp(unary_op) => {
-                let child = Self::conv_optd_to_df_scalar(&unary_op.child, context)?;
+                let child = Self::optd_to_df_scalar(&unary_op.child, context)?;
                 // TODO(yuchen): really need the enums!
                 match unary_op.kind.as_str().unwrap() {
                     "not" => Ok(Arc::new(NotExpr::new(child)) as Arc<dyn PhysicalExpr>),
@@ -181,14 +183,14 @@ impl OptdDFContext<'_> {
                     s => bail!("Unsupported logic operator: {}", s),
                 };
                 let mut children = logic_op.children.iter();
-                let first_child = Self::conv_optd_to_df_scalar(
+                let first_child = Self::optd_to_df_scalar(
                     children
                         .next()
                         .expect("LogicOp should have at least one child"),
                     context,
                 )?;
                 children.try_fold(first_child, |acc, expr| {
-                    let expr = Self::conv_optd_to_df_scalar(expr, context)?;
+                    let expr = Self::optd_to_df_scalar(expr, context)?;
                     Ok(Arc::new(BinaryExpr::new(acc, op, expr)) as Arc<dyn PhysicalExpr>)
                 })
             }
