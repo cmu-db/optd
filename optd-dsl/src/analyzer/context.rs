@@ -11,7 +11,7 @@ use std::{collections::HashMap, sync::Arc};
 ///
 /// The current (innermost) scope is mutable, while all previous scopes
 /// are immutable and stored as Arc for efficient cloning.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Context {
     /// Previous scopes (outer lexical scopes), stored as immutable Arc references
     previous_scopes: Vec<Arc<HashMap<Identifier, Value>>>,

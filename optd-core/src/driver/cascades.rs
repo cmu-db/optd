@@ -1,5 +1,6 @@
 use anyhow::Result;
 use async_recursion::async_recursion;
+use optd_dsl::analyzer::context::Context;
 use std::{char::MAX, sync::Arc};
 use tokio::task::JoinSet;
 
@@ -25,14 +26,10 @@ pub struct Driver<M: Memoize> {
 
 impl<M: Memoize> Driver<M> {
     pub fn new(memo: M) -> Arc<Self> {
-        todo!()
-        /*Arc::new_cyclic(|this| Self {
+        Arc::new_cyclic(|this| Self {
             memo,
-            rule_engine: Arc::new(Engine {
-                context: this.upgrade().unwrap(),
-                driver: todo!(),
-            }),
-        })*/
+            rule_engine: Engine::new(Context::default(), this.upgrade().unwrap())
+        })
     }
     /// The main entry point for the optimizer.
     /// If the cost is infinite, it will return None.

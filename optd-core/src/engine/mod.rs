@@ -34,6 +34,11 @@ pub struct Engine<M: Memoize> {
     /// The optimization driver instance
     driver: Arc<Driver<M>>,
 }
+impl<M: Memoize> Engine<M> {
+    pub fn new(context: Context, driver: Arc<Driver<M>>) -> Self {
+        Self { context, driver }
+    }
+}
 
 /*impl<M: Memoize> Engine<M> {
     /// Creates a new engine with the given context and driver.
