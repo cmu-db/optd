@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use super::{
-    groups::{RelationalGroupId, ScalarGroupId},
+    goal::PhysicalGoalId,
+    groups::{LogicalGroupId, ScalarGroupId},
     operators::{Child, LogicalOperator, PhysicalOperator, ScalarOperator},
     plans::{PartialLogicalPlan, PartialScalarPlan},
 };
@@ -18,9 +19,9 @@ pub struct ScalarExpressionId(pub i64);
 pub type StoredLogicalExpression = (LogicalExpression, LogicalExpressionId);
 pub type StoredPhysicalExpression = (PhysicalExpression, PhysicalExpressionId);
 
-pub type LogicalExpression = LogicalOperator<RelationalGroupId, ScalarGroupId>;
+pub type LogicalExpression = LogicalOperator<LogicalGroupId, ScalarGroupId>;
 pub type ScalarExpression = ScalarOperator<ScalarGroupId>;
-pub type PhysicalExpression = PhysicalOperator<RelationalGroupId, ScalarGroupId>;
+pub type PhysicalExpression = PhysicalOperator<PhysicalGoalId, ScalarGroupId>;
 
 impl Into<PartialLogicalPlan> for LogicalExpression {
     fn into(self) -> PartialLogicalPlan {

@@ -80,6 +80,7 @@ impl<M: Memoize> Engine<M> {
         &self,
         _rule_name: &str,
         _plan: PartialLogicalPlan,
+        _props: &PhysicalProperties,
     ) -> PartialPhysicalPlanStream {
         todo!()
     }

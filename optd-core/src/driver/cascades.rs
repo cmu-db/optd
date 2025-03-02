@@ -11,8 +11,8 @@ use crate::{
     ir::{
         cost::{Cost, MAX_COST},
         expressions::{LogicalExpression, StoredLogicalExpression, StoredPhysicalExpression},
-        goal::GoalId,
-        groups::{ExplorationStatus, RelationalGroupId},
+        goal::PhysicalGoalId,
+        groups::{ExplorationStatus, LogicalGroupId},
         plans::{LogicalPlan, PartialLogicalPlan},
         properties::{PhysicalProperties, PropertiesData},
         rules::{ImplementationRuleId, RuleId, TransformationRuleId},
@@ -30,7 +30,7 @@ pub struct Driver<M: Memoize> {
     pub rule_engine: Engine<M>,
 }
 
-/*impl<M: Memoize> Driver<M> {
+impl<M: Memoize> Driver<M> {
     pub fn new(memo: M) -> Arc<Self> {
         Arc::new_cyclic(|this| Self {
             memo,
@@ -54,7 +54,7 @@ pub struct Driver<M: Memoize> {
     #[async_recursion]
     pub async fn optimize_goal(
         self: Arc<Self>,
-        group_id: RelationalGroupId,
+        group_id: LogicalGroupId,
         required_physical_props: Arc<PhysicalProperties>,
     ) -> Result<Option<StoredPhysicalExpression>> {
         let goal = self
@@ -112,8 +112,8 @@ pub struct Driver<M: Memoize> {
     pub async fn optimize_logical_expression(
         self: Arc<Self>,
         logical_expr: LogicalExpression,
-        goal: GoalId,
-        group_id: RelationalGroupId,
+        goal: PhysicalGoalId,
+        group_id: LogicalGroupId,
         required_physical_props: Arc<PhysicalProperties>,
     ) -> Result<(Cost, Option<StoredPhysicalExpression>)> {
         let rules = self.memo.get_matching_rules(&logical_expr).await?;
@@ -164,7 +164,7 @@ pub struct Driver<M: Memoize> {
     #[async_recursion]
     pub async fn explore_relation_group(
         self: Arc<Self>,
-        group_id: RelationalGroupId,
+        group_id: LogicalGroupId,
     ) -> Result<Vec<StoredLogicalExpression>> {
         let logical_exprs = self.memo.get_all_logical_exprs_in_group(group_id).await?;
 
@@ -193,7 +193,7 @@ pub struct Driver<M: Memoize> {
     pub async fn explore_logical_expression(
         self: Arc<Self>,
         logical_expr: LogicalExpression,
-        group_id: RelationalGroupId,
+        group_id: LogicalGroupId,
     ) -> Result<Vec<StoredLogicalExpression>> {
         let rules = self
             .memo
@@ -293,4 +293,3 @@ pub struct Driver<M: Memoize> {
         Ok((best_cost, best_physical_output))
     }
 }
-*/
