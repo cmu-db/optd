@@ -36,7 +36,6 @@ pub enum PartialLogicalPlan {
 pub enum PartialScalarPlan {
     PartialMaterialized {
         node: ScalarOperator<Arc<PartialScalarPlan>>,
-        group_id: ScalarGroupId,
     },
     UnMaterialized(ScalarGroupId),
 }
@@ -49,4 +48,16 @@ pub enum PartialPhysicalPlan {
         group_id: RelationalGroupId,
     },
     UnMaterialized(GoalId),
+}
+
+impl From<RelationalGroupId> for Arc<PartialLogicalPlan> {
+    fn from(group_id: RelationalGroupId) -> Arc<PartialLogicalPlan> {
+        Arc::new(PartialLogicalPlan::UnMaterialized(group_id))
+    }
+}
+
+impl From<ScalarGroupId> for Arc<PartialScalarPlan> {
+    fn from(group_id: ScalarGroupId) -> Arc<PartialScalarPlan> {
+        Arc::new(PartialScalarPlan::UnMaterialized(group_id))
+    }
 }
