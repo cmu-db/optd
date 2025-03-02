@@ -235,7 +235,7 @@ fn evaluate_rust_udf_call(
 fn evaluate_reference(ident: String, context: Context) -> ValueStream {
     propagate_success(context.lookup(&ident).expect("Variable not found").clone()).boxed()
 }
-/*
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -728,4 +728,3 @@ mod tests {
         assert!(matches!(&result[0].0, Literal(Int64(n)) if *n == 42));
     }
 }
-*/

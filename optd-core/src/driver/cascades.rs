@@ -1,7 +1,6 @@
-use std::{char::MAX, sync::Arc};
-
 use anyhow::Result;
 use async_recursion::async_recursion;
+use std::{char::MAX, sync::Arc};
 use tokio::task::JoinSet;
 
 use crate::{
@@ -13,7 +12,7 @@ use crate::{
         groups::{ExplorationStatus, RelationalGroupId},
         plans::{LogicalPlan, PartialLogicalPlan},
         properties::PhysicalProperties,
-        rules::{RuleId, TransformationRuleId},
+        rules::{ImplementationRuleId, RuleId, TransformationRuleId},
     },
 };
 
@@ -195,23 +194,25 @@ impl<M: Memoize> Driver<M> {
             let ctx = self.clone();
             let expr = logical_expr.clone();
             join_set.spawn(async move {
-                ctx.match_and_apply_transformation_rule(expr, rule, group_id)
-                    .await
+                // ctx.match_and_apply_transformation_rule(expr, rule, group_id)
+                //     .await;
+                todo!()
             });
         }
 
-        let results = join_set
-            .join_all()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>>>()?;
+        // let results = join_set
+        //     .join_all()
+        //     .await
+        //     .into_iter()
+        //     .collect::<Result<Vec<_>>>()?;
 
-        let mut logical_exprs = Vec::new();
-        for result in results {
-            logical_exprs.extend(result);
-        }
+        // let mut logical_exprs = Vec::new();
+        // for result in results {
+        //     logical_exprs.extend(result);
+        // }
 
-        Ok(logical_exprs)
+        // Ok(logical_exprs)
+        todo!()
     }
 
     pub async fn match_and_apply_transformation_rule(
@@ -219,56 +220,58 @@ impl<M: Memoize> Driver<M> {
         logical_expr: Arc<LogicalExpression>,
         rule_id: TransformationRuleId,
     ) -> Result<Vec<StoredLogicalExpression>> {
-        let partial_logical_input = PartialLogicalPlan::from_expr(&logical_expr);
+        // let partial_logical_input = PartialLogicalPlan::from_expr(&logical_expr);
 
-        let partial_logical_outputs = self
-            .rule_engine
-            .match_and_apply_transformation_rule(rule_id, partial_logical_input)
-            .await;
+        // let partial_logical_outputs = self
+        //     .rule_engine
+        //     .match_and_apply_transformation_rule(rule_id, partial_logical_input)
+        //     .await;
 
-        let mut partial_logical_outputs = Box::pin(partial_logical_outputs);
+        // let mut partial_logical_outputs = Box::pin(partial_logical_outputs);
 
-        let mut logical_exprs = Vec::new();
-        while let Some(partial_logical_output) = partial_logical_outputs.next().await {
-            let (logical_expr, logical_expr_id) =
-                ingest_partial_logical_plan(&self.memo, &partial_logical_output).await?;
-            logical_exprs.push((logical_expr, logical_expr_id));
-        }
+        // let mut logical_exprs = Vec::new();
+        // while let Some(partial_logical_output) = partial_logical_outputs.next().await {
+        //     let (logical_expr, logical_expr_id) =
+        //         ingest_partial_logical_plan(&self.memo, &partial_logical_output).await?;
+        //     logical_exprs.push((logical_expr, logical_expr_id));
+        // }
 
-        Ok(logical_exprs)
+        // Ok(logical_exprs)
+        todo!()
     }
 
     pub async fn match_and_apply_implementation_rule(
         self: &Arc<Self>,
         logical_expr: Arc<LogicalExpression>,
         rule_id: ImplementationRuleId,
-        goal: Arc<Goal>,
+        goal: GoalId,
     ) -> Result<(Cost, Option<StoredPhysicalExpression>)> {
-        let partial_logical_input = PartialLogicalPlan::from_expr(&logical_expr);
+        // let partial_logical_input = PartialLogicalPlan::from_expr(&logical_expr);
 
-        let physical_outputs = self
-            .rule_engine
-            .match_and_apply_implementation_rule(
-                rule_id,
-                partial_logical_input,
-                &goal.required_physical_properties,
-            )
-            .await;
+        // let physical_outputs = self
+        //     .rule_engine
+        //     .match_and_apply_implementation_rule(
+        //         rule_id,
+        //         partial_logical_input,
+        //         &goal.required_physical_properties,
+        //     )
+        //     .await;
 
-        let mut physical_outputs = Box::pin(physical_outputs);
+        // let mut physical_outputs = Box::pin(physical_outputs);
 
-        let mut best_cost = MAX_COST;
-        let mut best_physical_output = None;
+        // let mut best_cost = MAX_COST;
+        // let mut best_physical_output = None;
 
-        while let Some(physical_output) = physical_outputs.next().await {
-            let (cost, top_phyiscal_expression) =
-                ingest_partial_physical_plan(&self.memo, &physical_output).await?;
-            if cost < best_cost {
-                best_cost = cost;
-                best_physical_output = Some(top_phyiscal_expression);
-            }
-        }
+        // while let Some(physical_output) = physical_outputs.next().await {
+        //     let (cost, top_phyiscal_expression) =
+        //         ingest_partial_physical_plan(&self.memo, &physical_output).await?;
+        //     if cost < best_cost {
+        //         best_cost = cost;
+        //         best_physical_output = Some(top_phyiscal_expression);
+        //     }
+        // }
 
-        Ok((best_cost, best_physical_output))
+        // Ok((best_cost, best_physical_output))
+        todo!()
     }
 }
