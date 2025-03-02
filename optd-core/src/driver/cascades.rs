@@ -24,6 +24,7 @@ use super::{
     memo::Memoize,
 };
 
+#[derive(Debug, Clone)]
 pub struct Driver<M: Memoize> {
     pub memo: M,
     pub rule_engine: Engine<M>,

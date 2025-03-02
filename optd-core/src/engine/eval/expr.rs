@@ -10,7 +10,7 @@ use crate::{
 use futures::StreamExt;
 use optd_dsl::analyzer::{
     context::Context,
-    hir::{BinOp, CoreData, Expr, FunKind, Literal, MatchArm, UnaryOp, Value},
+    hir::{ArcExpr, BinOp, CoreData, Expr, FunKind, Literal, MatchArm, UnaryOp, Value},
 };
 
 use super::{
@@ -21,31 +21,37 @@ use CoreData::*;
 use Expr::*;
 use FunKind::*;
 
-impl Evaluate for Expr {
+impl Evaluate for ArcExpr {
     /// Evaluates an expression to a stream of possible values.
     ///
-    /// This function consumes the expression, dispatching to specialized
+    /// This function takes a reference to the expression, dispatching to specialized
     /// handlers for each expression type.
     ///
     /// # Parameters
-    /// * `self` - The expression to evaluate (consumed)
+    /// * `self` - Reference to the expression to evaluate
     /// * `context` - The evaluation context containing variable bindings
     ///
     /// # Returns
     /// A stream of all possible evaluation results
     fn evaluate(self, context: Context) -> ValueStream {
-        match self {
-            PatternMatch(expr, match_arms) => evaluate_pattern_match(*expr, match_arms, context),
-            IfThenElse(cond, then_expr, else_expr) => {
-                evaluate_if_then_else(*cond, *then_expr, *else_expr, context)
+        match &*self {
+            PatternMatch(expr, match_arms) => {
+                evaluate_pattern_match(expr.clone(), match_arms.clone(), context)
             }
-            Let(ident, assignee, after) => evaluate_let_binding(ident, *assignee, *after, context),
-            Binary(left, op, right) => evaluate_binary_expr(*left, op, *right, context),
-            Unary(op, expr) => evaluate_unary_expr(op, *expr, context),
-            Call(fun, args) => evaluate_function_call(*fun, args, context),
-            Ref(ident) => evaluate_reference(ident, context),
-            CoreExpr(expr) => evaluate_core_expr(expr, context),
-            CoreVal(val) => propagate_success(val).boxed(),
+            IfThenElse(cond, then_expr, else_expr) => {
+                evaluate_if_then_else(cond.clone(), then_expr.clone(), else_expr.clone(), context)
+            }
+            Let(ident, assignee, after) => {
+                evaluate_let_binding(ident.clone(), assignee.clone(), after.clone(), context)
+            }
+            Binary(left, op, right) => {
+                evaluate_binary_expr(left.clone(), op.clone(), right.clone(), context)
+            }
+            Unary(op, expr) => evaluate_unary_expr(op.clone(), expr.clone(), context),
+            Call(fun, args) => evaluate_function_call(fun.clone(), args.clone(), context),
+            Ref(ident) => evaluate_reference(ident.clone(), context),
+            CoreExpr(expr) => evaluate_core_expr(expr.clone(), context),
+            CoreVal(val) => propagate_success(val.clone()).boxed(),
         }
     }
 }
@@ -62,7 +68,11 @@ impl Evaluate for Expr {
 ///
 /// # Returns
 /// A stream of all possible evaluation results
-fn evaluate_pattern_match(expr: Expr, match_arms: Vec<MatchArm>, context: Context) -> ValueStream {
+fn evaluate_pattern_match(
+    expr: ArcExpr,
+    match_arms: Vec<MatchArm>,
+    context: Context,
+) -> ValueStream {
     // First evaluate the expression
     expr.evaluate(context.clone())
         .flat_map(move |expr_result| {
@@ -82,9 +92,9 @@ fn evaluate_pattern_match(expr: Expr, match_arms: Vec<MatchArm>, context: Contex
 /// First evaluates the condition, then either the 'then' branch if the condition is true,
 /// or the 'else' branch if the condition is false.
 fn evaluate_if_then_else(
-    cond: Expr,
-    then_expr: Expr,
-    else_expr: Expr,
+    cond: ArcExpr,
+    then_expr: ArcExpr,
+    else_expr: ArcExpr,
     context: Context,
 ) -> ValueStream {
     cond.evaluate(context.clone())
@@ -116,8 +126,8 @@ fn evaluate_if_then_else(
 /// then evaluates the 'after' expression in the updated context.
 fn evaluate_let_binding(
     ident: String,
-    assignee: Expr,
-    after: Expr,
+    assignee: ArcExpr,
+    after: ArcExpr,
     context: Context,
 ) -> ValueStream {
     assignee
@@ -139,8 +149,9 @@ fn evaluate_let_binding(
 /// Evaluates a binary expression.
 ///
 /// Evaluates both operands in all possible combinations, then applies the binary operation.
-fn evaluate_binary_expr(left: Expr, op: BinOp, right: Expr, context: Context) -> ValueStream {
-    evaluate_all_combinations(vec![left, right].into_iter(), context)
+fn evaluate_binary_expr(left: ArcExpr, op: BinOp, right: ArcExpr, context: Context) -> ValueStream {
+    let exprs = vec![left, right];
+    evaluate_all_combinations(exprs.into_iter(), context)
         .map(move |combo_result| {
             combo_result.map(|mut values| {
                 let right_val = values.pop().expect("Right operand not found");
@@ -154,7 +165,7 @@ fn evaluate_binary_expr(left: Expr, op: BinOp, right: Expr, context: Context) ->
 /// Evaluates a unary expression.
 ///
 /// Evaluates the operand, then applies the unary operation.
-fn evaluate_unary_expr(op: UnaryOp, expr: Expr, context: Context) -> ValueStream {
+fn evaluate_unary_expr(op: UnaryOp, expr: ArcExpr, context: Context) -> ValueStream {
     expr.evaluate(context)
         .map(move |expr_result| expr_result.map(|value| eval_unary_op(&op, value)))
         .boxed()
@@ -164,7 +175,7 @@ fn evaluate_unary_expr(op: UnaryOp, expr: Expr, context: Context) -> ValueStream
 ///
 /// First evaluates the function expression, then the arguments,
 /// and finally applies the function to the arguments.
-fn evaluate_function_call(fun: Expr, args: Vec<Expr>, context: Context) -> ValueStream {
+fn evaluate_function_call(fun: ArcExpr, args: Vec<ArcExpr>, context: Context) -> ValueStream {
     let fun_stream = fun.evaluate(context.clone());
 
     fun_stream
@@ -194,8 +205,8 @@ fn evaluate_function_call(fun: Expr, args: Vec<Expr>, context: Context) -> Value
 /// then evaluates the function body in that context.
 fn evaluate_closure_call(
     params: Vec<String>,
-    body: Box<Expr>,
-    args: Vec<Expr>,
+    body: ArcExpr,
+    args: Vec<ArcExpr>,
     context: Context,
 ) -> ValueStream {
     evaluate_all_combinations(args.into_iter(), context.clone())
@@ -209,7 +220,7 @@ fn evaluate_closure_call(
                     params.iter().zip(args).for_each(|(p, a)| {
                         new_ctx.bind(p.clone(), a);
                     });
-                    (*body).evaluate(new_ctx)
+                    body.evaluate(new_ctx)
                 }),
             )
         })
@@ -221,7 +232,7 @@ fn evaluate_closure_call(
 /// Evaluates the arguments, then calls the Rust function with those arguments.
 fn evaluate_rust_udf_call(
     udf: fn(Vec<Value>) -> Value,
-    args: Vec<Expr>,
+    args: Vec<ArcExpr>,
     context: Context,
 ) -> ValueStream {
     evaluate_all_combinations(args.into_iter(), context)
@@ -241,8 +252,11 @@ mod tests {
     use super::*;
     use crate::engine::utils::streams::ValueStream;
     use futures::executor::block_on_stream;
-    use optd_dsl::analyzer::hir::{BinOp, CoreData, Literal, MatchArm, Pattern, UnaryOp, Value};
+    use optd_dsl::analyzer::hir::{
+        ArcExpr, BinOp, CoreData, Literal, MatchArm, Pattern, UnaryOp, Value,
+    };
     use std::collections::HashMap;
+    use std::sync::Arc;
     use BinOp::*;
     use UnaryOp::*;
 
@@ -263,6 +277,11 @@ mod tests {
         Value(Literal(Bool(b)))
     }
 
+    // Helper to wrap expressions in Arc
+    fn arc(expr: Expr) -> ArcExpr {
+        Arc::new(expr)
+    }
+
     // Helper to collect all successful values from a stream
     fn collect_stream_values(stream: ValueStream) -> Vec<Value> {
         block_on_stream(stream).filter_map(Result::ok).collect()
@@ -280,7 +299,7 @@ mod tests {
     #[test]
     fn test_evaluate_core_val() {
         // Test evaluating a core value directly
-        let expr = CoreVal(int_val(42));
+        let expr = arc(CoreVal(int_val(42)));
         let context = Context::new(HashMap::new());
 
         let stream = expr.evaluate(context);
@@ -293,15 +312,15 @@ mod tests {
     #[test]
     fn test_evaluate_let_binding() {
         // Test a basic let binding: let x = 42 in x + 10
-        let expr = Let(
+        let expr = arc(Let(
             "x".to_string(),
-            Box::new(CoreVal(int_val(42))),
-            Box::new(Binary(
-                Box::new(Ref("x".to_string())),
+            arc(CoreVal(int_val(42))),
+            arc(Binary(
+                arc(Ref("x".to_string())),
                 Add,
-                Box::new(CoreVal(int_val(10))),
+                arc(CoreVal(int_val(10))),
             )),
-        );
+        ));
 
         let context = Context::new(HashMap::new());
         let stream = expr.evaluate(context);
@@ -317,23 +336,23 @@ mod tests {
         // let x = 5 in
         //   let y = x * 2 in
         //     x + y
-        let expr = Let(
+        let expr = arc(Let(
             "x".to_string(),
-            Box::new(CoreVal(int_val(5))),
-            Box::new(Let(
+            arc(CoreVal(int_val(5))),
+            arc(Let(
                 "y".to_string(),
-                Box::new(Binary(
-                    Box::new(Ref("x".to_string())),
+                arc(Binary(
+                    arc(Ref("x".to_string())),
                     Mul,
-                    Box::new(CoreVal(int_val(2))),
+                    arc(CoreVal(int_val(2))),
                 )),
-                Box::new(Binary(
-                    Box::new(Ref("x".to_string())),
+                arc(Binary(
+                    arc(Ref("x".to_string())),
                     Add,
-                    Box::new(Ref("y".to_string())),
+                    arc(Ref("y".to_string())),
                 )),
             )),
-        );
+        ));
 
         let context = Context::new(HashMap::new());
         let stream = expr.evaluate(context);
@@ -348,11 +367,11 @@ mod tests {
         let context = Context::new(HashMap::new());
 
         // Test true condition: if true then 42 else 24
-        let true_expr = IfThenElse(
-            Box::new(CoreVal(bool_val(true))),
-            Box::new(CoreVal(int_val(42))),
-            Box::new(CoreVal(int_val(24))),
-        );
+        let true_expr = arc(IfThenElse(
+            arc(CoreVal(bool_val(true))),
+            arc(CoreVal(int_val(42))),
+            arc(CoreVal(int_val(24))),
+        ));
 
         let stream = true_expr.evaluate(context.clone());
         let values = collect_stream_values(stream);
@@ -361,11 +380,11 @@ mod tests {
         assert!(matches!(&values[0].0, Literal(Int64(42))));
 
         // Test false condition: if false then 42 else 24
-        let false_expr = IfThenElse(
-            Box::new(CoreVal(bool_val(false))),
-            Box::new(CoreVal(int_val(42))),
-            Box::new(CoreVal(int_val(24))),
-        );
+        let false_expr = arc(IfThenElse(
+            arc(CoreVal(bool_val(false))),
+            arc(CoreVal(int_val(42))),
+            arc(CoreVal(int_val(24))),
+        ));
 
         let stream = false_expr.evaluate(context);
         let values = collect_stream_values(stream);
@@ -378,15 +397,15 @@ mod tests {
     fn test_evaluate_if_then_else_with_computation() {
         // Test if-then-else with computed condition:
         // if 5 < 10 then "less" else "greater"
-        let expr = IfThenElse(
-            Box::new(Binary(
-                Box::new(CoreVal(int_val(5))),
+        let expr = arc(IfThenElse(
+            arc(Binary(
+                arc(CoreVal(int_val(5))),
                 Lt,
-                Box::new(CoreVal(int_val(10))),
+                arc(CoreVal(int_val(10))),
             )),
-            Box::new(CoreVal(string_val("less"))),
-            Box::new(CoreVal(string_val("greater"))),
-        );
+            arc(CoreVal(string_val("less"))),
+            arc(CoreVal(string_val("greater"))),
+        ));
 
         let context = Context::new(HashMap::new());
         let stream = expr.evaluate(context);
@@ -401,11 +420,11 @@ mod tests {
         let context = Context::new(HashMap::new());
 
         // Test addition: 5 + 7
-        let add_expr = Binary(
-            Box::new(CoreVal(int_val(5))),
+        let add_expr = arc(Binary(
+            arc(CoreVal(int_val(5))),
             Add,
-            Box::new(CoreVal(int_val(7))),
-        );
+            arc(CoreVal(int_val(7))),
+        ));
 
         let stream = add_expr.evaluate(context.clone());
         let values = collect_stream_values(stream);
@@ -414,19 +433,19 @@ mod tests {
         assert!(matches!(&values[0].0, Literal(Int64(12))));
 
         // Test complex expression: (3 * 4) + (10 / 2)
-        let complex_expr = Binary(
-            Box::new(Binary(
-                Box::new(CoreVal(int_val(3))),
+        let complex_expr = arc(Binary(
+            arc(Binary(
+                arc(CoreVal(int_val(3))),
                 Mul,
-                Box::new(CoreVal(int_val(4))),
+                arc(CoreVal(int_val(4))),
             )),
             Add,
-            Box::new(Binary(
-                Box::new(CoreVal(int_val(10))),
+            arc(Binary(
+                arc(CoreVal(int_val(10))),
                 Div,
-                Box::new(CoreVal(int_val(2))),
+                arc(CoreVal(int_val(2))),
             )),
-        );
+        ));
 
         let stream = complex_expr.evaluate(context);
         let values = collect_stream_values(stream);
@@ -440,7 +459,7 @@ mod tests {
         let context = Context::new(HashMap::new());
 
         // Test negation: -42
-        let neg_expr = Unary(Neg, Box::new(CoreVal(int_val(42))));
+        let neg_expr = arc(Unary(Neg, arc(CoreVal(int_val(42)))));
 
         let stream = neg_expr.evaluate(context.clone());
         let values = collect_stream_values(stream);
@@ -449,7 +468,7 @@ mod tests {
         assert!(matches!(&values[0].0, Literal(Int64(-42))));
 
         // Test logical not: !true
-        let not_expr = Unary(Not, Box::new(CoreVal(bool_val(true))));
+        let not_expr = arc(Unary(Not, arc(CoreVal(bool_val(true)))));
 
         let stream = not_expr.evaluate(context);
         let values = collect_stream_values(stream);
@@ -464,7 +483,7 @@ mod tests {
         let context = create_context_with_bindings(vec![("x".to_string(), int_val(42))]);
 
         // Test referencing the variable
-        let expr = Ref("x".to_string());
+        let expr = arc(Ref("x".to_string()));
 
         let stream = expr.evaluate(context);
         let values = collect_stream_values(stream);
@@ -478,19 +497,22 @@ mod tests {
         let context = Context::new(HashMap::new());
 
         // Create a closure: fn(x) { x + 1 }
-        let closure_body = Binary(
-            Box::new(Ref("x".to_string())),
+        let closure_body = arc(Binary(
+            arc(Ref("x".to_string())),
             Add,
-            Box::new(CoreVal(int_val(1))),
-        );
+            arc(CoreVal(int_val(1))),
+        ));
 
         let closure_val = Value(Function(Closure(
             vec!["x".to_string()],
-            Box::new(closure_body),
+            closure_body.clone(),
         )));
 
         // Call the closure with argument 5
-        let call_expr = Call(Box::new(CoreVal(closure_val)), vec![CoreVal(int_val(5))]);
+        let call_expr = arc(Call(
+            arc(CoreVal(closure_val)),
+            vec![arc(CoreVal(int_val(5)))],
+        ));
 
         let stream = call_expr.evaluate(context);
         let values = collect_stream_values(stream);
@@ -515,7 +537,7 @@ mod tests {
         let udf_val = Value(Function(RustUDF(square_udf)));
 
         // Call the UDF with argument 7
-        let call_expr = Call(Box::new(CoreVal(udf_val)), vec![CoreVal(int_val(7))]);
+        let call_expr = arc(Call(arc(CoreVal(udf_val)), vec![arc(CoreVal(int_val(7)))]));
 
         let stream = call_expr.evaluate(context);
         let values = collect_stream_values(stream);
@@ -532,13 +554,13 @@ mod tests {
         // match 42 {
         //   x @ _ => x
         // }
-        let match_expr = PatternMatch(
-            Box::new(CoreVal(int_val(42))),
+        let match_expr = arc(PatternMatch(
+            arc(CoreVal(int_val(42))),
             vec![MatchArm {
-                pattern: Bind("x".to_string(), Box::new(Wildcard)),
-                expr: Ref("x".to_string()),
+                pattern: Bind("x".to_string(), Wildcard.into()),
+                expr: arc(Ref("x".to_string())),
             }],
-        );
+        ));
 
         let stream = match_expr.evaluate(context);
         let values = collect_stream_values(stream);
@@ -557,23 +579,23 @@ mod tests {
         //   42 => "forty-two"
         //   _ => "other"
         // }
-        let match_expr = PatternMatch(
-            Box::new(CoreVal(int_val(42))),
+        let match_expr = arc(PatternMatch(
+            arc(CoreVal(int_val(42))),
             vec![
                 MatchArm {
                     pattern: Pattern::Literal(Int64(50)),
-                    expr: CoreVal(string_val("fifty")),
+                    expr: arc(CoreVal(string_val("fifty"))),
                 },
                 MatchArm {
                     pattern: Pattern::Literal(Int64(42)),
-                    expr: CoreVal(string_val("forty-two")),
+                    expr: arc(CoreVal(string_val("forty-two"))),
                 },
                 MatchArm {
                     pattern: Wildcard,
-                    expr: CoreVal(string_val("other")),
+                    expr: arc(CoreVal(string_val("other"))),
                 },
             ],
-        );
+        ));
 
         let stream = match_expr.evaluate(context);
         let values = collect_stream_values(stream);
@@ -596,19 +618,19 @@ mod tests {
         // match Person("Alice", 30) {
         //   Person(name, age) => name
         // }
-        let match_expr = PatternMatch(
-            Box::new(CoreVal(person)),
+        let match_expr = arc(PatternMatch(
+            arc(CoreVal(person)),
             vec![MatchArm {
                 pattern: Pattern::Struct(
                     "Person".to_string(),
                     vec![
-                        Bind("name".to_string(), Box::new(Wildcard)),
-                        Bind("age".to_string(), Box::new(Wildcard)),
+                        Bind("name".to_string(), Wildcard.into()),
+                        Bind("age".to_string(), Wildcard.into()),
                     ],
                 ),
-                expr: Ref("name".to_string()),
+                expr: arc(Ref("name".to_string())),
             }],
-        );
+        ));
 
         let stream = match_expr.evaluate(context);
         let values = collect_stream_values(stream);
@@ -628,31 +650,31 @@ mod tests {
         //       x + y
         //     else
         //       x * y
-        let expr = Let(
+        let expr = arc(Let(
             "x".to_string(),
-            Box::new(CoreVal(int_val(10))),
-            Box::new(Let(
+            arc(CoreVal(int_val(10))),
+            arc(Let(
                 "y".to_string(),
-                Box::new(CoreVal(int_val(20))),
-                Box::new(IfThenElse(
-                    Box::new(Binary(
-                        Box::new(Ref("x".to_string())),
+                arc(CoreVal(int_val(20))),
+                arc(IfThenElse(
+                    arc(Binary(
+                        arc(Ref("x".to_string())),
                         Lt,
-                        Box::new(Ref("y".to_string())),
+                        arc(Ref("y".to_string())),
                     )),
-                    Box::new(Binary(
-                        Box::new(Ref("x".to_string())),
+                    arc(Binary(
+                        arc(Ref("x".to_string())),
                         Add,
-                        Box::new(Ref("y".to_string())),
+                        arc(Ref("y".to_string())),
                     )),
-                    Box::new(Binary(
-                        Box::new(Ref("x".to_string())),
+                    arc(Binary(
+                        arc(Ref("x".to_string())),
                         Mul,
-                        Box::new(Ref("y".to_string())),
+                        arc(Ref("y".to_string())),
                     )),
                 )),
             )),
-        );
+        ));
 
         let stream = expr.evaluate(context);
         let values = collect_stream_values(stream);
@@ -668,34 +690,33 @@ mod tests {
         // Define a recursive sum function using pattern matching
         // sum([]) = 0
         // sum([x .. xs]) = x + sum(xs)
-        let sum_function = Value(Function(Closure(
-            vec!["arr".to_string()],
-            Box::new(PatternMatch(
-                Box::new(Ref("arr".to_string())),
-                vec![
-                    // Base case: empty array returns 0
-                    MatchArm {
-                        pattern: Pattern::EmptyArray,
-                        expr: CoreVal(int_val(0)),
-                    },
-                    // Recursive case: add head + sum(tail)
-                    MatchArm {
-                        pattern: Pattern::ArrayDecomp(
-                            Box::new(Bind("head".to_string(), Box::new(Wildcard))),
-                            Box::new(Bind("tail".to_string(), Box::new(Wildcard))),
-                        ),
-                        expr: Binary(
-                            Box::new(Ref("head".to_string())),
-                            BinOp::Add,
-                            Box::new(Call(
-                                Box::new(Ref("sum".to_string())),
-                                vec![Ref("tail".to_string())],
-                            )),
-                        ),
-                    },
-                ],
-            )),
-        )));
+        let sum_body = arc(PatternMatch(
+            arc(Ref("arr".to_string())),
+            vec![
+                // Base case: empty array returns 0
+                MatchArm {
+                    pattern: Pattern::EmptyArray,
+                    expr: arc(CoreVal(int_val(0))),
+                },
+                // Recursive case: add head + sum(tail)
+                MatchArm {
+                    pattern: Pattern::ArrayDecomp(
+                        Bind("head".to_string(), Wildcard.into()).into(),
+                        Bind("tail".to_string(), Wildcard.into()).into(),
+                    ),
+                    expr: arc(Binary(
+                        arc(Ref("head".to_string())),
+                        BinOp::Add,
+                        arc(Call(
+                            arc(Ref("sum".to_string())),
+                            vec![arc(Ref("tail".to_string()))],
+                        )),
+                    )),
+                },
+            ],
+        ));
+
+        let sum_function = Value(Function(Closure(vec!["arr".to_string()], sum_body)));
 
         // Bind the recursive function in the context
         let mut test_context = context.clone();
@@ -707,21 +728,30 @@ mod tests {
         let array_42 = Value(CoreData::Array(vec![int_val(42)]));
 
         // Test 1: Sum of empty array should be 0
-        let call_empty = Call(Box::new(Ref("sum".to_string())), vec![CoreVal(empty_array)]);
+        let call_empty = arc(Call(
+            arc(Ref("sum".to_string())),
+            vec![arc(CoreVal(empty_array))],
+        ));
 
         let result = collect_stream_values(call_empty.evaluate(test_context.clone()));
         assert_eq!(result.len(), 1);
         assert!(matches!(&result[0].0, Literal(Int64(n)) if *n == 0));
 
         // Test 2: Sum of [1, 2, 3] should be 6
-        let call_123 = Call(Box::new(Ref("sum".to_string())), vec![CoreVal(array_123)]);
+        let call_123 = arc(Call(
+            arc(Ref("sum".to_string())),
+            vec![arc(CoreVal(array_123))],
+        ));
 
         let result = collect_stream_values(call_123.evaluate(test_context.clone()));
         assert_eq!(result.len(), 1);
         assert!(matches!(&result[0].0, Literal(Int64(n)) if *n == 6));
 
         // Test 3: Sum of [42] should be 42
-        let call_42 = Call(Box::new(Ref("sum".to_string())), vec![CoreVal(array_42)]);
+        let call_42 = arc(Call(
+            arc(Ref("sum".to_string())),
+            vec![arc(CoreVal(array_42))],
+        ));
 
         let result = collect_stream_values(call_42.evaluate(test_context));
         assert_eq!(result.len(), 1);

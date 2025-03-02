@@ -6,7 +6,7 @@
 
 use crate::{
     driver::{cascades::Driver, memo::Memoize},
-    ir::{plans::PartialLogicalPlan, properties::PhysicalProperties},
+    ir::plans::PartialLogicalPlan,
 };
 use bridge::{from_optd::partial_logical_to_value, into_optd::value_to_partial_logical};
 use eval::Evaluate;
@@ -29,7 +29,7 @@ mod eval;
 mod utils;
 
 /// The engine for evaluating HIR expressions and applying rules.
-
+#[derive(Debug, Clone)]
 pub struct Engine<M: Memoize> {
     /// The original HIR context containing all defined expressions and rules
     context: Context,
@@ -57,10 +57,10 @@ impl<M: Memoize> Engine<M> {
         plan: PartialLogicalPlan,
     ) -> PartialLogicalPlanStream {
         // Create a call expression to invoke the rule
-        let call = Call(
+        let call = Arc::new(Call(
             CoreVal(Value(Literal(String(rule_name.to_string())))).into(),
-            vec![CoreVal(partial_logical_to_value(&plan))],
-        );
+            vec![CoreVal(partial_logical_to_value(&plan)).into()],
+        ));
 
         // Evaluate the call and transform the results
         call.evaluate(self.context.clone())

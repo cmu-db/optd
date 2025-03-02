@@ -15,10 +15,18 @@
 //! unified representation that can be transformed into optimizer-specific
 //! intermediate representations through the bridge modules.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
+
+use super::context::Context;
 
 /// Unique identifier for variables, functions, types, etc.
 pub type Identifier = String;
+
+/// Annotation for functions (e.g. [rust], [rule], etc.)
+pub type Annotation = String;
+
+/// Arc-wrapped Expr for efficient referencing and thread-safety
+pub type ArcExpr = Arc<Expr>;
 
 /// Values that can be directly represented in the language
 #[derive(Debug, Clone)]
@@ -33,7 +41,7 @@ pub enum Literal {
 /// Types of functions in the system
 #[derive(Debug, Clone)]
 pub enum FunKind {
-    Closure(Vec<Identifier>, Box<Expr>),
+    Closure(Vec<Identifier>, ArcExpr),
     RustUDF(fn(Vec<Value>) -> Value),
 }
 
@@ -88,7 +96,7 @@ pub struct PhysicalOperator<T> {
     /// The underlying operator structure
     pub operator: Operator<T>,
     /// Physical execution properties
-    pub properties: Box<Value>,
+    pub properties: Arc<Value>,
     /// Optimizer group identifier
     pub group_id: i64,
 }
@@ -124,21 +132,21 @@ pub enum CoreData<T> {
 #[derive(Debug, Clone)]
 pub enum Expr {
     /// Pattern matching expression
-    PatternMatch(Box<Expr>, Vec<MatchArm>),
+    PatternMatch(ArcExpr, Vec<MatchArm>),
     /// Conditional expression
-    IfThenElse(Box<Expr>, Box<Expr>, Box<Expr>),
+    IfThenElse(ArcExpr, ArcExpr, ArcExpr),
     /// Variable binding
-    Let(Identifier, Box<Expr>, Box<Expr>),
+    Let(Identifier, ArcExpr, ArcExpr),
     /// Binary operation
-    Binary(Box<Expr>, BinOp, Box<Expr>),
+    Binary(ArcExpr, BinOp, ArcExpr),
     /// Unary operation
-    Unary(UnaryOp, Box<Expr>),
+    Unary(UnaryOp, ArcExpr),
     /// Function call
-    Call(Box<Expr>, Vec<Expr>),
+    Call(ArcExpr, Vec<ArcExpr>),
     /// Variable reference
     Ref(Identifier),
     /// Core expression
-    CoreExpr(CoreData<Expr>),
+    CoreExpr(CoreData<ArcExpr>),
     /// Core value
     CoreVal(Value),
 }
@@ -172,7 +180,7 @@ pub struct MatchArm {
     /// Pattern to match against
     pub pattern: Pattern,
     /// Expression to evaluate if pattern matches
-    pub expr: Expr,
+    pub expr: ArcExpr,
 }
 
 /// Standard binary operators
@@ -197,18 +205,9 @@ pub enum UnaryOp {
     Not,
 }
 
-/// Value with annotations
-#[derive(Debug, Clone)]
-pub struct AnnotatedValue {
-    /// The evaluated value
-    pub value: Value,
-    /// Annotations associated with the value
-    pub annotations: Vec<Identifier>,
-}
-
 /// Program representation after the analysis phase
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct HIR {
-    /// Map of named expressions to their annotated values
-    pub expressions: HashMap<Identifier, AnnotatedValue>,
+    pub context: Context,
+    pub annotations: HashMap<Identifier, Vec<Annotation>>,
 }

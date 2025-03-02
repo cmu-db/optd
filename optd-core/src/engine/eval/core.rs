@@ -15,7 +15,7 @@ use crate::{
     },
 };
 use futures::StreamExt;
-use optd_dsl::analyzer::hir::{CoreData, Expr, FunKind, Literal, Value};
+use optd_dsl::analyzer::hir::{ArcExpr, CoreData, FunKind, Literal, Value};
 use CoreData::*;
 
 /// Evaluates a core expression by generating all possible evaluation paths.
@@ -29,7 +29,7 @@ use CoreData::*;
 ///
 /// # Returns
 /// A stream of all possible evaluation results
-pub(super) fn evaluate_core_expr(data: CoreData<Expr>, context: Context) -> ValueStream {
+pub(super) fn evaluate_core_expr(data: CoreData<ArcExpr>, context: Context) -> ValueStream {
     match data.clone() {
         Literal(lit) => evaluate_literal(lit),
         Array(items) => evaluate_collection(items, data, context),
@@ -37,7 +37,7 @@ pub(super) fn evaluate_core_expr(data: CoreData<Expr>, context: Context) -> Valu
         Struct(_, items) => evaluate_collection(items, data, context),
         Map(items) => evaluate_map(items, context),
         Function(fun_type) => evaluate_function(fun_type),
-        Fail(msg) => evaluate_fail((*msg).clone(), context),
+        Fail(msg) => evaluate_fail(*msg, context),
         LogicalOperator(op) => evaluate_logical_operator(op, context),
         ScalarOperator(op) => evaluate_scalar_operator(op, context),
         PhysicalOperator(op) => evaluate_physical_operator(op, context),
@@ -47,13 +47,14 @@ pub(super) fn evaluate_core_expr(data: CoreData<Expr>, context: Context) -> Valu
 
 /// Evaluates a literal value.
 fn evaluate_literal(lit: Literal) -> ValueStream {
-    propagate_success(Value(CoreData::Literal(lit.clone())))
+    let value = Value(CoreData::Literal(lit.clone()));
+    propagate_success(value)
 }
 
 /// Evaluates a collection expression (Array, Tuple, or Struct).
 fn evaluate_collection(
-    items: Vec<Expr>,
-    data_clone: CoreData<Expr>,
+    items: Vec<ArcExpr>,
+    data_clone: CoreData<ArcExpr>,
     context: Context,
 ) -> ValueStream {
     evaluate_all_combinations(items.into_iter(), context)
@@ -69,9 +70,10 @@ fn evaluate_collection(
 }
 
 /// Evaluates a map expression by generating all combinations of keys and values.
-fn evaluate_map(items: Vec<(Expr, Expr)>, context: Context) -> ValueStream {
-    let keys: Vec<_> = items.iter().map(|(k, _)| k).cloned().collect();
-    let values: Vec<_> = items.iter().map(|(_, v)| v).cloned().collect();
+fn evaluate_map(items: Vec<(ArcExpr, ArcExpr)>, context: Context) -> ValueStream {
+    // Extract keys and values
+    let keys: Vec<ArcExpr> = items.iter().map(|(k, _)| k.clone()).collect();
+    let values: Vec<ArcExpr> = items.iter().map(|(_, v)| v.clone()).collect();
 
     // First evaluate all key expressions
     evaluate_all_combinations(keys.into_iter(), context.clone())
@@ -101,9 +103,9 @@ fn evaluate_function(fun_type: FunKind) -> ValueStream {
 }
 
 /// Evaluates a fail expression.
-fn evaluate_fail(msg: Expr, context: Context) -> ValueStream {
+fn evaluate_fail(msg: ArcExpr, context: Context) -> ValueStream {
     msg.evaluate(context)
-        .map(|result| result.map(|value| Value(CoreData::Fail(value.into()))))
+        .map(|result| result.map(|value| Value(CoreData::Fail(Box::new(value)))))
         .boxed()
 }
 
@@ -112,8 +114,9 @@ mod tests {
     use super::*;
     use crate::engine::{utils::streams::ValueStream, Context};
     use futures::executor::block_on_stream;
-    use optd_dsl::analyzer::hir::{BinOp, CoreData, Expr, FunKind, Literal, Value};
+    use optd_dsl::analyzer::hir::{ArcExpr, BinOp, CoreData, Expr, FunKind, Literal, Value};
     use std::collections::HashMap;
+    use std::sync::Arc;
     use BinOp::*;
     use Expr::*;
     use Literal::*;
@@ -129,6 +132,11 @@ mod tests {
 
     fn bool_val(b: bool) -> Value {
         Value(Literal(Bool(b)))
+    }
+
+    // Helper to wrap expressions in Arc
+    fn arc(expr: Expr) -> ArcExpr {
+        Arc::new(expr)
     }
 
     // Helper to collect all successful values from a stream
@@ -170,9 +178,9 @@ mod tests {
 
         // Test array of literals
         let array_expr = CoreData::Array(vec![
-            CoreVal(int_val(1)),
-            CoreVal(int_val(2)),
-            CoreVal(int_val(3)),
+            arc(CoreVal(int_val(1))),
+            arc(CoreVal(int_val(2))),
+            arc(CoreVal(int_val(3))),
         ]);
 
         let array_stream = evaluate_core_expr(array_expr, context);
@@ -196,9 +204,9 @@ mod tests {
 
         // Test tuple with mixed types
         let tuple_expr = CoreData::Tuple(vec![
-            CoreVal(int_val(42)),
-            CoreVal(string_val("hello")),
-            CoreVal(bool_val(true)),
+            arc(CoreVal(int_val(42))),
+            arc(CoreVal(string_val("hello"))),
+            arc(CoreVal(bool_val(true))),
         ]);
 
         let tuple_stream = evaluate_core_expr(tuple_expr, context);
@@ -223,7 +231,7 @@ mod tests {
         // Test struct evaluation
         let struct_expr = CoreData::Struct(
             "Person".to_string(),
-            vec![CoreVal(string_val("Alice")), CoreVal(int_val(30))],
+            vec![arc(CoreVal(string_val("Alice"))), arc(CoreVal(int_val(30)))],
         );
 
         let struct_stream = evaluate_core_expr(struct_expr, context);
@@ -247,8 +255,11 @@ mod tests {
 
         // Test map evaluation
         let map_expr = CoreData::Map(vec![
-            (CoreVal(string_val("name")), CoreVal(string_val("Bob"))),
-            (CoreVal(string_val("age")), CoreVal(int_val(25))),
+            (
+                arc(CoreVal(string_val("name"))),
+                arc(CoreVal(string_val("Bob"))),
+            ),
+            (arc(CoreVal(string_val("age"))), arc(CoreVal(int_val(25)))),
         ]);
 
         let map_stream = evaluate_core_expr(map_expr, context);
@@ -281,7 +292,7 @@ mod tests {
     #[test]
     fn test_evaluate_function() {
         // Test closure function
-        let closure = FunKind::Closure(vec!["x".to_string()], CoreVal(int_val(42)).into());
+        let closure = FunKind::Closure(vec!["x".to_string()], arc(CoreVal(int_val(42))));
 
         let closure_stream = evaluate_function(closure.clone());
         let values = collect_stream_values(closure_stream);
@@ -319,7 +330,7 @@ mod tests {
 
         // Test fail expression with string message
         let fail_expr = CoreVal(string_val("Error occurred"));
-        let fail_stream = evaluate_fail(fail_expr, context);
+        let fail_stream = evaluate_fail(fail_expr.into(), context);
         let values = collect_stream_values(fail_stream);
 
         assert_eq!(values.len(), 1);
@@ -337,9 +348,13 @@ mod tests {
 
         // Create a complex expression: [1, 2 + 3, "hello"]
         let array_expr = CoreData::Array(vec![
-            CoreVal(int_val(1)),
-            Binary(CoreVal(int_val(2)).into(), Add, CoreVal(int_val(3)).into()),
-            CoreVal(string_val("hello")),
+            arc(CoreVal(int_val(1))),
+            arc(Binary(
+                arc(CoreVal(int_val(2))),
+                Add,
+                arc(CoreVal(int_val(3))),
+            )),
+            arc(CoreVal(string_val("hello"))),
         ]);
 
         let array_stream = evaluate_core_expr(array_expr, context);
