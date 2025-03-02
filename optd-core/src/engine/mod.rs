@@ -21,7 +21,7 @@ use CoreData::*;
 use Expr::*;
 use Literal::*;
 
-// mod bridge;
+mod bridge;
 mod eval;
 mod utils;
 

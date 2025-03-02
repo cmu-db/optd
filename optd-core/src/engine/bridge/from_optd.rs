@@ -1,16 +1,21 @@
-//! Contains functions to convert from Optd-IR representations to HIR Value objects.
-//!
-//! This submodule provides the functionality to transform the optimizer's intermediate
-//! representation (Optd-IR) into the DSL's internal representation (HIR). It allows
-//! query plans from the optimization engine to be manipulated using the DSL.
+use std::sync::Arc;
 
-use optd_dsl::analyzer::hir::{CoreData, Literal, Materializable, Operator, OperatorKind, Value};
+use crate::ir::{
+    operators::{Child, OperatorData},
+    plans::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, ScalarPlan},
+    properties::PropertiesData,
+};
+use optd_dsl::analyzer::hir::{
+    CoreData, Literal, LogicalOperator, Materializable, PhysicalOperator, Value,
+};
+
 use CoreData::*;
 use Literal::*;
 use Materializable::*;
-use OperatorKind::*;
 
-use crate::ir::plans::PartialLogicalPlan;
+//=============================================================================
+// Main conversion functions
+//=============================================================================
 
 /// Converts a PartialLogicalPlan into a HIR Value representation.
 ///
@@ -25,19 +30,23 @@ use crate::ir::plans::PartialLogicalPlan;
 /// A HIR Value representation of the input plan
 pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
     match plan {
-        PartialLogicalPlan::UnMaterialized(group_id) => Value(Operator(Group(group_id.0, Logical))),
-        PartialLogicalPlan::PartialMaterialized {
-            tag,
-            data,
-            relational_children,
-            scalar_children,
-        } => Value(Operator(Data(Operator {
-            kind: Logical,
-            tag: tag.clone(),
-            operator_data: convert_operator_data(data),
-            relational_children: convert_children(relational_children),
-            scalar_children: convert_children(scalar_children),
-        }))),
+        PartialLogicalPlan::UnMaterialized(group_id) => {
+            Value(LogicalOperator(UnMaterialized(group_id.0)))
+        }
+        PartialLogicalPlan::PartialMaterialized { node } => {
+            Value(LogicalOperator(Materialized(LogicalOperator {
+                tag: node.tag.clone(),
+                data: convert_operator_data_to_values(&node.data),
+                relational_children: convert_children_to_values(
+                    &node.relational_children,
+                    partial_logical_to_value,
+                ),
+                scalar_children: convert_children_to_values(
+                    &node.scalar_children,
+                    partial_scalar_to_value,
+                ),
+            })))
+        }
     }
 }
 
@@ -53,19 +62,37 @@ pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
 /// A HIR Value representation of the input plan
 pub(crate) fn partial_scalar_to_value(plan: &PartialScalarPlan) -> Value {
     match plan {
-        PartialScalarPlan::UnMaterialized(group_id) => Value(Operator(Group(group_id.0, Scalar))),
-        PartialScalarPlan::PartialMaterialized {
-            tag,
-            data,
-            scalar_children,
-        } => Value(Operator(Data(Operator {
-            kind: Scalar,
-            tag: tag.clone(),
-            operator_data: convert_operator_data(data),
-            relational_children: vec![], // Scalar ops don't have relational children
-            scalar_children: convert_children(scalar_children),
-        }))),
+        PartialScalarPlan::UnMaterialized(group_id) => {
+            Value(ScalarOperator(UnMaterialized(group_id.0)))
+        }
+        PartialScalarPlan::PartialMaterialized { node, .. } => Value(ScalarOperator(Materialized(
+            optd_dsl::analyzer::hir::ScalarOperator {
+                tag: node.tag.clone(),
+                data: convert_operator_data_to_values(&node.data),
+                children: convert_children_to_values(&node.children, partial_scalar_to_value),
+            },
+        ))),
     }
+}
+
+/// Converts a ScalarPlan into a HIR Value representation.
+///
+/// This function transforms a fully materialized scalar plan
+/// into the DSL's internal representation.
+///
+/// # Parameters
+/// * `plan` - The ScalarPlan to convert
+///
+/// # Returns
+/// A HIR Value representation of the input plan
+fn scalar_to_value(plan: &ScalarPlan) -> Value {
+    Value(ScalarOperator(Materialized(
+        optd_dsl::analyzer::hir::ScalarOperator {
+            tag: plan.node.tag.clone(),
+            data: convert_operator_data_to_values(&plan.node.data),
+            children: convert_children_to_values(&plan.node.children, scalar_to_value),
+        },
+    )))
 }
 
 /// Converts a PartialPhysicalPlan into a HIR Value representation.
@@ -80,75 +107,135 @@ pub(crate) fn partial_scalar_to_value(plan: &PartialScalarPlan) -> Value {
 /// A HIR Value representation of the input plan
 pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
     match plan {
-        PartialPhysicalPlan::UnMaterialized(group_id) => {
-            Value(Operator(Group(group_id.0, Physical)))
+        PartialPhysicalPlan::UnMaterialized(goal_id) => {
+            Value(PhysicalOperator(UnMaterialized(goal_id.0)))
         }
         PartialPhysicalPlan::PartialMaterialized {
-            tag,
-            data,
-            relational_children,
-            scalar_children,
-        } => Value(Operator(Data(Operator {
-            kind: Physical,
-            tag: tag.clone(),
-            operator_data: convert_operator_data(data),
-            relational_children: convert_children(relational_children),
-            scalar_children: convert_children(scalar_children),
+            node,
+            properties,
+            group_id,
+        } => Value(PhysicalOperator(Materialized(PhysicalOperator {
+            tag: node.tag.clone(),
+            data: convert_operator_data_to_values(&node.data),
+            relational_children: convert_children_to_values(
+                &node.relational_children,
+                partial_physical_to_value,
+            ),
+            scalar_children: convert_children_to_values(
+                &node.scalar_children,
+                partial_scalar_to_value,
+            ),
+            group_id: group_id.0,
+            properties: properties_data_to_value(&properties.0).into(),
         }))),
     }
 }
 
-/// Helper trait to convert children to Value
-trait ToValue {
-    fn to_value(&self) -> Value;
-}
+//=============================================================================
+// Generic conversion helpers
+//=============================================================================
 
-impl ToValue for PartialLogicalPlan {
-    fn to_value(&self) -> Value {
-        partial_logical_to_value(self)
-    }
-}
-
-impl ToValue for PartialScalarPlan {
-    fn to_value(&self) -> Value {
-        partial_scalar_to_value(self)
-    }
-}
-
-impl ToValue for PartialPhysicalPlan {
-    fn to_value(&self) -> Value {
-        partial_physical_to_value(self)
-    }
-}
-
-/// Convert a Vec of Children to Vec of Values
-fn convert_children<T: ToValue>(children: &[Child<T>]) -> Vec<Value> {
+/// Generic function to convert a Vec of Children to Vec of Values.
+///
+/// This function provides a generic way to convert IR Child structures
+/// to HIR Values for any type that can be converted using a converter function.
+///
+/// # Type Parameters
+/// * `T` - The source type which is wrapped in Arc<T> inside Child<Arc<T>>
+///
+/// # Parameters
+/// * `children` - The slice of Children to convert
+/// * `converter` - A function that converts a single T to Value
+///
+/// # Returns
+/// A Vec of Values representing the converted children
+fn convert_children_to_values<T, F>(children: &[Child<Arc<T>>], converter: F) -> Vec<Value>
+where
+    F: Fn(&T) -> Value,
+    T: 'static,
+{
     children
         .iter()
-        .map(|child_group| match child_group {
-            Child::Singleton(child) => child.to_value(),
-            Child::VarLength(children) => Value(Array(
-                children.iter().map(|child| child.to_value()).collect(),
-            )),
+        .map(|child| match child {
+            Child::Singleton(item) => converter(&*item),
+            Child::VarLength(items) => {
+                Value(Array(items.iter().map(|item| converter(&*item)).collect()))
+            }
         })
         .collect()
 }
 
-/// Converts operator data to Values
-fn convert_operator_data(data: &[OperatorData]) -> Vec<Value> {
+/// Converts a slice of OperatorData to a Vec of HIR Values.
+///
+/// This function maps each OperatorData to its corresponding HIR Value representation.
+///
+/// # Parameters
+/// * `data` - The slice of OperatorData to convert
+///
+/// # Returns
+/// A Vec of Values representing the converted data
+fn convert_operator_data_to_values(data: &[OperatorData]) -> Vec<Value> {
     data.iter().map(operator_data_to_value).collect()
 }
 
-/// Converts an OperatorData into a HIR Value representation
+/// Converts a slice of PropertiesData to a Vec of HIR Values.
+///
+/// This function maps each PropertiesData to its corresponding HIR Value representation.
+///
+/// # Parameters
+/// * `data` - The slice of PropertiesData to convert
+///
+/// # Returns
+/// A Vec of Values representing the converted properties
+fn convert_properties_data_to_values(data: &[PropertiesData]) -> Vec<Value> {
+    data.iter().map(properties_data_to_value).collect()
+}
+
+//=============================================================================
+// Data conversion functions
+//=============================================================================
+
+/// Converts an OperatorData to a HIR Value representation.
+///
+/// # Parameters
+/// * `data` - The OperatorData to convert
+///
+/// # Returns
+/// A HIR Value representation of the input data
 fn operator_data_to_value(data: &OperatorData) -> Value {
     match data {
         OperatorData::Int64(i) => Value(Literal(Int64(*i))),
         OperatorData::Float64(f) => Value(Literal(Float64(**f))),
         OperatorData::String(s) => Value(Literal(String(s.clone()))),
         OperatorData::Bool(b) => Value(Literal(Bool(*b))),
-        OperatorData::Struct(name, elements) => {
-            Value(Struct(name.clone(), convert_operator_data(elements)))
-        }
-        OperatorData::Array(elements) => Value(Array(convert_operator_data(elements))),
+        OperatorData::Struct(name, elements) => Value(Struct(
+            name.clone(),
+            convert_operator_data_to_values(elements),
+        )),
+        OperatorData::Array(elements) => Value(Array(convert_operator_data_to_values(elements))),
+    }
+}
+
+/// Converts a PropertiesData to a HIR Value representation.
+///
+/// # Parameters
+/// * `data` - The PropertiesData to convert
+///
+/// # Returns
+/// A HIR Value representation of the input properties data
+fn properties_data_to_value(data: &PropertiesData) -> Value {
+    match data {
+        PropertiesData::Int64(i) => Value(Literal(Int64(*i))),
+        PropertiesData::Float64(f) => Value(Literal(Float64(**f))),
+        PropertiesData::String(s) => Value(Literal(String(s.clone()))),
+        PropertiesData::Bool(b) => Value(Literal(Bool(*b))),
+        PropertiesData::Struct(name, elements) => Value(Struct(
+            name.clone(),
+            convert_properties_data_to_values(elements),
+        )),
+        PropertiesData::Array(elements) => Value(Array(
+            elements.iter().map(properties_data_to_value).collect(),
+        )),
+        PropertiesData::Scalar(scalar) => scalar_to_value(scalar),
     }
 }

@@ -1,20 +1,22 @@
-//! Contains functions to convert from HIR Value objects to Optd-IR representations.
-//!
-//! This submodule provides the functionality to transform the DSL's internal
-//! representation (HIR) into the optimizer's intermediate representation (Optd-IR).
-//! It enables rules written in the DSL to be applied to actual query plans in the
-//! optimization engine.
+use std::sync::Arc;
 
-use crate::analyzer::hir::{CoreData, Literal, Materializable, Operator, OperatorKind, Value};
-use optd_core::cascades::{
+use crate::ir::{
+    goal::GoalId,
     groups::{RelationalGroupId, ScalarGroupId},
-    ir::{Child, OperatorData, PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan},
+    operators::{Child, LogicalOperator, OperatorData, PhysicalOperator, ScalarOperator},
+    plans::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, ScalarPlan},
+    properties::{PhysicalProperties, PropertiesData},
 };
+use optd_dsl::analyzer::hir::{CoreData, Literal, Materializable, Value};
+
 use Child::*;
 use CoreData::*;
 use Literal::*;
 use Materializable::*;
-use OperatorKind::*;
+
+//=============================================================================
+// Main conversion functions
+//=============================================================================
 
 /// Converts a HIR Value into a PartialLogicalPlan representation.
 ///
@@ -29,25 +31,32 @@ use OperatorKind::*;
 /// A PartialLogicalPlan representation of the input value
 ///
 /// # Panics
-/// Panics if the Value does not contain an Operator with kind Logical
+/// Panics if the Value does not contain a LogicalOperator variant
 pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
     match &value.0 {
-        Operator(materialization) => {
-            validate_operator_kind(materialization, Logical);
-
-            match materialization {
-                Group(group_id, _) => {
-                    PartialLogicalPlan::UnMaterialized(RelationalGroupId(*group_id))
-                }
-                Data(op) => PartialLogicalPlan::PartialMaterialized {
-                    tag: op.tag.clone(),
-                    data: convert_from_operator_data(&op.operator_data),
-                    relational_children: convert_from_values(&op.relational_children),
-                    scalar_children: convert_from_values(&op.scalar_children),
-                },
+        LogicalOperator(materialization) => match materialization {
+            UnMaterialized(group_id) => {
+                PartialLogicalPlan::UnMaterialized(RelationalGroupId(*group_id))
             }
-        }
-        _ => panic!("Expected Operator CoreData variant, found: {:?}", value.0),
+            Materialized(op) => PartialLogicalPlan::PartialMaterialized {
+                node: LogicalOperator {
+                    tag: op.tag.clone(),
+                    data: convert_values_to_operator_data(&op.data),
+                    relational_children: convert_children_into(
+                        &op.relational_children,
+                        value_to_partial_logical,
+                    ),
+                    scalar_children: convert_children_into(
+                        &op.scalar_children,
+                        value_to_partial_scalar,
+                    ),
+                },
+            },
+        },
+        _ => panic!(
+            "Expected LogicalOperator CoreData variant, found: {:?}",
+            value.0
+        ),
     }
 }
 
@@ -63,22 +72,57 @@ pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
 /// A PartialScalarPlan representation of the input value
 ///
 /// # Panics
-/// Panics if the Value does not contain an Operator with kind Scalar
+/// Panics if the Value does not contain a ScalarOperator variant
 pub(crate) fn value_to_partial_scalar(value: &Value) -> PartialScalarPlan {
     match &value.0 {
-        Operator(materialization) => {
-            validate_operator_kind(materialization, Scalar);
-
-            match materialization {
-                Group(group_id, _) => PartialScalarPlan::UnMaterialized(ScalarGroupId(*group_id)),
-                Data(op) => PartialScalarPlan::PartialMaterialized {
+        ScalarOperator(materialization) => match materialization {
+            UnMaterialized(group_id) => PartialScalarPlan::UnMaterialized(ScalarGroupId(*group_id)),
+            Materialized(op) => PartialScalarPlan::PartialMaterialized {
+                node: ScalarOperator {
                     tag: op.tag.clone(),
-                    data: convert_from_operator_data(&op.operator_data),
-                    scalar_children: convert_from_values(&op.scalar_children),
+                    data: convert_values_to_operator_data(&op.data),
+                    children: convert_children_into(&op.children, value_to_partial_scalar),
                 },
+            },
+        },
+        _ => panic!(
+            "Expected ScalarOperator CoreData variant, found: {:?}",
+            value.0
+        ),
+    }
+}
+
+/// Converts a HIR Value into a complete ScalarPlan (not a partial plan).
+///
+/// This function is used when fully materializing a scalar expression
+/// for use in properties or other fully-realized contexts.
+///
+/// # Parameters
+/// * `value` - The HIR Value to convert
+///
+/// # Returns
+/// A ScalarPlan representation of the input value
+///
+/// # Panics
+/// Panics if the Value does not contain a materialized ScalarOperator variant
+fn value_to_scalar(value: &Value) -> ScalarPlan {
+    match &value.0 {
+        ScalarOperator(materialization) => match materialization {
+            UnMaterialized(_) => {
+                panic!("Cannot convert UnMaterialized ScalarOperator to ScalarPlan")
             }
-        }
-        _ => panic!("Expected Operator CoreData variant, found: {:?}", value.0),
+            Materialized(op) => ScalarPlan {
+                node: ScalarOperator {
+                    tag: op.tag.clone(),
+                    data: convert_values_to_operator_data(&op.data),
+                    children: convert_children_into(&op.children, value_to_scalar),
+                },
+            },
+        },
+        _ => panic!(
+            "Expected ScalarOperator CoreData variant, found: {:?}",
+            value.0
+        ),
     }
 }
 
@@ -94,68 +138,112 @@ pub(crate) fn value_to_partial_scalar(value: &Value) -> PartialScalarPlan {
 /// A PartialPhysicalPlan representation of the input value
 ///
 /// # Panics
-/// Panics if the Value does not contain an Operator with kind Physical
+/// Panics if the Value does not contain a PhysicalOperator variant
 pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
     match &value.0 {
-        Operator(materialization) => {
-            validate_operator_kind(materialization, Physical);
-
-            match materialization {
-                Group(group_id, _) => {
-                    PartialPhysicalPlan::UnMaterialized(RelationalGroupId(*group_id))
-                }
-                Data(op) => PartialPhysicalPlan::PartialMaterialized {
+        PhysicalOperator(materialization) => match materialization {
+            UnMaterialized(goal_id) => PartialPhysicalPlan::UnMaterialized(GoalId(*goal_id)),
+            Materialized(op) => PartialPhysicalPlan::PartialMaterialized {
+                node: PhysicalOperator {
                     tag: op.tag.clone(),
-                    data: convert_from_operator_data(&op.operator_data),
-                    relational_children: convert_from_values(&op.relational_children),
-                    scalar_children: convert_from_values(&op.scalar_children),
+                    data: convert_values_to_operator_data(&op.data),
+                    relational_children: convert_children_into(
+                        &op.relational_children,
+                        value_to_partial_physical,
+                    ),
+                    scalar_children: convert_children_into(
+                        &op.scalar_children, // Fixed: was using relational_children
+                        value_to_partial_scalar,
+                    ),
                 },
-            }
-        }
-        _ => panic!("Expected Operator CoreData variant, found: {:?}", value.0),
+                properties: PhysicalProperties(value_to_properties_data(&op.properties)),
+                group_id: RelationalGroupId(op.group_id),
+            },
+        },
+        _ => panic!(
+            "Expected PhysicalOperator CoreData variant, found: {:?}",
+            value.0
+        ),
     }
 }
 
-/// Helper trait to convert from Value to partial plans
-trait FromValue {
-    fn from_value(value: &Value) -> Self;
-}
+//=============================================================================
+// Generic conversion helpers
+//=============================================================================
 
-impl FromValue for PartialLogicalPlan {
-    fn from_value(value: &Value) -> Self {
-        value_to_partial_logical(value)
-    }
-}
-
-impl FromValue for PartialScalarPlan {
-    fn from_value(value: &Value) -> Self {
-        value_to_partial_scalar(value)
-    }
-}
-
-impl FromValue for PartialPhysicalPlan {
-    fn from_value(value: &Value) -> Self {
-        value_to_partial_physical(value)
-    }
-}
-
-/// Convert a Vec of Values to Vec of Children
-fn convert_from_values<T: FromValue>(values: &[Value]) -> Vec<Child<T>> {
+/// Generic function to convert a Vec of Values to Vec of Children.
+///
+/// This function provides a generic way to convert HIR Values to IR Child structures
+/// for any type that can be created from a Value using a converter function.
+///
+/// # Type Parameters
+/// * `T` - The target type which will be wrapped in Arc<T> inside Child<Arc<T>>
+///
+/// # Parameters
+/// * `values` - The slice of Values to convert
+/// * `converter` - A function that converts a single Value to the target type T
+///
+/// # Returns
+/// A Vec of Child<Arc<T>> representing the converted values
+fn convert_children_into<T, F>(values: &[Value], converter: F) -> Vec<Child<Arc<T>>>
+where
+    F: Fn(&Value) -> T,
+    T: 'static,
+{
     values
         .iter()
         .map(|value| match &value.0 {
-            Array(elements) => VarLength(elements.iter().map(|el| T::from_value(el)).collect()),
-            _ => Singleton(T::from_value(value)),
+            Array(elements) => {
+                VarLength(elements.iter().map(|el| Arc::new(converter(el))).collect())
+            }
+            _ => Singleton(Arc::new(converter(value))),
         })
         .collect()
 }
 
-/// Converts Values back to operator data
-fn convert_from_operator_data(values: &[Value]) -> Vec<OperatorData> {
+/// Converts a slice of HIR Values to a Vec of OperatorData.
+///
+/// This function maps each Value to its corresponding OperatorData representation.
+///
+/// # Parameters
+/// * `values` - The slice of Values to convert
+///
+/// # Returns
+/// A Vec of OperatorData representing the converted values
+fn convert_values_to_operator_data(values: &[Value]) -> Vec<OperatorData> {
     values.iter().map(value_to_operator_data).collect()
 }
 
-/// Converts a HIR Value back to OperatorData
+/// Converts a slice of HIR Values to a Vec of PropertiesData.
+///
+/// This function maps each Value to its corresponding PropertiesData representation.
+///
+/// # Parameters
+/// * `values` - The slice of Values to convert
+///
+/// # Returns
+/// A Vec of PropertiesData representing the converted values
+fn convert_values_to_properties_data(values: &[Value]) -> Vec<PropertiesData> {
+    values.iter().map(value_to_properties_data).collect()
+}
+
+//=============================================================================
+// Data conversion functions
+//=============================================================================
+
+/// Converts a HIR Value to an OperatorData representation.
+///
+/// This function handles the conversion of various HIR Value types to their
+/// corresponding OperatorData representations, which are used in the IR.
+///
+/// # Parameters
+/// * `value` - The HIR Value to convert
+///
+/// # Returns
+/// An OperatorData representation of the input value
+///
+/// # Panics
+/// Panics if the Value contains a type that cannot be converted to OperatorData
 fn value_to_operator_data(value: &Value) -> OperatorData {
     match &value.0 {
         Literal(constant) => match constant {
@@ -165,25 +253,43 @@ fn value_to_operator_data(value: &Value) -> OperatorData {
             Bool(b) => OperatorData::Bool(*b),
             Unit => panic!("Cannot convert Unit constant to OperatorData"),
         },
-        Array(elements) => OperatorData::Array(convert_from_operator_data(elements)),
+        Array(elements) => OperatorData::Array(convert_values_to_operator_data(elements)),
         Struct(name, elements) => {
-            OperatorData::Struct(name.clone(), convert_from_operator_data(elements))
+            OperatorData::Struct(name.clone(), convert_values_to_operator_data(elements))
         }
         _ => panic!("Cannot convert {:?} to OperatorData", value.0),
     }
 }
 
-/// Helper function to extract and validate operator kind
-fn validate_operator_kind<T>(op: &Materializable<Operator<T>>, expected_kind: OperatorKind) {
-    let actual_kind = match op {
-        Data(concrete_op) => concrete_op.kind,
-        Group(_, kind) => *kind,
-    };
-
-    if actual_kind != expected_kind {
-        panic!(
-            "Expected operator kind {:?}, but found {:?}",
-            expected_kind, actual_kind
-        );
+/// Converts a HIR Value to a PropertiesData representation.
+///
+/// This function handles the conversion of various HIR Value types to their
+/// corresponding PropertiesData representations, which are used for physical
+/// plan properties in the IR.
+///
+/// # Parameters
+/// * `value` - The HIR Value to convert
+///
+/// # Returns
+/// A PropertiesData representation of the input value
+///
+/// # Panics
+/// Panics if the Value contains a type that cannot be converted to PropertiesData
+fn value_to_properties_data(value: &Value) -> PropertiesData {
+    match &value.0 {
+        Literal(constant) => match constant {
+            Int64(i) => PropertiesData::Int64(*i),
+            Float64(f) => PropertiesData::Float64((*f).into()),
+            String(s) => PropertiesData::String(s.clone()),
+            Bool(b) => PropertiesData::Bool(*b),
+            Unit => panic!("Cannot convert Unit constant to PropertyData"),
+        },
+        Array(elements) => PropertiesData::Array(convert_values_to_properties_data(elements)),
+        Struct(name, elements) => PropertiesData::Struct(
+            name.clone(),
+            elements.iter().map(value_to_properties_data).collect(),
+        ),
+        ScalarOperator(_) => PropertiesData::Scalar(value_to_scalar(value)),
+        _ => panic!("Cannot convert {:?} to PropertyData", value.0),
     }
 }

@@ -44,26 +44,33 @@ pub enum FunKind {
 /// Either grouped or concrete data
 #[derive(Debug, Clone)]
 pub enum Materializable<T> {
-    Group(i64, OperatorKind),
-    Data(T),
+    UnMaterialized(i64),
+    Materialized(T),
 }
 
-/// Operator kind to differentiate between operator types
-#[derive(Debug, Clone, PartialEq, Copy)]
-pub enum OperatorKind {
-    Logical,
-    Physical,
-    Scalar,
-}
-
-/// Unified operator node structure for all operator types
-#[derive(Debug, Clone)]
-pub struct Operator<T> {
-    pub kind: OperatorKind,
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicalOperator<T> {
     pub tag: String,
-    pub operator_data: Vec<T>,
+    pub data: Vec<T>,
     pub relational_children: Vec<T>,
     pub scalar_children: Vec<T>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScalarOperator<T> {
+    pub tag: String,
+    pub data: Vec<T>,
+    pub children: Vec<T>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PhysicalOperator<T> {
+    pub tag: String,
+    pub data: Vec<T>,
+    pub relational_children: Vec<T>,
+    pub scalar_children: Vec<T>,
+    pub group_id: i64,
+    pub properties: Box<T>,
 }
 
 /// Core data structures shared across the system
@@ -76,7 +83,9 @@ pub enum CoreData<T> {
     Struct(Identifier, Vec<T>),
     Function(FunKind),
     Fail(Box<T>),
-    Operator(Materializable<Operator<T>>),
+    LogicalOperator(Materializable<LogicalOperator<T>>),
+    ScalarOperator(Materializable<ScalarOperator<T>>),
+    PhysicalOperator(Materializable<PhysicalOperator<T>>),
 }
 
 /// Expression nodes in the HIR
@@ -97,13 +106,31 @@ pub enum Expr {
 #[derive(Debug, Clone)]
 pub struct Value(pub CoreData<Value>);
 
+/// Operator kind to differentiate between operator types
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub enum OperatorKind {
+    Logical,
+    Physical,
+    Scalar,
+}
+
+/// Unified representation of operators for pattern matching as we don't match on properties
+#[derive(Debug, Clone)]
+pub struct OperatorPattern {
+    pub kind: OperatorKind,
+    pub tag: String,
+    pub operator_data: Vec<Pattern>,
+    pub relational_children: Vec<Pattern>,
+    pub scalar_children: Vec<Pattern>,
+}
+
 /// Pattern for matching
 #[derive(Debug, Clone)]
 pub enum Pattern {
     Bind(Identifier, Box<Pattern>),
     Literal(Literal),
     Struct(Identifier, Vec<Pattern>),
-    Operator(Operator<Pattern>),
+    Operator(OperatorPattern),
     Wildcard,
     EmptyArray,
     ArrayDecomp(Box<Pattern>, Box<Pattern>),
