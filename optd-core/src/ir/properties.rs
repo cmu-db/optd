@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 use super::plans::ScalarPlan;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct LogicalProperties(pub PropertiesData);
+pub struct LogicalProperties(pub Option<PropertiesData>);
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct PhysicalProperties(pub PropertiesData);
+pub struct PhysicalProperties(pub Option<PropertiesData>);
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub enum PropertiesData {
@@ -18,5 +18,4 @@ pub enum PropertiesData {
     Struct(String, Vec<PropertiesData>),
     Array(Vec<PropertiesData>),
     Scalar(ScalarPlan),
-    None,
 }

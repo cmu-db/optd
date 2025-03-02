@@ -116,8 +116,8 @@ pub enum CoreData<T> {
     ScalarOperator(Materializable<Operator<T>>),
     /// Physical query operators (executable operations with properties)
     PhysicalOperator(Materializable<PhysicalOperator<T>>),
-    /// The none value
-    None,
+    /// The null value
+    Null,
 }
 
 /// Expression nodes in the HIR

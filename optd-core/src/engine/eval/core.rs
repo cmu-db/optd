@@ -41,7 +41,7 @@ pub(super) fn evaluate_core_expr(data: CoreData<Expr>, context: Context) -> Valu
         LogicalOperator(op) => evaluate_logical_operator(op, context),
         ScalarOperator(op) => evaluate_scalar_operator(op, context),
         PhysicalOperator(op) => evaluate_physical_operator(op, context),
-        None => propagate_success(Value(None)),
+        Null => propagate_success(Value(Null)),
     }
 }
 
