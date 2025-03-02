@@ -1,17 +1,23 @@
-use std::sync::Arc;
-
-use futures::{
-    stream::{self, Stream},
-    StreamExt,
-};
+use std::{char::MAX, sync::Arc};
 
 use anyhow::Result;
 use async_recursion::async_recursion;
 use tokio::task::JoinSet;
 
-use crate::engine::Engine;
+use crate::{
+    engine::Engine,
+    ir::{
+        cost::{Cost, MAX_COST},
+        expressions::{LogicalExpression, StoredLogicalExpression, StoredPhysicalExpression},
+        goal::GoalId,
+        groups::{ExplorationStatus, RelationalGroupId},
+        plans::{LogicalPlan, PartialLogicalPlan},
+        properties::PhysicalProperties,
+        rules::{RuleId, TransformationRuleId},
+    },
+};
 
-use super::memo::Memoize;
+use super::{ingest::ingest_full_logical_plan, memo::Memoize};
 
 pub struct Driver<M: Memoize> {
     pub memo: M,
@@ -29,8 +35,6 @@ impl<M: Memoize> Driver<M> {
             }),
         })*/
     }
-}
-/*
     /// The main entry point for the optimizer.
     /// If the cost is infinite, it will return None.
     /// If the cost is finite, it will return the best physical expression.
@@ -58,16 +62,14 @@ impl<M: Memoize> Driver<M> {
         if self.memo.get_group_exploration_status(group_id).await? == ExplorationStatus::Unexplored
         {
             self.memo
-                .update_group_exploration_status(goal.group_id, ExplorationStatus::Exploring)
+                .update_group_exploration_status(group_id, ExplorationStatus::Exploring)
                 .await?;
             let ctx = self.clone();
             tokio::spawn(async move { ctx.explore_relation_group(group_id).await }).await?;
         }
 
-        let logical_exprs = self
-            .memo
-            .get_all_logical_exprs_in_group(goal.group_id)
-            .await?;
+        // TODO(sarvesh): we probably should get all logical expressions from the representative group
+        let logical_exprs = self.memo.get_all_logical_exprs_in_group(group_id).await?;
 
         let mut join_set = JoinSet::new();
         for (logical_expr_id, logical_expr) in logical_exprs {
@@ -82,7 +84,7 @@ impl<M: Memoize> Driver<M> {
             .into_iter()
             .collect::<Result<Vec<_>>>()?;
 
-        let mut best_cost = Cost::INFINITY;
+        let mut best_cost = MAX_COST;
         let mut best_plan = None;
         for result in plan_results {
             if result.0 < best_cost {
@@ -103,7 +105,7 @@ impl<M: Memoize> Driver<M> {
     pub async fn optimize_logical_expression(
         self: Arc<Self>,
         logical_expr: Arc<LogicalExpression>,
-        goal: Arc<Goal>,
+        goal: GoalId,
     ) -> Result<(Cost, Option<StoredPhysicalExpression>)> {
         let rules = self.memo.get_matching_rules(&logical_expr).await?;
 
@@ -121,9 +123,9 @@ impl<M: Memoize> Driver<M> {
                 }
                 RuleId::TransformationRule(rule_id) => {
                     join_set.spawn(async move {
-                        ctx.match_and_apply_transformation_rule(expr, rule_id, g.group_id)
+                        ctx.match_and_apply_transformation_rule(expr, rule_id)
                             .await?;
-                        return Ok((Cost::INFINITY, None));
+                        return Ok((MAX_COST, None));
                     });
                 }
             }
@@ -136,7 +138,7 @@ impl<M: Memoize> Driver<M> {
             .filter_map(|result| result.ok())
             .collect::<Vec<_>>();
 
-        let mut best_cost = Cost::INFINITY;
+        let mut best_cost = MAX_COST;
         let mut best_plan = None;
         for result in plan_results {
             if result.0 < best_cost {
@@ -216,7 +218,6 @@ impl<M: Memoize> Driver<M> {
         self: Arc<Self>,
         logical_expr: Arc<LogicalExpression>,
         rule_id: TransformationRuleId,
-        group_id: RelationalGroupId,
     ) -> Result<Vec<StoredLogicalExpression>> {
         let partial_logical_input = PartialLogicalPlan::from_expr(&logical_expr);
 
@@ -256,7 +257,7 @@ impl<M: Memoize> Driver<M> {
 
         let mut physical_outputs = Box::pin(physical_outputs);
 
-        let mut best_cost = Cost::INFINITY;
+        let mut best_cost = MAX_COST;
         let mut best_physical_output = None;
 
         while let Some(physical_output) = physical_outputs.next().await {
@@ -271,29 +272,3 @@ impl<M: Memoize> Driver<M> {
         Ok((best_cost, best_physical_output))
     }
 }
-
-struct Intepreter<M: Memoize> {
-    ctx: Arc<Driver<M>>,
-}
-
-impl<M: Memoize> Intepreter<M> {
-    async fn match_and_apply_transformation_rule(
-        &self,
-        rule_id: TransformationRuleId,
-        partial_logical_plan: PartialLogicalPlan,
-    ) -> impl StreamExt<Item = PartialLogicalPlan> {
-        let transformed_plan = partial_logical_plan; // Replace with actual transformation logic
-        stream::once(async { transformed_plan })
-    }
-
-    async fn match_and_apply_implementation_rule(
-        &self,
-        rule_id: ImplementationRuleId,
-        partial_logical_plan: PartialLogicalPlan,
-        required_physical_properties: &PhysicalProperties,
-    ) -> impl StreamExt<Item = PartialPhysicalPlan> {
-        let physical_plan = todo!();
-        stream::once(async { physical_plan })
-    }
-}
-*/

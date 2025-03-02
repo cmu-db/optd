@@ -1,4 +1,5 @@
 pub mod cascades;
+pub mod ingest;
 pub mod memo;
 
 use std::sync::Arc;

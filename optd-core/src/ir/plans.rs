@@ -28,7 +28,6 @@ pub struct PhysicalPlan {
 pub enum PartialLogicalPlan {
     PartialMaterialized {
         node: LogicalOperator<Arc<PartialLogicalPlan>, Arc<PartialScalarPlan>>,
-        group_id: RelationalGroupId,
     },
     UnMaterialized(RelationalGroupId),
 }

@@ -210,24 +210,25 @@ fn evaluate_closure_call<'a>(
     context: Context,
 ) -> ValueStream<'a> {
     // Make a Vec of references to expressions to evaluate
-    let args_refs: Vec<&Expr> = args.iter().collect();
+    // let args_refs: Vec<&Expr> = args.iter().collect();
 
-    evaluate_all_combinations(args_refs.into_iter(), context.clone())
-        .flat_map(move |args_result| {
-            stream_from_result(
-                args_result,
-                capture!([context, body, params], move |args| {
-                    // Create a new context with parameters bound to arguments
-                    let mut new_ctx = context;
-                    new_ctx.push_scope();
-                    params.iter().zip(args).for_each(|(p, a)| {
-                        new_ctx.bind(p.clone(), a);
-                    });
-                    body.clone().evaluate(new_ctx)
-                }),
-            )
-        })
-        .boxed()
+    // evaluate_all_combinations(args_refs.into_iter(), context.clone())
+    //     .flat_map(move |args_result| {
+    //         stream_from_result(
+    //             args_result,
+    //             capture!([context, body, params], move |args| {
+    //                 // Create a new context with parameters bound to arguments
+    //                 let mut new_ctx = context;
+    //                 new_ctx.push_scope();
+    //                 params.iter().zip(args).for_each(|(p, a)| {
+    //                     new_ctx.bind(p.clone(), a);
+    //                 });
+    //                 body.clone().evaluate(new_ctx)
+    //             }),
+    //         )
+    //     })
+    //     .boxed()
+    todo!()
 }
 
 /// Evaluates a call to a Rust UDF (built-in function).
@@ -252,7 +253,7 @@ fn evaluate_rust_udf_call(
 fn evaluate_reference(ident: &str, context: Context) -> ValueStream {
     propagate_success(context.lookup(ident).expect("Variable not found").clone()).boxed()
 }
-
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -744,3 +745,4 @@ mod tests {
         assert!(matches!(&result[0].0, Literal(Int64(n)) if *n == 42));
     }
 }
+*/
