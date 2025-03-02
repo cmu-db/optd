@@ -1,3 +1,4 @@
+use crate::NAMESPACE;
 use datafusion::catalog::TableProvider;
 use datafusion::common::arrow::datatypes::{DataType as DFType, Schema as DFSchema};
 use iceberg::spec::{NestedField, PrimitiveType, Schema, Type};
@@ -5,7 +6,6 @@ use iceberg::{Catalog, NamespaceIdent, Result, TableCreation, TableIdent};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::{collections::HashMap, sync::Arc};
 
-static NAMESPACE: &str = "default";
 static FIELD_ID: AtomicI32 = AtomicI32::new(0);
 
 // Given a map of table names to [`TableProvider`]s, ingest them into an Iceberg [`Catalog`].
@@ -23,7 +23,7 @@ where
         let table_ident = TableIdent::new(namespace_ident.clone(), name.clone());
 
         if catalog.table_exists(&table_ident).await? {
-            unimplemented!("Table update unimplemented")
+            eprintln!("TODO(connor): Table update is unimplemented, doing nothing for now");
         } else {
             let df_schema = provider.schema();
             let iceberg_schema = df_to_iceberg_schema(&df_schema);
@@ -41,7 +41,7 @@ where
         }
     }
 
-    todo!()
+    Ok(())
 }
 
 /// Converts a DataFusion [`DFSchema`] to an Iceberg [`Schema`].

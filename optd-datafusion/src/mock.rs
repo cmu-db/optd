@@ -1,4 +1,4 @@
-use crate::df_conversion::context::OptdDFContext;
+use crate::{df_conversion::context::OptdDFContext, NAMESPACE};
 use async_trait::async_trait;
 use datafusion::{
     common::Result as DataFusionResult,
@@ -9,23 +9,19 @@ use datafusion::{
     physical_plan::{displayable, explain::ExplainExec, ExecutionPlan},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
-use iceberg::io::FileIOBuilder;
+use iceberg::{io::FileIOBuilder, Catalog, NamespaceIdent};
 use iceberg_catalog_memory::MemoryCatalog;
 use optd_core::{
     cascades,
-    catalog::OptdCatalog,
     plans::{logical::LogicalPlan, physical::PhysicalPlan},
     storage::memo::SqliteMemo,
+    Optimizer,
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 /// A mock `optd` optimizer.
 #[derive(Debug)]
-pub(crate) struct MockOptdOptimizer {
-    /// The memo table used for dynamic programming during query optimization.
-    memo: Arc<SqliteMemo>,
-    catalog: Arc<OptdCatalog<MemoryCatalog>>,
-}
+pub(crate) struct MockOptdOptimizer(Optimizer<SqliteMemo, MemoryCatalog>);
 
 impl MockOptdOptimizer {
     /// Creates a new `optd` optimizer with an in-memory memo table.
@@ -33,10 +29,15 @@ impl MockOptdOptimizer {
         let memo = Arc::new(SqliteMemo::new_in_memory().await?);
 
         let file_io = FileIOBuilder::new("memory").build()?;
-        let memory_catalog = MemoryCatalog::new(file_io, None);
-        let catalog = Arc::new(OptdCatalog::new(memo.clone(), memory_catalog));
+        let catalog = Arc::new(MemoryCatalog::new(file_io, Some("datafusion".to_string())));
 
-        Ok(Self { memo, catalog })
+        // Initialize the default namespace.
+        let namespace_ident = NamespaceIdent::from_vec(vec![NAMESPACE.to_string()]).unwrap();
+        catalog
+            .create_namespace(&namespace_ident, HashMap::new())
+            .await?;
+
+        Ok(Self(Optimizer::new(memo, catalog)))
     }
 
     /// A mock optimization function for testing purposes.
@@ -60,12 +61,13 @@ impl MockOptdOptimizer {
         logical_plan: &LogicalPlan,
     ) -> anyhow::Result<Arc<PhysicalPlan>> {
         let root_group_id =
-            cascades::ingest_full_logical_plan(self.memo.as_ref(), logical_plan).await?;
+            cascades::ingest_full_logical_plan(self.0.memo.as_ref(), logical_plan).await?;
         let goal_id =
-            cascades::mock_optimize_relation_group(self.memo.as_ref(), root_group_id).await?;
-        let optimized_plan = cascades::match_any_physical_plan(self.memo.as_ref(), goal_id).await?;
+            cascades::mock_optimize_relation_group(self.0.memo.as_ref(), root_group_id).await?;
+        let optimized_plan =
+            cascades::match_any_physical_plan(self.0.memo.as_ref(), goal_id).await?;
 
-        std::hint::black_box(&self.catalog);
+        std::hint::black_box(&self.0.catalog);
 
         Ok(optimized_plan)
     }
@@ -130,12 +132,9 @@ impl QueryPlanner for MockOptdOptimizer {
 
         // The DataFusion to `optd` conversion will have read in all of the tables necessary to
         // execute the query. Now we can update our own catalog with any new tables.
-        crate::iceberg_conversion::ingest_providers(
-            self.catalog.as_ref().catalog(),
-            &optd_ctx.providers,
-        )
-        .await
-        .expect("Unable to ingest providers");
+        crate::iceberg_conversion::ingest_providers(self.0.catalog.as_ref(), &optd_ctx.providers)
+            .await
+            .expect("Unable to ingest providers");
 
         // Run the `optd` optimizer on the `LogicalPlan`.
         let optd_optimized_physical_plan = self

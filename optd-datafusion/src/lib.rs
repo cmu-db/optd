@@ -15,6 +15,8 @@ mod df_conversion;
 mod iceberg_conversion;
 mod mock;
 
+static NAMESPACE: &str = "memory";
+
 /// Given a string of SQL queries, run them
 pub async fn run_queries(queries: &[&str]) -> Result<()> {
     // Create a default DataFusion `SessionConfig`.
