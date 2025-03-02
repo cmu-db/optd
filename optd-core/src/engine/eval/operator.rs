@@ -10,7 +10,7 @@
 //! This approach handles the non-deterministic nature of expression evaluation
 //! in our system, where an expression might evaluate to multiple possible values.
 
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc};
 
 use crate::{
     capture,
@@ -22,7 +22,7 @@ use crate::{
 use futures::{Stream, StreamExt};
 use optd_dsl::analyzer::{
     context::Context,
-    hir::{ArcExpr, CoreData, Materializable, Operator, OperatorKind, PhysicalOperator, Value},
+    hir::{CoreData, Expr, Materializable, Operator, OperatorKind, PhysicalOperator, Value},
 };
 use CoreData::*;
 use Materializable::*;
@@ -37,7 +37,7 @@ type OperatorStream = Pin<Box<dyn Stream<Item = Result<Operator<Value>, Error>> 
 
 /// Evaluates a logical operator by generating all possible combinations of its components.
 pub(super) fn evaluate_logical_operator(
-    op: Materializable<Operator<ArcExpr>>,
+    op: Materializable<Operator<Arc<Expr>>>,
     context: Context,
 ) -> ValueStream {
     match op {
@@ -52,7 +52,7 @@ pub(super) fn evaluate_logical_operator(
 
 /// Evaluates a scalar operator by generating all possible combinations of its components.
 pub(super) fn evaluate_scalar_operator(
-    op: Materializable<Operator<ArcExpr>>,
+    op: Materializable<Operator<Arc<Expr>>>,
     context: Context,
 ) -> ValueStream {
     match op {
@@ -67,7 +67,7 @@ pub(super) fn evaluate_scalar_operator(
 
 /// Evaluates a physical operator by generating all possible combinations of its components.
 pub(super) fn evaluate_physical_operator(
-    op: Materializable<PhysicalOperator<ArcExpr>>,
+    op: Materializable<PhysicalOperator<Arc<Expr>>>,
     context: Context,
 ) -> ValueStream {
     match op {
@@ -104,7 +104,7 @@ pub(super) fn evaluate_physical_operator(
 /// This is a shared implementation that handles the common pattern of
 /// evaluating operator data, scalar children, and relational children
 /// for any type of operator.
-fn evaluate_operator_components(op: Operator<ArcExpr>, context: Context) -> OperatorStream {
+fn evaluate_operator_components(op: Operator<Arc<Expr>>, context: Context) -> OperatorStream {
     let kind = op.kind;
 
     explore_operator_data(
@@ -119,9 +119,9 @@ fn evaluate_operator_components(op: Operator<ArcExpr>, context: Context) -> Oper
 
 /// Evaluates all combinations of operator data values.
 fn explore_operator_data(
-    op_data_exprs: Vec<ArcExpr>,
-    scalar_exprs: Vec<ArcExpr>,
-    rel_exprs: Vec<ArcExpr>,
+    op_data_exprs: Vec<Arc<Expr>>,
+    scalar_exprs: Vec<Arc<Expr>>,
+    rel_exprs: Vec<Arc<Expr>>,
     kind: OperatorKind,
     tag: String,
     context: Context,
@@ -150,8 +150,8 @@ fn explore_operator_data(
 
 /// Evaluates all combinations of scalar children values.
 fn explore_scalar_children(
-    scalar_exprs: Vec<ArcExpr>,
-    rel_exprs: Vec<ArcExpr>,
+    scalar_exprs: Vec<Arc<Expr>>,
+    rel_exprs: Vec<Arc<Expr>>,
     op_data: Vec<Value>,
     kind: OperatorKind,
     tag: String,
@@ -184,7 +184,7 @@ fn explore_scalar_children(
 
 /// Evaluates all combinations of relational children values.
 fn explore_relational_children(
-    rel_exprs: Vec<ArcExpr>,
+    rel_exprs: Vec<Arc<Expr>>,
     op_data: Vec<Value>,
     scalar_children: Vec<Value>,
     kind: OperatorKind,

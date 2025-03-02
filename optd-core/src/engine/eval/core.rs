@@ -1,6 +1,8 @@
 //! This module provides evaluation functions for core expression types, transforming
 //! expressions into value streams that handle all possible evaluation paths.
 
+use std::sync::Arc;
+
 use super::{
     operator::{evaluate_logical_operator, evaluate_physical_operator, evaluate_scalar_operator},
     Evaluate,
@@ -15,7 +17,7 @@ use crate::{
     },
 };
 use futures::StreamExt;
-use optd_dsl::analyzer::hir::{ArcExpr, CoreData, FunKind, Literal, Value};
+use optd_dsl::analyzer::hir::{CoreData, Expr, FunKind, Literal, Value};
 use CoreData::*;
 
 /// Evaluates a core expression by generating all possible evaluation paths.
@@ -29,7 +31,7 @@ use CoreData::*;
 ///
 /// # Returns
 /// A stream of all possible evaluation results
-pub(super) fn evaluate_core_expr(data: CoreData<ArcExpr>, context: Context) -> ValueStream {
+pub(super) fn evaluate_core_expr(data: CoreData<Arc<Expr>>, context: Context) -> ValueStream {
     match data.clone() {
         Literal(lit) => evaluate_literal(lit),
         Array(items) => evaluate_collection(items, data, context),
@@ -53,8 +55,8 @@ fn evaluate_literal(lit: Literal) -> ValueStream {
 
 /// Evaluates a collection expression (Array, Tuple, or Struct).
 fn evaluate_collection(
-    items: Vec<ArcExpr>,
-    data_clone: CoreData<ArcExpr>,
+    items: Vec<Arc<Expr>>,
+    data_clone: CoreData<Arc<Expr>>,
     context: Context,
 ) -> ValueStream {
     evaluate_all_combinations(items.into_iter(), context)
@@ -70,10 +72,10 @@ fn evaluate_collection(
 }
 
 /// Evaluates a map expression by generating all combinations of keys and values.
-fn evaluate_map(items: Vec<(ArcExpr, ArcExpr)>, context: Context) -> ValueStream {
+fn evaluate_map(items: Vec<(Arc<Expr>, Arc<Expr>)>, context: Context) -> ValueStream {
     // Extract keys and values
-    let keys: Vec<ArcExpr> = items.iter().map(|(k, _)| k.clone()).collect();
-    let values: Vec<ArcExpr> = items.iter().map(|(_, v)| v.clone()).collect();
+    let keys: Vec<Arc<Expr>> = items.iter().map(|(k, _)| k.clone()).collect();
+    let values: Vec<Arc<Expr>> = items.iter().map(|(_, v)| v.clone()).collect();
 
     // First evaluate all key expressions
     evaluate_all_combinations(keys.into_iter(), context.clone())
@@ -103,7 +105,7 @@ fn evaluate_function(fun_type: FunKind) -> ValueStream {
 }
 
 /// Evaluates a fail expression.
-fn evaluate_fail(msg: ArcExpr, context: Context) -> ValueStream {
+fn evaluate_fail(msg: Arc<Expr>, context: Context) -> ValueStream {
     msg.evaluate(context)
         .map(|result| result.map(|value| Value(CoreData::Fail(Box::new(value)))))
         .boxed()
@@ -114,7 +116,7 @@ mod tests {
     use super::*;
     use crate::engine::{utils::streams::ValueStream, Context};
     use futures::executor::block_on_stream;
-    use optd_dsl::analyzer::hir::{ArcExpr, BinOp, CoreData, Expr, FunKind, Literal, Value};
+    use optd_dsl::analyzer::hir::{BinOp, CoreData, Expr, FunKind, Literal, Value};
     use std::collections::HashMap;
     use std::sync::Arc;
     use BinOp::*;
@@ -135,7 +137,7 @@ mod tests {
     }
 
     // Helper to wrap expressions in Arc
-    fn arc(expr: Expr) -> ArcExpr {
+    fn arc(expr: Expr) -> Arc<Expr> {
         Arc::new(expr)
     }
 

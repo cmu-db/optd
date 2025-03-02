@@ -25,9 +25,6 @@ pub type Identifier = String;
 /// Annotation for functions (e.g. [rust], [rule], etc.)
 pub type Annotation = String;
 
-/// Arc-wrapped Expr for efficient referencing and thread-safety
-pub type ArcExpr = Arc<Expr>;
-
 /// Values that can be directly represented in the language
 #[derive(Debug, Clone)]
 pub enum Literal {
@@ -41,7 +38,7 @@ pub enum Literal {
 /// Types of functions in the system
 #[derive(Debug, Clone)]
 pub enum FunKind {
-    Closure(Vec<Identifier>, ArcExpr),
+    Closure(Vec<Identifier>, Arc<Expr>),
     RustUDF(fn(Vec<Value>) -> Value),
 }
 
@@ -132,21 +129,21 @@ pub enum CoreData<T> {
 #[derive(Debug, Clone)]
 pub enum Expr {
     /// Pattern matching expression
-    PatternMatch(ArcExpr, Vec<MatchArm>),
+    PatternMatch(Arc<Expr>, Vec<MatchArm>),
     /// Conditional expression
-    IfThenElse(ArcExpr, ArcExpr, ArcExpr),
+    IfThenElse(Arc<Expr>, Arc<Expr>, Arc<Expr>),
     /// Variable binding
-    Let(Identifier, ArcExpr, ArcExpr),
+    Let(Identifier, Arc<Expr>, Arc<Expr>),
     /// Binary operation
-    Binary(ArcExpr, BinOp, ArcExpr),
+    Binary(Arc<Expr>, BinOp, Arc<Expr>),
     /// Unary operation
-    Unary(UnaryOp, ArcExpr),
+    Unary(UnaryOp, Arc<Expr>),
     /// Function call
-    Call(ArcExpr, Vec<ArcExpr>),
+    Call(Arc<Expr>, Vec<Arc<Expr>>),
     /// Variable reference
     Ref(Identifier),
     /// Core expression
-    CoreExpr(CoreData<ArcExpr>),
+    CoreExpr(CoreData<Arc<Expr>>),
     /// Core value
     CoreVal(Value),
 }
@@ -180,7 +177,7 @@ pub struct MatchArm {
     /// Pattern to match against
     pub pattern: Pattern,
     /// Expression to evaluate if pattern matches
-    pub expr: ArcExpr,
+    pub expr: Arc<Expr>,
 }
 
 /// Standard binary operators

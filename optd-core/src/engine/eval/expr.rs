@@ -1,6 +1,8 @@
 //! This module provides implementation of expression evaluation, handling different
 //! expression types and evaluation strategies in a non-blocking, streaming manner.
 
+use std::sync::Arc;
+
 use crate::{
     capture,
     engine::utils::streams::{
@@ -10,7 +12,7 @@ use crate::{
 use futures::StreamExt;
 use optd_dsl::analyzer::{
     context::Context,
-    hir::{ArcExpr, BinOp, CoreData, Expr, FunKind, Literal, MatchArm, UnaryOp, Value},
+    hir::{BinOp, CoreData, Expr, FunKind, Literal, MatchArm, UnaryOp, Value},
 };
 
 use super::{
@@ -21,7 +23,7 @@ use CoreData::*;
 use Expr::*;
 use FunKind::*;
 
-impl Evaluate for ArcExpr {
+impl Evaluate for Arc<Expr> {
     /// Evaluates an expression to a stream of possible values.
     ///
     /// This function takes a reference to the expression, dispatching to specialized
@@ -69,7 +71,7 @@ impl Evaluate for ArcExpr {
 /// # Returns
 /// A stream of all possible evaluation results
 fn evaluate_pattern_match(
-    expr: ArcExpr,
+    expr: Arc<Expr>,
     match_arms: Vec<MatchArm>,
     context: Context,
 ) -> ValueStream {
@@ -92,9 +94,9 @@ fn evaluate_pattern_match(
 /// First evaluates the condition, then either the 'then' branch if the condition is true,
 /// or the 'else' branch if the condition is false.
 fn evaluate_if_then_else(
-    cond: ArcExpr,
-    then_expr: ArcExpr,
-    else_expr: ArcExpr,
+    cond: Arc<Expr>,
+    then_expr: Arc<Expr>,
+    else_expr: Arc<Expr>,
     context: Context,
 ) -> ValueStream {
     cond.evaluate(context.clone())
@@ -126,8 +128,8 @@ fn evaluate_if_then_else(
 /// then evaluates the 'after' expression in the updated context.
 fn evaluate_let_binding(
     ident: String,
-    assignee: ArcExpr,
-    after: ArcExpr,
+    assignee: Arc<Expr>,
+    after: Arc<Expr>,
     context: Context,
 ) -> ValueStream {
     assignee
@@ -149,7 +151,12 @@ fn evaluate_let_binding(
 /// Evaluates a binary expression.
 ///
 /// Evaluates both operands in all possible combinations, then applies the binary operation.
-fn evaluate_binary_expr(left: ArcExpr, op: BinOp, right: ArcExpr, context: Context) -> ValueStream {
+fn evaluate_binary_expr(
+    left: Arc<Expr>,
+    op: BinOp,
+    right: Arc<Expr>,
+    context: Context,
+) -> ValueStream {
     let exprs = vec![left, right];
     evaluate_all_combinations(exprs.into_iter(), context)
         .map(move |combo_result| {
@@ -165,7 +172,7 @@ fn evaluate_binary_expr(left: ArcExpr, op: BinOp, right: ArcExpr, context: Conte
 /// Evaluates a unary expression.
 ///
 /// Evaluates the operand, then applies the unary operation.
-fn evaluate_unary_expr(op: UnaryOp, expr: ArcExpr, context: Context) -> ValueStream {
+fn evaluate_unary_expr(op: UnaryOp, expr: Arc<Expr>, context: Context) -> ValueStream {
     expr.evaluate(context)
         .map(move |expr_result| expr_result.map(|value| eval_unary_op(&op, value)))
         .boxed()
@@ -175,7 +182,7 @@ fn evaluate_unary_expr(op: UnaryOp, expr: ArcExpr, context: Context) -> ValueStr
 ///
 /// First evaluates the function expression, then the arguments,
 /// and finally applies the function to the arguments.
-fn evaluate_function_call(fun: ArcExpr, args: Vec<ArcExpr>, context: Context) -> ValueStream {
+fn evaluate_function_call(fun: Arc<Expr>, args: Vec<Arc<Expr>>, context: Context) -> ValueStream {
     let fun_stream = fun.evaluate(context.clone());
 
     fun_stream
@@ -205,8 +212,8 @@ fn evaluate_function_call(fun: ArcExpr, args: Vec<ArcExpr>, context: Context) ->
 /// then evaluates the function body in that context.
 fn evaluate_closure_call(
     params: Vec<String>,
-    body: ArcExpr,
-    args: Vec<ArcExpr>,
+    body: Arc<Expr>,
+    args: Vec<Arc<Expr>>,
     context: Context,
 ) -> ValueStream {
     evaluate_all_combinations(args.into_iter(), context.clone())
@@ -232,7 +239,7 @@ fn evaluate_closure_call(
 /// Evaluates the arguments, then calls the Rust function with those arguments.
 fn evaluate_rust_udf_call(
     udf: fn(Vec<Value>) -> Value,
-    args: Vec<ArcExpr>,
+    args: Vec<Arc<Expr>>,
     context: Context,
 ) -> ValueStream {
     evaluate_all_combinations(args.into_iter(), context)
@@ -252,9 +259,7 @@ mod tests {
     use super::*;
     use crate::engine::utils::streams::ValueStream;
     use futures::executor::block_on_stream;
-    use optd_dsl::analyzer::hir::{
-        ArcExpr, BinOp, CoreData, Literal, MatchArm, Pattern, UnaryOp, Value,
-    };
+    use optd_dsl::analyzer::hir::{BinOp, CoreData, Literal, MatchArm, Pattern, UnaryOp, Value};
     use std::collections::HashMap;
     use std::sync::Arc;
     use BinOp::*;
@@ -278,7 +283,7 @@ mod tests {
     }
 
     // Helper to wrap expressions in Arc
-    fn arc(expr: Expr) -> ArcExpr {
+    fn arc(expr: Expr) -> Arc<Expr> {
         Arc::new(expr)
     }
 

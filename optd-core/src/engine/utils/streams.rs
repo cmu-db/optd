@@ -9,8 +9,9 @@ use crate::ir::plans::PartialPhysicalPlan;
 use crate::{capture, ir::plans::PartialLogicalPlan};
 use futures::{stream, Stream, StreamExt};
 use optd_dsl::analyzer::context::Context;
-use optd_dsl::analyzer::hir::{ArcExpr, Value};
+use optd_dsl::analyzer::hir::{Expr, Value};
 use std::pin::Pin;
+use std::sync::Arc;
 
 /// Type alias for a stream of evaluation results.
 ///
@@ -84,7 +85,7 @@ pub type PartialPhysicalPlanStream =
 /// A stream of all possible combinations of values from the expressions
 pub(crate) fn evaluate_all_combinations<I>(mut items: I, context: Context) -> VecValueStream
 where
-    I: Iterator<Item = ArcExpr> + Send + Clone + 'static,
+    I: Iterator<Item = Arc<Expr>> + Send + Clone + 'static,
 {
     match items.next() {
         // Base case: no expressions

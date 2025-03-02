@@ -45,7 +45,7 @@ impl<M: Memoize> Driver<M> {
         logical_plan: LogicalPlan,
     ) -> Result<Option<StoredPhysicalExpression>> {
         let group_id = ingest_full_logical_plan(&self.memo, &logical_plan).await?;
-        let required_physical_props = Arc::new(PhysicalProperties(PropertiesData::None));
+        let required_physical_props = Arc::new(PhysicalProperties(None));
         self.optimize_goal(group_id, required_physical_props).await
     }
 
