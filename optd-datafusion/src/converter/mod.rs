@@ -7,7 +7,7 @@ pub mod into_optd;
 
 /// A context for converting between optd and datafusion.
 /// The map is used to lookup table sources when converting TableScan operators from optd to datafusion.
-pub struct OptdDFContext<'a> {
+pub(crate) struct OptdDFContext<'a> {
     /// Maps table names to table sources.
     pub tables: HashMap<String, Arc<dyn TableSource>>,
     pub session_state: &'a SessionState,
@@ -23,7 +23,7 @@ impl OptdDFContext<'_> {
     /// # Returns
     ///
     /// A `OptdDFContext` containing an empty table map and the provided session state.
-    pub fn new(session_state: &SessionState) -> OptdDFContext {
+    pub(crate) fn new(session_state: &SessionState) -> OptdDFContext {
         OptdDFContext {
             tables: HashMap::new(),
             session_state,

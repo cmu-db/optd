@@ -26,7 +26,7 @@ use super::OptdDFContext;
 
 impl OptdDFContext<'_> {
     /// The col_offset is an offset added to the column index for all column references. It is useful for joins.
-    pub fn conv_df_to_optd_scalar(
+    pub(crate) fn conv_df_to_optd_scalar(
         df_expr: &Expr,
         context: &DFSchema,
         col_offset: usize,
@@ -97,7 +97,7 @@ impl OptdDFContext<'_> {
         }
     }
 
-    pub fn conv_df_to_optd_relational(
+    pub(crate) fn conv_df_to_optd_relational(
         &mut self,
         df_logical_plan: &DFLogicalPlan,
     ) -> anyhow::Result<Arc<LogicalPlan>> {

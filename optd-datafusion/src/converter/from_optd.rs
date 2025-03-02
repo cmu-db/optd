@@ -25,7 +25,7 @@ use super::OptdDFContext;
 
 impl OptdDFContext<'_> {
     #[async_recursion]
-    pub async fn conv_optd_to_df_relational(
+    pub(crate) async fn conv_optd_to_df_relational(
         &self,
         optimized_plan: &PhysicalPlan,
     ) -> anyhow::Result<Arc<dyn ExecutionPlan>> {
@@ -127,7 +127,7 @@ impl OptdDFContext<'_> {
         }
     }
 
-    pub fn conv_optd_to_df_scalar(
+    pub(crate) fn conv_optd_to_df_scalar(
         pred: &ScalarPlan,
         context: &SchemaRef,
     ) -> anyhow::Result<Arc<dyn PhysicalExpr>> {
