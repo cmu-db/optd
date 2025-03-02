@@ -5,6 +5,7 @@
 
 use crate::engine::eval::Evaluate;
 use crate::engine::utils::error::Error;
+use crate::ir::plans::PartialPhysicalPlan;
 use crate::{capture, ir::plans::PartialLogicalPlan};
 use futures::{stream, Stream, StreamExt};
 use optd_dsl::analyzer::context::Context;
@@ -30,6 +31,12 @@ pub(crate) type VecValueStream = Pin<Box<dyn Stream<Item = Result<Vec<Value>, Er
 pub type PartialLogicalPlanStream =
     Pin<Box<dyn Stream<Item = Result<PartialLogicalPlan, Error>> + Send>>;
 
+/// Type alias for a stream of partial physical plans.
+///
+/// This represents a stream that yields Result<PartialPhysicalPlan, Error> items,
+/// which is used for returning multiple possible transformations of a plan.
+pub type PartialPhysicalPlanStream =
+    Pin<Box<dyn Stream<Item = Result<PartialPhysicalPlan, Error>> + Send>>;
 /// Generates a stream of all possible value combinations from a series of expressions.
 ///
 /// This implementation uses a recursive approach that processes expressions

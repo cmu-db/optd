@@ -1,10 +1,12 @@
 use anyhow::Result;
 use async_recursion::async_recursion;
+use futures::StreamExt;
 use optd_dsl::analyzer::context::Context;
 use std::{char::MAX, sync::Arc};
 use tokio::task::JoinSet;
 
 use crate::{
+    driver::ingest::ingest_partial_logical_plan,
     engine::Engine,
     ir::{
         cost::{Cost, MAX_COST},
@@ -17,7 +19,10 @@ use crate::{
     },
 };
 
-use super::{ingest::ingest_full_logical_plan, memo::Memoize};
+use super::{
+    ingest::{ingest_full_logical_plan, ingest_partial_physical_plan},
+    memo::Memoize,
+};
 
 pub struct Driver<M: Memoize> {
     pub memo: M,
@@ -28,7 +33,7 @@ impl<M: Memoize> Driver<M> {
     pub fn new(memo: M) -> Arc<Self> {
         Arc::new_cyclic(|this| Self {
             memo,
-            rule_engine: Engine::new(Context::default(), this.upgrade().unwrap())
+            rule_engine: Engine::new(Context::default(), this.upgrade().unwrap()),
         })
     }
     /// The main entry point for the optimizer.
@@ -61,7 +66,8 @@ impl<M: Memoize> Driver<M> {
                 .update_group_exploration_status(group_id, ExplorationStatus::Exploring)
                 .await?;
             let ctx = self.clone();
-            tokio::spawn(async move { ctx.explore_relation_group(group_id).await }).await?;
+            // TODO(sarvesh): we should use the result of this exploration instead of calling the memo table
+            let _ = tokio::spawn(async move { ctx.explore_relation_group(group_id).await }).await?;
         }
 
         // TODO(sarvesh): we probably should get all logical expressions from the representative group
@@ -71,7 +77,10 @@ impl<M: Memoize> Driver<M> {
         for (logical_expr_id, logical_expr) in logical_exprs {
             let ctx = self.clone();
             let g = goal.clone();
-            join_set.spawn(async move { ctx.optimize_logical_expression(logical_expr, g).await });
+            join_set.spawn(async move {
+                ctx.optimize_logical_expression(logical_expr, g, group_id, required_physical_props)
+                    .await
+            });
         }
 
         let plan_results = join_set
@@ -102,6 +111,8 @@ impl<M: Memoize> Driver<M> {
         self: Arc<Self>,
         logical_expr: Arc<LogicalExpression>,
         goal: GoalId,
+        group_id: RelationalGroupId,
+        required_physical_props: PhysicalProperties,
     ) -> Result<(Cost, Option<StoredPhysicalExpression>)> {
         let rules = self.memo.get_matching_rules(&logical_expr).await?;
 
@@ -214,61 +225,67 @@ impl<M: Memoize> Driver<M> {
 
     pub async fn match_and_apply_transformation_rule(
         self: Arc<Self>,
-        logical_expr: Arc<LogicalExpression>,
+        logical_expr: LogicalExpression,
         rule_id: TransformationRuleId,
     ) -> Result<Vec<StoredLogicalExpression>> {
-        // let partial_logical_input = PartialLogicalPlan::from_expr(&logical_expr);
+        let partial_logical_input = logical_expr.into();
 
-        // let partial_logical_outputs = self
-        //     .rule_engine
-        //     .match_and_apply_transformation_rule(rule_id, partial_logical_input)
-        //     .await;
+        let mut partial_logical_outputs = self
+            .rule_engine
+            .match_and_apply_logical_rule(&rule_id.0, partial_logical_input)
+            .await;
 
-        // let mut partial_logical_outputs = Box::pin(partial_logical_outputs);
+        let mut logical_exprs = Vec::new();
+        while let Some(partial_logical_output) = partial_logical_outputs.next().await {
+            match partial_logical_output {
+                Ok(partial_plan) => {
+                    let (logical_expr, logical_expr_id) =
+                        ingest_partial_logical_plan(&self.memo, &partial_plan).await?;
+                    logical_exprs.push((logical_expr, logical_expr_id));
+                }
+                Err(e) => {
+                    println!("DSL Error: {:?}", e);
+                    todo!()
+                }
+            }
+        }
 
-        // let mut logical_exprs = Vec::new();
-        // while let Some(partial_logical_output) = partial_logical_outputs.next().await {
-        //     let (logical_expr, logical_expr_id) =
-        //         ingest_partial_logical_plan(&self.memo, &partial_logical_output).await?;
-        //     logical_exprs.push((logical_expr, logical_expr_id));
-        // }
-
-        // Ok(logical_exprs)
-        todo!()
+        Ok(logical_exprs)
     }
 
     pub async fn match_and_apply_implementation_rule(
         self: &Arc<Self>,
-        logical_expr: Arc<LogicalExpression>,
+        logical_expr: LogicalExpression,
         rule_id: ImplementationRuleId,
         goal: GoalId,
     ) -> Result<(Cost, Option<StoredPhysicalExpression>)> {
-        // let partial_logical_input = PartialLogicalPlan::from_expr(&logical_expr);
+        let partial_logical_input = logical_expr.into();
 
-        // let physical_outputs = self
-        //     .rule_engine
-        //     .match_and_apply_implementation_rule(
-        //         rule_id,
-        //         partial_logical_input,
-        //         &goal.required_physical_properties,
-        //     )
-        //     .await;
+        let mut physical_outputs = self
+            .rule_engine
+            .match_and_apply_implementation_rule(&rule_id.0, partial_logical_input)
+            .await;
 
-        // let mut physical_outputs = Box::pin(physical_outputs);
+        let mut best_cost = MAX_COST;
+        let mut best_physical_output = None;
 
-        // let mut best_cost = MAX_COST;
-        // let mut best_physical_output = None;
+        while let Some(physical_output) = physical_outputs.next().await {
+            match physical_output {
+                Ok(partial_physical_output) => {
+                    let (cost, top_phyiscal_expression) =
+                        ingest_partial_physical_plan(&self.memo, &partial_physical_output).await?;
+                    if cost < best_cost {
+                        best_cost = cost;
+                        best_physical_output = Some(top_phyiscal_expression);
+                    }
+                }
+                Err(e) => {
+                    println!("DSL Error: {:?}", e);
+                    todo!()
+                }
+            }
+        }
 
-        // while let Some(physical_output) = physical_outputs.next().await {
-        //     let (cost, top_phyiscal_expression) =
-        //         ingest_partial_physical_plan(&self.memo, &physical_output).await?;
-        //     if cost < best_cost {
-        //         best_cost = cost;
-        //         best_physical_output = Some(top_phyiscal_expression);
-        //     }
-        // }
-
-        // Ok((best_cost, best_physical_output))
-        todo!()
+        Ok((best_cost, best_physical_output))
     }
 }

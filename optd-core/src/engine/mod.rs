@@ -16,7 +16,7 @@ use optd_dsl::analyzer::{
     hir::{CoreData, Expr, Literal, Value},
 };
 use std::sync::Arc;
-use utils::{error::Error, streams::PartialLogicalPlanStream};
+use utils::{error::Error, streams::{PartialLogicalPlanStream, PartialPhysicalPlanStream}};
 use CoreData::*;
 use Expr::*;
 use Literal::*;
@@ -37,6 +37,21 @@ pub struct Engine<M: Memoize> {
 impl<M: Memoize> Engine<M> {
     pub fn new(context: Context, driver: Arc<Driver<M>>) -> Self {
         Self { context, driver }
+    }
+    pub async fn match_and_apply_logical_rule(
+        &self,
+        rule_name: &str,
+        plan: PartialLogicalPlan,
+    ) -> PartialLogicalPlanStream {
+        todo!()
+    }
+
+    pub async fn match_and_apply_implementation_rule(
+        &self,
+        rule_name: &str,
+        plan: PartialLogicalPlan,
+    ) -> PartialPhysicalPlanStream {
+        todo!()
     }
 }
 
