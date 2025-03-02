@@ -28,7 +28,7 @@ impl<M: Memoize> Driver<M> {
     pub fn new(memo: M) -> Arc<Self> {
         Arc::new_cyclic(|this| Self {
             memo,
-            rule_engine: Engine::new(Context::default(), this.upgrade().unwrap())
+            rule_engine: Engine::new(Context::default(), this.upgrade().unwrap()),
         })
     }
     /// The main entry point for the optimizer.
