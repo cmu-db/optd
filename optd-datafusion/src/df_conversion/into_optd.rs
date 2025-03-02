@@ -1,3 +1,4 @@
+use super::context::OptdDFContext;
 use anyhow::bail;
 use datafusion::{
     common::DFSchema,
@@ -21,9 +22,7 @@ use optd_core::{
 };
 use std::sync::Arc;
 
-use super::OptdContext;
-
-impl OptdContext {
+impl OptdDFContext {
     /// Given a DataFusion logical plan, returns an `optd` [`LogicalPlan`].
     pub(crate) fn df_to_optd_relational(
         &mut self,
@@ -33,8 +32,11 @@ impl OptdContext {
             DataFusionLogicalPlan::TableScan(table_scan) => {
                 let table_name = table_scan.table_name.to_quoted_string();
 
-                // Record the table name and source into the context.
-                self.tables.insert(table_name, table_scan.source.clone());
+                // Record the table name and provider into the context.
+                self.providers.insert(
+                    table_name,
+                    datafusion::datasource::source_as_provider(&table_scan.source)?,
+                );
 
                 let combine_filters = conjunction(table_scan.filters.to_vec());
                 let predicate = match combine_filters {

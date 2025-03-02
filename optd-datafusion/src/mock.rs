@@ -1,17 +1,19 @@
-use crate::converter::OptdContext;
+use crate::df_conversion::context::OptdDFContext;
 use async_trait::async_trait;
 use datafusion::{
     common::Result as DataFusionResult,
     execution::{context::QueryPlanner, SessionState},
     logical_expr::{
-        Explain, LogicalPlan as DataFusionLogicalPlan, PlanType as DataFusionPlanType,
-        ToStringifiedPlan,
+        Explain, LogicalPlan as DFLogicalPlan, PlanType as DFPlanType, ToStringifiedPlan,
     },
     physical_plan::{displayable, explain::ExplainExec, ExecutionPlan},
     physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner},
 };
+use iceberg::io::FileIOBuilder;
+use iceberg_catalog_memory::MemoryCatalog;
 use optd_core::{
     cascades,
+    catalog::OptdCatalog,
     plans::{logical::LogicalPlan, physical::PhysicalPlan},
     storage::memo::SqliteMemo,
 };
@@ -21,15 +23,20 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub(crate) struct MockOptdOptimizer {
     /// The memo table used for dynamic programming during query optimization.
-    memo: SqliteMemo,
+    memo: Arc<SqliteMemo>,
+    catalog: Arc<OptdCatalog<MemoryCatalog>>,
 }
 
 impl MockOptdOptimizer {
     /// Creates a new `optd` optimizer with an in-memory memo table.
     pub async fn new_in_memory() -> anyhow::Result<Self> {
-        Ok(Self {
-            memo: SqliteMemo::new_in_memory().await?,
-        })
+        let memo = Arc::new(SqliteMemo::new_in_memory().await?);
+
+        let file_io = FileIOBuilder::new("memory").build()?;
+        let memory_catalog = MemoryCatalog::new(file_io, None);
+        let catalog = Arc::new(OptdCatalog::new(memo.clone(), memory_catalog));
+
+        Ok(Self { memo, catalog })
     }
 
     /// A mock optimization function for testing purposes.
@@ -52,9 +59,13 @@ impl MockOptdOptimizer {
         &self,
         logical_plan: &LogicalPlan,
     ) -> anyhow::Result<Arc<PhysicalPlan>> {
-        let root_group_id = cascades::ingest_full_logical_plan(&self.memo, logical_plan).await?;
-        let goal_id = cascades::mock_optimize_relation_group(&self.memo, root_group_id).await?;
-        let optimized_plan = cascades::match_any_physical_plan(&self.memo, goal_id).await?;
+        let root_group_id =
+            cascades::ingest_full_logical_plan(self.memo.as_ref(), logical_plan).await?;
+        let goal_id =
+            cascades::mock_optimize_relation_group(self.memo.as_ref(), root_group_id).await?;
+        let optimized_plan = cascades::match_any_physical_plan(self.memo.as_ref(), goal_id).await?;
+
+        std::hint::black_box(&self.catalog);
 
         Ok(optimized_plan)
     }
@@ -63,11 +74,11 @@ impl MockOptdOptimizer {
 #[async_trait]
 impl QueryPlanner for MockOptdOptimizer {
     /// This function is the entry point for the physical planner. It will attempt to optimize the
-    /// given DataFusion [`DataFusionLogicalPlan`] using the `optd` optimizer.
+    /// given DataFusion [`DFLogicalPlan`] using the `optd` optimizer.
     ///
-    /// If the [`DataFusionLogicalPlan`] is a DML/DDL operation, it will fall back to the DataFusion planner.
+    /// If the [`DFLogicalPlan`] is a DML/DDL operation, it will fall back to the DataFusion planner.
     ///
-    /// Otherwise, this function will convert the DataFusion [`DataFusionLogicalPlan`] into an
+    /// Otherwise, this function will convert the DataFusion [`DFLogicalPlan`] into an
     /// `optd` [`LogicalPlan`] in order to pass it to the `optd` optimizer.
     ///
     /// Once `optd` has finished optimization, it will convert the output `optd` [`PhysicalPlan`]
@@ -83,13 +94,12 @@ impl QueryPlanner for MockOptdOptimizer {
     ///   DataFusion.
     async fn create_physical_plan(
         &self,
-        datafusion_logical_plan: &DataFusionLogicalPlan,
+        datafusion_logical_plan: &DFLogicalPlan,
         session_state: &SessionState,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         // Fallback to the default DataFusion planner for DML/DDL operations.
-        if let DataFusionLogicalPlan::Dml(_)
-        | DataFusionLogicalPlan::Ddl(_)
-        | DataFusionLogicalPlan::EmptyRelation(_) = datafusion_logical_plan
+        if let DFLogicalPlan::Dml(_) | DFLogicalPlan::Ddl(_) | DFLogicalPlan::EmptyRelation(_) =
+            datafusion_logical_plan
         {
             return DefaultPhysicalPlanner::default()
                 .create_physical_plan(datafusion_logical_plan, session_state)
@@ -97,7 +107,7 @@ impl QueryPlanner for MockOptdOptimizer {
         }
 
         let (datafusion_logical_plan, _verbose, mut explains) = match datafusion_logical_plan {
-            DataFusionLogicalPlan::Explain(Explain { plan, verbose, .. }) => {
+            DFLogicalPlan::Explain(Explain { plan, verbose, .. }) => {
                 (plan.as_ref(), *verbose, Some(Vec::new()))
             }
             _ => (datafusion_logical_plan, false, None),
@@ -105,18 +115,27 @@ impl QueryPlanner for MockOptdOptimizer {
 
         if let Some(explains) = &mut explains {
             explains.push(datafusion_logical_plan.to_stringified(
-                DataFusionPlanType::OptimizedLogicalPlan {
+                DFPlanType::OptimizedLogicalPlan {
                     optimizer_name: "datafusion".to_string(),
                 },
             ));
         }
 
-        let mut optd_ctx = OptdContext::new(session_state);
+        let mut optd_ctx = OptdDFContext::new(session_state);
 
         // convert the DataFusion logical plan to `optd`'s version of a `LogicalPlan`.
         let logical_plan = optd_ctx
             .df_to_optd_relational(datafusion_logical_plan)
             .expect("TODO FIX ERROR HANDLING");
+
+        // The DataFusion to `optd` conversion will have read in all of the tables necessary to
+        // execute the query. Now we can update our own catalog with any new tables.
+        crate::iceberg_conversion::ingest_providers(
+            self.catalog.as_ref().catalog(),
+            &optd_ctx.providers,
+        )
+        .await
+        .expect("Unable to ingest providers");
 
         // Run the `optd` optimizer on the `LogicalPlan`.
         let optd_optimized_physical_plan = self
@@ -132,12 +151,11 @@ impl QueryPlanner for MockOptdOptimizer {
 
         if let Some(mut explains) = explains {
             explains.push(
-                displayable(&*physical_plan)
-                    .to_stringified(false, DataFusionPlanType::FinalPhysicalPlan),
+                displayable(&*physical_plan).to_stringified(false, DFPlanType::FinalPhysicalPlan),
             );
 
             return Ok(Arc::new(ExplainExec::new(
-                DataFusionLogicalPlan::explain_schema(),
+                DFLogicalPlan::explain_schema(),
                 explains,
                 true,
             )));

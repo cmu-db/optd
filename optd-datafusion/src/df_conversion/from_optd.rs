@@ -1,9 +1,9 @@
+use super::context::OptdDFContext;
 use anyhow::bail;
 use async_recursion::async_recursion;
 use datafusion::{
     arrow::datatypes::{Schema, SchemaRef},
     common::JoinType,
-    datasource::source_as_provider,
     logical_expr::Operator,
     physical_plan::{
         expressions::{BinaryExpr, Column, Literal, NegativeExpr, NotExpr},
@@ -20,9 +20,7 @@ use optd_core::{
 };
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
-use super::OptdContext;
-
-impl OptdContext {
+impl OptdDFContext {
     #[async_recursion]
     pub(crate) async fn optd_to_df_relational(
         &self,
@@ -30,8 +28,8 @@ impl OptdContext {
     ) -> anyhow::Result<Arc<dyn ExecutionPlan>> {
         match &optimized_plan.operator {
             PhysicalOperator::TableScan(table_scan) => {
-                let source = self
-                    .tables
+                let provider = self
+                    .providers
                     .get(
                         table_scan
                             .table_name
@@ -39,7 +37,6 @@ impl OptdContext {
                             .expect("Table name is not valid"),
                     )
                     .ok_or_else(|| anyhow::anyhow!("Table not found"))?;
-                let provider = source_as_provider(source)?;
 
                 // TODO(yuchen): support filters inside table scan.
                 let filters = vec![];

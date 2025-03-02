@@ -11,9 +11,9 @@ use datafusion::prelude::*;
 use futures::StreamExt;
 use std::time::SystemTime;
 
-mod converter;
+mod df_conversion;
+mod iceberg_conversion;
 mod mock;
-mod optd_utils;
 
 /// Given a string of SQL queries, run them
 pub async fn run_queries(queries: &[&str]) -> Result<()> {
@@ -22,7 +22,7 @@ pub async fn run_queries(queries: &[&str]) -> Result<()> {
 
     // Create a DataFusion `SessionContext` that uses the `optd` optimizer to help created optimized
     // `ExecutionPlan`s.
-    let ctx = optd_utils::create_optd_session(Some(session_config), None, None)
+    let ctx = df_conversion::session::create_optd_session(Some(session_config), None, None)
         .await
         .unwrap();
 
