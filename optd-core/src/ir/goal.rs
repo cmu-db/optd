@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::plans::PartialPhysicalPlan;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct GoalId(pub i64);
+pub struct PhysicalGoalId(pub i64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum OptimizationStatus {
@@ -12,7 +12,7 @@ pub enum OptimizationStatus {
     Optimized,
 }
 
-impl Into<PartialPhysicalPlan> for GoalId {
+impl Into<PartialPhysicalPlan> for PhysicalGoalId {
     fn into(self) -> PartialPhysicalPlan {
         PartialPhysicalPlan::UnMaterialized(self)
     }

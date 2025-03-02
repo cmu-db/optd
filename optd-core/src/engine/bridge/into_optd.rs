@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::ir::{
-    goal::GoalId,
-    groups::{RelationalGroupId, ScalarGroupId},
+    goal::PhysicalGoalId,
+    groups::{LogicalGroupId, ScalarGroupId},
     operators::{Child, LogicalOperator, OperatorData, PhysicalOperator, ScalarOperator},
     plans::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, ScalarPlan},
     properties::{PhysicalProperties, PropertiesData},
@@ -24,7 +24,7 @@ pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
     match &value.0 {
         LogicalOperator(materialization) => match materialization {
             UnMaterialized(group_id, _) => {
-                PartialLogicalPlan::UnMaterialized(RelationalGroupId(*group_id))
+                PartialLogicalPlan::UnMaterialized(LogicalGroupId(*group_id))
             }
             Materialized(op) => PartialLogicalPlan::PartialMaterialized {
                 node: LogicalOperator {
@@ -102,7 +102,9 @@ fn value_to_scalar(value: &Value) -> ScalarPlan {
 pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
     match &value.0 {
         PhysicalOperator(materialization) => match materialization {
-            UnMaterialized(goal_id, _) => PartialPhysicalPlan::UnMaterialized(GoalId(*goal_id)),
+            UnMaterialized(goal_id, _) => {
+                PartialPhysicalPlan::UnMaterialized(PhysicalGoalId(*goal_id))
+            }
             Materialized(physical_op) => {
                 let op = &physical_op.operator;
 
@@ -122,7 +124,7 @@ pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
                     properties: PhysicalProperties(value_to_properties_data(
                         &physical_op.properties,
                     )),
-                    group_id: RelationalGroupId(physical_op.group_id),
+                    group_id: LogicalGroupId(physical_op.group_id),
                 }
             }
         },
