@@ -115,7 +115,12 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
 
             let physical_op = PhysicalOperator {
                 operator: base_operator,
-                properties: Box::new(properties_data_to_value(&properties.0)),
+                properties: properties
+                    .0
+                    .as_ref()
+                    .map(properties_data_to_value)
+                    .unwrap_or(Value(Null))
+                    .into(),
                 group_id: group_id.0,
             };
 
@@ -185,6 +190,5 @@ fn properties_data_to_value(data: &PropertiesData) -> Value {
             Value(Array(values))
         }
         PropertiesData::Scalar(scalar) => scalar_to_value(scalar),
-        PropertiesData::None => Value(None),
     }
 }

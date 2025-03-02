@@ -108,6 +108,11 @@ pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
             Materialized(physical_op) => {
                 let op = &physical_op.operator;
 
+                let properties = match physical_op.properties.as_ref() {
+                    Value(Null) => None,
+                    other => Some(value_to_properties_data(&other)),
+                };
+
                 PartialPhysicalPlan::PartialMaterialized {
                     node: PhysicalOperator {
                         tag: op.tag.clone(),
@@ -121,9 +126,7 @@ pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
                             value_to_partial_scalar,
                         ),
                     },
-                    properties: PhysicalProperties(value_to_properties_data(
-                        &physical_op.properties,
-                    )),
+                    properties: PhysicalProperties(properties),
                     group_id: LogicalGroupId(physical_op.group_id),
                 }
             }
@@ -203,7 +206,6 @@ fn value_to_properties_data(value: &Value) -> PropertiesData {
             PropertiesData::Struct(name.clone(), convert_values_to_properties_data(elements))
         }
         ScalarOperator(_) => PropertiesData::Scalar(value_to_scalar(value)),
-        None => PropertiesData::None,
-        _ => panic!("Cannot convert {:?} to PropertyData", value.0),
+        _ => panic!("Cannot convert {:?} to PropertyData conten", value.0),
     }
 }
