@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
 use async_recursion::async_recursion;
+use futures::stream::ReuniteError;
 
 use crate::ir::{
     cost::Cost,
     expressions::{PhysicalExpression, StoredLogicalExpression, StoredPhysicalExpression},
     goal::PhysicalGoalId,
     groups::{LogicalGroupId, ScalarGroupId},
-    operators::Child,
+    operators::{Child, LogicalOperator},
     plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, ScalarPlan},
 };
 
@@ -118,17 +119,97 @@ pub async fn ingest_partial_physical_plan_inner(
 #[async_recursion]
 pub async fn ingest_partial_logical_plan(
     memo: &impl Memoize,
-    partial_logical_plan: &PartialLogicalPlan,
-) -> anyhow::Result<StoredLogicalExpression> {
-    todo!()
+    partial_logical_plan: PartialLogicalPlan,
+    group_id: LogicalGroupId,
+) -> anyhow::Result<Option<StoredLogicalExpression>> {
+    match partial_logical_plan {
+        PartialLogicalPlan::PartialMaterialized { node } => {
+            let mut children_groups = Vec::new();
+            for child in node.relational_children.iter() {
+                let child_group_id = ingest_partial_logical_plan_inner(memo, child).await?;
+                children_groups.push(child_group_id);
+            }
+            let mut children_scalars = Vec::new();
+            for child in node.scalar_children.iter() {
+                let child_scalar_id = ingest_partial_scalar_plan_inner(memo, child).await?;
+                children_scalars.push(child_scalar_id);
+            }
+            let expr = LogicalOperator {
+                tag: node.tag,
+                data: node.data,
+                relational_children: children_groups,
+                scalar_children: children_scalars,
+            };
+
+            let (new_group_id, expr_id) = memo.add_logical_expr(&expr).await?;
+            if new_group_id != group_id {
+                memo.merge_relation_group(group_id, new_group_id).await;
+            }
+            Ok(Some((expr, expr_id)))
+        }
+        PartialLogicalPlan::UnMaterialized(new_group_id) => {
+            if new_group_id != group_id {
+                memo.merge_relation_group(group_id, new_group_id).await;
+            }
+            Ok(None)
+        }
+    }
 }
 
 #[async_recursion]
 pub async fn ingest_partial_logical_plan_inner(
     memo: &impl Memoize,
-    partial_logical_plan: &PartialLogicalPlan,
-) -> anyhow::Result<(Option<StoredLogicalExpression>, LogicalGroupId)> {
-    todo!()
+    child: &Child<Arc<PartialLogicalPlan>>,
+) -> anyhow::Result<Child<LogicalGroupId>> {
+    match child {
+        Child::Singleton(child) => {
+            let child = child.clone();
+            let repr_group = ingest_partial_logical_plan_inner_inner(memo, child).await?;
+            Ok(Child::Singleton(repr_group))
+        }
+        Child::VarLength(children) => {
+            let mut children_groups = Vec::new();
+            for child in children.iter() {
+                let child = child.clone();
+                children_groups.push(ingest_partial_logical_plan_inner_inner(memo, child).await?);
+            }
+            Ok(Child::VarLength(children_groups))
+        }
+    }
+}
+
+#[async_recursion]
+pub async fn ingest_partial_logical_plan_inner_inner(
+    memo: &impl Memoize,
+    partial_logical_plan: Arc<PartialLogicalPlan>,
+) -> anyhow::Result<LogicalGroupId> {
+    match &*partial_logical_plan {
+        PartialLogicalPlan::PartialMaterialized { node } => {
+            let mut children_groups = Vec::new();
+            for child in node.relational_children.iter() {
+                let child_group_id = ingest_partial_logical_plan_inner(memo, child).await?;
+                children_groups.push(child_group_id);
+            }
+            let mut children_scalars = Vec::new();
+            for child in node.scalar_children.iter() {
+                let child_scalar_id = ingest_partial_scalar_plan_inner(memo, child).await?;
+                children_scalars.push(child_scalar_id);
+            }
+            let expr = LogicalOperator {
+                tag: node.tag.clone(),
+                data: node.data.clone(),
+                relational_children: children_groups,
+                scalar_children: children_scalars,
+            };
+
+            let (new_group_id, expr_id) = memo.add_logical_expr(&expr).await?;
+            Ok(new_group_id)
+        }
+        PartialLogicalPlan::UnMaterialized(new_group_id) => {
+            let repr_group = memo.get_repr_group(new_group_id).await?;
+            Ok(repr_group)
+        }
+    }
 }
 
 #[async_recursion]
@@ -144,6 +225,14 @@ pub async fn ingest_partial_scalar_plan(
     memo: &impl Memoize,
     partial_scalar_plan: &PartialScalarPlan,
 ) -> anyhow::Result<ScalarGroupId> {
+    todo!()
+}
+
+#[async_recursion]
+pub async fn ingest_partial_scalar_plan_inner(
+    memo: &impl Memoize,
+    child: &Child<Arc<PartialScalarPlan>>,
+) -> anyhow::Result<Child<ScalarGroupId>> {
     todo!()
 }
 

@@ -17,7 +17,7 @@ use crate::ir::{
         LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
         ScalarExpression, ScalarExpressionId,
     },
-    goal::{PhysicalGoalId, OptimizationStatus},
+    goal::{OptimizationStatus, PhysicalGoalId},
     groups::{ExplorationStatus, LogicalGroupId, ScalarGroupId},
     properties::PhysicalProperties,
     rules::{RuleId, TransformationRuleId},
@@ -49,7 +49,10 @@ pub trait Memoize: Send + Sync + 'static {
         status: ExplorationStatus,
     ) -> Result<()>;
 
-    async fn get_group_optimization_status(&self, goal_id: PhysicalGoalId) -> Result<OptimizationStatus>;
+    async fn get_group_optimization_status(
+        &self,
+        goal_id: PhysicalGoalId,
+    ) -> Result<OptimizationStatus>;
 
     /// Gets the metadata that describes a goal.
     async fn get_goal_details(
@@ -155,4 +158,8 @@ pub trait Memoize: Send + Sync + 'static {
     ) -> Result<Vec<TransformationRuleId>>;
 
     async fn get_matching_rules(&self, physical_expr: &LogicalExpression) -> Result<Vec<RuleId>>;
+
+    async fn get_repr_group(&self, group_id: &LogicalGroupId) -> Result<LogicalGroupId>;
+
+    async fn get_repr_goal(&self, goal_id: &PhysicalGoalId) -> Result<PhysicalGoalId>;
 }
