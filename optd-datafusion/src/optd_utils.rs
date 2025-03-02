@@ -1,5 +1,4 @@
-use crate::planner::OptdOptimizer;
-use crate::planner::OptdQueryPlanner;
+use crate::mock::MockOptdOptimizer;
 use datafusion::catalog::{CatalogProviderList, MemoryCatalogProviderList};
 use datafusion::common::Result;
 use datafusion::execution::runtime_env::{RuntimeEnv, RuntimeEnvBuilder};
@@ -22,7 +21,7 @@ pub(crate) async fn create_optd_session(
             })
             .with_information_schema(true);
 
-        // Disable Datafusion's heuristic rule-based optimizer by setting the passes to 1.
+        // Disable DataFusion's heuristic rule-based optimizer by setting the passes to 1.
         config.options_mut().optimizer.max_passes = 0;
         config
     };
@@ -36,10 +35,9 @@ pub(crate) async fn create_optd_session(
         datafusion_catalog.unwrap_or_else(|| Arc::new(MemoryCatalogProviderList::new()));
 
     // Use the `optd` optimizer as the query planner instead of the default one.
-    let optimizer = OptdOptimizer::new_in_memory()
+    let optimizer = MockOptdOptimizer::new_in_memory()
         .await
         .expect("TODO FIX ERROR HANDLING");
-    let planner = Arc::new(OptdQueryPlanner::new(optimizer));
 
     // Build up the state for the `SessionContext`. Removes all optimizer rules so that it
     // completely relies on `optd`.
@@ -50,7 +48,7 @@ pub(crate) async fn create_optd_session(
         .with_default_features()
         .with_optimizer_rules(vec![])
         .with_physical_optimizer_rules(vec![])
-        .with_query_planner(planner)
+        .with_query_planner(Arc::new(optimizer))
         .build();
 
     // Create the `SessionContext` and refresh the catalogs to ensure everything is up-to-date.

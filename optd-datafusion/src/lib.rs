@@ -12,8 +12,8 @@ use futures::StreamExt;
 use std::time::SystemTime;
 
 mod converter;
+mod mock;
 mod optd_utils;
-mod planner;
 
 /// Given a string of SQL queries, run them
 pub async fn run_queries(queries: &[&str]) -> Result<()> {
