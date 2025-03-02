@@ -21,9 +21,9 @@ use optd_core::{
 };
 use std::sync::Arc;
 
-use super::OptdDataFusionContext;
+use super::OptdContext;
 
-impl OptdDataFusionContext<'_> {
+impl OptdContext {
     /// Given a DataFusion logical plan, returns an `optd` [`LogicalPlan`].
     pub(crate) fn df_to_optd_relational(
         &mut self,

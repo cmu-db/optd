@@ -1,4 +1,4 @@
-use crate::converter::OptdDataFusionContext;
+use crate::converter::OptdContext;
 use async_trait::async_trait;
 use datafusion::{
     common::Result as DataFusionResult,
@@ -111,10 +111,10 @@ impl QueryPlanner for MockOptdOptimizer {
             ));
         }
 
-        let mut converter = OptdDataFusionContext::new(session_state);
+        let mut optd_ctx = OptdContext::new(session_state);
 
         // convert the DataFusion logical plan to `optd`'s version of a `LogicalPlan`.
-        let logical_plan = converter
+        let logical_plan = optd_ctx
             .df_to_optd_relational(datafusion_logical_plan)
             .expect("TODO FIX ERROR HANDLING");
 
@@ -125,7 +125,7 @@ impl QueryPlanner for MockOptdOptimizer {
             .expect("TODO FIX ERROR HANDLING");
 
         // Convert the output `optd` `PhysicalPlan` to DataFusion's `ExecutionPlan`.
-        let physical_plan = converter
+        let physical_plan = optd_ctx
             .optd_to_df_relational(&optd_optimized_physical_plan)
             .await
             .expect("TODO FIX ERROR HANDLING");

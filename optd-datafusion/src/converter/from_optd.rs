@@ -20,9 +20,9 @@ use optd_core::{
 };
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
-use super::OptdDataFusionContext;
+use super::OptdContext;
 
-impl OptdDataFusionContext<'_> {
+impl OptdContext {
     #[async_recursion]
     pub(crate) async fn optd_to_df_relational(
         &self,
@@ -44,7 +44,7 @@ impl OptdDataFusionContext<'_> {
                 // TODO(yuchen): support filters inside table scan.
                 let filters = vec![];
                 let plan = provider
-                    .scan(self.session_state, None, &filters, None)
+                    .scan(&self.session_state, None, &filters, None)
                     .await?;
 
                 Ok(plan)
