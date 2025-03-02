@@ -36,7 +36,6 @@ pub enum PartialLogicalPlan {
 pub enum PartialScalarPlan {
     PartialMaterialized {
         node: ScalarOperator<Arc<PartialScalarPlan>>,
-        group_id: ScalarGroupId,
     },
     UnMaterialized(ScalarGroupId),
 }

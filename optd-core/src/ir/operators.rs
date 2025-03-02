@@ -9,25 +9,25 @@ pub enum Child<T> {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScalarOperator<S> {
-    tag: String,
-    data: Vec<OperatorData>,
-    children: Vec<Child<S>>,
+    pub tag: String,
+    pub data: Vec<OperatorData>,
+    pub children: Vec<Child<S>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogicalOperator<R, S> {
-    tag: String,
-    data: Vec<OperatorData>,
-    relational_children: Vec<Child<R>>,
-    scalar_children: Vec<Child<S>>,
+    pub tag: String,
+    pub data: Vec<OperatorData>,
+    pub relational_children: Vec<Child<R>>,
+    pub scalar_children: Vec<Child<S>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PhysicalOperator<R, S> {
-    tag: String,
-    data: Vec<OperatorData>,
-    relational_children: Vec<Child<R>>,
-    scalar_children: Vec<Child<S>>,
+    pub tag: String,
+    pub data: Vec<OperatorData>,
+    pub relational_children: Vec<Child<R>>,
+    pub scalar_children: Vec<Child<S>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
