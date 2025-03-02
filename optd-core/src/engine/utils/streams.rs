@@ -37,6 +37,7 @@ pub type PartialLogicalPlanStream =
 /// which is used for returning multiple possible transformations of a plan.
 pub type PartialPhysicalPlanStream =
     Pin<Box<dyn Stream<Item = Result<PartialPhysicalPlan, Error>> + Send>>;
+
 /// Generates a stream of all possible value combinations from a series of expressions.
 ///
 /// This implementation uses a recursive approach that processes expressions

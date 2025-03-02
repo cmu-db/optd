@@ -18,4 +18,6 @@ pub enum PropertiesData {
     Struct(String, Vec<PropertiesData>),
     Array(Vec<PropertiesData>),
     Scalar(ScalarPlan),
+    // TODO: this is a hack to make the properties data optional. will be removed when DSL supports polymorphic types
+    None,
 }

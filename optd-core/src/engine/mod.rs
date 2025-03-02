@@ -6,7 +6,7 @@
 
 use crate::{
     driver::{cascades::Driver, memo::Memoize},
-    ir::plans::PartialLogicalPlan,
+    ir::{plans::PartialLogicalPlan, properties::PhysicalProperties},
 };
 // use bridge::{from_optd::partial_logical_to_value, into_optd::value_to_partial_logical};
 use eval::Evaluate;
@@ -50,6 +50,7 @@ impl<M: Memoize> Engine<M> {
         &self,
         rule_name: &str,
         plan: PartialLogicalPlan,
+        required_physical_props: &PhysicalProperties,
     ) -> PartialPhysicalPlanStream {
         todo!()
     }
