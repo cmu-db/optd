@@ -67,6 +67,7 @@ impl MockOptdOptimizer {
         let optimized_plan =
             cascades::match_any_physical_plan(self.0.memo.as_ref(), goal_id).await?;
 
+        // We are allowed to do anything we want with the catalog here.
         std::hint::black_box(&self.0.catalog);
 
         Ok(optimized_plan)
@@ -132,9 +133,12 @@ impl QueryPlanner for MockOptdOptimizer {
 
         // The DataFusion to `optd` conversion will have read in all of the tables necessary to
         // execute the query. Now we can update our own catalog with any new tables.
-        crate::iceberg_conversion::ingest_providers(self.0.catalog.as_ref(), &optd_ctx.providers)
-            .await
-            .expect("Unable to ingest providers");
+        crate::iceberg_conversion::ingest_providers(
+            self.0.catalog.as_ref(),
+            optd_ctx.session_state(),
+        )
+        .await
+        .expect("Unable to ingest providers");
 
         // Run the `optd` optimizer on the `LogicalPlan`.
         let optd_optimized_physical_plan = self

@@ -21,6 +21,7 @@ use optd_core::{
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 impl OptdDFContext {
+    /// Converts an `optd` [`PhysicalPlan`] into an executable DataFusion [`ExecutionPlan`].
     #[async_recursion]
     pub(crate) async fn optd_to_df_relational(
         &self,
@@ -41,7 +42,7 @@ impl OptdDFContext {
                 // TODO(yuchen): support filters inside table scan.
                 let filters = vec![];
                 let plan = provider
-                    .scan(&self.session_state, None, &filters, None)
+                    .scan(self.session_state(), None, &filters, None)
                     .await?;
 
                 Ok(plan)
@@ -127,6 +128,9 @@ impl OptdDFContext {
         }
     }
 
+    /// Converts an `optd` [`ScalarPlan`] into a physical DataFusion [`PhysicalExpr`].
+    ///
+    /// TODO(connor): Is the context necessary if we have a catalog?
     pub(crate) fn optd_to_df_scalar(
         pred: &ScalarPlan,
         context: &SchemaRef,
