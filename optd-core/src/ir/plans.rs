@@ -3,7 +3,6 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    goal::PhysicalGoalId,
     groups::{LogicalGroupId, ScalarGroupId},
     operators::{LogicalOperator, PhysicalOperator, ScalarOperator},
     properties::PhysicalProperties,
@@ -41,13 +40,17 @@ pub enum PartialScalarPlan {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct PhysicalGoal {
+    pub group_id: LogicalGroupId,
+    pub properties: PhysicalProperties,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum PartialPhysicalPlan {
     PartialMaterialized {
         node: PhysicalOperator<Arc<PartialPhysicalPlan>, Arc<PartialScalarPlan>>,
-        properties: PhysicalProperties,
-        group_id: LogicalGroupId,
     },
-    UnMaterialized(PhysicalGoalId),
+    UnMaterialized(PhysicalGoal),
 }
 
 impl From<LogicalGroupId> for Arc<PartialLogicalPlan> {

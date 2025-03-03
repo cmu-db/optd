@@ -42,16 +42,31 @@ pub enum FunKind {
     RustUDF(fn(Vec<Value>) -> Value),
 }
 
-/// Either grouped or concrete data with operator kind
+/// Group identifier (scalar or logical) in the optimizer
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct GroupId(pub i64);
+
+/// Either materialized or unmaterialized data
 ///
 /// Represents either a fully materialized operator or a reference to an
 /// operator group in the optimizer.
 #[derive(Debug, Clone)]
-pub enum Materializable<T> {
-    /// Reference to an operator group with its kind
-    UnMaterialized(i64, OperatorKind),
+pub enum Materializable<T, U> {
     /// Fully materialized operator
     Materialized(T),
+    /// Unmaterialized operator (group id or goal)
+    UnMaterialized(U),
+}
+
+/// Physical goal to achieve in the optimizer
+///
+/// Combines a logical group with required physical properties.
+#[derive(Debug, Clone)]
+pub struct PhysicalGoal {
+    /// The logical group to implement
+    pub group_id: GroupId,
+    /// Required physical properties
+    pub properties: Box<Value>,
 }
 
 /// Operator kind to differentiate between operator types
@@ -83,21 +98,6 @@ pub struct Operator<T> {
     pub scalar_children: Vec<T>,
 }
 
-/// A physical operator decorates an operator with additional execution properties
-///
-/// Physical operators extend the base operator structure with execution-specific
-/// details like physical properties (e.g., sort order, distribution) and an
-/// optimizer group identifier.
-#[derive(Debug, Clone)]
-pub struct PhysicalOperator<T> {
-    /// The underlying operator structure
-    pub operator: Operator<T>,
-    /// Physical execution properties
-    pub properties: Arc<Value>,
-    /// Optimizer group identifier
-    pub group_id: i64,
-}
-
 /// Core data structures shared across the system
 #[derive(Debug, Clone)]
 pub enum CoreData<T> {
@@ -116,11 +116,11 @@ pub enum CoreData<T> {
     /// Error representation
     Fail(Box<T>),
     /// Logical query operators (transformations on relations)
-    LogicalOperator(Materializable<Operator<T>>),
+    LogicalOperator(Materializable<Operator<T>, i64>),
     /// Scalar expressions (computations producing scalar values)
-    ScalarOperator(Materializable<Operator<T>>),
+    ScalarOperator(Materializable<Operator<T>, i64>),
     /// Physical query operators (executable operations with properties)
-    PhysicalOperator(Materializable<PhysicalOperator<T>>),
+    PhysicalOperator(Materializable<Operator<T>, PhysicalGoal>),
     /// The null value
     Null,
 }

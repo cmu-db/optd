@@ -13,10 +13,7 @@ use async_recursion::async_recursion;
 use futures::{future, stream, StreamExt};
 use optd_dsl::analyzer::{
     context::Context,
-    hir::{
-        CoreData, Literal, MatchArm, Materializable, Operator, OperatorKind, Pattern,
-        PhysicalOperator, Value,
-    },
+    hir::{CoreData, Literal, MatchArm, Materializable, Operator, OperatorKind, Pattern, Value},
 };
 use Literal::*;
 use Materializable::*;
