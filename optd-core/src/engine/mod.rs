@@ -29,7 +29,7 @@ mod utils;
 
 /// The engine for evaluating HIR expressions and applying rules.
 #[derive(Debug, Clone)]
-pub struct Engine<E: Expander> {
+pub(crate) struct Engine<E: Expander> {
     /// The original HIR context containing all defined expressions and rules
     pub(crate) context: Context,
     /// The expander for resolving group references

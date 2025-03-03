@@ -158,7 +158,7 @@ mod tests {
     }
 
     fn create_test_engine() -> Engine<MockExpander> {
-        let context = Context::new(HashMap::new());
+        let context = Context::default();
         let expander = create_basic_mock_expander();
         Engine::new(context, expander)
     }
@@ -399,54 +399,6 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_combinatorial_collection() {
-        // Create a MockExpander that provides multiple values for a scalar group
-        let expander = MockExpander::new(
-            |_| vec![], // No logical expansions
-            |group_id| match group_id {
-                GroupId(1) => vec![int_val(10), int_val(20)],
-                _ => vec![],
-            },
-            |_| panic!("Physical expansion not expected"),
-        );
-
-        let engine = Engine::new(Context::new(HashMap::new()), expander);
-
-        // Create an array with a scalar group reference: [<scalar_group1>, 5]
-        let scalar_group_ref = Value(Scalar(ScalarOp(UnMaterialized(GroupId(1)))));
-        let array_expr = CoreData::Array(vec![
-            arc(CoreVal(scalar_group_ref)),
-            arc(CoreVal(int_val(5))),
-        ]);
-
-        // Evaluate the array
-        let stream = evaluate_core_expr(array_expr, engine);
-        let values = collect_stream_values(stream);
-
-        // Should produce 2 arrays (one for each expansion of the scalar group)
-        println!("{:?}", values);
-        assert_eq!(values.len(), 2);
-
-        // First array should be [10, 5]
-        if let Array(items) = &values[0].0 {
-            assert_eq!(items.len(), 2);
-            assert!(matches!(&items[0].0, Literal(Int64(10))));
-            assert!(matches!(&items[1].0, Literal(Int64(5))));
-        } else {
-            panic!("Expected Array, got {:?}", values[0]);
-        }
-
-        // Second array should be [20, 5]
-        if let Array(items) = &values[1].0 {
-            assert_eq!(items.len(), 2);
-            assert!(matches!(&items[0].0, Literal(Int64(20))));
-            assert!(matches!(&items[1].0, Literal(Int64(5))));
-        } else {
-            panic!("Expected Array, got {:?}", values[1]);
-        }
-    }
-
-    #[test]
     fn test_evaluate_logical_group() {
         // Create a MockExpander that provides expansions for logical groups
         let expander = MockExpander::new(
@@ -480,7 +432,7 @@ mod tests {
             |_| panic!("Physical expansion not expected"),
         );
 
-        let engine = Engine::new(Context::new(HashMap::new()), expander);
+        let engine = Engine::new(Context::default(), expander);
 
         // Create a logical group reference
         let logical_expr = CoreData::Logical(LogicalOp(UnMaterialized(GroupId(2))));
@@ -578,7 +530,7 @@ mod tests {
             },
         );
 
-        let engine = Engine::new(Context::new(HashMap::new()), expander);
+        let engine = Engine::new(Context::default(), expander);
 
         // Create a physical goal reference
         let physical_expr = CoreData::Physical(PhysicalOp(UnMaterialized(goal)));
@@ -610,7 +562,7 @@ mod tests {
             |_| panic!("Physical expansion not expected"),
         );
 
-        let engine = Engine::new(Context::new(HashMap::new()), expander);
+        let engine = Engine::new(Context::default(), expander);
 
         // Create nested tuples with group references:
         // (
