@@ -110,58 +110,19 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::engine::{expander::MockExpander, utils::streams::ValueStream, Context};
-    use futures::executor::block_on_stream;
-    use optd_dsl::analyzer::hir::{
-        BinOp, CoreData, Expr, FunKind, GroupId, Literal, LogicalOp, Materializable, Operator,
-        OperatorKind, PhysicalGoal, PhysicalOp, ScalarOp, Value,
+    use crate::engine::{eval::core::evaluate_core_expr, utils::tests::*, Engine};
+    use optd_dsl::analyzer::{
+        context::Context,
+        hir::{
+            BinOp, CoreData, Expr, FunKind, GroupId, Literal, LogicalOp, Materializable, Operator,
+            OperatorKind, PhysicalGoal, PhysicalOp, ScalarOp, Value,
+        },
     };
     use std::{collections::HashMap, sync::Arc};
+    use CoreData::*;
     use Expr::*;
     use Literal::*;
     use Materializable::*;
-
-    // Helper functions to create values
-    fn int_val(i: i64) -> Value {
-        Value(Literal(Int64(i)))
-    }
-
-    fn string_val(s: &str) -> Value {
-        Value(Literal(String(s.to_string())))
-    }
-
-    fn bool_val(b: bool) -> Value {
-        Value(Literal(Bool(b)))
-    }
-
-    fn unit_val() -> Value {
-        Value(Literal(Unit))
-    }
-
-    // Helper to wrap expressions in Arc
-    fn arc(expr: Expr) -> Arc<Expr> {
-        Arc::new(expr)
-    }
-
-    // Helper to collect all successful values from a stream
-    fn collect_stream_values(stream: ValueStream) -> Vec<Value> {
-        block_on_stream(stream).filter_map(Result::ok).collect()
-    }
-
-    fn create_basic_mock_expander() -> MockExpander {
-        MockExpander::new(
-            |_| vec![], // No logical expansions
-            |_| vec![], // No scalar expansions
-            |_| panic!("Physical expansion not implemented"),
-        )
-    }
-
-    fn create_test_engine() -> Engine<MockExpander> {
-        let context = Context::default();
-        let expander = create_basic_mock_expander();
-        Engine::new(context, expander)
-    }
 
     #[test]
     fn test_evaluate_literal() {
