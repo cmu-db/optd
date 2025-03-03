@@ -242,7 +242,8 @@ impl<M: Memoize> Driver<M> {
         while let Some(partial_logical_output) = partial_logical_outputs.next().await {
             match partial_logical_output {
                 Ok(partial_plan) => {
-                    let stored_logical_expr = ingest_partial_logical_plan(&self.memo, partial_plan, group_id).await?;
+                    let stored_logical_expr =
+                        ingest_partial_logical_plan(&self.memo, partial_plan, group_id).await?;
                     match stored_logical_expr {
                         Some(stored_logical_expr) => {
                             logical_exprs.push(stored_logical_expr);

@@ -98,6 +98,27 @@ pub struct Operator<T> {
     pub scalar_children: Vec<T>,
 }
 
+/// Logical operator in the query plan
+///
+/// Represents a logical relational algebra operation that can be either
+/// materialized as a concrete operator or referenced by a group ID in the optimizer.
+#[derive(Debug, Clone)]
+pub struct LogicalOp<T>(pub Materializable<Operator<T>, GroupId>);
+
+/// Scalar operator in the query plan
+///
+/// Represents an expression that produces scalar values and can be either
+/// materialized as a concrete operator or referenced by a group ID in the optimizer.
+#[derive(Debug, Clone)]
+pub struct ScalarOp<T>(pub Materializable<Operator<T>, GroupId>);
+
+/// Physical operator in the query plan
+///
+/// Represents an executable implementation of a logical operation with specific
+/// physical properties, either materialized as a concrete operator or as a physical goal.
+#[derive(Debug, Clone)]
+pub struct PhysicalOp<T>(pub Materializable<Operator<T>, PhysicalGoal>);
+
 /// Core data structures shared across the system
 #[derive(Debug, Clone)]
 pub enum CoreData<T> {
@@ -116,11 +137,11 @@ pub enum CoreData<T> {
     /// Error representation
     Fail(Box<T>),
     /// Logical query operators (transformations on relations)
-    LogicalOperator(Materializable<Operator<T>, i64>),
+    Logical(LogicalOp<T>),
     /// Scalar expressions (computations producing scalar values)
-    ScalarOperator(Materializable<Operator<T>, i64>),
+    Scalar(ScalarOp<T>),
     /// Physical query operators (executable operations with properties)
-    PhysicalOperator(Materializable<Operator<T>, PhysicalGoal>),
+    Physical(PhysicalOp<T>),
     /// The null value
     Null,
 }

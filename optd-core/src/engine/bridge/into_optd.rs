@@ -3,10 +3,7 @@ use std::sync::Arc;
 use crate::ir::{
     groups::{LogicalGroupId, ScalarGroupId},
     operators::{Child, LogicalOperator, OperatorData, PhysicalOperator, ScalarOperator},
-    plans::{
-        PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, PhysicalGoal as IrPhysicalGoal,
-        ScalarPlan,
-    },
+    plans::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, PhysicalGoal, ScalarPlan},
     properties::{PhysicalProperties, PropertiesData},
 };
 use optd_dsl::analyzer::hir::{CoreData, Literal, Materializable, Value};
@@ -24,9 +21,9 @@ use Materializable::*;
 /// Transforms the DSL's HIR into the optimizer's IR for logical operators.
 pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
     match &value.0 {
-        LogicalOperator(materialization) => match materialization {
+        Logical(logical_op) => match &logical_op.0 {
             UnMaterialized(group_id) => {
-                PartialLogicalPlan::UnMaterialized(LogicalGroupId(*group_id))
+                PartialLogicalPlan::UnMaterialized(LogicalGroupId(group_id.0))
             }
             Materialized(op) => PartialLogicalPlan::PartialMaterialized {
                 node: LogicalOperator {
@@ -43,10 +40,7 @@ pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
                 },
             },
         },
-        _ => panic!(
-            "Expected LogicalOperator CoreData variant, found: {:?}",
-            value.0
-        ),
+        _ => panic!("Expected Logical CoreData variant, found: {:?}", value.0),
     }
 }
 
@@ -55,8 +49,10 @@ pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
 /// Transforms the DSL's HIR into the optimizer's IR for scalar operators.
 pub(crate) fn value_to_partial_scalar(value: &Value) -> PartialScalarPlan {
     match &value.0 {
-        ScalarOperator(materialization) => match materialization {
-            UnMaterialized(group_id) => PartialScalarPlan::UnMaterialized(ScalarGroupId(*group_id)),
+        Scalar(scalar_op) => match &scalar_op.0 {
+            UnMaterialized(group_id) => {
+                PartialScalarPlan::UnMaterialized(ScalarGroupId(group_id.0))
+            }
             Materialized(op) => PartialScalarPlan::PartialMaterialized {
                 node: ScalarOperator {
                     tag: op.tag.clone(),
@@ -65,10 +61,7 @@ pub(crate) fn value_to_partial_scalar(value: &Value) -> PartialScalarPlan {
                 },
             },
         },
-        _ => panic!(
-            "Expected ScalarOperator CoreData variant, found: {:?}",
-            value.0
-        ),
+        _ => panic!("Expected Scalar CoreData variant, found: {:?}", value.0),
     }
 }
 
@@ -77,7 +70,7 @@ pub(crate) fn value_to_partial_scalar(value: &Value) -> PartialScalarPlan {
 /// Used when fully materializing a scalar expression for use in properties.
 fn value_to_scalar(value: &Value) -> ScalarPlan {
     match &value.0 {
-        ScalarOperator(materialization) => match materialization {
+        Scalar(scalar_op) => match &scalar_op.0 {
             UnMaterialized(_) => {
                 panic!("Cannot convert UnMaterialized ScalarOperator to ScalarPlan")
             }
@@ -89,10 +82,7 @@ fn value_to_scalar(value: &Value) -> ScalarPlan {
                 },
             },
         },
-        _ => panic!(
-            "Expected ScalarOperator CoreData variant, found: {:?}",
-            value.0
-        ),
+        _ => panic!("Expected Scalar CoreData variant, found: {:?}", value.0),
     }
 }
 
@@ -101,10 +91,9 @@ fn value_to_scalar(value: &Value) -> ScalarPlan {
 /// Transforms the DSL's HIR into the optimizer's IR for physical operators.
 pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
     match &value.0 {
-        PhysicalOperator(materialization) => match materialization {
+        Physical(physical_op) => match &physical_op.0 {
             UnMaterialized(hir_goal) => {
-                // Convert HIR PhysicalGoal to IR PhysicalGoal
-                let ir_goal = IrPhysicalGoal {
+                let ir_goal = PhysicalGoal {
                     group_id: LogicalGroupId(hir_goal.group_id.0),
                     properties: convert_hir_properties_to_ir(&hir_goal.properties),
                 };
@@ -126,10 +115,7 @@ pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
                 },
             },
         },
-        _ => panic!(
-            "Expected PhysicalOperator CoreData variant, found: {:?}",
-            value.0
-        ),
+        _ => panic!("Expected Physical CoreData variant, found: {:?}", value.0),
     }
 }
 
@@ -208,7 +194,7 @@ fn value_to_properties_data(value: &Value) -> PropertiesData {
         Struct(name, elements) => {
             PropertiesData::Struct(name.clone(), convert_values_to_properties_data(elements))
         }
-        ScalarOperator(_) => PropertiesData::Scalar(value_to_scalar(value)),
+        Scalar(scalar_op) => PropertiesData::Scalar(value_to_scalar(value)),
         _ => panic!("Cannot convert {:?} to PropertyData content", value.0),
     }
 }

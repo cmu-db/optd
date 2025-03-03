@@ -23,21 +23,21 @@ pub type LogicalExpression = LogicalOperator<LogicalGroupId, ScalarGroupId>;
 pub type ScalarExpression = ScalarOperator<ScalarGroupId>;
 pub type PhysicalExpression = PhysicalOperator<PhysicalGoalId, ScalarGroupId>;
 
-impl Into<PartialLogicalPlan> for LogicalExpression {
-    fn into(self) -> PartialLogicalPlan {
+impl From<LogicalExpression> for PartialLogicalPlan {
+    fn from(expression: LogicalExpression) -> Self {
         PartialLogicalPlan::PartialMaterialized {
             node: LogicalOperator::<Arc<PartialLogicalPlan>, Arc<PartialScalarPlan>> {
-                tag: self.tag,
-                data: self.data,
-                relational_children: self
+                tag: expression.tag,
+                data: expression.data,
+                relational_children: expression
                     .relational_children
                     .into_iter()
-                    .map(|child| Child::from(child))
+                    .map(Child::from)
                     .collect(),
-                scalar_children: self
+                scalar_children: expression
                     .scalar_children
                     .into_iter()
-                    .map(|child| Child::from(child))
+                    .map(Child::from)
                     .collect(),
             },
         }

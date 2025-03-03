@@ -6,13 +6,12 @@ use crate::ir::{
     properties::{PhysicalProperties, PropertiesData},
 };
 use optd_dsl::analyzer::hir::{
-    CoreData, GroupId, Literal, Materializable, Operator, OperatorKind, PhysicalGoal, Value,
+    CoreData, GroupId, Literal, LogicalOp, Materializable, Operator, OperatorKind, PhysicalGoal,
+    PhysicalOp, ScalarOp, Value,
 };
-
 use CoreData::*;
 use Literal::*;
 use Materializable::*;
-use OperatorKind::*;
 
 //=============================================================================
 // Main conversion functions
@@ -23,12 +22,12 @@ pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
     match plan {
         PartialLogicalPlan::UnMaterialized(group_id) => {
             // For unmaterialized logical operators, we create a Value with the group ID
-            Value(LogicalOperator(UnMaterialized(group_id.0)))
+            Value(Logical(LogicalOp(UnMaterialized(GroupId(group_id.0)))))
         }
         PartialLogicalPlan::PartialMaterialized { node } => {
             // For materialized logical operators, we create a Value with the operator data
             let operator = Operator {
-                kind: Logical,
+                kind: OperatorKind::Logical,
                 tag: node.tag.clone(),
                 operator_data: convert_operator_data_to_values(&node.data),
                 relational_children: convert_children_to_values(
@@ -41,7 +40,7 @@ pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
                 ),
             };
 
-            Value(LogicalOperator(Materialized(operator)))
+            Value(Logical(LogicalOp(Materialized(operator))))
         }
     }
 }
@@ -51,12 +50,12 @@ pub(crate) fn partial_scalar_to_value(plan: &PartialScalarPlan) -> Value {
     match plan {
         PartialScalarPlan::UnMaterialized(group_id) => {
             // For unmaterialized scalar operators, we create a Value with the group ID
-            Value(ScalarOperator(UnMaterialized(group_id.0)))
+            Value(Scalar(ScalarOp(UnMaterialized(GroupId(group_id.0)))))
         }
         PartialScalarPlan::PartialMaterialized { node } => {
             // For materialized scalar operators, we create a Value with the operator data
             let operator = Operator {
-                kind: Scalar,
+                kind: OperatorKind::Scalar,
                 tag: node.tag.clone(),
                 operator_data: convert_operator_data_to_values(&node.data),
                 relational_children: vec![], // Scalar ops don't have relational children
@@ -66,7 +65,7 @@ pub(crate) fn partial_scalar_to_value(plan: &PartialScalarPlan) -> Value {
                 ),
             };
 
-            Value(ScalarOperator(Materialized(operator)))
+            Value(Scalar(ScalarOp(Materialized(operator))))
         }
     }
 }
@@ -75,14 +74,14 @@ pub(crate) fn partial_scalar_to_value(plan: &PartialScalarPlan) -> Value {
 fn scalar_to_value(plan: &ScalarPlan) -> Value {
     // For scalar plans, we create a Value with the operator data
     let operator = Operator {
-        kind: Scalar,
+        kind: OperatorKind::Scalar,
         tag: plan.node.tag.clone(),
         operator_data: convert_operator_data_to_values(&plan.node.data),
         relational_children: vec![], // Scalar ops don't have relational children
         scalar_children: convert_children_to_values(&plan.node.children, scalar_to_value),
     };
 
-    Value(ScalarOperator(Materialized(operator)))
+    Value(Scalar(ScalarOp(Materialized(operator))))
 }
 
 /// Converts a PartialPhysicalPlan into a HIR Value representation.
@@ -96,12 +95,12 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
             };
 
             // For unmaterialized physical operators, we create a Value with the PhysicalGoal
-            Value(PhysicalOperator(UnMaterialized(hir_goal)))
+            Value(Physical(PhysicalOp(UnMaterialized(hir_goal))))
         }
         PartialPhysicalPlan::PartialMaterialized { node } => {
             // For materialized physical operators, we create an Operator
             let operator = Operator {
-                kind: Physical,
+                kind: OperatorKind::Physical,
                 tag: node.tag.clone(),
                 operator_data: convert_operator_data_to_values(&node.data),
                 relational_children: convert_children_to_values(
@@ -114,7 +113,7 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
                 ),
             };
 
-            Value(PhysicalOperator(Materialized(operator)))
+            Value(Physical(PhysicalOp(Materialized(operator))))
         }
     }
 }
@@ -132,9 +131,9 @@ where
     children
         .iter()
         .map(|child| match child {
-            Child::Singleton(item) => converter(&*item),
+            Child::Singleton(item) => converter(item),
             Child::VarLength(items) => {
-                Value(Array(items.iter().map(|item| converter(&*item)).collect()))
+                Value(Array(items.iter().map(|item| converter(item)).collect()))
             }
         })
         .collect()

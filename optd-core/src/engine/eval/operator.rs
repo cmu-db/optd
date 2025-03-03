@@ -22,11 +22,13 @@ use crate::{
 use futures::{Stream, StreamExt};
 use optd_dsl::analyzer::{
     context::Context,
-    hir::{CoreData, Expr, Materializable, Operator, OperatorKind, PhysicalOperator, Value},
+    hir::{
+        CoreData, Expr, LogicalOp, Materializable, Operator, OperatorKind, PhysicalOp, ScalarOp,
+        Value,
+    },
 };
-use CoreData::*;
+use CoreData::{Logical, Physical, Scalar};
 use Materializable::*;
-use OperatorKind::*;
 
 /// A stream of evaluated operators
 type OperatorStream = Pin<Box<dyn Stream<Item = Result<Operator<Value>, Error>> + Send>>;
@@ -36,62 +38,41 @@ type OperatorStream = Pin<Box<dyn Stream<Item = Result<Operator<Value>, Error>> 
 //=============================================================================
 
 /// Evaluates a logical operator by generating all possible combinations of its components.
-pub(super) fn evaluate_logical_operator(
-    op: Materializable<Operator<Arc<Expr>>>,
-    context: Context,
-) -> ValueStream {
-    match op {
-        UnMaterialized(group_id, _) => {
-            propagate_success(Value(LogicalOperator(UnMaterialized(group_id, Logical))))
+pub(super) fn evaluate_logical_operator(op: LogicalOp<Arc<Expr>>, context: Context) -> ValueStream {
+    match op.0 {
+        UnMaterialized(group_id) => {
+            propagate_success(Value(Logical(LogicalOp(UnMaterialized(group_id)))))
         }
         Materialized(op) => evaluate_operator_components(op, context)
-            .map(|result| result.map(|op| Value(LogicalOperator(Materialized(op)))))
+            .map(|result| result.map(|op| Value(Logical(LogicalOp(Materialized(op))))))
             .boxed(),
     }
 }
 
 /// Evaluates a scalar operator by generating all possible combinations of its components.
-pub(super) fn evaluate_scalar_operator(
-    op: Materializable<Operator<Arc<Expr>>>,
-    context: Context,
-) -> ValueStream {
-    match op {
-        UnMaterialized(group_id, _) => {
-            propagate_success(Value(ScalarOperator(UnMaterialized(group_id, Scalar))))
+pub(super) fn evaluate_scalar_operator(op: ScalarOp<Arc<Expr>>, context: Context) -> ValueStream {
+    match op.0 {
+        UnMaterialized(group_id) => {
+            propagate_success(Value(Scalar(ScalarOp(UnMaterialized(group_id)))))
         }
         Materialized(op) => evaluate_operator_components(op, context)
-            .map(|result| result.map(|op| Value(ScalarOperator(Materialized(op)))))
+            .map(|result| result.map(|op| Value(Scalar(ScalarOp(Materialized(op))))))
             .boxed(),
     }
 }
 
 /// Evaluates a physical operator by generating all possible combinations of its components.
 pub(super) fn evaluate_physical_operator(
-    op: Materializable<PhysicalOperator<Arc<Expr>>>,
+    op: PhysicalOp<Arc<Expr>>,
     context: Context,
 ) -> ValueStream {
-    match op {
-        UnMaterialized(group_id, _) => {
-            propagate_success(Value(PhysicalOperator(UnMaterialized(group_id, Physical))))
+    match op.0 {
+        UnMaterialized(physical_goal) => {
+            propagate_success(Value(Physical(PhysicalOp(UnMaterialized(physical_goal)))))
         }
-        Materialized(physical_op) => {
-            let base_op = physical_op.operator;
-            let properties = physical_op.properties;
-            let group_id = physical_op.group_id;
-
-            evaluate_operator_components(base_op, context)
-                .map(move |result| {
-                    result.map(|evaluated_op| {
-                        let physical = PhysicalOperator {
-                            operator: evaluated_op,
-                            properties: properties.clone(),
-                            group_id,
-                        };
-                        Value(PhysicalOperator(Materialized(physical)))
-                    })
-                })
-                .boxed()
-        }
+        Materialized(op) => evaluate_operator_components(op, context)
+            .map(|result| result.map(|op| Value(Physical(PhysicalOp(Materialized(op))))))
+            .boxed(),
     }
 }
 

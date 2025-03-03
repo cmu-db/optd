@@ -40,9 +40,9 @@ pub(super) fn evaluate_core_expr(data: CoreData<Arc<Expr>>, context: Context) ->
         Map(items) => evaluate_map(items, context),
         Function(fun_type) => evaluate_function(fun_type),
         Fail(msg) => evaluate_fail(*msg, context),
-        LogicalOperator(op) => evaluate_logical_operator(op, context),
-        ScalarOperator(op) => evaluate_scalar_operator(op, context),
-        PhysicalOperator(op) => evaluate_physical_operator(op, context),
+        Logical(op) => evaluate_logical_operator(op, context),
+        Scalar(op) => evaluate_scalar_operator(op, context),
+        Physical(op) => evaluate_physical_operator(op, context),
         Null => propagate_success(Value(Null)),
     }
 }
