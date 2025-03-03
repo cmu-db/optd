@@ -134,7 +134,7 @@ impl<M: Memoize> Driver<M> {
                 }
                 RuleId::TransformationRule(rule_id) => {
                     join_set.spawn(async move {
-                        ctx.match_and_apply_transformation_rule(logical_expr, rule_id)
+                        ctx.match_and_apply_transformation_rule(logical_expr, rule_id, group_id)
                             .await?;
                         return Ok((MAX_COST, None));
                     });
@@ -205,8 +205,10 @@ impl<M: Memoize> Driver<M> {
             // Check if rule is applied, then:
             let ctx = self.clone();
             let expr = logical_expr.clone();
-            join_set
-                .spawn(async move { ctx.match_and_apply_transformation_rule(expr, rule).await });
+            join_set.spawn(async move {
+                ctx.match_and_apply_transformation_rule(expr, rule, group_id)
+                    .await
+            });
         }
 
         let results = join_set
@@ -227,6 +229,7 @@ impl<M: Memoize> Driver<M> {
         self: Arc<Self>,
         logical_expr: LogicalExpression,
         rule_id: TransformationRuleId,
+        group_id: LogicalGroupId,
     ) -> Result<Vec<StoredLogicalExpression>> {
         let partial_logical_input = logical_expr.into();
 
@@ -239,9 +242,15 @@ impl<M: Memoize> Driver<M> {
         while let Some(partial_logical_output) = partial_logical_outputs.next().await {
             match partial_logical_output {
                 Ok(partial_plan) => {
-                    let (logical_expr, logical_expr_id) =
-                        ingest_partial_logical_plan(&self.memo, &partial_plan).await?;
-                    logical_exprs.push((logical_expr, logical_expr_id));
+                    let stored_logical_expr = ingest_partial_logical_plan(&self.memo, partial_plan, group_id).await?;
+                    match stored_logical_expr {
+                        Some(stored_logical_expr) => {
+                            logical_exprs.push(stored_logical_expr);
+                        }
+                        None => {
+                            // This just means that the rule did not create a new logical expression.
+                        }
+                    }
                 }
                 Err(e) => {
                     println!("DSL Error: {:?}", e);
