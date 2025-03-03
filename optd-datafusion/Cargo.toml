@@ -16,3 +16,6 @@ async-trait = "0.1.85"
 datafusion.workspace = true
 futures = "0.3.31"
 itertools = "0.14.0"
+
+iceberg = "0.4.0"
+iceberg-catalog-memory = "0.4.0"
