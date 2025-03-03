@@ -43,7 +43,7 @@ pub enum FunKind {
 }
 
 /// Group identifier (scalar or logical) in the optimizer
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct GroupId(pub i64);
 
 /// Either materialized or unmaterialized data

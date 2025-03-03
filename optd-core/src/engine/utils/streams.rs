@@ -4,11 +4,12 @@
 //! stream processing pipelines.
 
 use crate::engine::eval::Evaluate;
+use crate::engine::expander::Expander;
 use crate::engine::utils::error::Error;
+use crate::engine::Engine;
 use crate::ir::plans::PartialPhysicalPlan;
 use crate::{capture, ir::plans::PartialLogicalPlan};
 use futures::{stream, Stream, StreamExt};
-use optd_dsl::analyzer::context::Context;
 use optd_dsl::analyzer::hir::{Expr, Value};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -29,14 +30,14 @@ pub(crate) type VecValueStream = Pin<Box<dyn Stream<Item = Result<Vec<Value>, Er
 ///
 /// This represents a stream that yields Result<PartialLogicalPlan, Error> items,
 /// which is used for returning multiple possible transformations of a plan.
-pub type PartialLogicalPlanStream =
+pub(crate) type PartialLogicalPlanStream =
     Pin<Box<dyn Stream<Item = Result<PartialLogicalPlan, Error>> + Send>>;
 
 /// Type alias for a stream of partial physical plans.
 ///
 /// This represents a stream that yields Result<PartialPhysicalPlan, Error> items,
 /// which is used for returning multiple possible transformations of a plan.
-pub type PartialPhysicalPlanStream =
+pub(crate) type PartialPhysicalPlanStream =
     Pin<Box<dyn Stream<Item = Result<PartialPhysicalPlan, Error>> + Send>>;
 
 /// Generates a stream of all possible value combinations from a series of expressions.
@@ -75,16 +76,18 @@ pub type PartialPhysicalPlanStream =
 /// This recursion generates all combinations without storing intermediate results.
 ///
 /// # Type Parameters
+/// * E - The type that implements Expander
 /// * I - The type of the iterator over expressions
 ///
 /// # Parameters
 /// * items - Iterator over expressions to evaluate
-/// * context - Evaluation context
+/// * engine - The evaluation engine
 ///
 /// # Returns
 /// A stream of all possible combinations of values from the expressions
-pub(crate) fn evaluate_all_combinations<I>(mut items: I, context: Context) -> VecValueStream
+pub(crate) fn evaluate_all_combinations<E, I>(mut items: I, engine: Engine<E>) -> VecValueStream
 where
+    E: Expander,
     I: Iterator<Item = Arc<Expr>> + Send + Clone + 'static,
 {
     match items.next() {
@@ -95,20 +98,19 @@ where
         Some(expr) => {
             if items.clone().next().is_none() {
                 // Only one expression, return its value in a vector
-                expr.evaluate(context)
+                expr.evaluate(engine)
                     .map(|result| result.map(|val| vec![val]))
                     .boxed()
             } else {
                 // Multiple expressions: process recursively with a fold-like approach
-                // Evaluate this expression, and for each result, combine with the rest
-                expr.evaluate(context.clone())
+                expr.evaluate(engine.clone())
                     .flat_map(move |result| {
                         stream_from_result(
                             result,
-                            capture!([context, items], move |value| {
+                            capture!([engine, items], move |value| {
                                 // Recursively evaluate the remaining expressions
                                 // and combine with the current value
-                                evaluate_all_combinations(items.clone(), context.clone()).map(
+                                evaluate_all_combinations(items.clone(), engine).map(
                                     move |rest_result| {
                                         rest_result.map(|mut rest_values| {
                                             let mut result =

@@ -4,12 +4,10 @@
 //! that are defined in the OPTD language. It handles the execution of rules against input
 //! plans and manages the transformation of plans according to those rules.
 
-use crate::{
-    driver::{cascades::Driver, memo::Memoize},
-    ir::{plans::PartialLogicalPlan, properties::PhysicalProperties},
-};
-use bridge::{from_optd::partial_logical_to_value, into_optd::value_to_partial_logical};
+use crate::ir::{plans::PartialLogicalPlan, properties::PhysicalProperties};
+use bridge::{from::partial_logical_to_value, into::value_to_partial_logical};
 use eval::Evaluate;
+use expander::Expander;
 use futures::StreamExt;
 use optd_dsl::analyzer::{
     context::Context,
@@ -26,24 +24,38 @@ use Literal::*;
 
 mod bridge;
 mod eval;
+pub mod expander;
 mod utils;
 
 /// The engine for evaluating HIR expressions and applying rules.
 #[derive(Debug, Clone)]
-pub struct Engine<M: Memoize> {
+pub struct Engine<E: Expander> {
     /// The original HIR context containing all defined expressions and rules
-    context: Context,
-
-    /// The optimization driver instance
-    _driver: Arc<Driver<M>>,
+    pub(crate) context: Context,
+    /// The expander for resolving group references
+    pub(crate) expander: E,
 }
 
-impl<M: Memoize> Engine<M> {
-    /// Creates a new engine with the given context and driver.
-    pub fn new(context: Context, driver: Arc<Driver<M>>) -> Self {
+impl<E: Expander> Engine<E> {
+    /// Creates a new engine with the given context and expander.
+    pub fn new(context: Context, expander: E) -> Self {
+        Self { context, expander }
+    }
+
+    /// Creates a new engine with an updated context but the same expandable.
+    ///
+    /// This is useful when you need to create a new engine with modifications to the context
+    /// while preserving the original expandable implementation.
+    ///
+    /// # Parameters
+    /// * `context` - The new context to use
+    ///
+    /// # Returns
+    /// A new engine with the provided context and the existing expandable
+    pub fn with_context(self, context: Context) -> Self {
         Self {
             context,
-            _driver: driver,
+            expander: self.expander,
         }
     }
 
@@ -52,7 +64,7 @@ impl<M: Memoize> Engine<M> {
     /// This applies a logical rule to an input plan and returns all possible
     /// transformations of the plan according to the rule.
     pub async fn match_and_apply_logical_rule(
-        &self,
+        self,
         rule_name: &str,
         plan: PartialLogicalPlan,
     ) -> PartialLogicalPlanStream {
@@ -63,7 +75,7 @@ impl<M: Memoize> Engine<M> {
         ));
 
         // Evaluate the call and transform the results
-        call.evaluate(self.context.clone())
+        call.evaluate(self)
             .map(|result| {
                 result.and_then(|value| match &value.0 {
                     Fail(boxed_msg) => match &boxed_msg.0 {
@@ -77,7 +89,7 @@ impl<M: Memoize> Engine<M> {
     }
 
     pub async fn match_and_apply_implementation_rule(
-        &self,
+        self,
         _rule_name: &str,
         _plan: PartialLogicalPlan,
         _props: &PhysicalProperties,

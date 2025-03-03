@@ -1,13 +1,13 @@
 use anyhow::Result;
 use async_recursion::async_recursion;
 use futures::StreamExt;
-use optd_dsl::analyzer::context::Context;
+use optd_dsl::analyzer::{context::Context, hir::GroupId};
 use std::{char::MAX, sync::Arc};
 use tokio::task::JoinSet;
 
 use crate::{
     driver::ingest::ingest_partial_logical_plan,
-    engine::Engine,
+    engine::{expander::Expander, Engine},
     ir::{
         cost::{Cost, MAX_COST},
         expressions::{LogicalExpression, StoredLogicalExpression, StoredPhysicalExpression},
@@ -27,7 +27,7 @@ use super::{
 #[derive(Debug, Clone)]
 pub struct Driver<M: Memoize> {
     pub memo: M,
-    pub rule_engine: Engine<M>,
+    pub rule_engine: Engine<Arc<Self>>,
 }
 
 impl<M: Memoize> Driver<M> {
@@ -235,6 +235,7 @@ impl<M: Memoize> Driver<M> {
 
         let mut partial_logical_outputs = self
             .rule_engine
+            .clone()
             .match_and_apply_logical_rule(&rule_id.0, partial_logical_input)
             .await;
 
@@ -273,6 +274,7 @@ impl<M: Memoize> Driver<M> {
 
         let mut physical_outputs = self
             .rule_engine
+            .clone()
             .match_and_apply_implementation_rule(
                 &rule_id.0,
                 partial_logical_input,

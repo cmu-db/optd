@@ -194,7 +194,7 @@ fn value_to_properties_data(value: &Value) -> PropertiesData {
         Struct(name, elements) => {
             PropertiesData::Struct(name.clone(), convert_values_to_properties_data(elements))
         }
-        Scalar(scalar_op) => PropertiesData::Scalar(value_to_scalar(value)),
+        Scalar(_) => PropertiesData::Scalar(value_to_scalar(value)),
         _ => panic!("Cannot convert {:?} to PropertyData content", value.0),
     }
 }

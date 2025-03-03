@@ -19,9 +19,7 @@
 //! streams that can be consumed incrementally. This approach efficiently handles the
 //! potential combinatorial explosion of evaluation paths in complex rule applications.
 
-use optd_dsl::analyzer::context::Context;
-
-use super::utils::streams::ValueStream;
+use super::{expander::Expander, utils::streams::ValueStream, Engine};
 
 mod binary;
 mod core;
@@ -36,5 +34,7 @@ mod unary;
 /// Expression types from HIR must implement this trait to be evaluated
 /// by the engine.
 pub(crate) trait Evaluate {
-    fn evaluate(self, context: Context) -> ValueStream;
+    fn evaluate<E>(self, engine: Engine<E>) -> ValueStream
+    where
+        E: Expander;
 }

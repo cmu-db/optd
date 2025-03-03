@@ -9,5 +9,5 @@
 //! allowing rule-based transformations to be applied to query plans while maintaining
 //! the ability to work with both representations.
 
-pub(super) mod from_optd;
-pub(super) mod into_optd;
+pub(super) mod from;
+pub(super) mod into;
