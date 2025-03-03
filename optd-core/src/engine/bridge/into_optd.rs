@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
 use crate::ir::{
-    goal::PhysicalGoalId,
     groups::{LogicalGroupId, ScalarGroupId},
     operators::{Child, LogicalOperator, OperatorData, PhysicalOperator, ScalarOperator},
-    plans::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, ScalarPlan},
+    plans::{
+        PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, PhysicalGoal as IrPhysicalGoal,
+        ScalarPlan,
+    },
     properties::{PhysicalProperties, PropertiesData},
 };
 use optd_dsl::analyzer::hir::{CoreData, Literal, Materializable, Value};
@@ -23,7 +25,7 @@ use Materializable::*;
 pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
     match &value.0 {
         LogicalOperator(materialization) => match materialization {
-            UnMaterialized(group_id, _) => {
+            UnMaterialized(group_id) => {
                 PartialLogicalPlan::UnMaterialized(LogicalGroupId(*group_id))
             }
             Materialized(op) => PartialLogicalPlan::PartialMaterialized {
@@ -54,9 +56,7 @@ pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
 pub(crate) fn value_to_partial_scalar(value: &Value) -> PartialScalarPlan {
     match &value.0 {
         ScalarOperator(materialization) => match materialization {
-            UnMaterialized(group_id, _) => {
-                PartialScalarPlan::UnMaterialized(ScalarGroupId(*group_id))
-            }
+            UnMaterialized(group_id) => PartialScalarPlan::UnMaterialized(ScalarGroupId(*group_id)),
             Materialized(op) => PartialScalarPlan::PartialMaterialized {
                 node: ScalarOperator {
                     tag: op.tag.clone(),
@@ -78,7 +78,7 @@ pub(crate) fn value_to_partial_scalar(value: &Value) -> PartialScalarPlan {
 fn value_to_scalar(value: &Value) -> ScalarPlan {
     match &value.0 {
         ScalarOperator(materialization) => match materialization {
-            UnMaterialized(_, _) => {
+            UnMaterialized(_) => {
                 panic!("Cannot convert UnMaterialized ScalarOperator to ScalarPlan")
             }
             Materialized(op) => ScalarPlan {
@@ -102,39 +102,42 @@ fn value_to_scalar(value: &Value) -> ScalarPlan {
 pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
     match &value.0 {
         PhysicalOperator(materialization) => match materialization {
-            UnMaterialized(goal_id, _) => {
-                PartialPhysicalPlan::UnMaterialized(PhysicalGoalId(*goal_id))
-            }
-            Materialized(physical_op) => {
-                let op = &physical_op.operator;
-
-                let properties = match physical_op.properties.as_ref() {
-                    Value(Null) => None,
-                    other => Some(value_to_properties_data(&other)),
+            UnMaterialized(hir_goal) => {
+                // Convert HIR PhysicalGoal to IR PhysicalGoal
+                let ir_goal = IrPhysicalGoal {
+                    group_id: LogicalGroupId(hir_goal.group_id.0),
+                    properties: convert_hir_properties_to_ir(&hir_goal.properties),
                 };
 
-                PartialPhysicalPlan::PartialMaterialized {
-                    node: PhysicalOperator {
-                        tag: op.tag.clone(),
-                        data: convert_values_to_operator_data(&op.operator_data),
-                        relational_children: convert_children_into(
-                            &op.relational_children,
-                            value_to_partial_physical,
-                        ),
-                        scalar_children: convert_children_into(
-                            &op.scalar_children,
-                            value_to_partial_scalar,
-                        ),
-                    },
-                    properties: PhysicalProperties(properties),
-                    group_id: LogicalGroupId(physical_op.group_id),
-                }
+                PartialPhysicalPlan::UnMaterialized(ir_goal)
             }
+            Materialized(op) => PartialPhysicalPlan::PartialMaterialized {
+                node: PhysicalOperator {
+                    tag: op.tag.clone(),
+                    data: convert_values_to_operator_data(&op.operator_data),
+                    relational_children: convert_children_into(
+                        &op.relational_children,
+                        value_to_partial_physical,
+                    ),
+                    scalar_children: convert_children_into(
+                        &op.scalar_children,
+                        value_to_partial_scalar,
+                    ),
+                },
+            },
         },
         _ => panic!(
             "Expected PhysicalOperator CoreData variant, found: {:?}",
             value.0
         ),
+    }
+}
+
+/// Convert HIR properties value to IR PhysicalProperties
+fn convert_hir_properties_to_ir(properties_value: &Value) -> PhysicalProperties {
+    match &properties_value.0 {
+        Null => PhysicalProperties(None),
+        _ => PhysicalProperties(Some(value_to_properties_data(properties_value))),
     }
 }
 
@@ -206,6 +209,6 @@ fn value_to_properties_data(value: &Value) -> PropertiesData {
             PropertiesData::Struct(name.clone(), convert_values_to_properties_data(elements))
         }
         ScalarOperator(_) => PropertiesData::Scalar(value_to_scalar(value)),
-        _ => panic!("Cannot convert {:?} to PropertyData conten", value.0),
+        _ => panic!("Cannot convert {:?} to PropertyData content", value.0),
     }
 }

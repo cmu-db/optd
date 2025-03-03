@@ -3,10 +3,10 @@ use std::sync::Arc;
 use crate::ir::{
     operators::{Child, OperatorData},
     plans::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, ScalarPlan},
-    properties::PropertiesData,
+    properties::{PhysicalProperties, PropertiesData},
 };
 use optd_dsl::analyzer::hir::{
-    CoreData, Literal, Materializable, Operator, OperatorKind, PhysicalOperator, Value,
+    CoreData, GroupId, Literal, Materializable, Operator, OperatorKind, PhysicalGoal, Value,
 };
 
 use CoreData::*;
@@ -23,7 +23,7 @@ pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
     match plan {
         PartialLogicalPlan::UnMaterialized(group_id) => {
             // For unmaterialized logical operators, we create a Value with the group ID
-            Value(LogicalOperator(UnMaterialized(group_id.0, Logical)))
+            Value(LogicalOperator(UnMaterialized(group_id.0)))
         }
         PartialLogicalPlan::PartialMaterialized { node } => {
             // For materialized logical operators, we create a Value with the operator data
@@ -51,9 +51,9 @@ pub(crate) fn partial_scalar_to_value(plan: &PartialScalarPlan) -> Value {
     match plan {
         PartialScalarPlan::UnMaterialized(group_id) => {
             // For unmaterialized scalar operators, we create a Value with the group ID
-            Value(ScalarOperator(UnMaterialized(group_id.0, Scalar)))
+            Value(ScalarOperator(UnMaterialized(group_id.0)))
         }
-        PartialScalarPlan::PartialMaterialized { node, .. } => {
+        PartialScalarPlan::PartialMaterialized { node } => {
             // For materialized scalar operators, we create a Value with the operator data
             let operator = Operator {
                 kind: Scalar,
@@ -88,18 +88,19 @@ fn scalar_to_value(plan: &ScalarPlan) -> Value {
 /// Converts a PartialPhysicalPlan into a HIR Value representation.
 pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
     match plan {
-        PartialPhysicalPlan::UnMaterialized(goal_id) => {
-            // For unmaterialized physical operators, we create a Value with the goal ID
-            Value(PhysicalOperator(UnMaterialized(goal_id.0, Physical)))
+        PartialPhysicalPlan::UnMaterialized(source_goal) => {
+            // Convert source PhysicalGoal to HIR PhysicalGoal
+            let hir_goal = PhysicalGoal {
+                group_id: GroupId(source_goal.group_id.0),
+                properties: physical_properties_to_value(&source_goal.properties).into(),
+            };
+
+            // For unmaterialized physical operators, we create a Value with the PhysicalGoal
+            Value(PhysicalOperator(UnMaterialized(hir_goal)))
         }
-        PartialPhysicalPlan::PartialMaterialized {
-            node,
-            properties,
-            group_id,
-        } => {
-            // For materialized physical operators, we create a PhysicalOperator
-            // that decorates an Operator with properties and group ID
-            let base_operator = Operator {
+        PartialPhysicalPlan::PartialMaterialized { node } => {
+            // For materialized physical operators, we create an Operator
+            let operator = Operator {
                 kind: Physical,
                 tag: node.tag.clone(),
                 operator_data: convert_operator_data_to_values(&node.data),
@@ -113,18 +114,7 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
                 ),
             };
 
-            let physical_op = PhysicalOperator {
-                operator: base_operator,
-                properties: properties
-                    .0
-                    .as_ref()
-                    .map(properties_data_to_value)
-                    .unwrap_or(Value(Null))
-                    .into(),
-                group_id: group_id.0,
-            };
-
-            Value(PhysicalOperator(Materialized(physical_op)))
+            Value(PhysicalOperator(Materialized(operator)))
         }
     }
 }
@@ -171,6 +161,14 @@ fn operator_data_to_value(data: &OperatorData) -> Value {
             convert_operator_data_to_values(elements),
         )),
         OperatorData::Array(elements) => Value(Array(convert_operator_data_to_values(elements))),
+    }
+}
+
+/// Converts PhysicalProperties to a HIR Value representation.
+fn physical_properties_to_value(properties: &PhysicalProperties) -> Value {
+    match &properties.0 {
+        Some(data) => properties_data_to_value(data),
+        None => Value(Null),
     }
 }
 
