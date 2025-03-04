@@ -10,7 +10,9 @@ use crate::{
     engine::{expander::Expander, Engine},
     ir::{
         cost::{Cost, MAX_COST},
-        expressions::{LogicalExpression, StoredLogicalExpression, StoredPhysicalExpression},
+        expressions::{
+            LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
+        },
         goal::PhysicalGoalId,
         groups::{ExplorationStatus, LogicalGroupId},
         plans::{LogicalPlan, PartialLogicalPlan},
@@ -43,7 +45,7 @@ impl<M: Memoize> Driver<M> {
     pub async fn optimize(
         self: Arc<Self>,
         logical_plan: LogicalPlan,
-    ) -> Result<Option<StoredPhysicalExpression>> {
+    ) -> Result<Option<(PhysicalExpression, PhysicalExpressionId)>> {
         let group_id = ingest_full_logical_plan(&self.memo, &logical_plan).await?;
         let required_physical_props = Arc::new(PhysicalProperties(None));
         self.optimize_goal(group_id, required_physical_props).await
@@ -56,7 +58,7 @@ impl<M: Memoize> Driver<M> {
         self: Arc<Self>,
         group_id: LogicalGroupId,
         required_physical_props: Arc<PhysicalProperties>,
-    ) -> Result<Option<StoredPhysicalExpression>> {
+    ) -> Result<Option<(PhysicalExpression, PhysicalExpressionId)>> {
         let goal = self
             .memo
             .create_or_get_goal(group_id, required_physical_props.clone())
@@ -115,7 +117,7 @@ impl<M: Memoize> Driver<M> {
         goal: PhysicalGoalId,
         group_id: LogicalGroupId,
         required_physical_props: Arc<PhysicalProperties>,
-    ) -> Result<(Cost, Option<StoredPhysicalExpression>)> {
+    ) -> Result<(Cost, Option<(PhysicalExpression, PhysicalExpressionId)>)> {
         let rules = self.memo.get_matching_rules(&logical_expr).await?;
 
         let mut join_set = JoinSet::new();
@@ -165,7 +167,7 @@ impl<M: Memoize> Driver<M> {
     pub async fn explore_relation_group(
         self: Arc<Self>,
         group_id: LogicalGroupId,
-    ) -> Result<Vec<StoredLogicalExpression>> {
+    ) -> Result<Vec<(LogicalExpression, LogicalExpressionId)>> {
         let logical_exprs = self.memo.get_all_logical_exprs_in_group(group_id).await?;
 
         let mut join_set = JoinSet::new();
@@ -194,7 +196,7 @@ impl<M: Memoize> Driver<M> {
         self: Arc<Self>,
         logical_expr: LogicalExpression,
         group_id: LogicalGroupId,
-    ) -> Result<Vec<StoredLogicalExpression>> {
+    ) -> Result<Vec<(LogicalExpression, LogicalExpressionId)>> {
         let rules = self
             .memo
             .get_matching_transformation_rules(&logical_expr)
@@ -230,7 +232,7 @@ impl<M: Memoize> Driver<M> {
         logical_expr: LogicalExpression,
         rule_id: TransformationRuleId,
         group_id: LogicalGroupId,
-    ) -> Result<Vec<StoredLogicalExpression>> {
+    ) -> Result<Vec<(LogicalExpression, LogicalExpressionId)>> {
         let partial_logical_input = logical_expr.into();
 
         let mut partial_logical_outputs = self
@@ -239,19 +241,24 @@ impl<M: Memoize> Driver<M> {
             .match_and_apply_logical_rule(&rule_id.0, partial_logical_input)
             .await;
 
-        let mut logical_exprs = Vec::new();
+        let mut logical_exprs_with_id = Vec::new();
         while let Some(partial_logical_output) = partial_logical_outputs.next().await {
             match partial_logical_output {
                 Ok(partial_plan) => {
-                    let stored_logical_expr =
-                        ingest_partial_logical_plan(&self.memo, partial_plan, group_id).await?;
-                    match stored_logical_expr {
-                        Some(stored_logical_expr) => {
-                            logical_exprs.push(stored_logical_expr);
+                    let new_group_id = match partial_plan {
+                        PartialLogicalPlan::PartialMaterialized { node } => {
+                            let (stored_logical_expr, logical_expr_id, new_group_id) =
+                                ingest_partial_logical_plan(&self.memo, &node, Some(group_id))
+                                    .await?;
+                            logical_exprs_with_id.push((stored_logical_expr, logical_expr_id));
+                            new_group_id
                         }
-                        None => {
-                            // This just means that the rule did not create a new logical expression.
-                        }
+                        PartialLogicalPlan::UnMaterialized(new_group_id) => new_group_id,
+                    };
+                    if new_group_id != group_id {
+                        self.memo
+                            .merge_relation_group(group_id, new_group_id)
+                            .await?;
                     }
                 }
                 Err(e) => {
@@ -261,7 +268,7 @@ impl<M: Memoize> Driver<M> {
             }
         }
 
-        Ok(logical_exprs)
+        Ok(logical_exprs_with_id)
     }
 
     pub async fn match_and_apply_implementation_rule(
@@ -269,7 +276,7 @@ impl<M: Memoize> Driver<M> {
         logical_expr: LogicalExpression,
         rule_id: ImplementationRuleId,
         required_physical_props: &PhysicalProperties,
-    ) -> Result<(Cost, Option<StoredPhysicalExpression>)> {
+    ) -> Result<(Cost, Option<(PhysicalExpression, PhysicalExpressionId)>)> {
         let partial_logical_input = logical_expr.into();
 
         let mut physical_outputs = self
