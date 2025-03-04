@@ -5,7 +5,7 @@ use optd_dsl::analyzer::{context::Context, hir::GroupId};
 use std::{char::MAX, sync::Arc};
 use tokio::task::JoinSet;
 
-use super::memo::Memoize;
+use super::{ingest::ingest_logical_plan, memo::Memoize};
 use crate::{
     engine::{expander::Expander, Engine},
     ir::{
@@ -13,7 +13,7 @@ use crate::{
         expressions::{
             LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
         },
-        goal::PhysicalGoalId,
+        goal::PhysicalGoal,
         groups::{ExplorationStatus, LogicalGroupId},
         plans::{LogicalPlan, PartialLogicalPlan},
         properties::{PhysicalProperties, PropertiesData},
@@ -23,8 +23,8 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct Driver<M: Memoize> {
-    pub memo: M,
-    pub rule_engine: Engine<Arc<Self>>,
+    memo: M,
+    rule_engine: Engine<Arc<Self>>,
 }
 
 impl<M: Memoize> Driver<M> {
@@ -34,6 +34,7 @@ impl<M: Memoize> Driver<M> {
             rule_engine: Engine::new(Context::default(), this.upgrade().unwrap()),
         })
     }
+
     /// The main entry point for the optimizer.
     /// If the cost is infinite, it will return None.
     /// If the cost is finite, it will return the best physical expression.
@@ -41,9 +42,8 @@ impl<M: Memoize> Driver<M> {
         self: Arc<Self>,
         logical_plan: LogicalPlan,
     ) -> Result<Option<(PhysicalExpression, PhysicalExpressionId)>> {
-        let group_id = todo!(); // ingest_full_logical_plan(&self.memo, &logical_plan).await?;
-        let required_physical_props = Arc::new(PhysicalProperties(None));
-        self.optimize_goal(group_id, required_physical_props).await
+        let group_id = ingest_logical_plan(&self.memo, &logical_plan.into()).await?;
+        self.optimize_goal(group_id, PhysicalProperties(None)).await
     }
 
     /// This function is used to optimize a goal. It will be called by the entry point `optimize`.
@@ -52,7 +52,7 @@ impl<M: Memoize> Driver<M> {
     pub async fn optimize_goal(
         self: Arc<Self>,
         group_id: LogicalGroupId,
-        required_physical_props: Arc<PhysicalProperties>,
+        required_physical_props: PhysicalProperties,
     ) -> Result<Option<(PhysicalExpression, PhysicalExpressionId)>> {
         let goal = self
             .memo
@@ -77,7 +77,7 @@ impl<M: Memoize> Driver<M> {
             let g = goal.clone();
             let required_physical_props = required_physical_props.clone();
             join_set.spawn(async move {
-                ctx.optimize_logical_expression(logical_expr, g, group_id, required_physical_props)
+                ctx.optimize_expression(logical_expr, g, group_id, required_physical_props)
                     .await
             });
         }
@@ -106,12 +106,12 @@ impl<M: Memoize> Driver<M> {
     /// If the cost is infinite, it will return None.
     /// If the cost is finite, it will return the best physical expression.
     #[async_recursion]
-    pub async fn optimize_logical_expression(
+    pub async fn optimize_expression(
         self: Arc<Self>,
         logical_expr: LogicalExpression,
-        goal: PhysicalGoalId,
+        goal: PhysicalGoal,
         group_id: LogicalGroupId,
-        required_physical_props: Arc<PhysicalProperties>,
+        required_physical_props: PhysicalProperties,
     ) -> Result<(Cost, Option<(PhysicalExpression, PhysicalExpressionId)>)> {
         let rules = self.memo.get_matching_rules(&logical_expr).await?;
 
@@ -168,8 +168,7 @@ impl<M: Memoize> Driver<M> {
         let mut join_set = JoinSet::new();
         for (logical_expr_id, logical_expr) in logical_exprs {
             let ctx = self.clone();
-            join_set
-                .spawn(async move { ctx.explore_logical_expression(logical_expr, group_id).await });
+            join_set.spawn(async move { ctx.explore_expression(logical_expr, group_id).await });
         }
 
         let results = join_set
@@ -186,8 +185,7 @@ impl<M: Memoize> Driver<M> {
         Ok(logical_exprs)
     }
 
-    #[async_recursion]
-    pub async fn explore_logical_expression(
+    pub async fn explore_expression(
         self: Arc<Self>,
         logical_expr: LogicalExpression,
         group_id: LogicalGroupId,
@@ -242,9 +240,8 @@ impl<M: Memoize> Driver<M> {
                 Ok(partial_plan) => {
                     let new_group_id = match partial_plan {
                         PartialLogicalPlan::PartialMaterialized { node } => {
-                            let (stored_logical_expr, logical_expr_id, new_group_id) =
-                            todo!(); //ingest_partial_logical_plan(&self.memo, &node, Some(group_id))
-                                   // .await?;
+                            let (stored_logical_expr, logical_expr_id, new_group_id) = todo!(); //ingest_partial_logical_plan(&self.memo, &node, Some(group_id))
+                                                                                                // .await?;
                             logical_exprs_with_id.push((stored_logical_expr, logical_expr_id));
                             new_group_id
                         }
@@ -291,7 +288,7 @@ impl<M: Memoize> Driver<M> {
             match physical_output {
                 Ok(partial_physical_output) => {
                     let (cost, top_phyiscal_expression) = todo!();
-                        // ingest_partial_physical_plan(&self.memo, &partial_physical_output).await?;
+                    // ingest_partial_physical_plan(&self.memo, &partial_physical_output).await?;
                     if cost < best_cost {
                         best_cost = cost;
                         best_physical_output = Some(top_phyiscal_expression);

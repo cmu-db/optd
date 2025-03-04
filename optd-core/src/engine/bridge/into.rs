@@ -1,12 +1,12 @@
-use std::sync::Arc;
-
 use crate::ir::{
+    goal::PhysicalGoal,
     groups::{LogicalGroupId, ScalarGroupId},
     operators::{Child, LogicalOperator, OperatorData, PhysicalOperator, ScalarOperator},
-    plans::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, PhysicalGoal, ScalarPlan},
+    plans::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, ScalarPlan},
     properties::{PhysicalProperties, PropertiesData},
 };
 use optd_dsl::analyzer::hir::{CoreData, Literal, Materializable, Value};
+use std::sync::Arc;
 use Child::*;
 use CoreData::*;
 use Literal::*;
@@ -93,10 +93,10 @@ pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
     match &value.0 {
         Physical(physical_op) => match &physical_op.0 {
             UnMaterialized(hir_goal) => {
-                let ir_goal = PhysicalGoal {
-                    group_id: LogicalGroupId(hir_goal.group_id.0),
-                    properties: convert_hir_properties_to_ir(&hir_goal.properties),
-                };
+                let ir_goal = PhysicalGoal(
+                    LogicalGroupId(hir_goal.group_id.0),
+                    convert_hir_properties_to_ir(&hir_goal.properties),
+                );
 
                 PartialPhysicalPlan::UnMaterialized(ir_goal)
             }

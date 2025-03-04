@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::ir::{
     operators::{Child, OperatorData},
     plans::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, ScalarPlan},
@@ -9,6 +7,7 @@ use optd_dsl::analyzer::hir::{
     CoreData, GroupId, Literal, LogicalOp, Materializable, Operator, OperatorKind, PhysicalGoal,
     PhysicalOp, ScalarOp, Value,
 };
+use std::sync::Arc;
 use CoreData::*;
 use Literal::*;
 use Materializable::*;
@@ -90,8 +89,8 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
         PartialPhysicalPlan::UnMaterialized(source_goal) => {
             // Convert source PhysicalGoal to HIR PhysicalGoal
             let hir_goal = PhysicalGoal {
-                group_id: GroupId(source_goal.group_id.0),
-                properties: physical_properties_to_value(&source_goal.properties).into(),
+                group_id: GroupId(source_goal.0 .0),
+                properties: physical_properties_to_value(&source_goal.1).into(),
             };
 
             // For unmaterialized physical operators, we create a Value with the PhysicalGoal
@@ -152,7 +151,7 @@ fn convert_operator_data_to_values(data: &[OperatorData]) -> Vec<Value> {
 fn operator_data_to_value(data: &OperatorData) -> Value {
     match data {
         OperatorData::Int64(i) => Value(Literal(Int64(*i))),
-        OperatorData::Float64(f) => Value(Literal(Float64(**f))),
+        OperatorData::Float64(f) => Value(Literal(Float64(*f))),
         OperatorData::String(s) => Value(Literal(String(s.clone()))),
         OperatorData::Bool(b) => Value(Literal(Bool(*b))),
         OperatorData::Struct(name, elements) => Value(Struct(
@@ -175,7 +174,7 @@ fn physical_properties_to_value(properties: &PhysicalProperties) -> Value {
 fn properties_data_to_value(data: &PropertiesData) -> Value {
     match data {
         PropertiesData::Int64(i) => Value(Literal(Int64(*i))),
-        PropertiesData::Float64(f) => Value(Literal(Float64(**f))),
+        PropertiesData::Float64(f) => Value(Literal(Float64(*f))),
         PropertiesData::String(s) => Value(Literal(String(s.clone()))),
         PropertiesData::Bool(b) => Value(Literal(Bool(*b))),
         PropertiesData::Struct(name, elements) => {

@@ -133,7 +133,7 @@ where
 /// # Returns
 /// * The ID of the logical group created or updated
 #[async_recursion]
-async fn ingest_logical_plan<M>(
+pub(super) async fn ingest_logical_plan<M>(
     memo: &M,
     partial_plan: &PartialLogicalPlan,
 ) -> Result<LogicalGroupId>

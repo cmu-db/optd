@@ -7,21 +7,19 @@
 //! - Grouping logically equivalent expressions together to enable rule-based optimization
 //!
 
-use std::sync::Arc;
-
-use anyhow::Result;
-
 use crate::ir::{
     cost::Cost,
     expressions::{
         LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
         ScalarExpression, ScalarExpressionId,
     },
-    goal::{OptimizationStatus, PhysicalGoalId},
+    goal::{OptimizationStatus, PhysicalGoal},
     groups::{ExplorationStatus, LogicalGroupId, ScalarGroupId},
     properties::PhysicalProperties,
     rules::{RuleId, TransformationRuleId},
 };
+use anyhow::Result;
+use std::sync::Arc;
 
 #[trait_variant::make(Send)]
 pub trait Memoize: Send + Sync + 'static {
@@ -29,12 +27,12 @@ pub trait Memoize: Send + Sync + 'static {
     async fn create_or_get_goal(
         &self,
         group_id: LogicalGroupId,
-        required_physical_props: Arc<PhysicalProperties>,
-    ) -> Result<PhysicalGoalId>;
+        required_physical_props: PhysicalProperties,
+    ) -> Result<PhysicalGoal>;
 
     async fn update_goal_optimization_status(
         &self,
-        goal_id: PhysicalGoalId,
+        goal: PhysicalGoal,
         status: OptimizationStatus,
     ) -> Result<()>;
 
@@ -49,15 +47,13 @@ pub trait Memoize: Send + Sync + 'static {
         status: ExplorationStatus,
     ) -> Result<()>;
 
-    async fn get_group_optimization_status(
-        &self,
-        goal_id: PhysicalGoalId,
-    ) -> Result<OptimizationStatus>;
+    async fn get_group_optimization_status(&self, goal: PhysicalGoal)
+        -> Result<OptimizationStatus>;
 
     /// Gets the metadata that describes a goal.
     async fn get_goal_details(
         &self,
-        goal_id: PhysicalGoalId,
+        goal: PhysicalGoal,
     ) -> Result<(PhysicalProperties, OptimizationStatus, LogicalGroupId)>;
 
     /// Gets all logical expressions in a group.
@@ -119,18 +115,18 @@ pub trait Memoize: Send + Sync + 'static {
         to: ScalarGroupId,
     ) -> Result<ScalarGroupId>;
 
-    async fn merge_goal(&self, from: PhysicalGoalId, to: PhysicalGoalId) -> Result<PhysicalGoalId>;
+    async fn merge_goal(&self, from: PhysicalGoal, to: PhysicalGoal) -> Result<PhysicalGoal>;
 
     /// Gets the winner physical expression.
     async fn get_winner_physical_expr_in_goal(
         &self,
-        goal_id: PhysicalGoalId,
+        goal: PhysicalGoal,
     ) -> Result<Option<(PhysicalExpressionId, Arc<PhysicalExpression>, Cost)>>;
 
     /// Gets all physical expressions in a goal.
     async fn get_all_physical_exprs_in_goal(
         &self,
-        goal_id: PhysicalGoalId,
+        goal: PhysicalGoal,
     ) -> Result<Vec<(PhysicalExpressionId, Arc<PhysicalExpression>)>>;
 
     /// Adds a physical expression to a goal in the memo table.
@@ -139,8 +135,8 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         physical_expr: &PhysicalExpression,
         cost: Cost,
-        goal_id: PhysicalGoalId,
-    ) -> Result<(PhysicalGoalId, PhysicalExpressionId)>;
+        goal: PhysicalGoal,
+    ) -> Result<(PhysicalGoal, PhysicalExpressionId)>;
 
     /// Gets the group id from a logical expression. If the logical expression is not in the memo table, it will be created and added to the memo table and the group id will be returned.
     async fn get_group_id_from_logical_expr(
@@ -149,11 +145,11 @@ pub trait Memoize: Send + Sync + 'static {
     ) -> Result<LogicalGroupId>;
 
     /// Gets the goal id from a physical expression. If the physical expression is not in the memo table, it will be created and added to the memo table and the goal id will be returned.
-    async fn get_goal_id_from_physical_expr(
+    async fn get_goal_from_physical_expr(
         &self,
         physical_expr: &PhysicalExpression,
         properties: &PhysicalProperties,
-    ) -> Result<PhysicalGoalId>;
+    ) -> Result<PhysicalGoal>;
 
     async fn get_matching_transformation_rules(
         &self,
@@ -164,5 +160,5 @@ pub trait Memoize: Send + Sync + 'static {
 
     async fn get_repr_group(&self, group_id: &LogicalGroupId) -> Result<LogicalGroupId>;
 
-    async fn get_repr_goal(&self, goal_id: &PhysicalGoalId) -> Result<PhysicalGoalId>;
+    async fn get_repr_goal(&self, goal: &PhysicalGoal) -> Result<PhysicalGoal>;
 }
