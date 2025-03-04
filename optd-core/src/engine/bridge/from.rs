@@ -1,11 +1,10 @@
 use crate::ir::{
     operators::{Child, OperatorData},
-    plans::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, ScalarPlan},
+    plans::{PartialLogicalPlan, PartialScalarPlan, ScalarPlan},
     properties::{PhysicalProperties, PropertiesData},
 };
 use optd_dsl::analyzer::hir::{
-    CoreData, GroupId, Literal, LogicalOp, Materializable, Operator, OperatorKind, PhysicalGoal,
-    PhysicalOp, ScalarOp, Value,
+    CoreData, GroupId, Literal, LogicalOp, Materializable, Operator, OperatorKind, ScalarOp, Value,
 };
 use std::sync::Arc;
 use CoreData::*;
@@ -83,40 +82,6 @@ fn scalar_to_value(plan: &ScalarPlan) -> Value {
     Value(Scalar(ScalarOp(Materialized(operator))))
 }
 
-/// Converts a PartialPhysicalPlan into a HIR Value representation.
-pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
-    match plan {
-        PartialPhysicalPlan::UnMaterialized(source_goal) => {
-            // Convert source PhysicalGoal to HIR PhysicalGoal
-            let hir_goal = PhysicalGoal {
-                group_id: GroupId(source_goal.0 .0),
-                properties: physical_properties_to_value(&source_goal.1).into(),
-            };
-
-            // For unmaterialized physical operators, we create a Value with the PhysicalGoal
-            Value(Physical(PhysicalOp(UnMaterialized(hir_goal))))
-        }
-        PartialPhysicalPlan::PartialMaterialized { node } => {
-            // For materialized physical operators, we create an Operator
-            let operator = Operator {
-                kind: OperatorKind::Physical,
-                tag: node.tag.clone(),
-                operator_data: convert_operator_data_to_values(&node.data),
-                relational_children: convert_children_to_values(
-                    &node.relational_children,
-                    partial_physical_to_value,
-                ),
-                scalar_children: convert_children_to_values(
-                    &node.scalar_children,
-                    partial_scalar_to_value,
-                ),
-            };
-
-            Value(Physical(PhysicalOp(Materialized(operator))))
-        }
-    }
-}
-
 //=============================================================================
 // Generic conversion helpers
 //=============================================================================
@@ -163,7 +128,7 @@ fn operator_data_to_value(data: &OperatorData) -> Value {
 }
 
 /// Converts PhysicalProperties to a HIR Value representation.
-fn physical_properties_to_value(properties: &PhysicalProperties) -> Value {
+pub(crate) fn physical_properties_to_value(properties: &PhysicalProperties) -> Value {
     match &properties.0 {
         Some(data) => properties_data_to_value(data),
         None => Value(Null),
