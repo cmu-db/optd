@@ -22,6 +22,33 @@ use Literal::*;
 use Materializable::*;
 use Pattern::*;
 
+/// Expands the top-level unmaterialized group in a value if present.
+/// Returns a vector of expanded values, or a singleton vector with the original value if no expansion needed.
+pub(super) async fn expand_top_level<E>(value: Value, engine: Engine<E>) -> Vec<Value>
+where
+    E: Expander,
+{
+    match &value.0 {
+        // For unmaterialized logical groups, expand them
+        CoreData::Logical(LogicalOp(UnMaterialized(group_id))) => {
+            engine.expander.expand_logical_group(*group_id).await
+        }
+
+        // For unmaterialized scalar groups, expand them
+        CoreData::Scalar(ScalarOp(UnMaterialized(group_id))) => {
+            engine.expander.expand_scalar_group(*group_id).await
+        }
+
+        // For unmaterialized physical goals, expand them
+        CoreData::Physical(PhysicalOp(UnMaterialized(physical_goal))) => {
+            vec![engine.expander.expand_physical_goal(physical_goal).await]
+        }
+
+        // For all other types, just return the original value
+        _ => vec![value],
+    }
+}
+
 /// Tries to match a value against a sequence of match arms.
 ///
 /// Attempts to match the value against each arm's pattern in order.
@@ -344,4 +371,498 @@ where
     }
 
     current_contexts
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::engine::{
+        eval::r#match::match_pattern,
+        utils::tests::{
+            bool_val, create_basic_mock_expander, create_test_engine, int_val, string_val,
+            unit_val, MockExpander,
+        },
+        Context, Engine,
+    };
+    use futures::executor::block_on;
+    use optd_dsl::analyzer::hir::{
+        CoreData, GroupId, Literal, LogicalOp, Materializable, Operator, OperatorKind, Pattern,
+        PhysicalGoal, PhysicalOp, ScalarOp, Value,
+    };
+    use Literal::*;
+    use Materializable::*;
+    use Pattern::*;
+
+    // Test pattern matching against a literal value
+    #[test]
+    fn test_match_literal() {
+        let engine = create_test_engine();
+        let value = int_val(42);
+        let pattern = Pattern::Literal(Int64(42));
+        let results = block_on(match_pattern(value, pattern, engine));
+
+        // Should produce one match with the unchanged context
+        assert_eq!(results.len(), 1);
+    }
+
+    // Test pattern matching with wildcard
+    #[test]
+    fn test_match_wildcard() {
+        let engine = create_test_engine();
+
+        // Create various values to match against
+        let values = vec![int_val(42), string_val("hello"), bool_val(true), unit_val()];
+
+        // Create a wildcard pattern
+        let pattern = Wildcard;
+
+        // Match each value against the pattern
+        for value in values {
+            let results = block_on(match_pattern(value, pattern.clone(), engine.clone()));
+
+            // Wildcard should match anything
+            assert_eq!(results.len(), 1);
+        }
+    }
+
+    // Test pattern matching with binding
+    #[test]
+    fn test_match_binding() {
+        let engine = create_test_engine();
+        let value = int_val(42);
+
+        // Create a binding pattern: x @ 42
+        let pattern = Bind("x".to_string(), Box::new(Pattern::Literal(Int64(42))));
+        let results = block_on(match_pattern(value, pattern, engine));
+
+        // Should produce one match
+        assert_eq!(results.len(), 1);
+
+        // Check that the variable was bound
+        let context = &results[0];
+        let bound_value = context.lookup("x").expect("Variable x should be bound");
+        assert!(matches!(&bound_value.0, CoreData::Literal(Int64(42))));
+    }
+
+    // Test pattern matching against a struct
+    #[test]
+    fn test_match_struct() {
+        let engine = create_test_engine();
+
+        // Create a struct value: Person("Alice", 30)
+        let person = Value(CoreData::Struct(
+            "Person".to_string(),
+            vec![string_val("Alice"), int_val(30)],
+        ));
+
+        // Create a struct pattern: Person(name, age)
+        let pattern = Pattern::Struct(
+            "Person".to_string(),
+            vec![
+                Bind("name".to_string(), Box::new(Wildcard)),
+                Bind("age".to_string(), Box::new(Wildcard)),
+            ],
+        );
+        let results = block_on(match_pattern(person, pattern, engine));
+
+        // Should produce one match
+        assert_eq!(results.len(), 1);
+
+        // Check that variables were bound correctly
+        let context = &results[0];
+        let name = context
+            .lookup("name")
+            .expect("Variable name should be bound");
+        let age = context.lookup("age").expect("Variable age should be bound");
+
+        assert!(matches!(&name.0, CoreData::Literal(String(s)) if s == "Alice"));
+        assert!(matches!(&age.0, CoreData::Literal(Int64(30))));
+    }
+
+    // Test pattern matching against an array decomposition
+    #[test]
+    fn test_match_array_decomposition() {
+        let engine = create_test_engine();
+
+        // Create an array value: [1, 2, 3]
+        let array = Value(CoreData::Array(vec![int_val(1), int_val(2), int_val(3)]));
+
+        // Create an array decomposition pattern: head :: tail
+        let pattern = ArrayDecomp(
+            Bind("head".to_string(), Wildcard.into()).into(),
+            Bind("tail".to_string(), Wildcard.into()).into(),
+        );
+        let results = block_on(match_pattern(array, pattern, engine));
+
+        // Should produce one match
+        assert_eq!(results.len(), 1);
+
+        // Check that variables were bound correctly
+        let context = &results[0];
+        let head = context
+            .lookup("head")
+            .expect("Variable head should be bound");
+        let tail = context
+            .lookup("tail")
+            .expect("Variable tail should be bound");
+
+        // Head should be the first element
+        assert!(matches!(&head.0, CoreData::Literal(Int64(1))));
+
+        // Tail should be the rest of the array [2, 3]
+        if let CoreData::Array(tail_items) = &tail.0 {
+            assert_eq!(tail_items.len(), 2);
+            assert!(matches!(&tail_items[0].0, CoreData::Literal(Int64(2))));
+            assert!(matches!(&tail_items[1].0, CoreData::Literal(Int64(3))));
+        } else {
+            panic!("Expected Array for tail, got {:?}", tail);
+        }
+    }
+
+    // Test pattern matching with empty array
+    #[test]
+    fn test_match_empty_array() {
+        let engine = create_test_engine();
+
+        // Create an empty array value: []
+        let empty_array = Value(CoreData::Array(vec![]));
+
+        // Create an empty array pattern
+        let pattern = EmptyArray;
+        let results = block_on(match_pattern(empty_array, pattern, engine));
+
+        // Should produce one match
+        assert_eq!(results.len(), 1);
+    }
+
+    // Test pattern matching against a logical operator
+    #[test]
+    fn test_match_logical_operator() {
+        // Create a logical operator
+        let filter_op = Operator {
+            tag: "Filter".to_string(),
+            kind: OperatorKind::Logical,
+            operator_data: vec![bool_val(true)], // Predicate value
+            scalar_children: vec![],
+            relational_children: vec![int_val(42)], // Child relation
+        };
+
+        let logical_value = Value(CoreData::Logical(LogicalOp(Materialized(filter_op))));
+
+        // Create an operator pattern: Filter(predicate, relation)
+        let op_pattern = Operator {
+            tag: "Filter".to_string(),
+            kind: OperatorKind::Logical,
+            operator_data: vec![Bind("predicate".to_string(), Box::new(Wildcard))],
+            scalar_children: vec![],
+            relational_children: vec![Bind("relation".to_string(), Box::new(Wildcard))],
+        };
+
+        let pattern = Pattern::Operator(op_pattern);
+
+        let engine = Engine::new(Context::default(), create_basic_mock_expander());
+        let results = block_on(match_pattern(logical_value, pattern, engine));
+
+        // Should produce one match
+        assert_eq!(results.len(), 1);
+
+        // Check that variables were bound correctly
+        let result_context = &results[0];
+        let predicate = result_context
+            .lookup("predicate")
+            .expect("Variable predicate should be bound");
+        let relation = result_context
+            .lookup("relation")
+            .expect("Variable relation should be bound");
+
+        assert!(matches!(&predicate.0, CoreData::Literal(Bool(true))));
+        assert!(matches!(&relation.0, CoreData::Literal(Int64(42))));
+    }
+
+    // Test pattern matching against an expanded logical group
+    #[test]
+    fn test_match_expanded_logical_group() {
+        // Create a MockExpander that provides two implementations for a logical group
+        let expander = MockExpander::new(
+            |group_id| {
+                if group_id == GroupId(1) {
+                    // Return two different filter operators
+                    let filter1 = Operator {
+                        tag: "Filter".to_string(),
+                        kind: OperatorKind::Logical,
+                        operator_data: vec![bool_val(true)], // Predicate = true
+                        scalar_children: vec![],
+                        relational_children: vec![],
+                    };
+
+                    let filter2 = Operator {
+                        tag: "Filter".to_string(),
+                        kind: OperatorKind::Logical,
+                        operator_data: vec![bool_val(false)], // Predicate = false
+                        scalar_children: vec![],
+                        relational_children: vec![],
+                    };
+
+                    vec![
+                        Value(CoreData::Logical(LogicalOp(Materialized(filter1)))),
+                        Value(CoreData::Logical(LogicalOp(Materialized(filter2)))),
+                    ]
+                } else {
+                    vec![]
+                }
+            },
+            |_| vec![],
+            |_| panic!("Physical expansion not expected"),
+        );
+
+        // Create an engine with this expander
+        let engine = Engine::new(Context::default(), expander);
+
+        // Create a logical group reference: <logical_group1>
+        let logical_group_ref = Value(CoreData::Logical(LogicalOp(UnMaterialized(GroupId(1)))));
+
+        // Create a pattern that matches Filter operators with true predicate
+        let op_pattern = Operator {
+            tag: "Filter".to_string(),
+            kind: OperatorKind::Logical,
+            operator_data: vec![Pattern::Literal(Bool(true))],
+            scalar_children: vec![],
+            relational_children: vec![],
+        };
+
+        let pattern = Pattern::Operator(op_pattern);
+
+        // Match the pattern against the expanded group
+        let results = block_on(match_pattern(logical_group_ref, pattern, engine));
+
+        // Should match only one of the expanded implementations (the one with true predicate)
+        assert_eq!(results.len(), 1);
+    }
+
+    // Test pattern matching against an expanded scalar group
+    #[test]
+    fn test_match_expanded_scalar_group() {
+        // Create a MockExpander that provides two implementations for a scalar group
+        let expander = MockExpander::new(
+            |_| vec![],
+            |group_id| {
+                if group_id == GroupId(2) {
+                    // Return two different scalar operators
+                    let add_op = Operator {
+                        tag: "Add".to_string(),
+                        kind: OperatorKind::Scalar,
+                        operator_data: vec![int_val(1), int_val(2)], // 1 + 2
+                        scalar_children: vec![],
+                        relational_children: vec![],
+                    };
+
+                    let mul_op = Operator {
+                        tag: "Multiply".to_string(),
+                        kind: OperatorKind::Scalar,
+                        operator_data: vec![int_val(3), int_val(4)], // 3 * 4
+                        scalar_children: vec![],
+                        relational_children: vec![],
+                    };
+
+                    vec![
+                        Value(CoreData::Scalar(ScalarOp(Materialized(add_op)))),
+                        Value(CoreData::Scalar(ScalarOp(Materialized(mul_op)))),
+                    ]
+                } else {
+                    vec![]
+                }
+            },
+            |_| panic!("Physical expansion not expected"),
+        );
+
+        // Create an engine with this expander
+        let engine = Engine::new(Context::default(), expander);
+
+        // Create a scalar group reference: <scalar_group2>
+        let scalar_group_ref = Value(CoreData::Scalar(ScalarOp(UnMaterialized(GroupId(2)))));
+
+        // Create a pattern that matches Add operators
+        let op_pattern = Operator {
+            tag: "Add".to_string(),
+            kind: OperatorKind::Scalar,
+            operator_data: vec![
+                Bind("left".to_string(), Box::new(Wildcard)),
+                Bind("right".to_string(), Box::new(Wildcard)),
+            ],
+            scalar_children: vec![],
+            relational_children: vec![],
+        };
+
+        let pattern = Pattern::Operator(op_pattern);
+
+        // Match the pattern against the expanded group
+        let results = block_on(match_pattern(scalar_group_ref, pattern, engine));
+
+        // Should match only the Add operator
+        assert_eq!(results.len(), 1);
+
+        // Check that variables were bound correctly
+        let context = &results[0];
+        let left = context
+            .lookup("left")
+            .expect("Variable left should be bound");
+        let right = context
+            .lookup("right")
+            .expect("Variable right should be bound");
+
+        assert!(matches!(&left.0, CoreData::Literal(Int64(1))));
+        assert!(matches!(&right.0, CoreData::Literal(Int64(2))));
+    }
+
+    // Test pattern matching against an expanded physical goal
+    #[test]
+    fn test_match_expanded_physical_goal() {
+        // Create a physical goal
+        let physical_goal = PhysicalGoal {
+            group_id: GroupId(3),
+            properties: Box::new(unit_val()),
+        };
+
+        // Create a MockExpander that provides an implementation for this physical goal
+        let expander = MockExpander::new(
+            |_| vec![],
+            |_| vec![],
+            |goal| {
+                if goal.group_id == GroupId(3) {
+                    // Return a hash join operator
+                    let hash_join = Operator {
+                        tag: "HashJoin".to_string(),
+                        kind: OperatorKind::Physical,
+                        operator_data: vec![int_val(42)], // Join key
+                        scalar_children: vec![],
+                        relational_children: vec![
+                            string_val("left_table"),
+                            string_val("right_table"),
+                        ],
+                    };
+
+                    Value(CoreData::Physical(PhysicalOp(Materialized(hash_join))))
+                } else {
+                    panic!("Unexpected physical goal")
+                }
+            },
+        );
+
+        // Create an engine with this expander
+        let engine = Engine::new(Context::default(), expander);
+
+        // Create a physical goal reference
+        let physical_ref = Value(CoreData::Physical(PhysicalOp(UnMaterialized(
+            physical_goal,
+        ))));
+
+        // Create a pattern that matches HashJoin operators
+        let op_pattern = Operator {
+            tag: "HashJoin".to_string(),
+            kind: OperatorKind::Physical,
+            operator_data: vec![Bind("key".to_string(), Box::new(Wildcard))],
+            scalar_children: vec![],
+            relational_children: vec![
+                Bind("left".to_string(), Box::new(Wildcard)),
+                Bind("right".to_string(), Box::new(Wildcard)),
+            ],
+        };
+
+        let pattern = Pattern::Operator(op_pattern);
+
+        // Match the pattern against the expanded goal
+        let results = block_on(match_pattern(physical_ref, pattern, engine));
+
+        // Should match the HashJoin operator
+        assert_eq!(results.len(), 1);
+
+        // Check that variables were bound correctly
+        let context = &results[0];
+        let key = context.lookup("key").expect("Variable key should be bound");
+        let left = context
+            .lookup("left")
+            .expect("Variable left should be bound");
+        let right = context
+            .lookup("right")
+            .expect("Variable right should be bound");
+
+        assert!(matches!(&key.0, CoreData::Literal(Int64(42))));
+        assert!(matches!(&left.0, CoreData::Literal(String(s)) if s == "left_table"));
+        assert!(matches!(&right.0, CoreData::Literal(String(s)) if s == "right_table"));
+    }
+
+    #[test]
+    fn test_match_multiple_expanded_groups() {
+        // Create a MockExpander that provides multiple implementations for a group
+        let expander = MockExpander::new(
+            |group_id| {
+                match group_id {
+                    GroupId(1) => {
+                        // Return two Filter operators with different predicates
+                        let filter1 = Operator {
+                            tag: "Filter".to_string(),
+                            kind: OperatorKind::Logical,
+                            operator_data: vec![bool_val(true)],
+                            scalar_children: vec![],
+                            relational_children: vec![],
+                        };
+
+                        let filter2 = Operator {
+                            tag: "Filter".to_string(),
+                            kind: OperatorKind::Logical,
+                            operator_data: vec![bool_val(false)],
+                            scalar_children: vec![],
+                            relational_children: vec![],
+                        };
+
+                        vec![
+                            Value(CoreData::Logical(LogicalOp(Materialized(filter1)))),
+                            Value(CoreData::Logical(LogicalOp(Materialized(filter2)))),
+                        ]
+                    }
+                    _ => vec![],
+                }
+            },
+            |_| vec![],
+            |_| panic!("Physical expansion not expected"),
+        );
+
+        // Create an engine with this expander
+        let engine = Engine::new(Context::default(), expander);
+
+        // Create a logical group reference: <logical_group1>
+        let logical_group_ref = Value(CoreData::Logical(LogicalOp(UnMaterialized(GroupId(1)))));
+
+        // Create a pattern that matches any Filter operator and binds its predicate
+        let pattern = Pattern::Operator(Operator {
+            tag: "Filter".to_string(),
+            kind: OperatorKind::Logical,
+            operator_data: vec![Bind("predicate".to_string(), Box::new(Wildcard))],
+            scalar_children: vec![],
+            relational_children: vec![],
+        });
+
+        // Match the pattern against the expanded group
+        let results = block_on(match_pattern(logical_group_ref, pattern, engine));
+
+        // Should match both Filter operators (one with true predicate, one with false)
+        assert_eq!(results.len(), 2);
+
+        // Check that bindings contain both true and false values
+        let predicates: Vec<bool> = results
+            .iter()
+            .map(|ctx| {
+                let pred = ctx
+                    .lookup("predicate")
+                    .expect("Variable predicate should be bound");
+                if let CoreData::Literal(Bool(b)) = pred.0 {
+                    b
+                } else {
+                    panic!("Expected boolean predicate")
+                }
+            })
+            .collect();
+
+        assert!(predicates.contains(&true));
+        assert!(predicates.contains(&false));
+    }
 }

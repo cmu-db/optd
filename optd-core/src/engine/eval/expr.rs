@@ -2,8 +2,11 @@
 //! expression types and evaluation strategies in a non-blocking, streaming manner.
 
 use super::{
-    binary::eval_binary_op, core::evaluate_core_expr, r#match::try_match_arms,
-    unary::eval_unary_op, Expander,
+    binary::eval_binary_op,
+    core::evaluate_core_expr,
+    r#match::{expand_top_level, try_match_arms},
+    unary::eval_unary_op,
+    Expander,
 };
 use crate::{
     capture,
@@ -14,7 +17,7 @@ use crate::{
         Engine, Evaluate,
     },
 };
-use futures::StreamExt;
+use futures::{stream, StreamExt};
 use optd_dsl::analyzer::hir::{BinOp, CoreData, Expr, FunKind, Literal, MatchArm, UnaryOp, Value};
 use std::sync::Arc;
 use CoreData::*;
@@ -85,14 +88,27 @@ where
             stream_from_result(
                 expr_result,
                 capture!([engine, match_arms], move |value| {
-                    // Try each match arm in sequence
-                    try_match_arms(value, match_arms, engine)
+                    let expansion_future = expand_top_level(value, engine.clone());
+                    stream::once(expansion_future)
+                        .flat_map(move |expanded_values| {
+                            // For each expanded value, try all match arms
+                            stream::iter(expanded_values).flat_map(capture!(
+                                [match_arms, engine],
+                                move |expanded_value| {
+                                    try_match_arms(
+                                        expanded_value,
+                                        match_arms.clone(),
+                                        engine.clone(),
+                                    )
+                                }
+                            ))
+                        })
+                        .boxed()
                 }),
             )
         })
         .boxed()
 }
-
 /// Evaluates an if-then-else expression.
 ///
 /// First evaluates the condition, then either the 'then' branch if the condition is true,
