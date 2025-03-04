@@ -304,3 +304,428 @@ where
     )
     .boxed()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{
+        utils::tests::{arc, bool_val, collect_stream_values, int_val, string_val, MockExpander},
+        Context, Engine,
+    };
+    use optd_dsl::analyzer::hir::{
+        BinOp, CoreData, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator,
+        OperatorKind, Pattern, ScalarOp, Value,
+    };
+    use Literal::*;
+    use Materializable::*;
+    use Pattern::*;
+
+    // Test pattern matching with expansion at the top level
+    #[test]
+    fn test_pattern_match_with_expansion() {
+        // Create a MockExpander that provides multiple implementations for a logical group
+        let expander = MockExpander::new(
+            |group_id| {
+                if group_id == GroupId(1) {
+                    // Return two different filter operators
+                    let filter_op = Operator {
+                        tag: "Filter".to_string(),
+                        kind: OperatorKind::Logical,
+                        operator_data: vec![bool_val(true)],
+                        scalar_children: vec![],
+                        relational_children: vec![],
+                    };
+
+                    let project_op = Operator {
+                        tag: "Project".to_string(),
+                        kind: OperatorKind::Logical,
+                        operator_data: vec![int_val(42)],
+                        scalar_children: vec![],
+                        relational_children: vec![],
+                    };
+
+                    vec![
+                        Value(Logical(LogicalOp(Materialized(filter_op)))),
+                        Value(Logical(LogicalOp(Materialized(project_op)))),
+                    ]
+                } else {
+                    vec![]
+                }
+            },
+            |_| vec![],
+            |_| panic!("Physical expansion not expected"),
+        );
+
+        let engine = Engine::new(Context::default(), expander);
+
+        // Create a logical group reference value
+        let logical_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(1)))));
+
+        // Create a pattern match expression that matches against different operators
+        let pattern_match_expr = arc(PatternMatch(
+            arc(CoreVal(logical_group_ref)),
+            vec![
+                // First arm: match Filter operator
+                MatchArm {
+                    pattern: Pattern::Operator(Operator {
+                        tag: "Filter".to_string(),
+                        kind: OperatorKind::Logical,
+                        operator_data: vec![Pattern::Literal(Bool(true))],
+                        scalar_children: vec![],
+                        relational_children: vec![],
+                    }),
+                    expr: arc(CoreVal(string_val("is_filter"))),
+                },
+                // Second arm: match Project operator
+                MatchArm {
+                    pattern: Pattern::Operator(Operator {
+                        tag: "Project".to_string(),
+                        kind: OperatorKind::Logical,
+                        operator_data: vec![Bind("column".to_string(), Box::new(Wildcard))],
+                        scalar_children: vec![],
+                        relational_children: vec![],
+                    }),
+                    expr: arc(Ref("column".to_string())),
+                },
+                // Fallback arm
+                MatchArm {
+                    pattern: Wildcard,
+                    expr: arc(CoreVal(string_val("unknown"))),
+                },
+            ],
+        ));
+
+        // Evaluate the pattern match expression
+        let values = collect_stream_values(pattern_match_expr.evaluate(engine));
+
+        // Should get one result for each expansion (one for Filter, one for Project)
+        assert_eq!(values.len(), 2);
+
+        // Check results
+        let result_strings: Vec<std::string::String> = values
+            .iter()
+            .map(|v| {
+                if let CoreData::Literal(String(s)) = &v.0 {
+                    s.clone()
+                } else if let CoreData::Literal(Int64(i)) = &v.0 {
+                    i.to_string()
+                } else {
+                    format!("{:?}", v)
+                }
+            })
+            .collect();
+
+        // Results should include "is_filter" (from first arm) and "42" (from second arm)
+        assert!(result_strings.contains(&"is_filter".to_string()));
+        assert!(result_strings.contains(&"42".to_string()));
+    }
+
+    // Test pattern matching for list length calculation with expansion
+    #[test]
+    fn test_list_length_with_expansion() {
+        // Create a MockExpander that provides multiple list implementations
+        let expander = MockExpander::new(
+            |_| vec![],
+            |group_id| {
+                if group_id == GroupId(4) {
+                    // Return two different lists
+                    vec![
+                        Value(CoreData::Array(vec![int_val(1), int_val(2), int_val(3)])),
+                        Value(CoreData::Array(vec![int_val(10), int_val(20)])),
+                    ]
+                } else {
+                    vec![]
+                }
+            },
+            |_| panic!("Physical expansion not expected"),
+        );
+
+        // Create a scalar group reference to the lists
+        let scalar_group_ref = Value(Scalar(ScalarOp(UnMaterialized(GroupId(4)))));
+
+        // Create recursive length calculation function
+        // length([]) = 0
+        // length([x .. xs]) = 1 + length(xs)
+        let length_fn = {
+            // Create the pattern matching expression for length calculation
+            let length_expr = arc(PatternMatch(
+                arc(Ref("list".to_string())),
+                vec![
+                    // Base case: empty list
+                    MatchArm {
+                        pattern: EmptyArray,
+                        expr: arc(CoreVal(int_val(0))),
+                    },
+                    // Recursive case: head :: tail
+                    MatchArm {
+                        pattern: ArrayDecomp(
+                            Box::new(Wildcard),                                     // head (ignored)
+                            Box::new(Bind("rest".to_string(), Box::new(Wildcard))), // tail
+                        ),
+                        expr: arc(Binary(
+                            arc(CoreVal(int_val(1))),
+                            BinOp::Add,
+                            arc(Call(
+                                arc(Ref("length".to_string())),
+                                vec![arc(Ref("rest".to_string()))],
+                            )),
+                        )),
+                    },
+                ],
+            ));
+
+            // Create a closure for the length function
+            Value(Function(Closure(vec!["list".to_string()], length_expr)))
+        };
+
+        // Create a context with the length function bound
+        let mut ctx = Context::default();
+        ctx.bind("length".to_string(), length_fn);
+        let engine_with_fn = Engine::new(ctx, expander);
+
+        // Call the length function on the scalar group reference
+        let call_expr = arc(Call(
+            arc(Ref("length".to_string())),
+            vec![arc(CoreVal(scalar_group_ref))],
+        ));
+
+        // Evaluate the call
+        let values = collect_stream_values(call_expr.evaluate(engine_with_fn));
+
+        // Should get two results (one for each expansion of the list)
+        assert_eq!(values.len(), 2);
+
+        // Results should include length 3 (for first list) and length 2 (for second list)
+        let result_ints: Vec<i64> = values
+            .iter()
+            .map(|v| {
+                if let CoreData::Literal(Int64(i)) = &v.0 {
+                    *i
+                } else {
+                    panic!("Expected integer result, got {:?}", v)
+                }
+            })
+            .collect();
+
+        assert!(result_ints.contains(&3)); // Length of [1, 2, 3]
+        assert!(result_ints.contains(&2)); // Length of [10, 20]
+    }
+
+    // Test multiple nested pattern matches with expansion
+    #[test]
+    fn test_nested_pattern_matches_with_expansion() {
+        // Create a MockExpander that provides multiple implementations for different groups
+        let expander = MockExpander::new(
+            |group_id| {
+                if group_id == GroupId(5) {
+                    // Return two different filter operators
+                    let filter_true = Operator {
+                        tag: "Filter".to_string(),
+                        kind: OperatorKind::Logical,
+                        operator_data: vec![bool_val(true)],
+                        scalar_children: vec![],
+                        relational_children: vec![],
+                    };
+
+                    let filter_false = Operator {
+                        tag: "Filter".to_string(),
+                        kind: OperatorKind::Logical,
+                        operator_data: vec![bool_val(false)],
+                        scalar_children: vec![],
+                        relational_children: vec![],
+                    };
+
+                    vec![
+                        Value(Logical(LogicalOp(Materialized(filter_true)))),
+                        Value(Logical(LogicalOp(Materialized(filter_false)))),
+                    ]
+                } else {
+                    vec![]
+                }
+            },
+            |group_id| {
+                if group_id == GroupId(6) {
+                    // Return two different lists
+                    vec![
+                        Value(CoreData::Array(vec![int_val(1), int_val(2)])),
+                        Value(CoreData::Array(vec![int_val(3), int_val(4), int_val(5)])),
+                    ]
+                } else {
+                    vec![]
+                }
+            },
+            |_| panic!("Physical expansion not expected"),
+        );
+
+        let engine = Engine::new(Context::default(), expander);
+
+        // Create references to groups
+        let logical_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(5)))));
+        let scalar_group_ref = Value(Scalar(ScalarOp(UnMaterialized(GroupId(6)))));
+
+        // Create a nested pattern match:
+        // match <logical_group5> {
+        //   Filter(true) => match <scalar_group6> {
+        //     [x, y] => x + y
+        //     [x, y, z] => x + y + z
+        //     _ => 0
+        //   }
+        //   Filter(false) => match <scalar_group6> {
+        //     [x, y] => x * y
+        //     [x, y, z] => x * y * z
+        //     _ => 0
+        //   }
+        //   _ => 0
+        // }
+        let pattern_match_expr = arc(PatternMatch(
+            arc(CoreVal(logical_group_ref)),
+            vec![
+                // First arm: Filter(true)
+                MatchArm {
+                    pattern: Pattern::Operator(Operator {
+                        tag: "Filter".to_string(),
+                        kind: OperatorKind::Logical,
+                        operator_data: vec![Pattern::Literal(Bool(true))],
+                        scalar_children: vec![],
+                        relational_children: vec![],
+                    }),
+                    // Nested pattern match for addition
+                    expr: arc(PatternMatch(
+                        arc(CoreVal(scalar_group_ref.clone())),
+                        vec![
+                            // Pattern for list with exactly 2 elements
+                            MatchArm {
+                                pattern: Pattern::Struct(
+                                    "Array".to_string(),
+                                    vec![
+                                        Bind("x".to_string(), Box::new(Wildcard)),
+                                        Bind("y".to_string(), Box::new(Wildcard)),
+                                    ],
+                                ),
+                                expr: arc(Binary(
+                                    arc(Ref("x".to_string())),
+                                    BinOp::Add,
+                                    arc(Ref("y".to_string())),
+                                )),
+                            },
+                            // Pattern for list with exactly 3 elements
+                            MatchArm {
+                                pattern: Pattern::Struct(
+                                    "Array".to_string(),
+                                    vec![
+                                        Bind("x".to_string(), Box::new(Wildcard)),
+                                        Bind("y".to_string(), Box::new(Wildcard)),
+                                        Bind("z".to_string(), Box::new(Wildcard)),
+                                    ],
+                                ),
+                                expr: arc(Binary(
+                                    arc(Binary(
+                                        arc(Ref("x".to_string())),
+                                        BinOp::Add,
+                                        arc(Ref("y".to_string())),
+                                    )),
+                                    BinOp::Add,
+                                    arc(Ref("z".to_string())),
+                                )),
+                            },
+                            // Fallback
+                            MatchArm {
+                                pattern: Wildcard,
+                                expr: arc(CoreVal(int_val(0))),
+                            },
+                        ],
+                    )),
+                },
+                // Second arm: Filter(false)
+                MatchArm {
+                    pattern: Pattern::Operator(Operator {
+                        tag: "Filter".to_string(),
+                        kind: OperatorKind::Logical,
+                        operator_data: vec![Pattern::Literal(Bool(false))],
+                        scalar_children: vec![],
+                        relational_children: vec![],
+                    }),
+                    // Nested pattern match for multiplication
+                    expr: arc(PatternMatch(
+                        arc(CoreVal(scalar_group_ref)),
+                        vec![
+                            // Pattern for list with exactly 2 elements
+                            MatchArm {
+                                pattern: Pattern::Struct(
+                                    "Array".to_string(),
+                                    vec![
+                                        Bind("x".to_string(), Box::new(Wildcard)),
+                                        Bind("y".to_string(), Box::new(Wildcard)),
+                                    ],
+                                ),
+                                expr: arc(Binary(
+                                    arc(Ref("x".to_string())),
+                                    BinOp::Mul,
+                                    arc(Ref("y".to_string())),
+                                )),
+                            },
+                            // Pattern for list with exactly 3 elements
+                            MatchArm {
+                                pattern: Pattern::Struct(
+                                    "Array".to_string(),
+                                    vec![
+                                        Bind("x".to_string(), Box::new(Wildcard)),
+                                        Bind("y".to_string(), Box::new(Wildcard)),
+                                        Bind("z".to_string(), Box::new(Wildcard)),
+                                    ],
+                                ),
+                                expr: arc(Binary(
+                                    arc(Binary(
+                                        arc(Ref("x".to_string())),
+                                        BinOp::Mul,
+                                        arc(Ref("y".to_string())),
+                                    )),
+                                    BinOp::Mul,
+                                    arc(Ref("z".to_string())),
+                                )),
+                            },
+                            // Fallback
+                            MatchArm {
+                                pattern: Wildcard,
+                                expr: arc(CoreVal(int_val(0))),
+                            },
+                        ],
+                    )),
+                },
+                // Fallback
+                MatchArm {
+                    pattern: Wildcard,
+                    expr: arc(CoreVal(int_val(0))),
+                },
+            ],
+        ));
+
+        // Evaluate the nested pattern matches
+        let values = collect_stream_values(pattern_match_expr.evaluate(engine));
+
+        // Should get 4 results: 2 Filter values × 2 Array options = 4 combinations
+        assert_eq!(values.len(), 4);
+
+        // Expected results:
+        // Filter(true) + [1, 2] = 1 + 2 = 3
+        // Filter(true) + [3, 4, 5] = 3 + 4 + 5 = 12
+        // Filter(false) + [1, 2] = 1 * 2 = 2
+        // Filter(false) + [3, 4, 5] = 3 * 4 * 5 = 60
+        let result_ints: Vec<i64> = values
+            .iter()
+            .map(|v| {
+                if let CoreData::Literal(Int64(i)) = &v.0 {
+                    *i
+                } else {
+                    panic!("Expected integer result, got {:?}", v)
+                }
+            })
+            .collect();
+
+        println!("Results: {:?}", result_ints);
+        assert!(result_ints.contains(&3)); // 1 + 2
+        assert!(result_ints.contains(&12)); // 3 + 4 + 5
+        assert!(result_ints.contains(&2)); // 1 * 2
+        assert!(result_ints.contains(&60)); // 3 * 4 * 5
+    }
+}
