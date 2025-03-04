@@ -5,8 +5,8 @@ use optd_dsl::analyzer::{context::Context, hir::GroupId};
 use std::{char::MAX, sync::Arc};
 use tokio::task::JoinSet;
 
+use super::memo::Memoize;
 use crate::{
-    driver::ingest::ingest_partial_logical_plan,
     engine::{expander::Expander, Engine},
     ir::{
         cost::{Cost, MAX_COST},
@@ -19,11 +19,6 @@ use crate::{
         properties::{PhysicalProperties, PropertiesData},
         rules::{ImplementationRuleId, RuleId, TransformationRuleId},
     },
-};
-
-use super::{
-    ingest::{ingest_full_logical_plan, ingest_partial_physical_plan},
-    memo::Memoize,
 };
 
 #[derive(Debug, Clone)]
@@ -46,7 +41,7 @@ impl<M: Memoize> Driver<M> {
         self: Arc<Self>,
         logical_plan: LogicalPlan,
     ) -> Result<Option<(PhysicalExpression, PhysicalExpressionId)>> {
-        let group_id = ingest_full_logical_plan(&self.memo, &logical_plan).await?;
+        let group_id = todo!(); // ingest_full_logical_plan(&self.memo, &logical_plan).await?;
         let required_physical_props = Arc::new(PhysicalProperties(None));
         self.optimize_goal(group_id, required_physical_props).await
     }
@@ -248,8 +243,8 @@ impl<M: Memoize> Driver<M> {
                     let new_group_id = match partial_plan {
                         PartialLogicalPlan::PartialMaterialized { node } => {
                             let (stored_logical_expr, logical_expr_id, new_group_id) =
-                                ingest_partial_logical_plan(&self.memo, &node, Some(group_id))
-                                    .await?;
+                            todo!(); //ingest_partial_logical_plan(&self.memo, &node, Some(group_id))
+                                   // .await?;
                             logical_exprs_with_id.push((stored_logical_expr, logical_expr_id));
                             new_group_id
                         }
@@ -295,8 +290,8 @@ impl<M: Memoize> Driver<M> {
         while let Some(physical_output) = physical_outputs.next().await {
             match physical_output {
                 Ok(partial_physical_output) => {
-                    let (cost, top_phyiscal_expression) =
-                        ingest_partial_physical_plan(&self.memo, &partial_physical_output).await?;
+                    let (cost, top_phyiscal_expression) = todo!();
+                        // ingest_partial_physical_plan(&self.memo, &partial_physical_output).await?;
                     if cost < best_cost {
                         best_cost = cost;
                         best_physical_output = Some(top_phyiscal_expression);

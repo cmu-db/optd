@@ -1,241 +1,172 @@
-use std::sync::Arc;
-
 use super::memo::Memoize;
 use crate::ir::{
-    cost::Cost,
-    expressions::{
-        LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
-    },
-    goal::PhysicalGoalId,
+    expressions::{LogicalExpression, LogicalExpressionId, ScalarExpression, ScalarExpressionId},
     groups::{LogicalGroupId, ScalarGroupId},
-    operators::{Child, LogicalOperator},
-    plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, ScalarPlan},
+    operators::{Child, LogicalOperator, ScalarOperator},
+    plans::{PartialLogicalPlan, PartialScalarPlan},
 };
 use anyhow::Result;
 use async_recursion::async_recursion;
+use futures::future::try_join_all;
+use std::{future::Future, pin::Pin, sync::Arc};
 use Child::*;
 
-/// Gets the cost of a physical plan by calling the cost model.
-/// It also stores the cost in the memo table.
-async fn get_physical_expression_cost(
-    physical_expression: &PhysicalExpression,
-    children_costs: &[Cost],
-    children_scalars: &[ScalarGroupId],
-) -> anyhow::Result<Cost> {
-    todo!("Unimiplemented cost model")
-}
-
-/// Ingests a partial physical plan and returns the cost of top physical expression and the stored top physical expression.
-#[async_recursion]
-pub async fn ingest_partial_physical_plan(
-    memo: &impl Memoize,
-    parital_physical_plan: &PartialPhysicalPlan,
-) -> anyhow::Result<(Cost, (PhysicalExpression, PhysicalExpressionId))> {
-    let (cost, physical_expr, _) =
-        ingest_partial_physical_plan_inner(memo, parital_physical_plan).await?;
-    Ok((cost, physical_expr.unwrap()))
-}
-
-/*************  ✨ Codeium Command ⭐  *************/
-/// Ingests a partial physical plan and returns the cost of the top physical expression, the stored top physical expression and the physical goal id.
+/// Processes a logical operator and integrates it into the memo table.
 ///
-/// This function is async because it calls itself when it encounters a PartialPhysicalPlan::PartialMaterialized.
-/// This is because the PartialPhysicalPlan::PartialMaterialized nodes can have children that are PartialPhysicalPlan::PartialMaterialized themselves.
-/// This function will recursively call itself until it reaches a PartialPhysicalPlan::UnMaterialized node.
+/// # Arguments
+/// * `memo` - The memoization table
+/// * `operator` - The logical operator to ingest
 ///
-/// The PartialPhysicalPlan::UnMaterialized node is the base case of the recursion.
-/// The PartialPhysicalPlan::UnMaterialized node contains the physical goal id of the goal that it represents.
-/// The function will return the cost of the top physical expression, the stored top physical expression and the physical goal id.
-/// The stored top physical expression is the expression that was stored in the memo table and the cost is the cost of that expression.
-/// The physical goal id is the id of the goal that the PartialPhysicalPlan::UnMaterialized node represents.
-/******  05e8b280-0737-4c22-9458-8f84a0663a26  *******/
-#[async_recursion]
-pub async fn ingest_partial_physical_plan_inner(
-    memo: &impl Memoize,
-    partial_physical_plan: &PartialPhysicalPlan,
-) -> Result<(
-    Cost,
-    Option<(PhysicalExpression, PhysicalExpressionId)>,
-    PhysicalGoalId,
-)> {
-    /*
-    match partial_physical_plan {
-        PartialPhysicalPlan::PartialMaterialized {
-            node,
-            properties,
-            group_id,
-        } => {
-            let mut children_relations = Vec::new();
-            for child in node.relational_children.iter() {
-                match child {
-                    Child::Singleton(child) => {
-                        children_relations
-                            .push(ingest_partial_physical_plan_inner(memo, child).await?);
-                    }
-                    Child::VarLength(children) => {
-                        for child in children.iter() {
-                            children_relations
-                                .push(ingest_partial_physical_plan_inner(memo, child).await?);
-                        }
-                    }
-                }
-            }
-
-            let mut children_scalars = Vec::new();
-            for child in operator.children_scalars().iter() {
-                children_scalars.push(ingest_partial_scalar_plan(memo, child).await?);
-            }
-
-            let children_goals: Vec<Arc<Goal>> = children_relations
-                .iter()
-                .map(|(_, _, goal)| goal.clone())
-                .collect();
-            let children_goals_ids: Vec<PhysicalGoalId> = children_goals
-                .iter()
-                .map(|goal| goal.representative_goal_id)
-                .collect();
-            let children_cost: Vec<Cost> = children_relations
-                .iter()
-                .map(|(cost, _, _)| *cost)
-                .collect();
-            let new_physical_expr = operator.into_expr(&children_goals_ids, &children_scalars);
-            let cost =
-                get_physical_expression_cost(&new_physical_expr, &children_cost, &children_scalars)
-                    .await?;
-
-            let goal = memo
-                .create_or_get_goal(*group_id, properties.clone())
-                .await?;
-            // Now we store the physical expression in the goal.
-            let (_, new_physical_expresion_id) = memo
-                .add_physical_expr_to_goal(&new_physical_expr, cost, goal.representative_goal_id)
-                .await?;
-
-            Ok((
-                cost,
-                Some((new_physical_expr, new_physical_expresion_id)),
-                goal.clone(),
-            ))
-        }
-        PartialPhysicalPlan::UnMaterialized(goal_id) => {
-            // If this unwrap fails, then the child goal has not been optimized yet. This should never happen because the rule engine should only return a goal id if the goal has been optimized.
-            // TODO: handle merging of goals.
-            // what happens when the parialphysicalplan is unmaterialized?
-            let (_, _, best_goal_cost) = memo
-                .get_winner_physical_expr_in_goal(*goal_id)
-                .await?
-                .unwrap();
-            // let goal = memo.get_goal(*goal_id).await?;
-            // Ok((best_goal_cost, None, goal.clone()))
-            todo!()
-        }
-    }
-    */
-    todo!()
-}
-
-async fn ingest_partial_logical_plan2(
-    memo: &impl Memoize,
-    plan: &PartialLogicalPlan,
-) -> Result<LogicalGroupId> {
-    todo!()
-}
-
-#[async_recursion]
-pub async fn ingest_partial_logical_plan(
-    memo: &impl Memoize,
+/// # Returns
+/// * The created logical expression, its ID in the memo table, and its group ID
+pub(super) async fn ingest_logical_operator<M>(
+    memo: &M,
     operator: &LogicalOperator<Arc<PartialLogicalPlan>, Arc<PartialScalarPlan>>,
-    group_id: Option<LogicalGroupId>,
-) -> Result<(LogicalExpression, LogicalExpressionId, LogicalGroupId)> {
-    let mut relational_children = Vec::new();
-    for child in operator.relational_children.iter() {
-        let child_group_id = ingest_partial_logical_plan_inner(memo, child).await?;
-        relational_children.push(child_group_id);
-    }
+) -> Result<(LogicalExpression, LogicalExpressionId, LogicalGroupId)>
+where
+    M: Memoize,
+{
+    // Process relational children
+    let relational_children = try_join_all(
+        operator
+            .relational_children
+            .iter()
+            .map(|child| process_child(memo, child, |m, p| ingest_logical_plan(m, p))),
+    )
+    .await?;
 
-    let mut scalar_children = Vec::new();
-    for child in operator.scalar_children.iter() {
-        let child_scalar_id = ingest_partial_scalar_plan_inner(memo, child).await?;
-        scalar_children.push(child_scalar_id);
-    }
+    // Process scalar children
+    let scalar_children = try_join_all(
+        operator
+            .scalar_children
+            .iter()
+            .map(|child| process_child(memo, child, |m, p| ingest_scalar_plan(m, p))),
+    )
+    .await?;
 
-    let local_expr = LogicalOperator {
+    // Create the logical expression with processed children
+    let logical_expr = LogicalOperator {
         tag: operator.tag.clone(),
         data: operator.data.clone(),
         relational_children,
         scalar_children,
     };
 
-    let (new_group_id, expr_id) = memo.add_logical_expr(&local_expr).await?;
+    // Add to memo table and get IDs
+    let (new_group_id, expr_id) = memo.add_logical_expr(&logical_expr).await?;
 
-    Ok((local_expr, expr_id, new_group_id))
+    Ok((logical_expr, expr_id, new_group_id))
 }
 
-#[async_recursion]
-pub async fn ingest_partial_logical_plan_inner(
-    memo: &impl Memoize,
-    child: &Child<Arc<PartialLogicalPlan>>,
-) -> Result<Child<LogicalGroupId>> {
+/// Processes a scalar operator and integrates it into the memo table.
+///
+/// # Arguments
+/// * `memo` - The memoization table
+/// * `operator` - The scalar operator to ingest
+///
+/// # Returns
+/// * The created scalar expression, its ID in the memo table, and its group ID
+pub(super) async fn ingest_scalar_operator<M>(
+    memo: &M,
+    operator: &ScalarOperator<Arc<PartialScalarPlan>>,
+) -> Result<(ScalarExpression, ScalarExpressionId, ScalarGroupId)>
+where
+    M: Memoize,
+{
+    // Process scalar operator children
+    let children = try_join_all(
+        operator
+            .children
+            .iter()
+            .map(|child| process_child(memo, child, |m, p| Box::pin(ingest_scalar_plan(m, p)))),
+    )
+    .await?;
+
+    // Create scalar operator with processed children
+    let scalar_expr = ScalarOperator {
+        tag: operator.tag.clone(),
+        data: operator.data.clone(),
+        children,
+    };
+
+    // Add to memo table and get IDs
+    let (group_id, expr_id) = memo.add_scalar_expr(&scalar_expr).await?;
+    Ok((scalar_expr, expr_id, group_id))
+}
+
+/// Generic function to process a Child structure containing any plan type.
+///
+/// # Arguments
+/// * `memo` - The memoization table
+/// * `child` - The Child structure to process
+/// * `ingest_fn` - Function to ingest each plan and get group ID
+///
+/// # Returns
+/// * Processed Child structure with appropriate GroupId
+async fn process_child<M, P, G, F>(
+    memo: &M,
+    child: &Child<Arc<P>>,
+    ingest_fn: F,
+) -> Result<Child<G>>
+where
+    M: Memoize,
+    F: for<'a> Fn(&'a M, &'a P) -> Pin<Box<dyn Future<Output = Result<G>> + Send + 'a>>,
+{
     match child {
-        Singleton(child) => {
-            let child = child.clone();
-            // access the operator inside the arc child
-            match &*child {
-                PartialLogicalPlan::PartialMaterialized { node } => {
-                    let (_, _, repr_group) = ingest_partial_logical_plan(memo, node, None).await?;
-                    Ok(Child::Singleton(repr_group))
-                }
-                PartialLogicalPlan::UnMaterialized(goal_id) => Ok(Child::Singleton(*goal_id)),
-            }
+        Singleton(plan) => {
+            let group_id = ingest_fn(memo, plan).await?;
+            Ok(Singleton(group_id))
         }
-        VarLength(children) => {
-            let mut children_groups = Vec::new();
-            for child in children.iter() {
-                let child = child.clone();
-                match &*child {
-                    PartialLogicalPlan::PartialMaterialized { node } => {
-                        let (_, _, repr_group) =
-                            ingest_partial_logical_plan(memo, node, None).await?;
-                        children_groups.push(repr_group);
-                    }
-                    PartialLogicalPlan::UnMaterialized(goal_id) => {
-                        children_groups.push(*goal_id);
-                    }
-                }
-            }
-            Ok(Child::VarLength(children_groups))
+        VarLength(plans) => {
+            let group_ids = try_join_all(plans.iter().map(|plan| ingest_fn(memo, plan))).await?;
+            Ok(VarLength(group_ids))
         }
     }
 }
 
+/// Ingests a partial logical plan into the memo table.
+///
+/// # Arguments
+/// * `memo` - The memoization table
+/// * `partial_plan` - The partial logical plan to ingest
+///
+/// # Returns
+/// * The ID of the logical group created or updated
 #[async_recursion]
-pub async fn ingest_full_logical_plan(
-    memo: &impl Memoize,
-    logical_plan: &LogicalPlan,
-) -> anyhow::Result<LogicalGroupId> {
-    todo!()
+async fn ingest_logical_plan<M>(
+    memo: &M,
+    partial_plan: &PartialLogicalPlan,
+) -> Result<LogicalGroupId>
+where
+    M: Memoize,
+{
+    match partial_plan {
+        PartialLogicalPlan::PartialMaterialized { node } => {
+            let (_, _, group_id) = ingest_logical_operator(memo, node).await?;
+            Ok(group_id)
+        }
+        PartialLogicalPlan::UnMaterialized(group_id) => Ok(*group_id),
+    }
 }
 
+/// Ingests a partial scalar plan into the memo table.
+///
+/// # Arguments
+/// * `memo` - The memoization table
+/// * `partial_plan` - The partial scalar plan to ingest
+///
+/// # Returns
+/// * The ID of the scalar group created or updated
 #[async_recursion]
-pub async fn ingest_partial_scalar_plan(
-    memo: &impl Memoize,
-    partial_scalar_plan: &PartialScalarPlan,
-) -> anyhow::Result<ScalarGroupId> {
-    todo!()
-}
-
-#[async_recursion]
-pub async fn ingest_partial_scalar_plan_inner(
-    memo: &impl Memoize,
-    child: &Child<Arc<PartialScalarPlan>>,
-) -> anyhow::Result<Child<ScalarGroupId>> {
-    todo!()
-}
-
-#[async_recursion]
-pub async fn ingest_full_scalar_plan(
-    memo: &impl Memoize,
-    scalar_plan: &ScalarPlan,
-) -> anyhow::Result<ScalarGroupId> {
-    todo!()
+async fn ingest_scalar_plan<M>(memo: &M, partial_plan: &PartialScalarPlan) -> Result<ScalarGroupId>
+where
+    M: Memoize,
+{
+    match partial_plan {
+        PartialScalarPlan::PartialMaterialized { node } => {
+            let (_, _, group_id) = ingest_scalar_operator(memo, node).await?;
+            Ok(group_id)
+        }
+        PartialScalarPlan::UnMaterialized(group_id) => Ok(*group_id),
+    }
 }

@@ -100,7 +100,10 @@ pub trait Memoize: Send + Sync + 'static {
 
     /// Adds a scalar expression to the memo table.
     /// Returns the group id of group if already exists, otherwise creates a new group.
-    async fn add_scalar_expr(&self, scalar_expr: &ScalarExpression) -> Result<ScalarGroupId>;
+    async fn add_scalar_expr(
+        &self,
+        scalar_expr: &ScalarExpression,
+    ) -> Result<(ScalarGroupId, ScalarExpressionId)>;
 
     /// Merges two relational groups and returns the new group id.
     async fn merge_relation_group(

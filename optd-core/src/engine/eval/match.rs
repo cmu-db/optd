@@ -10,7 +10,7 @@
 use super::{Engine, Evaluate, Expander};
 use crate::{capture, engine::utils::streams::ValueStream};
 use async_recursion::async_recursion;
-use futures::{future, stream, StreamExt};
+use futures::{future::join_all, stream, StreamExt};
 use optd_dsl::analyzer::{
     context::Context,
     hir::{
@@ -188,7 +188,7 @@ where
         .collect::<Vec<_>>();
 
     // Await all futures and flatten the results
-    future::join_all(context_futures)
+    join_all(context_futures)
         .await
         .into_iter()
         .flatten()
@@ -324,7 +324,7 @@ where
         .collect::<Vec<_>>();
 
     // Await all futures and collect results
-    future::join_all(context_futures)
+    join_all(context_futures)
         .await
         .into_iter()
         .flatten()
@@ -355,7 +355,7 @@ where
             .collect::<Vec<_>>();
 
         // Await all futures and collect all contexts
-        let next_contexts = future::join_all(next_context_futures)
+        let next_contexts = join_all(next_context_futures)
             .await
             .into_iter()
             .flatten()
