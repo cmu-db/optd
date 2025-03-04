@@ -130,10 +130,10 @@ impl<E: Expander> Engine<E> {
     /// # Returns
     /// A call expression representing the rule invocation
     fn create_rule_call(&self, rule_name: &str, args: Vec<Value>) -> Arc<Expr> {
-        let rule_name_expr = CoreVal(Value(Literal(String(rule_name.to_string())))).into();
+        let rule_name_expr = Ref(rule_name.to_string());
         let arg_exprs = args.into_iter().map(|arg| CoreVal(arg).into()).collect();
 
-        Arc::new(Call(rule_name_expr, arg_exprs))
+        Arc::new(Call(rule_name_expr.into(), arg_exprs))
     }
 
     /// Processes the result of a rule evaluation.
