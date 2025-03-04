@@ -5,7 +5,10 @@ use optd_dsl::analyzer::{context::Context, hir::GroupId};
 use std::{char::MAX, sync::Arc};
 use tokio::task::JoinSet;
 
-use super::{ingest::ingest_logical_plan, memo::Memoize};
+use super::{
+    ingest::{ingest_logical_operator, ingest_logical_plan},
+    memo::Memoize,
+};
 use crate::{
     engine::{expander::Expander, Engine},
     ir::{
@@ -17,21 +20,23 @@ use crate::{
         groups::{ExplorationStatus, LogicalGroupId},
         plans::{LogicalPlan, PartialLogicalPlan},
         properties::{PhysicalProperties, PropertiesData},
-        rules::{ImplementationRuleId, RuleId, TransformationRuleId},
+        rules::{ImplementationRule, RuleBook, TransformationRule},
     },
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Driver<M: Memoize> {
     memo: M,
-    rule_engine: Engine<Arc<Self>>,
+    rule_book: RuleBook,
+    engine: Engine<Arc<Self>>,
 }
 
 impl<M: Memoize> Driver<M> {
     pub fn new(memo: M) -> Arc<Self> {
         Arc::new_cyclic(|this| Self {
             memo,
-            rule_engine: Engine::new(Context::default(), this.upgrade().unwrap()),
+            rule_book: RuleBook::default(),
+            engine: Engine::new(Context::default(), this.upgrade().unwrap()),
         })
     }
 
@@ -43,7 +48,8 @@ impl<M: Memoize> Driver<M> {
         logical_plan: LogicalPlan,
     ) -> Result<Option<(PhysicalExpression, PhysicalExpressionId)>> {
         let group_id = ingest_logical_plan(&self.memo, &logical_plan.into()).await?;
-        self.optimize_goal(group_id, PhysicalProperties(None)).await
+        self.optimize_goal(group_id, PhysicalProperties(None).into())
+            .await
     }
 
     /// This function is used to optimize a goal. It will be called by the entry point `optimize`.
@@ -52,11 +58,11 @@ impl<M: Memoize> Driver<M> {
     pub async fn optimize_goal(
         self: Arc<Self>,
         group_id: LogicalGroupId,
-        required_physical_props: PhysicalProperties,
+        required_physical_props: Arc<PhysicalProperties>,
     ) -> Result<Option<(PhysicalExpression, PhysicalExpressionId)>> {
         let goal = self
             .memo
-            .create_or_get_goal(group_id, required_physical_props.clone())
+            .create_or_get_goal(group_id, &required_physical_props)
             .await?;
         if self.memo.get_group_exploration_status(group_id).await? == ExplorationStatus::Unexplored
         {
@@ -65,7 +71,7 @@ impl<M: Memoize> Driver<M> {
                 .await?;
             let ctx = self.clone();
             // TODO(sarvesh): we should use the result of this exploration instead of calling the memo table
-            let _ = tokio::spawn(async move { ctx.explore_relation_group(group_id).await }).await?;
+            ctx.explore_relation_group(group_id).await?;
         }
 
         // TODO(sarvesh): we probably should get all logical expressions from the representative group
@@ -77,7 +83,7 @@ impl<M: Memoize> Driver<M> {
             let g = goal.clone();
             let required_physical_props = required_physical_props.clone();
             join_set.spawn(async move {
-                ctx.optimize_expression(logical_expr, g, group_id, required_physical_props)
+                ctx.optimize_expression(logical_expr, g, group_id, required_physical_props.clone())
                     .await
             });
         }
@@ -111,32 +117,19 @@ impl<M: Memoize> Driver<M> {
         logical_expr: LogicalExpression,
         goal: PhysicalGoal,
         group_id: LogicalGroupId,
-        required_physical_props: PhysicalProperties,
+        req_props: Arc<PhysicalProperties>,
     ) -> Result<(Cost, Option<(PhysicalExpression, PhysicalExpressionId)>)> {
-        let rules = self.memo.get_matching_rules(&logical_expr).await?;
+        let rules = self.rule_book.get_implementations().iter().cloned();
 
         let mut join_set = JoinSet::new();
         for rule in rules {
             let ctx = self.clone();
-            let g = goal.clone();
-            // we clone here because we have to clone eventually in match_and_apply for the into conversion
             let logical_expr = logical_expr.clone();
-            let props = required_physical_props.clone();
-            match rule {
-                RuleId::ImplementationRule(rule_id) => {
-                    join_set.spawn(async move {
-                        ctx.match_and_apply_implementation_rule(logical_expr, rule_id, &props)
-                            .await
-                    });
-                }
-                RuleId::TransformationRule(rule_id) => {
-                    join_set.spawn(async move {
-                        ctx.match_and_apply_transformation_rule(logical_expr, rule_id, group_id)
-                            .await?;
-                        return Ok((MAX_COST, None));
-                    });
-                }
-            }
+            let req_props = req_props.clone();
+            join_set.spawn(async move {
+                ctx.match_and_apply_implementation_rule(logical_expr, rule, req_props)
+                    .await
+            });
         }
 
         let plan_results = join_set
@@ -159,14 +152,11 @@ impl<M: Memoize> Driver<M> {
     }
 
     #[async_recursion]
-    pub async fn explore_relation_group(
-        self: Arc<Self>,
-        group_id: LogicalGroupId,
-    ) -> Result<Vec<(LogicalExpression, LogicalExpressionId)>> {
+    pub async fn explore_relation_group(self: Arc<Self>, group_id: LogicalGroupId) -> Result<()> {
         let logical_exprs = self.memo.get_all_logical_exprs_in_group(group_id).await?;
 
         let mut join_set = JoinSet::new();
-        for (logical_expr_id, logical_expr) in logical_exprs {
+        for (_, logical_expr) in logical_exprs {
             let ctx = self.clone();
             join_set.spawn(async move { ctx.explore_expression(logical_expr, group_id).await });
         }
@@ -182,7 +172,7 @@ impl<M: Memoize> Driver<M> {
             logical_exprs.extend(result);
         }
 
-        Ok(logical_exprs)
+        Ok(())
     }
 
     pub async fn explore_expression(
@@ -190,10 +180,7 @@ impl<M: Memoize> Driver<M> {
         logical_expr: LogicalExpression,
         group_id: LogicalGroupId,
     ) -> Result<Vec<(LogicalExpression, LogicalExpressionId)>> {
-        let rules = self
-            .memo
-            .get_matching_transformation_rules(&logical_expr)
-            .await?;
+        let rules = vec![];
 
         let mut join_set = JoinSet::new();
         for rule in rules {
@@ -223,15 +210,15 @@ impl<M: Memoize> Driver<M> {
     pub async fn match_and_apply_transformation_rule(
         self: Arc<Self>,
         logical_expr: LogicalExpression,
-        rule_id: TransformationRuleId,
+        rule: TransformationRule,
         group_id: LogicalGroupId,
     ) -> Result<Vec<(LogicalExpression, LogicalExpressionId)>> {
         let partial_logical_input = logical_expr.into();
 
         let mut partial_logical_outputs = self
-            .rule_engine
+            .engine
             .clone()
-            .match_and_apply_logical_rule(&rule_id.0, partial_logical_input)
+            .match_and_apply_logical_rule(&rule.0, partial_logical_input)
             .await;
 
         let mut logical_exprs_with_id = Vec::new();
@@ -240,8 +227,8 @@ impl<M: Memoize> Driver<M> {
                 Ok(partial_plan) => {
                     let new_group_id = match partial_plan {
                         PartialLogicalPlan::PartialMaterialized { node } => {
-                            let (stored_logical_expr, logical_expr_id, new_group_id) = todo!(); //ingest_partial_logical_plan(&self.memo, &node, Some(group_id))
-                                                                                                // .await?;
+                            let (stored_logical_expr, logical_expr_id, new_group_id) =
+                                ingest_logical_operator(&self.memo, &node).await?;
                             logical_exprs_with_id.push((stored_logical_expr, logical_expr_id));
                             new_group_id
                         }
@@ -266,16 +253,16 @@ impl<M: Memoize> Driver<M> {
     pub async fn match_and_apply_implementation_rule(
         self: &Arc<Self>,
         logical_expr: LogicalExpression,
-        rule_id: ImplementationRuleId,
-        required_physical_props: &PhysicalProperties,
+        rule: ImplementationRule,
+        required_physical_props: Arc<PhysicalProperties>,
     ) -> Result<(Cost, Option<(PhysicalExpression, PhysicalExpressionId)>)> {
         let partial_logical_input = logical_expr.into();
 
         let mut physical_outputs = self
-            .rule_engine
+            .engine
             .clone()
             .match_and_apply_implementation_rule(
-                &rule_id.0,
+                &rule.0,
                 partial_logical_input,
                 required_physical_props,
             )

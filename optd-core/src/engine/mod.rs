@@ -92,7 +92,7 @@ impl<E: Expander> Engine<E> {
         self,
         _rule_name: &str,
         _plan: PartialLogicalPlan,
-        _props: &PhysicalProperties,
+        _props: Arc<PhysicalProperties>,
     ) -> PartialPhysicalPlanStream {
         todo!()
     }

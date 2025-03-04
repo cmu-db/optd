@@ -16,7 +16,6 @@ use crate::ir::{
     goal::{OptimizationStatus, PhysicalGoal},
     groups::{ExplorationStatus, LogicalGroupId, ScalarGroupId},
     properties::PhysicalProperties,
-    rules::{RuleId, TransformationRuleId},
 };
 use anyhow::Result;
 use std::sync::Arc;
@@ -27,7 +26,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn create_or_get_goal(
         &self,
         group_id: LogicalGroupId,
-        required_physical_props: PhysicalProperties,
+        required_physical_props: &PhysicalProperties,
     ) -> Result<PhysicalGoal>;
 
     async fn update_goal_optimization_status(
@@ -150,13 +149,6 @@ pub trait Memoize: Send + Sync + 'static {
         physical_expr: &PhysicalExpression,
         properties: &PhysicalProperties,
     ) -> Result<PhysicalGoal>;
-
-    async fn get_matching_transformation_rules(
-        &self,
-        logical_expr: &LogicalExpression,
-    ) -> Result<Vec<TransformationRuleId>>;
-
-    async fn get_matching_rules(&self, physical_expr: &LogicalExpression) -> Result<Vec<RuleId>>;
 
     async fn get_repr_group(&self, group_id: &LogicalGroupId) -> Result<LogicalGroupId>;
 
