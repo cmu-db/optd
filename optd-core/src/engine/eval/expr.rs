@@ -18,7 +18,9 @@ use crate::{
     },
 };
 use futures::{stream, StreamExt};
-use optd_dsl::analyzer::hir::{BinOp, CoreData, Expr, FunKind, Literal, MatchArm, UnaryOp, Value};
+use optd_dsl::analyzer::hir::{
+    BinOp, CoreData, Expr, FunKind, Identifier, Literal, MatchArm, UnaryOp, Value,
+};
 use std::sync::Arc;
 use CoreData::*;
 use Expr::*;
@@ -228,7 +230,7 @@ where
                     match fun_value.0 {
                         // Handle closure (user-defined function)
                         Function(Closure(params, body)) => {
-                            evaluate_closure_call(params, body, args.clone(), engine)
+                            evaluate_closure_call(params, body, args, engine)
                         }
                         // Handle Rust UDF (built-in function)
                         Function(RustUDF(udf)) => evaluate_rust_udf_call(udf, args, engine),
@@ -246,7 +248,7 @@ where
 /// Evaluates the arguments, binds them to the parameters in a new context,
 /// then evaluates the function body in that context.
 fn evaluate_closure_call<E>(
-    params: Vec<String>,
+    params: Vec<Identifier>,
     body: Arc<Expr>,
     args: Vec<Arc<Expr>>,
     engine: Engine<E>,
