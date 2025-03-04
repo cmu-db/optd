@@ -10,10 +10,7 @@
 
 use crate::driver::{cascades::Driver, memo::Memoize};
 use optd_dsl::analyzer::hir::{GroupId, PhysicalGoal, Value};
-use std::{
-    future::{self, Future},
-    sync::Arc,
-};
+use std::{future::Future, sync::Arc};
 
 /// Defines operations for expanding group references into concrete expressions.
 ///

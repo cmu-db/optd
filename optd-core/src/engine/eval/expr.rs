@@ -511,7 +511,6 @@ mod tests {
         assert!(result_ints.contains(&2)); // Length of [10, 20]
     }
 
-    // Test multiple nested pattern matches with expansion
     #[test]
     fn test_nested_pattern_matches_with_expansion() {
         // Create a MockExpander that provides multiple implementations for different groups
@@ -566,14 +565,16 @@ mod tests {
         // Create a nested pattern match:
         // match <logical_group5> {
         //   Filter(true) => match <scalar_group6> {
+        //     [] => 0
+        //     [x] => x
         //     [x, y] => x + y
-        //     [x, y, z] => x + y + z
-        //     _ => 0
+        //     [x, y, z, ...rest] => x + y + z
         //   }
         //   Filter(false) => match <scalar_group6> {
+        //     [] => 0
+        //     [x] => x
         //     [x, y] => x * y
-        //     [x, y, z] => x * y * z
-        //     _ => 0
+        //     [x, y, z, ...rest] => x * y * z
         //   }
         //   _ => 0
         // }
@@ -593,14 +594,27 @@ mod tests {
                     expr: arc(PatternMatch(
                         arc(CoreVal(scalar_group_ref.clone())),
                         vec![
+                            // Pattern for empty array
+                            MatchArm {
+                                pattern: EmptyArray,
+                                expr: arc(CoreVal(int_val(0))),
+                            },
+                            // Pattern for list with exactly 1 element
+                            MatchArm {
+                                pattern: ArrayDecomp(
+                                    Box::new(Bind("x".to_string(), Box::new(Wildcard))),
+                                    Box::new(EmptyArray),
+                                ),
+                                expr: arc(Ref("x".to_string())),
+                            },
                             // Pattern for list with exactly 2 elements
                             MatchArm {
-                                pattern: Pattern::Struct(
-                                    "Array".to_string(),
-                                    vec![
-                                        Bind("x".to_string(), Box::new(Wildcard)),
-                                        Bind("y".to_string(), Box::new(Wildcard)),
-                                    ],
+                                pattern: ArrayDecomp(
+                                    Box::new(Bind("x".to_string(), Box::new(Wildcard))),
+                                    Box::new(ArrayDecomp(
+                                        Box::new(Bind("y".to_string(), Box::new(Wildcard))),
+                                        Box::new(EmptyArray),
+                                    )),
                                 ),
                                 expr: arc(Binary(
                                     arc(Ref("x".to_string())),
@@ -608,15 +622,17 @@ mod tests {
                                     arc(Ref("y".to_string())),
                                 )),
                             },
-                            // Pattern for list with exactly 3 elements
+                            // Pattern for list with 3 or more elements
                             MatchArm {
-                                pattern: Pattern::Struct(
-                                    "Array".to_string(),
-                                    vec![
-                                        Bind("x".to_string(), Box::new(Wildcard)),
-                                        Bind("y".to_string(), Box::new(Wildcard)),
-                                        Bind("z".to_string(), Box::new(Wildcard)),
-                                    ],
+                                pattern: ArrayDecomp(
+                                    Box::new(Bind("x".to_string(), Box::new(Wildcard))),
+                                    Box::new(ArrayDecomp(
+                                        Box::new(Bind("y".to_string(), Box::new(Wildcard))),
+                                        Box::new(ArrayDecomp(
+                                            Box::new(Bind("z".to_string(), Box::new(Wildcard))),
+                                            Box::new(Wildcard), // Rest of the array (could be empty or not)
+                                        )),
+                                    )),
                                 ),
                                 expr: arc(Binary(
                                     arc(Binary(
@@ -627,11 +643,6 @@ mod tests {
                                     BinOp::Add,
                                     arc(Ref("z".to_string())),
                                 )),
-                            },
-                            // Fallback
-                            MatchArm {
-                                pattern: Wildcard,
-                                expr: arc(CoreVal(int_val(0))),
                             },
                         ],
                     )),
@@ -649,14 +660,27 @@ mod tests {
                     expr: arc(PatternMatch(
                         arc(CoreVal(scalar_group_ref)),
                         vec![
+                            // Pattern for empty array
+                            MatchArm {
+                                pattern: EmptyArray,
+                                expr: arc(CoreVal(int_val(0))),
+                            },
+                            // Pattern for list with exactly 1 element
+                            MatchArm {
+                                pattern: ArrayDecomp(
+                                    Box::new(Bind("x".to_string(), Box::new(Wildcard))),
+                                    Box::new(EmptyArray),
+                                ),
+                                expr: arc(Ref("x".to_string())),
+                            },
                             // Pattern for list with exactly 2 elements
                             MatchArm {
-                                pattern: Pattern::Struct(
-                                    "Array".to_string(),
-                                    vec![
-                                        Bind("x".to_string(), Box::new(Wildcard)),
-                                        Bind("y".to_string(), Box::new(Wildcard)),
-                                    ],
+                                pattern: ArrayDecomp(
+                                    Box::new(Bind("x".to_string(), Box::new(Wildcard))),
+                                    Box::new(ArrayDecomp(
+                                        Box::new(Bind("y".to_string(), Box::new(Wildcard))),
+                                        Box::new(EmptyArray),
+                                    )),
                                 ),
                                 expr: arc(Binary(
                                     arc(Ref("x".to_string())),
@@ -664,15 +688,17 @@ mod tests {
                                     arc(Ref("y".to_string())),
                                 )),
                             },
-                            // Pattern for list with exactly 3 elements
+                            // Pattern for list with 3 or more elements
                             MatchArm {
-                                pattern: Pattern::Struct(
-                                    "Array".to_string(),
-                                    vec![
-                                        Bind("x".to_string(), Box::new(Wildcard)),
-                                        Bind("y".to_string(), Box::new(Wildcard)),
-                                        Bind("z".to_string(), Box::new(Wildcard)),
-                                    ],
+                                pattern: ArrayDecomp(
+                                    Box::new(Bind("x".to_string(), Box::new(Wildcard))),
+                                    Box::new(ArrayDecomp(
+                                        Box::new(Bind("y".to_string(), Box::new(Wildcard))),
+                                        Box::new(ArrayDecomp(
+                                            Box::new(Bind("z".to_string(), Box::new(Wildcard))),
+                                            Box::new(Wildcard), // Rest of the array (could be empty or not)
+                                        )),
+                                    )),
                                 ),
                                 expr: arc(Binary(
                                     arc(Binary(
@@ -683,11 +709,6 @@ mod tests {
                                     BinOp::Mul,
                                     arc(Ref("z".to_string())),
                                 )),
-                            },
-                            // Fallback
-                            MatchArm {
-                                pattern: Wildcard,
-                                expr: arc(CoreVal(int_val(0))),
                             },
                         ],
                     )),
@@ -722,7 +743,6 @@ mod tests {
             })
             .collect();
 
-        println!("Results: {:?}", result_ints);
         assert!(result_ints.contains(&3)); // 1 + 2
         assert!(result_ints.contains(&12)); // 3 + 4 + 5
         assert!(result_ints.contains(&2)); // 1 * 2
