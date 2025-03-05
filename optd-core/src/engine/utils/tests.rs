@@ -1,6 +1,6 @@
 use crate::engine::{expander::Expander, utils::streams::ValueStream, Context, Engine};
 use futures::executor::block_on_stream;
-use optd_dsl::analyzer::hir::{CoreData, Expr, GroupId, Literal, Goal, Value};
+use optd_dsl::analyzer::hir::{CoreData, Expr, Goal, GroupId, Literal, Value};
 use std::{self, future::ready, sync::Arc};
 use CoreData::*;
 use Literal::*;
@@ -12,6 +12,8 @@ pub(crate) struct MockExpander {
     logical_expander: fn(GroupId) -> Vec<Value>,
     // Function to generate physical implementation for a physical goal
     physical_expander: fn(&Goal) -> Value,
+    // Function to generate logical properties for a group ID
+    properties_expander: fn(GroupId) -> Value,
 }
 
 impl MockExpander {
@@ -19,21 +21,27 @@ impl MockExpander {
     pub(crate) fn new(
         logical_expander: fn(GroupId) -> Vec<Value>,
         physical_expander: fn(&Goal) -> Value,
+        properties_expander: fn(GroupId) -> Value,
     ) -> Self {
         Self {
             logical_expander,
             physical_expander,
+            properties_expander,
         }
     }
 }
 
 impl Expander for MockExpander {
-    async fn expand_logical_group(&self, group_id: GroupId) -> Vec<Value> {
+    async fn expand_all_exprs(&self, group_id: GroupId) -> Vec<Value> {
         ready((self.logical_expander)(group_id)).await
     }
 
-    async fn expand_physical_goal(&self, physical_goal: &Goal) -> Value {
+    async fn expand_winning_expr(&self, physical_goal: &Goal) -> Value {
         ready((self.physical_expander)(physical_goal)).await
+    }
+
+    async fn expand_properties(&self, group_id: GroupId) -> Value {
+        ready((self.properties_expander)(group_id)).await
     }
 }
 
@@ -68,6 +76,7 @@ pub(crate) fn create_basic_mock_expander() -> MockExpander {
     MockExpander::new(
         |_| vec![], // No logical expansions
         |_| panic!("Physical expansion not implemented"),
+        |_| panic!("Properties expansion not implemented"), 
     )
 }
 

@@ -3,7 +3,7 @@ use crate::ir::{
     group::GroupId,
     operators::{Child, Operator, OperatorData},
     plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan},
-    properties::{PhysicalProperties, PropertiesData},
+    properties::{LogicalProperties, PhysicalProperties, PropertiesData},
 };
 use optd_dsl::analyzer::hir::{CoreData, Literal, Materializable, Value};
 use std::sync::Arc;
@@ -42,7 +42,7 @@ pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
             UnMaterialized(hir_goal) => {
                 let ir_goal = Goal(
                     GroupId(hir_goal.group_id.0),
-                    value_to_properties(&hir_goal.properties),
+                    value_to_physical_properties(&hir_goal.properties),
                 );
 
                 PartialPhysicalPlan::UnMaterialized(ir_goal)
@@ -77,10 +77,18 @@ fn value_to_logical(value: &Value) -> LogicalPlan {
 }
 
 /// Convert HIR properties value to IR PhysicalProperties
-fn value_to_properties(properties_value: &Value) -> PhysicalProperties {
+fn value_to_physical_properties(properties_value: &Value) -> PhysicalProperties {
     match &properties_value.0 {
         Null => PhysicalProperties(None),
         _ => PhysicalProperties(Some(value_to_properties_data(properties_value))),
+    }
+}
+
+/// Convert HIR properties value to IR LogicalProperties
+pub(crate) fn value_to_logical_properties(properties_value: &Value) -> LogicalProperties {
+    match &properties_value.0 {
+        Null => LogicalProperties(None),
+        _ => LogicalProperties(Some(value_to_properties_data(properties_value))),
     }
 }
 

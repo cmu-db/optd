@@ -4,34 +4,37 @@
 //! defined in the OPTD language. It handles the execution of rules against input
 //! plans and manages the transformation of plans according to those rules.
 
-use crate::ir::{plans::PartialLogicalPlan, properties::PhysicalProperties};
+use crate::{
+    error::Error,
+    ir::{
+        plans::PartialLogicalPlan,
+        properties::{LogicalProperties, PhysicalProperties},
+    },
+};
+use bridge::{
+    from::{partial_logical_to_value, physical_properties_to_value},
+    into::{value_to_logical_properties, value_to_partial_logical, value_to_partial_physical},
+};
+use error::EngineError;
+use eval::Evaluate;
+use expander::Expander;
 use futures::StreamExt;
 use optd_dsl::analyzer::{
     context::Context,
     hir::{CoreData, Expr, Literal, Value},
 };
 use std::sync::Arc;
-use utils::{
-    error::Error,
-    streams::{PartialLogicalPlanStream, PartialPhysicalPlanStream},
-};
-
-// Module imports
-mod bridge;
-mod eval;
-pub mod expander;
-mod utils;
-
-// Import common enum variants to make code more readable
-use bridge::{
-    from::{partial_logical_to_value, physical_properties_to_value},
-    into::{value_to_partial_logical, value_to_partial_physical},
-};
-use eval::Evaluate;
-use expander::Expander;
-use CoreData::*;
+use utils::streams::{PartialLogicalPlanStream, PartialPhysicalPlanStream};
+use EngineError::*;
+use Error::*;
 use Expr::*;
 use Literal::*;
+
+mod bridge;
+pub(crate) mod error;
+mod eval;
+pub mod expander;
+pub(crate) mod utils;
 
 /// Result type for rule applications
 type RuleResult<T> = Result<T, Error>;
@@ -82,9 +85,9 @@ impl<E: Expander> Engine<E> {
     pub(crate) async fn match_and_apply_logical_rule(
         self,
         rule_name: &str,
-        plan: PartialLogicalPlan,
+        plan: &PartialLogicalPlan,
     ) -> PartialLogicalPlanStream {
-        let rule_call = self.create_rule_call(rule_name, vec![partial_logical_to_value(&plan)]);
+        let rule_call = self.create_rule_call(rule_name, vec![partial_logical_to_value(plan)]);
 
         rule_call
             .evaluate(self)
@@ -107,10 +110,10 @@ impl<E: Expander> Engine<E> {
     pub(crate) async fn match_and_apply_implementation_rule(
         self,
         rule_name: &str,
-        plan: PartialLogicalPlan,
+        plan: &PartialLogicalPlan,
         props: Arc<PhysicalProperties>,
     ) -> PartialPhysicalPlanStream {
-        let plan_value = partial_logical_to_value(&plan);
+        let plan_value = partial_logical_to_value(plan);
         let props_value = physical_properties_to_value(&props);
 
         let rule_call = self.create_rule_call(rule_name, vec![plan_value, props_value]);
@@ -119,6 +122,36 @@ impl<E: Expander> Engine<E> {
             .evaluate(self)
             .map(|result| Self::process_rule_result(result, value_to_partial_physical))
             .boxed()
+    }
+
+    /// Derives logical properties for a given logical plan.
+    ///
+    /// This calls the reserved "derive" function of the DSL to compute
+    /// the logical properties for a given logical plan. These properties are
+    /// used for various optimization decisions like cardinality estimation,
+    /// schema inference, and cost calculations.
+    ///
+    /// # Parameters
+    /// * `plan` - The logical plan to derive properties for
+    ///
+    /// # Returns
+    /// The logical properties derived from the plan
+    pub(crate) async fn derive_properties(
+        self,
+        plan: &PartialLogicalPlan,
+    ) -> Result<LogicalProperties, Error> {
+        // Create a call to the reserved "derive" function
+        let rule_call = self.create_rule_call("derive", vec![partial_logical_to_value(plan)]);
+
+        // Evaluate the rule and transform the result into logical properties
+        let result = rule_call
+            .evaluate(self)
+            .next()
+            .await
+            .ok_or_else(|| Engine(NoResult))?;
+
+        // Process the result and transform to logical properties
+        Self::process_rule_result(result, value_to_logical_properties)
     }
 
     /// Creates a rule call expression with the given name and arguments.
@@ -133,7 +166,7 @@ impl<E: Expander> Engine<E> {
         let rule_name_expr = Ref(rule_name.to_string());
         let arg_exprs = args.into_iter().map(|arg| CoreVal(arg).into()).collect();
 
-        Arc::new(Call(rule_name_expr.into(), arg_exprs))
+        Call(rule_name_expr.into(), arg_exprs).into()
     }
 
     /// Processes the result of a rule evaluation.
@@ -149,8 +182,10 @@ impl<E: Expander> Engine<E> {
         F: FnOnce(&Value) -> T,
     {
         result.and_then(|value| match &value.0 {
-            Fail(boxed_msg) => match &boxed_msg.0 {
-                Literal(String(error_message)) => Err(Error::Fail(error_message.clone())),
+            CoreData::Fail(boxed_msg) => match &boxed_msg.0 {
+                CoreData::Literal(String(error_message)) => {
+                    Err(Engine(Fail(error_message.clone())))
+                }
                 _ => panic!("Fail expression must evaluate to a string message"),
             },
             _ => Ok(transform(&value)),

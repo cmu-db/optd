@@ -31,12 +31,12 @@ where
     match &value.0 {
         // For unmaterialized logical groups, expand them
         CoreData::Logical(LogicalOp(UnMaterialized(group_id))) => {
-            engine.expander.expand_logical_group(*group_id).await
+            engine.expander.expand_all_exprs(*group_id).await
         }
 
         // For unmaterialized physical goals, expand them
         CoreData::Physical(PhysicalOp(UnMaterialized(physical_goal))) => {
-            vec![engine.expander.expand_physical_goal(physical_goal).await]
+            vec![engine.expander.expand_winning_expr(physical_goal).await]
         }
 
         // For all other types, just return the original value
@@ -136,11 +136,11 @@ where
 
         // Unmaterialized operators
         (Operator(op_pattern), CoreData::Logical(LogicalOp(UnMaterialized(group_id)))) => {
-            let expanded_values = engine.expander.expand_logical_group(*group_id).await;
+            let expanded_values = engine.expander.expand_all_exprs(*group_id).await;
             match_against_expanded_values(op_pattern, expanded_values, engine).await
         }
         (Operator(op_pattern), CoreData::Physical(PhysicalOp(UnMaterialized(physical_goal)))) => {
-            let expanded_value = engine.expander.expand_physical_goal(physical_goal).await;
+            let expanded_value = engine.expander.expand_winning_expr(physical_goal).await;
             match_against_expanded_values(op_pattern, vec![expanded_value], engine).await
         }
 
@@ -568,6 +568,7 @@ mod tests {
                 }
             },
             |_| panic!("Physical expansion not expected"),
+            |_| panic!("Properties expansion not expected"),
         );
 
         // Create an engine with this expander
@@ -618,6 +619,7 @@ mod tests {
                     panic!("Unexpected physical goal")
                 }
             },
+            |_| panic!("Properties expansion not expected"),
         );
 
         // Create an engine with this expander
@@ -690,6 +692,7 @@ mod tests {
                 }
             },
             |_| panic!("Physical expansion not expected"),
+            |_| panic!("Properties expansion not expected"),
         );
 
         // Create an engine with this expander

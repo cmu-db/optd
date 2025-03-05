@@ -12,14 +12,12 @@
 use crate::{
     capture,
     engine::{
-        utils::{
-            error::Error,
-            streams::{
-                evaluate_all_combinations, propagate_success, stream_from_result, ValueStream,
-            },
+        utils::streams::{
+            evaluate_all_combinations, propagate_success, stream_from_result, ValueStream,
         },
         Engine, Expander,
     },
+    error::Error,
 };
 use futures::{Stream, StreamExt};
 use optd_dsl::analyzer::hir::{

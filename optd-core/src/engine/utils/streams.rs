@@ -5,8 +5,8 @@
 
 use crate::engine::eval::Evaluate;
 use crate::engine::expander::Expander;
-use crate::engine::utils::error::Error;
 use crate::engine::Engine;
+use crate::error::Error;
 use crate::ir::plans::PartialPhysicalPlan;
 use crate::{capture, ir::plans::PartialLogicalPlan};
 use futures::{stream, Stream, StreamExt};

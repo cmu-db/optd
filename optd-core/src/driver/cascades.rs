@@ -1,7 +1,9 @@
-use anyhow::Result;
 use async_recursion::async_recursion;
 use futures::StreamExt;
-use optd_dsl::analyzer::{context::Context, hir::GroupId};
+use optd_dsl::analyzer::{
+    context::Context,
+    hir::{GroupId, HIR},
+};
 use std::{char::MAX, sync::Arc};
 use tokio::task::JoinSet;
 
@@ -11,12 +13,11 @@ use super::{
 };
 use crate::{
     engine::{expander::Expander, Engine},
+    error::Error,
     ir::{
-        expressions::{
-            LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
-        },
+        expressions::{LogicalExpression, PhysicalExpression},
         goal::Goal,
-        group::ExplorationStatus,
+        group::{Cost, ExplorationStatus},
         plans::{LogicalPlan, PartialLogicalPlan},
         properties::PhysicalProperties,
         rules::{ImplementationRule, RuleBook, TransformationRule},
@@ -30,36 +31,30 @@ pub struct Driver<M: Memoize> {
     engine: Engine<Arc<Self>>,
 }
 
-/*impl<M: Memoize> Driver<M> {
-    pub fn new(memo: M) -> Arc<Self> {
+impl<M: Memoize> Driver<M> {
+    pub fn new(memo: M, hir: HIR) -> Arc<Self> {
         Arc::new_cyclic(|this| Self {
             memo,
             rule_book: RuleBook::default(),
-            engine: Engine::new(Context::default(), this.upgrade().unwrap()),
+            engine: Engine::new(hir.context, this.upgrade().unwrap()),
         })
     }
 
-    /// The main entry point for the optimizer.
-    /// If the cost is infinite, it will return None.
-    /// If the cost is finite, it will return the best physical expression.
     pub async fn optimize(
         self: Arc<Self>,
         logical_plan: LogicalPlan,
-    ) -> Result<Option<(PhysicalExpression, PhysicalExpressionId)>> {
-        let group_id = ingest_logical_plan(&self.memo, &logical_plan.into()).await?;
-        self.optimize_goal(group_id, PhysicalProperties(None).into())
+    ) -> Result<Option<PhysicalExpression>, Error> {
+        let group_id = ingest_logical_plan(&self.memo, &self.engine, &logical_plan.into()).await?;
+        self.optimize_goal(Goal(group_id, PhysicalProperties(None)))
             .await
     }
 
-    /// This function is used to optimize a goal. It will be called by the entry point `optimize`.
-    /// It will also be called by the interpreter when it needs to optimize a children goals.
     #[async_recursion]
     pub async fn optimize_goal(
         self: Arc<Self>,
-        group_id: GroupId,
-        required_physical_props: Arc<PhysicalProperties>,
-    ) -> Result<Option<(PhysicalExpression, PhysicalExpressionId)>> {
-        let goal = self
+        goal: Goal,
+    ) -> Result<Option<PhysicalExpression>, Error> {
+        /*let goal = self
             .memo
             .create_or_get_goal(group_id, &required_physical_props)
             .await?;
@@ -93,7 +88,6 @@ pub struct Driver<M: Memoize> {
             .into_iter()
             .collect::<Result<Vec<_>>>()?;
 
-        let mut best_cost = MAX_COST;
         let mut best_plan = None;
         for result in plan_results {
             if result.0 < best_cost {
@@ -102,7 +96,8 @@ pub struct Driver<M: Memoize> {
             }
         }
 
-        Ok(best_plan)
+        Ok(best_plan)*/
+        todo!()
     }
 
     /// This function is used to optimize a logical expression.
@@ -117,8 +112,8 @@ pub struct Driver<M: Memoize> {
         goal: Goal,
         group_id: GroupId,
         req_props: Arc<PhysicalProperties>,
-    ) -> Result<(Cost, Option<(PhysicalExpression, PhysicalExpressionId)>)> {
-        let rules = self.rule_book.get_implementations().iter().cloned();
+    ) -> Result<(Cost, Option<PhysicalExpression>), Error> {
+        /*let rules = self.rule_book.get_implementations().iter().cloned();
 
         let mut join_set = JoinSet::new();
         for rule in rules {
@@ -147,10 +142,12 @@ pub struct Driver<M: Memoize> {
             }
         }
 
-        Ok((best_cost, best_plan))
+        Ok((best_cost, best_plan))*/
+
+        todo!()
     }
 
-    #[async_recursion]
+    /*#[async_recursion]
     pub async fn explore_relation_group(self: Arc<Self>, group_id: GroupId) -> Result<()> {
         let logical_exprs = self.memo.get_all_logical_exprs_in_group(group_id).await?;
 
@@ -288,5 +285,5 @@ pub struct Driver<M: Memoize> {
         }
 
         Ok((best_cost, best_physical_output))
-    }
-}*/
+    }*/
+}

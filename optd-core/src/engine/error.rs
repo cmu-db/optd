@@ -6,7 +6,9 @@
 
 /// Represents errors that can occur during expression evaluation.
 #[derive(Clone, Debug)]
-pub enum Error {
+pub(crate) enum EngineError {
     /// A failure triggered by a Fail expression in the HIR.
     Fail(String),
+    /// A failure triggered by the failure of returning any result.
+    NoResult,
 }

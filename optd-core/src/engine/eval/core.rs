@@ -384,6 +384,7 @@ mod tests {
                 }
             },
             |_| panic!("Physical expansion not expected"),
+            |_| panic!("Properties expansion not expected"),
         );
 
         let engine = Engine::new(Context::default(), expander);
@@ -428,6 +429,7 @@ mod tests {
                     panic!("Unexpected physical goal")
                 }
             },
+            |_| panic!("Properties expansion not expected"),
         );
 
         let engine = Engine::new(Context::default(), expander);
@@ -456,6 +458,7 @@ mod tests {
                 _ => vec![],
             },
             |_| panic!("Physical expansion not expected"),
+            |_| panic!("Properties expansion not expected"),
         );
 
         let engine = Engine::new(Context::default(), expander);

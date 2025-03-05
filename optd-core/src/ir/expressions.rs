@@ -7,24 +7,6 @@ use super::{
 use std::sync::Arc;
 
 //=============================================================================
-// Expression IDs
-//=============================================================================
-
-/// Unique identifier for a logical expression within the memo structure.
-///
-/// Logical expressions represent relational algebra operations like joins,
-/// filters, projections, etc. Each expression has a unique ID in the memo.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LogicalExpressionId(pub i64);
-
-/// Unique identifier for a physical expression within the memo structure.
-///
-/// Physical expressions represent concrete implementation strategies for
-/// logical operations, like hash joins, index scans, etc.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PhysicalExpressionId(pub i64);
-
-//=============================================================================
 // Expression Types
 //=============================================================================
 

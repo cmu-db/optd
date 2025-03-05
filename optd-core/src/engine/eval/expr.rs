@@ -351,6 +351,7 @@ mod tests {
                 }
             },
             |_| panic!("Physical expansion not expected"),
+            |_| panic!("Properties expansion not expected"),
         );
 
         let engine = Engine::new(Context::default(), expander);
@@ -430,6 +431,7 @@ mod tests {
                 }
             },
             |_| panic!("Physical expansion not expected"),
+            |_| panic!("Properties expansion not expected"),
         );
 
         // Create a logical group reference to the lists
@@ -544,6 +546,7 @@ mod tests {
                 }
             },
             |_| panic!("Physical expansion not expected"),
+            |_| panic!("Properties expansion not expected"),
         );
 
         let engine = Engine::new(Context::default(), expander);

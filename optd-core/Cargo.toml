@@ -7,7 +7,6 @@ repository.workspace = true
 
 [dependencies]
 tokio.workspace = true
-anyhow.workspace = true
 async-recursion.workspace = true
 trait-variant.workspace = true
 proc-macro2.workspace = true
