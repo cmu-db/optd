@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use crate::{
     error::Error,
     ir::{
@@ -24,7 +26,7 @@ pub trait Memoize: Send + Sync + 'static {
         status: ExplorationStatus,
     ) -> MemoizeResult<()>;
 
-    async fn get_exploration_status(&self, goal: GroupId) -> MemoizeResult<ExplorationStatus>;
+    async fn get_exploration_status(&self, group_id: GroupId) -> MemoizeResult<ExplorationStatus>;
 
     async fn get_optimization_status(&self, goal: &Goal) -> MemoizeResult<OptimizationStatus>;
 
@@ -35,16 +37,14 @@ pub trait Memoize: Send + Sync + 'static {
         group_id: GroupId,
     ) -> MemoizeResult<Vec<LogicalExpression>>;
 
-    async fn try_add_logical_expr(
+    async fn add_logical_expr<F, Fut>(
         &self,
         logical_expr: &LogicalExpression,
-    ) -> MemoizeResult<Option<GroupId>>;
-
-    async fn create_group_with(
-        &self,
-        logical_expr: &LogicalExpression,
-        properties: &LogicalProperties,
-    ) -> MemoizeResult<GroupId>;
+        derive_properties: F,
+    ) -> MemoizeResult<GroupId>
+    where
+        F: FnOnce() -> Fut + Send,
+        Fut: Future<Output = MemoizeResult<LogicalProperties>> + Send;
 
     async fn merge_groups(&self, from: GroupId, to: GroupId) -> MemoizeResult<()>;
 

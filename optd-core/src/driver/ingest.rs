@@ -1,5 +1,6 @@
 use super::memo::Memoize;
 use crate::{
+    capture,
     engine::{expander::Expander, Engine},
     error::Error,
     ir::{
@@ -50,23 +51,17 @@ where
         children,
     };
 
-    // First try to add the expression to an existing group
-    let group_id_result = memo.try_add_logical_expr(&logical_expr).await?;
+    // Add the expression to memo with a callback to derive properties
+    let group_id = memo
+        .add_logical_expr(&logical_expr, || {
+            capture!([logical_expr, engine], async move {
+                let partial_plan = logical_expr.into();
+                engine.derive_properties(&partial_plan).await
+            })
+        })
+        .await?;
 
-    // If no existing group found, create a new group with derived properties
-    if let Some(group_id) = group_id_result {
-        Ok((logical_expr, group_id))
-    } else {
-        // Create a partial logical plan from the logical expression to derive properties
-        let partial_plan = logical_expr.clone().into();
-
-        // Derive properties using the engine
-        let props = engine.clone().derive_properties(&partial_plan).await?;
-
-        // Create new group with the expression and its properties
-        let group_id = memo.create_group_with(&logical_expr, &props).await?;
-        Ok((logical_expr, group_id))
-    }
+    Ok((logical_expr, group_id))
 }
 
 /// Processes a physical operator and integrates it into the memo table.

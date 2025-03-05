@@ -141,7 +141,7 @@ impl<E: Expander> Engine<E> {
         plan: &PartialLogicalPlan,
     ) -> Result<LogicalProperties, Error> {
         // Create a call to the reserved "derive" function
-        let rule_call = self.create_rule_call("derive", vec![partial_logical_to_value(plan)]);
+        let rule_call = self.create_rule_call("derive", vec![partial_logical_to_value(&plan)]);
 
         // Evaluate the rule and transform the result into logical properties
         let result = rule_call

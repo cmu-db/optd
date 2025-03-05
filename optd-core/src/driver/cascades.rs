@@ -1,12 +1,3 @@
-use async_recursion::async_recursion;
-use futures::StreamExt;
-use optd_dsl::analyzer::{
-    context::Context,
-    hir::{GroupId, HIR},
-};
-use std::{char::MAX, sync::Arc};
-use tokio::task::JoinSet;
-
 use super::{
     ingest::{ingest_logical_operator, ingest_logical_plan},
     memo::Memoize,
@@ -17,12 +8,18 @@ use crate::{
     ir::{
         expressions::{LogicalExpression, PhysicalExpression},
         goal::Goal,
-        group::{Cost, ExplorationStatus},
+        group::{Cost, ExplorationStatus, GroupId},
         plans::{LogicalPlan, PartialLogicalPlan},
         properties::PhysicalProperties,
         rules::{ImplementationRule, RuleBook, TransformationRule},
     },
 };
+use async_recursion::async_recursion;
+use futures::StreamExt;
+use optd_dsl::analyzer::hir::HIR;
+use std::{char::MAX, sync::Arc};
+use tokio::task::JoinSet;
+use ExplorationStatus::*;
 
 #[derive(Debug)]
 pub struct Driver<M: Memoize> {
@@ -32,7 +29,7 @@ pub struct Driver<M: Memoize> {
 }
 
 impl<M: Memoize> Driver<M> {
-    pub fn new(memo: M, hir: HIR) -> Arc<Self> {
+    pub(crate) fn new(memo: M, hir: HIR) -> Arc<Self> {
         Arc::new_cyclic(|this| Self {
             memo,
             rule_book: RuleBook::default(),
@@ -40,7 +37,7 @@ impl<M: Memoize> Driver<M> {
         })
     }
 
-    pub async fn optimize(
+    pub(crate) async fn optimize(
         self: Arc<Self>,
         logical_plan: LogicalPlan,
     ) -> Result<Option<PhysicalExpression>, Error> {
@@ -50,10 +47,13 @@ impl<M: Memoize> Driver<M> {
     }
 
     #[async_recursion]
-    pub async fn optimize_goal(
+    async fn optimize_goal(
         self: Arc<Self>,
         goal: Goal,
     ) -> Result<Option<PhysicalExpression>, Error> {
+
+        
+
         /*let goal = self
             .memo
             .create_or_get_goal(group_id, &required_physical_props)
@@ -106,13 +106,22 @@ impl<M: Memoize> Driver<M> {
     /// If the cost is infinite, it will return None.
     /// If the cost is finite, it will return the best physical expression.
     #[async_recursion]
-    pub async fn optimize_expression(
+    async fn optimize_expression(
         self: Arc<Self>,
         logical_expr: LogicalExpression,
         goal: Goal,
         group_id: GroupId,
         req_props: Arc<PhysicalProperties>,
     ) -> Result<(Cost, Option<PhysicalExpression>), Error> {
+        // Alexis guidelines
+        // 1. Apply all implementation rules, get back the partial physical plans
+        // 2. Ingest with the existing function
+        // 3. For each partial physical plan, optimize it's children while it doesn't increase the cost budget
+        // this is pretty much a DFS traversal of the physical plan tree (ez recursive function)
+        // 4. Call a "cost" (new) function to the engine, passing the optimized partial physical plan as input
+        // 5. Store the cost & statistics of that optimized expression into the memo (new memo call)
+        // 6. Done & profit
+
         /*let rules = self.rule_book.get_implementations().iter().cloned();
 
         let mut join_set = JoinSet::new();
@@ -147,38 +156,36 @@ impl<M: Memoize> Driver<M> {
         todo!()
     }
 
-    /*#[async_recursion]
-    pub async fn explore_relation_group(self: Arc<Self>, group_id: GroupId) -> Result<()> {
-        let logical_exprs = self.memo.get_all_logical_exprs_in_group(group_id).await?;
+    #[async_recursion]
+    async fn explore_group(self: Arc<Self>, group_id: GroupId) -> Result<(), Error> {
+        self.memo
+            .set_exploration_status(group_id, Exploring)
+            .await?;
 
-        let mut join_set = JoinSet::new();
-        for (_, logical_expr) in logical_exprs {
-            let ctx = self.clone();
-            join_set.spawn(async move { ctx.explore_expression(logical_expr, group_id).await });
+        let logical_exprs = self.memo.get_all_logical_exprs(group_id).await?;
+
+        let mut res = Vec::new();
+        for logical_expr in logical_exprs {
+            let driver = self.clone();
+            res.push(driver.explore_expression(logical_expr, group_id).await);
         }
 
-        let results = join_set
-            .join_all()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>>>()?;
-
         let mut logical_exprs = Vec::new();
-        for result in results {
+        for result in res {
             logical_exprs.extend(result);
         }
 
-        Ok(())
+        self.memo.set_exploration_status(group_id, Explored).await
     }
 
     pub async fn explore_expression(
         self: Arc<Self>,
         logical_expr: LogicalExpression,
         group_id: GroupId,
-    ) -> Result<Vec<(LogicalExpression, LogicalExpressionId)>> {
-        let rules = vec![];
+    ) -> Result<Vec<LogicalExpression>, Error> {
+        // let rules = vec![];
 
-        let mut join_set = JoinSet::new();
+        /*let mut join_set = JoinSet::new();
         for rule in rules {
             // Check if rule is applied, then:
             let ctx = self.clone();
@@ -200,9 +207,10 @@ impl<M: Memoize> Driver<M> {
             logical_exprs.extend(result);
         }
 
-        Ok(logical_exprs)
+        Ok(logical_exprs)*/
+        todo!()
     }
-
+    /*
     pub async fn match_and_apply_transformation_rule(
         self: Arc<Self>,
         logical_expr: LogicalExpression,
