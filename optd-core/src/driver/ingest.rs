@@ -27,11 +27,12 @@ use Child::*;
 ///
 /// # Returns
 /// * The created logical expression and its assigned group ID
+/// * `bool` - Whether a new logical expression was added to the memoization table
 pub(super) async fn ingest_logical_operator<M, E>(
     memo: &M,
     engine: &Engine<E>,
     operator: &Operator<Arc<PartialLogicalPlan>>,
-) -> Result<(LogicalExpression, GroupId), Error>
+) -> Result<(LogicalExpression, GroupId, bool), Error>
 where
     M: Memoize,
     E: Expander,
@@ -43,30 +44,36 @@ where
         }))
         .await?;
 
+    let new_expr_added_by_children = children.iter().any(|(_, added)| *added);
+
     // Create the logical expression with processed children
     let logical_expr = LogicalExpression {
         tag: operator.tag.clone(),
         data: operator.data.clone(),
-        children,
+        children: children.into_iter().map(|(c, _)| c).collect(),
     };
 
+    // clone the engine and logical_expr for the closure
+    let engine = engine.clone();
+    let logical_expr_for_props = logical_expr.clone();
+
     // First try to add the expression to an existing group
-    let group_id_result = memo.try_add_logical_expr(&logical_expr).await?;
+    let (group_id_result, new_expr_added) = memo
+        .add_logical_expr(&logical_expr, move || async {
+            // If no existing group found, create a new group with derived properties
+            // Create a partial logical plan from the logical expression to derive properties
+            let partial_plan = logical_expr_for_props.into();
 
-    // If no existing group found, create a new group with derived properties
-    if let Some(group_id) = group_id_result {
-        Ok((logical_expr, group_id))
-    } else {
-        // Create a partial logical plan from the logical expression to derive properties
-        let partial_plan = logical_expr.clone().into();
-
-        // Derive properties using the engine
-        let props = engine.clone().derive_properties(&partial_plan).await?;
-
-        // Create new group with the expression and its properties
-        let group_id = memo.create_group_with(&logical_expr, &props).await?;
-        Ok((logical_expr, group_id))
-    }
+            // Derive properties using the engine
+            let props = engine.derive_properties(&partial_plan).await?;
+            Ok(props)
+        })
+        .await?;
+    Ok((
+        logical_expr,
+        group_id_result,
+        new_expr_added_by_children || new_expr_added,
+    ))
 }
 
 /// Processes a physical operator and integrates it into the memo table.
@@ -81,10 +88,11 @@ where
 ///
 /// # Returns
 /// * The created physical expression and its assigned goal
+/// * `bool` - Whether a new physical expression was added to the memoization table
 pub(super) async fn ingest_physical_operator<M>(
     memo: &M,
     operator: &Operator<Arc<PartialPhysicalPlan>>,
-) -> Result<(PhysicalExpression, Goal), Error>
+) -> Result<(PhysicalExpression, Goal, bool), Error>
 where
     M: Memoize,
 {
@@ -97,24 +105,22 @@ where
     )
     .await?;
 
+    let new_expr_added_by_children = children.iter().any(|(_, added)| *added);
+
     // Create the physical expression with processed children
     let physical_expr = PhysicalExpression {
         tag: operator.tag.clone(),
         data: operator.data.clone(),
-        children,
+        children: children.into_iter().map(|(c, _)| c).collect(),
     };
 
     // Add to memo table and get goal
-    let goal_result = memo.try_add_physical_expr(&physical_expr).await?;
-
-    // If no existing goal found, create a new goal
-    if let Some(goal) = goal_result {
-        Ok((physical_expr, goal))
-    } else {
-        // Create new goal with the expression
-        let goal = memo.create_goal_with(&physical_expr).await?;
-        Ok((physical_expr, goal))
-    }
+    let (goal_result, new_expr_added) = memo.add_physical_expr(&physical_expr).await?;
+    Ok((
+        physical_expr,
+        goal_result,
+        new_expr_added_by_children || new_expr_added,
+    ))
 }
 
 /// Generic function to process a Child structure containing any plan type.
@@ -130,28 +136,33 @@ where
 ///
 /// # Returns
 /// * Processed Child structure with appropriate GroupId or Goal
+/// * `bool` - Whether a new expression was added to the memoization table
 async fn process_child<M, C, P, G, F>(
     memo: &M,
     ctx: &C,
     child: &Child<Arc<P>>,
     ingest_fn: F,
-) -> Result<Child<G>, Error>
+) -> Result<(Child<G>, bool), Error>
 where
     M: Memoize,
     F: for<'a> Fn(
         &'a M,
         &'a C,
         &'a P,
-    ) -> Pin<Box<dyn Future<Output = Result<G, Error>> + Send + 'a>>,
+    ) -> Pin<Box<dyn Future<Output = Result<(G, bool), Error>> + Send + 'a>>,
 {
     match child {
         Singleton(plan) => {
             let result = ingest_fn(memo, ctx, plan).await?;
-            Ok(Singleton(result))
+            Ok((Singleton(result.0), result.1))
         }
         VarLength(plans) => {
             let results = try_join_all(plans.iter().map(|plan| ingest_fn(memo, ctx, plan))).await?;
-            Ok(VarLength(results))
+            let new_expr_added = results.iter().any(|(_, added)| *added);
+            Ok((
+                VarLength(results.into_iter().map(|(c, b)| c).collect()),
+                new_expr_added,
+            ))
         }
     }
 }
@@ -173,17 +184,18 @@ pub(super) async fn ingest_logical_plan<M, E>(
     memo: &M,
     engine: &Engine<E>,
     partial_plan: &PartialLogicalPlan,
-) -> Result<GroupId, Error>
+) -> Result<(GroupId, bool), Error>
 where
     M: Memoize,
     E: Expander,
 {
     match partial_plan {
         PartialLogicalPlan::Materialized(operator) => {
-            let (_, group_id) = ingest_logical_operator(memo, engine, operator).await?;
-            Ok(group_id)
+            let (_, group_id, new_expr_added) =
+                ingest_logical_operator(memo, engine, operator).await?;
+            Ok((group_id, new_expr_added))
         }
-        PartialLogicalPlan::UnMaterialized(group_id) => Ok(*group_id),
+        PartialLogicalPlan::UnMaterialized(group_id) => Ok((*group_id, false)),
     }
 }
 
@@ -202,15 +214,15 @@ where
 pub(super) async fn ingest_physical_plan<M>(
     memo: &M,
     partial_plan: &PartialPhysicalPlan,
-) -> Result<Goal, Error>
+) -> Result<(Goal, bool), Error>
 where
     M: Memoize,
 {
     match partial_plan {
         PartialPhysicalPlan::Materialized(operator) => {
-            let (_, goal) = ingest_physical_operator(memo, operator).await?;
-            Ok(goal)
+            let (_, goal, new_expr_added) = ingest_physical_operator(memo, operator).await?;
+            Ok((goal, new_expr_added))
         }
-        PartialPhysicalPlan::UnMaterialized(goal) => Ok(goal.clone()),
+        PartialPhysicalPlan::UnMaterialized(goal) => Ok((goal.clone(), false)),
     }
 }

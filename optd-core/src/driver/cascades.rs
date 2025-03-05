@@ -1,9 +1,6 @@
 use async_recursion::async_recursion;
 use futures::StreamExt;
-use optd_dsl::analyzer::{
-    context::Context,
-    hir::{GroupId, HIR},
-};
+use optd_dsl::analyzer::{context::Context, hir::HIR};
 use std::{char::MAX, sync::Arc};
 use tokio::task::JoinSet;
 
@@ -17,7 +14,7 @@ use crate::{
     ir::{
         expressions::{LogicalExpression, PhysicalExpression},
         goal::Goal,
-        group::{Cost, ExplorationStatus},
+        group::{Cost, ExplorationStatus, GroupId},
         plans::{LogicalPlan, PartialLogicalPlan},
         properties::PhysicalProperties,
         rules::{ImplementationRule, RuleBook, TransformationRule},
@@ -44,9 +41,110 @@ impl<M: Memoize> Driver<M> {
         self: Arc<Self>,
         logical_plan: LogicalPlan,
     ) -> Result<Option<PhysicalExpression>, Error> {
-        let group_id = ingest_logical_plan(&self.memo, &self.engine, &logical_plan.into()).await?;
+        let (group_id, _) =
+            ingest_logical_plan(&self.memo, &self.engine, &logical_plan.into()).await?;
         self.optimize_goal(Goal(group_id, PhysicalProperties(None)))
             .await
+    }
+
+    #[async_recursion]
+    pub async fn explore_relation_group(self: Arc<Self>, group_id: GroupId) -> Result<(), Error> {
+        // TODO(sarvesh): we should make sure that we are exploring the group only if it is unexplored
+        // else if it is exploring, we should wait for it to finish
+        // else if it is explored, we should return
+        let logical_exprs = self.memo.get_all_logical_exprs(group_id).await?;
+
+        let mut join_set = JoinSet::new();
+        for logical_expr in logical_exprs {
+            let ctx = self.clone();
+            join_set.spawn(async move { ctx.explore_expression(logical_expr, group_id).await });
+        }
+
+        let results = join_set
+            .join_all()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        Ok(())
+    }
+
+    #[async_recursion]
+    pub async fn explore_expression(
+        self: Arc<Self>,
+        logical_expr: LogicalExpression,
+        group_id: GroupId,
+    ) -> Result<(), Error> {
+        let rules = vec![];
+
+        let mut join_set = JoinSet::new();
+        for rule in rules {
+            // Check if rule is applied, then:
+            let ctx = self.clone();
+            let expr = logical_expr.clone();
+            join_set.spawn(async move {
+                ctx.match_and_apply_transformation_rule(expr, rule, group_id)
+                    .await
+            });
+        }
+
+        let results = join_set
+            .join_all()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        for result in results {
+            for (logical_expr, new_expression_added) in result {
+                if new_expression_added {
+                    let self_clone = self.clone();
+                    self_clone.explore_expression(logical_expr, group_id).await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn match_and_apply_transformation_rule(
+        self: Arc<Self>,
+        logical_expr: LogicalExpression,
+        rule: TransformationRule,
+        group_id: GroupId,
+    ) -> Result<Vec<(LogicalExpression, bool)>, Error> {
+        let partial_logical_input = &PartialLogicalPlan::from(logical_expr);
+
+        let mut partial_logical_outputs = self
+            .engine
+            .clone()
+            .match_and_apply_logical_rule(&rule.0, partial_logical_input)
+            .await;
+
+        let mut logical_exprs = Vec::new();
+        while let Some(partial_logical_output) = partial_logical_outputs.next().await {
+            match partial_logical_output {
+                Ok(partial_plan) => {
+                    let new_group_id = match partial_plan {
+                        PartialLogicalPlan::Materialized(node) => {
+                            let (stored_logical_expr, new_group_id, new_expression_added) =
+                                ingest_logical_operator(&self.memo, &self.engine, &node).await?;
+                            logical_exprs.push((stored_logical_expr, new_expression_added));
+                            new_group_id
+                        }
+                        PartialLogicalPlan::UnMaterialized(new_group_id) => new_group_id,
+                    };
+                    if new_group_id != group_id {
+                        self.memo.merge_groups(group_id, new_group_id).await?;
+                    }
+                }
+                Err(e) => {
+                    println!("DSL Error: {:?}", e);
+                    todo!()
+                }
+            }
+        }
+
+        Ok(logical_exprs)
     }
 
     #[async_recursion]

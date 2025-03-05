@@ -7,6 +7,7 @@ use crate::{
         properties::LogicalProperties,
     },
 };
+use std::future::Future;
 
 pub type MemoizeResult<T> = Result<T, Error>;
 
@@ -57,6 +58,24 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         physical_expr: &PhysicalExpression,
     ) -> MemoizeResult<Option<Goal>>;
+
+    /// Adds a physical expression to the memoization table and returns the goal.
+    /// Returns true if the expression was added, false if it already exists.
+    async fn add_physical_expr(
+        &self,
+        physical_expr: &PhysicalExpression,
+    ) -> MemoizeResult<(Goal, bool)>;
+
+    /// Adds a logical expression to the memoization table and returns the group ID.
+    /// Returns true if the expression was added, false if it already exists.
+    async fn add_logical_expr<F, Fut>(
+        &self,
+        logical_expr: &LogicalExpression,
+        derive_properties: F,
+    ) -> MemoizeResult<(GroupId, bool)>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<LogicalProperties, Error>> + Send;
 
     async fn create_goal_with(&self, physical_expr: &PhysicalExpression) -> MemoizeResult<Goal>;
 
