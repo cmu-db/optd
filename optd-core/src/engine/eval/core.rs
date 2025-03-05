@@ -2,7 +2,7 @@
 //! expressions into value streams that handle all possible evaluation paths.
 
 use super::{
-    operator::{evaluate_logical_operator, evaluate_physical_operator, evaluate_scalar_operator},
+    operator::{evaluate_logical_operator, evaluate_physical_operator},
     Engine, Evaluate, Expander,
 };
 use crate::{
@@ -40,7 +40,6 @@ where
         Function(fun_type) => propagate_success(Value(Function(fun_type))),
         Fail(msg) => evaluate_fail(*msg, engine),
         Logical(op) => evaluate_logical_operator(op, engine),
-        Scalar(op) => evaluate_scalar_operator(op, engine),
         Physical(op) => evaluate_physical_operator(op, engine),
         Null => propagate_success(Value(Null)),
     }
@@ -114,11 +113,11 @@ mod tests {
     use optd_dsl::analyzer::{
         context::Context,
         hir::{
-            BinOp, CoreData, Expr, FunKind, GroupId, Literal, LogicalOp, Materializable, Operator,
-            OperatorKind, PhysicalGoal, PhysicalOp, ScalarOp, Value,
+            BinOp, CoreData, Expr, FunKind, Goal, GroupId, Literal, LogicalOp, Materializable,
+            Operator, PhysicalOp, Value,
         },
     };
-    use std::{collections::HashMap, sync::Arc};
+    use std::sync::Arc;
     use CoreData::*;
     use Expr::*;
     use Literal::*;
@@ -166,7 +165,7 @@ mod tests {
         let engine = create_test_engine();
 
         // Test array of literals
-        let array_expr = CoreData::Array(vec![
+        let array_expr = Array(vec![
             arc(CoreVal(int_val(1))),
             arc(CoreVal(int_val(2))),
             arc(CoreVal(int_val(3))),
@@ -191,7 +190,7 @@ mod tests {
         let engine = create_test_engine();
 
         // Test tuple with mixed types
-        let tuple_expr = CoreData::Tuple(vec![
+        let tuple_expr = Tuple(vec![
             arc(CoreVal(int_val(42))),
             arc(CoreVal(string_val("hello"))),
             arc(CoreVal(bool_val(true))),
@@ -216,7 +215,7 @@ mod tests {
         let engine = create_test_engine();
 
         // Test struct with name and fields
-        let struct_expr = CoreData::Struct(
+        let struct_expr = Struct(
             "Person".to_string(),
             vec![arc(CoreVal(string_val("Alice"))), arc(CoreVal(int_val(30)))],
         );
@@ -240,7 +239,7 @@ mod tests {
         let engine = create_test_engine();
 
         // Test map with string keys and mixed value types
-        let map_expr = CoreData::Map(vec![
+        let map_expr = Map(vec![
             (
                 arc(CoreVal(string_val("name"))),
                 arc(CoreVal(string_val("Bob"))),
@@ -282,7 +281,7 @@ mod tests {
         // Test closure function
         let closure = FunKind::Closure(vec!["x".to_string()], arc(CoreVal(int_val(42))));
 
-        let func_expr = CoreData::Function(closure);
+        let func_expr = Function(closure);
         let stream = evaluate_core_expr(func_expr, engine);
         let values = collect_stream_values(stream);
 
@@ -300,9 +299,8 @@ mod tests {
         let engine = create_test_engine();
 
         // Test fail expression with string message
-        let fail_expr = CoreData::Fail(
-            Arc::new(CoreExpr(Literal(String("Error occurred".to_string())))).into(),
-        );
+        let fail_expr =
+            Fail(Arc::new(CoreExpr(Literal(String("Error occurred".to_string())))).into());
         let stream = evaluate_core_expr(fail_expr, engine);
         let values = collect_stream_values(stream);
 
@@ -368,17 +366,13 @@ mod tests {
                     // Create two logical operators
                     let op1 = Operator {
                         tag: "Filter".to_string(),
-                        kind: OperatorKind::Logical,
-                        operator_data: vec![bool_val(true)],
-                        scalar_children: vec![],
-                        relational_children: vec![],
+                        data: vec![bool_val(true)],
+                        children: vec![],
                     };
                     let op2 = Operator {
                         tag: "Project".to_string(),
-                        kind: OperatorKind::Logical,
-                        operator_data: vec![int_val(42)],
-                        scalar_children: vec![],
-                        relational_children: vec![],
+                        data: vec![int_val(42)],
+                        children: vec![],
                     };
 
                     vec![
@@ -389,14 +383,13 @@ mod tests {
                     vec![]
                 }
             },
-            |_| vec![],
             |_| panic!("Physical expansion not expected"),
         );
 
         let engine = Engine::new(Context::default(), expander);
 
         // Create a logical group reference
-        let logical_expr = CoreData::Logical(LogicalOp(UnMaterialized(GroupId(2))));
+        let logical_expr = Logical(LogicalOp(UnMaterialized(GroupId(2))));
 
         // Evaluate the logical group
         let stream = evaluate_core_expr(logical_expr, engine);
@@ -411,60 +404,9 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_scalar_group() {
-        // Create a MockExpander that provides expansions for scalar groups
-        let expander = MockExpander::new(
-            |_| vec![],
-            |group_id| {
-                if group_id == GroupId(3) {
-                    // Create two scalar operators
-                    let op1 = Operator {
-                        tag: "Add".to_string(),
-                        kind: OperatorKind::Scalar,
-                        operator_data: vec![int_val(1), int_val(2)],
-                        scalar_children: vec![],
-                        relational_children: vec![],
-                    };
-                    let op2 = Operator {
-                        tag: "Multiply".to_string(),
-                        kind: OperatorKind::Scalar,
-                        operator_data: vec![int_val(3), int_val(4)],
-                        scalar_children: vec![],
-                        relational_children: vec![],
-                    };
-
-                    vec![
-                        Value(Scalar(ScalarOp(Materialized(op1)))),
-                        Value(Scalar(ScalarOp(Materialized(op2)))),
-                    ]
-                } else {
-                    vec![]
-                }
-            },
-            |_| panic!("Physical expansion not expected"),
-        );
-
-        let engine = Engine::new(Context::new(HashMap::new()), expander);
-
-        // Create a scalar group reference
-        let scalar_expr = CoreData::Scalar(ScalarOp(UnMaterialized(GroupId(3))));
-
-        // Evaluate the scalar group
-        let stream = evaluate_core_expr(scalar_expr, engine);
-        let values = collect_stream_values(stream);
-
-        // The group reference should be returned as-is (no expansion happens here)
-        assert_eq!(values.len(), 1);
-        assert!(matches!(
-            &values[0].0,
-            Scalar(ScalarOp(UnMaterialized(group_id))) if *group_id == GroupId(3)
-        ));
-    }
-
-    #[test]
     fn test_evaluate_physical_goal() {
         // Create a goal for testing
-        let goal = PhysicalGoal {
+        let goal = Goal {
             group_id: GroupId(4),
             properties: Box::new(unit_val()),
         };
@@ -472,16 +414,13 @@ mod tests {
         // Create a MockExpander that provides implementation for physical goals
         let expander = MockExpander::new(
             |_| vec![],
-            |_| vec![],
             |physical_goal| {
                 if physical_goal.group_id == GroupId(4) {
                     // Create a physical operator
                     let op = Operator {
                         tag: "HashJoin".to_string(),
-                        kind: OperatorKind::Physical,
-                        operator_data: vec![int_val(1)],
-                        scalar_children: vec![],
-                        relational_children: vec![],
+                        data: vec![int_val(1)],
+                        children: vec![],
                     };
 
                     Value(Physical(PhysicalOp(Materialized(op))))
@@ -494,7 +433,7 @@ mod tests {
         let engine = Engine::new(Context::default(), expander);
 
         // Create a physical goal reference
-        let physical_expr = CoreData::Physical(PhysicalOp(UnMaterialized(goal)));
+        let physical_expr = Physical(PhysicalOp(Materializable::UnMaterialized(goal)));
 
         // Evaluate the physical goal
         let stream = evaluate_core_expr(physical_expr, engine);
@@ -516,10 +455,6 @@ mod tests {
                 GroupId(1) => vec![int_val(1), int_val(2)],
                 _ => vec![],
             },
-            |group_id| match group_id {
-                GroupId(2) => vec![int_val(10), int_val(20)],
-                _ => vec![],
-            },
             |_| panic!("Physical expansion not expected"),
         );
 
@@ -528,31 +463,24 @@ mod tests {
         // Create nested tuples with group references:
         // (
         //   [<logical_group1>],
-        //   [<scalar_group2>]
         // )
 
         let logical_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(1)))));
-        let scalar_group_ref = Value(Scalar(ScalarOp(UnMaterialized(GroupId(2)))));
 
-        let tuple_expr = CoreData::Tuple(vec![
-            arc(CoreExpr(CoreData::Array(vec![arc(CoreVal(
-                logical_group_ref,
-            ))]))),
-            arc(CoreExpr(CoreData::Array(vec![arc(CoreVal(
-                scalar_group_ref,
-            ))]))),
-        ]);
+        let tuple_expr = Tuple(vec![arc(CoreExpr(Array(vec![arc(CoreVal(
+            logical_group_ref,
+        ))])))]);
 
         // Evaluate the nested structure
         let stream = evaluate_core_expr(tuple_expr, engine);
         let values = collect_stream_values(stream);
 
-        // Should produce the cartesian product: 2 logical group expansions × 2 scalar group expansions = 4 combinations
+        // Should produce one result
         assert_eq!(values.len(), 1);
 
-        // Check the structure of each result
+        // Check the structure of the result
         if let Tuple(items) = &values[0].0 {
-            assert_eq!(items.len(), 2);
+            assert_eq!(items.len(), 1);
 
             // First item should be an array containing a logical group reference
             if let Array(array1) = &items[0].0 {
@@ -563,17 +491,6 @@ mod tests {
                 ));
             } else {
                 panic!("Expected Array, got {:?}", items[0]);
-            }
-
-            // Second item should be an array containing a scalar group reference
-            if let Array(array2) = &items[1].0 {
-                assert_eq!(array2.len(), 1);
-                assert!(matches!(
-                    &array2[0].0,
-                    Scalar(ScalarOp(UnMaterialized(group_id))) if *group_id == GroupId(2)
-                ));
-            } else {
-                panic!("Expected Array, got {:?}", items[1]);
             }
         } else {
             panic!("Expected Tuple, got {:?}", values[0]);

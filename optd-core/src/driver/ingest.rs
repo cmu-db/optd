@@ -1,9 +1,9 @@
 use super::memo::Memoize;
 use crate::ir::{
-    expressions::{LogicalExpression, LogicalExpressionId, ScalarExpression, ScalarExpressionId},
-    groups::{LogicalGroupId, ScalarGroupId},
-    operators::{Child, LogicalOperator, ScalarOperator},
-    plans::{PartialLogicalPlan, PartialScalarPlan},
+    expressions::{LogicalExpression, LogicalExpressionId},
+    group::GroupId,
+    operators::{Child, Operator},
+    plans::PartialLogicalPlan,
 };
 use anyhow::Result;
 use async_recursion::async_recursion;
@@ -21,77 +21,31 @@ use Child::*;
 /// * The created logical expression, its ID in the memo table, and its group ID
 pub(super) async fn ingest_logical_operator<M>(
     memo: &M,
-    operator: &LogicalOperator<Arc<PartialLogicalPlan>, Arc<PartialScalarPlan>>,
-) -> Result<(LogicalExpression, LogicalExpressionId, LogicalGroupId)>
+    operator: &Operator<Arc<PartialLogicalPlan>>,
+) -> Result<(LogicalExpression, LogicalExpressionId, GroupId)>
 where
     M: Memoize,
 {
-    // Process relational children
-    let relational_children = try_join_all(
+    // Process children
+    let children = try_join_all(
         operator
-            .relational_children
+            .children
             .iter()
             .map(|child| process_child(memo, child, |m, p| ingest_logical_plan(m, p))),
     )
     .await?;
 
-    // Process scalar children
-    let scalar_children = try_join_all(
-        operator
-            .scalar_children
-            .iter()
-            .map(|child| process_child(memo, child, |m, p| ingest_scalar_plan(m, p))),
-    )
-    .await?;
-
     // Create the logical expression with processed children
-    let logical_expr = LogicalOperator {
-        tag: operator.tag.clone(),
-        data: operator.data.clone(),
-        relational_children,
-        scalar_children,
-    };
-
-    // Add to memo table and get IDs
-    let (new_group_id, expr_id) = memo.add_logical_expr(&logical_expr).await?;
-
-    Ok((logical_expr, expr_id, new_group_id))
-}
-
-/// Processes a scalar operator and integrates it into the memo table.
-///
-/// # Arguments
-/// * `memo` - The memoization table
-/// * `operator` - The scalar operator to ingest
-///
-/// # Returns
-/// * The created scalar expression, its ID in the memo table, and its group ID
-pub(super) async fn ingest_scalar_operator<M>(
-    memo: &M,
-    operator: &ScalarOperator<Arc<PartialScalarPlan>>,
-) -> Result<(ScalarExpression, ScalarExpressionId, ScalarGroupId)>
-where
-    M: Memoize,
-{
-    // Process scalar operator children
-    let children = try_join_all(
-        operator
-            .children
-            .iter()
-            .map(|child| process_child(memo, child, |m, p| Box::pin(ingest_scalar_plan(m, p)))),
-    )
-    .await?;
-
-    // Create scalar operator with processed children
-    let scalar_expr = ScalarOperator {
+    let logical_expr = Operator {
         tag: operator.tag.clone(),
         data: operator.data.clone(),
         children,
     };
 
     // Add to memo table and get IDs
-    let (group_id, expr_id) = memo.add_scalar_expr(&scalar_expr).await?;
-    Ok((scalar_expr, expr_id, group_id))
+    let (new_group_id, expr_id) = memo.add_logical_expr(&logical_expr).await?;
+
+    Ok((logical_expr, expr_id, new_group_id))
 }
 
 /// Generic function to process a Child structure containing any plan type.
@@ -136,37 +90,15 @@ where
 pub(super) async fn ingest_logical_plan<M>(
     memo: &M,
     partial_plan: &PartialLogicalPlan,
-) -> Result<LogicalGroupId>
+) -> Result<GroupId>
 where
     M: Memoize,
 {
     match partial_plan {
-        PartialLogicalPlan::PartialMaterialized { node } => {
+        PartialLogicalPlan::Materialized(node) => {
             let (_, _, group_id) = ingest_logical_operator(memo, node).await?;
             Ok(group_id)
         }
         PartialLogicalPlan::UnMaterialized(group_id) => Ok(*group_id),
-    }
-}
-
-/// Ingests a partial scalar plan into the memo table.
-///
-/// # Arguments
-/// * `memo` - The memoization table
-/// * `partial_plan` - The partial scalar plan to ingest
-///
-/// # Returns
-/// * The ID of the scalar group created or updated
-#[async_recursion]
-async fn ingest_scalar_plan<M>(memo: &M, partial_plan: &PartialScalarPlan) -> Result<ScalarGroupId>
-where
-    M: Memoize,
-{
-    match partial_plan {
-        PartialScalarPlan::PartialMaterialized { node } => {
-            let (_, _, group_id) = ingest_scalar_operator(memo, node).await?;
-            Ok(group_id)
-        }
-        PartialScalarPlan::UnMaterialized(group_id) => Ok(*group_id),
     }
 }

@@ -1,10 +1,10 @@
 use crate::ir::{
     operators::{Child, OperatorData},
-    plans::{PartialLogicalPlan, PartialScalarPlan, ScalarPlan},
+    plans::PartialLogicalPlan,
     properties::{PhysicalProperties, PropertiesData},
 };
 use optd_dsl::analyzer::hir::{
-    CoreData, GroupId, Literal, LogicalOp, Materializable, Operator, OperatorKind, ScalarOp, Value,
+    CoreData, GroupId, Literal, LogicalOp, Materializable, Operator, Value,
 };
 use std::sync::Arc;
 use CoreData::*;
@@ -22,64 +22,17 @@ pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
             // For unmaterialized logical operators, we create a Value with the group ID
             Value(Logical(LogicalOp(UnMaterialized(GroupId(group_id.0)))))
         }
-        PartialLogicalPlan::PartialMaterialized { node } => {
+        PartialLogicalPlan::Materialized(node) => {
             // For materialized logical operators, we create a Value with the operator data
             let operator = Operator {
-                kind: OperatorKind::Logical,
                 tag: node.tag.clone(),
-                operator_data: convert_operator_data_to_values(&node.data),
-                relational_children: convert_children_to_values(
-                    &node.relational_children,
-                    partial_logical_to_value,
-                ),
-                scalar_children: convert_children_to_values(
-                    &node.scalar_children,
-                    partial_scalar_to_value,
-                ),
+                data: convert_operator_data_to_values(&node.data),
+                children: convert_children_to_values(&node.children, partial_logical_to_value),
             };
 
             Value(Logical(LogicalOp(Materialized(operator))))
         }
     }
-}
-
-/// Converts a PartialScalarPlan into a HIR Value representation.
-pub(crate) fn partial_scalar_to_value(plan: &PartialScalarPlan) -> Value {
-    match plan {
-        PartialScalarPlan::UnMaterialized(group_id) => {
-            // For unmaterialized scalar operators, we create a Value with the group ID
-            Value(Scalar(ScalarOp(UnMaterialized(GroupId(group_id.0)))))
-        }
-        PartialScalarPlan::PartialMaterialized { node } => {
-            // For materialized scalar operators, we create a Value with the operator data
-            let operator = Operator {
-                kind: OperatorKind::Scalar,
-                tag: node.tag.clone(),
-                operator_data: convert_operator_data_to_values(&node.data),
-                relational_children: vec![], // Scalar ops don't have relational children
-                scalar_children: convert_children_to_values(
-                    &node.children,
-                    partial_scalar_to_value,
-                ),
-            };
-
-            Value(Scalar(ScalarOp(Materialized(operator))))
-        }
-    }
-}
-
-/// Converts a ScalarPlan into a HIR Value representation.
-fn scalar_to_value(plan: &ScalarPlan) -> Value {
-    // For scalar plans, we create a Value with the operator data
-    let operator = Operator {
-        kind: OperatorKind::Scalar,
-        tag: plan.node.tag.clone(),
-        operator_data: convert_operator_data_to_values(&plan.node.data),
-        relational_children: vec![], // Scalar ops don't have relational children
-        scalar_children: convert_children_to_values(&plan.node.children, scalar_to_value),
-    };
-
-    Value(Scalar(ScalarOp(Materialized(operator))))
 }
 
 //=============================================================================
@@ -150,6 +103,6 @@ fn properties_data_to_value(data: &PropertiesData) -> Value {
             let values = elements.iter().map(properties_data_to_value).collect();
             Value(Array(values))
         }
-        PropertiesData::Scalar(scalar) => scalar_to_value(scalar),
+        PropertiesData::Logical(plan) => partial_logical_to_value(&plan.clone().into()),
     }
 }

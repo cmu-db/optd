@@ -9,7 +9,7 @@
 //! expansion operations on logical groups, scalar groups, and physical goals.
 
 use crate::driver::{cascades::Driver, memo::Memoize};
-use optd_dsl::analyzer::hir::{GroupId, PhysicalGoal, Value};
+use optd_dsl::analyzer::hir::{GroupId, Goal, Value};
 use std::{future::Future, sync::Arc};
 
 /// Defines operations for expanding group references into concrete expressions.
@@ -24,13 +24,10 @@ pub(crate) trait Expander: Clone + Send + Sync + 'static {
         group_id: GroupId,
     ) -> impl std::future::Future<Output = Vec<Value>> + Send;
 
-    /// Expands a scalar group into all possible scalar operator expressions.
-    fn expand_scalar_group(&self, group_id: GroupId) -> impl Future<Output = Vec<Value>> + Send;
-
     /// Expands a physical goal into its optimal physical implementation.
     fn expand_physical_goal(
         &self,
-        physical_goal: &PhysicalGoal,
+        physical_goal: &Goal,
     ) -> impl Future<Output = Value> + Send;
 }
 
@@ -49,11 +46,7 @@ impl<M: Memoize> Expander for Arc<Driver<M>> {
         todo!()
     }
 
-    async fn expand_scalar_group(&self, _group_id: GroupId) -> Vec<Value> {
-        todo!()
-    }
-
-    async fn expand_physical_goal(&self, _physical_goal: &PhysicalGoal) -> Value {
+    async fn expand_physical_goal(&self, _physical_goal: &Goal) -> Value {
         todo!()
     }
 }

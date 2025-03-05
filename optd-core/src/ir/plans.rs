@@ -1,7 +1,7 @@
 use super::{
-    goal::PhysicalGoal,
-    groups::{LogicalGroupId, ScalarGroupId},
-    operators::{Child, LogicalOperator, PhysicalOperator, ScalarOperator},
+    goal::Goal,
+    group::GroupId,
+    operators::{Child, Operator},
 };
 use std::sync::Arc;
 
@@ -12,31 +12,16 @@ use std::sync::Arc;
 /// Represents a fully materialized logical query plan.
 ///
 /// A logical plan consists of logical operators arranged in a tree structure,
-/// with each operator having possible relational and scalar children.
+/// with each operator having children.
 #[derive(Clone, Debug, PartialEq)]
-pub struct LogicalPlan {
-    /// The root operator of this logical plan
-    pub node: LogicalOperator<Arc<LogicalPlan>, Arc<ScalarPlan>>,
-}
-
-/// Represents a fully materialized scalar expression plan.
-///
-/// A scalar plan consists of scalar operators arranged in a tree structure.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ScalarPlan {
-    /// The root operator of this scalar plan
-    pub node: ScalarOperator<Arc<ScalarPlan>>,
-}
+pub struct LogicalPlan(pub Operator<Arc<LogicalPlan>>);
 
 /// Represents a fully materialized physical query plan.
 ///
 /// A physical plan consists of physical operators arranged in a tree structure,
-/// with each operator having possible physical and scalar children.
+/// with each operator having children.
 #[derive(Clone, Debug, PartialEq)]
-pub struct PhysicalPlan {
-    /// The root operator of this physical plan
-    pub node: PhysicalOperator<Arc<PhysicalPlan>, Arc<ScalarPlan>>,
-}
+pub struct PhysicalPlan(pub Operator<Arc<PhysicalPlan>>);
 
 //=============================================================================
 // Partial Plan Types
@@ -49,27 +34,9 @@ pub struct PhysicalPlan {
 #[derive(Clone, Debug, PartialEq)]
 pub enum PartialLogicalPlan {
     /// A fully materialized logical plan with explicit operator and children
-    PartialMaterialized {
-        /// The root operator of this partial logical plan
-        node: LogicalOperator<Arc<PartialLogicalPlan>, Arc<PartialScalarPlan>>,
-    },
+    Materialized(Operator<Arc<PartialLogicalPlan>>),
     /// A reference to a logical group in the memo structure
-    UnMaterialized(LogicalGroupId),
-}
-
-/// Represents a partially materialized scalar plan.
-///
-/// Partial scalar plans can either be fully materialized with operator trees,
-/// or unmaterialized references to scalar groups in the memo structure.
-#[derive(Clone, Debug, PartialEq)]
-pub enum PartialScalarPlan {
-    /// A fully materialized scalar plan with explicit operator and children
-    PartialMaterialized {
-        /// The root operator of this partial scalar plan
-        node: ScalarOperator<Arc<PartialScalarPlan>>,
-    },
-    /// A reference to a scalar group in the memo structure
-    UnMaterialized(ScalarGroupId),
+    UnMaterialized(GroupId),
 }
 
 /// Represents a partially materialized physical plan.
@@ -79,35 +46,25 @@ pub enum PartialScalarPlan {
 #[derive(Clone, Debug, PartialEq)]
 pub enum PartialPhysicalPlan {
     /// A fully materialized physical plan with explicit operator and children
-    PartialMaterialized {
-        /// The root operator of this partial physical plan
-        node: PhysicalOperator<Arc<PartialPhysicalPlan>, Arc<PartialScalarPlan>>,
-    },
+    Materialized(Operator<Arc<PartialPhysicalPlan>>),
     /// A reference to a physical goal
-    UnMaterialized(PhysicalGoal),
+    UnMaterialized(Goal),
 }
 
 //=============================================================================
 // Conversion Implementations
 //=============================================================================
 
-impl From<LogicalGroupId> for PartialLogicalPlan {
+impl From<GroupId> for PartialLogicalPlan {
     /// Converts a logical group ID to an unmaterialized partial logical plan.
-    fn from(group_id: LogicalGroupId) -> PartialLogicalPlan {
+    fn from(group_id: GroupId) -> PartialLogicalPlan {
         PartialLogicalPlan::UnMaterialized(group_id)
     }
 }
 
-impl From<ScalarGroupId> for PartialScalarPlan {
-    /// Converts a scalar group ID to an unmaterialized partial scalar plan.
-    fn from(group_id: ScalarGroupId) -> PartialScalarPlan {
-        PartialScalarPlan::UnMaterialized(group_id)
-    }
-}
-
-impl From<PhysicalGoal> for PartialPhysicalPlan {
+impl From<Goal> for PartialPhysicalPlan {
     /// Converts a physical goal to an unmaterialized partial physical plan.
-    fn from(goal: PhysicalGoal) -> PartialPhysicalPlan {
+    fn from(goal: Goal) -> PartialPhysicalPlan {
         PartialPhysicalPlan::UnMaterialized(goal)
     }
 }
@@ -115,49 +72,26 @@ impl From<PhysicalGoal> for PartialPhysicalPlan {
 impl From<LogicalPlan> for PartialLogicalPlan {
     /// Converts a fully materialized logical plan to a partial logical plan.
     ///
-    /// This recursively converts all children (both relational and scalar)
-    /// to their partial equivalents.
-    fn from(plan: LogicalPlan) -> Self {
-        PartialLogicalPlan::PartialMaterialized {
-            node: LogicalOperator {
-                tag: plan.node.tag,
-                data: plan.node.data,
-                relational_children: convert_children(plan.node.relational_children),
-                scalar_children: convert_children(plan.node.scalar_children),
-            },
-        }
-    }
-}
-
-impl From<ScalarPlan> for PartialScalarPlan {
-    /// Converts a fully materialized scalar plan to a partial scalar plan.
-    ///
     /// This recursively converts all children to their partial equivalents.
-    fn from(plan: ScalarPlan) -> Self {
-        PartialScalarPlan::PartialMaterialized {
-            node: ScalarOperator {
-                tag: plan.node.tag,
-                data: plan.node.data,
-                children: convert_children(plan.node.children),
-            },
-        }
+    fn from(plan: LogicalPlan) -> Self {
+        PartialLogicalPlan::Materialized(Operator {
+            tag: plan.0.tag,
+            data: plan.0.data,
+            children: convert_children(plan.0.children),
+        })
     }
 }
 
 impl From<PhysicalPlan> for PartialPhysicalPlan {
     /// Converts a fully materialized physical plan to a partial physical plan.
     ///
-    /// This recursively converts all children (both physical and scalar)
-    /// to their partial equivalents.
+    /// This recursively converts all children to their partial equivalents.
     fn from(plan: PhysicalPlan) -> Self {
-        PartialPhysicalPlan::PartialMaterialized {
-            node: PhysicalOperator {
-                tag: plan.node.tag,
-                data: plan.node.data,
-                relational_children: convert_children(plan.node.relational_children),
-                scalar_children: convert_children(plan.node.scalar_children),
-            },
-        }
+        PartialPhysicalPlan::Materialized(Operator {
+            tag: plan.0.tag,
+            data: plan.0.data,
+            children: convert_children(plan.0.children),
+        })
     }
 }
 

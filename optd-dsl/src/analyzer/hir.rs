@@ -42,8 +42,8 @@ pub enum FunKind {
     RustUDF(fn(Vec<Value>) -> Value),
 }
 
-/// Group identifier (scalar or logical) in the optimizer
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+/// Group identifier in the optimizer
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub struct GroupId(pub i64);
 
 /// Either materialized or unmaterialized data
@@ -62,40 +62,25 @@ pub enum Materializable<T, U> {
 ///
 /// Combines a logical group with required physical properties.
 #[derive(Debug, Clone)]
-pub struct PhysicalGoal {
+pub struct Goal {
     /// The logical group to implement
     pub group_id: GroupId,
     /// Required physical properties
     pub properties: Box<Value>,
 }
 
-/// Operator kind to differentiate between operator types
-#[derive(Debug, Clone, PartialEq, Copy)]
-pub enum OperatorKind {
-    /// Logical operators represent relational algebra operations
-    Logical,
-    /// Physical operators represent executable implementations
-    Physical,
-    /// Scalar operators represent expressions that produce values
-    Scalar,
-}
-
 /// Unified operator node structure for all operator types
 ///
 /// This core structure represents a query plan operator with data parameters
-/// and child expressions for both logical and scalar operations.
+/// and child expressions for both logical and physical operations.
 #[derive(Debug, Clone)]
 pub struct Operator<T> {
-    /// Specifies the operator's category (Logical, Scalar, or Physical)
-    pub kind: OperatorKind,
     /// Identifies the specific operation (e.g., "Join", "Filter")
     pub tag: String,
     /// Operation-specific parameters
-    pub operator_data: Vec<T>,
-    /// Child operators that produce relations
-    pub relational_children: Vec<T>,
-    /// Child operators that produce scalar values
-    pub scalar_children: Vec<T>,
+    pub data: Vec<T>,
+    /// Children operators
+    pub children: Vec<T>,
 }
 
 /// Logical operator in the query plan
@@ -105,19 +90,12 @@ pub struct Operator<T> {
 #[derive(Debug, Clone)]
 pub struct LogicalOp<T>(pub Materializable<Operator<T>, GroupId>);
 
-/// Scalar operator in the query plan
-///
-/// Represents an expression that produces scalar values and can be either
-/// materialized as a concrete operator or referenced by a group ID in the optimizer.
-#[derive(Debug, Clone)]
-pub struct ScalarOp<T>(pub Materializable<Operator<T>, GroupId>);
-
 /// Physical operator in the query plan
 ///
 /// Represents an executable implementation of a logical operation with specific
 /// physical properties, either materialized as a concrete operator or as a physical goal.
 #[derive(Debug, Clone)]
-pub struct PhysicalOp<T>(pub Materializable<Operator<T>, PhysicalGoal>);
+pub struct PhysicalOp<T>(pub Materializable<Operator<T>, Goal>);
 
 /// Core data structures shared across the system
 #[derive(Debug, Clone)]
@@ -136,11 +114,9 @@ pub enum CoreData<T> {
     Function(FunKind),
     /// Error representation
     Fail(Box<T>),
-    /// Logical query operators (transformations on relations)
+    /// Logical query operators
     Logical(LogicalOp<T>),
-    /// Scalar expressions (computations producing scalar values)
-    Scalar(ScalarOp<T>),
-    /// Physical query operators (executable operations with properties)
+    /// Physical query operators
     Physical(PhysicalOp<T>),
     /// The null value
     Null,

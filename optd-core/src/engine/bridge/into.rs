@@ -1,8 +1,8 @@
 use crate::ir::{
-    goal::PhysicalGoal,
-    groups::{LogicalGroupId, ScalarGroupId},
-    operators::{Child, LogicalOperator, OperatorData, PhysicalOperator, ScalarOperator},
-    plans::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan, ScalarPlan},
+    goal::Goal,
+    group::GroupId,
+    operators::{Child, Operator, OperatorData},
+    plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan},
     properties::{PhysicalProperties, PropertiesData},
 };
 use optd_dsl::analyzer::hir::{CoreData, Literal, Materializable, Value};
@@ -22,67 +22,14 @@ use Materializable::*;
 pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
     match &value.0 {
         Logical(logical_op) => match &logical_op.0 {
-            UnMaterialized(group_id) => {
-                PartialLogicalPlan::UnMaterialized(LogicalGroupId(group_id.0))
-            }
-            Materialized(op) => PartialLogicalPlan::PartialMaterialized {
-                node: LogicalOperator {
-                    tag: op.tag.clone(),
-                    data: convert_values_to_operator_data(&op.operator_data),
-                    relational_children: convert_children_into(
-                        &op.relational_children,
-                        value_to_partial_logical,
-                    ),
-                    scalar_children: convert_children_into(
-                        &op.scalar_children,
-                        value_to_partial_scalar,
-                    ),
-                },
-            },
+            UnMaterialized(group_id) => PartialLogicalPlan::UnMaterialized(GroupId(group_id.0)),
+            Materialized(op) => PartialLogicalPlan::Materialized(Operator {
+                tag: op.tag.clone(),
+                data: convert_values_to_operator_data(&op.data),
+                children: convert_children_into(&op.children, value_to_partial_logical),
+            }),
         },
         _ => panic!("Expected Logical CoreData variant, found: {:?}", value.0),
-    }
-}
-
-/// Converts a HIR Value into a PartialScalarPlan representation.
-///
-/// Transforms the DSL's HIR into the optimizer's IR for scalar operators.
-pub(crate) fn value_to_partial_scalar(value: &Value) -> PartialScalarPlan {
-    match &value.0 {
-        Scalar(scalar_op) => match &scalar_op.0 {
-            UnMaterialized(group_id) => {
-                PartialScalarPlan::UnMaterialized(ScalarGroupId(group_id.0))
-            }
-            Materialized(op) => PartialScalarPlan::PartialMaterialized {
-                node: ScalarOperator {
-                    tag: op.tag.clone(),
-                    data: convert_values_to_operator_data(&op.operator_data),
-                    children: convert_children_into(&op.scalar_children, value_to_partial_scalar),
-                },
-            },
-        },
-        _ => panic!("Expected Scalar CoreData variant, found: {:?}", value.0),
-    }
-}
-
-/// Converts a HIR Value into a complete ScalarPlan (not a partial plan).
-///
-/// Used when fully materializing a scalar expression for use in properties.
-fn value_to_scalar(value: &Value) -> ScalarPlan {
-    match &value.0 {
-        Scalar(scalar_op) => match &scalar_op.0 {
-            UnMaterialized(_) => {
-                panic!("Cannot convert UnMaterialized ScalarOperator to ScalarPlan")
-            }
-            Materialized(op) => ScalarPlan {
-                node: ScalarOperator {
-                    tag: op.tag.clone(),
-                    data: convert_values_to_operator_data(&op.operator_data),
-                    children: convert_children_into(&op.scalar_children, value_to_scalar),
-                },
-            },
-        },
-        _ => panic!("Expected Scalar CoreData variant, found: {:?}", value.0),
     }
 }
 
@@ -93,34 +40,44 @@ pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
     match &value.0 {
         Physical(physical_op) => match &physical_op.0 {
             UnMaterialized(hir_goal) => {
-                let ir_goal = PhysicalGoal(
-                    LogicalGroupId(hir_goal.group_id.0),
-                    convert_hir_properties_to_ir(&hir_goal.properties),
+                let ir_goal = Goal(
+                    GroupId(hir_goal.group_id.0),
+                    value_to_properties(&hir_goal.properties),
                 );
 
                 PartialPhysicalPlan::UnMaterialized(ir_goal)
             }
-            Materialized(op) => PartialPhysicalPlan::PartialMaterialized {
-                node: PhysicalOperator {
-                    tag: op.tag.clone(),
-                    data: convert_values_to_operator_data(&op.operator_data),
-                    relational_children: convert_children_into(
-                        &op.relational_children,
-                        value_to_partial_physical,
-                    ),
-                    scalar_children: convert_children_into(
-                        &op.scalar_children,
-                        value_to_partial_scalar,
-                    ),
-                },
-            },
+            Materialized(op) => PartialPhysicalPlan::Materialized(Operator {
+                tag: op.tag.clone(),
+                data: convert_values_to_operator_data(&op.data),
+                children: convert_children_into(&op.children, value_to_partial_physical),
+            }),
         },
         _ => panic!("Expected Physical CoreData variant, found: {:?}", value.0),
     }
 }
 
+/// Converts a HIR Value into a complete LogicalPlan (not a partial plan).
+///
+/// Used when fully materializing a logical expression for use in properties.
+fn value_to_logical(value: &Value) -> LogicalPlan {
+    match &value.0 {
+        Logical(logical_op) => match &logical_op.0 {
+            UnMaterialized(_) => {
+                panic!("Cannot convert UnMaterialized LogicalOperator to LogicalPlan")
+            }
+            Materialized(op) => LogicalPlan(Operator {
+                tag: op.tag.clone(),
+                data: convert_values_to_operator_data(&op.data),
+                children: convert_children_into(&op.children, value_to_logical),
+            }),
+        },
+        _ => panic!("Expected Logical CoreData variant, found: {:?}", value.0),
+    }
+}
+
 /// Convert HIR properties value to IR PhysicalProperties
-fn convert_hir_properties_to_ir(properties_value: &Value) -> PhysicalProperties {
+fn value_to_properties(properties_value: &Value) -> PhysicalProperties {
     match &properties_value.0 {
         Null => PhysicalProperties(None),
         _ => PhysicalProperties(Some(value_to_properties_data(properties_value))),
@@ -194,7 +151,7 @@ fn value_to_properties_data(value: &Value) -> PropertiesData {
         Struct(name, elements) => {
             PropertiesData::Struct(name.clone(), convert_values_to_properties_data(elements))
         }
-        Scalar(_) => PropertiesData::Scalar(value_to_scalar(value)),
+        Logical(_) => PropertiesData::Logical(value_to_logical(value)),
         _ => panic!("Cannot convert {:?} to PropertyData content", value.0),
     }
 }

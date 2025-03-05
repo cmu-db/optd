@@ -1,7 +1,6 @@
-pub mod cost;
 pub mod expressions;
 pub mod goal;
-pub mod groups;
+pub mod group;
 pub mod operators;
 pub mod plans;
 pub mod properties;

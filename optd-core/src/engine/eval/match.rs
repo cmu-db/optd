@@ -15,7 +15,7 @@ use optd_dsl::analyzer::{
     context::Context,
     hir::{
         CoreData, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern, PhysicalOp,
-        ScalarOp, Value,
+        Value,
     },
 };
 use Literal::*;
@@ -32,11 +32,6 @@ where
         // For unmaterialized logical groups, expand them
         CoreData::Logical(LogicalOp(UnMaterialized(group_id))) => {
             engine.expander.expand_logical_group(*group_id).await
-        }
-
-        // For unmaterialized scalar groups, expand them
-        CoreData::Scalar(ScalarOp(UnMaterialized(group_id))) => {
-            engine.expander.expand_scalar_group(*group_id).await
         }
 
         // For unmaterialized physical goals, expand them
@@ -144,11 +139,6 @@ where
             let expanded_values = engine.expander.expand_logical_group(*group_id).await;
             match_against_expanded_values(op_pattern, expanded_values, engine).await
         }
-        (Operator(op_pattern), CoreData::Scalar(ScalarOp(UnMaterialized(group_id)))) => {
-            let expanded_values = engine.expander.expand_scalar_group(*group_id).await;
-            match_against_expanded_values(op_pattern, expanded_values, engine).await
-        }
-
         (Operator(op_pattern), CoreData::Physical(PhysicalOp(UnMaterialized(physical_goal)))) => {
             let expanded_value = engine.expander.expand_physical_goal(physical_goal).await;
             match_against_expanded_values(op_pattern, vec![expanded_value], engine).await
@@ -156,9 +146,6 @@ where
 
         // Materialized operators
         (Operator(op_pattern), CoreData::Logical(LogicalOp(Materialized(operator)))) => {
-            match_operator_pattern(op_pattern, operator, engine).await
-        }
-        (Operator(op_pattern), CoreData::Scalar(ScalarOp(Materialized(operator)))) => {
             match_operator_pattern(op_pattern, operator, engine).await
         }
         (Operator(op_pattern), CoreData::Physical(PhysicalOp(Materialized(operator)))) => {
@@ -255,49 +242,27 @@ async fn match_operator_pattern<E>(
 where
     E: Expander,
 {
-    // Match tag and kind
-    if op_pattern.tag != op.tag || op_pattern.kind != op.kind {
-        return vec![];
-    }
-
-    // Match component counts
-    if op_pattern.operator_data.len() != op.operator_data.len()
-        || op_pattern.relational_children.len() != op.relational_children.len()
-        || op_pattern.scalar_children.len() != op.scalar_children.len()
+    // Match tag and component counts
+    if op_pattern.tag != op.tag && op_pattern.data.len() != op.data.len()
+        || op_pattern.children.len() != op.children.len()
     {
         return vec![];
     }
 
     // Step 1: Match operator data
-    let ctx_after_data = match_pattern_pairs(
-        op_pattern.operator_data.iter().zip(op.operator_data.iter()),
-        engine.clone(),
-    )
-    .await;
+    let ctx_after_data =
+        match_pattern_pairs(op_pattern.data.iter().zip(op.data.iter()), engine.clone()).await;
 
     if ctx_after_data.is_empty() {
         return vec![];
     }
 
-    // Step 2: Match relational children for each context from operator data
-    let contexts_after_rel = match_operator_children(
-        &op_pattern.relational_children,
-        &op.relational_children,
+    // Step 2: Match children for each context from operator data
+    match_operator_children(
+        &op_pattern.children,
+        &op.children,
         ctx_after_data,
         engine.clone(),
-    )
-    .await;
-
-    if contexts_after_rel.is_empty() {
-        return vec![];
-    }
-
-    // Step 3: Match scalar children for each context from relational children
-    match_operator_children(
-        &op_pattern.scalar_children,
-        &op.scalar_children,
-        contexts_after_rel,
-        engine,
     )
     .await
 }
@@ -385,8 +350,8 @@ mod tests {
     };
     use futures::executor::block_on;
     use optd_dsl::analyzer::hir::{
-        CoreData, GroupId, Literal, LogicalOp, Materializable, Operator, OperatorKind, Pattern,
-        PhysicalGoal, PhysicalOp, ScalarOp, Value,
+        CoreData, Goal, GroupId, Literal, LogicalOp, Materializable, Operator, Pattern, PhysicalOp,
+        Value,
     };
     use Literal::*;
     use Materializable::*;
@@ -458,8 +423,8 @@ mod tests {
         let pattern = Pattern::Struct(
             "Person".to_string(),
             vec![
-                Bind("name".to_string(), Box::new(Wildcard)),
-                Bind("age".to_string(), Box::new(Wildcard)),
+                Bind("name".to_string(), Wildcard.into()),
+                Bind("age".to_string(), Wildcard.into()),
             ],
         );
         let results = block_on(match_pattern(person, pattern, engine));
@@ -540,10 +505,8 @@ mod tests {
         // Create a logical operator
         let filter_op = Operator {
             tag: "Filter".to_string(),
-            kind: OperatorKind::Logical,
-            operator_data: vec![bool_val(true)], // Predicate value
-            scalar_children: vec![],
-            relational_children: vec![int_val(42)], // Child relation
+            data: vec![bool_val(true)],  // Predicate value
+            children: vec![int_val(42)], // Child relation
         };
 
         let logical_value = Value(CoreData::Logical(LogicalOp(Materialized(filter_op))));
@@ -551,10 +514,8 @@ mod tests {
         // Create an operator pattern: Filter(predicate, relation)
         let op_pattern = Operator {
             tag: "Filter".to_string(),
-            kind: OperatorKind::Logical,
-            operator_data: vec![Bind("predicate".to_string(), Box::new(Wildcard))],
-            scalar_children: vec![],
-            relational_children: vec![Bind("relation".to_string(), Box::new(Wildcard))],
+            data: vec![Bind("predicate".to_string(), Wildcard.into())],
+            children: vec![Bind("relation".to_string(), Wildcard.into())],
         };
 
         let pattern = Pattern::Operator(op_pattern);
@@ -588,18 +549,14 @@ mod tests {
                     // Return two different filter operators
                     let filter1 = Operator {
                         tag: "Filter".to_string(),
-                        kind: OperatorKind::Logical,
-                        operator_data: vec![bool_val(true)], // Predicate = true
-                        scalar_children: vec![],
-                        relational_children: vec![],
+                        data: vec![bool_val(true)], // Predicate = true
+                        children: vec![],
                     };
 
                     let filter2 = Operator {
                         tag: "Filter".to_string(),
-                        kind: OperatorKind::Logical,
-                        operator_data: vec![bool_val(false)], // Predicate = false
-                        scalar_children: vec![],
-                        relational_children: vec![],
+                        data: vec![bool_val(false)], // Predicate = false
+                        children: vec![],
                     };
 
                     vec![
@@ -610,7 +567,6 @@ mod tests {
                     vec![]
                 }
             },
-            |_| vec![],
             |_| panic!("Physical expansion not expected"),
         );
 
@@ -623,10 +579,8 @@ mod tests {
         // Create a pattern that matches Filter operators with true predicate
         let op_pattern = Operator {
             tag: "Filter".to_string(),
-            kind: OperatorKind::Logical,
-            operator_data: vec![Pattern::Literal(Bool(true))],
-            scalar_children: vec![],
-            relational_children: vec![],
+            data: vec![Pattern::Literal(Bool(true))],
+            children: vec![],
         };
 
         let pattern = Pattern::Operator(op_pattern);
@@ -638,86 +592,11 @@ mod tests {
         assert_eq!(results.len(), 1);
     }
 
-    // Test pattern matching against an expanded scalar group
-    #[test]
-    fn test_match_expanded_scalar_group() {
-        // Create a MockExpander that provides two implementations for a scalar group
-        let expander = MockExpander::new(
-            |_| vec![],
-            |group_id| {
-                if group_id == GroupId(2) {
-                    // Return two different scalar operators
-                    let add_op = Operator {
-                        tag: "Add".to_string(),
-                        kind: OperatorKind::Scalar,
-                        operator_data: vec![int_val(1), int_val(2)], // 1 + 2
-                        scalar_children: vec![],
-                        relational_children: vec![],
-                    };
-
-                    let mul_op = Operator {
-                        tag: "Multiply".to_string(),
-                        kind: OperatorKind::Scalar,
-                        operator_data: vec![int_val(3), int_val(4)], // 3 * 4
-                        scalar_children: vec![],
-                        relational_children: vec![],
-                    };
-
-                    vec![
-                        Value(CoreData::Scalar(ScalarOp(Materialized(add_op)))),
-                        Value(CoreData::Scalar(ScalarOp(Materialized(mul_op)))),
-                    ]
-                } else {
-                    vec![]
-                }
-            },
-            |_| panic!("Physical expansion not expected"),
-        );
-
-        // Create an engine with this expander
-        let engine = Engine::new(Context::default(), expander);
-
-        // Create a scalar group reference: <scalar_group2>
-        let scalar_group_ref = Value(CoreData::Scalar(ScalarOp(UnMaterialized(GroupId(2)))));
-
-        // Create a pattern that matches Add operators
-        let op_pattern = Operator {
-            tag: "Add".to_string(),
-            kind: OperatorKind::Scalar,
-            operator_data: vec![
-                Bind("left".to_string(), Box::new(Wildcard)),
-                Bind("right".to_string(), Box::new(Wildcard)),
-            ],
-            scalar_children: vec![],
-            relational_children: vec![],
-        };
-
-        let pattern = Pattern::Operator(op_pattern);
-
-        // Match the pattern against the expanded group
-        let results = block_on(match_pattern(scalar_group_ref, pattern, engine));
-
-        // Should match only the Add operator
-        assert_eq!(results.len(), 1);
-
-        // Check that variables were bound correctly
-        let context = &results[0];
-        let left = context
-            .lookup("left")
-            .expect("Variable left should be bound");
-        let right = context
-            .lookup("right")
-            .expect("Variable right should be bound");
-
-        assert!(matches!(&left.0, CoreData::Literal(Int64(1))));
-        assert!(matches!(&right.0, CoreData::Literal(Int64(2))));
-    }
-
     // Test pattern matching against an expanded physical goal
     #[test]
     fn test_match_expanded_physical_goal() {
         // Create a physical goal
-        let physical_goal = PhysicalGoal {
+        let physical_goal = Goal {
             group_id: GroupId(3),
             properties: Box::new(unit_val()),
         };
@@ -725,19 +604,13 @@ mod tests {
         // Create a MockExpander that provides an implementation for this physical goal
         let expander = MockExpander::new(
             |_| vec![],
-            |_| vec![],
             |goal| {
                 if goal.group_id == GroupId(3) {
                     // Return a hash join operator
                     let hash_join = Operator {
                         tag: "HashJoin".to_string(),
-                        kind: OperatorKind::Physical,
-                        operator_data: vec![int_val(42)], // Join key
-                        scalar_children: vec![],
-                        relational_children: vec![
-                            string_val("left_table"),
-                            string_val("right_table"),
-                        ],
+                        data: vec![int_val(42)], // Join key
+                        children: vec![string_val("left_table"), string_val("right_table")],
                     };
 
                     Value(CoreData::Physical(PhysicalOp(Materialized(hash_join))))
@@ -758,12 +631,10 @@ mod tests {
         // Create a pattern that matches HashJoin operators
         let op_pattern = Operator {
             tag: "HashJoin".to_string(),
-            kind: OperatorKind::Physical,
-            operator_data: vec![Bind("key".to_string(), Box::new(Wildcard))],
-            scalar_children: vec![],
-            relational_children: vec![
-                Bind("left".to_string(), Box::new(Wildcard)),
-                Bind("right".to_string(), Box::new(Wildcard)),
+            data: vec![Bind("key".to_string(), Wildcard.into())],
+            children: vec![
+                Bind("left".to_string(), Wildcard.into()),
+                Bind("right".to_string(), Wildcard.into()),
             ],
         };
 
@@ -800,18 +671,14 @@ mod tests {
                         // Return two Filter operators with different predicates
                         let filter1 = Operator {
                             tag: "Filter".to_string(),
-                            kind: OperatorKind::Logical,
-                            operator_data: vec![bool_val(true)],
-                            scalar_children: vec![],
-                            relational_children: vec![],
+                            data: vec![bool_val(true)],
+                            children: vec![],
                         };
 
                         let filter2 = Operator {
                             tag: "Filter".to_string(),
-                            kind: OperatorKind::Logical,
-                            operator_data: vec![bool_val(false)],
-                            scalar_children: vec![],
-                            relational_children: vec![],
+                            data: vec![bool_val(false)],
+                            children: vec![],
                         };
 
                         vec![
@@ -822,7 +689,6 @@ mod tests {
                     _ => vec![],
                 }
             },
-            |_| vec![],
             |_| panic!("Physical expansion not expected"),
         );
 
@@ -835,10 +701,8 @@ mod tests {
         // Create a pattern that matches any Filter operator and binds its predicate
         let pattern = Pattern::Operator(Operator {
             tag: "Filter".to_string(),
-            kind: OperatorKind::Logical,
-            operator_data: vec![Bind("predicate".to_string(), Box::new(Wildcard))],
-            scalar_children: vec![],
-            relational_children: vec![],
+            data: vec![Bind("predicate".to_string(), Wildcard.into())],
+            children: vec![],
         });
 
         // Match the pattern against the expanded group

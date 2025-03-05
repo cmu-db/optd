@@ -1,8 +1,8 @@
 use super::{
-    goal::PhysicalGoal,
-    groups::{LogicalGroupId, ScalarGroupId},
-    operators::{Child, LogicalOperator, PhysicalOperator, ScalarOperator},
-    plans::{PartialLogicalPlan, PartialPhysicalPlan, PartialScalarPlan},
+    goal::Goal,
+    group::GroupId,
+    operators::{Child, Operator},
+    plans::{PartialLogicalPlan, PartialPhysicalPlan},
 };
 use std::sync::Arc;
 
@@ -14,22 +14,15 @@ use std::sync::Arc;
 ///
 /// Logical expressions represent relational algebra operations like joins,
 /// filters, projections, etc. Each expression has a unique ID in the memo.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LogicalExpressionId(pub i64);
 
 /// Unique identifier for a physical expression within the memo structure.
 ///
 /// Physical expressions represent concrete implementation strategies for
 /// logical operations, like hash joins, index scans, etc.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PhysicalExpressionId(pub i64);
-
-/// Unique identifier for a scalar expression within the memo structure.
-///
-/// Scalar expressions represent computations that produce scalar values,
-/// like arithmetic operations, function calls, etc.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ScalarExpressionId(pub i64);
 
 //=============================================================================
 // Expression Types
@@ -38,20 +31,14 @@ pub struct ScalarExpressionId(pub i64);
 /// A logical expression in the memo structure.
 ///
 /// Logical expressions use group IDs rather than full plans for their children,
-/// representing a compact form suitable for the memo optimization structure.
-pub type LogicalExpression = LogicalOperator<LogicalGroupId, ScalarGroupId>;
-
-/// A scalar expression in the memo structure.
-///
-/// Scalar expressions use group IDs rather than full plans for their children,
-/// representing a compact form suitable for the memo optimization structure.
-pub type ScalarExpression = ScalarOperator<ScalarGroupId>;
+/// representing a compact form suitable for the memo structure.
+pub type LogicalExpression = Operator<GroupId>;
 
 /// A physical expression in the memo structure.
 ///
-/// Physical expressions use goal IDs and group IDs rather than full plans for
+/// Physical expressions use goal IDs rather than full plans for
 /// their children, representing a compact form suitable for the memo structure.
-pub type PhysicalExpression = PhysicalOperator<PhysicalGoal, ScalarGroupId>;
+pub type PhysicalExpression = Operator<Goal>;
 
 //=============================================================================
 // Conversion Implementations
@@ -63,30 +50,11 @@ impl From<LogicalExpression> for PartialLogicalPlan {
     /// This creates a materialized partial plan where each child group ID
     /// is converted to an unmaterialized partial plan reference.
     fn from(expr: LogicalExpression) -> Self {
-        PartialLogicalPlan::PartialMaterialized {
-            node: LogicalOperator {
-                tag: expr.tag,
-                data: expr.data,
-                relational_children: convert_children(expr.relational_children),
-                scalar_children: convert_children(expr.scalar_children),
-            },
-        }
-    }
-}
-
-impl From<ScalarExpression> for PartialScalarPlan {
-    /// Converts a scalar expression to a partial scalar plan.
-    ///
-    /// This creates a materialized partial plan where each child group ID
-    /// is converted to an unmaterialized partial plan reference.
-    fn from(expr: ScalarExpression) -> Self {
-        PartialScalarPlan::PartialMaterialized {
-            node: ScalarOperator {
-                tag: expr.tag,
-                data: expr.data,
-                children: convert_children(expr.children),
-            },
-        }
+        PartialLogicalPlan::Materialized(Operator {
+            tag: expr.tag,
+            data: expr.data,
+            children: convert_children(expr.children),
+        })
     }
 }
 
@@ -96,14 +64,11 @@ impl From<PhysicalExpression> for PartialPhysicalPlan {
     /// This creates a materialized partial plan where each child goal ID
     /// is converted to an unmaterialized partial plan reference.
     fn from(expr: PhysicalExpression) -> Self {
-        PartialPhysicalPlan::PartialMaterialized {
-            node: PhysicalOperator {
-                tag: expr.tag,
-                data: expr.data,
-                relational_children: convert_children(expr.relational_children),
-                scalar_children: convert_children(expr.scalar_children),
-            },
-        }
+        PartialPhysicalPlan::Materialized(Operator {
+            tag: expr.tag,
+            data: expr.data,
+            children: convert_children(expr.children),
+        })
     }
 }
 
@@ -117,7 +82,7 @@ impl From<PhysicalExpression> for PartialPhysicalPlan {
 /// each source type into its equivalent target wrapped in an Arc.
 ///
 /// # Type Parameters
-/// * `S` - Source type (e.g., LogicalGroupId)
+/// * `S` - Source type (e.g., GroupId)
 /// * `T` - Target type (e.g., PartialLogicalPlan)
 ///
 /// # Arguments

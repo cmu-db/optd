@@ -315,8 +315,8 @@ mod tests {
         Context, Engine,
     };
     use optd_dsl::analyzer::hir::{
-        BinOp, CoreData, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator,
-        OperatorKind, Pattern, ScalarOp, Value,
+        BinOp, CoreData, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern,
+        Value,
     };
     use Literal::*;
     use Materializable::*;
@@ -332,18 +332,14 @@ mod tests {
                     // Return two different filter operators
                     let filter_op = Operator {
                         tag: "Filter".to_string(),
-                        kind: OperatorKind::Logical,
-                        operator_data: vec![bool_val(true)],
-                        scalar_children: vec![],
-                        relational_children: vec![],
+                        data: vec![bool_val(true)],
+                        children: vec![],
                     };
 
                     let project_op = Operator {
                         tag: "Project".to_string(),
-                        kind: OperatorKind::Logical,
-                        operator_data: vec![int_val(42)],
-                        scalar_children: vec![],
-                        relational_children: vec![],
+                        data: vec![int_val(42)],
+                        children: vec![],
                     };
 
                     vec![
@@ -354,7 +350,6 @@ mod tests {
                     vec![]
                 }
             },
-            |_| vec![],
             |_| panic!("Physical expansion not expected"),
         );
 
@@ -371,10 +366,8 @@ mod tests {
                 MatchArm {
                     pattern: Pattern::Operator(Operator {
                         tag: "Filter".to_string(),
-                        kind: OperatorKind::Logical,
-                        operator_data: vec![Pattern::Literal(Bool(true))],
-                        scalar_children: vec![],
-                        relational_children: vec![],
+                        data: vec![Pattern::Literal(Bool(true))],
+                        children: vec![],
                     }),
                     expr: arc(CoreVal(string_val("is_filter"))),
                 },
@@ -382,10 +375,8 @@ mod tests {
                 MatchArm {
                     pattern: Pattern::Operator(Operator {
                         tag: "Project".to_string(),
-                        kind: OperatorKind::Logical,
-                        operator_data: vec![Bind("column".to_string(), Box::new(Wildcard))],
-                        scalar_children: vec![],
-                        relational_children: vec![],
+                        data: vec![Bind("column".to_string(), Box::new(Wildcard))],
+                        children: vec![],
                     }),
                     expr: arc(Ref("column".to_string())),
                 },
@@ -427,13 +418,12 @@ mod tests {
     fn test_list_length_with_expansion() {
         // Create a MockExpander that provides multiple list implementations
         let expander = MockExpander::new(
-            |_| vec![],
             |group_id| {
                 if group_id == GroupId(4) {
                     // Return two different lists
                     vec![
-                        Value(CoreData::Array(vec![int_val(1), int_val(2), int_val(3)])),
-                        Value(CoreData::Array(vec![int_val(10), int_val(20)])),
+                        Value(Array(vec![int_val(1), int_val(2), int_val(3)])),
+                        Value(Array(vec![int_val(10), int_val(20)])),
                     ]
                 } else {
                     vec![]
@@ -442,8 +432,8 @@ mod tests {
             |_| panic!("Physical expansion not expected"),
         );
 
-        // Create a scalar group reference to the lists
-        let scalar_group_ref = Value(Scalar(ScalarOp(UnMaterialized(GroupId(4)))));
+        // Create a logical group reference to the lists
+        let logical_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(4)))));
 
         // Create recursive length calculation function
         // length([]) = 0
@@ -461,8 +451,8 @@ mod tests {
                     // Recursive case: head :: tail
                     MatchArm {
                         pattern: ArrayDecomp(
-                            Box::new(Wildcard),                                     // head (ignored)
-                            Box::new(Bind("rest".to_string(), Box::new(Wildcard))), // tail
+                            Wildcard.into(),                                  // head (ignored)
+                            Bind("rest".to_string(), Wildcard.into()).into(), // tail
                         ),
                         expr: arc(Binary(
                             arc(CoreVal(int_val(1))),
@@ -485,10 +475,10 @@ mod tests {
         ctx.bind("length".to_string(), length_fn);
         let engine_with_fn = Engine::new(ctx, expander);
 
-        // Call the length function on the scalar group reference
+        // Call the length function on the logical group reference
         let call_expr = arc(Call(
             arc(Ref("length".to_string())),
-            vec![arc(CoreVal(scalar_group_ref))],
+            vec![arc(CoreVal(logical_group_ref))],
         ));
 
         // Evaluate the call
@@ -522,34 +512,32 @@ mod tests {
                     // Return two different filter operators
                     let filter_true = Operator {
                         tag: "Filter".to_string(),
-                        kind: OperatorKind::Logical,
-                        operator_data: vec![bool_val(true)],
-                        scalar_children: vec![],
-                        relational_children: vec![],
+                        data: vec![bool_val(true)],
+                        children: vec![],
                     };
 
                     let filter_false = Operator {
                         tag: "Filter".to_string(),
-                        kind: OperatorKind::Logical,
-                        operator_data: vec![bool_val(false)],
-                        scalar_children: vec![],
-                        relational_children: vec![],
+                        data: vec![bool_val(false)],
+                        children: vec![],
                     };
 
                     vec![
                         Value(Logical(LogicalOp(Materialized(filter_true)))),
                         Value(Logical(LogicalOp(Materialized(filter_false)))),
                     ]
-                } else {
-                    vec![]
-                }
-            },
-            |group_id| {
-                if group_id == GroupId(6) {
-                    // Return two different lists
+                } else if group_id == GroupId(6) {
+                    // Return two different array values
                     vec![
-                        Value(CoreData::Array(vec![int_val(1), int_val(2)])),
-                        Value(CoreData::Array(vec![int_val(3), int_val(4), int_val(5)])),
+                        Value(Array(vec![
+                            Value(CoreData::Literal(Int64(1))),
+                            Value(CoreData::Literal(Int64(2))),
+                        ])),
+                        Value(Array(vec![
+                            Value(CoreData::Literal(Int64(3))),
+                            Value(CoreData::Literal(Int64(4))),
+                            Value(CoreData::Literal(Int64(5))),
+                        ])),
                     ]
                 } else {
                     vec![]
@@ -562,17 +550,17 @@ mod tests {
 
         // Create references to groups
         let logical_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(5)))));
-        let scalar_group_ref = Value(Scalar(ScalarOp(UnMaterialized(GroupId(6)))));
+        let array_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(6)))));
 
         // Create a nested pattern match:
         // match <logical_group5> {
-        //   Filter(true) => match <scalar_group6> {
+        //   Filter(true) => match <array_group6> {
         //     [] => 0
         //     [x] => x
         //     [x, y] => x + y
         //     [x, y, z, ...rest] => x + y + z
         //   }
-        //   Filter(false) => match <scalar_group6> {
+        //   Filter(false) => match <array_group6> {
         //     [] => 0
         //     [x] => x
         //     [x, y] => x * y
@@ -587,37 +575,39 @@ mod tests {
                 MatchArm {
                     pattern: Pattern::Operator(Operator {
                         tag: "Filter".to_string(),
-                        kind: OperatorKind::Logical,
-                        operator_data: vec![Pattern::Literal(Bool(true))],
-                        scalar_children: vec![],
-                        relational_children: vec![],
-                    }),
+                        data: vec![Pattern::Literal(Bool(true)).into()],
+                        children: vec![],
+                    })
+                    .into(),
                     // Nested pattern match for addition
                     expr: arc(PatternMatch(
-                        arc(CoreVal(scalar_group_ref.clone())),
+                        arc(CoreVal(array_group_ref.clone())),
                         vec![
                             // Pattern for empty array
                             MatchArm {
-                                pattern: EmptyArray,
+                                pattern: EmptyArray.into(),
                                 expr: arc(CoreVal(int_val(0))),
                             },
                             // Pattern for list with exactly 1 element
                             MatchArm {
                                 pattern: ArrayDecomp(
-                                    Box::new(Bind("x".to_string(), Box::new(Wildcard))),
-                                    Box::new(EmptyArray),
-                                ),
+                                    Bind("x".to_string(), Wildcard.into()).into(),
+                                    EmptyArray.into(),
+                                )
+                                .into(),
                                 expr: arc(Ref("x".to_string())),
                             },
                             // Pattern for list with exactly 2 elements
                             MatchArm {
                                 pattern: ArrayDecomp(
-                                    Box::new(Bind("x".to_string(), Box::new(Wildcard))),
-                                    Box::new(ArrayDecomp(
-                                        Box::new(Bind("y".to_string(), Box::new(Wildcard))),
-                                        Box::new(EmptyArray),
-                                    )),
-                                ),
+                                    Bind("x".to_string(), Wildcard.into()).into(),
+                                    ArrayDecomp(
+                                        Bind("y".to_string(), Wildcard.into()).into(),
+                                        EmptyArray.into(),
+                                    )
+                                    .into(),
+                                )
+                                .into(),
                                 expr: arc(Binary(
                                     arc(Ref("x".to_string())),
                                     BinOp::Add,
@@ -627,15 +617,18 @@ mod tests {
                             // Pattern for list with 3 or more elements
                             MatchArm {
                                 pattern: ArrayDecomp(
-                                    Box::new(Bind("x".to_string(), Box::new(Wildcard))),
-                                    Box::new(ArrayDecomp(
-                                        Box::new(Bind("y".to_string(), Box::new(Wildcard))),
-                                        Box::new(ArrayDecomp(
-                                            Box::new(Bind("z".to_string(), Box::new(Wildcard))),
-                                            Box::new(Wildcard), // Rest of the array (could be empty or not)
-                                        )),
-                                    )),
-                                ),
+                                    Bind("x".to_string(), Wildcard.into()).into(),
+                                    ArrayDecomp(
+                                        Bind("y".to_string(), Wildcard.into()).into(),
+                                        ArrayDecomp(
+                                            Bind("z".to_string(), Wildcard.into()).into(),
+                                            Wildcard.into(), // Rest of the array (could be empty or not)
+                                        )
+                                        .into(),
+                                    )
+                                    .into(),
+                                )
+                                .into(),
                                 expr: arc(Binary(
                                     arc(Binary(
                                         arc(Ref("x".to_string())),
@@ -653,37 +646,39 @@ mod tests {
                 MatchArm {
                     pattern: Pattern::Operator(Operator {
                         tag: "Filter".to_string(),
-                        kind: OperatorKind::Logical,
-                        operator_data: vec![Pattern::Literal(Bool(false))],
-                        scalar_children: vec![],
-                        relational_children: vec![],
-                    }),
+                        data: vec![Pattern::Literal(Bool(false)).into()],
+                        children: vec![],
+                    })
+                    .into(),
                     // Nested pattern match for multiplication
                     expr: arc(PatternMatch(
-                        arc(CoreVal(scalar_group_ref)),
+                        arc(CoreVal(array_group_ref)),
                         vec![
                             // Pattern for empty array
                             MatchArm {
-                                pattern: EmptyArray,
+                                pattern: EmptyArray.into(),
                                 expr: arc(CoreVal(int_val(0))),
                             },
                             // Pattern for list with exactly 1 element
                             MatchArm {
                                 pattern: ArrayDecomp(
-                                    Box::new(Bind("x".to_string(), Box::new(Wildcard))),
-                                    Box::new(EmptyArray),
-                                ),
+                                    Bind("x".to_string(), Wildcard.into()).into(),
+                                    EmptyArray.into(),
+                                )
+                                .into(),
                                 expr: arc(Ref("x".to_string())),
                             },
                             // Pattern for list with exactly 2 elements
                             MatchArm {
                                 pattern: ArrayDecomp(
-                                    Box::new(Bind("x".to_string(), Box::new(Wildcard))),
-                                    Box::new(ArrayDecomp(
-                                        Box::new(Bind("y".to_string(), Box::new(Wildcard))),
-                                        Box::new(EmptyArray),
-                                    )),
-                                ),
+                                    Bind("x".to_string(), Wildcard.into()).into(),
+                                    ArrayDecomp(
+                                        Bind("y".to_string(), Wildcard.into()).into(),
+                                        EmptyArray.into(),
+                                    )
+                                    .into(),
+                                )
+                                .into(),
                                 expr: arc(Binary(
                                     arc(Ref("x".to_string())),
                                     BinOp::Mul,
@@ -693,15 +688,18 @@ mod tests {
                             // Pattern for list with 3 or more elements
                             MatchArm {
                                 pattern: ArrayDecomp(
-                                    Box::new(Bind("x".to_string(), Box::new(Wildcard))),
-                                    Box::new(ArrayDecomp(
-                                        Box::new(Bind("y".to_string(), Box::new(Wildcard))),
-                                        Box::new(ArrayDecomp(
-                                            Box::new(Bind("z".to_string(), Box::new(Wildcard))),
-                                            Box::new(Wildcard), // Rest of the array (could be empty or not)
-                                        )),
-                                    )),
-                                ),
+                                    Bind("x".to_string(), Wildcard.into()).into(),
+                                    ArrayDecomp(
+                                        Bind("y".to_string(), Wildcard.into()).into(),
+                                        ArrayDecomp(
+                                            Bind("z".to_string(), Wildcard.into()).into(),
+                                            Wildcard.into(), // Rest of the array (could be empty or not)
+                                        )
+                                        .into(),
+                                    )
+                                    .into(),
+                                )
+                                .into(),
                                 expr: arc(Binary(
                                     arc(Binary(
                                         arc(Ref("x".to_string())),
@@ -717,7 +715,7 @@ mod tests {
                 },
                 // Fallback
                 MatchArm {
-                    pattern: Wildcard,
+                    pattern: Wildcard.into(),
                     expr: arc(CoreVal(int_val(0))),
                 },
             ],

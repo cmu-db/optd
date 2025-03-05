@@ -2,8 +2,7 @@
 //!
 //! Operators represent computational units that can have various components:
 //! - Operator data: Basic parameters needed for the operator's function
-//! - Scalar children: Expressions that produce scalar values
-//! - Relational children: Expressions that produce relations (like table operations)
+//! - Children: Expressions that provide input data to the operator
 //!
 //! The evaluation process generates all possible combinations of component values
 //! (a cartesian product) and constructs operator instances for each combination.
@@ -24,10 +23,10 @@ use crate::{
 };
 use futures::{Stream, StreamExt};
 use optd_dsl::analyzer::hir::{
-    CoreData, Expr, LogicalOp, Materializable, Operator, OperatorKind, PhysicalOp, ScalarOp, Value,
+    CoreData, Expr, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
 use std::{pin::Pin, sync::Arc};
-use CoreData::{Logical, Physical, Scalar};
+use CoreData::{Logical, Physical};
 use Materializable::*;
 
 /// A stream of evaluated operators
@@ -49,23 +48,8 @@ where
         UnMaterialized(group_id) => {
             propagate_success(Value(Logical(LogicalOp(UnMaterialized(group_id)))))
         }
-        Materialized(op) => evaluate_operator_components(op, engine)
+        Materialized(op) => explore_operator_data(op.data, op.children, op.tag, engine)
             .map(|result| result.map(|op| Value(Logical(LogicalOp(Materialized(op))))))
-            .boxed(),
-    }
-}
-
-/// Evaluates a scalar operator by generating all possible combinations of its components.
-pub(super) fn evaluate_scalar_operator<E>(op: ScalarOp<Arc<Expr>>, engine: Engine<E>) -> ValueStream
-where
-    E: Expander,
-{
-    match op.0 {
-        UnMaterialized(group_id) => {
-            propagate_success(Value(Scalar(ScalarOp(UnMaterialized(group_id)))))
-        }
-        Materialized(op) => evaluate_operator_components(op, engine)
-            .map(|result| result.map(|op| Value(Scalar(ScalarOp(Materialized(op))))))
             .boxed(),
     }
 }
@@ -82,7 +66,7 @@ where
         UnMaterialized(physical_goal) => {
             propagate_success(Value(Physical(PhysicalOp(UnMaterialized(physical_goal)))))
         }
-        Materialized(op) => evaluate_operator_components(op, engine)
+        Materialized(op) => explore_operator_data(op.data, op.children, op.tag, engine)
             .map(|result| result.map(|op| Value(Physical(PhysicalOp(Materialized(op))))))
             .boxed(),
     }
@@ -92,33 +76,10 @@ where
 // Shared implementation for operator evaluation
 //=============================================================================
 
-/// Evaluates the components of an operator (data and children).
-///
-/// This is a shared implementation that handles the common pattern of
-/// evaluating operator data, scalar children, and relational children
-/// for any type of operator.
-fn evaluate_operator_components<E>(op: Operator<Arc<Expr>>, engine: Engine<E>) -> OperatorStream
-where
-    E: Expander,
-{
-    let kind = op.kind;
-
-    explore_operator_data(
-        op.operator_data,
-        op.scalar_children,
-        op.relational_children,
-        kind,
-        op.tag,
-        engine,
-    )
-}
-
 /// Evaluates all combinations of operator data values.
 fn explore_operator_data<E>(
     op_data_exprs: Vec<Arc<Expr>>,
-    scalar_exprs: Vec<Arc<Expr>>,
-    rel_exprs: Vec<Arc<Expr>>,
-    kind: OperatorKind,
+    children_exprs: Vec<Arc<Expr>>,
     tag: String,
     engine: Engine<E>,
 ) -> OperatorStream
@@ -129,78 +90,31 @@ where
         .flat_map(move |op_data_result| {
             stream_from_result(
                 op_data_result,
-                capture!(
-                    [kind, tag, scalar_exprs, rel_exprs, engine],
-                    move |op_data| {
-                        explore_scalar_children(scalar_exprs, rel_exprs, op_data, kind, tag, engine)
-                    }
-                ),
+                capture!([tag, children_exprs, engine], move |op_data| {
+                    explore_children(children_exprs, op_data, tag, engine)
+                }),
             )
         })
         .boxed()
 }
 
-/// Evaluates all combinations of scalar children values.
-fn explore_scalar_children<E>(
-    scalar_exprs: Vec<Arc<Expr>>,
-    rel_exprs: Vec<Arc<Expr>>,
+/// Evaluates all combinations of children values.
+fn explore_children<E>(
+    children: Vec<Arc<Expr>>,
     op_data: Vec<Value>,
-    kind: OperatorKind,
     tag: String,
     engine: Engine<E>,
 ) -> OperatorStream
 where
     E: Expander,
 {
-    evaluate_all_combinations(scalar_exprs.into_iter(), engine.clone())
-        .flat_map(capture!(
-            [kind, tag, op_data, rel_exprs, engine],
-            move |scalar_result| {
-                stream_from_result(
-                    scalar_result,
-                    capture!(
-                        [kind, tag, op_data, rel_exprs, engine],
-                        move |scalar_children| {
-                            explore_relational_children(
-                                rel_exprs,
-                                op_data,
-                                scalar_children,
-                                kind,
-                                tag,
-                                engine,
-                            )
-                        }
-                    ),
-                )
-            }
-        ))
-        .boxed()
-}
-
-/// Evaluates all combinations of relational children values.
-fn explore_relational_children<E>(
-    rel_exprs: Vec<Arc<Expr>>,
-    op_data: Vec<Value>,
-    scalar_children: Vec<Value>,
-    kind: OperatorKind,
-    tag: String,
-    engine: Engine<E>,
-) -> OperatorStream
-where
-    E: Expander,
-{
-    evaluate_all_combinations(rel_exprs.into_iter(), engine)
-        .map(capture!(
-            [kind, tag, op_data, scalar_children],
-            move |rel_result| {
-                rel_result.map(|rel_children| Operator {
-                    kind,
-                    tag: tag.clone(),
-                    operator_data: op_data.clone(),
-                    relational_children: rel_children,
-                    scalar_children: scalar_children.clone(),
-                })
-            }
-        ))
+    evaluate_all_combinations(children.into_iter(), engine)
+        .map(capture!([tag, op_data], move |rel_result| {
+            rel_result.map(|children| Operator {
+                tag: tag.clone(),
+                data: op_data.clone(),
+                children,
+            })
+        }))
         .boxed()
 }
