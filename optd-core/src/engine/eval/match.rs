@@ -72,25 +72,31 @@ fn match_pattern<E>(value: Value, pattern: Pattern, engine: Engine<E>) -> MatchR
 where
     E: Expander,
 {
-    match (&pattern, &value.0) {
+    match (pattern, &value.0) {
         // Wildcard pattern matches anything
         (Wildcard, _) => stream::once(async move { (value, Some(engine.context.clone())) }).boxed(),
 
         // Binding pattern: bind the value to the identifier and continue matching
         (Bind(ident, inner_pattern), _) => {
-            let mut new_ctx = engine.context.clone();
-            new_ctx.bind(ident.clone(), value.clone());
-
-            match_pattern(
-                value,
-                (**inner_pattern).clone(),
-                engine.with_context(new_ctx),
-            )
+            match_pattern(value.clone(), *inner_pattern, engine.clone())
+                .map(move |(matched_value, ctx_opt)| {
+                    // Only bind if the inner pattern matched
+                    if let Some(ctx) = ctx_opt {
+                        // Create a new context with the binding
+                        let mut new_ctx = ctx.clone();
+                        new_ctx.bind(ident.clone(), matched_value.clone());
+                        (matched_value, Some(new_ctx))
+                    } else {
+                        // Inner pattern didn't match, propagate failure
+                        (matched_value, None)
+                    }
+                })
+                .boxed()
         }
 
         // Literal pattern: match if literals are equal
         (Literal(pattern_lit), CoreData::Literal(value_lit)) => {
-            match_literals(value.clone(), pattern_lit, value_lit, engine.context)
+            match_literals(value.clone(), &pattern_lit, value_lit, engine.context)
         }
 
         // Empty array pattern
@@ -100,32 +106,32 @@ where
 
         // List decomposition pattern: match first element and rest of the array
         (ArrayDecomp(head_pattern, tail_pattern), CoreData::Array(arr)) => {
-            match_array_decomposition(value.clone(), head_pattern, tail_pattern, arr, engine)
+            match_array_decomposition(value.clone(), &head_pattern, &tail_pattern, arr, engine)
         }
 
         // Struct pattern: match name and recursively match fields
         (Struct(pat_name, field_patterns), CoreData::Struct(val_name, field_values)) => {
-            if pat_name != val_name || field_patterns.len() != field_values.len() {
+            if pat_name != *val_name || field_patterns.len() != field_values.len() {
                 return stream::once(async move { (value, None) }).boxed();
             }
 
-            match_struct_pattern(value.clone(), field_patterns, field_values, engine)
+            match_struct_pattern(value.clone(), &field_patterns, field_values, engine)
         }
 
         // Unmaterialized operators
         (Operator(op_pattern), CoreData::Logical(LogicalOp(UnMaterialized(group_id)))) => {
-            match_unmaterialized_group(op_pattern, *group_id, engine)
+            match_unmaterialized_group(&op_pattern, *group_id, engine)
         }
         (Operator(op_pattern), CoreData::Physical(PhysicalOp(UnMaterialized(physical_goal)))) => {
-            match_unmaterialized_physical(op_pattern, &physical_goal.clone(), engine)
+            match_unmaterialized_physical(&op_pattern, &physical_goal.clone(), engine)
         }
 
         // Materialized operators
         (Operator(op_pattern), CoreData::Logical(LogicalOp(Materialized(operator)))) => {
-            match_operator_pattern(value.clone(), op_pattern, operator, engine)
+            match_operator_pattern(value.clone(), &op_pattern, operator, engine)
         }
         (Operator(op_pattern), CoreData::Physical(PhysicalOp(Materialized(operator)))) => {
-            match_operator_pattern(value.clone(), op_pattern, operator, engine)
+            match_operator_pattern(value.clone(), &op_pattern, operator, engine)
         }
 
         // No match for other combinations

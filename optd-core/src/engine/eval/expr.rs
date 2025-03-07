@@ -620,13 +620,22 @@ mod tests {
             // Check that the join key was correctly captured
             assert!(matches!(&fields[0].0, CoreData::Literal(String(s)) if s == "customer_id"));
 
-            // Check that the group references were correctly captured (still unexpanded)
-            assert!(
-                matches!(&fields[1].0, CoreData::Logical(LogicalOp(UnMaterialized(group_id))) if *group_id == GroupId(16))
-            );
-            assert!(
-                matches!(&fields[2].0, CoreData::Logical(LogicalOp(UnMaterialized(group_id))) if *group_id == GroupId(17))
-            );
+            // Check that the bound values now contain the expanded operators, not the unexpanded references
+            // Left child should be a Filter operator (expanded from group 16)
+            if let CoreData::Logical(LogicalOp(Materialized(left_op))) = &fields[1].0 {
+                assert_eq!(left_op.tag, "Filter");
+                assert!(matches!(&left_op.data[0].0, CoreData::Literal(Bool(true))));
+            } else {
+                panic!("Expected expanded Filter operator, got {:?}", fields[1]);
+            }
+
+            // Right child should be a Project operator (expanded from group 17)
+            if let CoreData::Logical(LogicalOp(Materialized(right_op))) = &fields[2].0 {
+                assert_eq!(right_op.tag, "Project");
+                assert!(matches!(&right_op.data[0].0, CoreData::Literal(Int64(100))));
+            } else {
+                panic!("Expected expanded Project operator, got {:?}", fields[2]);
+            }
         } else {
             panic!("Expected Struct result, got {:?}", values[0]);
         }
