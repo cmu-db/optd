@@ -78,6 +78,7 @@ where
 
         // Binding pattern: bind the value to the identifier and continue matching
         (Bind(ident, inner_pattern), _) => {
+            // First check if the inner pattern matches without binding
             match_pattern(value.clone(), *inner_pattern, engine.clone())
                 .map(move |(matched_value, ctx_opt)| {
                     // Only bind if the inner pattern matched
@@ -183,23 +184,28 @@ where
 
     // Match head against head pattern
     match_pattern(head, head_pattern, engine.clone())
-        .flat_map(move |(_, head_ctx_opt)| {
+        .flat_map(capture!([original_value], move |(_, head_ctx_opt)| {
             match head_ctx_opt {
                 Some(head_ctx) => {
                     // Head matched, now try to match tail
                     let engine_with_head_ctx = engine.clone().with_context(head_ctx);
                     match_pattern(tail.clone(), tail_pattern.clone(), engine_with_head_ctx)
+                        .map(capture!([original_value], move |(_, tail_ctx_opt)| {
+                            // Return original value with tail match result
+                            (original_value.clone(), tail_ctx_opt)
+                        }))
+                        .boxed()
                 }
                 None => {
                     // Head didn't match, so array decomposition fails
                     stream::once({
                         let value = original_value.clone();
-                        async move { (value, None) }
+                        async move { (value.clone(), None) }
                     })
                     .boxed()
                 }
             }
-        })
+        }))
         .boxed()
 }
 
@@ -222,7 +228,7 @@ where
 
     // Start with a stream containing the original context
     let initial_stream = stream::once(capture!([engine], async move {
-        (original_value, Some(engine.context))
+        (original_value.clone(), Some(engine.context))
     }))
     .boxed();
 
@@ -237,6 +243,11 @@ where
                             // If we have a context, try matching the next field
                             let engine_with_ctx = engine.clone().with_context(ctx);
                             match_pattern(value.clone(), pattern.clone(), engine_with_ctx)
+                                .map(move |(original, field_ctx_opt)| {
+                                    // Keep original value but with new context result
+                                    (original, field_ctx_opt)
+                                })
+                                .boxed()
                         }
                         None => {
                             // If previous match failed, no need to try further fields
