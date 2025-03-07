@@ -197,7 +197,7 @@ where
                     // Head didn't match, so array decomposition fails
                     stream::once({
                         let value = original_value.clone();
-                        async move { (value.clone(), None) }
+                        async move { (value, None) }
                     })
                     .boxed()
                 }
