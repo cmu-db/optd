@@ -2,11 +2,8 @@
 //! expression types and evaluation strategies in a non-blocking, streaming manner.
 
 use super::{
-    binary::eval_binary_op,
-    core::evaluate_core_expr,
-    r#match::{expand_top_level, try_match_arms},
-    unary::eval_unary_op,
-    Expander,
+    binary::eval_binary_op, core::evaluate_core_expr, r#match::try_match_arms,
+    unary::eval_unary_op, Expander,
 };
 use crate::{
     capture,
@@ -17,7 +14,7 @@ use crate::{
         Engine, Evaluate,
     },
 };
-use futures::{stream, StreamExt};
+use futures::StreamExt;
 use optd_dsl::analyzer::hir::{
     BinOp, CoreData, Expr, FunKind, Identifier, Literal, MatchArm, UnaryOp, Value,
 };
@@ -90,27 +87,13 @@ where
             stream_from_result(
                 expr_result,
                 capture!([engine, match_arms], move |value| {
-                    let expansion_future = expand_top_level(value, engine.clone());
-                    stream::once(expansion_future)
-                        .flat_map(move |expanded_values| {
-                            // For each expanded value, try all match arms
-                            stream::iter(expanded_values).flat_map(capture!(
-                                [match_arms, engine],
-                                move |expanded_value| {
-                                    try_match_arms(
-                                        expanded_value,
-                                        match_arms.clone(),
-                                        engine.clone(),
-                                    )
-                                }
-                            ))
-                        })
-                        .boxed()
+                    try_match_arms(value, match_arms.clone(), engine.clone())
                 }),
             )
         })
         .boxed()
 }
+
 /// Evaluates an if-then-else expression.
 ///
 /// First evaluates the condition, then either the 'then' branch if the condition is true,
@@ -301,7 +284,7 @@ where
         engine
             .context
             .lookup(&ident)
-            .expect("Variable not found")
+            .expect(&format!("Variable not found: {}", ident))
             .clone(),
     )
     .boxed()
@@ -322,29 +305,32 @@ mod tests {
     use Materializable::*;
     use Pattern::*;
 
-    // Test pattern matching with expansion at the top level
     #[test]
-    fn test_pattern_match_with_expansion() {
-        // Create a MockExpander that provides multiple implementations for a logical group
+    fn test_pattern_matching_with_different_operator_types() {
+        // Create a MockExpander that provides different operator types within a group
         let expander = MockExpander::new(
             |group_id| {
-                if group_id == GroupId(1) {
-                    // Return two different filter operators
-                    let filter_op = Operator {
-                        tag: "Filter".to_string(),
-                        data: vec![bool_val(true)],
-                        children: vec![],
-                    };
-
-                    let project_op = Operator {
-                        tag: "Project".to_string(),
-                        data: vec![int_val(42)],
-                        children: vec![],
-                    };
-
+                if group_id == GroupId(10) {
+                    // Group 10 expands to multiple operator types
                     vec![
-                        Value(Logical(LogicalOp(Materialized(filter_op)))),
-                        Value(Logical(LogicalOp(Materialized(project_op)))),
+                        // Filter operator
+                        Value(Logical(LogicalOp(Materialized(Operator {
+                            tag: "Filter".to_string(),
+                            data: vec![bool_val(true)],
+                            children: vec![string_val("customers")],
+                        })))),
+                        // Join operator
+                        Value(Logical(LogicalOp(Materialized(Operator {
+                            tag: "Join".to_string(),
+                            data: vec![string_val("customer_id")],
+                            children: vec![string_val("customers"), string_val("orders")],
+                        })))),
+                        // Project operator
+                        Value(Logical(LogicalOp(Materialized(Operator {
+                            tag: "Project".to_string(),
+                            data: vec![int_val(42)],
+                            children: vec![string_val("customers")],
+                        })))),
                     ]
                 } else {
                     vec![]
@@ -356,10 +342,10 @@ mod tests {
 
         let engine = Engine::new(Context::default(), expander);
 
-        // Create a logical group reference value
-        let logical_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(1)))));
+        // Create a logical group reference
+        let logical_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(10)))));
 
-        // Create a pattern match expression that matches against different operators
+        // Create a pattern match expression with arms for each operator type
         let pattern_match_expr = arc(PatternMatch(
             arc(CoreVal(logical_group_ref)),
             vec![
@@ -368,23 +354,39 @@ mod tests {
                     pattern: Pattern::Operator(Operator {
                         tag: "Filter".to_string(),
                         data: vec![Pattern::Literal(Bool(true))],
-                        children: vec![],
+                        children: vec![Bind("filter_table".to_string(), Box::new(Wildcard))],
                     }),
-                    expr: arc(CoreVal(string_val("is_filter"))),
+                    expr: arc(Binary(
+                        arc(CoreVal(string_val("Filter on: "))),
+                        BinOp::Concat,
+                        arc(Ref("filter_table".to_string())),
+                    )),
                 },
-                // Second arm: match Project operator
+                // Second arm: match Join operator with binding
+                MatchArm {
+                    pattern: Pattern::Operator(Operator {
+                        tag: "Join".to_string(),
+                        data: vec![Bind("join_key".to_string(), Box::new(Wildcard))],
+                        children: vec![
+                            Bind("left_table".to_string(), Box::new(Wildcard)),
+                            Bind("right_table".to_string(), Box::new(Wildcard)),
+                        ],
+                    }),
+                    expr: arc(CoreVal(string_val("join_matched"))),
+                },
+                // Third arm: match Project operator
                 MatchArm {
                     pattern: Pattern::Operator(Operator {
                         tag: "Project".to_string(),
-                        data: vec![Bind("column".to_string(), Box::new(Wildcard))],
-                        children: vec![],
+                        data: vec![Pattern::Bind("column".to_string(), Box::new(Wildcard))],
+                        children: vec![Wildcard],
                     }),
-                    expr: arc(Ref("column".to_string())),
+                    expr: arc(Ref("column".to_string())), // Return the bound column value
                 },
                 // Fallback arm
                 MatchArm {
                     pattern: Wildcard,
-                    expr: arc(CoreVal(string_val("unknown"))),
+                    expr: arc(CoreVal(string_val("wildcard_matched"))),
                 },
             ],
         ));
@@ -392,10 +394,10 @@ mod tests {
         // Evaluate the pattern match expression
         let values = collect_stream_values(pattern_match_expr.evaluate(engine));
 
-        // Should get one result for each expansion (one for Filter, one for Project)
-        assert_eq!(values.len(), 2);
+        // Should get three results - one for each operator type
+        assert_eq!(values.len(), 3);
 
-        // Check results
+        // Collect the results
         let result_strings: Vec<std::string::String> = values
             .iter()
             .map(|v| {
@@ -409,37 +411,24 @@ mod tests {
             })
             .collect();
 
-        // Results should include "is_filter" (from first arm) and "42" (from second arm)
-        assert!(result_strings.contains(&"is_filter".to_string()));
-        assert!(result_strings.contains(&"42".to_string()));
+        // Check that each operator matched correctly
+        assert!(result_strings.contains(&"Filter on: customers".to_string()));
+        assert!(result_strings.contains(&"join_matched".to_string()));
+        assert!(result_strings.contains(&"42".to_string())); // From binding the column value
     }
 
-    // Test pattern matching for list length calculation with expansion
     #[test]
-    fn test_list_length_with_expansion() {
-        // Create a MockExpander that provides multiple list implementations
+    fn test_recursive_list_length_function() {
+        // Create a mockExpander that doesn't expand anything
         let expander = MockExpander::new(
-            |group_id| {
-                if group_id == GroupId(4) {
-                    // Return two different lists
-                    vec![
-                        Value(Array(vec![int_val(1), int_val(2), int_val(3)])),
-                        Value(Array(vec![int_val(10), int_val(20)])),
-                    ]
-                } else {
-                    vec![]
-                }
-            },
+            |_| vec![],
             |_| panic!("Physical expansion not expected"),
             |_| panic!("Properties expansion not expected"),
         );
 
-        // Create a logical group reference to the lists
-        let logical_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(4)))));
-
         // Create recursive length calculation function
         // length([]) = 0
-        // length([x .. xs]) = 1 + length(xs)
+        // length([x :: xs]) = 1 + length(xs)
         let length_fn = {
             // Create the pattern matching expression for length calculation
             let length_expr = arc(PatternMatch(
@@ -475,74 +464,88 @@ mod tests {
         // Create a context with the length function bound
         let mut ctx = Context::default();
         ctx.bind("length".to_string(), length_fn);
-        let engine_with_fn = Engine::new(ctx, expander);
+        let engine = Engine::new(ctx, expander);
 
-        // Call the length function on the logical group reference
-        let call_expr = arc(Call(
-            arc(Ref("length".to_string())),
-            vec![arc(CoreVal(logical_group_ref))],
+        // Create test data: lists of different lengths
+        let empty_list = Value(Array(vec![]));
+        let singleton_list = Value(Array(vec![int_val(5)]));
+        let pair_list = Value(Array(vec![int_val(10), int_val(20)]));
+        let triple_list = Value(Array(vec![int_val(1), int_val(2), int_val(3)]));
+
+        // Helper function to call the length function on a list
+        let get_length = |list: Value| {
+            let call_expr = arc(Call(
+                arc(Ref("length".to_string())),
+                vec![arc(CoreVal(list))],
+            ));
+            collect_stream_values(call_expr.evaluate(engine.clone()))
+        };
+
+        // Test each list
+        let empty_result = get_length(empty_list);
+        let singleton_result = get_length(singleton_list);
+        let pair_result = get_length(pair_list);
+        let triple_result = get_length(triple_list);
+
+        // Check results
+        assert_eq!(empty_result.len(), 1);
+        assert!(matches!(&empty_result[0].0, CoreData::Literal(Int64(0))));
+
+        assert_eq!(singleton_result.len(), 1);
+        assert!(matches!(
+            &singleton_result[0].0,
+            CoreData::Literal(Int64(1))
         ));
 
-        // Evaluate the call
-        let values = collect_stream_values(call_expr.evaluate(engine_with_fn));
+        assert_eq!(pair_result.len(), 1);
+        assert!(matches!(&pair_result[0].0, CoreData::Literal(Int64(2))));
 
-        // Should get two results (one for each expansion of the list)
-        assert_eq!(values.len(), 2);
-
-        // Results should include length 3 (for first list) and length 2 (for second list)
-        let result_ints: Vec<i64> = values
-            .iter()
-            .map(|v| {
-                if let CoreData::Literal(Int64(i)) = &v.0 {
-                    *i
-                } else {
-                    panic!("Expected integer result, got {:?}", v)
-                }
-            })
-            .collect();
-
-        assert!(result_ints.contains(&3)); // Length of [1, 2, 3]
-        assert!(result_ints.contains(&2)); // Length of [10, 20]
+        assert_eq!(triple_result.len(), 1);
+        assert!(matches!(&triple_result[0].0, CoreData::Literal(Int64(3))));
     }
 
     #[test]
-    fn test_nested_pattern_matches_with_expansion() {
-        // Create a MockExpander that provides multiple implementations for different groups
+    fn test_pattern_with_group_references() {
+        // Create a MockExpander that provides operators with group references as children
         let expander = MockExpander::new(
             |group_id| {
-                if group_id == GroupId(5) {
-                    // Return two different filter operators
-                    let filter_true = Operator {
-                        tag: "Filter".to_string(),
-                        data: vec![bool_val(true)],
-                        children: vec![],
-                    };
+                match group_id {
+                    GroupId(15) => {
+                        // Main join operator with group references as children
+                        let join_op = Operator {
+                            tag: "Join".to_string(),
+                            data: vec![string_val("customer_id")],
+                            children: vec![
+                                // Left child is a reference to group 16
+                                Value(Logical(LogicalOp(UnMaterialized(GroupId(16))))),
+                                // Right child is a reference to group 17
+                                Value(Logical(LogicalOp(UnMaterialized(GroupId(17))))),
+                            ],
+                        };
 
-                    let filter_false = Operator {
-                        tag: "Filter".to_string(),
-                        data: vec![bool_val(false)],
-                        children: vec![],
-                    };
+                        vec![Value(Logical(LogicalOp(Materialized(join_op))))]
+                    }
+                    GroupId(16) => {
+                        // Group 16 expands to a Filter operator
+                        let filter_op = Operator {
+                            tag: "Filter".to_string(),
+                            data: vec![bool_val(true)],
+                            children: vec![string_val("customers")],
+                        };
 
-                    vec![
-                        Value(Logical(LogicalOp(Materialized(filter_true)))),
-                        Value(Logical(LogicalOp(Materialized(filter_false)))),
-                    ]
-                } else if group_id == GroupId(6) {
-                    // Return two different array values
-                    vec![
-                        Value(Array(vec![
-                            Value(CoreData::Literal(Int64(1))),
-                            Value(CoreData::Literal(Int64(2))),
-                        ])),
-                        Value(Array(vec![
-                            Value(CoreData::Literal(Int64(3))),
-                            Value(CoreData::Literal(Int64(4))),
-                            Value(CoreData::Literal(Int64(5))),
-                        ])),
-                    ]
-                } else {
-                    vec![]
+                        vec![Value(Logical(LogicalOp(Materialized(filter_op))))]
+                    }
+                    GroupId(17) => {
+                        // Group 17 expands to a Project operator
+                        let project_op = Operator {
+                            tag: "Project".to_string(),
+                            data: vec![int_val(100)],
+                            children: vec![string_val("orders")],
+                        };
+
+                        vec![Value(Logical(LogicalOp(Materialized(project_op))))]
+                    }
+                    _ => vec![],
                 }
             },
             |_| panic!("Physical expansion not expected"),
@@ -551,204 +554,145 @@ mod tests {
 
         let engine = Engine::new(Context::default(), expander);
 
-        // Create references to groups
-        let logical_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(5)))));
-        let array_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(6)))));
+        // Create a logical group reference to the main join operator
+        let logical_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(15)))));
 
-        // Create a nested pattern match:
-        // match <logical_group5> {
-        //   Filter(true) => match <array_group6> {
-        //     [] => 0
-        //     [x] => x
-        //     [x, y] => x + y
-        //     [x, y, z, ...rest] => x + y + z
-        //   }
-        //   Filter(false) => match <array_group6> {
-        //     [] => 0
-        //     [x] => x
-        //     [x, y] => x * y
-        //     [x, y, z, ...rest] => x * y * z
-        //   }
-        //   _ => 0
-        // }
+        // Create a pattern match that extracts components with bindings
         let pattern_match_expr = arc(PatternMatch(
-            arc(CoreVal(logical_group_ref)),
+            arc(CoreVal(logical_group_ref.clone())),
             vec![
-                // First arm: Filter(true)
+                // Match the join structure with specific operator patterns for children
                 MatchArm {
                     pattern: Pattern::Operator(Operator {
-                        tag: "Filter".to_string(),
-                        data: vec![Pattern::Literal(Bool(true)).into()],
-                        children: vec![],
-                    })
-                    .into(),
-                    // Nested pattern match for addition
-                    expr: arc(PatternMatch(
-                        arc(CoreVal(array_group_ref.clone())),
-                        vec![
-                            // Pattern for empty array
-                            MatchArm {
-                                pattern: EmptyArray.into(),
-                                expr: arc(CoreVal(int_val(0))),
-                            },
-                            // Pattern for list with exactly 1 element
-                            MatchArm {
-                                pattern: ArrayDecomp(
-                                    Bind("x".to_string(), Wildcard.into()).into(),
-                                    EmptyArray.into(),
-                                )
+                        tag: "Join".to_string(),
+                        data: vec![Bind("join_key".to_string(), Wildcard.into())],
+                        children: vec![
+                            // Left child - filter operator pattern (will cause group 16 to expand)
+                            Pattern::Bind(
+                                "left_child".to_string(),
+                                Pattern::Operator(Operator {
+                                    tag: "Filter".to_string(),
+                                    data: vec![Bind("predicate".to_string(), Wildcard.into())],
+                                    children: vec![Wildcard.into()],
+                                })
                                 .into(),
-                                expr: arc(Ref("x".to_string())),
-                            },
-                            // Pattern for list with exactly 2 elements
-                            MatchArm {
-                                pattern: ArrayDecomp(
-                                    Bind("x".to_string(), Wildcard.into()).into(),
-                                    ArrayDecomp(
-                                        Bind("y".to_string(), Wildcard.into()).into(),
-                                        EmptyArray.into(),
-                                    )
-                                    .into(),
-                                )
+                            ),
+                            // Right child - project operator pattern (will cause group 17 to expand)
+                            Pattern::Bind(
+                                "right_child".to_string(),
+                                Pattern::Operator(Operator {
+                                    tag: "Project".to_string(),
+                                    data: vec![Bind("column".to_string(), Wildcard.into())],
+                                    children: vec![Wildcard.into()],
+                                })
                                 .into(),
-                                expr: arc(Binary(
-                                    arc(Ref("x".to_string())),
-                                    BinOp::Add,
-                                    arc(Ref("y".to_string())),
-                                )),
-                            },
-                            // Pattern for list with 3 or more elements
-                            MatchArm {
-                                pattern: ArrayDecomp(
-                                    Bind("x".to_string(), Wildcard.into()).into(),
-                                    ArrayDecomp(
-                                        Bind("y".to_string(), Wildcard.into()).into(),
-                                        ArrayDecomp(
-                                            Bind("z".to_string(), Wildcard.into()).into(),
-                                            Wildcard.into(), // Rest of the array (could be empty or not)
-                                        )
-                                        .into(),
-                                    )
-                                    .into(),
-                                )
-                                .into(),
-                                expr: arc(Binary(
-                                    arc(Binary(
-                                        arc(Ref("x".to_string())),
-                                        BinOp::Add,
-                                        arc(Ref("y".to_string())),
-                                    )),
-                                    BinOp::Add,
-                                    arc(Ref("z".to_string())),
-                                )),
-                            },
+                            ),
                         ],
-                    )),
-                },
-                // Second arm: Filter(false)
-                MatchArm {
-                    pattern: Pattern::Operator(Operator {
-                        tag: "Filter".to_string(),
-                        data: vec![Pattern::Literal(Bool(false)).into()],
-                        children: vec![],
-                    })
-                    .into(),
-                    // Nested pattern match for multiplication
-                    expr: arc(PatternMatch(
-                        arc(CoreVal(array_group_ref)),
+                    }),
+                    // Create a structured result with the join key and the child references
+                    expr: arc(CoreExpr(CoreData::Struct(
+                        "JoinPlan".to_string(),
                         vec![
-                            // Pattern for empty array
-                            MatchArm {
-                                pattern: EmptyArray.into(),
-                                expr: arc(CoreVal(int_val(0))),
-                            },
-                            // Pattern for list with exactly 1 element
-                            MatchArm {
-                                pattern: ArrayDecomp(
-                                    Bind("x".to_string(), Wildcard.into()).into(),
-                                    EmptyArray.into(),
-                                )
-                                .into(),
-                                expr: arc(Ref("x".to_string())),
-                            },
-                            // Pattern for list with exactly 2 elements
-                            MatchArm {
-                                pattern: ArrayDecomp(
-                                    Bind("x".to_string(), Wildcard.into()).into(),
-                                    ArrayDecomp(
-                                        Bind("y".to_string(), Wildcard.into()).into(),
-                                        EmptyArray.into(),
-                                    )
-                                    .into(),
-                                )
-                                .into(),
-                                expr: arc(Binary(
-                                    arc(Ref("x".to_string())),
-                                    BinOp::Mul,
-                                    arc(Ref("y".to_string())),
-                                )),
-                            },
-                            // Pattern for list with 3 or more elements
-                            MatchArm {
-                                pattern: ArrayDecomp(
-                                    Bind("x".to_string(), Wildcard.into()).into(),
-                                    ArrayDecomp(
-                                        Bind("y".to_string(), Wildcard.into()).into(),
-                                        ArrayDecomp(
-                                            Bind("z".to_string(), Wildcard.into()).into(),
-                                            Wildcard.into(), // Rest of the array (could be empty or not)
-                                        )
-                                        .into(),
-                                    )
-                                    .into(),
-                                )
-                                .into(),
-                                expr: arc(Binary(
-                                    arc(Binary(
-                                        arc(Ref("x".to_string())),
-                                        BinOp::Mul,
-                                        arc(Ref("y".to_string())),
-                                    )),
-                                    BinOp::Mul,
-                                    arc(Ref("z".to_string())),
-                                )),
-                            },
+                            arc(Ref("join_key".to_string())),
+                            arc(Ref("left_child".to_string())),
+                            arc(Ref("right_child".to_string())),
                         ],
-                    )),
+                    ))),
                 },
-                // Fallback
+                // Fallback arm
                 MatchArm {
-                    pattern: Wildcard.into(),
-                    expr: arc(CoreVal(int_val(0))),
+                    pattern: Wildcard,
+                    expr: arc(CoreVal(string_val("no_match"))),
                 },
             ],
         ));
 
-        // Evaluate the nested pattern matches
-        let values = collect_stream_values(pattern_match_expr.evaluate(engine));
+        // Evaluate the pattern match expression
+        let values = collect_stream_values(pattern_match_expr.evaluate(engine.clone()));
+        // Should get one result with a structured value
+        assert_eq!(values.len(), 1);
 
-        // Should get 4 results: 2 Filter values × 2 Array options = 4 combinations
-        assert_eq!(values.len(), 4);
+        // Verify the structure of the result
+        if let CoreData::Struct(name, fields) = &values[0].0 {
+            assert_eq!(name, "JoinPlan");
+            assert_eq!(fields.len(), 3);
 
-        // Expected results:
-        // Filter(true) + [1, 2] = 1 + 2 = 3
-        // Filter(true) + [3, 4, 5] = 3 + 4 + 5 = 12
-        // Filter(false) + [1, 2] = 1 * 2 = 2
-        // Filter(false) + [3, 4, 5] = 3 * 4 * 5 = 60
-        let result_ints: Vec<i64> = values
-            .iter()
-            .map(|v| {
-                if let CoreData::Literal(Int64(i)) = &v.0 {
-                    *i
-                } else {
-                    panic!("Expected integer result, got {:?}", v)
-                }
-            })
-            .collect();
+            // Check that the join key was correctly captured
+            assert!(matches!(&fields[0].0, CoreData::Literal(String(s)) if s == "customer_id"));
 
-        assert!(result_ints.contains(&3)); // 1 + 2
-        assert!(result_ints.contains(&12)); // 3 + 4 + 5
-        assert!(result_ints.contains(&2)); // 1 * 2
-        assert!(result_ints.contains(&60)); // 3 * 4 * 5
+            // Check that the group references were correctly captured (still unexpanded)
+            assert!(
+                matches!(&fields[1].0, CoreData::Logical(LogicalOp(UnMaterialized(group_id))) if *group_id == GroupId(16))
+            );
+            assert!(
+                matches!(&fields[2].0, CoreData::Logical(LogicalOp(UnMaterialized(group_id))) if *group_id == GroupId(17))
+            );
+        } else {
+            panic!("Expected Struct result, got {:?}", values[0]);
+        }
+
+        // Now let's create a second pattern match that first expands the child groups
+        let expand_children_expr = arc(PatternMatch(
+            arc(CoreVal(logical_group_ref)),
+            vec![
+                // Match the join and then expand its children
+                MatchArm {
+                    pattern: Pattern::Operator(Operator {
+                        tag: "Join".to_string(),
+                        data: vec![Bind("join_key".to_string(), Wildcard.into())],
+                        children: vec![
+                            // Patterns to match the expanded child groups
+                            Pattern::Operator(Operator {
+                                tag: "Filter".to_string(),
+                                data: vec![Bind("predicate".to_string(), Wildcard.into())],
+                                children: vec![Bind("left_table".to_string(), Wildcard.into())],
+                            }),
+                            Pattern::Operator(Operator {
+                                tag: "Project".to_string(),
+                                data: vec![Bind("column".to_string(), Wildcard.into())],
+                                children: vec![Bind("right_table".to_string(), Wildcard.into())],
+                            }),
+                        ],
+                    }),
+                    // Create a structured result with all bound values
+                    expr: arc(CoreExpr(CoreData::Struct(
+                        "ExpandedJoinPlan".to_string(),
+                        vec![
+                            arc(Ref("join_key".to_string())),
+                            arc(Ref("predicate".to_string())),
+                            arc(Ref("left_table".to_string())),
+                            arc(Ref("column".to_string())),
+                            arc(Ref("right_table".to_string())),
+                        ],
+                    ))),
+                },
+                // Fallback arm
+                MatchArm {
+                    pattern: Wildcard,
+                    expr: arc(CoreVal(string_val("no_match"))),
+                },
+            ],
+        ));
+
+        // This should also work, because the pattern will cause expansion of the groups
+        let expanded_values = collect_stream_values(expand_children_expr.evaluate(engine));
+
+        // Should get one result with the expanded values
+        assert_eq!(expanded_values.len(), 1);
+
+        // Verify the structure of the result with expanded values
+        if let CoreData::Struct(name, fields) = &expanded_values[0].0 {
+            assert_eq!(name, "ExpandedJoinPlan");
+            assert_eq!(fields.len(), 5);
+
+            // Check that all values were correctly captured after expansion
+            assert!(matches!(&fields[0].0, CoreData::Literal(String(s)) if s == "customer_id"));
+            assert!(matches!(&fields[1].0, CoreData::Literal(Bool(true))));
+            assert!(matches!(&fields[2].0, CoreData::Literal(String(s)) if s == "customers"));
+            assert!(matches!(&fields[3].0, CoreData::Literal(Int64(100))));
+            assert!(matches!(&fields[4].0, CoreData::Literal(String(s)) if s == "orders"));
+        } else {
+            panic!("Expected Struct result, got {:?}", expanded_values[0]);
+        }
     }
 }

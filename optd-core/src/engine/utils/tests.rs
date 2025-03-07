@@ -1,11 +1,12 @@
 use crate::engine::{expander::Expander, utils::streams::ValueStream, Context, Engine};
-use futures::executor::block_on_stream;
+use futures::{executor::block_on_stream, stream, StreamExt};
 use optd_dsl::analyzer::hir::{CoreData, Expr, Goal, GroupId, Literal, Value};
 use std::{self, future::ready, sync::Arc};
 use CoreData::*;
 use Literal::*;
 
-/// A simple mock implementation of the Expander trait for testing
+use super::streams::propagate_success;
+
 #[derive(Clone)]
 pub(crate) struct MockExpander {
     // Function to generate logical expansions for a group ID
@@ -31,17 +32,20 @@ impl MockExpander {
     }
 }
 
+/// A simple mock implementation of the Expander trait for testing
 impl Expander for MockExpander {
-    async fn expand_all_exprs(&self, group_id: GroupId) -> Vec<Value> {
-        ready((self.logical_expander)(group_id)).await
+    fn expand_all_exprs(&self, group_id: GroupId) -> ValueStream {
+        let values = (self.logical_expander)(group_id);
+        stream::iter(values).map(Ok).boxed()
     }
 
-    async fn expand_winning_expr(&self, physical_goal: &Goal) -> Value {
-        ready((self.physical_expander)(physical_goal)).await
+    fn expand_winning_expr(&self, physical_goal: &Goal) -> ValueStream {
+        let value = (self.physical_expander)(physical_goal);
+        propagate_success(value)
     }
 
     async fn expand_properties(&self, group_id: GroupId) -> Value {
-        ready((self.properties_expander)(group_id)).await
+        (self.properties_expander)(group_id)
     }
 }
 
@@ -76,7 +80,7 @@ pub(crate) fn create_basic_mock_expander() -> MockExpander {
     MockExpander::new(
         |_| vec![], // No logical expansions
         |_| panic!("Physical expansion not implemented"),
-        |_| panic!("Properties expansion not implemented"), 
+        |_| panic!("Properties expansion not implemented"),
     )
 }
 
