@@ -17,15 +17,15 @@ use crate::{
 use async_recursion::async_recursion;
 use futures::StreamExt;
 use optd_dsl::analyzer::hir::HIR;
-use std::{char::MAX, sync::Arc};
-use tokio::task::JoinSet;
+use std::{char::MAX, collections::HashMap, sync::Arc};
+use tokio::{sync::oneshot::Sender, task::JoinSet};
 use ExplorationStatus::*;
 
 #[derive(Debug)]
 pub struct Driver<M: Memoize> {
-    memo: M,
-    rule_book: RuleBook,
-    engine: Engine<Arc<Self>>,
+    pub memo: M,
+    pub rule_book: RuleBook,
+    pub engine: Engine<Arc<Self>>,
 }
 
 impl<M: Memoize> Driver<M> {
@@ -42,61 +42,25 @@ impl<M: Memoize> Driver<M> {
         logical_plan: LogicalPlan,
     ) -> Result<Option<PhysicalExpression>, Error> {
         let group_id = ingest_logical_plan(&self.memo, &self.engine, &logical_plan.into()).await?;
-        self.optimize_goal(Goal(group_id, PhysicalProperties(None)))
-            .await
+        let result = self.optimize_goal(Goal(group_id, PhysicalProperties(None)))
+            .await?;
+        todo!()
     }
 
     #[async_recursion]
     async fn optimize_goal(
         self: Arc<Self>,
         goal: Goal,
-    ) -> Result<Option<PhysicalExpression>, Error> {
-
+    ) -> Result<Sender<Option<(Cost, PhysicalExpression)>>, Error> {
+        // 1. Subscribe to the exploration of a group.
+        // 2. Pass all explored expression to the optimize_expression function.
+        // 3. Everytime the optimize_expression function returns a new physical expression,
+        //    update the goal with the new physical expression.
+        //    If the optimize_expression function returns a new goal, then make sure that you are subscribing to the new goal.
+        // 4. If the cost of the physical expression is better than the current best cost,
+        //    update the best cost and the best physical expression.
+        // 5. Publish the new better physical expression.
         
-
-        /*let goal = self
-            .memo
-            .create_or_get_goal(group_id, &required_physical_props)
-            .await?;
-        if self.memo.get_group_exploration_status(group_id).await? == ExplorationStatus::Unexplored
-        {
-            self.memo
-                .update_group_exploration_status(group_id, ExplorationStatus::Exploring)
-                .await?;
-            let ctx = self.clone();
-            // TODO(sarvesh): we should use the result of this exploration instead of calling the memo table
-            ctx.explore_relation_group(group_id).await?;
-        }
-
-        // TODO(sarvesh): we probably should get all logical expressions from the representative group
-        let logical_exprs = self.memo.get_all_logical_exprs_in_group(group_id).await?;
-
-        let mut join_set = JoinSet::new();
-        for (logical_expr_id, logical_expr) in logical_exprs {
-            let ctx = self.clone();
-            let g = goal.clone();
-            let required_physical_props = required_physical_props.clone();
-            join_set.spawn(async move {
-                ctx.optimize_expression(logical_expr, g, group_id, required_physical_props.clone())
-                    .await
-            });
-        }
-
-        let plan_results = join_set
-            .join_all()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>>>()?;
-
-        let mut best_plan = None;
-        for result in plan_results {
-            if result.0 < best_cost {
-                best_cost = result.0;
-                best_plan = result.1;
-            }
-        }
-
-        Ok(best_plan)*/
         todo!()
     }
 
@@ -122,46 +86,20 @@ impl<M: Memoize> Driver<M> {
         // 5. Store the cost & statistics of that optimized expression into the memo (new memo call)
         // 6. Done & profit
 
-        /*let rules = self.rule_book.get_implementations().iter().cloned();
-
-        let mut join_set = JoinSet::new();
-        for rule in rules {
-            let ctx = self.clone();
-            let logical_expr = logical_expr.clone();
-            let req_props = req_props.clone();
-            join_set.spawn(async move {
-                ctx.match_and_apply_implementation_rule(logical_expr, rule, req_props)
-                    .await
-            });
-        }
-
-        let plan_results = join_set
-            .join_all()
-            .await
-            .into_iter()
-            .filter_map(|result| result.ok())
-            .collect::<Vec<_>>();
-
-        let mut best_cost = MAX_COST;
-        let mut best_plan = None;
-        for result in plan_results {
-            if result.0 < best_cost {
-                best_cost = result.0;
-                best_plan = result.1;
-            }
-        }
-
-        Ok((best_cost, best_plan))*/
 
         todo!()
     }
 
     #[async_recursion]
     async fn explore_group(self: Arc<Self>, group_id: GroupId) -> Result<(), Error> {
+        // if the group is already explored, return
+        // if the group is currently being explored, wait for it to finish
+        // if the group is unexplored, set the status to exploring and explore the group
         self.memo
             .set_exploration_status(group_id, Exploring)
             .await?;
 
+        // explore the group by exploring all the logical expressions in the group
         let logical_exprs = self.memo.get_all_logical_exprs(group_id).await?;
 
         let mut res = Vec::new();
@@ -175,6 +113,7 @@ impl<M: Memoize> Driver<M> {
             logical_exprs.extend(result);
         }
 
+        // set the status of the group to explored
         self.memo.set_exploration_status(group_id, Explored).await
     }
 
@@ -183,9 +122,9 @@ impl<M: Memoize> Driver<M> {
         logical_expr: LogicalExpression,
         group_id: GroupId,
     ) -> Result<Vec<LogicalExpression>, Error> {
-        // let rules = vec![];
+        let rules = vec![];
 
-        /*let mut join_set = JoinSet::new();
+        let mut join_set = JoinSet::new();
         for rule in rules {
             // Check if rule is applied, then:
             let ctx = self.clone();
@@ -207,16 +146,16 @@ impl<M: Memoize> Driver<M> {
             logical_exprs.extend(result);
         }
 
-        Ok(logical_exprs)*/
+        Ok(logical_exprs)
         todo!()
     }
-    /*
+
     pub async fn match_and_apply_transformation_rule(
         self: Arc<Self>,
         logical_expr: LogicalExpression,
         rule: TransformationRule,
         group_id: GroupId,
-    ) -> Result<Vec<(LogicalExpression, LogicalExpressionId)>> {
+    ) -> Result<Vec<LogicalExpression >, Error> {
         let partial_logical_input = logical_expr.into();
 
         let mut partial_logical_outputs = self
@@ -230,17 +169,17 @@ impl<M: Memoize> Driver<M> {
             match partial_logical_output {
                 Ok(partial_plan) => {
                     let new_group_id = match partial_plan {
-                        PartialLogicalPlan::PartialMaterialized { node } => {
-                            let (stored_logical_expr, logical_expr_id, new_group_id) =
-                                ingest_logical_operator(&self.memo, &node).await?;
-                            logical_exprs_with_id.push((stored_logical_expr, logical_expr_id));
+                        PartialLogicalPlan::Materialized(node) => {
+                            let (stored_logical_expr, new_group_id) =
+                                ingest_logical_operator(&self.memo, &self.engine, &node).await?;
+                            logical_exprs_with_id.push((stored_logical_expr));
                             new_group_id
                         }
                         PartialLogicalPlan::UnMaterialized(new_group_id) => new_group_id,
                     };
                     if new_group_id != group_id {
                         self.memo
-                            .merge_relation_group(group_id, new_group_id)
+                            .merge_groups(group_id, new_group_id)
                             .await?;
                     }
                 }
@@ -253,6 +192,7 @@ impl<M: Memoize> Driver<M> {
 
         Ok(logical_exprs_with_id)
     }
+    /* 
 
     pub async fn match_and_apply_implementation_rule(
         self: &Arc<Self>,
