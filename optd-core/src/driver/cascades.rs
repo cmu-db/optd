@@ -139,14 +139,14 @@ impl<M: Memoize> Driver<M> {
             .join_all()
             .await
             .into_iter()
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>,Error>>()?;
 
         let mut logical_exprs = Vec::new();
         for result in results {
             logical_exprs.extend(result);
         }
 
-        Ok(logical_exprs)
+        //Ok(logical_exprs);
         todo!()
     }
 
@@ -156,7 +156,7 @@ impl<M: Memoize> Driver<M> {
         rule: TransformationRule,
         group_id: GroupId,
     ) -> Result<Vec<LogicalExpression >, Error> {
-        let partial_logical_input = logical_expr.into();
+        let partial_logical_input = todo!();
 
         let mut partial_logical_outputs = self
             .engine

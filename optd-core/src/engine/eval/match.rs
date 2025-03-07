@@ -1,5 +1,9 @@
 use super::{Engine, Evaluate, Expander};
-use crate::{capture, engine::utils::streams::ValueStream};
+use crate::error::Error;
+use crate::{
+    capture,
+    engine::utils::streams::{propagate_success, stream_from_result, ValueStream},
+};
 use futures::{stream, Stream, StreamExt};
 use optd_dsl::analyzer::{
     context::Context,
@@ -17,8 +21,8 @@ use Pattern::*;
 /// None means the match failed, Some(context) means it succeeded
 type MatchResult = (Value, Option<Context>);
 
-/// Type alias for a stream of match results
-type MatchResultStream = Pin<Box<dyn Stream<Item = MatchResult> + Send>>;
+/// Type alias for a stream of result-wrapped match results
+type MatchResultStream = Pin<Box<dyn Stream<Item = Result<MatchResult, Error>> + Send>>;
 
 /// Tries to match a value against a sequence of match arms.
 ///
@@ -34,7 +38,7 @@ where
 {
     if match_arms.is_empty() {
         // No arms matched - this is a runtime error
-        panic!("Pattern match exhausted: no pattern matched the value");
+        panic!("Pattern match exhausted: no patterns provided");
     }
 
     // Start by attempting to match against the first arm
@@ -43,54 +47,59 @@ where
 
     // Match the value against the arm's pattern
     match_pattern(value.clone(), first_arm.pattern.clone(), engine.clone())
-        .flat_map(move |(value, context_opt)| {
-            match context_opt {
-                // If we got a match, evaluate the arm's expression with the context
-                Some(context) => {
-                    let engine_with_ctx = engine.clone().with_context(context);
-                    first_arm.expr.clone().evaluate(engine_with_ctx)
-                }
-                // If no match, try the next arm with this value
-                None => {
-                    if remaining_arms.is_empty() {
-                        // No more arms to try - this is a runtime error
-                        panic!("Pattern match exhausted: no pattern matched the value");
+        .flat_map(move |match_result| {
+            stream_from_result(
+                match_result,
+                capture!(
+                    [engine, first_arm, remaining_arms, value],
+                    move |(value, context_opt)| {
+                        match context_opt {
+                            // If we got a match, evaluate the arm's expression with the context
+                            Some(context) => {
+                                let engine_with_ctx = engine.clone().with_context(context);
+                                first_arm.expr.clone().evaluate(engine_with_ctx)
+                            }
+                            // If no match, try the next arm with this value
+                            None => try_match_arms(value, remaining_arms.clone(), engine),
+                        }
                     }
-                    try_match_arms(value, remaining_arms.clone(), engine.clone())
-                }
-            }
+                ),
+            )
         })
         .boxed()
 }
 
 /// Attempts to match a value against a pattern.
 ///
-/// Returns a stream of (Value, Option<Context>) pairs:
-/// - For successful matches: (Value, Some(Context))
-/// - For failed matches: (Value, None)
+/// Returns a stream of Result<(Value, Option<Context>), Error> pairs:
+/// - For successful matches: Ok((Value, Some(Context)))
+/// - For failed matches: Ok((Value, None))
+/// - For errors: Err(Error)
 fn match_pattern<E>(value: Value, pattern: Pattern, engine: Engine<E>) -> MatchResultStream
 where
     E: Expander,
 {
     match (pattern, &value.0) {
         // Wildcard pattern matches anything
-        (Wildcard, _) => stream::once(async move { (value, Some(engine.context.clone())) }).boxed(),
+        (Wildcard, _) => propagate_success((value, Some(engine.context.clone()))),
 
         // Binding pattern: bind the value to the identifier and continue matching
         (Bind(ident, inner_pattern), _) => {
             // First check if the inner pattern matches without binding
             match_pattern(value.clone(), *inner_pattern, engine.clone())
-                .map(move |(matched_value, ctx_opt)| {
-                    // Only bind if the inner pattern matched
-                    if let Some(ctx) = ctx_opt {
-                        // Create a new context with the binding
-                        let mut new_ctx = ctx.clone();
-                        new_ctx.bind(ident.clone(), matched_value.clone());
-                        (matched_value, Some(new_ctx))
-                    } else {
-                        // Inner pattern didn't match, propagate failure
-                        (matched_value, None)
-                    }
+                .map(move |result| {
+                    result.map(|(matched_value, ctx_opt)| {
+                        // Only bind if the inner pattern matched
+                        if let Some(ctx) = ctx_opt {
+                            // Create a new context with the binding
+                            let mut new_ctx = ctx.clone();
+                            new_ctx.bind(ident.clone(), matched_value.clone());
+                            (matched_value, Some(new_ctx))
+                        } else {
+                            // Inner pattern didn't match, propagate failure
+                            (matched_value, None)
+                        }
+                    })
                 })
                 .boxed()
         }
@@ -102,7 +111,7 @@ where
 
         // Empty array pattern
         (EmptyArray, CoreData::Array(arr)) if arr.is_empty() => {
-            stream::once(async move { (value, Some(engine.context.clone())) }).boxed()
+            propagate_success((value, Some(engine.context.clone())))
         }
 
         // List decomposition pattern: match first element and rest of the array
@@ -113,7 +122,7 @@ where
         // Struct pattern: match name and recursively match fields
         (Struct(pat_name, field_patterns), CoreData::Struct(val_name, field_values)) => {
             if pat_name != *val_name || field_patterns.len() != field_values.len() {
-                return stream::once(async move { (value, None) }).boxed();
+                return propagate_success((value, None));
             }
 
             match_struct_pattern(value.clone(), &field_patterns, field_values, engine)
@@ -125,7 +134,7 @@ where
             match_against_expanded_values(&op_pattern, expanded_values, engine)
         }
         (Operator(op_pattern), CoreData::Physical(PhysicalOp(UnMaterialized(physical_goal)))) => {
-            let expanded_values = engine.expander.expand_winning_expr(physical_goal);
+            let expanded_values = engine.expander.expand_winning_expr(&physical_goal);
             match_against_expanded_values(&op_pattern, expanded_values, engine)
         }
 
@@ -138,7 +147,7 @@ where
         }
 
         // No match for other combinations
-        _ => stream::once(async move { (value, None) }).boxed(),
+        _ => propagate_success((value, None)),
     }
 }
 
@@ -158,7 +167,7 @@ fn match_literals(
         _ => None,
     };
 
-    stream::once(async move { (value, result) }).boxed()
+    propagate_success((value, result))
 }
 
 /// Helper function to match array decomposition patterns
@@ -173,7 +182,7 @@ where
     E: Expander,
 {
     if arr.is_empty() {
-        return stream::once(async move { (original_value, None) }).boxed();
+        return propagate_success((original_value, None));
     }
 
     // Split array into head and tail
@@ -184,28 +193,42 @@ where
 
     // Match head against head pattern
     match_pattern(head, head_pattern, engine.clone())
-        .flat_map(capture!([original_value], move |(_, head_ctx_opt)| {
-            match head_ctx_opt {
-                Some(head_ctx) => {
-                    // Head matched, now try to match tail
-                    let engine_with_head_ctx = engine.clone().with_context(head_ctx);
-                    match_pattern(tail.clone(), tail_pattern.clone(), engine_with_head_ctx)
-                        .map(capture!([original_value], move |(_, tail_ctx_opt)| {
-                            // Return original value with tail match result
-                            (original_value.clone(), tail_ctx_opt)
-                        }))
-                        .boxed()
-                }
-                None => {
-                    // Head didn't match, so array decomposition fails
-                    stream::once({
-                        let value = original_value.clone();
-                        async move { (value.clone(), None) }
-                    })
-                    .boxed()
-                }
+        .flat_map(capture!(
+            [original_value, tail_pattern, engine],
+            move |head_result| {
+                stream_from_result(
+                    head_result,
+                    capture!(
+                        [original_value, tail_pattern, engine, tail],
+                        move |(_, head_ctx_opt)| {
+                            match head_ctx_opt {
+                                Some(head_ctx) => {
+                                    // Head matched, now try to match tail
+                                    let engine_with_head_ctx =
+                                        engine.clone().with_context(head_ctx);
+                                    match_pattern(
+                                        tail.clone(),
+                                        tail_pattern.clone(),
+                                        engine_with_head_ctx,
+                                    )
+                                    .map(capture!([original_value], move |tail_result| {
+                                        tail_result.map(|(_, tail_ctx_opt)| {
+                                            // Return original value with tail match result
+                                            (original_value.clone(), tail_ctx_opt)
+                                        })
+                                    }))
+                                    .boxed()
+                                }
+                                None => {
+                                    // Head didn't match, so array decomposition fails
+                                    propagate_success((original_value.clone(), None))
+                                }
+                            }
+                        }
+                    ),
+                )
             }
-        }))
+        ))
         .boxed()
 }
 
@@ -227,65 +250,40 @@ where
         .collect();
 
     // Start with a stream containing the original context
-    let initial_stream = stream::once(capture!([engine], async move {
-        (original_value.clone(), Some(engine.context))
-    }))
-    .boxed();
+    let initial_stream = propagate_success((original_value.clone(), Some(engine.context.clone())));
 
     // For each field pair, extend the context if match succeeds
     pattern_value_pairs
         .into_iter()
         .fold(initial_stream, |acc_stream, (pattern, value)| {
             acc_stream
-                .flat_map(capture!([engine], move |(original, ctx_opt)| {
-                    match ctx_opt {
-                        Some(ctx) => {
-                            // If we have a context, try matching the next field
-                            let engine_with_ctx = engine.clone().with_context(ctx);
-                            match_pattern(value.clone(), pattern.clone(), engine_with_ctx)
-                                .map(move |(original, field_ctx_opt)| {
-                                    // Keep original value but with new context result
-                                    (original, field_ctx_opt)
-                                })
-                                .boxed()
-                        }
-                        None => {
-                            // If previous match failed, no need to try further fields
-                            stream::once(async move { (original, None) }).boxed()
-                        }
-                    }
+                .flat_map(capture!([engine], move |acc_result| {
+                    stream_from_result(
+                        acc_result,
+                        capture!([engine, pattern, value], move |(original, ctx_opt)| {
+                            match ctx_opt {
+                                Some(ctx) => {
+                                    // If we have a context, try matching the next field
+                                    let engine_with_ctx = engine.clone().with_context(ctx);
+                                    match_pattern(value.clone(), pattern.clone(), engine_with_ctx)
+                                        .map(move |field_result| {
+                                            field_result.map(|(_, field_ctx_opt)| {
+                                                // Keep original value but with new context result
+                                                (original.clone(), field_ctx_opt)
+                                            })
+                                        })
+                                        .boxed()
+                                }
+                                None => {
+                                    // If previous match failed, no need to try further fields
+                                    propagate_success((original, None))
+                                }
+                            }
+                        }),
+                    )
                 }))
                 .boxed()
         })
-}
-
-/// Helper function to match a pattern against a stream of expanded values
-fn match_against_expanded_values<E>(
-    op_pattern: &Operator<Pattern>,
-    expanded_values: ValueStream,
-    engine: Engine<E>,
-) -> MatchResultStream
-where
-    E: Expander,
-{
-    let op_pattern = op_pattern.clone();
-
-    expanded_values
-        .filter_map(move |expanded_value_result| {
-            let op_pattern_clone = op_pattern.clone();
-            let engine_clone = engine.clone();
-
-            async move {
-                match expanded_value_result {
-                    Ok(expanded_value) => Some((expanded_value, op_pattern_clone, engine_clone)),
-                    Err(_) => None,
-                }
-            }
-        })
-        .flat_map(move |(expanded_value, op_pattern_clone, engine_clone)| {
-            match_pattern(expanded_value, Operator(op_pattern_clone), engine_clone)
-        })
-        .boxed()
 }
 
 /// Matches a pattern against a materialized operator.
@@ -306,7 +304,7 @@ where
         || op_pattern.data.len() != op.data.len()
         || op_pattern.children.len() != op.children.len()
     {
-        return stream::once(async move { (original_value, None) }).boxed();
+        return propagate_success((original_value, None));
     }
 
     // Create pairs for data and children
@@ -325,10 +323,7 @@ where
         .collect();
 
     // Start with a stream containing the original context
-    let initial_stream = stream::once(capture!([engine], async move {
-        (original_value.clone(), Some(engine.context.clone()))
-    }))
-    .boxed();
+    let initial_stream = propagate_success((original_value.clone(), Some(engine.context.clone())));
 
     // First match all data components
     let after_data_stream =
@@ -336,23 +331,34 @@ where
             .into_iter()
             .fold(initial_stream, |acc_stream, (pattern, value)| {
                 acc_stream
-                    .flat_map(capture!([engine], move |(original, ctx_opt)| {
-                        match ctx_opt {
-                            Some(ctx) => {
-                                // If we have a context, try matching the next component
-                                let engine_with_ctx = engine.clone().with_context(ctx);
-                                match_pattern(value.clone(), pattern.clone(), engine_with_ctx)
-                                    .map(move |(_, comp_ctx_opt)| {
-                                        // Keep original value but with new context result
-                                        (original.clone(), comp_ctx_opt)
-                                    })
-                                    .boxed()
-                            }
-                            None => {
-                                // If previous match failed, no need to try further components
-                                stream::once(async move { (original, None) }).boxed()
-                            }
-                        }
+                    .flat_map(capture!([engine], move |acc_result| {
+                        stream_from_result(
+                            acc_result,
+                            capture!([engine, pattern, value], move |(original, ctx_opt)| {
+                                match ctx_opt {
+                                    Some(ctx) => {
+                                        // If we have a context, try matching the next component
+                                        let engine_with_ctx = engine.clone().with_context(ctx);
+                                        match_pattern(
+                                            value.clone(),
+                                            pattern.clone(),
+                                            engine_with_ctx,
+                                        )
+                                        .map(move |comp_result| {
+                                            comp_result.map(|(_, comp_ctx_opt)| {
+                                                // Keep original value but with new context result
+                                                (original.clone(), comp_ctx_opt)
+                                            })
+                                        })
+                                        .boxed()
+                                    }
+                                    None => {
+                                        // If previous match failed, no need to try further components
+                                        propagate_success((original, None))
+                                    }
+                                }
+                            }),
+                        )
                     }))
                     .boxed()
             });
@@ -362,24 +368,55 @@ where
         .into_iter()
         .fold(after_data_stream, |acc_stream, (pattern, value)| {
             acc_stream
-                .flat_map(capture!([engine], move |(original, ctx_opt)| {
-                    match ctx_opt {
-                        Some(ctx) => {
-                            // If we have a context, try matching the next child
-                            let engine_with_ctx = engine.clone().with_context(ctx);
-                            match_pattern(value.clone(), pattern.clone(), engine_with_ctx)
-                                .map(move |(_, child_ctx_opt)| {
-                                    // Keep original value but with new context result
-                                    (original.clone(), child_ctx_opt)
-                                })
-                                .boxed()
-                        }
-                        None => {
-                            // If previous match failed, no need to try further children
-                            stream::once(async move { (original, None) }).boxed()
-                        }
-                    }
+                .flat_map(capture!([engine], move |acc_result| {
+                    stream_from_result(
+                        acc_result,
+                        capture!([engine, pattern, value], move |(original, ctx_opt)| {
+                            match ctx_opt {
+                                Some(ctx) => {
+                                    // If we have a context, try matching the next child
+                                    let engine_with_ctx = engine.clone().with_context(ctx);
+                                    match_pattern(value.clone(), pattern.clone(), engine_with_ctx)
+                                        .map(move |child_result| {
+                                            child_result.map(|(_, child_ctx_opt)| {
+                                                // Keep original value but with new context result
+                                                (original.clone(), child_ctx_opt)
+                                            })
+                                        })
+                                        .boxed()
+                                }
+                                None => {
+                                    // If previous match failed, no need to try further children
+                                    propagate_success((original, None))
+                                }
+                            }
+                        }),
+                    )
                 }))
                 .boxed()
         })
+}
+
+/// Helper function to match a pattern against a stream of expanded values
+fn match_against_expanded_values<E, S>(
+    op_pattern: &Operator<Pattern>,
+    expanded_values: S,
+    engine: Engine<E>,
+) -> MatchResultStream
+where
+    E: Expander,
+    S: Stream<Item = Result<Value, Error>> + Send + 'static,
+{
+    let op_pattern = op_pattern.clone();
+
+    expanded_values
+        .flat_map(move |expanded_value_result| {
+            stream_from_result(
+                expanded_value_result,
+                capture!([op_pattern, engine], move |expanded_value| {
+                    match_pattern(expanded_value, Operator(op_pattern.clone()), engine.clone())
+                }),
+            )
+        })
+        .boxed()
 }
