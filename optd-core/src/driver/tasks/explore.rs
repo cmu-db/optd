@@ -67,7 +67,7 @@ impl<M: Memoize> ExploreGroupTask<M> {
                 subscriber.send(Some(logical_expr.clone()));
             }
         }
-        // Launch explore logical expression task for each expression
+        // TODO: spawn logical expression exploration tasks
         // TODO(sarvesh): The arc mutex is not technically needed here because explore_group is called only once in the new function.
         let mut consumer = self.consumer.lock().await;
         while let Some(logical_expr) = consumer.recv().await {
@@ -76,5 +76,10 @@ impl<M: Memoize> ExploreGroupTask<M> {
             }
         }
         Ok(())
+    }
+
+    // The logical expression tasks will call this function to get a producer to send logical expressions to the explore group
+    pub async fn publish_to_explore_group(self: Arc<Self>) -> Result<Sender<Option<LogicalExpression>>, Error> {
+        Ok(self.producer.clone())
     }
 }
