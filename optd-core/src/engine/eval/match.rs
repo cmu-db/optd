@@ -120,10 +120,12 @@ where
 
         // Unmaterialized operators
         (Operator(op_pattern), CoreData::Logical(LogicalOp(UnMaterialized(group_id)))) => {
-            match_unmaterialized_group(&op_pattern, *group_id, engine)
+            let expanded_values = engine.expander.expand_all_exprs(*group_id);
+            match_against_expanded_values(&op_pattern, expanded_values, engine)
         }
         (Operator(op_pattern), CoreData::Physical(PhysicalOp(UnMaterialized(physical_goal)))) => {
-            match_unmaterialized_physical(&op_pattern, &physical_goal.clone(), engine)
+            let expanded_values = engine.expander.expand_winning_expr(physical_goal);
+            match_against_expanded_values(&op_pattern, expanded_values, engine)
         }
 
         // Materialized operators
@@ -181,17 +183,12 @@ where
 
     // Match head against head pattern
     match_pattern(head, head_pattern, engine.clone())
-        .flat_map(capture!([original_value], move |(_, head_ctx_opt)| {
+        .flat_map(move |(_, head_ctx_opt)| {
             match head_ctx_opt {
                 Some(head_ctx) => {
                     // Head matched, now try to match tail
                     let engine_with_head_ctx = engine.clone().with_context(head_ctx);
                     match_pattern(tail.clone(), tail_pattern.clone(), engine_with_head_ctx)
-                        .map(capture!([original_value], move |(_, tail_ctx_opt)| {
-                            // Return original value with tail match result
-                            (original_value.clone(), tail_ctx_opt)
-                        }))
-                        .boxed()
                 }
                 None => {
                     // Head didn't match, so array decomposition fails
@@ -202,7 +199,7 @@ where
                     .boxed()
                 }
             }
-        }))
+        })
         .boxed()
 }
 
@@ -225,7 +222,7 @@ where
 
     // Start with a stream containing the original context
     let initial_stream = stream::once(capture!([engine], async move {
-        (original_value.clone(), Some(engine.context))
+        (original_value, Some(engine.context))
     }))
     .boxed();
 
@@ -240,11 +237,6 @@ where
                             // If we have a context, try matching the next field
                             let engine_with_ctx = engine.clone().with_context(ctx);
                             match_pattern(value.clone(), pattern.clone(), engine_with_ctx)
-                                .map(move |(original, field_ctx_opt)| {
-                                    // Keep original value but with new context result
-                                    (original, field_ctx_opt)
-                                })
-                                .boxed()
                         }
                         None => {
                             // If previous match failed, no need to try further fields
@@ -254,32 +246,6 @@ where
                 }))
                 .boxed()
         })
-}
-
-/// Helper function to match unmaterialized logical groups
-fn match_unmaterialized_group<E>(
-    op_pattern: &Operator<Pattern>,
-    group_id: GroupId,
-    engine: Engine<E>,
-) -> MatchResultStream
-where
-    E: Expander,
-{
-    let expanded_values = engine.expander.expand_all_exprs(group_id);
-    match_against_expanded_values(op_pattern, expanded_values, engine)
-}
-
-/// Helper function to match unmaterialized physical goals
-fn match_unmaterialized_physical<E>(
-    op_pattern: &Operator<Pattern>,
-    physical_goal: &Goal,
-    engine: Engine<E>,
-) -> MatchResultStream
-where
-    E: Expander,
-{
-    let expanded_values = engine.expander.expand_winning_expr(physical_goal);
-    match_against_expanded_values(op_pattern, expanded_values, engine)
 }
 
 /// Helper function to match a pattern against a stream of expanded values
@@ -306,12 +272,7 @@ where
             }
         })
         .flat_map(move |(expanded_value, op_pattern_clone, engine_clone)| {
-            match_pattern(expanded_value, Operator(op_pattern_clone), engine_clone).map(
-                move |(value, ctx_opt)| {
-                    // Return original value with the context from matching the expanded value
-                    (value, ctx_opt)
-                },
-            )
+            match_pattern(expanded_value, Operator(op_pattern_clone), engine_clone)
         })
         .boxed()
 }
