@@ -4,8 +4,8 @@ use crate::{
     error::Error,
     ir::{
         expressions::{LogicalExpression, PhysicalExpression},
-        goal::{Goal, OptimizationStatus},
-        group::{Cost, ExplorationStatus, GroupId},
+        goal::{Cost, Goal},
+        group::GroupId,
         properties::LogicalProperties,
     },
 };

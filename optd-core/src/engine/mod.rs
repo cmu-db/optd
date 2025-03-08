@@ -82,7 +82,7 @@ impl<E: Expander> Engine<E> {
     ///
     /// # Returns
     /// A stream of possible transformed logical plans
-    pub(crate) async fn match_and_apply_logical_rule(
+    pub(crate) fn match_and_apply_logical_rule(
         self,
         rule_name: &str,
         plan: &PartialLogicalPlan,
@@ -107,11 +107,11 @@ impl<E: Expander> Engine<E> {
     ///
     /// # Returns
     /// A stream of possible physical plan implementations
-    pub(crate) async fn match_and_apply_implementation_rule(
+    pub(crate) fn match_and_apply_implementation_rule(
         self,
         rule_name: &str,
         plan: &PartialLogicalPlan,
-        props: Arc<PhysicalProperties>,
+        props: &PhysicalProperties,
     ) -> PartialPhysicalPlanStream {
         let plan_value = partial_logical_to_value(plan);
         let props_value = physical_properties_to_value(&props);

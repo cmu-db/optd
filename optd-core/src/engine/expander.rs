@@ -9,9 +9,15 @@
 //! expansion operations on logical groups, scalar groups, and physical goals.
 //! It also provides access to logical properties of groups, which is essential
 //! for cost-based optimization decisions.
-
-use super::utils::streams::ValueStream;
-use crate::driver::{cascades::Driver, memo::Memoize};
+use super::{
+    bridge::from::{self, partial_logical_to_value},
+    utils::streams::ValueStream,
+};
+use crate::{
+    driver::{cascades::Driver, memo::Memoize},
+    ir,
+};
+use futures::{channel::mpsc, StreamExt};
 use optd_dsl::analyzer::hir::{Goal, GroupId, Value};
 use std::sync::Arc;
 
@@ -74,7 +80,42 @@ pub(crate) trait Expander: Clone + Send + Sync + 'static {
 /// 3. Access the logical properties of a group.
 impl<M: Memoize> Expander for Arc<Driver<M>> {
     fn expand_all_exprs(&self, group_id: GroupId) -> ValueStream {
-        todo!()
+        let group_id = ir::group::GroupId(group_id.0);
+        let (sender, receiver) = mpsc::unbounded();
+
+        let driver = self.clone();
+
+        tokio::spawn(async move {
+            // Acquire the lock and keep it throughout the entire operation
+            // TODO: Probably have a global lock, also what to do with fail unwrap?
+            let mut subscribers = driver.group_subscribers.lock().await;
+
+            // Add sender to subscribers map first
+            if let Some(senders) = subscribers.get_mut(&group_id) {
+                senders.push(sender.clone());
+            } else {
+                subscribers.insert(group_id, vec![sender.clone()]);
+            }
+
+            // Fetch expressions while still holding the lock
+            driver
+                .memo
+                .get_all_logical_exprs(group_id)
+                .await
+                .map(|exprs| {
+                    // Process expressions
+                    exprs.into_iter().for_each(|expr| {
+                        if let Err(e) = sender.unbounded_send(expr) {
+                            eprintln!("Failed to send expression: {:?}", e);
+                        }
+                    });
+                })
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to get logical expressions: {:?}", e);
+                });
+        });
+
+        Box::pin(receiver.map(|result| Ok(partial_logical_to_value(&result.into()))))
     }
 
     fn expand_winning_expr(&self, physical_goal: &Goal) -> ValueStream {

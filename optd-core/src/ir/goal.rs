@@ -9,18 +9,6 @@ use super::{group::GroupId, properties::PhysicalProperties};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Goal(pub GroupId, pub PhysicalProperties);
 
-/// Represents the current optimization status of a goal in the memo.
-///
-/// During cost-based optimization, goals go through different stages as the
-/// optimizer searches for the lowest-cost implementation that satisfies
-/// the required physical properties.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum OptimizationStatus {
-    /// Goal has not yet been processed by the optimizer
-    Unoptimized,
-    /// Goal is currently being processed by the optimizer
-    /// (used to detect and prevent optimization cycles)
-    Pending,
-    /// Goal has been fully optimized and the best implementation has been found
-    Optimized,
-}
+/// Represents the cost of a goal / optimized expression in the memo.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Cost(f64);
