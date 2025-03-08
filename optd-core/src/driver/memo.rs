@@ -2,7 +2,7 @@ use std::future::Future;
 
 use crate::{
     error::Error,
-    ir::{
+    cir::{
         expressions::{LogicalExpression, PhysicalExpression},
         goal::{Cost, Goal},
         group::GroupId,

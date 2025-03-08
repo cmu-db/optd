@@ -3,7 +3,7 @@ use crate::{
     capture,
     engine::{expander::Expander, Engine},
     error::Error,
-    ir::{
+    cir::{
         expressions::{LogicalExpression, PhysicalExpression},
         goal::Goal,
         group::GroupId,

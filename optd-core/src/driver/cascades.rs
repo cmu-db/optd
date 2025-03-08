@@ -3,8 +3,8 @@ use crate::{
     capture,
     engine::Engine,
     error::Error,
-    ir::{
-        expressions::LogicalExpression,
+    cir::{
+        expressions::{LogicalExpression, PhysicalExpression},
         goal::Goal,
         group::GroupId,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan},
@@ -44,7 +44,7 @@ impl<M: Memoize> Driver<M> {
         // TODO: Use the HIR to initialize the rule book
         let rule_book = RuleBook::default();
         let (task_sender, task_receiver) = mpsc::unbounded();
-        
+
         // TODO: Launch a task that polls task receiver, and dispatches the results to subscribers
 
         Arc::new_cyclic(|this| Self {
@@ -55,6 +55,19 @@ impl<M: Memoize> Driver<M> {
             task_receiver,
             group_subscribers: Mutex::new(HashMap::new()),
         })
+    }
+
+    pub(crate) fn subscribe_to_group(
+        &self,
+        group_id: GroupId,
+    ) -> UnboundedReceiver<LogicalExpression> {
+        // TODO: Add the sender to the list of subscribers for the group
+        todo!()
+    }
+
+    pub(crate) fn subscribe_to_goal(&self, goal: Goal) -> UnboundedReceiver<PhysicalExpression> {
+        // TODO: Add the sender to the list of subscribers for the goal
+        todo!()
     }
 
     pub(crate) async fn optimize(self: Arc<Self>, logical_plan: LogicalPlan) -> Result<(), Error> {

@@ -6,14 +6,14 @@
 
 use crate::{
     error::Error,
-    ir::{
+    cir::{
         plans::PartialLogicalPlan,
         properties::{LogicalProperties, PhysicalProperties},
     },
 };
 use bridge::{
-    from::{partial_logical_to_value, physical_properties_to_value},
-    into::{value_to_logical_properties, value_to_partial_logical, value_to_partial_physical},
+    from_cir::{partial_logical_to_value, physical_properties_to_value},
+    into_cir::{value_to_logical_properties, value_to_partial_logical, value_to_partial_physical},
 };
 use error::EngineError;
 use eval::Evaluate;

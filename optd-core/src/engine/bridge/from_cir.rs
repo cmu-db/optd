@@ -1,4 +1,4 @@
-use crate::ir::{
+use crate::cir::{
     operators::{Child, OperatorData},
     plans::PartialLogicalPlan,
     properties::{PhysicalProperties, PropertiesData},
