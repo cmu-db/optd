@@ -42,7 +42,8 @@ impl<M: Memoize> Driver<M> {
         logical_plan: LogicalPlan,
     ) -> Result<Option<PhysicalExpression>, Error> {
         let group_id = ingest_logical_plan(&self.memo, &self.engine, &logical_plan.into()).await?;
-        let result = self.optimize_goal(Goal(group_id, PhysicalProperties(None)))
+        let result = self
+            .optimize_goal(Goal(group_id, PhysicalProperties(None)))
             .await?;
         todo!()
     }
@@ -60,7 +61,7 @@ impl<M: Memoize> Driver<M> {
         // 4. If the cost of the physical expression is better than the current best cost,
         //    update the best cost and the best physical expression.
         // 5. Publish the new better physical expression.
-        
+
         todo!()
     }
 
@@ -85,7 +86,6 @@ impl<M: Memoize> Driver<M> {
         // 4. Call a "cost" (new) function to the engine, passing the optimized partial physical plan as input
         // 5. Store the cost & statistics of that optimized expression into the memo (new memo call)
         // 6. Done & profit
-
 
         todo!()
     }
@@ -139,7 +139,7 @@ impl<M: Memoize> Driver<M> {
             .join_all()
             .await
             .into_iter()
-            .collect::<Result<Vec<_>,Error>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
 
         let mut logical_exprs = Vec::new();
         for result in results {
@@ -155,7 +155,7 @@ impl<M: Memoize> Driver<M> {
         logical_expr: LogicalExpression,
         rule: TransformationRule,
         group_id: GroupId,
-    ) -> Result<Vec<LogicalExpression >, Error> {
+    ) -> Result<Vec<LogicalExpression>, Error> {
         let partial_logical_input = todo!();
 
         let mut partial_logical_outputs = self
@@ -178,9 +178,7 @@ impl<M: Memoize> Driver<M> {
                         PartialLogicalPlan::UnMaterialized(new_group_id) => new_group_id,
                     };
                     if new_group_id != group_id {
-                        self.memo
-                            .merge_groups(group_id, new_group_id)
-                            .await?;
+                        self.memo.merge_groups(group_id, new_group_id).await?;
                     }
                 }
                 Err(e) => {
@@ -192,7 +190,7 @@ impl<M: Memoize> Driver<M> {
 
         Ok(logical_exprs_with_id)
     }
-    /* 
+    /*
 
     pub async fn match_and_apply_implementation_rule(
         self: &Arc<Self>,

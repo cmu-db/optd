@@ -79,7 +79,9 @@ impl<M: Memoize> ExploreGroupTask<M> {
     }
 
     // The logical expression tasks will call this function to get a producer to send logical expressions to the explore group
-    pub async fn publish_to_explore_group(self: Arc<Self>) -> Result<Sender<Option<LogicalExpression>>, Error> {
+    pub async fn publish_to_explore_group(
+        self: Arc<Self>,
+    ) -> Result<Sender<Option<LogicalExpression>>, Error> {
         Ok(self.producer.clone())
     }
 }

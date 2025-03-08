@@ -5,6 +5,9 @@
 //! wildcards, bindings, structs, arrays, and operators, with special handling for operators.
 
 use super::{Engine, Evaluate, Expander};
+use crate::engine::utils::streams::{
+    process_items_in_sequence, MatchResultStream, VecMatchResultStream,
+};
 use crate::error::Error;
 use crate::{
     capture,
@@ -15,16 +18,12 @@ use optd_dsl::analyzer::{
     context::Context,
     hir::{CoreData, LogicalOp, MatchArm, Materializable, Operator, Pattern, PhysicalOp, Value},
 };
-use std::pin::Pin;
 use Materializable::*;
 use Pattern::*;
 
 /// Type representing a match result: a value and an optional context
 /// None means the match failed, Some(context) means it succeeded
-type MatchResult = (Value, Option<Context>);
-
-/// Type alias for a stream of result-wrapped match results
-type MatchResultStream = Pin<Box<dyn Stream<Item = Result<MatchResult, Error>> + Send>>;
+pub(crate) type MatchResult = (Value, Option<Context>);
 
 /// Tries to match a value against a sequence of match arms.
 ///
@@ -108,7 +107,7 @@ where
 
         // Literal pattern: match if literals are equal
         (Literal(pattern_lit), CoreData::Literal(value_lit)) => {
-            let context_opt = (pattern_lit == *value_lit).then(|| engine.context);
+            let context_opt = (pattern_lit == *value_lit).then_some(engine.context);
             propagate_success((value, context_opt))
         }
 
@@ -123,7 +122,7 @@ where
                 return propagate_success((value, None));
             }
 
-            match_array_decomposition(*head_pattern, *tail_pattern, arr, engine)
+            match_array_pattern(*head_pattern, *tail_pattern, arr, engine)
         }
 
         // Struct pattern: match name and recursively match fields
@@ -132,17 +131,7 @@ where
                 return propagate_success((value, None));
             }
 
-            match_struct_pattern(value.clone(), &field_patterns, field_values, engine)
-        }
-
-        // Unmaterialized operators
-        (Operator(op_pattern), CoreData::Logical(LogicalOp(UnMaterialized(group_id)))) => {
-            let expanded_values = engine.expander.expand_all_exprs(*group_id);
-            match_against_expanded_values(&op_pattern, expanded_values, engine)
-        }
-        (Operator(op_pattern), CoreData::Physical(PhysicalOp(UnMaterialized(physical_goal)))) => {
-            let expanded_values = engine.expander.expand_winning_expr(&physical_goal);
-            match_against_expanded_values(&op_pattern, expanded_values, engine)
+            match_struct_pattern(pat_name, &field_patterns, field_values, engine)
         }
 
         // Materialized operators
@@ -153,13 +142,38 @@ where
             match_operator_pattern(value.clone(), &op_pattern, operator, engine)
         }
 
+        // Unmaterialized operators
+        (Operator(op_pattern), CoreData::Logical(LogicalOp(UnMaterialized(group_id)))) => {
+            let expanded_values = engine.expander.expand_all_exprs(*group_id);
+            match_against_expanded_values(op_pattern, expanded_values, engine)
+        }
+        (Operator(op_pattern), CoreData::Physical(PhysicalOp(UnMaterialized(physical_goal)))) => {
+            let expanded_values = engine.expander.expand_winning_expr(physical_goal);
+            match_against_expanded_values(op_pattern, expanded_values, engine)
+        }
+
         // No match for other combinations
         _ => propagate_success((value, None)),
     }
 }
 
+/// Matches patterns against values and collects individual match results.
+///
+/// This is a specialized version of `process_items_in_sequence` for pattern matching.
+/// It processes value-pattern pairs one at a time and combines their results.
+fn match_pattern_combinations<E, I>(pairs: I, engine: Engine<E>) -> VecMatchResultStream
+where
+    E: Expander,
+    I: Iterator<Item = (Value, Pattern)> + Send + Clone + 'static,
+{
+    // Use the generic process_items_in_sequence with a matcher function
+    process_items_in_sequence(pairs, engine, |pair, eng| {
+        match_pattern(pair.0, pair.1, eng)
+    })
+}
+
 /// Helper function to match array decomposition patterns
-fn match_array_decomposition<E>(
+fn match_array_pattern<E>(
     head_pattern: Pattern,
     tail_pattern: Pattern,
     arr: &[Value],
@@ -168,63 +182,57 @@ fn match_array_decomposition<E>(
 where
     E: Expander,
 {
+    if arr.is_empty() {
+        return propagate_success((Value(CoreData::Array(Vec::new())), None));
+    }
+
     // Split array into head and tail
     let head = arr[0].clone();
     let tail_elements = arr[1..].to_vec();
-    let tail = Value(CoreData::Array(tail_elements.clone()));
+    let tail = Value(CoreData::Array(tail_elements));
 
-    // Try to match head against head pattern
-    match_pattern(head, head_pattern, engine.clone())
-        .flat_map(move |head_result| {
-            stream_from_result(
-                head_result,
-                capture!(
-                    [tail_pattern, engine, tail, tail_elements],
-                    move |(expanded_head, head_ctx_opt)| {
-                        match head_ctx_opt {
-                            Some(head_ctx) => {
-                                // Head pattern matched, try matching tail
-                                let engine_with_ctx = engine.with_context(head_ctx);
-                                match_pattern(tail, tail_pattern, engine_with_ctx)
-                                    .map(move |tail_result| {
-                                        tail_result.map(|(expanded_tail, tail_ctx_opt)| {
-                                            // Extract expanded tail elements or panic
-                                            let expanded_tail_elements = match &expanded_tail.0 {
-                                                CoreData::Array(elements) => elements,
-                                                _ => panic!("Expected Array in tail result"),
-                                            };
+    // Create value-pattern pairs
+    let pairs = vec![(head, head_pattern), (tail, tail_pattern)];
 
-                                            // Create new array with expanded components
-                                            let new_array = Value(CoreData::Array(
-                                                std::iter::once(expanded_head.clone())
-                                                    .chain(expanded_tail_elements.iter().cloned())
-                                                    .collect(),
-                                            ));
-                                            (new_array, tail_ctx_opt)
-                                        })
-                                    })
-                                    .boxed()
-                            }
-                            None => {
-                                // Head pattern didn't match, return array with expanded head + original tail
-                                let new_array = Value(CoreData::Array(
-                                    std::iter::once(expanded_head)
-                                        .chain(tail_elements.iter().cloned())
-                                        .collect(),
-                                ));
-                                propagate_success((new_array, None))
-                            }
-                        }
+    // Use match_pattern_combinations to process all pairs
+    match_pattern_combinations(pairs.into_iter(), engine.clone())
+        .map(move |result| {
+            result.map(|pair_results| {
+                // Destructure and take ownership of the results
+                let [(head_value, head_ctx_opt), (tail_value, tail_ctx_opt)] =
+                    pair_results.try_into().unwrap_or_else(|_| {
+                        panic!("Expected exactly 2 results from array decomposition")
+                    });
+
+                // Extract tail elements and take ownership
+                let tail_elements = match tail_value.0 {
+                    CoreData::Array(elements) => elements,
+                    _ => panic!("Expected Array in tail result"),
+                };
+
+                // Create new array with head + tail elements
+                let new_array = Value(CoreData::Array(
+                    std::iter::once(head_value).chain(tail_elements).collect(),
+                ));
+
+                // Both patterns need to match for the overall match to succeed
+                let combined_ctx_opt = match (head_ctx_opt, tail_ctx_opt) {
+                    (Some(head_ctx), Some(mut tail_ctx)) => {
+                        tail_ctx.merge(head_ctx);
+                        Some(tail_ctx)
                     }
-                ),
-            )
+                    _ => None,
+                };
+
+                (new_array, combined_ctx_opt)
+            })
         })
         .boxed()
 }
 
 /// Helper function to match struct patterns
 fn match_struct_pattern<E>(
-    original_value: Value,
+    struct_name: String,
     field_patterns: &[Pattern],
     field_values: &[Value],
     engine: Engine<E>,
@@ -232,48 +240,41 @@ fn match_struct_pattern<E>(
 where
     E: Expander,
 {
-    // Create pairs of field patterns and values
-    let pattern_value_pairs: Vec<_> = field_patterns
+    // Create pairs of field values and patterns
+    let pairs: Vec<_> = field_values
         .iter()
         .cloned()
-        .zip(field_values.iter().cloned())
+        .zip(field_patterns.iter().cloned())
         .collect();
 
-    // Start with a stream containing the original context
-    let initial_stream = propagate_success((original_value.clone(), Some(engine.context.clone())));
+    // Use match_pattern_combinations to process all pairs
+    match_pattern_combinations(pairs.into_iter(), engine.clone())
+        .map(move |result| {
+            result.map(capture!([struct_name, engine], move |pair_results| {
+                // Reconstruct struct with matched values regardless of match success
+                let matched_values = pair_results.iter().map(|(v, _)| v.clone()).collect();
+                let new_struct = Value(CoreData::Struct(struct_name, matched_values));
 
-    // For each field pair, extend the context if match succeeds
-    pattern_value_pairs
-        .into_iter()
-        .fold(initial_stream, |acc_stream, (pattern, value)| {
-            acc_stream
-                .flat_map(capture!([engine], move |acc_result| {
-                    stream_from_result(
-                        acc_result,
-                        capture!([engine, pattern, value], move |(original, ctx_opt)| {
-                            match ctx_opt {
-                                Some(ctx) => {
-                                    // If we have a context, try matching the next field
-                                    let engine_with_ctx = engine.clone().with_context(ctx);
-                                    match_pattern(value.clone(), pattern.clone(), engine_with_ctx)
-                                        .map(move |field_result| {
-                                            field_result.map(|(_, field_ctx_opt)| {
-                                                // Keep original value but with new context result
-                                                (original.clone(), field_ctx_opt)
-                                            })
-                                        })
-                                        .boxed()
-                                }
-                                None => {
-                                    // If previous match failed, no need to try further fields
-                                    propagate_success((original, None))
-                                }
-                            }
-                        }),
-                    )
-                }))
-                .boxed()
+                // Check if all fields matched for context handling
+                let all_matched = pair_results.iter().all(|(_, ctx)| ctx.is_some());
+
+                if all_matched {
+                    // Combine all contexts
+                    let mut combined_ctx = engine.context;
+                    for (_, ctx_opt) in pair_results {
+                        if let Some(ctx) = ctx_opt {
+                            combined_ctx.merge(ctx);
+                        }
+                    }
+
+                    (new_struct, Some(combined_ctx))
+                } else {
+                    // Struct pattern match failed, but still return expanded values
+                    (new_struct, None)
+                }
+            }))
         })
+        .boxed()
 }
 
 /// Matches a pattern against a materialized operator.
@@ -297,99 +298,80 @@ where
         return propagate_success((original_value, None));
     }
 
-    // Create pairs for data and children
-    let data_pairs: Vec<_> = op_pattern
+    // Create a single vector of all value-pattern pairs
+    let pairs: Vec<_> = op_pattern
         .data
         .iter()
         .cloned()
         .zip(op.data.iter().cloned())
+        .map(|(pattern, value)| (value, pattern))
+        .chain(
+            op_pattern
+                .children
+                .iter()
+                .cloned()
+                .zip(op.children.iter().cloned())
+                .map(|(pattern, value)| (value, pattern)),
+        )
         .collect();
 
-    let children_pairs: Vec<_> = op_pattern
-        .children
-        .iter()
-        .cloned()
-        .zip(op.children.iter().cloned())
-        .collect();
+    // Tag to use when reconstructing the operator
+    let op_tag = op.tag.clone();
+    let data_len = op.data.len();
 
-    // Start with a stream containing the original context
-    let initial_stream = propagate_success((original_value.clone(), Some(engine.context.clone())));
+    // Use match_pattern_combinations to process all pairs
+    match_pattern_combinations(pairs.into_iter(), engine.clone())
+        .map(move |result| {
+            result.map(capture!(
+                [op_tag, engine, original_value],
+                move |pair_results| {
+                    // Reconstruct operator with matched values regardless of match success
+                    let matched_values: Vec<_> =
+                        pair_results.iter().map(|(v, _)| v.clone()).collect();
 
-    // First match all data components
-    let after_data_stream =
-        data_pairs
-            .into_iter()
-            .fold(initial_stream, |acc_stream, (pattern, value)| {
-                acc_stream
-                    .flat_map(capture!([engine], move |acc_result| {
-                        stream_from_result(
-                            acc_result,
-                            capture!([engine, pattern, value], move |(original, ctx_opt)| {
-                                match ctx_opt {
-                                    Some(ctx) => {
-                                        // If we have a context, try matching the next component
-                                        let engine_with_ctx = engine.clone().with_context(ctx);
-                                        match_pattern(
-                                            value.clone(),
-                                            pattern.clone(),
-                                            engine_with_ctx,
-                                        )
-                                        .map(move |comp_result| {
-                                            comp_result.map(|(_, comp_ctx_opt)| {
-                                                // Keep original value but with new context result
-                                                (original.clone(), comp_ctx_opt)
-                                            })
-                                        })
-                                        .boxed()
-                                    }
-                                    None => {
-                                        // If previous match failed, no need to try further components
-                                        propagate_success((original, None))
-                                    }
-                                }
-                            }),
-                        )
-                    }))
-                    .boxed()
-            });
+                    // Create new operator with matched components
+                    let new_op = Operator {
+                        tag: op_tag,
+                        data: matched_values[..data_len].to_vec(),
+                        children: matched_values[data_len..].to_vec(),
+                    };
 
-    // Then match all children components
-    children_pairs
-        .into_iter()
-        .fold(after_data_stream, |acc_stream, (pattern, value)| {
-            acc_stream
-                .flat_map(capture!([engine], move |acc_result| {
-                    stream_from_result(
-                        acc_result,
-                        capture!([engine, pattern, value], move |(original, ctx_opt)| {
-                            match ctx_opt {
-                                Some(ctx) => {
-                                    // If we have a context, try matching the next child
-                                    let engine_with_ctx = engine.clone().with_context(ctx);
-                                    match_pattern(value.clone(), pattern.clone(), engine_with_ctx)
-                                        .map(move |child_result| {
-                                            child_result.map(|(_, child_ctx_opt)| {
-                                                // Keep original value but with new context result
-                                                (original.clone(), child_ctx_opt)
-                                            })
-                                        })
-                                        .boxed()
-                                }
-                                None => {
-                                    // If previous match failed, no need to try further children
-                                    propagate_success((original, None))
-                                }
+                    // Create appropriate value type based on original
+                    let new_value = match &original_value.0 {
+                        CoreData::Logical(_) => {
+                            Value(CoreData::Logical(LogicalOp(Materialized(new_op))))
+                        }
+                        CoreData::Physical(_) => {
+                            Value(CoreData::Physical(PhysicalOp(Materialized(new_op))))
+                        }
+                        _ => panic!("Expected Logical or Physical operator"),
+                    };
+
+                    // Check if all components matched for context handling
+                    let all_matched = pair_results.iter().all(|(_, ctx)| ctx.is_some());
+
+                    if all_matched {
+                        let mut combined_ctx = engine.context;
+                        for (_, ctx_opt) in pair_results {
+                            if let Some(ctx) = ctx_opt {
+                                combined_ctx.merge(ctx);
                             }
-                        }),
-                    )
-                }))
-                .boxed()
+                        }
+
+                        (new_value, Some(combined_ctx))
+                    } else {
+                        // Operator pattern match failed, but still return expanded values
+                        (new_value, None)
+                    }
+                }
+            ))
         })
+        .boxed()
 }
 
 /// Helper function to match a pattern against a stream of expanded values
 fn match_against_expanded_values<E, S>(
-    op_pattern: &Operator<Pattern>,
+    op_pattern: Operator<Pattern>,
     expanded_values: S,
     engine: Engine<E>,
 ) -> MatchResultStream
@@ -397,8 +379,6 @@ where
     E: Expander,
     S: Stream<Item = Result<Value, Error>> + Send + 'static,
 {
-    let op_pattern = op_pattern.clone();
-
     expanded_values
         .flat_map(move |expanded_value_result| {
             stream_from_result(

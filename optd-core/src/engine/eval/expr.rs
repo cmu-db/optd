@@ -284,7 +284,7 @@ where
         engine
             .context
             .lookup(&ident)
-            .expect(&format!("Variable not found: {}", ident))
+            .unwrap_or_else(|| panic!("Variable not found: {}", ident))
             .clone(),
     )
     .boxed()

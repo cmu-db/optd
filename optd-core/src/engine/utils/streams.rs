@@ -1,8 +1,9 @@
 //! This module provides stream-based utilities for evaluating expressions in a non-blocking,
 //! asynchronous manner. It includes tools for handling success and error cases consistently,
-//! computing all possible combinations of expression values, and transforming Result types within
-//! stream processing pipelines.
+//! computing all possible combinations of expression values, pattern matching, and transforming
+//! Result types within stream processing pipelines.
 
+use crate::engine::eval::r#match::MatchResult;
 use crate::engine::eval::Evaluate;
 use crate::engine::expander::Expander;
 use crate::engine::Engine;
@@ -10,7 +11,8 @@ use crate::error::Error;
 use crate::ir::plans::PartialPhysicalPlan;
 use crate::{capture, ir::plans::PartialLogicalPlan};
 use futures::{stream, Stream, StreamExt};
-use optd_dsl::analyzer::hir::{Expr, Value};
+use optd_dsl::analyzer::context::Context;
+use optd_dsl::analyzer::hir::{Expr, Pattern, Value};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -40,40 +42,94 @@ pub(crate) type PartialLogicalPlanStream =
 pub(crate) type PartialPhysicalPlanStream =
     Pin<Box<dyn Stream<Item = Result<PartialPhysicalPlan, Error>> + Send>>;
 
+/// Type alias for a stream of result-wrapped match results
+pub(crate) type MatchResultStream = Pin<Box<dyn Stream<Item = Result<MatchResult, Error>> + Send>>;
+
+/// Type alias for a stream of result-wrapped vector match results
+pub(crate) type VecMatchResultStream =
+    Pin<Box<dyn Stream<Item = Result<Vec<MatchResult>, Error>> + Send + 'static>>;
+
+/// A generic function to process items in an iterator one by one and combine their results.
+///
+/// This function provides a common implementation that can be used for different
+/// use cases like evaluating expressions or matching patterns by specifying
+/// how each item should be processed.
+///
+/// # Type Parameters
+/// * E - The type that implements Expander
+/// * I - The type of the iterator over items to process
+/// * T - The type of result produced for each item
+/// * F - The type of the processor function
+///
+/// # Parameters
+/// * items - Iterator over items to process
+/// * engine - The evaluation engine
+/// * process_item - Function that processes a single item and returns a stream of results
+///
+/// # Returns
+/// A stream of all combined results from processing the items
+pub(crate) fn process_items_in_sequence<E, I, T, F>(
+    mut items: I,
+    engine: Engine<E>,
+    process_item: F,
+) -> Pin<Box<dyn Stream<Item = Result<Vec<T>, Error>> + Send>>
+where
+    E: Expander,
+    I: Iterator + Send + Clone + 'static,
+    T: Send + Clone + 'static,
+    F: Fn(I::Item, Engine<E>) -> Pin<Box<dyn Stream<Item = Result<T, Error>> + Send>>
+        + Send
+        + Clone
+        + 'static,
+{
+    match items.next() {
+        // Base case: no items
+        None => propagate_success(Vec::new()),
+
+        // Process the first item and recursively handle the rest
+        Some(item) => {
+            // Process the current item
+            process_item(item, engine.clone())
+                .flat_map(move |result| {
+                    stream_from_result(
+                        result,
+                        capture!([engine, items, process_item], move |value| {
+                            // Recursively process the remaining items
+                            process_items_in_sequence(
+                                items.clone(),
+                                engine.clone(),
+                                process_item.clone(),
+                            )
+                            .map(move |rest_result| {
+                                rest_result.map(|mut rest_values| {
+                                    let mut result = Vec::with_capacity(rest_values.len() + 1);
+                                    result.push(value.clone());
+                                    result.append(&mut rest_values);
+                                    result
+                                })
+                            })
+                        }),
+                    )
+                })
+                .boxed()
+        }
+    }
+}
+
 /// Generates a stream of all possible value combinations from a series of expressions.
 ///
-/// This implementation uses a recursive approach that processes expressions
-/// one at a time, avoiding materializing the entire vector upfront.
+/// This is a specialized version of `process_items_in_sequence` for evaluating expressions.
+/// It processes expressions one at a time and combines their results.
 ///
-/// # How it works
+/// # Example
 ///
-/// For expressions [A, B, C]:
+/// For expressions [A, B] where A evaluates to [a1, a2] and B evaluates to [b1, b2],
+/// this will produce the combinations:
 ///
-/// ```text
-///                ┌────────────┐
-///                │ Evaluate A │
-///                └─────┬──────┘
-///                      │
-///        ┌─────────────┴─────────────┐
-///        │                           │
-///        ▼                           ▼
-///   ┌─────────┐                 ┌─────────┐
-///   │Result a1│                 │Result a2│
-///   └────┬────┘                 └────┬────┘
-///        │                           │
-///        ▼                           ▼
-/// ┌─────────────┐             ┌─────────────┐
-/// │ Evaluate BC │             │ Evaluate BC │
-/// └──────┬──────┘             └──────┬──────┘
-///        │                           │
-///        ▼                           ▼
-/// ┌──────────────┐            ┌──────────────┐
-/// │Combine a1 w/ │            │ Combine a2 w/│
-/// │  BC results  │            │  BC results  │
-/// └──────────────┘            └──────────────┘
-/// ```
-///
-/// This recursion generates all combinations without storing intermediate results.
+/// [a1, b1]
+/// [a1, b2]
+/// [a2, b1]
+/// [a2, b2]
 ///
 /// # Type Parameters
 /// * E - The type that implements Expander
@@ -85,49 +141,13 @@ pub(crate) type PartialPhysicalPlanStream =
 ///
 /// # Returns
 /// A stream of all possible combinations of values from the expressions
-pub(crate) fn evaluate_all_combinations<E, I>(mut items: I, engine: Engine<E>) -> VecValueStream
+pub(crate) fn evaluate_all_combinations<E, I>(items: I, engine: Engine<E>) -> VecValueStream
 where
     E: Expander,
     I: Iterator<Item = Arc<Expr>> + Send + Clone + 'static,
 {
-    match items.next() {
-        // Base case: no expressions
-        None => propagate_success(vec![]),
-
-        // Single expression case
-        Some(expr) => {
-            if items.clone().next().is_none() {
-                // Only one expression, return its value in a vector
-                expr.evaluate(engine)
-                    .map(|result| result.map(|val| vec![val]))
-                    .boxed()
-            } else {
-                // Multiple expressions: process recursively with a fold-like approach
-                expr.evaluate(engine.clone())
-                    .flat_map(move |result| {
-                        stream_from_result(
-                            result,
-                            capture!([engine, items], move |value| {
-                                // Recursively evaluate the remaining expressions
-                                // and combine with the current value
-                                evaluate_all_combinations(items.clone(), engine).map(
-                                    move |rest_result| {
-                                        rest_result.map(|mut rest_values| {
-                                            let mut result =
-                                                Vec::with_capacity(rest_values.len() + 1);
-                                            result.push(value.clone());
-                                            result.append(&mut rest_values);
-                                            result
-                                        })
-                                    },
-                                )
-                            }),
-                        )
-                    })
-                    .boxed()
-            }
-        }
-    }
+    // Use the generic process_items_in_sequence with an evaluator function
+    process_items_in_sequence(items, engine, |expr, eng| expr.evaluate(eng))
 }
 
 /// Creates a stream that produces a single error result.

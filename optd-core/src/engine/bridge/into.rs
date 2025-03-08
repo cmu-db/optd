@@ -132,7 +132,7 @@ fn value_to_operator_data(value: &Value) -> OperatorData {
     match &value.0 {
         Literal(constant) => match constant {
             Int64(i) => OperatorData::Int64(*i),
-            Float64(f) => OperatorData::Float64((*f).into()),
+            Float64(f) => OperatorData::Float64(*f),
             String(s) => OperatorData::String(s.clone()),
             Bool(b) => OperatorData::Bool(*b),
             Unit => panic!("Cannot convert Unit constant to OperatorData"),
@@ -150,7 +150,7 @@ fn value_to_properties_data(value: &Value) -> PropertiesData {
     match &value.0 {
         Literal(constant) => match constant {
             Int64(i) => PropertiesData::Int64(*i),
-            Float64(f) => PropertiesData::Float64((*f).into()),
+            Float64(f) => PropertiesData::Float64(*f),
             String(s) => PropertiesData::String(s.clone()),
             Bool(b) => PropertiesData::Bool(*b),
             Unit => panic!("Cannot convert Unit constant to PropertyData"),

@@ -24,7 +24,7 @@ use super::{expander::Expander, utils::streams::ValueStream, Engine};
 mod binary;
 mod core;
 mod expr;
-mod r#match;
+pub(crate) mod r#match;
 mod operator;
 mod unary;
 

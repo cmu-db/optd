@@ -75,6 +75,22 @@ impl Context {
         None
     }
 
+    /// Merges bindings from another context into this context.
+    ///
+    /// This function takes ownership of another context and moves all bindings
+    /// from its current scope into this context's current scope. It's useful
+    /// when combining results from pattern matching operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The context to merge from (consumed by this operation)
+    pub fn merge(&mut self, other: Context) {
+        // Move bindings from other's current scope into our current scope
+        for (name, val) in other.current_scope {
+            self.current_scope.insert(name, val);
+        }
+    }
+
     /// Binds a variable in the current (innermost) scope.
     ///
     /// If the variable already exists in the current scope,
