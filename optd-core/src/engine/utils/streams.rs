@@ -11,8 +11,7 @@ use crate::error::Error;
 use crate::ir::plans::PartialPhysicalPlan;
 use crate::{capture, ir::plans::PartialLogicalPlan};
 use futures::{stream, Stream, StreamExt};
-use optd_dsl::analyzer::context::Context;
-use optd_dsl::analyzer::hir::{Expr, Pattern, Value};
+use optd_dsl::analyzer::hir::{Expr, Value};
 use std::pin::Pin;
 use std::sync::Arc;
 

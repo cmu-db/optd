@@ -1,7 +1,10 @@
-use crate::engine::{expander::Expander, utils::streams::ValueStream, Context, Engine};
-use futures::{executor::block_on_stream, stream, StreamExt};
+use crate::{
+    engine::{expander::Expander, utils::streams::ValueStream, Context, Engine},
+    error::Error,
+};
+use futures::{executor::block_on_stream, stream, Stream, StreamExt};
 use optd_dsl::analyzer::hir::{CoreData, Expr, Goal, GroupId, Literal, Value};
-use std::{self, future::ready, sync::Arc};
+use std::{self, pin::Pin, sync::Arc};
 use CoreData::*;
 use Literal::*;
 
@@ -71,8 +74,13 @@ pub(crate) fn arc(expr: Expr) -> Arc<Expr> {
     Arc::new(expr)
 }
 
-// Helper to collect all successful values from a stream
-pub(crate) fn collect_stream_values(stream: ValueStream) -> Vec<Value> {
+/// Helper to collect all successful values from any stream of Results
+pub(crate) fn collect_stream_values<T>(
+    stream: Pin<Box<dyn Stream<Item = Result<T, Error>> + Send>>,
+) -> Vec<T>
+where
+    T: Send + 'static,
+{
     block_on_stream(stream).filter_map(Result::ok).collect()
 }
 
