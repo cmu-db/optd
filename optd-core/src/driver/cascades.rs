@@ -23,9 +23,9 @@ use ExplorationStatus::*;
 
 #[derive(Debug)]
 pub struct Driver<M: Memoize> {
-    pub memo: M,
-    pub rule_book: RuleBook,
-    pub engine: Engine<Arc<Self>>,
+    memo: M,
+    rule_book: RuleBook,
+    engine: Engine<Arc<Self>>,
 }
 
 impl<M: Memoize> Driver<M> {
@@ -48,7 +48,6 @@ impl<M: Memoize> Driver<M> {
         todo!()
     }
 
-    #[async_recursion]
     async fn optimize_goal(
         self: Arc<Self>,
         goal: Goal,
@@ -90,15 +89,7 @@ impl<M: Memoize> Driver<M> {
         todo!()
     }
 
-    #[async_recursion]
     async fn explore_group(self: Arc<Self>, group_id: GroupId) -> Result<(), Error> {
-        // if the group is already explored, return
-        // if the group is currently being explored, wait for it to finish
-        // if the group is unexplored, set the status to exploring and explore the group
-        self.memo
-            .set_exploration_status(group_id, Exploring)
-            .await?;
-
         // explore the group by exploring all the logical expressions in the group
         let logical_exprs = self.memo.get_all_logical_exprs(group_id).await?;
 
@@ -108,13 +99,7 @@ impl<M: Memoize> Driver<M> {
             res.push(driver.explore_expression(logical_expr, group_id).await);
         }
 
-        let mut logical_exprs = Vec::new();
-        for result in res {
-            logical_exprs.extend(result);
-        }
-
-        // set the status of the group to explored
-        self.memo.set_exploration_status(group_id, Explored).await
+        Ok(())
     }
 
     pub async fn explore_expression(

@@ -99,17 +99,9 @@ where
         children,
     };
 
-    // Add to memo table and get goal
-    let goal_result = memo.try_add_physical_expr(&physical_expr).await?;
-
-    // If no existing goal found, create a new goal
-    if let Some(goal) = goal_result {
-        Ok((physical_expr, goal))
-    } else {
-        // Create new goal with the expression
-        let goal = memo.create_goal_with(&physical_expr).await?;
-        Ok((physical_expr, goal))
-    }
+    // Add the expression to memo
+    let goal = memo.add_physical_expr(&physical_expr).await?;
+    Ok((physical_expr, goal))
 }
 
 /// Generic function to process a Child structure containing any plan type.
