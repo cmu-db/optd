@@ -13,13 +13,9 @@ use crate::{
 use futures::{Stream, StreamExt};
 use optd_dsl::analyzer::{
     context::Context,
-    hir::{
-        CoreData, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern, PhysicalOp,
-        Value,
-    },
+    hir::{CoreData, LogicalOp, MatchArm, Materializable, Operator, Pattern, PhysicalOp, Value},
 };
 use std::pin::Pin;
-use Literal::*;
 use Materializable::*;
 use Pattern::*;
 
@@ -123,7 +119,11 @@ where
 
         // List decomposition pattern: match first element and rest of the array
         (ArrayDecomp(head_pattern, tail_pattern), CoreData::Array(arr)) => {
-            match_array_decomposition(value.clone(), &head_pattern, &tail_pattern, arr, engine)
+            if arr.is_empty() {
+                return propagate_success((value, None));
+            }
+
+            match_array_decomposition(*head_pattern, *tail_pattern, arr, engine)
         }
 
         // Struct pattern: match name and recursively match fields
@@ -160,53 +160,65 @@ where
 
 /// Helper function to match array decomposition patterns
 fn match_array_decomposition<E>(
-    original_value: Value,
-    head_pattern: &Pattern,
-    tail_pattern: &Pattern,
+    head_pattern: Pattern,
+    tail_pattern: Pattern,
     arr: &[Value],
     engine: Engine<E>,
 ) -> MatchResultStream
 where
     E: Expander,
 {
-    if arr.is_empty() {
-        return propagate_success((original_value, None));
-    }
-
     // Split array into head and tail
     let head = arr[0].clone();
-    let tail = Value(CoreData::Array(arr[1..].to_vec()));
+    let tail_elements = arr[1..].to_vec();
+    let tail = Value(CoreData::Array(tail_elements.clone()));
 
-    // Match head against head pattern
-    match_pattern(head, head_pattern.clone(), engine.clone())
-        .flat_map(capture!([tail_pattern, engine], move |head_result| {
+    // Try to match head against head pattern
+    match_pattern(head, head_pattern, engine.clone())
+        .flat_map(move |head_result| {
             stream_from_result(
                 head_result,
                 capture!(
-                    [original_value, tail_pattern, engine, tail],
-                    move |(_, head_ctx_opt)| {
+                    [tail_pattern, engine, tail, tail_elements],
+                    move |(expanded_head, head_ctx_opt)| {
                         match head_ctx_opt {
                             Some(head_ctx) => {
-                                // Head matched, now try to match tail
-                                let engine_with_head_ctx = engine.clone().with_context(head_ctx);
-                                match_pattern(tail, tail_pattern, engine_with_head_ctx)
+                                // Head pattern matched, try matching tail
+                                let engine_with_ctx = engine.with_context(head_ctx);
+                                match_pattern(tail, tail_pattern, engine_with_ctx)
                                     .map(move |tail_result| {
-                                        tail_result.map(|(_, tail_ctx_opt)| {
-                                            // Return original value with tail match result
-                                            (original_value.clone(), tail_ctx_opt)
+                                        tail_result.map(|(expanded_tail, tail_ctx_opt)| {
+                                            // Extract expanded tail elements or panic
+                                            let expanded_tail_elements = match &expanded_tail.0 {
+                                                CoreData::Array(elements) => elements,
+                                                _ => panic!("Expected Array in tail result"),
+                                            };
+
+                                            // Create new array with expanded components
+                                            let new_array = Value(CoreData::Array(
+                                                std::iter::once(expanded_head.clone())
+                                                    .chain(expanded_tail_elements.iter().cloned())
+                                                    .collect(),
+                                            ));
+                                            (new_array, tail_ctx_opt)
                                         })
                                     })
                                     .boxed()
                             }
                             None => {
-                                // Head didn't match, so array decomposition fails
-                                propagate_success((original_value.clone(), None))
+                                // Head pattern didn't match, return array with expanded head + original tail
+                                let new_array = Value(CoreData::Array(
+                                    std::iter::once(expanded_head)
+                                        .chain(tail_elements.iter().cloned())
+                                        .collect(),
+                                ));
+                                propagate_success((new_array, None))
                             }
                         }
                     }
                 ),
             )
-        }))
+        })
         .boxed()
 }
 
@@ -392,7 +404,7 @@ where
             stream_from_result(
                 expanded_value_result,
                 capture!([op_pattern, engine], move |expanded_value| {
-                    match_pattern(expanded_value, Operator(op_pattern.clone()), engine.clone())
+                    match_pattern(expanded_value, Operator(op_pattern), engine)
                 }),
             )
         })
