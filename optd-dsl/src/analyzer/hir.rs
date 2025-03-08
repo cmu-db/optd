@@ -26,7 +26,7 @@ pub type Identifier = String;
 pub type Annotation = String;
 
 /// Values that can be directly represented in the language
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Int64(i64),
     Float64(f64),

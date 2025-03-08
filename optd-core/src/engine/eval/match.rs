@@ -1,15 +1,21 @@
+//! This module provides pattern matching functionality for expressions.
+//!
+//! Pattern matching is a powerful feature that allows for destructuring and examining
+//! values against patterns. This implementation supports matching against literals,
+//! wildcards, bindings, structs, arrays, and operators, with special handling for operators.
+
 use super::{Engine, Evaluate, Expander};
 use crate::error::Error;
 use crate::{
     capture,
     engine::utils::streams::{propagate_success, stream_from_result, ValueStream},
 };
-use futures::{stream, Stream, StreamExt};
+use futures::{Stream, StreamExt};
 use optd_dsl::analyzer::{
     context::Context,
     hir::{
-        CoreData, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern,
-        PhysicalOp, Value,
+        CoreData, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern, PhysicalOp,
+        Value,
     },
 };
 use std::pin::Pin;
@@ -46,24 +52,24 @@ where
     let remaining_arms = match_arms[1..].to_vec();
 
     // Match the value against the arm's pattern
-    match_pattern(value.clone(), first_arm.pattern.clone(), engine.clone())
+    match_pattern(value, first_arm.pattern.clone(), engine.clone())
         .flat_map(move |match_result| {
             stream_from_result(
                 match_result,
-                capture!(
-                    [engine, first_arm, remaining_arms, value],
-                    move |(value, context_opt)| {
-                        match context_opt {
-                            // If we got a match, evaluate the arm's expression with the context
-                            Some(context) => {
-                                let engine_with_ctx = engine.clone().with_context(context);
-                                first_arm.expr.clone().evaluate(engine_with_ctx)
-                            }
-                            // If no match, try the next arm with this value
-                            None => try_match_arms(value, remaining_arms.clone(), engine),
+                capture!([engine, first_arm, remaining_arms], move |(
+                    value,
+                    context_opt,
+                )| {
+                    match context_opt {
+                        // If we got a match, evaluate the arm's expression with the context
+                        Some(context) => {
+                            let engine_with_ctx = engine.with_context(context);
+                            first_arm.expr.evaluate(engine_with_ctx)
                         }
+                        // If no match, try the next arm with this value
+                        None => try_match_arms(value, remaining_arms, engine),
                     }
-                ),
+                }),
             )
         })
         .boxed()
@@ -81,12 +87,12 @@ where
 {
     match (pattern, &value.0) {
         // Wildcard pattern matches anything
-        (Wildcard, _) => propagate_success((value, Some(engine.context.clone()))),
+        (Wildcard, _) => propagate_success((value, Some(engine.context))),
 
         // Binding pattern: bind the value to the identifier and continue matching
         (Bind(ident, inner_pattern), _) => {
             // First check if the inner pattern matches without binding
-            match_pattern(value.clone(), *inner_pattern, engine.clone())
+            match_pattern(value, *inner_pattern, engine)
                 .map(move |result| {
                     result.map(|(matched_value, ctx_opt)| {
                         // Only bind if the inner pattern matched
@@ -106,12 +112,13 @@ where
 
         // Literal pattern: match if literals are equal
         (Literal(pattern_lit), CoreData::Literal(value_lit)) => {
-            match_literals(value.clone(), &pattern_lit, value_lit, engine.context)
+            let context_opt = (pattern_lit == *value_lit).then(|| engine.context);
+            propagate_success((value, context_opt))
         }
 
         // Empty array pattern
         (EmptyArray, CoreData::Array(arr)) if arr.is_empty() => {
-            propagate_success((value, Some(engine.context.clone())))
+            propagate_success((value, Some(engine.context)))
         }
 
         // List decomposition pattern: match first element and rest of the array
@@ -151,25 +158,6 @@ where
     }
 }
 
-/// Helper function to match literals
-fn match_literals(
-    value: Value,
-    pattern_lit: &Literal,
-    value_lit: &Literal,
-    context: Context,
-) -> MatchResultStream {
-    let result = match (pattern_lit, value_lit) {
-        (Int64(p), Int64(v)) if p == v => Some(context),
-        (Float64(p), Float64(v)) if p == v => Some(context),
-        (String(p), String(v)) if p == v => Some(context),
-        (Bool(p), Bool(v)) if p == v => Some(context),
-        (Unit, Unit) => Some(context),
-        _ => None,
-    };
-
-    propagate_success((value, result))
-}
-
 /// Helper function to match array decomposition patterns
 fn match_array_decomposition<E>(
     original_value: Value,
@@ -188,47 +176,37 @@ where
     // Split array into head and tail
     let head = arr[0].clone();
     let tail = Value(CoreData::Array(arr[1..].to_vec()));
-    let head_pattern = (*head_pattern).clone();
-    let tail_pattern = (*tail_pattern).clone();
 
     // Match head against head pattern
-    match_pattern(head, head_pattern, engine.clone())
-        .flat_map(capture!(
-            [original_value, tail_pattern, engine],
-            move |head_result| {
-                stream_from_result(
-                    head_result,
-                    capture!(
-                        [original_value, tail_pattern, engine, tail],
-                        move |(_, head_ctx_opt)| {
-                            match head_ctx_opt {
-                                Some(head_ctx) => {
-                                    // Head matched, now try to match tail
-                                    let engine_with_head_ctx =
-                                        engine.clone().with_context(head_ctx);
-                                    match_pattern(
-                                        tail.clone(),
-                                        tail_pattern.clone(),
-                                        engine_with_head_ctx,
-                                    )
-                                    .map(capture!([original_value], move |tail_result| {
+    match_pattern(head, head_pattern.clone(), engine.clone())
+        .flat_map(capture!([tail_pattern, engine], move |head_result| {
+            stream_from_result(
+                head_result,
+                capture!(
+                    [original_value, tail_pattern, engine, tail],
+                    move |(_, head_ctx_opt)| {
+                        match head_ctx_opt {
+                            Some(head_ctx) => {
+                                // Head matched, now try to match tail
+                                let engine_with_head_ctx = engine.clone().with_context(head_ctx);
+                                match_pattern(tail, tail_pattern, engine_with_head_ctx)
+                                    .map(move |tail_result| {
                                         tail_result.map(|(_, tail_ctx_opt)| {
                                             // Return original value with tail match result
                                             (original_value.clone(), tail_ctx_opt)
                                         })
-                                    }))
+                                    })
                                     .boxed()
-                                }
-                                None => {
-                                    // Head didn't match, so array decomposition fails
-                                    propagate_success((original_value.clone(), None))
-                                }
+                            }
+                            None => {
+                                // Head didn't match, so array decomposition fails
+                                propagate_success((original_value.clone(), None))
                             }
                         }
-                    ),
-                )
-            }
-        ))
+                    }
+                ),
+            )
+        }))
         .boxed()
 }
 
