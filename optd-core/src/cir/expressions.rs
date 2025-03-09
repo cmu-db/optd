@@ -1,5 +1,5 @@
 use super::{
-    goal::Goal,
+    goal::{Cost, Goal},
     group::GroupId,
     operators::{Child, Operator},
     plans::{PartialLogicalPlan, PartialPhysicalPlan},
@@ -21,6 +21,10 @@ pub type LogicalExpression = Operator<GroupId>;
 /// Physical expressions use goal IDs rather than full plans for
 /// their children, representing a compact form suitable for the memo structure.
 pub type PhysicalExpression = Operator<Goal>;
+
+/// An optimized physical expression with its associated cost.
+#[derive(Clone, Debug)]
+pub struct OptimizedExpression(pub PhysicalExpression, pub Cost);
 
 //=============================================================================
 // Conversion Implementations

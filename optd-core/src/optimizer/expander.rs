@@ -72,7 +72,7 @@ impl Expander for OptimizerExpander {
                 .expect("Failed to send goal subscription - channel closed");
 
             expr_receiver
-                .map(|expr| Ok(partial_physical_to_value(&expr.into())))
+                .map(|expr| Ok(partial_physical_to_value(&expr.0.into())))
                 .boxed()
         };
 

@@ -3,6 +3,7 @@
 //! computing all possible combinations of expression values, pattern matching, and transforming
 //! Result types within stream processing pipelines.
 
+use crate::cir::goal::Cost;
 use crate::cir::plans::PartialPhysicalPlan;
 use crate::engine::eval::r#match::MatchResult;
 use crate::engine::eval::Evaluate;
@@ -47,6 +48,9 @@ pub(crate) type MatchResultStream = Pin<Box<dyn Stream<Item = Result<MatchResult
 /// Type alias for a stream of result-wrapped vector match results
 pub(crate) type VecMatchResultStream =
     Pin<Box<dyn Stream<Item = Result<Vec<MatchResult>, Error>> + Send + 'static>>;
+
+/// Type alias for a stream of cost values.
+pub(crate) type CostStream = Pin<Box<dyn Stream<Item = Result<Cost, Error>> + Send>>;
 
 /// A generic function to process items in an iterator one by one and combine their results.
 ///

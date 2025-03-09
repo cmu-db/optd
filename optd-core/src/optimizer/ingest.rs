@@ -1,12 +1,15 @@
 use super::{expander::Expander, memo::Memoize};
 use crate::{
-    capture, cir::{
+    capture,
+    cir::{
         expressions::{LogicalExpression, PhysicalExpression},
         goal::Goal,
         group::GroupId,
         operators::{Child, Operator},
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
-    }, engine::Engine, error::Error
+    },
+    engine::Engine,
+    error::Error,
 };
 use async_recursion::async_recursion;
 use futures::future::try_join_all;

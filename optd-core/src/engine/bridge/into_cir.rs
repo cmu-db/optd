@@ -1,5 +1,5 @@
 use crate::cir::{
-    goal::Goal,
+    goal::{Cost, Goal},
     group::GroupId,
     operators::{Child, Operator, OperatorData},
     plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan},
@@ -51,6 +51,14 @@ pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
             }),
         },
         _ => panic!("Expected Physical CoreData variant, found: {:?}", value.0),
+    }
+}
+
+/// Converts a HIR Value into a CIR cost.
+pub(crate) fn value_to_cost(value: &Value) -> Cost {
+    match &value.0 {
+        Literal(Float64(f)) => Cost(*f),
+        _ => panic!("Expected Float64 literal, found: {:?}", value.0),
     }
 }
 

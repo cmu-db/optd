@@ -11,4 +11,4 @@ pub struct Goal(pub GroupId, pub PhysicalProperties);
 
 /// Represents the cost of a goal / optimized expression in the memo.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Cost(f64);
+pub struct Cost(pub f64);

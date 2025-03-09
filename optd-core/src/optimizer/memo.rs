@@ -1,13 +1,13 @@
 use std::future::Future;
 
 use crate::{
-    error::Error,
     cir::{
-        expressions::{LogicalExpression, PhysicalExpression},
-        goal::{Cost, Goal},
+        expressions::{LogicalExpression, OptimizedExpression, PhysicalExpression},
+        goal::Goal,
         group::GroupId,
         properties::LogicalProperties,
     },
+    error::Error,
 };
 
 pub type MemoizeResult<T> = Result<T, Error>;
@@ -32,10 +32,10 @@ pub trait Memoize: Send + Sync + 'static {
 
     async fn merge_groups(&self, from: GroupId, to: GroupId) -> MemoizeResult<()>;
 
-    async fn get_winning_physical_expr(
+    async fn get_best_optimized_physical_expr(
         &self,
         goal: &Goal,
-    ) -> MemoizeResult<Option<(PhysicalExpression, Cost)>>;
+    ) -> MemoizeResult<Option<OptimizedExpression>>;
 
     async fn add_physical_expr(&self, physical_expr: &PhysicalExpression) -> MemoizeResult<Goal>;
 
