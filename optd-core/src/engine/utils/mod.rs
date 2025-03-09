@@ -1,4 +1,4 @@
 pub(super) mod macros;
-pub(super) mod streams;
+pub(crate) mod streams;
 #[cfg(test)]
 pub(crate) mod tests;

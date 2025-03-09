@@ -2197,6 +2197,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "optd-dsl",
+ "ordered-float 5.0.0",
  "proc-macro2",
  "serde",
  "serde_json",

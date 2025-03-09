@@ -13,7 +13,7 @@ use std::sync::Arc;
 ///
 /// A logical plan consists of logical operators arranged in a tree structure,
 /// with each operator having children.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LogicalPlan(pub Operator<Arc<LogicalPlan>>);
 
 /// Represents a fully materialized physical query plan.

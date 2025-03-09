@@ -1,5 +1,5 @@
 // pub mod catalog;
-pub mod driver;
+pub mod optimizer;
 pub mod engine;
 pub mod error;
 pub mod cir;

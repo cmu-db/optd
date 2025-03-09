@@ -35,7 +35,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn get_winning_physical_expr(
         &self,
         goal: &Goal,
-    ) -> MemoizeResult<(PhysicalExpression, Cost)>;
+    ) -> MemoizeResult<Option<(PhysicalExpression, Cost)>>;
 
     async fn add_physical_expr(&self, physical_expr: &PhysicalExpression) -> MemoizeResult<Goal>;
 

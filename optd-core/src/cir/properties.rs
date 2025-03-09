@@ -1,3 +1,5 @@
+use ordered_float::OrderedFloat;
+
 use super::plans::LogicalPlan;
 
 /// Represents logical properties of a logical group.
@@ -11,19 +13,19 @@ pub struct LogicalProperties(pub Option<PropertiesData>);
 ///
 /// Physical properties describe execution characteristics of a physical plan node,
 /// such as sort order, distribution, or resource requirements.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PhysicalProperties(pub Option<PropertiesData>);
 
 /// Represents various types of property data that can be associated with plan nodes.
 ///
 /// This enum provides a flexible way to store different types of metadata and
 /// properties for both logical and physical plan nodes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PropertiesData {
     /// 64-bit signed integer value
     Int64(i64),
     /// 64-bit floating point value
-    Float64(f64),
+    Float64(OrderedFloat<f64>),
     /// String value
     String(String),
     /// Boolean value

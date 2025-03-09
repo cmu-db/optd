@@ -1,9 +1,11 @@
+use ordered_float::OrderedFloat;
+
 /// Represents a child node in an operator tree, which can be either
 /// a single item or a variable-length collection of items.
 ///
 /// This enumeration provides a flexible way to represent operator children
 /// that may have different arities depending on the operation type.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Child<T> {
     /// A single child node
     Singleton(T),
@@ -15,12 +17,12 @@ pub enum Child<T> {
 ///
 /// This enumeration provides a type-safe way to represent the various data types
 /// that can be used as parameters in operators.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum OperatorData {
     /// 64-bit signed integer value
     Int64(i64),
     /// 64-bit floating point value
-    Float64(f64),
+    Float64(OrderedFloat<f64>),
     /// String value
     String(String),
     /// Boolean value
@@ -38,7 +40,7 @@ pub enum OperatorData {
 ///
 /// # Type Parameters
 /// * `T` - Type of children, typically a plan or group reference
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Operator<T> {
     /// Identifies the specific operation (e.g., "Join", "Filter", "Add")
     pub tag: String,

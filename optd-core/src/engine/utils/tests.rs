@@ -1,14 +1,14 @@
-use crate::{
-    engine::{expander::Expander, utils::streams::ValueStream, Context, Engine},
-    error::Error,
-};
+use crate::{engine::Engine, error::Error, optimizer::expander::Expander};
 use futures::{executor::block_on_stream, stream, Stream, StreamExt};
-use optd_dsl::analyzer::hir::{CoreData, Expr, Goal, GroupId, Literal, Value};
+use optd_dsl::analyzer::{
+    context::Context,
+    hir::{CoreData, Expr, Goal, GroupId, Literal, Value},
+};
 use std::{self, pin::Pin, sync::Arc};
 use CoreData::*;
 use Literal::*;
 
-use super::streams::propagate_success;
+use super::streams::{propagate_success, ValueStream};
 
 #[derive(Clone)]
 pub(crate) struct MockExpander {

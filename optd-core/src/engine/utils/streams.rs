@@ -3,12 +3,12 @@
 //! computing all possible combinations of expression values, pattern matching, and transforming
 //! Result types within stream processing pipelines.
 
+use crate::cir::plans::PartialPhysicalPlan;
 use crate::engine::eval::r#match::MatchResult;
 use crate::engine::eval::Evaluate;
-use crate::engine::expander::Expander;
 use crate::engine::Engine;
 use crate::error::Error;
-use crate::cir::plans::PartialPhysicalPlan;
+use crate::optimizer::expander::Expander;
 use crate::{capture, cir::plans::PartialLogicalPlan};
 use futures::{stream, Stream, StreamExt};
 use optd_dsl::analyzer::hir::{Expr, Value};

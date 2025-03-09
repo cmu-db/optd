@@ -18,15 +18,17 @@ use Materializable::*;
 
 /// Converts a HIR Value into a PartialLogicalPlan representation.
 ///
-/// Transforms the DSL's HIR into the CIR for logical operators.
+/// Transforms the DSL's HIR into the optimizer's IR for logical operators.
 pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
     match &value.0 {
         Logical(logical_op) => match &logical_op.0 {
-            UnMaterialized(group_id) => PartialLogicalPlan::UnMaterialized(GroupId(group_id.0)),
+            UnMaterialized(group_id) => {
+                PartialLogicalPlan::UnMaterialized(hir_group_id_to_cir(group_id))
+            }
             Materialized(op) => PartialLogicalPlan::Materialized(Operator {
                 tag: op.tag.clone(),
                 data: convert_values_to_operator_data(&op.data),
-                children: convert_children_into(&op.children, value_to_partial_logical),
+                children: convert_values_to_children(&op.children, value_to_partial_logical),
             }),
         },
         _ => panic!("Expected Logical CoreData variant, found: {:?}", value.0),
@@ -40,17 +42,12 @@ pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
     match &value.0 {
         Physical(physical_op) => match &physical_op.0 {
             UnMaterialized(hir_goal) => {
-                let ir_goal = Goal(
-                    GroupId(hir_goal.group_id.0),
-                    value_to_physical_properties(&hir_goal.properties),
-                );
-
-                PartialPhysicalPlan::UnMaterialized(ir_goal)
+                PartialPhysicalPlan::UnMaterialized(hir_goal_to_cir(hir_goal))
             }
             Materialized(op) => PartialPhysicalPlan::Materialized(Operator {
                 tag: op.tag.clone(),
                 data: convert_values_to_operator_data(&op.data),
-                children: convert_children_into(&op.children, value_to_partial_physical),
+                children: convert_values_to_children(&op.children, value_to_partial_physical),
             }),
         },
         _ => panic!("Expected Physical CoreData variant, found: {:?}", value.0),
@@ -69,7 +66,7 @@ pub(crate) fn value_to_logical_properties(properties_value: &Value) -> LogicalPr
 ///
 /// This function provides a consistent way to convert group identifiers
 /// from the HIR representation to the optimizer's internal representation.
-pub(crate) fn hir_to_cir_group_id(hir_group_id: &hir::GroupId) -> GroupId {
+pub(crate) fn hir_group_id_to_cir(hir_group_id: &hir::GroupId) -> GroupId {
     GroupId(hir_group_id.0)
 }
 
@@ -77,11 +74,15 @@ pub(crate) fn hir_to_cir_group_id(hir_group_id: &hir::GroupId) -> GroupId {
 ///
 /// Transforms the DSL's HIR Goal into the optimizer's IR Goal representation,
 /// handling both the group ID and physical properties components.
-pub(crate) fn hir_to_cir_goal(hir_goal: &hir::Goal) -> Goal {
-    let group_id = hir_to_cir_group_id(&hir_goal.group_id);
+pub(crate) fn hir_goal_to_cir(hir_goal: &hir::Goal) -> Goal {
+    let group_id = hir_group_id_to_cir(&hir_goal.group_id);
     let properties = value_to_physical_properties(&hir_goal.properties);
     Goal(group_id, properties)
 }
+
+//=============================================================================
+// HIR to CIR conversion helpers
+//=============================================================================
 
 /// Converts a HIR Value into a complete LogicalPlan (not a partial plan).
 ///
@@ -95,7 +96,7 @@ fn value_to_logical(value: &Value) -> LogicalPlan {
             Materialized(op) => LogicalPlan(Operator {
                 tag: op.tag.clone(),
                 data: convert_values_to_operator_data(&op.data),
-                children: convert_children_into(&op.children, value_to_logical),
+                children: convert_values_to_children(&op.children, value_to_logical),
             }),
         },
         _ => panic!("Expected Logical CoreData variant, found: {:?}", value.0),
@@ -110,12 +111,8 @@ fn value_to_physical_properties(properties_value: &Value) -> PhysicalProperties 
     }
 }
 
-//=============================================================================
-// Generic conversion helpers
-//=============================================================================
-
 /// Converts a Vec of Values to Vec of Children for any target type.
-fn convert_children_into<T, F>(values: &[Value], converter: F) -> Vec<Child<Arc<T>>>
+fn convert_values_to_children<T, F>(values: &[Value], converter: F) -> Vec<Child<Arc<T>>>
 where
     F: Fn(&Value) -> T,
     T: 'static,
@@ -141,16 +138,12 @@ fn convert_values_to_properties_data(values: &[Value]) -> Vec<PropertiesData> {
     values.iter().map(value_to_properties_data).collect()
 }
 
-//=============================================================================
-// Data conversion functions
-//=============================================================================
-
 /// Converts a HIR Value to an OperatorData representation.
 fn value_to_operator_data(value: &Value) -> OperatorData {
     match &value.0 {
         Literal(constant) => match constant {
             Int64(i) => OperatorData::Int64(*i),
-            Float64(f) => OperatorData::Float64(*f),
+            Float64(f) => OperatorData::Float64((*f).into()),
             String(s) => OperatorData::String(s.clone()),
             Bool(b) => OperatorData::Bool(*b),
             Unit => panic!("Cannot convert Unit constant to OperatorData"),
@@ -168,7 +161,7 @@ fn value_to_properties_data(value: &Value) -> PropertiesData {
     match &value.0 {
         Literal(constant) => match constant {
             Int64(i) => PropertiesData::Int64(*i),
-            Float64(f) => PropertiesData::Float64(*f),
+            Float64(f) => PropertiesData::Float64((*f).into()),
             String(s) => PropertiesData::String(s.clone()),
             Bool(b) => PropertiesData::Bool(*b),
             Unit => panic!("Cannot convert Unit constant to PropertyData"),
