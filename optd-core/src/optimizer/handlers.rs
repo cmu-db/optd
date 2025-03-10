@@ -27,7 +27,7 @@ impl<M: Memoize> Optimizer<M> {
         response_tx: Sender<PhysicalPlan>,
     ) {
         match self.try_ingest_logical(logical_plan.clone().into()).await {
-            LogicalIngest::Success(group_id, _) => {
+            LogicalIngest::Success(group_id) => {
                 // Plan was ingested successfully, subscribe to the goal
                 let goal = Goal(group_id, PhysicalProperties(None));
                 let (expr_tx, mut expr_rx) = mpsc::channel(0);
@@ -89,17 +89,12 @@ impl<M: Memoize> Optimizer<M> {
         group_id: GroupId,
     ) {
         match self.try_ingest_logical(plan.clone()).await {
-            LogicalIngest::Success(new_group_id, is_new_expr) => {
-               if new_group_id != group_id {
+            LogicalIngest::Success(new_group_id) => {
+                if new_group_id != group_id {
                     self.memo
                         .merge_groups(group_id, new_group_id)
                         .await
                         .expect("Failed to merge groups");
-                }
-
-                if is_new_expr {
-                    // send to subscribers
-
                 }
             }
             LogicalIngest::NeedsDependencies(dependencies) => {

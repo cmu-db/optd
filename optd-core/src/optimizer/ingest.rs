@@ -18,9 +18,7 @@ use OptimizerMessage::CreateGroup;
 /// Result type for logical plan ingestion exposed to clients
 pub(super) enum LogicalIngest {
     /// Plan was successfully ingested
-    ///
-    /// The boolean flag indicates whether the expression belongs to a new group
-    Success(GroupId, bool),
+    Success(GroupId),
 
     /// Plan requires dependencies to be created
     /// Contains a set of job IDs for the launched dependency tasks
@@ -30,7 +28,7 @@ pub(super) enum LogicalIngest {
 /// Internal result type for logical expression processing
 /// This enum is used internally during recursive plan traversal
 enum InternalLogicalIngest {
-    Found(GroupId, bool),
+    Found(GroupId),
     NeedsProperties(Vec<LogicalExpression>),
 }
 
@@ -40,9 +38,8 @@ impl<M: Memoize> Optimizer<M> {
     /// Attempts direct ingestion or spawns property derivation tasks when needed.
     ///
     /// # Returns
-    /// - `Success(group_id, is_new)`: Plan was successfully ingested
+    /// - `Success(group_id)`: Plan was successfully ingested
     ///    - `group_id`: The ID of the group that contains the plan
-    ///    - `is_new`: Indicates whether this was a novel expression (true) or already existed (false)
     /// - `NeedsDependencies(job_ids)`: Property derivation tasks were launched
     ///    - `job_ids`: Set of job IDs for the launched tasks
     pub(super) async fn try_ingest_logical(
@@ -54,9 +51,7 @@ impl<M: Memoize> Optimizer<M> {
             .expect("Failed to ingest logical plan");
 
         match ingest_result {
-            InternalLogicalIngest::Found(group_id, is_new_expr) => {
-                LogicalIngest::Success(group_id, is_new_expr)
-            }
+            InternalLogicalIngest::Found(group_id) => LogicalIngest::Success(group_id),
             InternalLogicalIngest::NeedsProperties(expressions) => {
                 let pending_dependencies = expressions
                     .into_iter()
@@ -99,7 +94,7 @@ impl<M: Memoize> Optimizer<M> {
 /// * `partial_plan` - The partial logical plan to ingest
 ///
 /// # Returns
-/// * For unmaterialized plans: Found(group_id, false) since the group already exists
+/// * For unmaterialized plans: Found(group_id) since the group already exists
 /// * For materialized plans: Result from recursive operator ingestion
 #[async_recursion]
 async fn ingest_logical_plan<M>(
@@ -111,9 +106,7 @@ where
 {
     match partial_plan {
         PartialLogicalPlan::Materialized(operator) => ingest_logical_operator(memo, operator).await,
-        PartialLogicalPlan::UnMaterialized(group_id) => {
-            Ok(InternalLogicalIngest::Found(*group_id, false))
-        }
+        PartialLogicalPlan::UnMaterialized(group_id) => Ok(InternalLogicalIngest::Found(*group_id)),
     }
 }
 
@@ -179,7 +172,7 @@ where
     let children = children
         .into_iter()
         .map(|child_result| match child_result {
-            Singleton(InternalLogicalIngest::Found(group_id, _)) => Singleton(group_id),
+            Singleton(InternalLogicalIngest::Found(group_id)) => Singleton(group_id),
             Singleton(InternalLogicalIngest::NeedsProperties(exprs)) => {
                 need_properties.extend(exprs);
                 Singleton(GroupId(0)) // Placeholder
@@ -188,7 +181,7 @@ where
                 let group_ids = results
                     .into_iter()
                     .map(|result| match result {
-                        InternalLogicalIngest::Found(group_id, _) => group_id,
+                        InternalLogicalIngest::Found(group_id) => group_id,
                         InternalLogicalIngest::NeedsProperties(exprs) => {
                             need_properties.extend(exprs);
                             GroupId(0) // Placeholder
@@ -218,7 +211,7 @@ where
     match group_maybe {
         Some(group_id) => {
             // Expression already exists in this group
-            Ok(InternalLogicalIngest::Found(group_id, false))
+            Ok(InternalLogicalIngest::Found(group_id))
         }
         None => {
             // Expression doesn't exist, needs property derivation
