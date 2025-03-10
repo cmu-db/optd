@@ -62,8 +62,11 @@ enum EngineResult {
     /// May not be the globally optimal plan for the goal.
     NewOptimizedExpression(OptimizedExpression, Goal),
 
-    /// Newly created group with its derived logical properties.
-    NewGroup(GroupId, LogicalProperties),
+    /// The derived logical properties of a logical expression
+    ///
+    /// Includes the job ID of the property derivation task that produced these properties,
+    /// allowing correlation with pending ingestion tasks.
+    DeriveProperties(LogicalProperties, i64),
 }
 
 /// Requests from the optimization engine to the central optimizer.
@@ -94,6 +97,23 @@ pub(crate) enum EngineRequest {
     DeriveProperties(GroupId, oneshot::Sender<LogicalProperties>),
 }
 
+/// Represents a logical plan waiting for property derivation to complete before ingestion.
+///
+/// This structure tracks the state of a logical plan that requires derived properties
+/// before it can be fully ingested into the memo. It maintains a set of property
+/// derivation job IDs that must complete before the plan can be processed.
+#[derive(Debug)]
+struct PendingIngestion {
+    /// The logical plan awaiting ingestion
+    plan: PartialLogicalPlan,
+
+    /// Set of property derivation job IDs that must complete before this plan can be ingested
+    ///
+    /// As property derivation tasks complete, their job IDs are removed from this set.
+    /// When the set becomes empty, the plan is ready for ingestion.
+    pending_derivations: HashSet<i64>,
+}
+
 /// The central access point to the OPTD optimizer.
 ///
 /// This struct provides the main interface to the query optimization system,
@@ -101,29 +121,64 @@ pub(crate) enum EngineRequest {
 /// optimized physical plans in return. It contains all state necessary for
 /// optimization, including channels for communication between components.
 struct Optimizer<M: Memoize> {
+    //
+    // Core optimization components
+    //
     /// The memo instance for storing optimization data
     memo: M,
+
     /// The rule book containing transformation and implementation rules
     rule_book: RuleBook,
+
     /// The engine for evaluating rules and functions
     engine: Engine<OptimizerExpander>,
 
+    //
+    // Ingestion state tracking
+    //
+    /// Logical plans waiting for property derivation to complete
+    ///
+    /// Each entry represents a plan that needs derived properties before
+    /// it can be fully ingested. The associated set tracks which property
+    /// derivation tasks must complete before the plan can be processed.
+    pending_ingestions: Vec<PendingIngestion>,
+
+    /// Counter for generating unique property derivation job IDs
+    ///
+    /// Each property derivation task gets a unique ID to correlate results
+    /// with pending ingestion tasks that depend on those properties.
+    next_derive_job_id: i64,
+
+    //
+    // Exploration tracking
+    //
+    /// Track which groups we've started exploring with transformation rules
+    exploring_groups: HashSet<GroupId>,
+
+    /// Track which goals we've started implementing with implementation rules
+    exploring_goals: HashSet<Goal>,
+
+    //
+    // Subscription management
+    //
     /// Subscribers to logical expressions in groups
     group_subscribers: HashMap<GroupId, Vec<Sender<LogicalExpression>>>,
+
     /// Subscribers to *optimized* physical expressions for goals
     goal_subscribers: HashMap<Goal, Vec<Sender<OptimizedExpression>>>,
 
-    /// Track which goals & groups we've started exploring
-    exploring_groups: HashSet<GroupId>,
-    exploring_goals: HashSet<Goal>,
-    /// Engine results
+    //
+    // Communication channels
+    //
+    /// Engine results communication channel
     engine_result_tx: Sender<EngineResult>,
     engine_result_rx: Receiver<EngineResult>,
-    /// Engine requests
+
+    /// Engine requests communication channel
     engine_request_tx: Sender<EngineRequest>,
     engine_request_rx: Receiver<EngineRequest>,
 
-    /// Optimization requests
+    /// Optimization requests from external clients
     optimize_rx: Receiver<OptimizationRequest>,
 }
 
@@ -146,15 +201,26 @@ impl<M: Memoize> Optimizer<M> {
             },
         );
 
-        // Create the optimizer with initialized channels
+        // Create the optimizer with initialized channels and state
         let optimizer = Self {
+            // Core optimization components
             memo,
             rule_book: RuleBook::default(),
             engine,
-            group_subscribers: HashMap::new(),
-            goal_subscribers: HashMap::new(),
+
+            // Ingestion state tracking
+            pending_ingestions: Vec::new(),
+            next_derive_job_id: 0,
+
+            // Exploration tracking
             exploring_groups: HashSet::new(),
             exploring_goals: HashSet::new(),
+
+            // Subscription management
+            group_subscribers: HashMap::new(),
+            goal_subscribers: HashMap::new(),
+
+            // Communication channels
             engine_result_tx,
             engine_result_rx,
             engine_request_tx,
@@ -196,7 +262,7 @@ impl<M: Memoize> Optimizer<M> {
                         EngineResult::NewOptimizedExpression(expr, goal) => {
                             todo!("Received optimized expression for goal: {:?}", goal);
                         }
-                        EngineResult::NewGroup(group_id, props) => {
+                        EngineResult::DeriveProperties(group_id, props) => {
                             todo!("Received properties result for group: {:?}", group_id);
                         }
                     }
@@ -217,6 +283,18 @@ impl<M: Memoize> Optimizer<M> {
                 else => break,
             }
         }
+    }
+
+    // Very important helper
+    async fn ingest_logical_plan(&self, logical_plan: PartialLogicalPlan) {
+        /*let res = ingest_logical_plan(&self.memo, &logical_plan)
+            .await
+            .expect("Failed to ingest logical plan");
+
+        match res {
+            Ok(r) => println!("Ingested logical plan successfully"),
+            Err(err) => eprintln!("Failed to ingest logical plan: {:?}", err),
+        }*/
     }
 
     /// Subscribe to optimized expressions for a specific goal.
@@ -292,7 +370,7 @@ impl<M: Memoize> Optimizer<M> {
         logical_plan: LogicalPlan,
         mut response_tx: Sender<Result<PhysicalPlan, Error>>,
     ) {
-        let (expr_tx, mut expr_rx) = mpsc::channel(0);
+        /*let (expr_tx, mut expr_rx) = mpsc::channel(0);
 
         // Ingest the logical plan
         let ingestion_result = match ingest_logical_plan(&self.memo, &logical_plan.into()).await {
@@ -349,7 +427,7 @@ impl<M: Memoize> Optimizer<M> {
                     break;
                 }
             }
-        });
+        });*/
     }
 
     /// Handles a group subscription request

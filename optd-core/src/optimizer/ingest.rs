@@ -20,6 +20,62 @@ pub enum LogicalIngestion {
     NeedsProperties(Vec<LogicalExpression>),
 }
 
+/// Ingests a partial logical plan into the memo table.
+///
+/// This function handles both materialized and unmaterialized logical plans,
+/// recursively processing operators in materialized plans.
+///
+/// # Arguments
+/// * `memo` - The memoization table
+/// * `partial_plan` - The partial logical plan to ingest
+///
+/// # Returns
+/// * The ID of the logical group created or updated
+#[async_recursion]
+pub(super) async fn ingest_logical_plan<M>(
+    memo: &M,
+    partial_plan: &PartialLogicalPlan,
+) -> Result<LogicalIngestion, Error>
+where
+    M: Memoize,
+{
+    match partial_plan {
+        PartialLogicalPlan::Materialized(operator) => ingest_logical_operator(memo, operator).await,
+        PartialLogicalPlan::UnMaterialized(group_id) => {
+            // For unmaterialized plans, we know the group has to exist
+            Ok(LogicalIngestion::Found(*group_id, false))
+        }
+    }
+}
+
+/// Ingests a partial physical plan into the memo table.
+///
+/// This function handles both materialized and unmaterialized physical plans,
+/// recursively processing operators in materialized plans.
+///
+/// # Arguments
+/// * `memo` - The memoization table
+/// * `partial_plan` - The partial physical plan to ingest
+///
+/// # Returns
+/// * The goal associated with the physical plan
+#[async_recursion]
+pub(super) async fn ingest_physical_plan<M>(
+    memo: &M,
+    partial_plan: &PartialPhysicalPlan,
+) -> Result<Goal, Error>
+where
+    M: Memoize,
+{
+    match partial_plan {
+        PartialPhysicalPlan::Materialized(operator) => {
+            let (_, goal) = ingest_physical_operator(memo, operator).await?;
+            Ok(goal)
+        }
+        PartialPhysicalPlan::UnMaterialized(goal) => Ok(goal.clone()),
+    }
+}
+
 /// Processes a logical operator and attempts to find it in the memo table.
 ///
 /// This function ingests a logical operator into the memo structure, recursively
@@ -32,7 +88,7 @@ pub enum LogicalIngestion {
 ///
 /// # Returns
 /// * Either the found group ID or the logical expression that needs properties
-pub(super) async fn ingest_logical_operator<M>(
+async fn ingest_logical_operator<M>(
     memo: &M,
     operator: &Operator<Arc<PartialLogicalPlan>>,
 ) -> Result<LogicalIngestion, Error>
@@ -107,7 +163,7 @@ where
 ///
 /// # Returns
 /// * The created physical expression and its assigned goal
-pub(super) async fn ingest_physical_operator<M>(
+async fn ingest_physical_operator<M>(
     memo: &M,
     operator: &Operator<Arc<PartialPhysicalPlan>>,
 ) -> Result<(PhysicalExpression, Goal), Error>
@@ -165,61 +221,5 @@ where
             let results = try_join_all(plans.iter().map(|plan| ingest_fn(memo, plan))).await?;
             Ok(VarLength(results))
         }
-    }
-}
-
-/// Ingests a partial logical plan into the memo table.
-///
-/// This function handles both materialized and unmaterialized logical plans,
-/// recursively processing operators in materialized plans.
-///
-/// # Arguments
-/// * `memo` - The memoization table
-/// * `partial_plan` - The partial logical plan to ingest
-///
-/// # Returns
-/// * The ID of the logical group created or updated
-#[async_recursion]
-pub(super) async fn ingest_logical_plan<M>(
-    memo: &M,
-    partial_plan: &PartialLogicalPlan,
-) -> Result<LogicalIngestion, Error>
-where
-    M: Memoize,
-{
-    match partial_plan {
-        PartialLogicalPlan::Materialized(operator) => ingest_logical_operator(memo, operator).await,
-        PartialLogicalPlan::UnMaterialized(group_id) => {
-            // For unmaterialized plans, we know the group has to exist
-            Ok(LogicalIngestion::Found(*group_id, false))
-        }
-    }
-}
-
-/// Ingests a partial physical plan into the memo table.
-///
-/// This function handles both materialized and unmaterialized physical plans,
-/// recursively processing operators in materialized plans.
-///
-/// # Arguments
-/// * `memo` - The memoization table
-/// * `partial_plan` - The partial physical plan to ingest
-///
-/// # Returns
-/// * The goal associated with the physical plan
-#[async_recursion]
-pub(super) async fn ingest_physical_plan<M>(
-    memo: &M,
-    partial_plan: &PartialPhysicalPlan,
-) -> Result<Goal, Error>
-where
-    M: Memoize,
-{
-    match partial_plan {
-        PartialPhysicalPlan::Materialized(operator) => {
-            let (_, goal) = ingest_physical_operator(memo, operator).await?;
-            Ok(goal)
-        }
-        PartialPhysicalPlan::UnMaterialized(goal) => Ok(goal.clone()),
     }
 }
