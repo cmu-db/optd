@@ -10,7 +10,10 @@ use crate::cir::{
     properties::{LogicalProperties, PhysicalProperties},
 };
 use futures::{
-    channel::{mpsc::Sender, oneshot},
+    channel::{
+        mpsc::{self, Sender},
+        oneshot,
+    },
     SinkExt, StreamExt,
 };
 use OptimizerMessage::*;
@@ -27,13 +30,14 @@ impl<M: Memoize> Optimizer<M> {
             IngestionResult::Success(group_id, _) => {
                 // Plan was ingested successfully, subscribe to the goal
                 let goal = Goal(group_id, PhysicalProperties(None));
-                let mut expr_stream = self.subscribe_to_goal(goal);
+                let (expr_tx, mut expr_rx) = mpsc::channel(0);
+                self.subscribe_to_goal(goal, expr_tx).await;
 
                 let mut message_tx = self.message_tx.clone();
 
                 tokio::spawn(async move {
                     // Forward optimized expressions to the client
-                    while let Some(expr) = expr_stream.next().await {
+                    while let Some(expr) = expr_rx.next().await {
                         message_tx
                             .send(EgestOptimized(expr, response_tx.clone()))
                             .await
@@ -129,9 +133,9 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_group_subscription(
         &mut self,
         group_id: GroupId,
-        mut sender: Sender<LogicalExpression>,
+        sender: Sender<LogicalExpression>,
     ) {
-        todo!();
+        self.subscribe_to_group(group_id, sender).await;
     }
 
     /// Sends the best existing physical expression for the goal to the subscriber
@@ -139,9 +143,9 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_goal_subscription(
         &mut self,
         goal: Goal,
-        mut sender: Sender<OptimizedExpression>,
+        sender: Sender<OptimizedExpression>,
     ) {
-        todo!();
+        self.subscribe_to_goal(goal, sender).await;
     }
 
     /// Retrieves the logical properties for the given group from the memo
