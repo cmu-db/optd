@@ -28,15 +28,6 @@ pub(crate) mod expander;
 mod ingest;
 mod memo;
 
-/// Represents the result of an optimization task
-#[derive(Debug)]
-pub enum TaskResult {
-    /// Result of exploring a logical expression within a group
-    Exploration(PartialLogicalPlan, GroupId),
-    /// Result of implementing a physical expression for a goal
-    Implementation(PartialPhysicalPlan, Goal),
-}
-
 /// Represents external requests sent to the optimizer
 #[derive(Debug)]
 pub enum OptimizationRequest {
@@ -49,9 +40,18 @@ pub enum OptimizationRequest {
     ),
 }
 
+/// Represents the result of an optimization task
+#[derive(Debug)]
+enum TaskResult {
+    /// Result of exploring a logical expression within a group
+    Exploration(PartialLogicalPlan, GroupId),
+    /// Result of implementing a physical expression for a goal
+    Implementation(PartialPhysicalPlan, Goal),
+}
+
 // Subscription requests that can be sent to the optimizer
 #[derive(Debug)]
-pub enum SubscriptionRequest {
+enum SubscriptionRequest {
     Group(GroupId, Sender<LogicalExpression>),
     Goal(Goal, Sender<OptimizedExpression>),
 }
@@ -65,40 +65,28 @@ pub enum SubscriptionRequest {
 struct Optimizer<M: Memoize> {
     /// The memo instance for storing optimization data
     memo: M,
-
     /// The rule book containing transformation and implementation rules
     rule_book: RuleBook,
-
     /// The engine for evaluating rules and functions
     engine: Engine<OptimizerExpander>,
-
     /// Subscribers to logical expressions in groups
     group_subscribers: HashMap<GroupId, Vec<Sender<LogicalExpression>>>,
-
     /// Subscribers to optimized physical expressions for goals
     goal_subscribers: HashMap<Goal, Vec<Sender<OptimizedExpression>>>,
-
     /// Track which groups we've already launched tasks for
     explored_groups: HashSet<GroupId>,
-
     /// Track which goals we've already launched tasks for
     launched_goals: HashSet<Goal>,
-
     /// Sender for task results
     task_sender: Sender<TaskResult>,
-
     /// Receiver for task results
     task_receiver: Receiver<TaskResult>,
-
     /// Sender for subscription requests
     subscription_sender: Sender<SubscriptionRequest>,
-
     /// Receiver for subscription requests
     subscription_receiver: Receiver<SubscriptionRequest>,
-
     /// Sender for optimization requests
     request_sender: Sender<OptimizationRequest>,
-
     /// Receiver for optimization requests
     request_receiver: Receiver<OptimizationRequest>,
 }
@@ -200,7 +188,7 @@ impl<M: Memoize> Optimizer<M> {
     ) {
         let (expr_sender, mut expr_receiver) = mpsc::channel(0);
 
-        let group_id = ingest_logical_plan(&self.memo, &self.engine, &logical_plan.into())
+        let group_id = ingest_logical_plan(&self.memo, &logical_plan.into())
             .await
             .expect("Failed to ingest logical plan");
         let goal = Goal(group_id, PhysicalProperties(None));

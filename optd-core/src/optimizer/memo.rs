@@ -21,14 +21,16 @@ pub trait Memoize: Send + Sync + 'static {
         group_id: GroupId,
     ) -> MemoizeResult<Vec<LogicalExpression>>;
 
-    async fn add_logical_expr<F, Fut>(
+    async fn try_add_logical_expr(
         &self,
         logical_expr: &LogicalExpression,
-        derive_properties: F,
-    ) -> MemoizeResult<GroupId>
-    where
-        F: FnOnce() -> Fut + Send,
-        Fut: Future<Output = MemoizeResult<LogicalProperties>> + Send;
+    ) -> MemoizeResult<Option<(GroupId, bool)>>;
+
+    async fn create_group_with(
+        &self,
+        logical_expr: &LogicalExpression,
+        props: &LogicalProperties,
+    ) -> MemoizeResult<GroupId>;
 
     async fn merge_groups(&self, from: GroupId, to: GroupId) -> MemoizeResult<()>;
 
