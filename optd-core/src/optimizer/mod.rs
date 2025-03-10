@@ -9,8 +9,8 @@ use crate::{
         rules::RuleBook,
     },
     engine::Engine,
-    error::Error,
 };
+use egest::egest_best_plan;
 use expander::OptimizerExpander;
 use futures::StreamExt;
 use futures::{
@@ -23,32 +23,40 @@ use memo::Memoize;
 use optd_dsl::analyzer::hir::HIR;
 use std::collections::{HashMap, HashSet};
 
+mod egest;
 mod expander;
 mod ingest;
 mod memo;
 
-/// External client requests to the query optimizer.
+/// External client request to optimize a query in the optimizer.
 ///
-/// Defines the public API for submitting queries and receiving execution plans.
+/// Defines the public API for submitting a query and receiving execution plans.
 #[derive(Debug)]
-pub enum OptimizationRequest {
-    /// Optimize a logical query plan into a physical execution plan.
+pub struct OptimizeRequest {
+    /// The logical plan to optimize
+    pub logical_plan: LogicalPlan,
+
+    /// Channel for receiving optimized physical plans
     ///
     /// Streams results back as they become available, allowing clients to:
     /// * Receive progressively better plans during optimization
     /// * Terminate early when a "good enough" plan is found
     /// * Control optimization duration by consuming or dropping the receiver
-    ///
-    /// * `LogicalPlan` - Input logical plan to optimize
-    /// * `Sender<Result<PhysicalPlan, Error>>` - Channel for receiving optimized plans
-    Optimize(LogicalPlan, Sender<Result<PhysicalPlan, Error>>),
+    pub result_sender: Sender<PhysicalPlan>,
 }
 
-/// Results produced by the optimization engine for the central optimizer.
+/// Messages passed within the optimization system.
 ///
-/// Represents outcomes from various stages of query optimization.
+/// This enum unifies all the message types that flow through the
+/// optimizer, enabling centralized message handling.
 #[derive(Debug)]
-enum EngineResult {
+enum OptimizerMessage {
+    /// Process an optimization request.
+    ///
+    /// Wraps the external client request as an internal message for consistent
+    /// handling within the optimizer's message processing system.
+    OptimizeRequest(OptimizeRequest),
+
     /// New logical plan alternative for a group from applying transformation rules.
     NewLogicalPartial(PartialLogicalPlan, GroupId),
 
@@ -62,18 +70,12 @@ enum EngineResult {
     /// May not be the globally optimal plan for the goal.
     NewOptimizedExpression(OptimizedExpression, Goal),
 
-    /// The derived logical properties of a logical expression
+    /// Create a new group with the provided logical properties.
     ///
-    /// Includes the job ID of the property derivation task that produced these properties,
-    /// allowing correlation with pending ingestion tasks.
-    DeriveProperties(LogicalProperties, i64),
-}
+    /// Used when the engine derives properties for a logical expression.
+    /// Includes the job ID to track dependency resolution.
+    CreateGroup(LogicalProperties, LogicalExpression, i64),
 
-/// Requests from the optimization engine to the central optimizer.
-///
-/// Used to access shared state or subscribe to updates in the memo structure.
-#[derive(Debug)]
-pub(crate) enum EngineRequest {
     /// Subscribe to all logical expressions in a specific group.
     ///
     /// Provides notifications for existing and new expressions in the equivalence class.
@@ -94,24 +96,32 @@ pub(crate) enum EngineRequest {
     /// Gets properties (schema, cardinality, statistics) needed for rules and costing.
     /// * `GroupId` - Group whose properties are requested
     /// * `oneshot::Sender<LogicalProperties>` - Channel for properties response
-    DeriveProperties(GroupId, oneshot::Sender<LogicalProperties>),
+    RetrieveProperties(GroupId, oneshot::Sender<LogicalProperties>),
 }
 
-/// Represents a logical plan waiting for property derivation to complete before ingestion.
-///
-/// This structure tracks the state of a logical plan that requires derived properties
-/// before it can be fully ingested into the memo. It maintains a set of property
-/// derivation job IDs that must complete before the plan can be processed.
-#[derive(Debug)]
-struct PendingIngestion {
-    /// The logical plan awaiting ingestion
-    plan: PartialLogicalPlan,
+/// Result type for logical plan ingestion
+enum IngestionResult {
+    /// Plan was successfully ingested
+    Success(GroupId, bool),
 
-    /// Set of property derivation job IDs that must complete before this plan can be ingested
+    /// Plan requires dependencies to be created
+    NeedsDependencies(HashSet<i64>),
+}
+
+/// A message that is waiting for dependencies before it can be processed.
+///
+/// This structure represents a message that requires one or more groups to be
+/// created before it can be fully processed. It tracks the set of group IDs
+/// that must exist before the message can be handled.
+struct PendingMessage {
+    /// The message awaiting processing
+    message: OptimizerMessage,
+
+    /// Set of job IDs whose groups must be created before this message can be processed
     ///
-    /// As property derivation tasks complete, their job IDs are removed from this set.
-    /// When the set becomes empty, the plan is ready for ingestion.
-    pending_derivations: HashSet<i64>,
+    /// As groups are created, their corresponding job IDs are removed from this set.
+    /// When the set becomes empty, the message is ready for processing.
+    pending_dependencies: HashSet<i64>,
 }
 
 /// The central access point to the OPTD optimizer.
@@ -134,20 +144,20 @@ struct Optimizer<M: Memoize> {
     engine: Engine<OptimizerExpander>,
 
     //
-    // Ingestion state tracking
+    // Dependency tracking
     //
-    /// Logical plans waiting for property derivation to complete
+    /// Messages waiting for dependencies to be resolved
     ///
-    /// Each entry represents a plan that needs derived properties before
-    /// it can be fully ingested. The associated set tracks which property
-    /// derivation tasks must complete before the plan can be processed.
-    pending_ingestions: Vec<PendingIngestion>,
+    /// Each entry represents a message that can only be processed once
+    /// certain groups have been created. The associated set tracks which
+    /// group creation tasks must complete before the message can be processed.
+    pending_messages: Vec<PendingMessage>,
 
-    /// Counter for generating unique property derivation job IDs
+    /// Counter for generating unique job IDs
     ///
-    /// Each property derivation task gets a unique ID to correlate results
-    /// with pending ingestion tasks that depend on those properties.
-    next_derive_job_id: i64,
+    /// Each job (like property derivation) gets a unique ID to correlate
+    /// results with pending messages that depend on it.
+    next_dep_id: i64,
 
     //
     // Exploration tracking
@@ -170,16 +180,12 @@ struct Optimizer<M: Memoize> {
     //
     // Communication channels
     //
-    /// Engine results communication channel
-    engine_result_tx: Sender<EngineResult>,
-    engine_result_rx: Receiver<EngineResult>,
-
-    /// Engine requests communication channel
-    engine_request_tx: Sender<EngineRequest>,
-    engine_request_rx: Receiver<EngineRequest>,
+    /// Optimizer message communication channel
+    message_tx: Sender<OptimizerMessage>,
+    message_rx: Receiver<OptimizerMessage>,
 
     /// Optimization requests from external clients
-    optimize_rx: Receiver<OptimizationRequest>,
+    optimize_rx: Receiver<OptimizeRequest>,
 }
 
 impl<M: Memoize> Optimizer<M> {
@@ -187,17 +193,16 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// This method creates, initializes, and launches the optimizer in one step.
     /// It returns a sender that can be used to communicate with the optimizer.
-    pub fn launch(memo: M, hir: HIR) -> Sender<OptimizationRequest> {
+    pub fn launch(memo: M, hir: HIR) -> Sender<OptimizeRequest> {
         // Initialize all channels
-        let (engine_result_tx, engine_result_rx) = mpsc::channel(0);
-        let (engine_request_tx, engine_request_rx) = mpsc::channel(0);
+        let (message_tx, message_rx) = mpsc::channel(0);
         let (optimize_tx, optimize_rx) = mpsc::channel(0);
 
         // Create the engine with the optimizer expander
         let engine = Engine::new(
             hir.context,
             OptimizerExpander {
-                engine_request_tx: engine_request_tx.clone(),
+                message_tx: message_tx.clone(),
             },
         );
 
@@ -208,9 +213,9 @@ impl<M: Memoize> Optimizer<M> {
             rule_book: RuleBook::default(),
             engine,
 
-            // Ingestion state tracking
-            pending_ingestions: Vec::new(),
-            next_derive_job_id: 0,
+            // Dependency tracking
+            pending_messages: Vec::new(),
+            next_dep_id: 0,
 
             // Exploration tracking
             exploring_groups: HashSet::new(),
@@ -221,10 +226,8 @@ impl<M: Memoize> Optimizer<M> {
             goal_subscribers: HashMap::new(),
 
             // Communication channels
-            engine_result_tx,
-            engine_result_rx,
-            engine_request_tx,
-            engine_request_rx,
+            message_tx,
+            message_rx,
             optimize_rx,
         };
 
@@ -245,39 +248,39 @@ impl<M: Memoize> Optimizer<M> {
         loop {
             tokio::select! {
                 Some(request) = self.optimize_rx.next() => {
-                    match request {
-                        OptimizationRequest::Optimize(logical_plan, response_sender) => {
-                            self.optimize(logical_plan, response_sender).await;
-                        }
-                    }
+                    let mut message_tx = self.message_tx.clone();
+                    tokio::spawn(async move {
+                        message_tx.send(OptimizerMessage::OptimizeRequest(request))
+                            .await
+                            .expect("Failed to forward optimize request");
+                    });
                 },
-                Some(result) = self.engine_result_rx.next() => {
-                    match result {
-                        EngineResult::NewLogicalPartial(plan, group_id) => {
-                            todo!("Received exploration result for group: {:?}", group_id);
+                Some(message) = self.message_rx.next() => {
+                    match message {
+                        OptimizerMessage::OptimizeRequest(request) => {
+                            self.process_optimize_request(request.logical_plan, request.result_sender).await;
+                        }
+                        OptimizerMessage::NewLogicalPartial(plan, group_id) => {
+                            self.process_new_logical_partial(plan, group_id).await;
                         },
-                        EngineResult::NewPhysicalPartial(plan, goal) => {
-                            todo!("Received implementation result for goal: {:?}", goal);
-                        }
-                        EngineResult::NewOptimizedExpression(expr, goal) => {
-                            todo!("Received optimized expression for goal: {:?}", goal);
-                        }
-                        EngineResult::DeriveProperties(group_id, props) => {
-                            todo!("Received properties result for group: {:?}", group_id);
-                        }
-                    }
-                },
-                Some(request) = self.engine_request_rx.next() => {
-                    match request {
-                        EngineRequest::SubscribeGroup(group_id, sender) => {
-                            self.handle_group_subscription(group_id, sender).await;
+                        OptimizerMessage::NewPhysicalPartial(plan, goal) => {
+                            self.process_new_physical_partial(plan, goal).await;
                         },
-                        EngineRequest::SubscribeGoal(goal, sender) => {
-                            self.handle_goal_subscription(goal, sender).await;
-                        }
-                        EngineRequest::DeriveProperties(group_id, sender) => {
-                            self.handle_derive_properties(group_id, sender).await;
-                        }
+                        OptimizerMessage::NewOptimizedExpression(expr, goal) => {
+                            self.process_new_optimized_expression(expr, goal).await;
+                        },
+                        OptimizerMessage::CreateGroup(props, expr, job_id) => {
+                            self.process_create_group(props, expr, job_id).await;
+                        },
+                        OptimizerMessage::SubscribeGroup(group_id, sender) => {
+                            self.process_group_subscription(group_id, sender).await;
+                        },
+                        OptimizerMessage::SubscribeGoal(goal, sender) => {
+                            self.process_goal_subscription(goal, sender).await;
+                        },
+                        OptimizerMessage::RetrieveProperties(group_id, sender) => {
+                            self.process_retrieve_properties(group_id, sender).await;
+                        },
                     }
                 },
                 else => break,
@@ -285,46 +288,230 @@ impl<M: Memoize> Optimizer<M> {
         }
     }
 
-    // Very important helper
-    async fn ingest_logical_plan(&self, logical_plan: PartialLogicalPlan) {
-        /*let res = ingest_logical_plan(&self.memo, &logical_plan)
+    /// Handles an optimize request
+    ///
+    /// This method initiates the optimization process for a logical plan and streams
+    /// results back to the client as they become available.
+    async fn process_optimize_request(
+        &mut self,
+        logical_plan: LogicalPlan,
+        response_tx: Sender<PhysicalPlan>,
+    ) {
+        // Convert the logical plan to a partial plan
+        let partial_plan = PartialLogicalPlan::from(logical_plan);
+
+        // Try to ingest the plan
+        match self.process_ingest_logical_plan(partial_plan).await {
+            IngestionResult::Success(group_id, _) => {
+                // Plan was ingested successfully, subscribe to the goal
+                let goal = Goal(group_id, PhysicalProperties(None));
+                let mut expr_stream = self.subscribe_to_goal(goal);
+
+                tokio::spawn(async move {
+                    // Forward optimized expressions to the client
+                    while let Some(expr) = expr_stream.next().await {
+                        todo!("cannot access memo in coroutine: have a materilaize message!")
+                        /*      // Convert OptimizedExpression to PhysicalPlan
+                        let physical_plan = egest_best_plan(&self.memo, &expr)
+                            .await
+                            .expect("Failed to egest best plan")
+                            .expect("Optimization not complete");
+
+                        response_tx
+                            .send(physical_plan)
+                            .await
+                            .expect("Failed to send physical plan");*/
+                    }
+                });
+            }
+            IngestionResult::NeedsDependencies(dependencies) => {
+                // Store a message to handle optimization once dependencies are resolved
+                todo!("do")
+            }
+        }
+    }
+
+    /// Process a logical plan for ingestion into the memo
+    ///
+    /// This method takes a logical plan and either ingests it directly or
+    /// initiates property derivation if needed.
+    ///
+    /// Returns an IngestionResult indicating either success or the dependencies needed.
+    async fn process_ingest_logical_plan(
+        &mut self,
+        logical_plan: PartialLogicalPlan,
+    ) -> IngestionResult {
+        let ingest_result = ingest_logical_plan(&self.memo, &logical_plan)
             .await
             .expect("Failed to ingest logical plan");
 
-        match res {
-            Ok(r) => println!("Ingested logical plan successfully"),
-            Err(err) => eprintln!("Failed to ingest logical plan: {:?}", err),
-        }*/
+        match ingest_result {
+            LogicalIngestion::Found(group_id, is_new_expr) => {
+                IngestionResult::Success(group_id, is_new_expr)
+            }
+            LogicalIngestion::NeedsProperties(expressions) => {
+                let pending_dependencies = expressions
+                    .into_iter()
+                    .map(|expr| {
+                        let job_id = self.next_dep_id;
+                        self.next_dep_id += 1;
+
+                        let mut message_tx = self.message_tx.clone();
+                        let engine = self.engine.clone();
+
+                        tokio::spawn(async move {
+                            let properties = engine
+                                .derive_properties(&expr.clone().into())
+                                .await
+                                .expect("Failed to derive properties");
+
+                            message_tx
+                                .send(OptimizerMessage::CreateGroup(properties, expr, job_id))
+                                .await
+                                .expect("Failed to send CreateGroup message");
+                        });
+
+                        job_id
+                    })
+                    .collect();
+
+                IngestionResult::NeedsDependencies(pending_dependencies)
+            }
+        }
+    }
+
+    /// Process a CreateGroup message to create a new group with derived properties
+    ///
+    /// This method handles group creation for expressions with derived properties
+    /// and updates any pending messages that depend on this group.
+    async fn process_create_group(
+        &mut self,
+        properties: LogicalProperties,
+        expression: LogicalExpression,
+        job_id: i64,
+    ) {
+        self.memo
+            .create_group_with(&expression, &properties)
+            .await
+            .expect("Failed to create group");
+
+        self.process_dependency_resolution(job_id).await;
+    }
+
+    /// Process resolution of a dependency
+    ///
+    /// This method is called when a group creation job completes. It updates all
+    /// pending messages that were waiting for this job and processes any that
+    /// are now ready (have no more pending dependencies).
+    async fn process_dependency_resolution(&mut self, completed_job_id: i64) {
+        // Find all pending messages that were waiting for this job
+        let mut ready_indices = Vec::new();
+
+        for (i, pending) in self.pending_messages.iter_mut().enumerate() {
+            // Remove the completed job from the pending dependencies
+            pending.pending_dependencies.remove(&completed_job_id);
+
+            // If there are no more pending dependencies, this message is ready
+            if pending.pending_dependencies.is_empty() {
+                ready_indices.push(i);
+            }
+        }
+
+        // Process all ready messages (in reverse order to avoid index issues when removing)
+        for i in ready_indices.iter().rev() {
+            // Take ownership of the message
+            let pending = self.pending_messages.swap_remove(*i);
+
+            // Re-send the message to be processed
+            let mut message_tx = self.message_tx.clone();
+            tokio::spawn(async move {
+                if let Err(err) = message_tx.send(pending.message).await {
+                    eprintln!("Failed to re-send ready message: {}", err);
+                }
+            });
+        }
+    }
+
+    /// Process a new logical partial plan from transformation rules
+    ///
+    /// This method handles new logical plan alternatives discovered through
+    /// transformation rule application.
+    async fn process_new_logical_partial(&mut self, plan: PartialLogicalPlan, group_id: GroupId) {
+        todo!()
+    }
+
+    /// Process a new physical partial plan from implementation rules
+    ///
+    /// This method handles new physical implementations discovered through
+    /// implementation rule application.
+    async fn process_new_physical_partial(&mut self, plan: PartialPhysicalPlan, goal: Goal) {
+        todo!()
+    }
+
+    /// Process a new optimized expression
+    ///
+    /// This method handles fully optimized physical expressions with cost information.
+    async fn process_new_optimized_expression(&mut self, expr: OptimizedExpression, goal: Goal) {
+        todo!()
     }
 
     /// Subscribe to optimized expressions for a specific goal.
-    /// If hasn't started to explore, launch exploration.
-    async fn subscribe_to_goal(
-        mut engine_request_tx: Sender<EngineRequest>,
-        goal: Goal,
-    ) -> impl Stream<Item = OptimizedExpression> {
+    /// If group hasn't started to explore, launch exploration.
+    fn subscribe_to_goal(&mut self, goal: Goal) -> impl Stream<Item = OptimizedExpression> {
         let (expr_tx, expr_rx) = mpsc::channel(0);
 
-        engine_request_tx
-            .send(EngineRequest::SubscribeGoal(goal, expr_tx))
-            .await
-            .expect("Failed to send goal subscription - channel closed");
+        // Add the sender to goal subscribers list
+        self.goal_subscribers
+            .entry(goal.clone())
+            .or_insert_with(Vec::new)
+            .push(expr_tx.clone());
+
+        // Launch exploration if this goal isn't being explored yet
+        if !self.exploring_goals.contains(&goal) {
+            self.explore_goal(goal.clone());
+        }
+
+        // Send the subscription request to the engine
+        let mut message_tx = self.message_tx.clone();
+        let goal_clone = goal.clone();
+        let expr_tx_clone = expr_tx.clone();
+
+        tokio::spawn(async move {
+            message_tx
+                .send(OptimizerMessage::SubscribeGoal(goal_clone, expr_tx_clone))
+                .await
+                .expect("Failed to send goal subscription - channel closed");
+        });
 
         expr_rx
     }
 
     /// Subscribe to logical expressions in a specific group.
-    /// If hasn't started to explore, launch exploration.
-    async fn subscribe_to_group(
-        mut engine_request_tx: Sender<EngineRequest>,
-        group_id: GroupId,
-    ) -> impl Stream<Item = LogicalExpression> {
+    /// If group hasn't started to explore, launch exploration.
+    fn subscribe_to_group(&mut self, group_id: GroupId) -> impl Stream<Item = LogicalExpression> {
         let (expr_tx, expr_rx) = mpsc::channel(0);
 
-        engine_request_tx
-            .send(EngineRequest::SubscribeGroup(group_id, expr_tx))
-            .await
-            .expect("Failed to send group subscription - channel closed");
+        // Add the sender to group subscribers list
+        self.group_subscribers
+            .entry(group_id)
+            .or_insert_with(Vec::new)
+            .push(expr_tx.clone());
+
+        // Launch exploration if this group isn't being explored yet
+        if !self.exploring_groups.contains(&group_id) {
+            self.explore_group(group_id);
+        }
+
+        // Send the subscription request to the engine
+        let mut message_tx = self.message_tx.clone();
+        let expr_tx_clone = expr_tx.clone();
+
+        tokio::spawn(async move {
+            message_tx
+                .send(OptimizerMessage::SubscribeGroup(group_id, expr_tx_clone))
+                .await
+                .expect("Failed to send group subscription - channel closed");
+        });
 
         expr_rx
     }
@@ -333,112 +520,31 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// Retrieves the logical properties for the given group from the memo
     /// and sends them back to the requestor through the provided oneshot channel.
-    async fn handle_derive_properties(
+    async fn process_retrieve_properties(
         &self,
         group_id: GroupId,
         sender: oneshot::Sender<LogicalProperties>,
     ) {
-        match self.memo.get_logical_properties(group_id).await {
-            Ok(props) => {
-                if let Err(_) = sender.send(props) {
-                    println!(
-                        "Failed to send properties for group {:?}: receiver dropped",
-                        group_id
-                    );
-                }
-            }
-            Err(err) => {
-                println!(
-                    "Failed to get properties for group {:?}: {:?}",
-                    group_id, err
-                );
-            }
-        }
-    }
-
-    /// Handles an optimize request
-    ///
-    /// This method initiates the optimization process for a logical plan and streams
-    /// results back to the client as they become available. The client can continue
-    /// receiving optimized plans indefinitely until they decide to stop listening.
-    ///
-    /// Each new physical plan generated is sent through the response channel,
-    /// allowing clients to see optimization progress in real-time and terminate
-    /// the process whenever they're satisfied with the results.
-    async fn optimize(
-        &self,
-        logical_plan: LogicalPlan,
-        mut response_tx: Sender<Result<PhysicalPlan, Error>>,
-    ) {
-        /*let (expr_tx, mut expr_rx) = mpsc::channel(0);
-
-        // Ingest the logical plan
-        let ingestion_result = match ingest_logical_plan(&self.memo, &logical_plan.into()).await {
-            Ok(result) => result,
-            Err(err) => {
-                if let Err(send_err) = response_tx.send(Err(err)).await {
-                    eprintln!("Failed to send error response: {}", send_err);
-                }
-                return;
-            }
-        };
-
-        // Extract the group ID from the ingestion result
-        let group_id = match ingestion_result {
-            LogicalIngestion::Found(group_id, _) => group_id,
-            LogicalIngestion::NeedsProperties(_) => {
-                let err =
-                    Error::Internal("Plan requires property derivation before optimization".into());
-                if let Err(send_err) = response_tx.send(Err(err)).await {
-                    eprintln!("Failed to send error response: {}", send_err);
-                }
-                return;
-            }
-        };
-
-        let goal = Goal(group_id, PhysicalProperties(None));
-        let request = EngineRequest::SubscribeGoal(goal.clone(), expr_tx);
-
-        let mut engine_request_tx = self.engine_request_tx.clone();
-
-        // Spawn a task to handle the optimization process
-        tokio::spawn(async move {
-            // Subscribe to goal expressions
-            if let Err(err) = engine_request_tx.send(request).await {
-                let err_msg = format!("Failed to send goal subscription request: {}", err);
-                if let Err(send_err) = response_tx.send(Err(Error::Internal(err_msg))).await {
-                    eprintln!("Failed to send error response: {}", send_err);
-                }
-                return;
-            }
-
-            // Stream optimized expressions as they arrive
-            while let Some(expr) = expr_rx.next().await {
-                println!("Received optimized expression: {:?}", expr);
-
-                // Convert OptimizedExpression to PhysicalPlan
-                // In a real implementation, this would involve traversing the expression
-                // and building a complete PhysicalPlan
-                let physical_plan = PhysicalPlan {}; // Placeholder implementation
-
-                // Send the plan to the client
-                if let Err(err) = response_tx.send(Ok(physical_plan)).await {
-                    eprintln!("Client disconnected, stopping optimization stream: {}", err);
-                    break;
-                }
-            }
-        });*/
+        let props = self
+            .memo
+            .get_logical_properties(group_id)
+            .await
+            .expect("Failed to get logical properties");
+        sender
+            .send(props)
+            .expect("Failed to send properties - channel closed");
     }
 
     /// Handles a group subscription request
     ///
     /// Sends existing logical expressions for the group to the subscriber
     /// and initiates exploration of the group if it hasn't been explored yet.
-    async fn handle_group_subscription(
+    async fn process_group_subscription(
         &mut self,
         group_id: GroupId,
         mut sender: Sender<LogicalExpression>,
     ) {
+        todo!("review");
         // Get existing logical expressions for the group
         let exprs = match self.memo.get_all_logical_exprs(group_id).await {
             Ok(exprs) => exprs,
@@ -467,7 +573,7 @@ impl<M: Memoize> Optimizer<M> {
 
         // Set up exploration of the group if not already explored
         if !self.exploring_groups.contains(&group_id) {
-            self.explore_group(group_id).await;
+            self.explore_group(group_id);
         }
     }
 
@@ -475,11 +581,13 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// Sends the best existing physical expression for the goal to the subscriber
     /// and initiates implementation of the goal if it hasn't been launched yet.
-    async fn handle_goal_subscription(
+    async fn process_goal_subscription(
         &mut self,
         goal: Goal,
         mut sender: Sender<OptimizedExpression>,
     ) {
+        todo!("review");
+
         // Get the best existing physical expression for the goal
         let result = match self.memo.get_best_optimized_physical_expr(&goal).await {
             Ok(result) => result,
@@ -508,7 +616,7 @@ impl<M: Memoize> Optimizer<M> {
 
         // Set up implementation of the goal if not already launched
         if !self.exploring_goals.contains(&goal) {
-            self.explore_goal(goal).await;
+            self.explore_goal(goal);
         }
     }
 
@@ -517,8 +625,8 @@ impl<M: Memoize> Optimizer<M> {
     /// This method triggers the application of transformation rules to
     /// the logical expressions in a group, generating new equivalent
     /// logical expressions.
-    async fn explore_group(&mut self, group_id: GroupId) {
-        // Mark the group as explored
+    fn explore_group(&mut self, group_id: GroupId) {
+        // Mark the group as exploring
         self.exploring_groups.insert(group_id);
 
         // Set up exploration of the group
@@ -531,17 +639,16 @@ impl<M: Memoize> Optimizer<M> {
             .cloned()
             .collect::<Vec<_>>();
 
-        let request = EngineRequest::SubscribeGroup(group_id, expr_tx);
-        let mut engine_request_tx = self.engine_request_tx.clone();
-        let engine_result_tx = self.engine_result_tx.clone();
+        let mut message_tx = self.message_tx.clone();
         let engine = self.engine.clone();
 
         // Spawn a task to explore the group
         tokio::spawn(async move {
-            if let Err(err) = engine_request_tx.send(request).await {
-                eprintln!("Failed to send group subscription request: {}", err);
-                return;
-            }
+            // Subscribe to the group
+            message_tx
+                .send(OptimizerMessage::SubscribeGroup(group_id, expr_tx))
+                .await
+                .expect("Failed to send group subscription request");
 
             while let Some(expr) = expr_rx.next().await {
                 let plan: PartialLogicalPlan = expr.into();
@@ -549,7 +656,7 @@ impl<M: Memoize> Optimizer<M> {
                 for rule in &transformations {
                     let rule_name = rule.0.clone();
 
-                    tokio::spawn(capture!([engine, plan, engine_result_tx], async move {
+                    tokio::spawn(capture!([engine, plan, message_tx], async move {
                         engine
                             .match_and_apply_logical_rule(&rule_name, &plan)
                             .inspect(|result| {
@@ -559,10 +666,10 @@ impl<M: Memoize> Optimizer<M> {
                             })
                             .filter_map(|result| async move { result.ok() })
                             .for_each(|transformed_plan| {
-                                let mut result_tx = engine_result_tx.clone();
+                                let mut result_tx = message_tx.clone();
                                 async move {
                                     if let Err(err) = result_tx
-                                        .send(EngineResult::NewLogicalPartial(
+                                        .send(OptimizerMessage::NewLogicalPartial(
                                             transformed_plan,
                                             group_id,
                                         ))
@@ -584,7 +691,7 @@ impl<M: Memoize> Optimizer<M> {
     /// This method triggers the application of implementation rules to
     /// logical expressions in the goal's group, generating physical
     /// implementations for the goal.
-    async fn explore_goal(&mut self, goal: Goal) {
+    fn explore_goal(&mut self, goal: Goal) {
         self.exploring_goals.insert(goal.clone());
 
         // Set up implementation of the goal
@@ -598,20 +705,16 @@ impl<M: Memoize> Optimizer<M> {
             .collect::<Vec<_>>();
 
         let props = goal.1.clone();
-        let request = EngineRequest::SubscribeGroup(goal.0, expr_tx);
-        let mut engine_request_tx = self.engine_request_tx.clone();
-        let engine_result_tx = self.engine_result_tx.clone();
+        let mut message_tx = self.message_tx.clone();
         let engine = self.engine.clone();
 
         // Spawn a task to implement the goal
         tokio::spawn(async move {
-            if let Err(err) = engine_request_tx.send(request).await {
-                eprintln!(
-                    "Failed to send group subscription request for goal: {}",
-                    err
-                );
-                return;
-            }
+            // Subscribe to the group
+            message_tx
+                .send(OptimizerMessage::SubscribeGroup(goal.0, expr_tx))
+                .await
+                .expect("Failed to send group subscription request for goal");
 
             while let Some(expr) = expr_rx.next().await {
                 let plan: PartialLogicalPlan = expr.into();
@@ -620,7 +723,7 @@ impl<M: Memoize> Optimizer<M> {
                     let rule_name = rule.0.clone();
 
                     tokio::spawn(capture!(
-                        [engine, plan, engine_result_tx, goal, props],
+                        [engine, plan, message_tx, goal, props],
                         async move {
                             engine
                                 .match_and_apply_implementation_rule(&rule_name, &plan, &props)
@@ -634,11 +737,11 @@ impl<M: Memoize> Optimizer<M> {
                                 })
                                 .filter_map(|result| async move { result.ok() })
                                 .for_each(|physical_plan| {
-                                    let mut result_tx = engine_result_tx.clone();
+                                    let mut result_tx = message_tx.clone();
                                     let goal = goal.clone();
                                     async move {
                                         if let Err(err) = result_tx
-                                            .send(EngineResult::NewPhysicalPartial(
+                                            .send(OptimizerMessage::NewPhysicalPartial(
                                                 physical_plan,
                                                 goal,
                                             ))

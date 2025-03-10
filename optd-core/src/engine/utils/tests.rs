@@ -50,7 +50,7 @@ impl Expander for MockExpander {
         propagate_success(value)
     }
 
-    async fn expand_properties(&self, group_id: GroupId) -> Value {
+    async fn retrieve_properties(&self, group_id: GroupId) -> Value {
         (self.properties_expander)(group_id)
     }
 }

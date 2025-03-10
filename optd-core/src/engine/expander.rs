@@ -21,5 +21,5 @@ pub trait Expander: Clone + Send + Sync + 'static {
     /// Retrieves logical properties for a group.
     ///
     /// Returns the derived logical properties (schema, statistics, etc.) for the group.
-    async fn expand_properties(&self, group_id: GroupId) -> Value;
+    async fn retrieve_properties(&self, group_id: GroupId) -> Value;
 }
