@@ -26,6 +26,7 @@ mod expander;
 mod handlers;
 mod ingest;
 mod memo;
+mod subscriptions;
 
 /// External client request to optimize a query in the optimizer.
 ///
