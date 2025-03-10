@@ -5,22 +5,24 @@
 //! plans and manages the transformation of plans according to those rules.
 
 use crate::{
+    bridge::{
+        from_cir::{
+            partial_logical_to_value, partial_physical_to_value, physical_properties_to_value,
+        },
+        into_cir::{
+            value_to_cost, value_to_logical_properties, value_to_partial_logical,
+            value_to_partial_physical,
+        },
+    },
     cir::{
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
     },
     error::Error,
-    optimizer::expander::Expander,
-};
-use bridge::{
-    from_cir::{partial_logical_to_value, partial_physical_to_value, physical_properties_to_value},
-    into_cir::{
-        value_to_cost, value_to_logical_properties, value_to_partial_logical,
-        value_to_partial_physical,
-    },
 };
 use error::EngineError;
 use eval::Evaluate;
+use expander::Expander;
 use futures::StreamExt;
 use optd_dsl::analyzer::{
     context::Context,
@@ -33,9 +35,9 @@ use Error::*;
 use Expr::*;
 use Literal::*;
 
-pub(crate) mod bridge;
 pub(crate) mod error;
 mod eval;
+pub(crate) mod expander;
 pub(crate) mod utils;
 
 /// Result type for rule applications

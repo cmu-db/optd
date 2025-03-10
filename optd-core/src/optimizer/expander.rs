@@ -1,85 +1,81 @@
-use super::SubscriptionRequest;
-use crate::engine::{
+use super::EngineRequest;
+use crate::{
     bridge::{
-        from_cir::{partial_logical_to_value, partial_physical_to_value},
+        from_cir::{
+            logical_properties_to_value, partial_logical_to_value, partial_physical_to_value,
+        },
         into_cir::{hir_goal_to_cir, hir_group_id_to_cir},
     },
-    utils::streams::ValueStream,
+    engine::{expander::Expander, utils::streams::ValueStream},
 };
 use futures::{
-    channel::mpsc::{self, Sender},
-    SinkExt,
+    channel::{
+        mpsc::{self, Sender},
+        oneshot,
+    },
+    stream, SinkExt, StreamExt,
 };
-use futures::{stream, StreamExt};
-use optd_dsl::analyzer::hir::{Goal as HIRGoal, GroupId as HIRGroupId, Value};
+use optd_dsl::analyzer::hir::{Goal, GroupId, Value};
 
-/// Defines operations for expanding group references into concrete expressions.
+/// Implementation of the Expander trait that connects the engine to the optimizer.
 ///
-/// Serves as a bridge between the evaluation engine and the optimizer, allowing
-/// access to materialized expressions when encountering group references during
-/// evaluation.
-#[trait_variant::make(Send)]
-pub trait Expander: Clone + Send + Sync + 'static {
-    /// Expands a logical group into a stream of logical operator expressions.
-    fn expand_all_exprs(&self, group_id: HIRGroupId) -> ValueStream;
-
-    /// Expands a physical goal into a stream of physical implementations.
-    fn expand_winning_expr(&self, physical_goal: &HIRGoal) -> ValueStream;
-
-    /// Expands a logical group into its corresponding logical properties.
-    async fn expand_properties(&self, group_id: HIRGroupId) -> Value;
-}
-
-/// Expander implementation that communicates with the optimizer via channels
+/// This expander provides the engine with access to memo-stored expressions and properties
+/// by communicating with the optimizer through channels. It translates between the HIR
+/// representation used by the engine and the CIR representation used by the optimizer.
 #[derive(Clone)]
 pub struct OptimizerExpander {
-    pub subscription_sender: Sender<SubscriptionRequest>,
+    pub engine_request_tx: Sender<EngineRequest>,
 }
 
 impl Expander for OptimizerExpander {
-    fn expand_all_exprs(&self, group_id: HIRGroupId) -> ValueStream {
-        let (expr_sender, expr_receiver) = mpsc::channel(0);
-        let mut subscription_sender = self.subscription_sender.clone();
-
+    fn expand_all_exprs(&self, group_id: GroupId) -> ValueStream {
+        let (tx, rx) = mpsc::channel(0);
+        let mut engine_request_tx = self.engine_request_tx.clone();
         let cir_group_id = hir_group_id_to_cir(&group_id);
-        let request = SubscriptionRequest::Group(cir_group_id, expr_sender);
+        let request = EngineRequest::SubscribeGroup(cir_group_id, tx);
 
         let send_request = async move {
-            subscription_sender
+            engine_request_tx
                 .send(request)
                 .await
                 .expect("Failed to send group subscription - channel closed");
-
-            expr_receiver
-                .map(|expr| Ok(partial_logical_to_value(&expr.into())))
-                .boxed()
+            rx.map(|expr| Ok(partial_logical_to_value(&expr.into())))
         };
 
         stream::once(send_request).flatten().boxed()
     }
 
-    fn expand_winning_expr(&self, physical_goal: &HIRGoal) -> ValueStream {
-        let (expr_sender, expr_receiver) = mpsc::channel(0);
-        let mut subscription_sender = self.subscription_sender.clone();
-
+    fn expand_optimized_expr(&self, physical_goal: &Goal) -> ValueStream {
+        let (tx, rx) = mpsc::channel(0);
+        let mut engine_request_tx = self.engine_request_tx.clone();
         let cir_goal = hir_goal_to_cir(physical_goal);
-        let request = SubscriptionRequest::Goal(cir_goal, expr_sender);
+        let request = EngineRequest::SubscribeGoal(cir_goal, tx);
 
         let send_request = async move {
-            subscription_sender
+            engine_request_tx
                 .send(request)
                 .await
                 .expect("Failed to send goal subscription - channel closed");
-
-            expr_receiver
-                .map(|expr| Ok(partial_physical_to_value(&expr.0.into())))
-                .boxed()
+            rx.map(|expr| Ok(partial_physical_to_value(&expr.0.into())))
         };
 
         stream::once(send_request).flatten().boxed()
     }
 
-    async fn expand_properties(&self, _group_id: HIRGroupId) -> Value {
-        todo!("will need another channel in here")
+    async fn expand_properties(&self, group_id: GroupId) -> Value {
+        let (tx, rx) = oneshot::channel();
+        let mut engine_request_tx = self.engine_request_tx.clone();
+        let cir_group_id = hir_group_id_to_cir(&group_id);
+        let request = EngineRequest::DeriveProperties(cir_group_id, tx);
+
+        engine_request_tx
+            .send(request)
+            .await
+            .expect("Failed to send properties request - channel closed");
+        let properties = rx
+            .await
+            .expect("Failed to receive properties - sender dropped");
+
+        logical_properties_to_value(&properties)
     }
 }

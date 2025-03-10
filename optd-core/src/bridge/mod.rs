@@ -9,5 +9,5 @@
 //! allowing rule-based transformations to be applied to query plans while maintaining
 //! the ability to work with both representations.
 
-pub(crate) mod from_cir;
-pub(crate) mod into_cir;
+pub mod from_cir;
+pub mod into_cir;

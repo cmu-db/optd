@@ -1,4 +1,7 @@
-use crate::{engine::Engine, error::Error, optimizer::expander::Expander};
+use crate::{
+    engine::{expander::Expander, Engine},
+    error::Error,
+};
 use futures::{executor::block_on_stream, stream, Stream, StreamExt};
 use optd_dsl::analyzer::{
     context::Context,
@@ -42,7 +45,7 @@ impl Expander for MockExpander {
         stream::iter(values).map(Ok).boxed()
     }
 
-    fn expand_winning_expr(&self, physical_goal: &Goal) -> ValueStream {
+    fn expand_optimized_expr(&self, physical_goal: &Goal) -> ValueStream {
         let value = (self.physical_expander)(physical_goal);
         propagate_success(value)
     }

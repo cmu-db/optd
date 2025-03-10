@@ -19,8 +19,7 @@
 //! streams that can be consumed incrementally. This approach efficiently handles the
 //! potential combinatorial explosion of evaluation paths in complex rule applications.
 
-use super::{utils::streams::ValueStream, Engine};
-use crate::optimizer::expander::Expander;
+use super::{expander::Expander, utils::streams::ValueStream, Engine};
 
 mod binary;
 mod core;

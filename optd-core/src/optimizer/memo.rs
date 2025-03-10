@@ -1,5 +1,3 @@
-use std::future::Future;
-
 use crate::{
     cir::{
         expressions::{LogicalExpression, OptimizedExpression, PhysicalExpression},

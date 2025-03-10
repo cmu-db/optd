@@ -148,7 +148,7 @@ where
             match_against_expanded_values(op_pattern, expanded_values, engine)
         }
         (Operator(op_pattern), CoreData::Physical(PhysicalOp(UnMaterialized(physical_goal)))) => {
-            let expanded_values = engine.expander.expand_winning_expr(physical_goal);
+            let expanded_values = engine.expander.expand_optimized_expr(physical_goal);
             match_against_expanded_values(op_pattern, expanded_values, engine)
         }
 
