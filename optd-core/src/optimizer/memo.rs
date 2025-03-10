@@ -19,10 +19,10 @@ pub trait Memoize: Send + Sync + 'static {
         group_id: GroupId,
     ) -> MemoizeResult<Vec<LogicalExpression>>;
 
-    async fn try_add_logical_expr(
+    async fn find_logical_expr(
         &self,
         logical_expr: &LogicalExpression,
-    ) -> MemoizeResult<Option<(GroupId, bool)>>;
+    ) -> MemoizeResult<Option<GroupId>>;
 
     async fn create_group_with(
         &self,

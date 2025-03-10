@@ -1,5 +1,5 @@
 use super::{
-    egest::egest_best_plan, ingest::IngestionResult, memo::Memoize, OptimizeRequest, Optimizer,
+    egest::egest_best_plan, ingest::LogicalIngest, memo::Memoize, OptimizeRequest, Optimizer,
     OptimizerMessage, PendingMessage,
 };
 use crate::cir::{
@@ -27,7 +27,7 @@ impl<M: Memoize> Optimizer<M> {
         response_tx: Sender<PhysicalPlan>,
     ) {
         match self.try_ingest_logical(logical_plan.clone().into()).await {
-            IngestionResult::Success(group_id, _) => {
+            LogicalIngest::Success(group_id, _) => {
                 // Plan was ingested successfully, subscribe to the goal
                 let goal = Goal(group_id, PhysicalProperties(None));
                 let (expr_tx, mut expr_rx) = mpsc::channel(0);
@@ -45,7 +45,7 @@ impl<M: Memoize> Optimizer<M> {
                     }
                 });
             }
-            IngestionResult::NeedsDependencies(dependencies) => {
+            LogicalIngest::NeedsDependencies(dependencies) => {
                 // Store the request as a pending message that will be processed
                 // once all dependencies are resolved
                 let pending_message = PendingMessage {
@@ -88,7 +88,31 @@ impl<M: Memoize> Optimizer<M> {
         plan: PartialLogicalPlan,
         group_id: GroupId,
     ) {
-        todo!()
+        match self.try_ingest_logical(plan.clone()).await {
+            LogicalIngest::Success(new_group_id, is_new_expr) => {
+               if new_group_id != group_id {
+                    self.memo
+                        .merge_groups(group_id, new_group_id)
+                        .await
+                        .expect("Failed to merge groups");
+                }
+
+                if is_new_expr {
+                    // send to subscribers
+
+                }
+            }
+            LogicalIngest::NeedsDependencies(dependencies) => {
+                // Store the request as a pending message that will be processed
+                // once all dependencies are resolved
+                let pending_message = PendingMessage {
+                    message: NewLogicalPartial(plan, group_id),
+                    pending_dependencies: dependencies,
+                };
+
+                self.pending_messages.push(pending_message);
+            }
+        }
     }
 
     /// This method handles new physical implementations discovered through

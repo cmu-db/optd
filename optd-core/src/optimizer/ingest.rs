@@ -15,33 +15,49 @@ use std::{collections::HashSet, future::Future, pin::Pin, sync::Arc};
 use Child::*;
 use OptimizerMessage::CreateGroup;
 
-/// Result type for logical plan ingestion
-pub(super) enum IngestionResult {
+/// Result type for logical plan ingestion exposed to clients
+pub(super) enum LogicalIngest {
     /// Plan was successfully ingested
+    ///
+    /// The boolean flag indicates whether the expression belongs to a new group
     Success(GroupId, bool),
 
     /// Plan requires dependencies to be created
+    /// Contains a set of job IDs for the launched dependency tasks
     NeedsDependencies(HashSet<i64>),
+}
+
+/// Internal result type for logical expression processing
+/// This enum is used internally during recursive plan traversal
+enum InternalLogicalIngest {
+    Found(GroupId, bool),
+    NeedsProperties(Vec<LogicalExpression>),
 }
 
 impl<M: Memoize> Optimizer<M> {
     /// Process a logical plan for ingestion into the memo
     ///
-    /// Attempts direct ingestion or spawns property derivation tasks if needed.
-    /// Returns either success with a group ID or dependency IDs for launched tasks.
+    /// Attempts direct ingestion or spawns property derivation tasks when needed.
+    ///
+    /// # Returns
+    /// - `Success(group_id, is_new)`: Plan was successfully ingested
+    ///    - `group_id`: The ID of the group that contains the plan
+    ///    - `is_new`: Indicates whether this was a novel expression (true) or already existed (false)
+    /// - `NeedsDependencies(job_ids)`: Property derivation tasks were launched
+    ///    - `job_ids`: Set of job IDs for the launched tasks
     pub(super) async fn try_ingest_logical(
         &mut self,
         logical_plan: PartialLogicalPlan,
-    ) -> IngestionResult {
+    ) -> LogicalIngest {
         let ingest_result = ingest_logical_plan(&self.memo, &logical_plan)
             .await
             .expect("Failed to ingest logical plan");
 
         match ingest_result {
-            LogicalIngestion::Found(group_id, is_new_expr) => {
-                IngestionResult::Success(group_id, is_new_expr)
+            InternalLogicalIngest::Found(group_id, is_new_expr) => {
+                LogicalIngest::Success(group_id, is_new_expr)
             }
-            LogicalIngestion::NeedsProperties(expressions) => {
+            InternalLogicalIngest::NeedsProperties(expressions) => {
                 let pending_dependencies = expressions
                     .into_iter()
                     .map(|expr| {
@@ -67,16 +83,10 @@ impl<M: Memoize> Optimizer<M> {
                     })
                     .collect();
 
-                IngestionResult::NeedsDependencies(pending_dependencies)
+                LogicalIngest::NeedsDependencies(pending_dependencies)
             }
         }
     }
-}
-
-/// Represents the result of attempting to ingest a logical expression
-enum LogicalIngestion {
-    Found(GroupId, bool), // The boolean flag indicates whether an expr has been added
-    NeedsProperties(Vec<LogicalExpression>),
 }
 
 /// Ingests a partial logical plan into the memo table.
@@ -89,20 +99,20 @@ enum LogicalIngestion {
 /// * `partial_plan` - The partial logical plan to ingest
 ///
 /// # Returns
-/// * The ID of the logical group created or updated
+/// * For unmaterialized plans: Found(group_id, false) since the group already exists
+/// * For materialized plans: Result from recursive operator ingestion
 #[async_recursion]
 async fn ingest_logical_plan<M>(
     memo: &M,
     partial_plan: &PartialLogicalPlan,
-) -> Result<LogicalIngestion, Error>
+) -> Result<InternalLogicalIngest, Error>
 where
     M: Memoize,
 {
     match partial_plan {
         PartialLogicalPlan::Materialized(operator) => ingest_logical_operator(memo, operator).await,
         PartialLogicalPlan::UnMaterialized(group_id) => {
-            // For unmaterialized plans, we know the group has to exist
-            Ok(LogicalIngestion::Found(*group_id, false))
+            Ok(InternalLogicalIngest::Found(*group_id, false))
         }
     }
 }
@@ -117,7 +127,7 @@ where
 /// * `partial_plan` - The partial physical plan to ingest
 ///
 /// # Returns
-/// * The goal associated with the physical plan
+/// * The Goal associated with the physical plan
 #[async_recursion]
 async fn ingest_physical_plan<M>(
     memo: &M,
@@ -138,19 +148,20 @@ where
 /// Processes a logical operator and attempts to find it in the memo table.
 ///
 /// This function ingests a logical operator into the memo structure, recursively
-/// processing its children. If the expression is not found in the memo, it returns
-/// the expression for property derivation.
+/// processing its children. If the expression is not found in the memo, it collects
+/// expressions that need property derivation.
 ///
 /// # Arguments
 /// * `memo` - The memoization table for storing plan expressions
 /// * `operator` - The logical operator to ingest
 ///
 /// # Returns
-/// * Either the found group ID or the logical expression that needs properties
+/// * LogicalIngestion::Found when expression is in memo or added to memo
+/// * LogicalIngestion::NeedsProperties when properties are needed before adding to memo
 async fn ingest_logical_operator<M>(
     memo: &M,
     operator: &Operator<Arc<PartialLogicalPlan>>,
-) -> Result<LogicalIngestion, Error>
+) -> Result<InternalLogicalIngest, Error>
 where
     M: Memoize,
 {
@@ -168,8 +179,8 @@ where
     let children = children
         .into_iter()
         .map(|child_result| match child_result {
-            Singleton(LogicalIngestion::Found(group_id, _)) => Singleton(group_id),
-            Singleton(LogicalIngestion::NeedsProperties(exprs)) => {
+            Singleton(InternalLogicalIngest::Found(group_id, _)) => Singleton(group_id),
+            Singleton(InternalLogicalIngest::NeedsProperties(exprs)) => {
                 need_properties.extend(exprs);
                 Singleton(GroupId(0)) // Placeholder
             }
@@ -177,8 +188,8 @@ where
                 let group_ids = results
                     .into_iter()
                     .map(|result| match result {
-                        LogicalIngestion::Found(group_id, _) => group_id,
-                        LogicalIngestion::NeedsProperties(exprs) => {
+                        InternalLogicalIngest::Found(group_id, _) => group_id,
+                        InternalLogicalIngest::NeedsProperties(exprs) => {
                             need_properties.extend(exprs);
                             GroupId(0) // Placeholder
                         }
@@ -191,7 +202,7 @@ where
 
     // If any children need properties, return the expressions
     if !need_properties.is_empty() {
-        return Ok(LogicalIngestion::NeedsProperties(need_properties));
+        return Ok(InternalLogicalIngest::NeedsProperties(need_properties));
     }
 
     // Create the logical expression with processed children
@@ -202,11 +213,17 @@ where
     };
 
     // Try to add the expression to memo
-    let maybe_added = memo.try_add_logical_expr(&logical_expr).await?;
+    let group_maybe = memo.find_logical_expr(&logical_expr).await?;
 
-    match maybe_added {
-        Some((group_id, already_existed)) => Ok(LogicalIngestion::Found(group_id, already_existed)),
-        None => Ok(LogicalIngestion::NeedsProperties(vec![logical_expr])),
+    match group_maybe {
+        Some(group_id) => {
+            // Expression already exists in this group
+            Ok(InternalLogicalIngest::Found(group_id, false))
+        }
+        None => {
+            // Expression doesn't exist, needs property derivation
+            Ok(InternalLogicalIngest::NeedsProperties(vec![logical_expr]))
+        }
     }
 }
 
@@ -250,7 +267,7 @@ where
     Ok((physical_expr, goal))
 }
 
-/// Generic function to process a Child structure containing any plan type.
+/// Generic function to process a Child structure containing any logical plan type.
 ///
 /// This function handles both singleton and variable-length children,
 /// applying the appropriate ingestion function to each.
@@ -258,10 +275,10 @@ where
 /// # Arguments
 /// * `memo` - The memoization table
 /// * `child` - The Child structure to process
-/// * `ingest_fn` - Function to ingest each plan and get group ID or goal
+/// * `ingest_fn` - Function to ingest each plan
 ///
 /// # Returns
-/// * Processed Child structure with appropriate GroupId or Goal
+/// * Processed Child structure with LogicalIngestion results
 async fn process_child<M, P, G, F>(
     memo: &M,
     child: &Child<Arc<P>>,
