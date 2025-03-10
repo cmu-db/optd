@@ -1,4 +1,4 @@
-use super::memo::Memoize;
+use super::{memo::Memoize, Optimizer, OptimizerMessage};
 use crate::{
     cir::{
         expressions::{LogicalExpression, PhysicalExpression},
@@ -10,12 +10,71 @@ use crate::{
     error::Error,
 };
 use async_recursion::async_recursion;
-use futures::future::try_join_all;
-use std::{future::Future, pin::Pin, sync::Arc};
+use futures::{future::try_join_all, SinkExt};
+use std::{collections::HashSet, future::Future, pin::Pin, sync::Arc};
 use Child::*;
+use OptimizerMessage::CreateGroup;
+
+/// Result type for logical plan ingestion
+pub(super) enum IngestionResult {
+    /// Plan was successfully ingested
+    Success(GroupId, bool),
+
+    /// Plan requires dependencies to be created
+    NeedsDependencies(HashSet<i64>),
+}
+
+impl<M: Memoize> Optimizer<M> {
+    /// Process a logical plan for ingestion into the memo
+    ///
+    /// Attempts direct ingestion or spawns property derivation tasks if needed.
+    /// Returns either success with a group ID or dependency IDs for launched tasks.
+    pub(super) async fn try_ingest_logical(
+        &mut self,
+        logical_plan: PartialLogicalPlan,
+    ) -> IngestionResult {
+        let ingest_result = ingest_logical_plan(&self.memo, &logical_plan)
+            .await
+            .expect("Failed to ingest logical plan");
+
+        match ingest_result {
+            LogicalIngestion::Found(group_id, is_new_expr) => {
+                IngestionResult::Success(group_id, is_new_expr)
+            }
+            LogicalIngestion::NeedsProperties(expressions) => {
+                let pending_dependencies = expressions
+                    .into_iter()
+                    .map(|expr| {
+                        let job_id = self.next_dep_id;
+                        self.next_dep_id += 1;
+
+                        let mut message_tx = self.message_tx.clone();
+                        let engine = self.engine.clone();
+
+                        tokio::spawn(async move {
+                            let properties = engine
+                                .derive_properties(&expr.clone().into())
+                                .await
+                                .expect("Failed to derive properties");
+
+                            message_tx
+                                .send(CreateGroup(properties, expr, job_id))
+                                .await
+                                .expect("Failed to send CreateGroup message");
+                        });
+
+                        job_id
+                    })
+                    .collect();
+
+                IngestionResult::NeedsDependencies(pending_dependencies)
+            }
+        }
+    }
+}
 
 /// Represents the result of attempting to ingest a logical expression
-pub enum LogicalIngestion {
+enum LogicalIngestion {
     Found(GroupId, bool), // The boolean flag indicates whether an expr has been added
     NeedsProperties(Vec<LogicalExpression>),
 }
@@ -32,7 +91,7 @@ pub enum LogicalIngestion {
 /// # Returns
 /// * The ID of the logical group created or updated
 #[async_recursion]
-pub(super) async fn ingest_logical_plan<M>(
+async fn ingest_logical_plan<M>(
     memo: &M,
     partial_plan: &PartialLogicalPlan,
 ) -> Result<LogicalIngestion, Error>
@@ -60,7 +119,7 @@ where
 /// # Returns
 /// * The goal associated with the physical plan
 #[async_recursion]
-pub(super) async fn ingest_physical_plan<M>(
+async fn ingest_physical_plan<M>(
     memo: &M,
     partial_plan: &PartialPhysicalPlan,
 ) -> Result<Goal, Error>

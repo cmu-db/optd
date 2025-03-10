@@ -118,7 +118,7 @@ impl<E: Expander> Engine<E> {
         props: &PhysicalProperties,
     ) -> PartialPhysicalPlanStream {
         let plan_value = partial_logical_to_value(plan);
-        let props_value = physical_properties_to_value(&props);
+        let props_value = physical_properties_to_value(props);
 
         let rule_call = self.create_rule_call(rule_name, vec![plan_value, props_value]);
 
