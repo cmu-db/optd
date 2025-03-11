@@ -124,7 +124,7 @@ struct PendingMessage {
 /// allowing clients to submit logical plans for optimization and receive
 /// optimized physical plans in return. It contains all state necessary for
 /// optimization, including channels for communication between components.
-struct Optimizer<M: Memoize> {
+pub struct Optimizer<M: Memoize> {
     //
     // Core optimization components
     //

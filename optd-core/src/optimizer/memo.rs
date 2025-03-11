@@ -33,7 +33,7 @@ pub(crate) enum MergeResult {
 }
 
 #[trait_variant::make(Send)]
-pub(crate) trait Memoize: Send + Sync + 'static {
+pub trait Memoize: Send + Sync + 'static {
     /// Retrieves logical properties for a group
     ///
     /// Returns the properties associated with the group or an error if not found.

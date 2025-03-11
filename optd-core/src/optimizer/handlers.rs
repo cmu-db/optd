@@ -8,7 +8,7 @@ use crate::{
     cir::{
         expressions::{LogicalExpression, OptimizedExpression, PhysicalExpression},
         goal::Goal,
-        group::{self, GroupId},
+        group::GroupId,
         operators::Child,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
