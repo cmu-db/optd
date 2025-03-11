@@ -33,7 +33,7 @@ enum InternalLogicalIngest {
 }
 
 impl<M: Memoize> Optimizer<M> {
-    /// Process a logical plan for ingestion into the memo
+    /// Process a logical plan for ingestion into the memo.
     ///
     /// Attempts direct ingestion or spawns property derivation tasks when needed.
     ///
@@ -84,6 +84,18 @@ impl<M: Memoize> Optimizer<M> {
         }
     }
 
+    /// Process a physical plan for ingestion into the memo.
+    ///
+    /// Directly ingests the physical plan and returns the associated goal.
+    ///
+    /// # Returns
+    /// The Goal associated with the physical plan
+    pub(super) async fn try_ingest_physical(&self, physical_plan: &PartialPhysicalPlan) -> Goal {
+        self.ingest_physical_plan(physical_plan)
+            .await
+            .expect("Failed to ingest physical plan")
+    }
+
     /// Ingests a partial logical plan into the memo table.
     ///
     /// This function handles both materialized and unmaterialized logical plans,
@@ -128,7 +140,7 @@ impl<M: Memoize> Optimizer<M> {
     ) -> Result<Goal, Error> {
         match partial_plan {
             PartialPhysicalPlan::Materialized(operator) => {
-                let (_, goal) = self.ingest_physical_operator(operator).await?;
+                let goal = self.ingest_physical_operator(operator).await?;
                 Ok(goal)
             }
             PartialPhysicalPlan::UnMaterialized(goal) => {
@@ -227,11 +239,11 @@ impl<M: Memoize> Optimizer<M> {
     /// * `operator` - The physical operator to ingest
     ///
     /// # Returns
-    /// * The created physical expression and its assigned goal
+    /// * The Goal associated with the physical expression
     async fn ingest_physical_operator(
         &self,
         operator: &Operator<Arc<PartialPhysicalPlan>>,
-    ) -> Result<(PhysicalExpression, Goal), Error> {
+    ) -> Result<Goal, Error> {
         // Process children
         let children = try_join_all(
             operator
@@ -248,9 +260,16 @@ impl<M: Memoize> Optimizer<M> {
             children,
         };
 
-        // Add the expression to memo
-        let goal = self.memo.add_physical_expr(&physical_expr).await?;
-        Ok((physical_expr, goal))
+        // Try to find the expression in the memo
+        if let Some(goal) = self.memo.find_physical_expr(&physical_expr).await? {
+            let goal = self.goal_repr.find(&goal);
+            return Ok(goal);
+        }
+
+        // Expression doesn't exist, create a new goal
+        let goal = self.memo.create_goal(&physical_expr).await?;
+
+        Ok(goal)
     }
 
     /// Helper function to process a Child structure containing a logical plan.

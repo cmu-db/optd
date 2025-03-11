@@ -102,7 +102,7 @@ impl<M: Memoize> Optimizer<M> {
                 // Perform the merge in the memo and process all results
                 let merge_results = self
                     .memo
-                    .merge_groups(group_id, new_group_id)
+                    .merge_groups(&group_id, &new_group_id)
                     .await
                     .expect("Failed to merge groups");
 
@@ -130,7 +130,22 @@ impl<M: Memoize> Optimizer<M> {
         plan: PartialPhysicalPlan,
         goal: Goal,
     ) {
-        todo!()
+        let goal = self.goal_repr.find(&goal);
+        let new_goal = self.try_ingest_physical(&plan).await;
+
+        // If the goals are different, merge them
+        if new_goal != goal {
+            // Perform the merge in the memo and process all results
+            let merge_results = self
+                .memo
+                .merge_goals(&goal, &new_goal)
+                .await
+                .expect("Failed to merge goals");
+
+            for result in merge_results {
+                self.handle_merge_result(result).await;
+            }
+        }
     }
 
     /// This method handles fully optimized physical expressions with cost information.
@@ -151,7 +166,7 @@ impl<M: Memoize> Optimizer<M> {
         job_id: i64,
     ) {
         self.memo
-            .create_group_with(&expression, &properties)
+            .create_group(&expression, &properties)
             .await
             .expect("Failed to create group");
 
@@ -190,7 +205,7 @@ impl<M: Memoize> Optimizer<M> {
         let group_id = self.group_repr.find(&group_id);
         let props = self
             .memo
-            .get_logical_properties(group_id)
+            .get_logical_properties(&group_id)
             .await
             .expect("Failed to get logical properties");
 

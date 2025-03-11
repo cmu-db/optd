@@ -38,13 +38,17 @@ impl<T: Eq + Hash + Clone> Representative<T> {
         self.parents.entry(old.clone()).or_insert(old.clone());
         self.parents.entry(new.clone()).or_insert(new.clone());
 
-        // Find roots with path compression during merge
-        let old_root = self.find_with_compression(old);
-        let new_root = self.find_with_compression(new);
+        // Find roots of both elements (without compression)
+        let old_root = self.find(old);
+        let new_root = self.find(new);
 
         if old_root != new_root {
             // Always make new_root the representative
             self.parents.insert(old_root, new_root.clone());
+
+            // Apply path compression to both sides
+            self.find_with_compression(old);
+            self.find_with_compression(new);
         }
 
         new_root
@@ -52,7 +56,7 @@ impl<T: Eq + Hash + Clone> Representative<T> {
 
     /// Internal method that finds the representative with path compression
     fn find_with_compression(&mut self, x: &T) -> T {
-        let parent = self.parents.get(x).cloned().unwrap_or_else(|| x.clone());
+        let parent = self.parents.get(x).cloned().unwrap_or(x.clone());
 
         if &parent == x {
             return parent;
