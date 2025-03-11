@@ -6,9 +6,10 @@ use super::{
 use crate::{
     capture,
     cir::{
-        expressions::{LogicalExpression, OptimizedExpression},
+        expressions::{LogicalExpression, OptimizedExpression, PhysicalExpression},
         goal::Goal,
         group::{self, GroupId},
+        operators::Child,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
     },
@@ -154,7 +155,35 @@ impl<M: Memoize> Optimizer<M> {
         expr: OptimizedExpression,
         goal: Goal,
     ) {
-        todo!()
+        // Update the expression & goal to use representative goals
+        let goal = self.goal_repr.find(&goal);
+        let expr = self.normalize_optimized_expression(&expr);
+
+        // Add the optimized expression to the memo
+        let new_best = self
+            .memo
+            .add_optimized_physical_expr(&goal, &expr)
+            .await
+            .expect("Failed to add optimized physical expression");
+
+        // If this is the new best expression found so far for this goal,
+        // notify all subscribers
+        if new_best {
+            let subscribers = self
+                .goal_subscribers
+                .get(&goal)
+                .cloned()
+                .unwrap_or_default();
+
+            for mut subscriber in subscribers {
+                tokio::spawn(capture!([expr], async move {
+                    subscriber
+                        .send(expr)
+                        .await
+                        .expect("Failed to send optimized expression");
+                }));
+            }
+        }
     }
 
     /// This method handles group creation for expressions with derived properties
@@ -327,5 +356,36 @@ impl<M: Memoize> Optimizer<M> {
                     .expect("Failed to re-send ready message");
             });
         }
+    }
+
+    /// Helper method to normalize an optimized expression by updating all child goals
+    /// to use their representative goals.
+    ///
+    /// This ensures consistency in the memo by always working with canonical representatives.
+    fn normalize_optimized_expression(&self, expr: &OptimizedExpression) -> OptimizedExpression {
+        let normalized_children = expr
+            .0
+            .children
+            .iter()
+            .map(|child| match child {
+                Child::Singleton(goal) => {
+                    let goal = self.goal_repr.find(goal);
+                    Child::Singleton(goal)
+                }
+                Child::VarLength(goals) => {
+                    let goals = goals.iter().map(|goal| self.goal_repr.find(goal)).collect();
+                    Child::VarLength(goals)
+                }
+            })
+            .collect();
+
+        OptimizedExpression(
+            PhysicalExpression {
+                tag: expr.0.tag.clone(),
+                data: expr.0.data.clone(),
+                children: normalized_children,
+            },
+            expr.1,
+        )
     }
 }

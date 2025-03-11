@@ -84,4 +84,11 @@ pub(crate) trait Memoize: Send + Sync + 'static {
     async fn create_goal(&self, physical_expr: &PhysicalExpression) -> MemoizeResult<Goal>;
 
     async fn merge_goals(&self, goal_1: &Goal, to: &Goal) -> MemoizeResult<Vec<MergeResult>>;
+
+    // returns whether the optimized expression is best for the goal
+    async fn add_optimized_physical_expr(
+        &self,
+        goal: &Goal,
+        optimized_expr: &OptimizedExpression,
+    ) -> MemoizeResult<bool>;
 }
