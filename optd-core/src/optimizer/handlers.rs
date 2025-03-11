@@ -133,8 +133,6 @@ impl<M: Memoize> Optimizer<M> {
         todo!()
     }
 
-    /// Process a new optimized expression
-    ///
     /// This method handles fully optimized physical expressions with cost information.
     pub(super) async fn process_new_optimized_expression(
         &mut self,
@@ -283,6 +281,8 @@ impl<M: Memoize> Optimizer<M> {
         }
     }
 
+    /// Helper method to resolve dependencies after a group creation job completes
+    ///
     /// This method is called when a group creation job completes. It updates all
     /// pending messages that were waiting for this job and processes any that
     /// are now ready (have no more pending dependencies).
