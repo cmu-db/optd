@@ -21,7 +21,6 @@ pub(crate) enum MergeResult {
         /// New logical expressions added to the group
         expressions: Vec<LogicalExpression>,
     },
-
     /// Result of merging two goals
     GoalMerge {
         /// Original goal that was merged
@@ -36,21 +35,29 @@ pub(crate) enum MergeResult {
 #[trait_variant::make(Send)]
 pub(crate) trait Memoize: Send + Sync + 'static {
     /// Retrieves logical properties for a group
+    ///
+    /// Returns the properties associated with the group or an error if not found.
     async fn get_logical_properties(&self, group_id: &GroupId) -> MemoizeResult<LogicalProperties>;
 
     /// Gets all logical expressions in a group
+    ///
+    /// Returns a vector of all logical expressions in the specified group.
     async fn get_all_logical_exprs(
         &self,
         group_id: GroupId,
     ) -> MemoizeResult<Vec<LogicalExpression>>;
 
     /// Finds group containing a logical expression, if it exists
+    ///
+    /// Returns the group ID if the expression exists, None otherwise.
     async fn find_logical_expr(
         &self,
         logical_expr: &LogicalExpression,
     ) -> MemoizeResult<Option<GroupId>>;
 
     /// Creates a new group with a logical expression and properties
+    ///
+    /// Returns the ID of the newly created group.
     async fn create_group(
         &self,
         logical_expr: &LogicalExpression,
@@ -68,24 +75,40 @@ pub(crate) trait Memoize: Send + Sync + 'static {
     ) -> MemoizeResult<Vec<MergeResult>>;
 
     /// Gets the best optimized physical expression for a goal
+    ///
+    /// Retrieves the lowest-cost physical implementation found so far for the goal.
+    /// Returns None if no optimized expression exists for the goal.
     async fn get_best_optimized_physical_expr(
         &self,
         goal: &Goal,
     ) -> MemoizeResult<Option<OptimizedExpression>>;
 
+    /// Searches for a physical expression in the memo
+    ///
+    /// Returns the associated Goal if the physical expression exists.
+    /// Returns None if the expression isn't found in any goal.
     async fn find_physical_expr(
         &self,
         physical_expr: &PhysicalExpression,
     ) -> MemoizeResult<Option<Goal>>;
 
-    /// TODO(alexis): Note for Sarvesh, this always creates a "floating" goal, except in this
-    /// framework, there is nothing shocking about it. It will just incr +1 the group_id,
-    /// and have empty props.
+    /// Creates a new goal associated with the provided physical expression
+    ///
+    /// Allocates a new unique group ID for the goal and initializes it with empty properties.
+    /// This creates an isolated goal that may later participate in the memo structure
+    /// through merges with equivalent goals during optimization.
     async fn create_goal(&self, physical_expr: &PhysicalExpression) -> MemoizeResult<Goal>;
 
-    async fn merge_goals(&self, goal_1: &Goal, to: &Goal) -> MemoizeResult<Vec<MergeResult>>;
+    /// Merges goals 1 and 2, creating a new goal containing all expressions
+    ///
+    /// May trigger cascading merges of parent entities.
+    /// Returns a vector of merge results for all affected entities.
+    async fn merge_goals(&self, goal_1: &Goal, goal_2: &Goal) -> MemoizeResult<Vec<MergeResult>>;
 
-    // returns whether the optimized expression is best for the goal
+    /// Adds an optimized physical expression to a goal
+    ///
+    /// Returns whether the optimized expression is now the best expression for the goal,
+    /// allowing callers to determine if this expression should be propagated to subscribers.
     async fn add_optimized_physical_expr(
         &self,
         goal: &Goal,

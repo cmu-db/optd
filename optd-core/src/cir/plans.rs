@@ -113,7 +113,7 @@ impl From<PhysicalPlan> for PartialPhysicalPlan {
 ///
 /// # Returns
 /// * Converted collection of partial plan children
-pub(super) fn convert_children<S, T>(children: Vec<Child<Arc<S>>>) -> Vec<Child<Arc<T>>>
+fn convert_children<S, T>(children: Vec<Child<Arc<S>>>) -> Vec<Child<Arc<T>>>
 where
     S: Clone,
     S: Into<T>,

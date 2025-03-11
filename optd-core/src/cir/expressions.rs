@@ -76,7 +76,7 @@ impl From<PhysicalExpression> for PartialPhysicalPlan {
 ///
 /// # Returns
 /// * Converted collection of partial plan children wrapped in Arc
-pub(super) fn convert_children<S, T>(children: Vec<Child<S>>) -> Vec<Child<Arc<T>>>
+fn convert_children<S, T>(children: Vec<Child<S>>) -> Vec<Child<Arc<T>>>
 where
     S: Into<T>,
 {
