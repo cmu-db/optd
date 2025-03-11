@@ -8,6 +8,7 @@ use crate::{
         plans::PartialLogicalPlan,
     },
 };
+use async_recursion::async_recursion;
 use futures::{
     channel::mpsc::{self, Sender},
     SinkExt, StreamExt,
@@ -21,6 +22,7 @@ impl<M: Memoize> Optimizer<M> {
     /// - Adds the sender to the group subscribers list to receive future expressions
     /// - Launches exploration of the group if it hasn't already started
     /// - Fetches existing expressions from the memo and sends them to the subscriber
+    #[async_recursion]
     pub(super) async fn subscribe_to_group(
         &mut self,
         group_id: GroupId,
@@ -34,7 +36,7 @@ impl<M: Memoize> Optimizer<M> {
 
         // Launch exploration if this group isn't being explored yet
         if !self.exploring_groups.contains(&group_id) {
-            self.explore_group(group_id);
+            self.explore_group(group_id).await;
         }
 
         // Get and send existing expressions from the memo
@@ -75,7 +77,7 @@ impl<M: Memoize> Optimizer<M> {
 
         // Launch exploration if this goal isn't being explored yet
         if !self.exploring_goals.contains(&goal) {
-            self.explore_goal(goal.clone());
+            self.explore_goal(goal.clone()).await;
         }
 
         // Get and send the best existing optimized expression if any

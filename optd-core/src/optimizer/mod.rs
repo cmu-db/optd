@@ -17,6 +17,7 @@ use futures::{
     SinkExt,
 };
 use memo::Memoize;
+use merge_repr::Representative;
 use optd_dsl::analyzer::hir::HIR;
 use std::collections::{HashMap, HashSet};
 use OptimizerMessage::*;
@@ -26,6 +27,7 @@ mod expander;
 mod handlers;
 mod ingest;
 mod memo;
+mod merge_repr;
 mod subscriptions;
 
 /// External client request to optimize a query in the optimizer.
@@ -152,6 +154,15 @@ struct Optimizer<M: Memoize> {
     next_dep_id: i64,
 
     //
+    // Representative tracking
+    //
+    /// Maps groups to their representatives for merging
+    group_repr: Representative<GroupId>,
+
+    /// Maps goals to their representatives for merging
+    goal_repr: Representative<Goal>,
+
+    //
     // Exploration tracking
     //
     /// Track which groups we've started exploring with transformation rules
@@ -208,6 +219,10 @@ impl<M: Memoize> Optimizer<M> {
             // Dependency tracking
             pending_messages: Vec::new(),
             next_dep_id: 0,
+
+            // Representative tracking
+            group_repr: Representative::new(),
+            goal_repr: Representative::new(),
 
             // Exploration tracking
             exploring_groups: HashSet::new(),

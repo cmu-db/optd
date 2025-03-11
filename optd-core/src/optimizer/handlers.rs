@@ -1,13 +1,17 @@
 use super::{
-    egest::egest_best_plan, ingest::LogicalIngest, memo::Memoize, OptimizeRequest, Optimizer,
-    OptimizerMessage, PendingMessage,
+    ingest::LogicalIngest,
+    memo::{Memoize, MergeResult},
+    OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
 };
-use crate::cir::{
-    expressions::{LogicalExpression, OptimizedExpression},
-    goal::Goal,
-    group::GroupId,
-    plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
-    properties::{LogicalProperties, PhysicalProperties},
+use crate::{
+    capture,
+    cir::{
+        expressions::{LogicalExpression, OptimizedExpression},
+        goal::Goal,
+        group::{self, GroupId},
+        plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
+        properties::{LogicalProperties, PhysicalProperties},
+    },
 };
 use futures::{
     channel::{
@@ -26,10 +30,12 @@ impl<M: Memoize> Optimizer<M> {
         logical_plan: LogicalPlan,
         response_tx: Sender<PhysicalPlan>,
     ) {
-        match self.try_ingest_logical(logical_plan.clone().into()).await {
+        match self.try_ingest_logical(&logical_plan.clone().into()).await {
             LogicalIngest::Success(group_id) => {
                 // Plan was ingested successfully, subscribe to the goal
                 let goal = Goal(group_id, PhysicalProperties(None));
+                let goal = self.goal_repr.find(&goal);
+
                 let (expr_tx, mut expr_rx) = mpsc::channel(0);
                 self.subscribe_to_goal(goal, expr_tx).await;
 
@@ -68,7 +74,8 @@ impl<M: Memoize> Optimizer<M> {
         expr: OptimizedExpression,
         mut response_tx: Sender<PhysicalPlan>,
     ) {
-        let plan = egest_best_plan(&self.memo, &expr)
+        let plan = self
+            .egest_best_plan(&expr)
             .await
             .expect("Failed to egest plan from memo")
             .expect("Expression has not been recursively optimized");
@@ -88,24 +95,30 @@ impl<M: Memoize> Optimizer<M> {
         plan: PartialLogicalPlan,
         group_id: GroupId,
     ) {
-        match self.try_ingest_logical(plan.clone()).await {
-            LogicalIngest::Success(new_group_id) => {
-                if new_group_id != group_id {
-                    self.memo
-                        .merge_groups(group_id, new_group_id)
-                        .await
-                        .expect("Failed to merge groups");
+        let group_id = self.group_repr.find(&group_id);
+
+        match self.try_ingest_logical(&plan).await {
+            LogicalIngest::Success(new_group_id) if new_group_id != group_id => {
+                // Perform the merge in the memo and process all results
+                let merge_results = self
+                    .memo
+                    .merge_groups(group_id, new_group_id)
+                    .await
+                    .expect("Failed to merge groups");
+
+                for result in merge_results {
+                    self.handle_merge_result(result).await;
                 }
             }
+            LogicalIngest::Success(_) => {
+                // Group already exists, nothing to merge
+            }
             LogicalIngest::NeedsDependencies(dependencies) => {
-                // Store the request as a pending message that will be processed
-                // once all dependencies are resolved
-                let pending_message = PendingMessage {
+                // Store as pending message to process after dependencies are resolved
+                self.pending_messages.push(PendingMessage {
                     message: NewLogicalPartial(plan, group_id),
                     pending_dependencies: dependencies,
-                };
-
-                self.pending_messages.push(pending_message);
+                });
             }
         }
     }
@@ -154,6 +167,7 @@ impl<M: Memoize> Optimizer<M> {
         group_id: GroupId,
         sender: Sender<LogicalExpression>,
     ) {
+        let group_id = self.group_repr.find(&group_id);
         self.subscribe_to_group(group_id, sender).await;
     }
 
@@ -164,16 +178,18 @@ impl<M: Memoize> Optimizer<M> {
         goal: Goal,
         sender: Sender<OptimizedExpression>,
     ) {
+        let goal = self.goal_repr.find(&goal);
         self.subscribe_to_goal(goal, sender).await;
     }
 
     /// Retrieves the logical properties for the given group from the memo
     /// and sends them back to the requestor through the provided oneshot channel.
     pub(super) async fn process_retrieve_properties(
-        &self,
+        &mut self,
         group_id: GroupId,
         sender: oneshot::Sender<LogicalProperties>,
     ) {
+        let group_id = self.group_repr.find(&group_id);
         let props = self
             .memo
             .get_logical_properties(group_id)
@@ -185,6 +201,86 @@ impl<M: Memoize> Optimizer<M> {
                 .send(props)
                 .expect("Failed to send properties - channel closed");
         });
+    }
+
+    /// Helper method to handle different types of merge results
+    ///
+    /// This method processes the results of group and goal merges, updating
+    /// representatives, subscribers, and exploration status appropriately.
+    async fn handle_merge_result(&mut self, result: MergeResult) {
+        match result {
+            MergeResult::GroupMerge {
+                prev_group_id,
+                new_group_id,
+                expressions,
+            } => {
+                // Update representative tracking
+                self.group_repr.merge(&prev_group_id, &new_group_id);
+
+                // Get subscribers for the previous group
+                let subscribers = self
+                    .group_subscribers
+                    .remove(&prev_group_id)
+                    .unwrap_or_default();
+
+                // Send expressions to all subscribers
+                for expr in &expressions {
+                    for mut subscriber in subscribers.clone() {
+                        tokio::spawn(capture!([expr], async move {
+                            subscriber
+                                .send(expr)
+                                .await
+                                .expect("Failed to send logical expression");
+                        }));
+                    }
+                }
+
+                // Add subscribers to new group
+                self.group_subscribers
+                    .entry(new_group_id)
+                    .or_default()
+                    .extend(subscribers);
+
+                // Inherit exploration status
+                if self.exploring_groups.remove(&prev_group_id) {
+                    self.exploring_groups.insert(new_group_id);
+                }
+            }
+            MergeResult::GoalMerge {
+                prev_goal,
+                new_goal,
+                expression,
+            } => {
+                // Update goal representative
+                self.goal_repr.merge(&prev_goal, &new_goal);
+
+                // Get subscribers for the previous goal
+                let subscribers = self.goal_subscribers.remove(&prev_goal).unwrap_or_default();
+
+                // Send optimized expression if present
+                if let Some(expr) = &expression {
+                    for mut subscriber in subscribers.clone() {
+                        tokio::spawn(capture!([expr], async move {
+                            subscriber
+                                .send(expr)
+                                .await
+                                .expect("Failed to send optimized expression");
+                        }));
+                    }
+                }
+
+                // Add subscribers to new goal
+                self.goal_subscribers
+                    .entry(new_goal.clone())
+                    .or_default()
+                    .extend(subscribers);
+
+                // Inherit exploration status
+                if self.exploring_goals.remove(&prev_goal) {
+                    self.exploring_goals.insert(new_goal);
+                }
+            }
+        }
     }
 
     /// This method is called when a group creation job completes. It updates all
