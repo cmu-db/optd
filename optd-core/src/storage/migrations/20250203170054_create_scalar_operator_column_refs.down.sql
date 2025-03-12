@@ -1,1 +1,0 @@
-DROP TABLE column_refs;

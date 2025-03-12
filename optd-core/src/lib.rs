@@ -1,10 +1,6 @@
-#[allow(dead_code)]
-pub mod cascades;
-pub mod catalog;
-pub mod cost_model;
-pub mod operators;
-pub mod plans;
-pub mod storage;
-
-#[cfg(test)]
-pub(crate) mod test_utils;
+pub mod bridge;
+pub mod cir;
+pub mod engine;
+pub mod error;
+pub mod memo;
+pub mod optimizer;

@@ -1,9 +1,0 @@
-[book]
-authors = ["Yuchen Liang"]
-language = "en"
-multilingual = false
-src = "src"
-title = "The optd Query Optimizer Documentation"
-
-[output.html]
-additional-css = ["custom.css"]

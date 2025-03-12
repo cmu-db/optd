@@ -1,4 +1,4 @@
-data LogicalProps(schema_len: I64)
+data LogicalProps(schema_len: )
 
 data Scalar =
     | ColumnRef(idx: Int64)
