@@ -5,7 +5,7 @@
 //! during evaluation.
 
 /// Represents errors that can occur during expression evaluation.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) enum EngineError {
     /// A failure triggered by a Fail expression in the HIR.
     Fail(String),
