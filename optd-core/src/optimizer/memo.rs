@@ -11,6 +11,7 @@ use crate::{
 pub(crate) type MemoizeResult<T> = Result<T, Error>;
 
 /// Results of merge operations for different entity types
+#[allow(dead_code)]
 pub(crate) enum MergeResult {
     /// Result of merging two groups
     GroupMerge {

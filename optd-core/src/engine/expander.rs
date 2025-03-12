@@ -6,6 +6,7 @@ use optd_dsl::analyzer::hir::{Goal, GroupId, Value};
 /// This trait serves as a bridge between the evaluation engine and the optimizer,
 /// providing access to materialized expressions and properties stored in the memo.
 #[trait_variant::make(Send)]
+#[allow(dead_code)]
 pub trait Expander: Clone + Send + Sync + 'static {
     /// Retrieves all logical expressions in a group.
     ///

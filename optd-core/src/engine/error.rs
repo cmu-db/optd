@@ -6,6 +6,7 @@
 
 /// Represents errors that can occur during expression evaluation.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) enum EngineError {
     /// A failure triggered by a Fail expression in the HIR.
     Fail(String),
