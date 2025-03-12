@@ -5,7 +5,7 @@ use crate::{
         expressions::{LogicalExpression, OptimizedExpression},
         goal::Goal,
         group::GroupId,
-        plans::PartialLogicalPlan,
+        plans::{PartialLogicalPlan, PartialPhysicalPlan},
     },
 };
 use async_recursion::async_recursion;
@@ -165,7 +165,46 @@ impl<M: Memoize> Optimizer<M> {
         let engine = self.engine.clone();
         let message_tx = self.message_tx.clone();
 
-        // Spawn a task to implement the goal
+        let physical_exprs = self
+            .memo
+            .get_all_physical_exprs(&goal)
+            .await
+            .expect("Failed to get physical expressions");
+
+        // Spawn a task to cost all existing physical expressions
+        if !physical_exprs.is_empty() {
+            for expr in physical_exprs {
+                let plan: PartialPhysicalPlan = expr.clone().into();
+
+                tokio::spawn(capture!([engine, message_tx, goal], async move {
+                    engine
+                        .cost_plan(&plan)
+                        .inspect(|result| {
+                            if let Err(err) = result {
+                                eprintln!("Error costing physical plan: {:?}", err);
+                            }
+                        })
+                        .filter_map(|result| async move { result.ok() })
+                        .for_each(|cost| {
+                            let mut result_tx = message_tx.clone();
+                            let goal = goal.clone();
+                            let expr = expr.clone();
+                            async move {
+                                result_tx
+                                    .send(NewOptimizedExpression(
+                                        OptimizedExpression(expr, cost),
+                                        goal,
+                                    ))
+                                    .await
+                                    .expect("Failed to send costed plan");
+                            }
+                        })
+                        .await;
+                }));
+            }
+        }
+
+        // Spawn a task to implement the logical expressions
         tokio::spawn(async move {
             while let Some(expr) = expr_rx.next().await {
                 let plan: PartialLogicalPlan = expr.into();

@@ -32,6 +32,14 @@ enum InternalLogicalIngest {
     NeedsProperties(Vec<LogicalExpression>),
 }
 
+/// Result type for physical plan ingestion that includes the new expression if created
+pub(super) struct PhysicalIngest {
+    /// The new goal matched with the physical plan
+    pub goal: Goal,
+    /// The physical expression if newly created, None if it already existed
+    pub new_expr: Option<PhysicalExpression>,
+}
+
 impl<M: Memoize> Optimizer<M> {
     /// Process a logical plan for ingestion into the memo.
     ///
@@ -86,11 +94,16 @@ impl<M: Memoize> Optimizer<M> {
 
     /// Process a physical plan for ingestion into the memo.
     ///
-    /// Directly ingests the physical plan and returns the associated goal.
+    /// Directly ingests the physical plan and returns the associated goal along with the
+    /// physical expression if it was newly created.
     ///
     /// # Returns
-    /// The Goal associated with the physical plan
-    pub(super) async fn try_ingest_physical(&self, physical_plan: &PartialPhysicalPlan) -> Goal {
+    /// A PhysicalIngest containing the Goal associated with the physical plan
+    /// and the PhysicalExpression if newly created (None if it already existed)
+    pub(super) async fn try_ingest_physical(
+        &self,
+        physical_plan: &PartialPhysicalPlan,
+    ) -> PhysicalIngest {
         self.ingest_physical_plan(physical_plan)
             .await
             .expect("Failed to ingest physical plan")
@@ -132,20 +145,25 @@ impl<M: Memoize> Optimizer<M> {
     /// * `partial_plan` - The partial physical plan to ingest
     ///
     /// # Returns
-    /// * The Goal associated with the physical plan
+    /// * A PhysicalIngest containing the Goal associated with the physical plan
+    ///   and the PhysicalExpression if newly created (None if it already existed)
     #[async_recursion]
     async fn ingest_physical_plan(
         &self,
         partial_plan: &PartialPhysicalPlan,
-    ) -> Result<Goal, Error> {
+    ) -> Result<PhysicalIngest, Error> {
         match partial_plan {
             PartialPhysicalPlan::Materialized(operator) => {
-                let goal = self.ingest_physical_operator(operator).await?;
-                Ok(goal)
+                self.ingest_physical_operator(operator).await
             }
             PartialPhysicalPlan::UnMaterialized(goal) => {
                 let goal = self.goal_repr.find(goal);
-                Ok(goal)
+                // For unmaterialized plans, we always return new_expr=None because
+                // we're using an existing goal
+                Ok(PhysicalIngest {
+                    goal,
+                    new_expr: None,
+                })
             }
         }
     }
@@ -239,11 +257,12 @@ impl<M: Memoize> Optimizer<M> {
     /// * `operator` - The physical operator to ingest
     ///
     /// # Returns
-    /// * The Goal associated with the physical expression
+    /// * A PhysicalIngest containing the Goal associated with the physical expression
+    ///   and the PhysicalExpression if newly created (None if it already existed)
     async fn ingest_physical_operator(
         &self,
         operator: &Operator<Arc<PartialPhysicalPlan>>,
-    ) -> Result<Goal, Error> {
+    ) -> Result<PhysicalIngest, Error> {
         // Process children
         let children = try_join_all(
             operator
@@ -263,13 +282,21 @@ impl<M: Memoize> Optimizer<M> {
         // Try to find the expression in the memo
         if let Some(goal) = self.memo.find_physical_expr(&physical_expr).await? {
             let goal = self.goal_repr.find(&goal);
-            return Ok(goal);
+            // Expression already exists, return goal with new_expr=None
+            return Ok(PhysicalIngest {
+                goal,
+                new_expr: None,
+            });
         }
 
         // Expression doesn't exist, create a new goal
         let goal = self.memo.create_goal(&physical_expr).await?;
 
-        Ok(goal)
+        // Return goal with new_expr containing the physical expression we just created
+        Ok(PhysicalIngest {
+            goal,
+            new_expr: Some(physical_expr),
+        })
     }
 
     /// Helper function to process a Child structure containing a logical plan.
@@ -316,12 +343,15 @@ impl<M: Memoize> Optimizer<M> {
         match child {
             Singleton(plan) => {
                 let result = self.ingest_physical_plan(plan).await?;
-                Ok(Singleton(result))
+                // Extract just the goal from the PhysicalIngest
+                Ok(Singleton(result.goal))
             }
             VarLength(plans) => {
                 let results =
                     try_join_all(plans.iter().map(|plan| self.ingest_physical_plan(plan))).await?;
-                Ok(VarLength(results))
+                // Extract just the goals from the PhysicalIngest results
+                let goals = results.into_iter().map(|ingest| ingest.goal).collect();
+                Ok(VarLength(goals))
             }
         }
     }

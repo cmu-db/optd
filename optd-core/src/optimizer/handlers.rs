@@ -1,5 +1,5 @@
 use super::{
-    ingest::LogicalIngest,
+    ingest::{LogicalIngest, PhysicalIngest},
     memo::{Memoize, MergeResult},
     OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
 };
@@ -132,9 +132,11 @@ impl<M: Memoize> Optimizer<M> {
         goal: Goal,
     ) {
         let goal = self.goal_repr.find(&goal);
-        let new_goal = self.try_ingest_physical(&plan).await;
+        let PhysicalIngest {
+            goal: new_goal,
+            new_expr,
+        } = self.try_ingest_physical(&plan).await;
 
-        // If the goals are different, merge them
         if new_goal != goal {
             // Perform the merge in the memo and process all results
             let merge_results = self
@@ -146,11 +148,43 @@ impl<M: Memoize> Optimizer<M> {
             for result in merge_results {
                 self.handle_merge_result(result).await;
             }
+
+            let message_tx = self.message_tx.clone();
+            let engine = self.engine.clone();
+
+            // If a new expression was created, cost it and stream the optimized results
+            if let Some(expr) = new_expr {
+                tokio::spawn(capture!([engine], async move {
+                    engine
+                        .cost_plan(&plan)
+                        .inspect(|result| {
+                            if let Err(err) = result {
+                                eprintln!("Error costing physical plan: {:?}", err);
+                            }
+                        })
+                        .filter_map(|result| async move { result.ok() })
+                        .for_each(|cost| {
+                            let mut result_tx = message_tx.clone();
+                            let goal = goal.clone();
+                            let expr = expr.clone();
+                            async move {
+                                result_tx
+                                    .send(NewOptimizedExpression(
+                                        OptimizedExpression(expr, cost),
+                                        goal,
+                                    ))
+                                    .await
+                                    .expect("Failed to send costed plan");
+                            }
+                        })
+                        .await;
+                }));
+            }
         }
     }
 
     /// This method handles fully optimized physical expressions with cost information.
-    pub(super) async fn process_new_optimized_expression(
+    pub(super) async fn process_new_optimized_expr(
         &mut self,
         expr: OptimizedExpression,
         goal: Goal,

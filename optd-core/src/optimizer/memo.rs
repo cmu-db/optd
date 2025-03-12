@@ -83,6 +83,12 @@ pub trait Memoize: Send + Sync + 'static {
         goal: &Goal,
     ) -> MemoizeResult<Option<OptimizedExpression>>;
 
+    /// Gets all physical expressions in a goal
+    ///
+    /// Returns a vector of physical expressions in the specified goal.
+    /// If the goal doesn't exist, returns an empty vector.
+    async fn get_all_physical_exprs(&self, goal: &Goal) -> MemoizeResult<Vec<PhysicalExpression>>;
+
     /// Searches for a physical expression in the memo
     ///
     /// Returns the associated Goal if the physical expression exists.
