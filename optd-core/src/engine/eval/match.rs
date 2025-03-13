@@ -155,44 +155,42 @@ where
                 match_bind_pattern(value.clone(), ident, *inner_pattern, ctx, gen, k).await;
             }
             (ArrayDecomp(head_pat, tail_pat), CoreData::Array(arr)) => {
-                match_array_pattern(value.clone(), *head_pat, *tail_pat, arr, ctx, gen, k).await;
+                if arr.is_empty() {
+                    k((value, None)).await;
+                    return;
+                }
+
+                match_array_pattern(*head_pat, *tail_pat, arr, ctx, gen, k).await;
             }
             (Struct(pat_name, pat_fields), CoreData::Struct(val_name, val_fields)) => {
-                match_struct_pattern(
-                    value.clone(),
-                    pat_name,
-                    pat_fields,
-                    val_name,
-                    val_fields,
-                    ctx,
-                    gen,
-                    k,
-                )
-                .await;
+                if pat_name != *val_name || pat_fields.len() != val_fields.len() {
+                    k((value, None)).await;
+                    return;
+                }
+
+                match_struct_pattern(pat_name, pat_fields, val_fields, ctx, gen, k).await;
             }
             (Operator(op_pattern), CoreData::Logical(LogicalOp(Materialized(operator)))) => {
-                match_materialized_operator(
-                    value.clone(),
-                    op_pattern,
-                    operator.clone(),
-                    CoreData::Logical(LogicalOp(Materialized(operator.clone()))),
-                    ctx,
-                    gen,
-                    k,
-                )
-                .await;
+                if op_pattern.tag != operator.tag
+                    || op_pattern.data.len() != operator.data.len()
+                    || op_pattern.children.len() != operator.children.len()
+                {
+                    k((value, None)).await;
+                    return;
+                }
+
+                match_materialized_operator(true, op_pattern, operator.clone(), ctx, gen, k).await;
             }
             (Operator(op_pattern), CoreData::Physical(PhysicalOp(Materialized(operator)))) => {
-                match_materialized_operator(
-                    value.clone(),
-                    op_pattern,
-                    operator.clone(),
-                    CoreData::Physical(PhysicalOp(Materialized(operator.clone()))),
-                    ctx,
-                    gen,
-                    k,
-                )
-                .await;
+                if op_pattern.tag != operator.tag
+                    || op_pattern.data.len() != operator.data.len()
+                    || op_pattern.children.len() != operator.children.len()
+                {
+                    k((value, None)).await;
+                    return;
+                }
+
+                match_materialized_operator(false, op_pattern, operator.clone(), ctx, gen, k).await;
             }
             // Unmaterialized operators
             (Operator(op_pattern), CoreData::Logical(LogicalOp(UnMaterialized(group_id)))) => {
@@ -208,13 +206,10 @@ where
                     )
                     .await;
             }
-            (
-                Operator(op_pattern),
-                CoreData::Physical(PhysicalOp(UnMaterialized(physical_goal))),
-            ) => {
+            (Operator(op_pattern), CoreData::Physical(PhysicalOp(UnMaterialized(goal)))) => {
                 gen.clone()
                     .yield_goal(
-                        physical_goal,
+                        goal,
                         Arc::new(move |expanded_value| {
                             Box::pin(capture!([op_pattern, ctx, gen, k], async move {
                                 match_pattern(expanded_value, Operator(op_pattern), ctx, gen, k)
@@ -268,7 +263,6 @@ async fn match_bind_pattern<G>(
 
 /// Matches an array decomposition pattern
 async fn match_array_pattern<G>(
-    original_value: Value,
     head_pattern: Pattern,
     tail_pattern: Pattern,
     arr: &[Value],
@@ -278,11 +272,6 @@ async fn match_array_pattern<G>(
 ) where
     G: Generator,
 {
-    if arr.is_empty() {
-        k((original_value, None)).await;
-        return;
-    }
-
     // Split array into head and tail
     let head = arr[0].clone();
     let tail_elements = arr[1..].to_vec();
@@ -342,10 +331,8 @@ async fn match_array_pattern<G>(
 
 /// Matches a struct pattern
 async fn match_struct_pattern<G>(
-    original_value: Value,
     pat_name: String,
     field_patterns: Vec<Pattern>,
-    val_name: &String,
     field_values: &[Value],
     ctx: Context,
     generator: G,
@@ -353,11 +340,6 @@ async fn match_struct_pattern<G>(
 ) where
     G: Generator,
 {
-    if pat_name != *val_name || field_patterns.len() != field_values.len() {
-        k((original_value, None)).await;
-        return;
-    }
-
     // Match fields sequentially
     match_components(
         field_patterns,
@@ -396,26 +378,16 @@ async fn match_struct_pattern<G>(
 }
 
 /// Matches a materialized operator
-/// TODO: Simplify parameters - value_type is redundant with operator
 async fn match_materialized_operator<G>(
-    original_value: Value,
+    is_logical: bool,
     op_pattern: Operator<Pattern>,
     operator: Operator<Value>,
-    value_type: CoreData<Value>,
     ctx: Context,
     gen: G,
     k: MatchContinuation,
 ) where
     G: Generator,
 {
-    if op_pattern.tag != operator.tag
-        || op_pattern.data.len() != operator.data.len()
-        || op_pattern.children.len() != operator.children.len()
-    {
-        k((original_value, None)).await;
-        return;
-    }
-
     // Create all patterns and values to match
     let data_patterns = op_pattern.data;
     let children_patterns = op_pattern.children;
@@ -438,7 +410,7 @@ async fn match_materialized_operator<G>(
         ctx.clone(),
         gen,
         Arc::new(move |results| {
-            Box::pin(capture!([ctx, operator, value_type, k], async move {
+            Box::pin(capture!([ctx, operator, k], async move {
                 // Check if all components matched successfully
                 let all_matched = results.iter().all(|(_, ctx_opt)| ctx_opt.is_some());
 
@@ -455,15 +427,11 @@ async fn match_materialized_operator<G>(
                     children: matched_children,
                 };
 
-                // Create appropriate value type
-                let new_value = match value_type {
-                    CoreData::Logical(_) => {
-                        Value(CoreData::Logical(LogicalOp(Materialized(new_op))))
-                    }
-                    CoreData::Physical(_) => {
-                        Value(CoreData::Physical(PhysicalOp(Materialized(new_op))))
-                    }
-                    _ => panic!("Expected Logical or Physical operator"),
+                // Create appropriate value type based on original_value
+                let new_value = if is_logical {
+                    Value(CoreData::Logical(LogicalOp(Materialized(new_op))))
+                } else {
+                    Value(CoreData::Physical(PhysicalOp(Materialized(new_op))))
                 };
 
                 if all_matched {
