@@ -465,18 +465,17 @@ async fn match_materialized_operator<G>(
 /// * `ctx` - The current context to extend with bindings
 /// * `generator` - The generator to resolve references
 /// * `k` - The continuation to receive the vector of match results
-fn match_components<G>(
+async fn match_components<G>(
     patterns: Vec<Pattern>,
     values: Vec<Value>,
     ctx: Context,
     generator: G,
     k: MatchSequenceContinuation,
-) -> Pin<Box<dyn Future<Output = ()> + Send>>
-where
+) where
     G: Generator,
 {
     // Start the sequential matching process with an empty results vector
-    match_components_sequentially(patterns, values, 0, ctx, Vec::new(), generator, k)
+    match_components_sequentially(patterns, values, 0, ctx, Vec::new(), generator, k).await
 }
 
 /// Internal helper function to match components sequentially

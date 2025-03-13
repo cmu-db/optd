@@ -5,5 +5,5 @@ use crate::engine::error::EngineError;
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) enum Error {
-    Engine(EngineError),
+    Placeholder,
 }
