@@ -1,118 +1,140 @@
-//! This module provides evaluation functionality for operator expressions.
-//!
-//! Operators represent computational units that can have various components:
-//! - Operator data: Basic parameters needed for the operator's function
-//! - Children: Expressions that provide input data to the operator
-//!
-//! The evaluation process generates all possible combinations of component values
-//! (a cartesian product) and constructs operator instances for each combination.
-//! This approach handles the non-deterministic nature of expression evaluation
-//! in our system, where an expression might evaluate to multiple possible values.
-
-use crate::{
-    capture,
-    engine::{
-        utils::streams::{
-            evaluate_all_combinations, propagate_success, stream_from_result, ValueStream,
-        },
-        Engine, Expander,
-    },
-    error::Error,
-};
-use futures::{Stream, StreamExt};
+use super::{Engine, Generator};
+use crate::capture;
+use crate::engine::generator::Continuation;
+use crate::engine::utils::evaluate_sequence;
 use optd_dsl::analyzer::hir::{
     CoreData, Expr, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
-use std::{pin::Pin, sync::Arc};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 use CoreData::{Logical, Physical};
 use Materializable::*;
 
-/// A stream of evaluated operators
-type OperatorStream = Pin<Box<dyn Stream<Item = Result<Operator<Value>, Error>> + Send>>;
-
-//=============================================================================
-// Entry points for different operator types
-//=============================================================================
+/// Specialized continuation type for operator values
+type OperatorContinuation = Arc<
+    dyn Fn(Operator<Value>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static,
+>;
 
 /// Evaluates a logical operator by generating all possible combinations of its components.
-pub(super) fn evaluate_logical_operator<E>(
+///
+/// # Parameters
+/// * `op` - The logical operator to evaluate
+/// * `engine` - The evaluation engine
+/// * `k` - The continuation to receive evaluation results
+pub(super) async fn evaluate_logical_operator<G>(
     op: LogicalOp<Arc<Expr>>,
-    engine: Engine<E>,
-) -> ValueStream
-where
-    E: Expander,
+    engine: Engine<G>,
+    k: Continuation,
+) where
+    G: Generator,
 {
     match op.0 {
+        // For unmaterialized operators, directly call the continuation with the unmaterialized value
         UnMaterialized(group_id) => {
-            propagate_success(Value(Logical(LogicalOp(UnMaterialized(group_id)))))
+            k(Value(Logical(LogicalOp(UnMaterialized(group_id))))).await;
         }
-        Materialized(op) => explore_operator_data(op.data, op.children, op.tag, engine)
-            .map(|result| result.map(|op| Value(Logical(LogicalOp(Materialized(op))))))
-            .boxed(),
+        // For materialized operators, evaluate all parts and construct the result
+        Materialized(op) => {
+            evaluate_operator(
+                op.data,
+                op.children,
+                op.tag,
+                engine,
+                Arc::new(move |constructed_op| {
+                    Box::pin(capture!([k], async move {
+                        // Wrap the constructed operator in the logical operator structure
+                        let result = Value(Logical(LogicalOp(Materialized(constructed_op))));
+                        k(result).await;
+                    }))
+                }),
+            )
+            .await;
+        }
     }
 }
 
 /// Evaluates a physical operator by generating all possible combinations of its components.
-pub(super) fn evaluate_physical_operator<E>(
+///
+/// # Parameters
+/// * `op` - The physical operator to evaluate
+/// * `engine` - The evaluation engine
+/// * `k` - The continuation to receive evaluation results
+pub(super) async fn evaluate_physical_operator<G>(
     op: PhysicalOp<Arc<Expr>>,
-    engine: Engine<E>,
-) -> ValueStream
-where
-    E: Expander,
+    engine: Engine<G>,
+    k: Continuation,
+) where
+    G: Generator,
 {
     match op.0 {
+        // For unmaterialized operators, continue with the unmaterialized value
         UnMaterialized(physical_goal) => {
-            propagate_success(Value(Physical(PhysicalOp(UnMaterialized(physical_goal)))))
+            k(Value(Physical(PhysicalOp(UnMaterialized(physical_goal))))).await;
         }
-        Materialized(op) => explore_operator_data(op.data, op.children, op.tag, engine)
-            .map(|result| result.map(|op| Value(Physical(PhysicalOp(Materialized(op))))))
-            .boxed(),
+        // For materialized operators, evaluate all parts and construct the result
+        Materialized(op) => {
+            evaluate_operator(
+                op.data,
+                op.children,
+                op.tag,
+                engine,
+                Arc::new(move |constructed_op| {
+                    Box::pin(capture!([k], async move {
+                        k(Value(Physical(PhysicalOp(Materialized(constructed_op))))).await;
+                    }))
+                }),
+            )
+            .await;
+        }
     }
 }
 
-//=============================================================================
-// Shared implementation for operator evaluation
-//=============================================================================
-
-/// Evaluates all combinations of operator data values.
-fn explore_operator_data<E>(
+/// Evaluates all components of an operator and constructs the final operator value.
+///
+/// Evaluates both operator data parameters and children expressions, combining
+/// them to form complete operator instances.
+///
+/// # Parameters
+/// * `op_data_exprs` - The operator parameter expressions to evaluate
+/// * `children_exprs` - The child operator expressions to evaluate
+/// * `tag` - The operator type tag
+/// * `engine` - The evaluation engine
+/// * `k` - The continuation to receive the constructed operator
+async fn evaluate_operator<G>(
     op_data_exprs: Vec<Arc<Expr>>,
     children_exprs: Vec<Arc<Expr>>,
     tag: String,
-    engine: Engine<E>,
-) -> OperatorStream
-where
-    E: Expander,
+    engine: Engine<G>,
+    k: OperatorContinuation,
+) where
+    G: Generator,
 {
-    evaluate_all_combinations(op_data_exprs.into_iter(), engine.clone())
-        .flat_map(move |op_data_result| {
-            stream_from_result(
-                op_data_result,
-                capture!([tag, children_exprs, engine], move |op_data| {
-                    explore_children(children_exprs, op_data, tag, engine)
-                }),
-            )
-        })
-        .boxed()
-}
-
-/// Evaluates all combinations of children values.
-fn explore_children<E>(
-    children: Vec<Arc<Expr>>,
-    op_data: Vec<Value>,
-    tag: String,
-    engine: Engine<E>,
-) -> OperatorStream
-where
-    E: Expander,
-{
-    evaluate_all_combinations(children.into_iter(), engine)
-        .map(capture!([tag, op_data], move |rel_result| {
-            rel_result.map(|children| Operator {
-                tag: tag.clone(),
-                data: op_data.clone(),
-                children,
-            })
-        }))
-        .boxed()
+    // First evaluate all operator data parameters
+    evaluate_sequence(
+        op_data_exprs,
+        engine.clone(),
+        Arc::new(move |op_data| {
+            Box::pin(capture!([children_exprs, tag, engine, k], async move {
+                // Then evaluate all children expressions
+                evaluate_sequence(
+                    children_exprs,
+                    engine,
+                    Arc::new(move |children| {
+                        Box::pin(capture!([tag, op_data, k], async move {
+                            // Construct the complete operator and pass to continuation
+                            let operator = Operator {
+                                tag: tag,
+                                data: op_data,
+                                children,
+                            };
+                            k(operator).await;
+                        }))
+                    }),
+                )
+                .await;
+            }))
+        }),
+    )
+    .await;
 }

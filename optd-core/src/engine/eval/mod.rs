@@ -3,9 +3,10 @@ use super::Engine;
 use core::evaluate_core_expr;
 use expr::{
     evaluate_binary_expr, evaluate_function_call, evaluate_if_then_else, evaluate_let_binding,
-    evaluate_pattern_match, evaluate_reference, evaluate_unary_expr,
+    evaluate_reference, evaluate_unary_expr,
 };
 use optd_dsl::analyzer::hir::Expr;
+use r#match::evaluate_pattern_match;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -14,6 +15,8 @@ use Expr::*;
 mod binary;
 mod core;
 mod expr;
+mod r#match;
+mod operator;
 mod unary;
 
 /// Trait for evaluating expressions using Continuation Passing Style (CPS).

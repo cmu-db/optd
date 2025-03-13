@@ -31,11 +31,6 @@ pub struct OptimizerExpander {
 }
 
 impl Generator for OptimizerExpander {
-    /// Returns a value directly to the caller without further processing.
-    ///
-    /// This is the terminal operation in CPS that delivers a final result.
-    async fn emit(&self, value: Value) {}
-
     /// Expands a logical group and passes each expression to the continuation.
     ///
     /// Instead of returning a stream, this function invokes the provided continuation

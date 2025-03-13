@@ -29,14 +29,13 @@ use optd_dsl::analyzer::{
     hir::{CoreData, Expr, Literal, Value},
 };
 use std::sync::Arc;
-use utils::streams::{CostStream, PartialLogicalPlanStream, PartialPhysicalPlanStream};
 use EngineError::*;
 use Error::*;
 use Expr::*;
 use Literal::*;
 
 pub(crate) mod error;
-mod eval;
+pub(crate) mod eval;
 pub(crate) mod generator;
 pub(crate) mod utils;
 
@@ -49,13 +48,13 @@ pub(crate) struct Engine<G: Generator> {
     /// The original HIR context containing all defined expressions and rules
     pub(crate) context: Context,
     /// The expander for resolving group references
-    pub(crate) expander: G,
+    pub(crate) generator: G,
 }
 
 impl<E: Generator> Engine<E> {
     /// Creates a new engine with the given context and expander.
-    pub(crate) fn new(context: Context, expander: E) -> Self {
-        Self { context, expander }
+    pub(crate) fn new(context: Context, generator: E) -> Self {
+        Self { context, generator }
     }
 
     /// Creates a new engine with an updated context but the same expander.
@@ -71,7 +70,7 @@ impl<E: Generator> Engine<E> {
     pub(crate) fn with_context(self, context: Context) -> Self {
         Self {
             context,
-            expander: self.expander,
+            generator: self.generator,
         }
     }
 

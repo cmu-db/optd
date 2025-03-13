@@ -3,40 +3,16 @@ use crate::{
     capture,
     engine::{
         generator::{Continuation, Generator},
+        utils::evaluate_sequence,
         Engine,
     },
 };
 use optd_dsl::analyzer::hir::{
-    BinOp, CoreData, Expr, FunKind, Identifier, Literal, MatchArm, UnaryOp, Value,
+    BinOp, CoreData, Expr, FunKind, Identifier, Literal, UnaryOp, Value,
 };
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::sync::Arc;
 use CoreData::*;
 use FunKind::*;
-
-/// Specialized continuation type for vectors of values
-type ArgsContinuation =
-    Arc<dyn Fn(Vec<Value>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>;
-
-/// Evaluates a pattern match expression.
-///
-/// First evaluates the expression to match, then tries each match arm in order
-/// until a pattern matches, passing results to the continuation.
-///
-/// # Parameters
-/// * `expr` - The expression to match against patterns
-/// * `match_arms` - The list of pattern-expression pairs to try
-/// * `engine` - The evaluation engine
-/// * `k` - The continuation to receive evaluation results
-pub(super) async fn evaluate_pattern_match<G>(
-    expr: Arc<Expr>,
-    match_arms: Vec<MatchArm>,
-    engine: Engine<G>,
-    k: Continuation,
-) where
-    G: Generator,
-{
-    todo!()
-}
 
 /// Evaluates an if-then-else expression.
 ///
@@ -91,34 +67,31 @@ pub(super) async fn evaluate_if_then_else<G>(
 /// * `after` - The expression to evaluate in the updated context
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive evaluation results
-pub(super) fn evaluate_let_binding<G>(
+pub(super) async fn evaluate_let_binding<G>(
     ident: String,
     assignee: Arc<Expr>,
     after: Arc<Expr>,
     engine: Engine<G>,
     k: Continuation,
-) -> Pin<Box<dyn Future<Output = ()> + Send>>
-where
+) where
     G: Generator,
 {
-    Box::pin(async move {
-        // Evaluate the assignee first
-        assignee
-            .evaluate(
-                engine.clone(),
-                Arc::new(move |value| {
-                    Box::pin(capture!([ident, after, engine, k], async move {
-                        // Create updated context with the new binding
-                        let mut new_ctx = engine.context.clone();
-                        new_ctx.bind(ident, value);
+    // Evaluate the assignee first
+    assignee
+        .evaluate(
+            engine.clone(),
+            Arc::new(move |value| {
+                Box::pin(capture!([ident, after, engine, k], async move {
+                    // Create updated context with the new binding
+                    let mut new_ctx = engine.context.clone();
+                    new_ctx.bind(ident, value);
 
-                        // Evaluate the after expression in the updated context
-                        after.evaluate(engine.with_context(new_ctx), k).await;
-                    }))
-                }),
-            )
-            .await;
-    })
+                    // Evaluate the after expression in the updated context
+                    after.evaluate(engine.with_context(new_ctx), k).await;
+                }))
+            }),
+        )
+        .await;
 }
 
 /// Evaluates a binary expression.
@@ -270,13 +243,8 @@ pub(super) async fn evaluate_closure_call<G>(
 ) where
     G: Generator,
 {
-    let length = args.len();
-
-    // Evaluate arguments one by one, collecting results
-    evaluate_args_sequentially(
+    evaluate_sequence(
         args,
-        0,
-        Vec::with_capacity(length),
         engine.clone(),
         Arc::new(move |arg_values| {
             Box::pin(capture!([params, body, engine, k], async move {
@@ -293,7 +261,7 @@ pub(super) async fn evaluate_closure_call<G>(
             }))
         }),
     )
-    .await;
+    .await
 }
 
 /// Evaluates a call to a Rust UDF (built-in function).
@@ -314,13 +282,8 @@ pub(super) async fn evaluate_rust_udf_call<G>(
 ) where
     G: Generator,
 {
-    let length = args.len();
-
-    // Evaluate all arguments and then call the function
-    evaluate_args_sequentially(
+    evaluate_sequence(
         args,
-        0,
-        Vec::with_capacity(length),
         engine,
         Arc::new(move |arg_values| {
             Box::pin(capture!([udf, k], async move {
@@ -332,52 +295,7 @@ pub(super) async fn evaluate_rust_udf_call<G>(
             }))
         }),
     )
-    .await;
-}
-
-/// Helper function to evaluate arguments sequentially.
-///
-/// Evaluates each argument in order, collecting results to pass to a continuation.
-///
-/// # Parameters
-/// * `args` - The argument expressions to evaluate
-/// * `index` - The current argument index
-/// * `values` - Accumulated argument values
-/// * `engine` - The evaluation engine
-/// * `k` - The continuation to receive all evaluated argument values
-fn evaluate_args_sequentially<G>(
-    args: Vec<Arc<Expr>>,
-    index: usize,
-    values: Vec<Value>,
-    engine: Engine<G>,
-    k: ArgsContinuation,
-) -> Pin<Box<dyn Future<Output = ()> + Send>>
-where
-    G: Generator,
-{
-    Box::pin(async move {
-        if index >= args.len() {
-            // All arguments evaluated, call continuation directly with the vector
-            k(values).await;
-            return;
-        }
-
-        // Evaluate the current argument
-        let arg = args[index].clone();
-
-        arg.evaluate(
-            engine.clone(),
-            Arc::new(move |arg_value| {
-                let mut next_values = values.clone();
-                next_values.push(arg_value);
-
-                Box::pin(capture!([args, index, engine, k], async move {
-                    evaluate_args_sequentially(args, index + 1, next_values, engine, k).await;
-                }))
-            }),
-        )
-        .await;
-    })
+    .await
 }
 
 /// Evaluates a reference to a variable.
