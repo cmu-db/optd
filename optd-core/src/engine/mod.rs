@@ -14,7 +14,6 @@ use crate::{
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
     },
-    error::Error,
 };
 use eval::Evaluate;
 use generator::Generator;
@@ -27,7 +26,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use Expr::*;
 
-pub(crate) mod eval;
+mod eval;
 pub(crate) mod generator;
 pub(crate) mod utils;
 
@@ -82,49 +81,6 @@ impl<E: Generator> Engine<E> {
         }
     }
 
-    /// Helper function to process result values and handle errors
-    ///
-    /// This abstracts the common pattern of error handling and value transformation
-    /// for all rule application functions.
-    ///
-    /// # Parameters
-    /// * `result` - The result from rule evaluation
-    /// * `transform` - Function to transform value to desired type
-    /// * `context` - Context string for error messages
-    /// * `k` - Continuation to call with transformed value on success
-    async fn process_result<T, F>(
-        result: Result<Value, Error>,
-        transform: F,
-        context: &str,
-        k: Arc<dyn Fn(T) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>,
-    ) where
-        F: FnOnce(&Value) -> T,
-    {
-        match result {
-            Ok(value) => {
-                match &value.0 {
-                    CoreData::Fail(boxed_msg) => {
-                        if let CoreData::Literal(Literal::String(error_message)) = &boxed_msg.0 {
-                            eprintln!("Error in {}: {}", context, error_message);
-                            // Don't call continuation for failed rules
-                        } else {
-                            panic!("Fail expression must evaluate to a string message");
-                        }
-                    }
-                    _ => {
-                        // Transform and pass to continuation
-                        let transformed = transform(&value);
-                        k(transformed).await;
-                    }
-                }
-            }
-            Err(err) => {
-                eprintln!("Error evaluating {}: {:?}", context, err);
-                // Don't call continuation for errors
-            }
-        }
-    }
-
     /// Launches a logical rule application for a given plan.
     ///
     /// This applies a logical rule to an input plan and passes all possible
@@ -149,7 +105,7 @@ impl<E: Generator> Engine<E> {
                     Arc::new(move |result| {
                         Box::pin(capture!([k, rule_name], async move {
                             Self::process_result(
-                                Ok(result), // Convert Value to Result<Value, Error>
+                                result,
                                 value_to_partial_logical,
                                 &format!("logical rule '{}'", rule_name),
                                 k,
@@ -191,7 +147,7 @@ impl<E: Generator> Engine<E> {
                     Arc::new(move |result| {
                         Box::pin(capture!([k, rule_name], async move {
                             Self::process_result(
-                                Ok(result),
+                                result,
                                 value_to_partial_physical,
                                 &format!("implementation rule '{}'", rule_name),
                                 k,
@@ -226,8 +182,7 @@ impl<E: Generator> Engine<E> {
                     self,
                     Arc::new(move |result| {
                         Box::pin(capture!([k], async move {
-                            Self::process_result(Ok(result), value_to_cost, "cost function", k)
-                                .await;
+                            Self::process_result(result, value_to_cost, "cost function", k).await;
                         }))
                     }),
                 )
@@ -258,7 +213,7 @@ impl<E: Generator> Engine<E> {
                     Arc::new(move |result| {
                         Box::pin(capture!([k], async move {
                             Self::process_result(
-                                Ok(result),
+                                result,
                                 value_to_logical_properties,
                                 "derive function",
                                 k,
@@ -284,5 +239,40 @@ impl<E: Generator> Engine<E> {
         let arg_exprs = args.into_iter().map(|arg| CoreVal(arg).into()).collect();
 
         Call(rule_name_expr.into(), arg_exprs).into()
+    }
+
+    /// Helper function to process values and handle failures
+    ///
+    /// This abstracts the common pattern of handling failures and value transformation
+    /// for all rule application functions.
+    ///
+    /// # Parameters
+    /// * `value` - The value from rule evaluation
+    /// * `transform` - Function to transform value to desired type
+    /// * `context` - Context string for error messages
+    /// * `k` - Continuation to call with transformed value on success
+    async fn process_result<T, F>(
+        value: Value,
+        transform: F,
+        context: &str,
+        k: Arc<dyn Fn(T) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>,
+    ) where
+        F: FnOnce(&Value) -> T,
+    {
+        match &value.0 {
+            CoreData::Fail(boxed_msg) => {
+                if let CoreData::Literal(Literal::String(error_message)) = &boxed_msg.0 {
+                    eprintln!("Error in {}: {}", context, error_message);
+                    // Don't call continuation for failed rules
+                } else {
+                    panic!("Fail expression must evaluate to a string message");
+                }
+            }
+            _ => {
+                // Transform and pass to continuation
+                let transformed = transform(&value);
+                k(transformed).await;
+            }
+        }
     }
 }
