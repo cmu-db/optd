@@ -4,7 +4,7 @@
 //! values against patterns. This implementation supports matching against literals,
 //! wildcards, bindings, structs, arrays, and operators, with special handling for operators.
 
-use super::{Engine, Evaluate, Expander};
+use super::{Engine, Evaluate, Generator};
 use crate::engine::utils::streams::{
     process_items_in_sequence, MatchResultStream, VecMatchResultStream,
 };
@@ -35,7 +35,7 @@ pub(super) fn try_match_arms<E>(
     engine: Engine<E>,
 ) -> ValueStream
 where
-    E: Expander,
+    E: Generator,
 {
     if match_arms.is_empty() {
         // No arms matched - this is a runtime error
@@ -78,7 +78,7 @@ where
 /// - For errors: Err(Error)
 fn match_pattern<E>(value: Value, pattern: Pattern, engine: Engine<E>) -> MatchResultStream
 where
-    E: Expander,
+    E: Generator,
 {
     match (pattern, &value.0) {
         // Wildcard pattern matches anything
@@ -163,7 +163,7 @@ where
 /// It processes value-pattern pairs one at a time and combines their results.
 fn match_pattern_combinations<E, I>(pairs: I, engine: Engine<E>) -> VecMatchResultStream
 where
-    E: Expander,
+    E: Generator,
     I: Iterator<Item = (Value, Pattern)> + Send + Clone + 'static,
 {
     // Use the generic process_items_in_sequence with a matcher function
@@ -180,7 +180,7 @@ fn match_array_pattern<E>(
     engine: Engine<E>,
 ) -> MatchResultStream
 where
-    E: Expander,
+    E: Generator,
 {
     if arr.is_empty() {
         return propagate_success((Value(CoreData::Array(Vec::new())), None));
@@ -238,7 +238,7 @@ fn match_struct_pattern<E>(
     engine: Engine<E>,
 ) -> MatchResultStream
 where
-    E: Expander,
+    E: Generator,
 {
     // Create pairs of field values and patterns
     let pairs: Vec<_> = field_values
@@ -288,7 +288,7 @@ fn match_operator_pattern<E>(
     engine: Engine<E>,
 ) -> MatchResultStream
 where
-    E: Expander,
+    E: Generator,
 {
     // Match tag and component counts
     if op_pattern.tag != op.tag
@@ -376,7 +376,7 @@ fn match_against_expanded_values<E, S>(
     engine: Engine<E>,
 ) -> MatchResultStream
 where
-    E: Expander,
+    E: Generator,
     S: Stream<Item = Result<Value, Error>> + Send + 'static,
 {
     expanded_values
@@ -921,7 +921,6 @@ mod tests {
                 }
             },
             |_| panic!("Physical expansion not expected in this test"),
-            |_| panic!("Properties expansion not expected in this test"),
         );
 
         let context = Context::default();

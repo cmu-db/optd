@@ -22,8 +22,8 @@ use crate::{
 };
 use error::EngineError;
 use eval::Evaluate;
-use expander::Expander;
 use futures::StreamExt;
+use generator::Generator;
 use optd_dsl::analyzer::{
     context::Context,
     hir::{CoreData, Expr, Literal, Value},
@@ -37,7 +37,7 @@ use Literal::*;
 
 pub(crate) mod error;
 mod eval;
-pub(crate) mod expander;
+pub(crate) mod generator;
 pub(crate) mod utils;
 
 /// Result type for rule applications
@@ -45,14 +45,14 @@ type RuleResult<T> = Result<T, Error>;
 
 /// The engine for evaluating HIR expressions and applying rules.
 #[derive(Debug, Clone)]
-pub(crate) struct Engine<E: Expander> {
+pub(crate) struct Engine<G: Generator> {
     /// The original HIR context containing all defined expressions and rules
     pub(crate) context: Context,
     /// The expander for resolving group references
-    pub(crate) expander: E,
+    pub(crate) expander: G,
 }
 
-impl<E: Expander> Engine<E> {
+impl<E: Generator> Engine<E> {
     /// Creates a new engine with the given context and expander.
     pub(crate) fn new(context: Context, expander: E) -> Self {
         Self { context, expander }

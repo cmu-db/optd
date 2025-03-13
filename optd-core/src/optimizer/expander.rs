@@ -6,7 +6,10 @@ use crate::{
         },
         into_cir::{hir_goal_to_cir, hir_group_id_to_cir},
     },
-    engine::{expander::Expander, utils::streams::ValueStream},
+    engine::{
+        generator::{Continuation, Generator},
+        utils::streams::ValueStream,
+    },
 };
 use futures::{
     channel::{
@@ -27,8 +30,34 @@ pub struct OptimizerExpander {
     pub message_tx: Sender<OptimizerMessage>,
 }
 
-impl Expander for OptimizerExpander {
-    fn expand_all_exprs(&self, group_id: GroupId) -> ValueStream {
+impl Generator for OptimizerExpander {
+    /// Returns a value directly to the caller without further processing.
+    ///
+    /// This is the terminal operation in CPS that delivers a final result.
+    async fn emit(&self, value: Value) {}
+
+    /// Expands a logical group and passes each expression to the continuation.
+    ///
+    /// Instead of returning a stream, this function invokes the provided continuation
+    /// for each expression in the group, enabling more efficient processing of
+    /// multiple evaluation paths.
+    ///
+    /// # Parameters
+    /// * `group_id` - The ID of the group to expand
+    /// * `k` - The continuation to process each expression in the group
+    async fn yield_group(&self, group_id: GroupId, k: Continuation) {}
+
+    /// Expands a physical goal and passes each implementation to the continuation.
+    ///
+    /// Processes physical implementations that satisfy the goal, invoking the continuation
+    /// for each valid implementation, typically in order of increasing cost.
+    ///
+    /// # Parameters
+    /// * `physical_goal` - The goal describing required properties
+    /// * `k` - The continuation to process each implementation
+    async fn yield_goal(&self, physical_goal: &Goal, k: Continuation) {}
+
+    /*fn expand_all_exprs(&self, group_id: GroupId) -> ValueStream {
         let (tx, rx) = mpsc::channel(0);
         let mut message_tx = self.message_tx.clone();
         let cir_group_id = hir_group_id_to_cir(&group_id);
@@ -60,23 +89,5 @@ impl Expander for OptimizerExpander {
         };
 
         stream::once(send_request).flatten().boxed()
-    }
-
-    async fn retrieve_properties(&self, group_id: GroupId) -> Value {
-        let (tx, rx) = oneshot::channel();
-        let mut message_tx = self.message_tx.clone();
-        let cir_group_id = hir_group_id_to_cir(&group_id);
-        let request = OptimizerMessage::RetrieveProperties(cir_group_id, tx);
-
-        message_tx
-            .send(request)
-            .await
-            .expect("Failed to send properties request - channel closed");
-
-        let properties = rx
-            .await
-            .expect("Failed to receive properties - sender dropped");
-
-        logical_properties_to_value(&properties)
-    }
+    }*/
 }

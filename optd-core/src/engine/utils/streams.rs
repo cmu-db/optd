@@ -7,7 +7,7 @@ use crate::cir::goal::Cost;
 use crate::cir::plans::PartialPhysicalPlan;
 use crate::engine::eval::r#match::MatchResult;
 use crate::engine::eval::Evaluate;
-use crate::engine::expander::Expander;
+use crate::engine::generator::Generator;
 use crate::engine::Engine;
 use crate::error::Error;
 use crate::{capture, cir::plans::PartialLogicalPlan};
@@ -77,7 +77,7 @@ pub(crate) fn process_items_in_sequence<E, I, T, F>(
     process_item: F,
 ) -> Pin<Box<dyn Stream<Item = Result<Vec<T>, Error>> + Send>>
 where
-    E: Expander,
+    E: Generator,
     I: Iterator + Send + Clone + 'static,
     T: Send + Clone + 'static,
     F: Fn(I::Item, Engine<E>) -> Pin<Box<dyn Stream<Item = Result<T, Error>> + Send>>
@@ -146,7 +146,7 @@ where
 /// A stream of all possible combinations of values from the expressions
 pub(crate) fn evaluate_all_combinations<E, I>(items: I, engine: Engine<E>) -> VecValueStream
 where
-    E: Expander,
+    E: Generator,
     I: Iterator<Item = Arc<Expr>> + Send + Clone + 'static,
 {
     // Use the generic process_items_in_sequence with an evaluator function

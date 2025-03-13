@@ -1,5 +1,5 @@
 use crate::{
-    engine::{expander::Expander, Engine},
+    engine::{generator::Generator, Engine},
     error::Error,
 };
 use futures::{executor::block_on_stream, stream, Stream, StreamExt};
@@ -19,8 +19,6 @@ pub(crate) struct MockExpander {
     logical_expander: fn(GroupId) -> Vec<Value>,
     // Function to generate physical implementation for a physical goal
     physical_expander: fn(&Goal) -> Value,
-    // Function to generate logical properties for a group ID
-    properties_expander: fn(GroupId) -> Value,
 }
 
 impl MockExpander {
@@ -28,18 +26,16 @@ impl MockExpander {
     pub(crate) fn new(
         logical_expander: fn(GroupId) -> Vec<Value>,
         physical_expander: fn(&Goal) -> Value,
-        properties_expander: fn(GroupId) -> Value,
     ) -> Self {
         Self {
             logical_expander,
             physical_expander,
-            properties_expander,
         }
     }
 }
 
 /// A simple mock implementation of the Expander trait for testing
-impl Expander for MockExpander {
+impl Generator for MockExpander {
     fn expand_all_exprs(&self, group_id: GroupId) -> ValueStream {
         let values = (self.logical_expander)(group_id);
         stream::iter(values).map(Ok).boxed()
@@ -48,10 +44,6 @@ impl Expander for MockExpander {
     fn expand_optimized_expr(&self, physical_goal: &Goal) -> ValueStream {
         let value = (self.physical_expander)(physical_goal);
         propagate_success(value)
-    }
-
-    async fn retrieve_properties(&self, group_id: GroupId) -> Value {
-        (self.properties_expander)(group_id)
     }
 }
 
@@ -91,7 +83,6 @@ pub(crate) fn create_basic_mock_expander() -> MockExpander {
     MockExpander::new(
         |_| vec![], // No logical expansions
         |_| panic!("Physical expansion not implemented"),
-        |_| panic!("Properties expansion not implemented"),
     )
 }
 
