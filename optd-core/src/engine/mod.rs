@@ -31,21 +31,21 @@ pub(crate) mod generator;
 pub(crate) mod utils;
 
 /// Type alias for a continuation that receives a PartialLogicalPlan
-type LogicalPlanContinuation = Arc<
+pub(crate) type LogicalPlanContinuation = Arc<
     dyn Fn(PartialLogicalPlan) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static,
 >;
 
 /// Type alias for a continuation that receives a PartialPhysicalPlan
-type PhysicalPlanContinuation = Arc<
+pub(crate) type PhysicalPlanContinuation = Arc<
     dyn Fn(PartialPhysicalPlan) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static,
 >;
 
 /// Type alias for a continuation that receives a cost value
-type CostContinuation =
+pub(crate) type CostContinuation =
     Arc<dyn Fn(Cost) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>;
 
 /// Type alias for a continuation that receives LogicalProperties
-type PropertiesContinuation = Arc<
+pub(crate) type PropertiesContinuation = Arc<
     dyn Fn(LogicalProperties) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static,
 >;
 

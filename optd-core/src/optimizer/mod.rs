@@ -9,13 +9,13 @@ use crate::{
     },
     engine::Engine,
 };
-use expander::OptimizerExpander;
 use futures::channel::oneshot;
 use futures::StreamExt;
 use futures::{
     channel::mpsc::{self, Receiver, Sender},
     SinkExt,
 };
+use generator::OptimizerGenerator;
 use memo::Memoize;
 use merge_repr::Representative;
 use optd_dsl::analyzer::hir::HIR;
@@ -23,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 use OptimizerMessage::*;
 
 mod egest;
-mod expander;
+mod generator;
 mod handlers;
 mod ingest;
 mod memo;
@@ -135,7 +135,7 @@ pub struct Optimizer<M: Memoize> {
     rule_book: RuleBook,
 
     /// The engine for evaluating rules and functions
-    engine: Engine<OptimizerExpander>,
+    engine: Engine<OptimizerGenerator>,
 
     //
     // Dependency tracking
@@ -201,10 +201,10 @@ impl<M: Memoize> Optimizer<M> {
         let (message_tx, message_rx) = mpsc::channel(0);
         let (optimize_tx, optimize_rx) = mpsc::channel(0);
 
-        // Create the engine with the optimizer expander
+        // Create the engine with the optimizer generator
         let engine = Engine::new(
             hir.context,
-            OptimizerExpander {
+            OptimizerGenerator {
                 message_tx: message_tx.clone(),
             },
         );
