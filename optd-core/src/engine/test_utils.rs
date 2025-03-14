@@ -2,12 +2,9 @@ use crate::engine::{
     generator::{Continuation, Generator},
     Engine, Evaluate,
 };
-use optd_dsl::analyzer::{
-    context::Context,
-    hir::{
-        CoreData, Expr, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator,
-        Pattern, PhysicalOp, Value,
-    },
+use optd_dsl::analyzer::hir::{
+    CoreData, Expr, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern,
+    PhysicalOp, Value,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -119,11 +116,6 @@ pub fn array_val(items: Vec<Value>) -> Value {
 /// Helper to create a struct value
 pub fn struct_val(name: &str, fields: Vec<Value>) -> Value {
     Value(CoreData::Struct(name.to_string(), fields))
-}
-
-/// Helper to create a map value
-pub fn map_val(items: Vec<(Value, Value)>) -> Value {
-    Value(CoreData::Map(items))
 }
 
 /// Helper to create a pattern matching expression

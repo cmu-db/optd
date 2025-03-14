@@ -134,3 +134,318 @@ async fn evaluate_operator<G>(
     )
     .await;
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::engine::{
+        test_utils::{
+            create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val, string,
+            MockGenerator,
+        },
+        Engine,
+    };
+    use optd_dsl::analyzer::{
+        context::Context,
+        hir::{
+            BinOp, CoreData, Expr, Goal, GroupId, Literal, LogicalOp, Materializable, Operator,
+            PhysicalOp, Value,
+        },
+    };
+    use std::sync::Arc;
+
+    /// Test evaluation of a materialized logical operator
+    #[tokio::test]
+    async fn test_materialized_logical_operator() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Create a materialized logical operator expression with nested expressions to evaluate
+        let op = LogicalOp(Materializable::Materialized(Operator {
+            tag: "Join".to_string(),
+            data: vec![
+                lit_expr(string("inner")),
+                Arc::new(Expr::Binary(
+                    lit_expr(int(10)),
+                    BinOp::Add,
+                    lit_expr(int(5)),
+                )),
+            ],
+            children: vec![
+                Arc::new(Expr::CoreExpr(CoreData::Literal(string("orders")))),
+                Arc::new(Expr::CoreExpr(CoreData::Literal(string("lineitem")))),
+            ],
+        }));
+
+        // Create the expression to evaluate
+        let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(op)));
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(logical_op_expr, engine).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Logical(LogicalOp(Materializable::Materialized(op))) => {
+                // Check tag
+                assert_eq!(op.tag, "Join");
+
+                // Check data - should have "inner" and 15
+                assert_eq!(op.data.len(), 2);
+                match &op.data[0].0 {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::String("inner".to_string()));
+                    }
+                    _ => panic!("Expected string literal"),
+                }
+                match &op.data[1].0 {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::Int64(15));
+                    }
+                    _ => panic!("Expected integer literal"),
+                }
+
+                // Check children - should have "orders" and "lineitem"
+                assert_eq!(op.children.len(), 2);
+                match &op.children[0].0 {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::String("orders".to_string()));
+                    }
+                    _ => panic!("Expected string literal"),
+                }
+                match &op.children[1].0 {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::String("lineitem".to_string()));
+                    }
+                    _ => panic!("Expected string literal"),
+                }
+            }
+            _ => panic!("Expected materialized logical operator"),
+        }
+    }
+
+    /// Test evaluation of an unmaterialized logical operator
+    #[tokio::test]
+    async fn test_unmaterialized_logical_operator() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Create an unmaterialized logical operator with a group ID
+        let group_id = GroupId(42);
+        let op = LogicalOp(Materializable::UnMaterialized(group_id));
+
+        // Create the expression to evaluate
+        let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(op)));
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(logical_op_expr, engine).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Logical(LogicalOp(Materializable::UnMaterialized(id))) => {
+                // Check that the group ID is preserved
+                assert_eq!(*id, group_id);
+            }
+            _ => panic!("Expected unmaterialized logical operator"),
+        }
+    }
+
+    /// Test evaluation of a materialized physical operator
+    #[tokio::test]
+    async fn test_materialized_physical_operator() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Create a materialized physical operator expression with nested expressions to evaluate
+        let op = PhysicalOp(Materializable::Materialized(Operator {
+            tag: "HashJoin".to_string(),
+            data: vec![
+                lit_expr(string("inner")),
+                Arc::new(Expr::Binary(
+                    lit_expr(int(20)),
+                    BinOp::Mul,
+                    lit_expr(int(3)),
+                )),
+            ],
+            children: vec![
+                Arc::new(Expr::CoreExpr(CoreData::Literal(string("IndexScan")))),
+                Arc::new(Expr::CoreExpr(CoreData::Literal(string("FullScan")))),
+            ],
+        }));
+
+        // Create the expression to evaluate
+        let physical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Physical(op)));
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(physical_op_expr, engine).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Physical(PhysicalOp(Materializable::Materialized(op))) => {
+                // Check tag
+                assert_eq!(op.tag, "HashJoin");
+
+                // Check data - should have "inner" and 60
+                assert_eq!(op.data.len(), 2);
+                match &op.data[0].0 {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::String("inner".to_string()));
+                    }
+                    _ => panic!("Expected string literal"),
+                }
+                match &op.data[1].0 {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::Int64(60));
+                    }
+                    _ => panic!("Expected integer literal"),
+                }
+
+                // Check children - should have "IndexScan" and "FullScan"
+                assert_eq!(op.children.len(), 2);
+                match &op.children[0].0 {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::String("IndexScan".to_string()));
+                    }
+                    _ => panic!("Expected string literal"),
+                }
+                match &op.children[1].0 {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::String("FullScan".to_string()));
+                    }
+                    _ => panic!("Expected string literal"),
+                }
+            }
+            _ => panic!("Expected materialized physical operator"),
+        }
+    }
+
+    /// Test evaluation of an unmaterialized physical operator
+    #[tokio::test]
+    async fn test_unmaterialized_physical_operator() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Create an unmaterialized physical operator with a goal
+        let goal = Goal {
+            group_id: GroupId(42),
+            properties: Box::new(Value(CoreData::Literal(Literal::String(
+                "sorted".to_string(),
+            )))),
+        };
+        let op = PhysicalOp(Materializable::UnMaterialized(goal.clone()));
+
+        // Create the expression to evaluate
+        let physical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Physical(op)));
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(physical_op_expr, engine).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Physical(PhysicalOp(Materializable::UnMaterialized(result_goal))) => {
+                // Check that the goal is preserved
+                assert_eq!(result_goal.group_id, goal.group_id);
+
+                // Check properties
+                match &result_goal.properties.0 {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::String("sorted".to_string()));
+                    }
+                    _ => panic!("Expected string literal in goal properties"),
+                }
+            }
+            _ => panic!("Expected unmaterialized physical operator"),
+        }
+    }
+
+    /// Test evaluation of a logical operator with nested operators as children
+    #[tokio::test]
+    async fn test_nested_logical_operators() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Create a Join operator with two Scan operators as children
+        let scan1 = Arc::new(Expr::CoreVal(create_logical_operator(
+            "Scan",
+            vec![lit_val(string("orders"))],
+            vec![],
+        )));
+
+        let scan2 = Arc::new(Expr::CoreVal(create_logical_operator(
+            "Scan",
+            vec![lit_val(string("lineitem"))],
+            vec![],
+        )));
+
+        let op = LogicalOp(Materializable::Materialized(Operator {
+            tag: "Join".to_string(),
+            data: vec![lit_expr(string("inner"))],
+            children: vec![scan1, scan2],
+        }));
+
+        // Create the expression to evaluate
+        let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(op)));
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(logical_op_expr, engine).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Logical(LogicalOp(Materializable::Materialized(op))) => {
+                // Check tag
+                assert_eq!(op.tag, "Join");
+
+                // Check data
+                assert_eq!(op.data.len(), 1);
+                match &op.data[0].0 {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::String("inner".to_string()));
+                    }
+                    _ => panic!("Expected string literal"),
+                }
+
+                // Check children - should be two logical operators
+                assert_eq!(op.children.len(), 2);
+
+                // Check first child
+                match &op.children[0].0 {
+                    CoreData::Logical(LogicalOp(Materializable::Materialized(child_op))) => {
+                        assert_eq!(child_op.tag, "Scan");
+                        assert_eq!(child_op.data.len(), 1);
+                        match &child_op.data[0].0 {
+                            CoreData::Literal(lit) => {
+                                assert_eq!(lit, &Literal::String("orders".to_string()));
+                            }
+                            _ => panic!("Expected string literal"),
+                        }
+                    }
+                    _ => panic!("Expected logical operator as child"),
+                }
+
+                // Check second child
+                match &op.children[1].0 {
+                    CoreData::Logical(LogicalOp(Materializable::Materialized(child_op))) => {
+                        assert_eq!(child_op.tag, "Scan");
+                        assert_eq!(child_op.data.len(), 1);
+                        match &child_op.data[0].0 {
+                            CoreData::Literal(lit) => {
+                                assert_eq!(lit, &Literal::String("lineitem".to_string()));
+                            }
+                            _ => panic!("Expected string literal"),
+                        }
+                    }
+                    _ => panic!("Expected logical operator as child"),
+                }
+            }
+            _ => panic!("Expected materialized logical operator"),
+        }
+    }
+}

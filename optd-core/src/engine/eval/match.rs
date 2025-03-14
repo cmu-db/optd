@@ -536,17 +536,17 @@ mod tests {
     use crate::engine::{
         test_utils::{
             array_decomp_pattern, array_val, bind_pattern, create_logical_operator,
-            evaluate_and_collect, int, lit_expr, lit_val, literal_pattern, match_arm,
-            operator_pattern, pattern_match_expr, ref_expr, string, struct_pattern, struct_val,
-            wildcard_pattern, MockGenerator,
+            create_physical_operator, evaluate_and_collect, int, lit_expr, lit_val,
+            literal_pattern, match_arm, operator_pattern, pattern_match_expr, ref_expr, string,
+            struct_pattern, struct_val, wildcard_pattern, MockGenerator,
         },
         Engine,
     };
     use optd_dsl::analyzer::{
         context::Context,
         hir::{
-            BinOp, CoreData, Expr, FunKind, GroupId, Literal, LogicalOp, Materializable, Operator,
-            Value,
+            BinOp, CoreData, Expr, FunKind, Goal, GroupId, Literal, LogicalOp, Materializable,
+            Operator, PhysicalOp, Value,
         },
     };
     use std::sync::Arc;
@@ -840,7 +840,7 @@ mod tests {
 
     /// Test pattern matching with unmaterialized operators (requires group resolution)
     #[tokio::test]
-    async fn test_unmaterialized_operator_patterns() {
+    async fn test_unmaterialized_logical_operator_patterns() {
         let mock_gen = MockGenerator::new();
         let test_group_id = GroupId(1);
 
@@ -940,6 +940,139 @@ mod tests {
                         "Resolved group: found inner join between orders and lineitem with condition: x = y".to_string()
                     )
                 );
+            }
+            _ => panic!("Expected string literal"),
+        }
+    }
+
+    /// Test pattern matching with unmaterialized physical operators (requires goal resolution)
+    #[tokio::test]
+    async fn test_unmaterialized_physical_operator_patterns() {
+        let mock_gen = MockGenerator::new();
+
+        // Create a physical goal
+        let test_group_id = GroupId(2);
+        let properties = Box::new(Value(CoreData::Literal(string("sorted"))));
+        let test_goal = Goal {
+            group_id: test_group_id,
+            properties,
+        };
+
+        // Register a physical operator to be returned when the goal is expanded
+        let materialized_hash_join = create_physical_operator(
+            "HashJoin",
+            vec![lit_val(string("hash")), lit_val(string("id = id"))],
+            vec![
+                create_physical_operator("IndexScan", vec![lit_val(string("customers"))], vec![]),
+                create_physical_operator("ParallelScan", vec![lit_val(string("orders"))], vec![]),
+            ],
+        );
+
+        mock_gen.register_goal(&test_goal, materialized_hash_join);
+
+        // Create an unmaterialized physical operator with the goal
+        let unmaterialized_physical_op = Value(CoreData::Physical(PhysicalOp(
+            Materializable::UnMaterialized(test_goal.clone()),
+        )));
+
+        let unmaterialized_expr = Arc::new(Expr::CoreVal(unmaterialized_physical_op));
+
+        // Create a match expression to match against the expanded physical operator
+        let match_expr = pattern_match_expr(
+            unmaterialized_expr,
+            vec![
+                match_arm(
+                    operator_pattern(
+                        "HashJoin",
+                        vec![
+                            bind_pattern("join_method", literal_pattern(string("hash"))),
+                            bind_pattern("join_condition", wildcard_pattern()),
+                        ],
+                        vec![
+                            operator_pattern(
+                                "IndexScan",
+                                vec![bind_pattern("left_table", wildcard_pattern())],
+                                vec![],
+                            ),
+                            operator_pattern(
+                                "ParallelScan",
+                                vec![bind_pattern("right_table", wildcard_pattern())],
+                                vec![],
+                            ),
+                        ],
+                    ),
+                    // Create formatted result string with binding values
+                    Arc::new(Expr::Let(
+                        "to_string".to_string(),
+                        Arc::new(Expr::CoreVal(Value(CoreData::Function(FunKind::RustUDF(
+                            |args| match &args[0].0 {
+                                CoreData::Literal(lit) => {
+                                    Value(CoreData::Literal(string(&format!("{:?}", lit))))
+                                }
+                                _ => Value(CoreData::Literal(string("<non-literal>"))),
+                            },
+                        ))))),
+                        Arc::new(Expr::Binary(
+                            lit_expr(string("Physical plan: ")),
+                            BinOp::Concat,
+                            Arc::new(Expr::Binary(
+                                Arc::new(Expr::Call(
+                                    ref_expr("to_string"),
+                                    vec![ref_expr("join_method")],
+                                )),
+                                BinOp::Concat,
+                                Arc::new(Expr::Binary(
+                                    lit_expr(string(" join between ")),
+                                    BinOp::Concat,
+                                    Arc::new(Expr::Binary(
+                                        ref_expr("left_table"),
+                                        BinOp::Concat,
+                                        Arc::new(Expr::Binary(
+                                            lit_expr(string(" and ")),
+                                            BinOp::Concat,
+                                            Arc::new(Expr::Binary(
+                                                ref_expr("right_table"),
+                                                BinOp::Concat,
+                                                Arc::new(Expr::Binary(
+                                                    lit_expr(string(" with condition: ")),
+                                                    BinOp::Concat,
+                                                    ref_expr("join_condition"),
+                                                )),
+                                            )),
+                                        )),
+                                    )),
+                                )),
+                            )),
+                        )),
+                    )),
+                ),
+                match_arm(wildcard_pattern(), lit_expr(string("No match"))),
+            ],
+        );
+
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(match_expr, engine).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(lit) => {
+                match lit {
+                    Literal::String(s) => {
+                        // Check that the string contains all our expected components
+                        assert!(s.contains("Physical plan:"));
+                        assert!(s.contains("hash"));
+                        assert!(s.contains("join between"));
+                        assert!(s.contains("customers"));
+                        assert!(s.contains("orders"));
+                        assert!(s.contains("with condition:"));
+                        assert!(s.contains("id = id"));
+                    }
+                    _ => panic!("Expected string result"),
+                }
             }
             _ => panic!("Expected string literal"),
         }
