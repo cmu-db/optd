@@ -1,20 +1,16 @@
 use super::{Engine, Generator};
-use crate::capture;
 use crate::engine::generator::Continuation;
 use crate::engine::utils::evaluate_sequence;
+use crate::{capture, engine::utils::UnitFuture};
 use optd_dsl::analyzer::hir::{
     CoreData, Expr, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use CoreData::{Logical, Physical};
 use Materializable::*;
 
 /// Specialized continuation type for operator values
-type OperatorContinuation = Arc<
-    dyn Fn(Operator<Value>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static,
->;
+type OperatorContinuation = Arc<dyn Fn(Operator<Value>) -> UnitFuture + Send + Sync + 'static>;
 
 /// Evaluates a logical operator by generating all possible combinations of its components.
 ///
@@ -124,7 +120,7 @@ async fn evaluate_operator<G>(
                         Box::pin(capture!([tag, op_data, k], async move {
                             // Construct the complete operator and pass to continuation
                             let operator = Operator {
-                                tag: tag,
+                                tag,
                                 data: op_data,
                                 children,
                             };

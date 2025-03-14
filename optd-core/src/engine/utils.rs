@@ -43,9 +43,11 @@ macro_rules! capture {
     };
 }
 
+/// A future that completes with no return value
+pub(super) type UnitFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+
 /// Specialized continuation type for vectors of values
-type ValueSequenceContinuation =
-    Arc<dyn Fn(Vec<Value>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>;
+type ValueSequenceContinuation = Arc<dyn Fn(Vec<Value>) -> UnitFuture + Send + Sync + 'static>;
 
 /// Public function to evaluate a sequence of expressions and collect their values.
 ///
@@ -57,7 +59,7 @@ pub(super) fn evaluate_sequence<G>(
     exprs: Vec<Arc<Expr>>,
     engine: Engine<G>,
     k: ValueSequenceContinuation,
-) -> Pin<Box<dyn Future<Output = ()> + Send>>
+) -> UnitFuture
 where
     G: Generator,
 {
@@ -79,7 +81,7 @@ fn evaluate_sequence_internal<G>(
     values: Vec<Value>,
     engine: Engine<G>,
     k: ValueSequenceContinuation,
-) -> Pin<Box<dyn Future<Output = ()> + Send>>
+) -> UnitFuture
 where
     G: Generator,
 {

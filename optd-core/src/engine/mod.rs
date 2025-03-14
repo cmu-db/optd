@@ -21,9 +21,8 @@ use optd_dsl::analyzer::{
     context::Context,
     hir::{CoreData, Expr, Literal, Value},
 };
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
+use utils::UnitFuture;
 use Expr::*;
 
 mod eval;
@@ -31,23 +30,19 @@ pub(crate) mod generator;
 pub(crate) mod utils;
 
 /// Type alias for a continuation that receives a PartialLogicalPlan
-pub(crate) type LogicalPlanContinuation = Arc<
-    dyn Fn(PartialLogicalPlan) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static,
->;
+pub(crate) type LogicalPlanContinuation =
+    Arc<dyn Fn(PartialLogicalPlan) -> UnitFuture + Send + Sync + 'static>;
 
 /// Type alias for a continuation that receives a PartialPhysicalPlan
-pub(crate) type PhysicalPlanContinuation = Arc<
-    dyn Fn(PartialPhysicalPlan) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static,
->;
+pub(crate) type PhysicalPlanContinuation =
+    Arc<dyn Fn(PartialPhysicalPlan) -> UnitFuture + Send + Sync + 'static>;
 
 /// Type alias for a continuation that receives a cost value
-pub(crate) type CostContinuation =
-    Arc<dyn Fn(Cost) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>;
+pub(crate) type CostContinuation = Arc<dyn Fn(Cost) -> UnitFuture + Send + Sync + 'static>;
 
 /// Type alias for a continuation that receives LogicalProperties
-pub(crate) type PropertiesContinuation = Arc<
-    dyn Fn(LogicalProperties) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static,
->;
+pub(crate) type PropertiesContinuation =
+    Arc<dyn Fn(LogicalProperties) -> UnitFuture + Send + Sync + 'static>;
 
 /// The engine for evaluating HIR expressions and applying rules.
 #[derive(Debug, Clone)]
@@ -95,7 +90,7 @@ impl<E: Generator> Engine<E> {
         rule_name: String,
         plan: &PartialLogicalPlan,
         k: LogicalPlanContinuation,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    ) -> UnitFuture {
         let rule_call = self.create_rule_call(&rule_name, vec![partial_logical_to_value(plan)]);
 
         Box::pin(async move {
@@ -134,7 +129,7 @@ impl<E: Generator> Engine<E> {
         plan: &PartialLogicalPlan,
         props: &PhysicalProperties,
         k: PhysicalPlanContinuation,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    ) -> UnitFuture {
         let plan_value = partial_logical_to_value(plan);
         let props_value = physical_properties_to_value(props);
 
@@ -172,7 +167,7 @@ impl<E: Generator> Engine<E> {
         self,
         plan: &PartialPhysicalPlan,
         k: CostContinuation,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    ) -> UnitFuture {
         // Create a call to the reserved "cost" function
         let rule_call = self.create_rule_call("cost", vec![partial_physical_to_value(plan)]);
 
@@ -202,7 +197,7 @@ impl<E: Generator> Engine<E> {
         self,
         plan: &PartialLogicalPlan,
         k: PropertiesContinuation,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    ) -> UnitFuture {
         // Create a call to the reserved "derive" function
         let rule_call = self.create_rule_call("derive", vec![partial_logical_to_value(plan)]);
 
@@ -255,7 +250,7 @@ impl<E: Generator> Engine<E> {
         value: Value,
         transform: F,
         context: &str,
-        k: Arc<dyn Fn(T) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>,
+        k: Arc<dyn Fn(T) -> UnitFuture + Send + Sync + 'static>,
     ) where
         F: FnOnce(&Value) -> T,
     {

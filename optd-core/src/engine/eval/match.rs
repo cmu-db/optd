@@ -1,14 +1,12 @@
 use super::{Engine, Evaluate, Generator};
-use crate::capture;
 use crate::engine::generator::Continuation;
+use crate::{capture, engine::UnitFuture};
 use optd_dsl::analyzer::{
     context::Context,
     hir::{
         CoreData, Expr, LogicalOp, MatchArm, Materializable, Operator, Pattern, PhysicalOp, Value,
     },
 };
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use Materializable::*;
 use Pattern::*;
@@ -18,14 +16,12 @@ use Pattern::*;
 type MatchResult = (Value, Option<Context>);
 
 /// Specialized continuation type for match results
-type MatchContinuation =
-    Arc<dyn Fn(MatchResult) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>;
+type MatchContinuation = Arc<dyn Fn(MatchResult) -> UnitFuture + Send + Sync + 'static>;
 
 /// Specialized continuation type for sequence match results
 /// Takes a vector of all match results for the sequence
-type MatchSequenceContinuation = Arc<
-    dyn Fn(Vec<MatchResult>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static,
->;
+type MatchSequenceContinuation =
+    Arc<dyn Fn(Vec<MatchResult>) -> UnitFuture + Send + Sync + 'static>;
 
 /// Evaluates a pattern match expression.
 ///
@@ -77,7 +73,7 @@ fn try_match_arms<G>(
     match_arms: Vec<MatchArm>,
     engine: Engine<G>,
     k: Continuation,
-) -> Pin<Box<dyn Future<Output = ()> + Send>>
+) -> UnitFuture
 where
     G: Generator,
 {
@@ -133,7 +129,7 @@ fn match_pattern<G>(
     ctx: Context,
     gen: G,
     k: MatchContinuation,
-) -> Pin<Box<dyn Future<Output = ()> + Send>>
+) -> UnitFuture
 where
     G: Generator,
 {
@@ -490,7 +486,7 @@ fn match_components_sequentially<G>(
     results: Vec<MatchResult>,
     generator: G,
     k: MatchSequenceContinuation,
-) -> Pin<Box<dyn Future<Output = ()> + Send>>
+) -> UnitFuture
 where
     G: Generator,
 {

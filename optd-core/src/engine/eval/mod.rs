@@ -1,5 +1,5 @@
 use super::generator::{Continuation, Generator};
-use super::Engine;
+use super::{Engine, UnitFuture};
 use core::evaluate_core_expr;
 use expr::{
     evaluate_binary_expr, evaluate_function_call, evaluate_if_then_else, evaluate_let_binding,
@@ -7,8 +7,6 @@ use expr::{
 };
 use optd_dsl::analyzer::hir::Expr;
 use r#match::evaluate_pattern_match;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use Expr::*;
 
@@ -27,21 +25,13 @@ pub trait Evaluate {
     /// * `self` - The expression to evaluate
     /// * `engine` - The evaluation engine (owned)
     /// * `k` - The continuation to receive each evaluation result
-    fn evaluate<G>(
-        self,
-        engine: Engine<G>,
-        k: Continuation,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send>>
+    fn evaluate<G>(self, engine: Engine<G>, k: Continuation) -> UnitFuture
     where
         G: Generator;
 }
 
 impl Evaluate for Arc<Expr> {
-    fn evaluate<G>(
-        self,
-        engine: Engine<G>,
-        k: Continuation,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send>>
+    fn evaluate<G>(self, engine: Engine<G>, k: Continuation) -> UnitFuture
     where
         G: Generator,
     {

@@ -1,11 +1,10 @@
 use optd_dsl::analyzer::hir::{Goal, GroupId, Value};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
+use super::utils::UnitFuture;
+
 /// A continuation function that processes a Value and returns a Future.
-pub type Continuation =
-    Arc<dyn Fn(Value) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>;
+pub type Continuation = Arc<dyn Fn(Value) -> UnitFuture + Send + Sync + 'static>;
 
 /// Defines operations for expanding references in the query plan using CPS.
 ///

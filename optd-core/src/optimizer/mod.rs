@@ -99,6 +99,7 @@ enum OptimizerMessage {
     /// Retrieve logical properties for a specific group.
     ///
     /// Gets properties (schema, cardinality, statistics) needed for rules and costing.
+    #[allow(dead_code)]
     RetrieveProperties(GroupId, oneshot::Sender<LogicalProperties>),
 }
 
