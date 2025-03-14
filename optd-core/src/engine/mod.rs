@@ -9,11 +9,7 @@ use crate::{
         },
     },
     capture,
-    cir::{
-        goal::Cost,
-        plans::{PartialLogicalPlan, PartialPhysicalPlan},
-        properties::{LogicalProperties, PhysicalProperties},
-    },
+    cir::{Cost, LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan, PhysicalProperties},
 };
 use eval::Evaluate;
 use generator::Generator;
@@ -55,9 +51,9 @@ pub(crate) struct Engine<G: Generator> {
     pub(crate) generator: G,
 }
 
-impl<E: Generator> Engine<E> {
+impl<G: Generator> Engine<G> {
     /// Creates a new engine with the given context and expander.
-    pub(crate) fn new(context: Context, generator: E) -> Self {
+    pub(crate) fn new(context: Context, generator: G) -> Self {
         Self { context, generator }
     }
 
@@ -71,17 +67,17 @@ impl<E: Generator> Engine<E> {
     ///
     /// # Returns
     /// A new engine with the provided context and the existing expander
-    pub(crate) fn with_context(self, context: Context) -> Self {
+    pub(crate) fn with_new_context(&self, context: Context) -> Self {
         Self {
             context,
-            generator: self.generator,
+            generator: self.clone().generator,
         }
     }
 
     /// Launches a logical rule application for a given plan.
     ///
-    /// This applies a logical rule to an input plan and passes all possible
-    /// transformations of the plan to the continuation.
+    /// This applies a logical rule to an input plan and passes all possible transformations of the
+    /// plan to the continuation.
     ///
     /// # Parameters
     /// * `rule_name` - The name of the rule to apply

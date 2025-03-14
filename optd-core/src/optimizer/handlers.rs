@@ -6,12 +6,9 @@ use super::{
 use crate::{
     capture,
     cir::{
-        expressions::{LogicalExpression, OptimizedExpression, PhysicalExpression},
-        goal::Goal,
-        group::GroupId,
-        operators::Child,
-        plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
-        properties::{LogicalProperties, PhysicalProperties},
+        Child, Goal, GroupId, LogicalExpression, LogicalPlan, LogicalProperties,
+        OptimizedExpression, PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpression,
+        PhysicalPlan, PhysicalProperties,
     },
     engine::CostContinuation,
 };

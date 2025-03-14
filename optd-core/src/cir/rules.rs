@@ -1,5 +1,6 @@
 #[derive(Debug, Clone)]
 pub struct TransformationRule(pub String);
+
 #[derive(Debug, Clone)]
 pub struct ImplementationRule(pub String);
 

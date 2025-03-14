@@ -5,32 +5,33 @@ use super::{
 };
 use std::sync::Arc;
 
-//=============================================================================
-// Core Plan Types
-//=============================================================================
-
 /// Represents a fully materialized logical query plan.
 ///
-/// A logical plan consists of logical operators arranged in a tree structure,
-/// with each operator having children.
+/// A logical plan consists of logical operators arranged in a tree structure, where each logical
+/// operator has logical plans as children.
+///
+/// Can also represent a DAG structure due to the use of shared [`Arc`]s.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LogicalPlan(pub Operator<Arc<LogicalPlan>>);
 
 /// Represents a fully materialized physical query plan.
 ///
-/// A physical plan consists of physical operators arranged in a tree structure,
-/// with each operator having children.
+/// A physical plan consists of physical operators arranged in a tree structure, where each physical
+/// operator has physical plans as children.
+///
+/// Can also represent a DAG structure due to the use of shared [`Arc`]s.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PhysicalPlan(pub Operator<Arc<PhysicalPlan>>);
 
-//=============================================================================
-// Partial Plan Types
-//=============================================================================
-
-/// Represents a partially materialized logical plan.
+/// Represents partially materialized logical plans.
 ///
-/// Partial logical plans can either be fully materialized with operator trees,
-/// or unmaterialized references to logical groups in the memo structure.
+/// Partial logical plans are partially materialized [`LogicalPlan`]s, representing the top of a
+/// logical plan tree, where the unmaterialized leaves of this structure are [`GroupId`]s.
+///
+/// We use partial plans because most rules only need to match and bind to the top of the
+/// plan (the root and maybe some of its children), and it would be expensive to materialize the
+/// entire plan when the rule engine only needs to know about the top. In other words, partial plans
+/// allow us to give the rule engine exactly what it needs and nothing else.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PartialLogicalPlan {
     /// A fully materialized logical plan with explicit operator and children
@@ -41,19 +42,20 @@ pub enum PartialLogicalPlan {
 
 /// Represents a partially materialized physical plan.
 ///
-/// Partial physical plans can either be fully materialized with operator trees,
-/// or unmaterialized references to physical goals.
+/// Partial physical plans are partially materialized [`PhysicalPlan`]s, representing the top of a
+/// physical execution plan tree, where the unmaterialized leaves of this structure are [`Goal`]s.
+///
+/// We use partial plans because most rules only need to match and bind to the top of the
+/// plan (the root and maybe some of its children), and it would be expensive to materialize the
+/// entire plan when the rule engine only needs to know about the top. In other words, partial plans
+/// allow us to give the rule engine exactly what it needs and nothing else.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PartialPhysicalPlan {
-    /// A fully materialized physical plan with explicit operator and children
+    /// A fully materialized physical plan with explicit operator and children.
     Materialized(Operator<Arc<PartialPhysicalPlan>>),
-    /// A reference to a physical goal
+    /// A reference to a physical goal.
     UnMaterialized(Goal),
 }
-
-//=============================================================================
-// Conversion Implementations
-//=============================================================================
 
 impl From<GroupId> for PartialLogicalPlan {
     /// Converts a logical group ID to an unmaterialized partial logical plan.
@@ -77,7 +79,7 @@ impl From<LogicalPlan> for PartialLogicalPlan {
         PartialLogicalPlan::Materialized(Operator {
             tag: plan.0.tag,
             data: plan.0.data,
-            children: convert_children(plan.0.children),
+            children: convert_children::<LogicalPlan, Self>(plan.0.children),
         })
     }
 }
@@ -90,29 +92,15 @@ impl From<PhysicalPlan> for PartialPhysicalPlan {
         PartialPhysicalPlan::Materialized(Operator {
             tag: plan.0.tag,
             data: plan.0.data,
-            children: convert_children(plan.0.children),
+            children: convert_children::<PhysicalPlan, Self>(plan.0.children),
         })
     }
 }
 
-//=============================================================================
-// Helper Functions
-//=============================================================================
-
-/// Generic function to convert a collection of plan children to partial plan children.
+/// A generic function that converts children with type `Arc<S>` into a `Arc<T>`.
 ///
-/// This handles both singleton and variable-length children, recursively
-/// converting each child plan to its partial equivalent.
-///
-/// # Type Parameters
-/// * `S` - Source plan type
-/// * `T` - Target partial plan type
-///
-/// # Arguments
-/// * `children` - Collection of child plans to convert
-///
-/// # Returns
-/// * Converted collection of partial plan children
+/// This handles both singleton and variable-length children, converting each source type into its
+/// equivalent target wrapped in an [`Arc`].
 fn convert_children<S, T>(children: Vec<Child<Arc<S>>>) -> Vec<Child<Arc<T>>>
 where
     S: Clone,

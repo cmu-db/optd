@@ -6,12 +6,11 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 /// A macro that automatically clones variables before they're captured by a closure.
 ///
-/// This macro takes a list of variables to clone and a closure expression.
-/// It clones all the specified variables *before* creating the closure,
-/// so the closure captures the clones rather than the originals.
+/// This macro takes a list of variables to clone and a closure expression, cloning the variables in
+/// the list so that the clones can be moved into the closure.
 #[macro_export]
 macro_rules! capture {
-    ([$($var:ident),* $(,)?], $($closure:tt)*) => {
+    ([$($var:ident),* $(,)?], $($closure:expr)*) => {
         {
             $(let $var = $var.clone();)*
             $($closure)*
@@ -19,13 +18,14 @@ macro_rules! capture {
     };
 }
 
-/// A future that completes with no return value
-pub(super) type UnitFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+/// A future that completes with no return value.
+pub(crate) type UnitFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
-/// Specialized continuation type for vectors of values
-type ValueSequenceContinuation = Arc<dyn Fn(Vec<Value>) -> UnitFuture + Send + Sync + 'static>;
+/// Specialized continuation type for vectors of values.
+pub(crate) type ValueSequenceContinuation =
+    Arc<dyn Fn(Vec<Value>) -> UnitFuture + Send + Sync + 'static>;
 
-/// Public function to evaluate a sequence of expressions and collect their values.
+/// Evaluates a sequence of expressions and collects their values using continuation passing style.
 ///
 /// # Parameters
 /// * `exprs` - The expressions to evaluate

@@ -1,9 +1,7 @@
 use crate::{
     cir::{
-        expressions::{LogicalExpression, OptimizedExpression, PhysicalExpression},
-        goal::Goal,
-        group::GroupId,
-        properties::LogicalProperties,
+        Goal, GroupId, LogicalExpression, LogicalProperties, OptimizedExpression,
+        PhysicalExpression,
     },
     error::Error,
 };

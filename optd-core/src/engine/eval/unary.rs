@@ -86,9 +86,11 @@ mod tests {
 
     #[test]
     fn test_float_negation() {
+        use std::f64::consts::PI;
+
         // Negating a positive float
-        if let Literal(Float64(result)) = eval_unary_op(&Neg, float(3.14)).0 {
-            assert_eq!(result, -3.14);
+        if let Literal(Float64(result)) = eval_unary_op(&Neg, float(PI)).0 {
+            assert_eq!(result, -PI);
         } else {
             panic!("Expected Float64");
         }
@@ -114,14 +116,14 @@ mod tests {
     fn test_boolean_not() {
         // NOT true
         if let Literal(Bool(result)) = eval_unary_op(&Not, boolean(true)).0 {
-            assert_eq!(result, false);
+            assert!(!result);
         } else {
             panic!("Expected Bool");
         }
 
         // NOT false
         if let Literal(Bool(result)) = eval_unary_op(&Not, boolean(false)).0 {
-            assert_eq!(result, true);
+            assert!(result);
         } else {
             panic!("Expected Bool");
         }
