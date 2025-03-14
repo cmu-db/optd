@@ -530,3 +530,861 @@ where
         .await
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::engine::{
+        test_utils::{
+            array_decomp_pattern, array_val, bind_pattern, create_logical_operator,
+            evaluate_and_collect, int, lit_expr, lit_val, literal_pattern, match_arm,
+            operator_pattern, pattern_match_expr, ref_expr, string, struct_pattern, struct_val,
+            wildcard_pattern, MockGenerator,
+        },
+        Engine,
+    };
+    use optd_dsl::analyzer::{
+        context::Context,
+        hir::{
+            BinOp, CoreData, Expr, FunKind, GroupId, Literal, LogicalOp, Materializable, Operator,
+            Value,
+        },
+    };
+    use std::sync::Arc;
+
+    /// Test simple pattern matching with literals
+    #[tokio::test]
+    async fn test_simple_literal_patterns() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Create a match expression: match 42 { 42 => "matched", _ => "not matched" }
+        let match_expr = pattern_match_expr(
+            lit_expr(int(42)),
+            vec![
+                match_arm(literal_pattern(int(42)), lit_expr(string("matched"))),
+                match_arm(wildcard_pattern(), lit_expr(string("not matched"))),
+            ],
+        );
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(match_expr, engine).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::String("matched".to_string()));
+            }
+            _ => panic!("Expected string literal"),
+        }
+    }
+
+    /// Test binding patterns with nested patterns
+    #[tokio::test]
+    async fn test_bind_pattern_with_nesting() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Create a match expression:
+        // match 42 {
+        //   x @ 42 => let y = x + 10 in y,
+        //   _ => 0
+        // }
+        let match_expr = pattern_match_expr(
+            lit_expr(int(42)),
+            vec![
+                match_arm(
+                    bind_pattern("x", literal_pattern(int(42))),
+                    Arc::new(Expr::Let(
+                        "y".to_string(),
+                        Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, lit_expr(int(10)))),
+                        ref_expr("y"),
+                    )),
+                ),
+                match_arm(wildcard_pattern(), lit_expr(int(0))),
+            ],
+        );
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(match_expr, engine).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::Int64(52));
+            }
+            _ => panic!("Expected integer literal"),
+        }
+    }
+
+    /// Test array decomposition patterns
+    #[tokio::test]
+    async fn test_array_decomposition() {
+        let mock_gen = MockGenerator::new();
+
+        // Create an array value [1, 2, 3, 4, 5]
+        let array_expr = Arc::new(Expr::CoreVal(array_val(vec![
+            lit_val(int(1)),
+            lit_val(int(2)),
+            lit_val(int(3)),
+            lit_val(int(4)),
+            lit_val(int(5)),
+        ])));
+
+        // Create a match expression:
+        // match [1, 2, 3, 4, 5] {
+        //   [head @ 1, ...tail] => head + tail.length,
+        //   _ => 0
+        // }
+        //
+        // This should bind head to 1, tail to [2, 3, 4, 5]
+        // And return 1 + 4 = 5
+        let match_expr = pattern_match_expr(
+            array_expr,
+            vec![
+                match_arm(
+                    array_decomp_pattern(
+                        bind_pattern("head", literal_pattern(int(1))),
+                        bind_pattern("tail", wildcard_pattern()),
+                    ),
+                    Arc::new(Expr::Binary(
+                        ref_expr("head"),
+                        BinOp::Add,
+                        Arc::new(Expr::Call(ref_expr("length"), vec![ref_expr("tail")])),
+                    )),
+                ),
+                match_arm(wildcard_pattern(), lit_expr(int(0))),
+            ],
+        );
+
+        // Add a length function to the context
+        let mut ctx = Context::default();
+        ctx.bind(
+            "length".to_string(),
+            Value(CoreData::Function(FunKind::RustUDF(|args| {
+                match &args[0].0 {
+                    CoreData::Array(elements) => {
+                        Value(CoreData::Literal(int(elements.len() as i64)))
+                    }
+                    _ => panic!("Expected array"),
+                }
+            }))),
+        );
+
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(match_expr, engine).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::Int64(5));
+            }
+            _ => panic!("Expected integer literal"),
+        }
+    }
+
+    /// Test struct patterns
+    #[tokio::test]
+    async fn test_struct_patterns() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Create a struct value Point { x: 10, y: 20 }
+        let struct_expr = Arc::new(Expr::CoreVal(struct_val(
+            "Point",
+            vec![lit_val(int(10)), lit_val(int(20))],
+        )));
+
+        // Create a match expression:
+        // match Point { x: 10, y: 20 } {
+        //   Point { x @ 10, y } => x + y,
+        //   _ => 0
+        // }
+        let match_expr = pattern_match_expr(
+            struct_expr,
+            vec![
+                match_arm(
+                    struct_pattern(
+                        "Point",
+                        vec![
+                            bind_pattern("x", literal_pattern(int(10))),
+                            bind_pattern("y", wildcard_pattern()),
+                        ],
+                    ),
+                    Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, ref_expr("y"))),
+                ),
+                match_arm(wildcard_pattern(), lit_expr(int(0))),
+            ],
+        );
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(match_expr, engine).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::Int64(30));
+            }
+            _ => panic!("Expected integer literal"),
+        }
+    }
+
+    /// Test complex operator pattern matching
+    #[tokio::test]
+    async fn test_complex_operator_patterns() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Create a logical operator: LogicalJoin { joinType: "inner", condition: "x = y" } [TableScan("orders"), TableScan("lineitem")]
+        let op = Operator {
+            tag: "LogicalJoin".to_string(),
+            data: vec![lit_val(string("inner")), lit_val(string("x = y"))],
+            children: vec![
+                create_logical_operator("TableScan", vec![lit_val(string("orders"))], vec![]),
+                create_logical_operator("TableScan", vec![lit_val(string("lineitem"))], vec![]),
+            ],
+        };
+
+        let logical_op_value = Value(CoreData::Logical(LogicalOp(Materializable::Materialized(
+            op,
+        ))));
+        let logical_op_expr = Arc::new(Expr::CoreVal(logical_op_value.clone()));
+
+        // Create a match expression:
+        // match LogicalJoin { joinType: "inner", condition } [TableScan(left), TableScan(right)] {
+        //   LogicalJoin { joinType @ "inner", condition } [
+        //     TableScan(left @ "orders"),
+        //     TableScan(right)
+        //   ] => {
+        //     "Found inner join between " + left + " and " + right + " with condition: " + condition
+        //   },
+        //   _ => "No match"
+        // }
+        let match_expr = pattern_match_expr(
+            logical_op_expr,
+            vec![
+                match_arm(
+                    operator_pattern(
+                        "LogicalJoin",
+                        vec![
+                            bind_pattern("joinType", literal_pattern(string("inner"))),
+                            bind_pattern("condition", wildcard_pattern()),
+                        ],
+                        vec![
+                            operator_pattern(
+                                "TableScan",
+                                vec![bind_pattern("left", literal_pattern(string("orders")))],
+                                vec![],
+                            ),
+                            operator_pattern(
+                                "TableScan",
+                                vec![bind_pattern("right", wildcard_pattern())],
+                                vec![],
+                            ),
+                        ],
+                    ),
+                    // Create a complex expression to concatenate strings
+                    Arc::new(Expr::Binary(
+                        Arc::new(Expr::Binary(
+                            Arc::new(Expr::Binary(
+                                Arc::new(Expr::Binary(
+                                    lit_expr(string("Found inner join between ")),
+                                    BinOp::Concat,
+                                    ref_expr("left"),
+                                )),
+                                BinOp::Concat,
+                                lit_expr(string(" and ")),
+                            )),
+                            BinOp::Concat,
+                            ref_expr("right"),
+                        )),
+                        BinOp::Concat,
+                        Arc::new(Expr::Binary(
+                            lit_expr(string(" with condition: ")),
+                            BinOp::Concat,
+                            ref_expr("condition"),
+                        )),
+                    )),
+                ),
+                match_arm(wildcard_pattern(), lit_expr(string("No match"))),
+            ],
+        );
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(match_expr, engine).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(lit) => {
+                assert_eq!(
+                    lit,
+                    &Literal::String(
+                        "Found inner join between orders and lineitem with condition: x = y"
+                            .to_string()
+                    )
+                );
+            }
+            _ => panic!("Expected string literal"),
+        }
+    }
+
+    /// Test pattern matching with unmaterialized operators (requires group resolution)
+    #[tokio::test]
+    async fn test_unmaterialized_operator_patterns() {
+        let mock_gen = MockGenerator::new();
+        let test_group_id = GroupId(1);
+
+        // Register a logical operator in the mock generator
+        // This is what will be returned when the UnMaterialized group is expanded
+        let materialized_join = create_logical_operator(
+            "LogicalJoin",
+            vec![lit_val(string("inner")), lit_val(string("x = y"))],
+            vec![
+                create_logical_operator("TableScan", vec![lit_val(string("orders"))], vec![]),
+                create_logical_operator("TableScan", vec![lit_val(string("lineitem"))], vec![]),
+            ],
+        );
+
+        mock_gen.register_group(test_group_id, materialized_join);
+
+        // Create an unmaterialized logical operator
+        let unmaterialized_logical_op = Value(CoreData::Logical(LogicalOp(
+            Materializable::UnMaterialized(test_group_id),
+        )));
+
+        let unmaterialized_expr = Arc::new(Expr::CoreVal(unmaterialized_logical_op));
+
+        // Create a match expression:
+        // match UnMaterializedLogicalOp(group_id) {
+        //   LogicalJoin { joinType @ "inner", condition } [
+        //     TableScan(left @ "orders"),
+        //     TableScan(right)
+        //   ] => {
+        //     "Found inner join between " + left + " and " + right + " with condition: " + condition
+        //   },
+        //   _ => "No match"
+        // }
+        let match_expr = pattern_match_expr(
+            unmaterialized_expr,
+            vec![
+                match_arm(
+                    operator_pattern(
+                        "LogicalJoin",
+                        vec![
+                            bind_pattern("joinType", literal_pattern(string("inner"))),
+                            bind_pattern("condition", wildcard_pattern()),
+                        ],
+                        vec![
+                            operator_pattern(
+                                "TableScan",
+                                vec![bind_pattern("left", literal_pattern(string("orders")))],
+                                vec![],
+                            ),
+                            operator_pattern(
+                                "TableScan",
+                                vec![bind_pattern("right", wildcard_pattern())],
+                                vec![],
+                            ),
+                        ],
+                    ),
+                    // Create a complex expression to concatenate strings
+                    Arc::new(Expr::Binary(
+                        Arc::new(Expr::Binary(
+                            Arc::new(Expr::Binary(
+                                Arc::new(Expr::Binary(
+                                    lit_expr(string("Resolved group: found inner join between ")),
+                                    BinOp::Concat,
+                                    ref_expr("left"),
+                                )),
+                                BinOp::Concat,
+                                lit_expr(string(" and ")),
+                            )),
+                            BinOp::Concat,
+                            ref_expr("right"),
+                        )),
+                        BinOp::Concat,
+                        Arc::new(Expr::Binary(
+                            lit_expr(string(" with condition: ")),
+                            BinOp::Concat,
+                            ref_expr("condition"),
+                        )),
+                    )),
+                ),
+                match_arm(wildcard_pattern(), lit_expr(string("No match"))),
+            ],
+        );
+
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(match_expr, engine).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(lit) => {
+                assert_eq!(
+                    lit,
+                    &Literal::String(
+                        "Resolved group: found inner join between orders and lineitem with condition: x = y".to_string()
+                    )
+                );
+            }
+            _ => panic!("Expected string literal"),
+        }
+    }
+
+    /// Test multiple pattern matching arms with fallthrough
+    #[tokio::test]
+    async fn test_multiple_match_arms_with_fallthrough() {
+        let mock_gen = MockGenerator::new();
+        let mut ctx = Context::default();
+
+        // Add to_string function to convert numbers to strings
+        ctx.bind(
+            "to_string".to_string(),
+            Value(CoreData::Function(FunKind::RustUDF(|args| {
+                match &args[0].0 {
+                    CoreData::Literal(Literal::Int64(i)) => {
+                        Value(CoreData::Literal(string(&i.to_string())))
+                    }
+                    _ => panic!("Expected integer literal"),
+                }
+            }))),
+        );
+
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Create a struct value Point { x: 30, y: 40 }
+        let struct_expr = Arc::new(Expr::CoreVal(struct_val(
+            "Point",
+            vec![lit_val(int(30)), lit_val(int(40))],
+        )));
+
+        // Create a match expression with multiple arms and fallthrough:
+        // match Point { x: 30, y: 40 } {
+        //   Point { x @ 10, y } => "First arm: " + to_string(x) + ", " + to_string(y),
+        //   Point { x @ 20, y } => "Second arm: " + to_string(x) + ", " + to_string(y),
+        //   Point { x, y } => "Fallthrough arm: " + to_string(x) + ", " + to_string(y),
+        //   _ => "Default"
+        // }
+        let match_expr = pattern_match_expr(
+            struct_expr,
+            vec![
+                // First arm - won't match
+                match_arm(
+                    struct_pattern(
+                        "Point",
+                        vec![
+                            bind_pattern("x", literal_pattern(int(10))),
+                            bind_pattern("y", wildcard_pattern()),
+                        ],
+                    ),
+                    Arc::new(Expr::Binary(
+                        lit_expr(string("First arm: ")),
+                        BinOp::Concat,
+                        Arc::new(Expr::Binary(
+                            Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("x")])),
+                            BinOp::Concat,
+                            Arc::new(Expr::Binary(
+                                lit_expr(string(", ")),
+                                BinOp::Concat,
+                                Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("y")])),
+                            )),
+                        )),
+                    )),
+                ),
+                // Second arm - won't match
+                match_arm(
+                    struct_pattern(
+                        "Point",
+                        vec![
+                            bind_pattern("x", literal_pattern(int(20))),
+                            bind_pattern("y", wildcard_pattern()),
+                        ],
+                    ),
+                    Arc::new(Expr::Binary(
+                        lit_expr(string("Second arm: ")),
+                        BinOp::Concat,
+                        Arc::new(Expr::Binary(
+                            Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("x")])),
+                            BinOp::Concat,
+                            Arc::new(Expr::Binary(
+                                lit_expr(string(", ")),
+                                BinOp::Concat,
+                                Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("y")])),
+                            )),
+                        )),
+                    )),
+                ),
+                // Fallthrough arm - should match
+                match_arm(
+                    struct_pattern(
+                        "Point",
+                        vec![
+                            bind_pattern("x", wildcard_pattern()),
+                            bind_pattern("y", wildcard_pattern()),
+                        ],
+                    ),
+                    Arc::new(Expr::Binary(
+                        lit_expr(string("Fallthrough arm: ")),
+                        BinOp::Concat,
+                        Arc::new(Expr::Binary(
+                            Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("x")])),
+                            BinOp::Concat,
+                            Arc::new(Expr::Binary(
+                                lit_expr(string(", ")),
+                                BinOp::Concat,
+                                Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("y")])),
+                            )),
+                        )),
+                    )),
+                ),
+                // Default arm - won't reach
+                match_arm(wildcard_pattern(), lit_expr(string("Default"))),
+            ],
+        );
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(match_expr, engine).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::String("Fallthrough arm: 30, 40".to_string()));
+            }
+            _ => panic!("Expected string literal"),
+        }
+    }
+
+    /// Test pattern matching with deeply nested bind patterns
+    #[tokio::test]
+    async fn test_deeply_nested_bind_patterns() {
+        let mock_gen = MockGenerator::new();
+        let mut ctx = Context::default();
+
+        // Add to_string function to convert complex values to strings
+        ctx.bind(
+            "to_string".to_string(),
+            Value(CoreData::Function(FunKind::RustUDF(|args| {
+                match &args[0].0 {
+                    CoreData::Literal(lit) => {
+                        Value(CoreData::Literal(string(&format!("{:?}", lit))))
+                    }
+                    CoreData::Array(_) => Value(CoreData::Literal(string("<array>"))),
+                    _ => Value(CoreData::Literal(string("<unknown>"))),
+                }
+            }))),
+        );
+
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Create a deeply nested operator:
+        // Project [col1, col2] (
+        //   Filter (predicate) (
+        //     Join (joinType, condition) (
+        //       TableScan (table1),
+        //       TableScan (table2)
+        //     )
+        //   )
+        // )
+        let nested_op = create_logical_operator(
+            "Project",
+            vec![array_val(vec![
+                lit_val(string("col1")),
+                lit_val(string("col2")),
+            ])],
+            vec![create_logical_operator(
+                "Filter",
+                vec![lit_val(string("age > 30"))],
+                vec![create_logical_operator(
+                    "Join",
+                    vec![lit_val(string("inner")), lit_val(string("t1.id = t2.id"))],
+                    vec![
+                        create_logical_operator(
+                            "TableScan",
+                            vec![lit_val(string("employees"))],
+                            vec![],
+                        ),
+                        create_logical_operator(
+                            "TableScan",
+                            vec![lit_val(string("departments"))],
+                            vec![],
+                        ),
+                    ],
+                )],
+            )],
+        );
+
+        let nested_op_expr = Arc::new(Expr::CoreVal(nested_op));
+
+        // Create a deeply nested pattern match that extracts values at various depths:
+        let match_expr = pattern_match_expr(
+            nested_op_expr,
+            vec![
+                match_arm(
+                    operator_pattern(
+                        "Project",
+                        vec![bind_pattern("cols", wildcard_pattern())],
+                        vec![operator_pattern(
+                            "Filter",
+                            vec![bind_pattern("pred", wildcard_pattern())],
+                            vec![operator_pattern(
+                                "Join",
+                                vec![
+                                    bind_pattern("jtype", wildcard_pattern()),
+                                    bind_pattern("jcond", wildcard_pattern()),
+                                ],
+                                vec![
+                                    operator_pattern(
+                                        "TableScan",
+                                        vec![bind_pattern("t1", wildcard_pattern())],
+                                        vec![],
+                                    ),
+                                    operator_pattern(
+                                        "TableScan",
+                                        vec![bind_pattern("t2", wildcard_pattern())],
+                                        vec![],
+                                    ),
+                                ],
+                            )],
+                        )],
+                    ),
+                    // Build a SQL-like string with to_string calls
+                    Arc::new(Expr::Binary(
+                        lit_expr(string("Query: SELECT ")),
+                        BinOp::Concat,
+                        Arc::new(Expr::Binary(
+                            Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("cols")])),
+                            BinOp::Concat,
+                            Arc::new(Expr::Binary(
+                                lit_expr(string(" FROM ")),
+                                BinOp::Concat,
+                                Arc::new(Expr::Binary(
+                                    Arc::new(Expr::Call(
+                                        ref_expr("to_string"),
+                                        vec![ref_expr("t1")],
+                                    )),
+                                    BinOp::Concat,
+                                    Arc::new(Expr::Binary(
+                                        lit_expr(string(" JOIN ")),
+                                        BinOp::Concat,
+                                        Arc::new(Expr::Binary(
+                                            Arc::new(Expr::Call(
+                                                ref_expr("to_string"),
+                                                vec![ref_expr("t2")],
+                                            )),
+                                            BinOp::Concat,
+                                            Arc::new(Expr::Binary(
+                                                lit_expr(string(" ON ")),
+                                                BinOp::Concat,
+                                                Arc::new(Expr::Binary(
+                                                    ref_expr("jcond"),
+                                                    BinOp::Concat,
+                                                    Arc::new(Expr::Binary(
+                                                        lit_expr(string(" WHERE ")),
+                                                        BinOp::Concat,
+                                                        ref_expr("pred"),
+                                                    )),
+                                                )),
+                                            )),
+                                        )),
+                                    )),
+                                )),
+                            )),
+                        )),
+                    )),
+                ),
+                match_arm(wildcard_pattern(), lit_expr(string("No match"))),
+            ],
+        );
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(match_expr, engine).await;
+
+        // Check result (this is a complex test of correct binding propagation through deeply nested patterns)
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(lit) => {
+                assert!(matches!(lit, Literal::String(_)));
+                let result_str = match lit {
+                    Literal::String(s) => s,
+                    _ => unreachable!(),
+                };
+
+                // Check for the presence of key components
+                assert!(result_str.contains("SELECT"));
+                assert!(result_str.contains("FROM"));
+                assert!(result_str.contains("employees"));
+                assert!(result_str.contains("departments"));
+                assert!(result_str.contains("JOIN"));
+                assert!(result_str.contains("t1.id = t2.id"));
+                assert!(result_str.contains("WHERE"));
+                assert!(result_str.contains("age > 30"));
+            }
+            _ => panic!("Expected string literal"),
+        }
+    }
+
+    /// Test combinatorial explosion with multiple expansion paths
+    #[tokio::test]
+    async fn test_combinatorial_explosion() {
+        let mock_gen = MockGenerator::new();
+        let group_id_1 = GroupId(1);
+        let group_id_2 = GroupId(2);
+
+        // Register multiple alternatives for each group to create a combinatorial explosion
+        // For group 1, register 3 different possible values
+        mock_gen.register_group(
+            group_id_1,
+            create_logical_operator("TableScan", vec![lit_val(string("employees"))], vec![]),
+        );
+        mock_gen.register_group(
+            group_id_1,
+            create_logical_operator("TableScan", vec![lit_val(string("departments"))], vec![]),
+        );
+        mock_gen.register_group(
+            group_id_1,
+            create_logical_operator("TableScan", vec![lit_val(string("customers"))], vec![]),
+        );
+        mock_gen.register_group(
+            group_id_1,
+            create_logical_operator("Filter", vec![lit_val(string("age > 30"))], vec![]),
+        );
+
+        // For group 2, register 2 different possible values
+        mock_gen.register_group(
+            group_id_2,
+            create_logical_operator("Filter", vec![lit_val(string("age > 30"))], vec![]),
+        );
+        mock_gen.register_group(
+            group_id_2,
+            create_logical_operator("Filter", vec![lit_val(string("salary > 50000"))], vec![]),
+        );
+
+        // Create a join with two unmaterialized children
+        let join_op = create_logical_operator(
+            "Join",
+            vec![
+                lit_val(string("inner")),
+                lit_val(string("left.id = right.id")),
+            ],
+            vec![
+                Value(CoreData::Logical(LogicalOp(
+                    Materializable::UnMaterialized(group_id_1),
+                ))),
+                Value(CoreData::Logical(LogicalOp(
+                    Materializable::UnMaterialized(group_id_2),
+                ))),
+            ],
+        );
+
+        let join_expr = Arc::new(Expr::CoreVal(join_op));
+
+        // Create a pattern match that will match any join with a table scan as first child
+        // and extract information from it
+        let match_expr = pattern_match_expr(
+            join_expr,
+            vec![
+                match_arm(
+                    operator_pattern(
+                        "Join",
+                        vec![
+                            bind_pattern("join_type", wildcard_pattern()),
+                            bind_pattern("join_condition", wildcard_pattern()),
+                        ],
+                        vec![
+                            operator_pattern(
+                                "TableScan",
+                                vec![bind_pattern("table_name", wildcard_pattern())],
+                                vec![],
+                            ),
+                            operator_pattern(
+                                "Filter",
+                                vec![bind_pattern("filter_condition", wildcard_pattern())],
+                                vec![],
+                            ),
+                        ],
+                    ),
+                    Arc::new(Expr::Let(
+                        "result".to_string(),
+                        Arc::new(Expr::Binary(
+                            ref_expr("table_name"),
+                            BinOp::Concat,
+                            Arc::new(Expr::Binary(
+                                lit_expr(string(" filtered by ")),
+                                BinOp::Concat,
+                                ref_expr("filter_condition"),
+                            )),
+                        )),
+                        ref_expr("result"),
+                    )),
+                ),
+                match_arm(wildcard_pattern(), lit_expr(string("No match"))),
+            ],
+        );
+
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Evaluate the expression
+        let results = evaluate_and_collect(match_expr, engine).await;
+
+        // We should get 4 × 2 = 8 different results from the combinatorial explosion
+        assert_eq!(results.len(), 8);
+
+        // Check that we got all the expected combinations
+        let expected_combinations = [
+            ("employees filtered by age > 30", 1),
+            ("employees filtered by salary > 50000", 1),
+            ("departments filtered by age > 30", 1),
+            ("departments filtered by salary > 50000", 1),
+            ("customers filtered by age > 30", 1),
+            ("customers filtered by salary > 50000", 1),
+            ("No match", 2),
+        ];
+
+        for result in &results {
+            match &result.0 {
+                CoreData::Literal(Literal::String(s)) => {
+                    assert!(expected_combinations
+                        .map(|(expected, _)| expected)
+                        .contains(&s.as_str()));
+                }
+                _ => panic!("Expected string literal"),
+            }
+        }
+
+        // Ensure we got each combination exactly once (no duplicates)
+        let mut result_strings = Vec::new();
+        for result in &results {
+            if let CoreData::Literal(Literal::String(s)) = &result.0 {
+                result_strings.push(s.clone());
+            }
+        }
+
+        for (expected, occ) in expected_combinations {
+            assert_eq!(
+                result_strings
+                    .iter()
+                    .filter(|s| s == &&expected.to_string())
+                    .count(),
+                occ,
+                "Expected combination '{}' should appear exactly once",
+                expected
+            );
+        }
+    }
+}

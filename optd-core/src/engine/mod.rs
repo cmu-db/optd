@@ -27,6 +27,8 @@ use Expr::*;
 
 mod eval;
 pub(crate) mod generator;
+#[cfg(test)]
+pub(super) mod test_utils;
 pub(crate) mod utils;
 
 /// Type alias for a continuation that receives a PartialLogicalPlan
