@@ -1,707 +1,633 @@
-//! This module provides implementation of expression evaluation, handling different
-//! expression types and evaluation strategies in a non-blocking, streaming manner.
-
-use super::{
-    binary::eval_binary_op, core::evaluate_core_expr, r#match::try_match_arms,
-    unary::eval_unary_op, Expander,
-};
+use super::{binary::eval_binary_op, unary::eval_unary_op, Evaluate};
 use crate::{
     capture,
     engine::{
-        utils::streams::{
-            evaluate_all_combinations, propagate_success, stream_from_result, ValueStream,
-        },
-        Engine, Evaluate,
+        generator::{Continuation, Generator},
+        utils::evaluate_sequence,
+        Engine,
     },
 };
-use futures::StreamExt;
 use optd_dsl::analyzer::hir::{
-    BinOp, CoreData, Expr, FunKind, Identifier, Literal, MatchArm, UnaryOp, Value,
+    BinOp, CoreData, Expr, FunKind, Identifier, Literal, UnaryOp, Value,
 };
 use std::sync::Arc;
 use CoreData::*;
-use Expr::*;
 use FunKind::*;
-
-impl Evaluate for Arc<Expr> {
-    /// Evaluates an expression to a stream of possible values.
-    ///
-    /// This function takes a reference to the expression, dispatching to specialized
-    /// handlers for each expression type.
-    ///
-    /// # Parameters
-    /// * `self` - Reference to the expression to evaluate
-    /// * `engine` - The evaluation engine with an expander implementation
-    ///
-    /// # Returns
-    /// A stream of all possible evaluation results
-    fn evaluate<E>(self, engine: Engine<E>) -> ValueStream
-    where
-        E: Expander,
-    {
-        match &*self {
-            PatternMatch(expr, match_arms) => {
-                evaluate_pattern_match(expr.clone(), match_arms.clone(), engine)
-            }
-            IfThenElse(cond, then_expr, else_expr) => {
-                evaluate_if_then_else(cond.clone(), then_expr.clone(), else_expr.clone(), engine)
-            }
-            Let(ident, assignee, after) => {
-                evaluate_let_binding(ident.clone(), assignee.clone(), after.clone(), engine)
-            }
-            Binary(left, op, right) => {
-                evaluate_binary_expr(left.clone(), op.clone(), right.clone(), engine)
-            }
-            Unary(op, expr) => evaluate_unary_expr(op.clone(), expr.clone(), engine),
-            Call(fun, args) => evaluate_function_call(fun.clone(), args.clone(), engine),
-            Ref(ident) => evaluate_reference(ident.clone(), engine),
-            CoreExpr(expr) => evaluate_core_expr(expr.clone(), engine),
-            CoreVal(val) => propagate_success(val.clone()).boxed(),
-        }
-    }
-}
-
-/// Evaluates a pattern match expression.
-///
-/// First evaluates the expression to match, then tries each match arm in order
-/// until a pattern matches.
-///
-/// # Parameters
-/// * `expr` - The expression to match against patterns
-/// * `match_arms` - The list of pattern-expression pairs to try
-/// * `engine` - The evaluation engine
-///
-/// # Returns
-/// A stream of all possible evaluation results
-fn evaluate_pattern_match<E>(
-    expr: Arc<Expr>,
-    match_arms: Vec<MatchArm>,
-    engine: Engine<E>,
-) -> ValueStream
-where
-    E: Expander,
-{
-    // First evaluate the expression
-    expr.evaluate(engine.clone())
-        .flat_map(move |expr_result| {
-            stream_from_result(
-                expr_result,
-                capture!([engine, match_arms], move |value| {
-                    try_match_arms(value, match_arms.clone(), engine.clone())
-                }),
-            )
-        })
-        .boxed()
-}
 
 /// Evaluates an if-then-else expression.
 ///
 /// First evaluates the condition, then either the 'then' branch if the condition is true,
-/// or the 'else' branch if the condition is false.
-fn evaluate_if_then_else<E>(
+/// or the 'else' branch if the condition is false, passing results to the continuation.
+///
+/// # Parameters
+/// * `cond` - The condition expression
+/// * `then_expr` - The expression to evaluate if condition is true
+/// * `else_expr` - The expression to evaluate if condition is false
+/// * `engine` - The evaluation engine
+/// * `k` - The continuation to receive evaluation results
+pub(super) async fn evaluate_if_then_else<G>(
     cond: Arc<Expr>,
     then_expr: Arc<Expr>,
     else_expr: Arc<Expr>,
-    engine: Engine<E>,
-) -> ValueStream
-where
-    E: Expander,
+    engine: Engine<G>,
+    k: Continuation,
+) where
+    G: Generator,
 {
-    cond.evaluate(engine.clone())
-        .flat_map(move |cond_result| {
-            stream_from_result(
-                cond_result,
-                capture!([engine, then_expr, else_expr], move |value| {
-                    match value.0 {
-                        // If condition is a boolean, evaluate the appropriate branch
-                        Literal(Literal::Bool(b)) => {
-                            if b {
-                                then_expr.evaluate(engine)
-                            } else {
-                                else_expr.evaluate(engine)
-                            }
+    // First evaluate the condition
+    cond.evaluate(
+        engine.clone(),
+        Arc::new(move |value| {
+            Box::pin(capture!([then_expr, else_expr, engine, k], async move {
+                match value.0 {
+                    Literal(Literal::Bool(b)) => {
+                        if b {
+                            then_expr.evaluate(engine, k).await;
+                        } else {
+                            else_expr.evaluate(engine, k).await;
                         }
-                        // Condition must be a boolean
-                        _ => panic!("Expected boolean in condition"),
                     }
-                }),
-            )
-        })
-        .boxed()
+                    _ => panic!("Expected boolean in condition"),
+                }
+            }))
+        }),
+    )
+    .await;
 }
 
 /// Evaluates a let binding expression.
 ///
 /// Binds the result of evaluating the assignee to the identifier in the context,
-/// then evaluates the 'after' expression in the updated context.
-fn evaluate_let_binding<E>(
+/// then evaluates the 'after' expression in the updated context, passing results
+/// to the continuation.
+///
+/// # Parameters
+/// * `ident` - The identifier to bind the value to
+/// * `assignee` - The expression to evaluate and bind
+/// * `after` - The expression to evaluate in the updated context
+/// * `engine` - The evaluation engine
+/// * `k` - The continuation to receive evaluation results
+pub(super) async fn evaluate_let_binding<G>(
     ident: String,
     assignee: Arc<Expr>,
     after: Arc<Expr>,
-    engine: Engine<E>,
-) -> ValueStream
-where
-    E: Expander,
+    engine: Engine<G>,
+    k: Continuation,
+) where
+    G: Generator,
 {
+    // Evaluate the assignee first
     assignee
-        .evaluate(engine.clone())
-        .flat_map(move |expr_result| {
-            stream_from_result(
-                expr_result,
-                capture!([engine, after, ident], move |value| {
+        .evaluate(
+            engine.clone(),
+            Arc::new(move |value| {
+                Box::pin(capture!([ident, after, engine, k], async move {
                     // Create updated context with the new binding
                     let mut new_ctx = engine.context.clone();
                     new_ctx.bind(ident, value);
-                    after.evaluate(engine.with_context(new_ctx))
-                }),
-            )
-        })
-        .boxed()
+
+                    // Evaluate the after expression in the updated context
+                    after.evaluate(engine.with_context(new_ctx), k).await;
+                }))
+            }),
+        )
+        .await;
 }
 
 /// Evaluates a binary expression.
 ///
-/// Evaluates both operands in all possible combinations, then applies the binary operation.
-fn evaluate_binary_expr<E>(
+/// Evaluates both operands, then applies the binary operation,
+/// passing the result to the continuation.
+///
+/// # Parameters
+/// * `left` - The left operand
+/// * `op` - The binary operator
+/// * `right` - The right operand
+/// * `engine` - The evaluation engine
+/// * `k` - The continuation to receive evaluation results
+pub(super) async fn evaluate_binary_expr<G>(
     left: Arc<Expr>,
     op: BinOp,
     right: Arc<Expr>,
-    engine: Engine<E>,
-) -> ValueStream
-where
-    E: Expander,
+    engine: Engine<G>,
+    k: Continuation,
+) where
+    G: Generator,
 {
-    let exprs = vec![left, right];
-    evaluate_all_combinations(exprs.into_iter(), engine)
-        .map(move |combo_result| {
-            combo_result.map(|mut values| {
-                let right_val = values.pop().expect("Right operand not found");
-                let left_val = values.pop().expect("Left operand not found");
-                eval_binary_op(left_val, &op, right_val)
-            })
-        })
-        .boxed()
+    // Helper function to evaluate the right operand after the left is evaluated
+    async fn evaluate_right<G>(
+        left_val: Value,
+        right: Arc<Expr>,
+        op: BinOp,
+        engine: Engine<G>,
+        k: Continuation,
+    ) where
+        G: Generator,
+    {
+        right
+            .evaluate(
+                engine,
+                Arc::new(move |right_val| {
+                    Box::pin(capture!([left_val, op, k], async move {
+                        // Apply the binary operation and pass result to continuation
+                        let result = eval_binary_op(left_val, &op, right_val);
+                        k(result).await;
+                    }))
+                }),
+            )
+            .await;
+    }
+
+    // First evaluate the left operand
+    left.evaluate(
+        engine.clone(),
+        Arc::new(move |left_val| {
+            Box::pin(capture!([right, op, engine, k], async move {
+                evaluate_right(left_val, right, op, engine, k).await;
+            }))
+        }),
+    )
+    .await;
 }
 
 /// Evaluates a unary expression.
 ///
-/// Evaluates the operand, then applies the unary operation.
-fn evaluate_unary_expr<E>(op: UnaryOp, expr: Arc<Expr>, engine: Engine<E>) -> ValueStream
-where
-    E: Expander,
+/// Evaluates the operand, then applies the unary operation,
+/// passing the result to the continuation.
+///
+/// # Parameters
+/// * `op` - The unary operator
+/// * `expr` - The operand expression
+/// * `engine` - The evaluation engine
+/// * `k` - The continuation to receive evaluation results
+pub(super) async fn evaluate_unary_expr<G>(
+    op: UnaryOp,
+    expr: Arc<Expr>,
+    engine: Engine<G>,
+    k: Continuation,
+) where
+    G: Generator,
 {
-    expr.evaluate(engine)
-        .map(move |expr_result| expr_result.map(|value| eval_unary_op(&op, value)))
-        .boxed()
+    // Evaluate the operand, then apply the unary operation
+    expr.evaluate(
+        engine,
+        Arc::new(move |value| {
+            Box::pin(capture!([op, k], async move {
+                // Apply the unary operation and pass result to continuation
+                let result = eval_unary_op(&op, value);
+                k(result).await;
+            }))
+        }),
+    )
+    .await;
 }
 
 /// Evaluates a function call expression.
 ///
 /// First evaluates the function expression, then the arguments,
-/// and finally applies the function to the arguments.
-fn evaluate_function_call<E>(fun: Arc<Expr>, args: Vec<Arc<Expr>>, engine: Engine<E>) -> ValueStream
-where
-    E: Expander,
+/// and finally applies the function to the arguments, passing results to the continuation.
+///
+/// # Parameters
+/// * `fun` - The function expression to evaluate
+/// * `args` - The argument expressions to evaluate
+/// * `engine` - The evaluation engine
+/// * `k` - The continuation to receive evaluation results
+pub(super) async fn evaluate_function_call<G>(
+    fun: Arc<Expr>,
+    args: Vec<Arc<Expr>>,
+    engine: Engine<G>,
+    k: Continuation,
+) where
+    G: Generator,
 {
-    let fun_stream = fun.evaluate(engine.clone());
-
-    fun_stream
-        .flat_map(move |fun_result| {
-            stream_from_result(
-                fun_result,
-                capture!([engine, args], move |fun_value| {
-                    match fun_value.0 {
-                        // Handle closure (user-defined function)
-                        Function(Closure(params, body)) => {
-                            evaluate_closure_call(params, body, args, engine)
-                        }
-                        // Handle Rust UDF (built-in function)
-                        Function(RustUDF(udf)) => evaluate_rust_udf_call(udf, args, engine),
-                        // Value must be a function
-                        _ => panic!("Expected function value"),
+    // First evaluate the function expression
+    fun.evaluate(
+        engine.clone(),
+        Arc::new(move |fun_value| {
+            Box::pin(capture!([args, engine, k], async move {
+                match fun_value.0 {
+                    // Handle closure (user-defined function)
+                    Function(Closure(params, body)) => {
+                        evaluate_closure_call(params, body, args, engine, k).await;
                     }
-                }),
-            )
-        })
-        .boxed()
+                    // Handle Rust UDF (built-in function)
+                    Function(RustUDF(udf)) => {
+                        evaluate_rust_udf_call(udf, args, engine, k).await;
+                    }
+                    // Value must be a function
+                    _ => panic!("Expected function value"),
+                }
+            }))
+        }),
+    )
+    .await;
 }
 
 /// Evaluates a call to a closure (user-defined function).
 ///
 /// Evaluates the arguments, binds them to the parameters in a new context,
-/// then evaluates the function body in that context.
-fn evaluate_closure_call<E>(
+/// then evaluates the function body in that context, passing results to the continuation.
+///
+/// # Parameters
+/// * `params` - The parameter names of the closure
+/// * `body` - The body expression of the closure
+/// * `args` - The argument expressions to evaluate
+/// * `engine` - The evaluation engine
+/// * `k` - The continuation to receive evaluation results
+pub(super) async fn evaluate_closure_call<G>(
     params: Vec<Identifier>,
     body: Arc<Expr>,
     args: Vec<Arc<Expr>>,
-    engine: Engine<E>,
-) -> ValueStream
-where
-    E: Expander,
+    engine: Engine<G>,
+    k: Continuation,
+) where
+    G: Generator,
 {
-    evaluate_all_combinations(args.into_iter(), engine.clone())
-        .flat_map(move |args_result| {
-            stream_from_result(
-                args_result,
-                capture!([engine, params, body], move |args| {
-                    // Create a new context with parameters bound to arguments
-                    let mut new_ctx = engine.context.clone();
-                    new_ctx.push_scope();
-                    params.iter().zip(args).for_each(|(p, a)| {
-                        new_ctx.bind(p.clone(), a);
-                    });
-                    body.evaluate(engine.with_context(new_ctx))
-                }),
-            )
-        })
-        .boxed()
+    evaluate_sequence(
+        args,
+        engine.clone(),
+        Arc::new(move |arg_values| {
+            Box::pin(capture!([params, body, engine, k], async move {
+                // Create a new context with parameters bound to arguments
+                let mut new_ctx = engine.context.clone();
+                new_ctx.push_scope();
+
+                params.iter().zip(arg_values).for_each(|(p, a)| {
+                    new_ctx.bind(p.clone(), a);
+                });
+
+                // Evaluate the body in the new context
+                body.evaluate(engine.with_context(new_ctx), k).await;
+            }))
+        }),
+    )
+    .await
 }
 
 /// Evaluates a call to a Rust UDF (built-in function).
 ///
-/// Evaluates the arguments, then calls the Rust function with those arguments.
-fn evaluate_rust_udf_call<E>(
+/// Evaluates the arguments, then calls the Rust function with those arguments,
+/// passing the result to the continuation.
+///
+/// # Parameters
+/// * `udf` - The Rust function to call
+/// * `args` - The argument expressions to evaluate
+/// * `engine` - The evaluation engine
+/// * `k` - The continuation to receive evaluation results
+pub(super) async fn evaluate_rust_udf_call<G>(
     udf: fn(Vec<Value>) -> Value,
     args: Vec<Arc<Expr>>,
-    engine: Engine<E>,
-) -> ValueStream
-where
-    E: Expander,
+    engine: Engine<G>,
+    k: Continuation,
+) where
+    G: Generator,
 {
-    evaluate_all_combinations(args.into_iter(), engine)
-        .map(move |args_result| args_result.map(udf))
-        .boxed()
+    evaluate_sequence(
+        args,
+        engine,
+        Arc::new(move |arg_values| {
+            Box::pin(capture!([udf, k], async move {
+                // Call the UDF with the argument values
+                let result = udf(arg_values);
+
+                // Pass the result to the continuation
+                k(result).await;
+            }))
+        }),
+    )
+    .await
 }
 
 /// Evaluates a reference to a variable.
 ///
-/// Looks up the variable in the context and returns its value.
-fn evaluate_reference<E>(ident: String, engine: Engine<E>) -> ValueStream
+/// Looks up the variable in the context and passes its value to the continuation.
+///
+/// # Parameters
+/// * `ident` - The identifier to look up
+/// * `engine` - The evaluation engine
+/// * `k` - The continuation to receive the variable value
+pub(super) async fn evaluate_reference<G>(ident: String, engine: Engine<G>, k: Continuation)
 where
-    E: Expander,
+    G: Generator,
 {
-    propagate_success(
-        engine
-            .context
-            .lookup(&ident)
-            .unwrap_or_else(|| panic!("Variable not found: {}", ident))
-            .clone(),
-    )
-    .boxed()
+    // Look up the variable in the context
+    let value = engine
+        .context
+        .lookup(&ident)
+        .unwrap_or_else(|| panic!("Variable not found: {}", ident))
+        .clone();
+
+    // Pass the value to the continuation
+    k(value).await;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::engine::{
-        utils::tests::{arc, bool_val, collect_stream_values, int_val, string_val, MockExpander},
-        Context, Engine,
+        test_utils::{
+            array_val, boolean, evaluate_and_collect, int, lit_expr, lit_val, ref_expr, string,
+            MockGenerator,
+        },
+        Engine,
     };
-    use optd_dsl::analyzer::hir::{
-        BinOp, CoreData, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern,
-        Value,
+    use optd_dsl::analyzer::{
+        context::Context,
+        hir::{BinOp, CoreData, Expr, FunKind, Literal, Value},
     };
-    use Literal::*;
-    use Materializable::*;
-    use Pattern::*;
+    use std::sync::Arc;
 
-    #[test]
-    fn test_pattern_matching_with_different_operator_types() {
-        // Create a MockExpander that provides different operator types within a group
-        let expander = MockExpander::new(
-            |group_id| {
-                if group_id == GroupId(10) {
-                    // Group 10 expands to multiple operator types
-                    vec![
-                        // Filter operator
-                        Value(Logical(LogicalOp(Materialized(Operator {
-                            tag: "Filter".to_string(),
-                            data: vec![bool_val(true)],
-                            children: vec![string_val("customers")],
-                        })))),
-                        // Join operator
-                        Value(Logical(LogicalOp(Materialized(Operator {
-                            tag: "Join".to_string(),
-                            data: vec![string_val("customer_id")],
-                            children: vec![string_val("customers"), string_val("orders")],
-                        })))),
-                        // Project operator
-                        Value(Logical(LogicalOp(Materialized(Operator {
-                            tag: "Project".to_string(),
-                            data: vec![int_val(42)],
-                            children: vec![string_val("customers")],
-                        })))),
-                    ]
-                } else {
-                    vec![]
-                }
-            },
-            |_| panic!("Physical expansion not expected"),
-            |_| panic!("Properties expansion not expected"),
-        );
+    /// Test if-then-else expressions with true and false conditions
+    #[tokio::test]
+    async fn test_if_then_else() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
 
-        let engine = Engine::new(Context::default(), expander);
+        // if true then "yes" else "no"
+        let true_condition = Arc::new(Expr::IfThenElse(
+            lit_expr(boolean(true)),
+            lit_expr(string("yes")),
+            lit_expr(string("no")),
+        ));
+        let true_results = evaluate_and_collect(true_condition, engine.clone()).await;
 
-        // Create a logical group reference
-        let logical_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(10)))));
+        // if false then "yes" else "no"
+        let false_condition = Arc::new(Expr::IfThenElse(
+            lit_expr(boolean(false)),
+            lit_expr(string("yes")),
+            lit_expr(string("no")),
+        ));
+        let false_results = evaluate_and_collect(false_condition, engine.clone()).await;
 
-        // Create a pattern match expression with arms for each operator type
-        let pattern_match_expr = arc(PatternMatch(
-            arc(CoreVal(logical_group_ref)),
-            vec![
-                // First arm: match Filter operator
-                MatchArm {
-                    pattern: Pattern::Operator(Operator {
-                        tag: "Filter".to_string(),
-                        data: vec![Pattern::Literal(Bool(true))],
-                        children: vec![Bind("filter_table".to_string(), Box::new(Wildcard))],
-                    }),
-                    expr: arc(Binary(
-                        arc(CoreVal(string_val("Filter on: "))),
-                        BinOp::Concat,
-                        arc(Ref("filter_table".to_string())),
-                    )),
-                },
-                // Second arm: match Join operator with binding
-                MatchArm {
-                    pattern: Pattern::Operator(Operator {
-                        tag: "Join".to_string(),
-                        data: vec![Bind("join_key".to_string(), Box::new(Wildcard))],
-                        children: vec![
-                            Bind("left_table".to_string(), Box::new(Wildcard)),
-                            Bind("right_table".to_string(), Box::new(Wildcard)),
-                        ],
-                    }),
-                    expr: arc(CoreVal(string_val("join_matched"))),
-                },
-                // Third arm: match Project operator
-                MatchArm {
-                    pattern: Pattern::Operator(Operator {
-                        tag: "Project".to_string(),
-                        data: vec![Pattern::Bind("column".to_string(), Box::new(Wildcard))],
-                        children: vec![Wildcard],
-                    }),
-                    expr: arc(Ref("column".to_string())), // Return the bound column value
-                },
-                // Fallback arm
-                MatchArm {
-                    pattern: Wildcard,
-                    expr: arc(CoreVal(string_val("wildcard_matched"))),
-                },
-            ],
+        // Let's create a more complex condition: if x > 10 then x * 2 else x / 2
+        let mut ctx = Context::default();
+        ctx.bind("x".to_string(), lit_val(int(20)));
+        let engine_with_x = Engine::new(ctx, MockGenerator::new());
+
+        let complex_condition = Arc::new(Expr::IfThenElse(
+            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Lt, lit_expr(int(10)))),
+            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Div, lit_expr(int(2)))),
+            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Mul, lit_expr(int(2)))),
         ));
 
-        // Evaluate the pattern match expression
-        let values = collect_stream_values(pattern_match_expr.evaluate(engine));
-
-        // Should get three results - one for each operator type
-        assert_eq!(values.len(), 3);
-
-        // Collect the results
-        let result_strings: Vec<std::string::String> = values
-            .iter()
-            .map(|v| {
-                if let CoreData::Literal(String(s)) = &v.0 {
-                    s.clone()
-                } else if let CoreData::Literal(Int64(i)) = &v.0 {
-                    i.to_string()
-                } else {
-                    format!("{:?}", v)
-                }
-            })
-            .collect();
-
-        // Check that each operator matched correctly
-        assert!(result_strings.contains(&"Filter on: customers".to_string()));
-        assert!(result_strings.contains(&"join_matched".to_string()));
-        assert!(result_strings.contains(&"42".to_string())); // From binding the column value
-    }
-
-    #[test]
-    fn test_recursive_list_length_function() {
-        // Create a mockExpander that doesn't expand anything
-        let expander = MockExpander::new(
-            |_| vec![],
-            |_| panic!("Physical expansion not expected"),
-            |_| panic!("Properties expansion not expected"),
-        );
-
-        // Create recursive length calculation function
-        // length([]) = 0
-        // length([x :: xs]) = 1 + length(xs)
-        let length_fn = {
-            // Create the pattern matching expression for length calculation
-            let length_expr = arc(PatternMatch(
-                arc(Ref("list".to_string())),
-                vec![
-                    // Base case: empty list
-                    MatchArm {
-                        pattern: EmptyArray,
-                        expr: arc(CoreVal(int_val(0))),
-                    },
-                    // Recursive case: head :: tail
-                    MatchArm {
-                        pattern: ArrayDecomp(
-                            Wildcard.into(),                                  // head (ignored)
-                            Bind("rest".to_string(), Wildcard.into()).into(), // tail
-                        ),
-                        expr: arc(Binary(
-                            arc(CoreVal(int_val(1))),
-                            BinOp::Add,
-                            arc(Call(
-                                arc(Ref("length".to_string())),
-                                vec![arc(Ref("rest".to_string()))],
-                            )),
-                        )),
-                    },
-                ],
-            ));
-
-            // Create a closure for the length function
-            Value(Function(Closure(vec!["list".to_string()], length_expr)))
-        };
-
-        // Create a context with the length function bound
-        let mut ctx = Context::default();
-        ctx.bind("length".to_string(), length_fn);
-        let engine = Engine::new(ctx, expander);
-
-        // Create test data: lists of different lengths
-        let empty_list = Value(Array(vec![]));
-        let singleton_list = Value(Array(vec![int_val(5)]));
-        let pair_list = Value(Array(vec![int_val(10), int_val(20)]));
-        let triple_list = Value(Array(vec![int_val(1), int_val(2), int_val(3)]));
-
-        // Helper function to call the length function on a list
-        let get_length = |list: Value| {
-            let call_expr = arc(Call(
-                arc(Ref("length".to_string())),
-                vec![arc(CoreVal(list))],
-            ));
-            collect_stream_values(call_expr.evaluate(engine.clone()))
-        };
-
-        // Test each list
-        let empty_result = get_length(empty_list);
-        let singleton_result = get_length(singleton_list);
-        let pair_result = get_length(pair_list);
-        let triple_result = get_length(triple_list);
+        let complex_results = evaluate_and_collect(complex_condition, engine_with_x).await;
 
         // Check results
-        assert_eq!(empty_result.len(), 1);
-        assert!(matches!(&empty_result[0].0, CoreData::Literal(Int64(0))));
-
-        assert_eq!(singleton_result.len(), 1);
-        assert!(matches!(
-            &singleton_result[0].0,
-            CoreData::Literal(Int64(1))
-        ));
-
-        assert_eq!(pair_result.len(), 1);
-        assert!(matches!(&pair_result[0].0, CoreData::Literal(Int64(2))));
-
-        assert_eq!(triple_result.len(), 1);
-        assert!(matches!(&triple_result[0].0, CoreData::Literal(Int64(3))));
-    }
-
-    #[test]
-    fn test_pattern_with_group_references() {
-        // Create a MockExpander that provides operators with group references as children
-        let expander = MockExpander::new(
-            |group_id| {
-                match group_id {
-                    GroupId(15) => {
-                        // Main join operator with group references as children
-                        let join_op = Operator {
-                            tag: "Join".to_string(),
-                            data: vec![string_val("customer_id")],
-                            children: vec![
-                                // Left child is a reference to group 16
-                                Value(Logical(LogicalOp(UnMaterialized(GroupId(16))))),
-                                // Right child is a reference to group 17
-                                Value(Logical(LogicalOp(UnMaterialized(GroupId(17))))),
-                            ],
-                        };
-
-                        vec![Value(Logical(LogicalOp(Materialized(join_op))))]
-                    }
-                    GroupId(16) => {
-                        // Group 16 expands to a Filter operator
-                        let filter_op = Operator {
-                            tag: "Filter".to_string(),
-                            data: vec![bool_val(true)],
-                            children: vec![string_val("customers")],
-                        };
-
-                        vec![Value(Logical(LogicalOp(Materialized(filter_op))))]
-                    }
-                    GroupId(17) => {
-                        // Group 17 expands to a Project operator
-                        let project_op = Operator {
-                            tag: "Project".to_string(),
-                            data: vec![int_val(100)],
-                            children: vec![string_val("orders")],
-                        };
-
-                        vec![Value(Logical(LogicalOp(Materialized(project_op))))]
-                    }
-                    _ => vec![],
-                }
-            },
-            |_| panic!("Physical expansion not expected"),
-            |_| panic!("Properties expansion not expected"),
-        );
-
-        let engine = Engine::new(Context::default(), expander);
-
-        // Create a logical group reference to the main join operator
-        let logical_group_ref = Value(Logical(LogicalOp(UnMaterialized(GroupId(15)))));
-
-        // Create a pattern match that extracts components with bindings
-        let pattern_match_expr = arc(PatternMatch(
-            arc(CoreVal(logical_group_ref.clone())),
-            vec![
-                // Match the join structure with specific operator patterns for children
-                MatchArm {
-                    pattern: Pattern::Operator(Operator {
-                        tag: "Join".to_string(),
-                        data: vec![Bind("join_key".to_string(), Wildcard.into())],
-                        children: vec![
-                            // Left child - filter operator pattern (will cause group 16 to expand)
-                            Pattern::Bind(
-                                "left_child".to_string(),
-                                Pattern::Operator(Operator {
-                                    tag: "Filter".to_string(),
-                                    data: vec![Bind("predicate".to_string(), Wildcard.into())],
-                                    children: vec![Wildcard.into()],
-                                })
-                                .into(),
-                            ),
-                            // Right child - project operator pattern (will cause group 17 to expand)
-                            Pattern::Bind(
-                                "right_child".to_string(),
-                                Pattern::Operator(Operator {
-                                    tag: "Project".to_string(),
-                                    data: vec![Bind("column".to_string(), Wildcard.into())],
-                                    children: vec![Wildcard.into()],
-                                })
-                                .into(),
-                            ),
-                        ],
-                    }),
-                    // Create a structured result with the join key and the child references
-                    expr: arc(CoreExpr(CoreData::Struct(
-                        "JoinPlan".to_string(),
-                        vec![
-                            arc(Ref("join_key".to_string())),
-                            arc(Ref("left_child".to_string())),
-                            arc(Ref("right_child".to_string())),
-                        ],
-                    ))),
-                },
-                // Fallback arm
-                MatchArm {
-                    pattern: Wildcard,
-                    expr: arc(CoreVal(string_val("no_match"))),
-                },
-            ],
-        ));
-
-        // Evaluate the pattern match expression
-        let values = collect_stream_values(pattern_match_expr.evaluate(engine.clone()));
-        // Should get one result with a structured value
-        assert_eq!(values.len(), 1);
-
-        // Verify the structure of the result
-        if let CoreData::Struct(name, fields) = &values[0].0 {
-            assert_eq!(name, "JoinPlan");
-            assert_eq!(fields.len(), 3);
-
-            // Check that the join key was correctly captured
-            assert!(matches!(&fields[0].0, CoreData::Literal(String(s)) if s == "customer_id"));
-
-            // Check that the bound values now contain the expanded operators, not the unexpanded references
-            // Left child should be a Filter operator (expanded from group 16)
-            if let CoreData::Logical(LogicalOp(Materialized(left_op))) = &fields[1].0 {
-                assert_eq!(left_op.tag, "Filter");
-                assert!(matches!(&left_op.data[0].0, CoreData::Literal(Bool(true))));
-            } else {
-                panic!("Expected expanded Filter operator, got {:?}", fields[1]);
+        match &true_results[0].0 {
+            CoreData::Literal(Literal::String(value)) => {
+                assert_eq!(value, "yes"); // true condition should select "yes"
             }
-
-            // Right child should be a Project operator (expanded from group 17)
-            if let CoreData::Logical(LogicalOp(Materialized(right_op))) = &fields[2].0 {
-                assert_eq!(right_op.tag, "Project");
-                assert!(matches!(&right_op.data[0].0, CoreData::Literal(Int64(100))));
-            } else {
-                panic!("Expected expanded Project operator, got {:?}", fields[2]);
-            }
-        } else {
-            panic!("Expected Struct result, got {:?}", values[0]);
+            _ => panic!("Expected string value"),
         }
 
-        // Now let's create a second pattern match that first expands the child groups
-        let expand_children_expr = arc(PatternMatch(
-            arc(CoreVal(logical_group_ref)),
-            vec![
-                // Match the join and then expand its children
-                MatchArm {
-                    pattern: Pattern::Operator(Operator {
-                        tag: "Join".to_string(),
-                        data: vec![Bind("join_key".to_string(), Wildcard.into())],
-                        children: vec![
-                            // Patterns to match the expanded child groups
-                            Pattern::Operator(Operator {
-                                tag: "Filter".to_string(),
-                                data: vec![Bind("predicate".to_string(), Wildcard.into())],
-                                children: vec![Bind("left_table".to_string(), Wildcard.into())],
-                            }),
-                            Pattern::Operator(Operator {
-                                tag: "Project".to_string(),
-                                data: vec![Bind("column".to_string(), Wildcard.into())],
-                                children: vec![Bind("right_table".to_string(), Wildcard.into())],
-                            }),
-                        ],
-                    }),
-                    // Create a structured result with all bound values
-                    expr: arc(CoreExpr(CoreData::Struct(
-                        "ExpandedJoinPlan".to_string(),
-                        vec![
-                            arc(Ref("join_key".to_string())),
-                            arc(Ref("predicate".to_string())),
-                            arc(Ref("left_table".to_string())),
-                            arc(Ref("column".to_string())),
-                            arc(Ref("right_table".to_string())),
-                        ],
-                    ))),
-                },
-                // Fallback arm
-                MatchArm {
-                    pattern: Wildcard,
-                    expr: arc(CoreVal(string_val("no_match"))),
-                },
-            ],
+        match &false_results[0].0 {
+            CoreData::Literal(Literal::String(value)) => {
+                assert_eq!(value, "no"); // false condition should select "no"
+            }
+            _ => panic!("Expected string value"),
+        }
+
+        match &complex_results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 40); // 20 * 2 = 40 (since x > 10)
+            }
+            _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test let bindings and variable references
+    #[tokio::test]
+    async fn test_let_binding() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // let x = 10 in x + 5
+        let let_expr = Arc::new(Expr::Let(
+            "x".to_string(),
+            lit_expr(int(10)),
+            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, lit_expr(int(5)))),
         ));
 
-        // This should also work, because the pattern will cause expansion of the groups
-        let expanded_values = collect_stream_values(expand_children_expr.evaluate(engine));
+        let results = evaluate_and_collect(let_expr, engine).await;
 
-        // Should get one result with the expanded values
-        assert_eq!(expanded_values.len(), 1);
+        // Check result
+        match &results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 15); // 10 + 5 = 15
+            }
+            _ => panic!("Expected integer value"),
+        }
+    }
 
-        // Verify the structure of the result with expanded values
-        if let CoreData::Struct(name, fields) = &expanded_values[0].0 {
-            assert_eq!(name, "ExpandedJoinPlan");
-            assert_eq!(fields.len(), 5);
+    /// Test nested let bindings
+    #[tokio::test]
+    async fn test_nested_let_bindings() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
 
-            // Check that all values were correctly captured after expansion
-            assert!(matches!(&fields[0].0, CoreData::Literal(String(s)) if s == "customer_id"));
-            assert!(matches!(&fields[1].0, CoreData::Literal(Bool(true))));
-            assert!(matches!(&fields[2].0, CoreData::Literal(String(s)) if s == "customers"));
-            assert!(matches!(&fields[3].0, CoreData::Literal(Int64(100))));
-            assert!(matches!(&fields[4].0, CoreData::Literal(String(s)) if s == "orders"));
-        } else {
-            panic!("Expected Struct result, got {:?}", expanded_values[0]);
+        // let x = 10 in
+        //   let y = x * 2 in
+        //     x + y
+        let nested_let_expr = Arc::new(Expr::Let(
+            "x".to_string(),
+            lit_expr(int(10)),
+            Arc::new(Expr::Let(
+                "y".to_string(),
+                Arc::new(Expr::Binary(ref_expr("x"), BinOp::Mul, lit_expr(int(2)))),
+                Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, ref_expr("y"))),
+            )),
+        ));
+
+        let results = evaluate_and_collect(nested_let_expr, engine).await;
+
+        // Check result
+        match &results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 30); // 10 + (10 * 2) = 30
+            }
+            _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test function calls with user-defined functions (closures)
+    #[tokio::test]
+    async fn test_function_call_closure() {
+        let mock_gen = MockGenerator::new();
+        let mut ctx = Context::default();
+
+        // Define a function: fn(x, y) => x + y
+        let add_function = Value(CoreData::Function(FunKind::Closure(
+            vec!["x".to_string(), "y".to_string()],
+            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, ref_expr("y"))),
+        )));
+
+        ctx.bind("add".to_string(), add_function);
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Call the function: add(10, 20)
+        let call_expr = Arc::new(Expr::Call(
+            ref_expr("add"),
+            vec![lit_expr(int(10)), lit_expr(int(20))],
+        ));
+
+        let results = evaluate_and_collect(call_expr, engine).await;
+
+        // Check result
+        match &results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 30); // 10 + 20 = 30
+            }
+            _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test function calls with built-in functions (Rust UDFs)
+    #[tokio::test]
+    async fn test_function_call_rust_udf() {
+        let mock_gen = MockGenerator::new();
+        let mut ctx = Context::default();
+
+        // Define a Rust UDF that calculates the sum of array elements
+        let sum_function = Value(CoreData::Function(FunKind::RustUDF(|args| {
+            match &args[0].0 {
+                CoreData::Array(elements) => {
+                    let mut sum = 0;
+                    for elem in elements {
+                        if let CoreData::Literal(Literal::Int64(value)) = &elem.0 {
+                            sum += value;
+                        }
+                    }
+                    Value(CoreData::Literal(Literal::Int64(sum)))
+                }
+                _ => panic!("Expected array argument"),
+            }
+        })));
+
+        ctx.bind("sum".to_string(), sum_function);
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Call the function: sum([1, 2, 3, 4, 5])
+        let call_expr = Arc::new(Expr::Call(
+            ref_expr("sum"),
+            vec![Arc::new(Expr::CoreVal(array_val(vec![
+                lit_val(int(1)),
+                lit_val(int(2)),
+                lit_val(int(3)),
+                lit_val(int(4)),
+                lit_val(int(5)),
+            ])))],
+        ));
+
+        let results = evaluate_and_collect(call_expr, engine).await;
+
+        // Check result
+        match &results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 15); // 1 + 2 + 3 + 4 + 5 = 15
+            }
+            _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test complex program with multiple expression types
+    #[tokio::test]
+    async fn test_complex_program() {
+        let mock_gen = MockGenerator::new();
+        let mut ctx = Context::default();
+
+        // Define a function to compute factorial: fn(n) => if n <= 1 then 1 else n * factorial(n-1)
+        let factorial_function = Value(CoreData::Function(FunKind::Closure(
+            vec!["n".to_string()],
+            Arc::new(Expr::IfThenElse(
+                Arc::new(Expr::Binary(
+                    ref_expr("n"),
+                    BinOp::Lt,
+                    lit_expr(int(2)), // n < 2
+                )),
+                lit_expr(int(1)), // then 1
+                Arc::new(Expr::Binary(
+                    ref_expr("n"),
+                    BinOp::Mul,
+                    Arc::new(Expr::Call(
+                        ref_expr("factorial"),
+                        vec![Arc::new(Expr::Binary(
+                            ref_expr("n"),
+                            BinOp::Sub,
+                            lit_expr(int(1)),
+                        ))],
+                    )),
+                )), // else n * factorial(n-1)
+            )),
+        )));
+
+        ctx.bind("factorial".to_string(), factorial_function);
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Create a program that:
+        // 1. Defines variables for different values
+        // 2. Calls factorial on one of them
+        // 3. Performs some arithmetic on the result
+        let program = Arc::new(Expr::Let(
+            "a".to_string(),
+            lit_expr(int(5)), // a = 5
+            Arc::new(Expr::Let(
+                "b".to_string(),
+                lit_expr(int(3)), // b = 3
+                Arc::new(Expr::Let(
+                    "fact_a".to_string(),
+                    Arc::new(Expr::Call(ref_expr("factorial"), vec![ref_expr("a")])), // fact_a = factorial(a)
+                    Arc::new(Expr::Binary(ref_expr("fact_a"), BinOp::Div, ref_expr("b"))), // fact_a / b
+                )),
+            )),
+        ));
+
+        let results = evaluate_and_collect(program, engine).await;
+
+        // Check result: factorial(5) / 3 = 120 / 3 = 40
+        match &results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 40);
+            }
+            _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test variable reference in various contexts
+    #[tokio::test]
+    async fn test_variable_references() {
+        let mock_gen = MockGenerator::new();
+
+        // Test that variables from outer scope are visible in inner scope
+        let mut ctx = Context::default();
+        ctx.bind("outer_var".to_string(), lit_val(int(100)));
+        ctx.push_scope();
+        ctx.bind("inner_var".to_string(), lit_val(int(200)));
+
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Reference to a variable in the current (inner) scope
+        let inner_ref = Arc::new(Expr::Ref("inner_var".to_string()));
+        let inner_results = evaluate_and_collect(inner_ref, engine.clone()).await;
+
+        // Reference to a variable in the outer scope
+        let outer_ref = Arc::new(Expr::Ref("outer_var".to_string()));
+        let outer_results = evaluate_and_collect(outer_ref, engine.clone()).await;
+
+        // Check results
+        match &inner_results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 200);
+            }
+            _ => panic!("Expected integer value"),
+        }
+
+        match &outer_results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 100);
+            }
+            _ => panic!("Expected integer value"),
         }
     }
 }

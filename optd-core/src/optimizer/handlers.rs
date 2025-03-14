@@ -13,6 +13,7 @@ use crate::{
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
     },
+    engine::CostContinuation,
 };
 use futures::{
     channel::{
@@ -21,6 +22,7 @@ use futures::{
     },
     SinkExt, StreamExt,
 };
+use std::sync::Arc;
 use OptimizerMessage::*;
 
 impl<M: Memoize> Optimizer<M> {
@@ -149,36 +151,31 @@ impl<M: Memoize> Optimizer<M> {
                 self.handle_merge_result(result).await;
             }
 
-            let message_tx = self.message_tx.clone();
-            let engine = self.engine.clone();
-
-            // If a new expression was created, cost it and stream the optimized results
+            // If a new expression was created, cost it using CPS
             if let Some(expr) = new_expr {
-                tokio::spawn(capture!([engine], async move {
-                    engine
-                        .cost_plan(&plan)
-                        .inspect(|result| {
-                            if let Err(err) = result {
-                                eprintln!("Error costing physical plan: {:?}", err);
-                            }
-                        })
-                        .filter_map(|result| async move { result.ok() })
-                        .for_each(|cost| {
-                            let mut result_tx = message_tx.clone();
-                            let goal = goal.clone();
-                            let expr = expr.clone();
-                            async move {
-                                result_tx
-                                    .send(NewOptimizedExpression(
-                                        OptimizedExpression(expr, cost),
-                                        goal,
-                                    ))
-                                    .await
-                                    .expect("Failed to send costed plan");
-                            }
-                        })
-                        .await;
-                }));
+                let message_tx = self.message_tx.clone();
+                let engine = self.engine.clone();
+
+                // Create a continuation that sends the costed expression
+                let continuation: CostContinuation = Arc::new(move |cost| {
+                    let mut message_tx = message_tx.clone();
+                    let goal = goal.clone();
+                    let expr = expr.clone();
+
+                    Box::pin(async move {
+                        // Create and send the optimized expression with cost
+                        let optimized_expr = OptimizedExpression(expr, cost);
+                        message_tx
+                            .send(NewOptimizedExpression(optimized_expr, goal))
+                            .await
+                            .expect("Failed to send costed plan");
+                    })
+                });
+
+                // Launch the cost plan operation with the continuation
+                tokio::spawn(async move {
+                    engine.launch_cost_plan(&plan, continuation).await;
+                });
             }
         }
     }

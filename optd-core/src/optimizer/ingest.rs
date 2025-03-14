@@ -7,6 +7,7 @@ use crate::{
         operators::{Child, Operator},
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
     },
+    engine::PropertiesContinuation,
     error::Error,
 };
 use async_recursion::async_recursion;
@@ -68,19 +69,29 @@ impl<M: Memoize> Optimizer<M> {
                         let job_id = self.next_dep_id;
                         self.next_dep_id += 1;
 
-                        let mut message_tx = self.message_tx.clone();
+                        let message_tx = self.message_tx.clone();
                         let engine = self.engine.clone();
+                        let expr_clone = expr.clone();
 
+                        // Create a continuation for processing derived properties
+                        let properties_continuation: PropertiesContinuation =
+                            Arc::new(move |properties| {
+                                let mut message_tx = message_tx.clone();
+                                let expr = expr_clone.clone();
+
+                                Box::pin(async move {
+                                    message_tx
+                                        .send(CreateGroup(properties, expr, job_id))
+                                        .await
+                                        .expect("Failed to send CreateGroup message");
+                                })
+                            });
+
+                        // Launch the derive properties operation with the continuation
                         tokio::spawn(async move {
-                            let properties = engine
-                                .derive_properties(&expr.clone().into())
-                                .await
-                                .expect("Failed to derive properties");
-
-                            message_tx
-                                .send(CreateGroup(properties, expr, job_id))
-                                .await
-                                .expect("Failed to send CreateGroup message");
+                            engine
+                                .launch_derive_properties(&expr.into(), properties_continuation)
+                                .await;
                         });
 
                         job_id

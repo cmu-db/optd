@@ -1,18 +1,19 @@
 use super::{memo::Memoize, Optimizer, OptimizerMessage};
 use crate::{
-    capture,
     cir::{
         expressions::{LogicalExpression, OptimizedExpression},
         goal::Goal,
         group::GroupId,
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
     },
+    engine::{CostContinuation, LogicalPlanContinuation, PhysicalPlanContinuation},
 };
 use async_recursion::async_recursion;
 use futures::{
     channel::mpsc::{self, Sender},
     SinkExt, StreamExt,
 };
+use std::sync::Arc;
 use OptimizerMessage::*;
 
 impl<M: Memoize> Optimizer<M> {
@@ -122,27 +123,28 @@ impl<M: Memoize> Optimizer<M> {
 
                 for rule in &transformations {
                     let rule_name = rule.0.clone();
+                    let engine_clone = engine.clone();
+                    let message_tx_clone = message_tx.clone();
+                    let plan_clone = plan.clone();
 
-                    tokio::spawn(capture!([engine, plan, message_tx], async move {
-                        engine
-                            .match_and_apply_logical_rule(&rule_name, &plan)
-                            .inspect(|result| {
-                                if let Err(err) = result {
-                                    eprintln!("Error applying rule {}: {:?}", rule_name, err);
-                                }
-                            })
-                            .filter_map(|result| async move { result.ok() })
-                            .for_each(|transformed_plan| {
-                                let mut result_tx = message_tx.clone();
-                                async move {
+                    tokio::spawn(async move {
+                        // Create a continuation that processes transformed logical plans
+                        let logical_continuation: LogicalPlanContinuation =
+                            Arc::new(move |transformed_plan| {
+                                let mut result_tx = message_tx_clone.clone();
+                                Box::pin(async move {
                                     result_tx
                                         .send(NewLogicalPartial(transformed_plan, group_id))
                                         .await
                                         .expect("Failed to send transformation result");
-                                }
-                            })
+                                })
+                            });
+
+                        // Launch the logical rule application with the continuation
+                        engine_clone
+                            .launch_logical_rule(rule_name, &plan_clone, logical_continuation)
                             .await;
-                    }));
+                    });
                 }
             }
         });
@@ -171,36 +173,38 @@ impl<M: Memoize> Optimizer<M> {
             .await
             .expect("Failed to get physical expressions");
 
-        // Spawn a task to cost all existing physical expressions
+        // Spawn a task to cost all existing physical expressions using CPS
         if !physical_exprs.is_empty() {
             for expr in physical_exprs {
                 let plan: PartialPhysicalPlan = expr.clone().into();
+                let engine_clone = engine.clone();
+                let message_tx_clone = message_tx.clone();
+                let goal_clone = goal.clone();
+                let expr_clone = expr.clone();
 
-                tokio::spawn(capture!([engine, message_tx, goal], async move {
-                    engine
-                        .cost_plan(&plan)
-                        .inspect(|result| {
-                            if let Err(err) = result {
-                                eprintln!("Error costing physical plan: {:?}", err);
-                            }
+                tokio::spawn(async move {
+                    // Create a continuation that processes cost values
+                    let cost_continuation: CostContinuation = Arc::new(move |cost| {
+                        let mut result_tx = message_tx_clone.clone();
+                        let goal = goal_clone.clone();
+                        let expr = expr_clone.clone();
+
+                        Box::pin(async move {
+                            result_tx
+                                .send(NewOptimizedExpression(
+                                    OptimizedExpression(expr, cost),
+                                    goal,
+                                ))
+                                .await
+                                .expect("Failed to send costed plan");
                         })
-                        .filter_map(|result| async move { result.ok() })
-                        .for_each(|cost| {
-                            let mut result_tx = message_tx.clone();
-                            let goal = goal.clone();
-                            let expr = expr.clone();
-                            async move {
-                                result_tx
-                                    .send(NewOptimizedExpression(
-                                        OptimizedExpression(expr, cost),
-                                        goal,
-                                    ))
-                                    .await
-                                    .expect("Failed to send costed plan");
-                            }
-                        })
+                    });
+
+                    // Launch the cost plan operation with the continuation
+                    engine_clone
+                        .launch_cost_plan(&plan, cost_continuation)
                         .await;
-                }));
+                });
             }
         }
 
@@ -211,34 +215,37 @@ impl<M: Memoize> Optimizer<M> {
 
                 for rule in &implementations {
                     let rule_name = rule.0.clone();
+                    let engine_clone = engine.clone();
+                    let message_tx_clone = message_tx.clone();
+                    let goal_clone = goal.clone();
+                    let plan_clone = plan.clone();
+                    let props_clone = props.clone();
 
-                    tokio::spawn(capture!(
-                        [engine, plan, message_tx, goal, props],
-                        async move {
-                            engine
-                                .match_and_apply_implementation_rule(&rule_name, &plan, &props)
-                                .inspect(|result| {
-                                    if let Err(err) = result {
-                                        eprintln!(
-                                            "Error applying implementation rule {}: {:?}",
-                                            rule_name, err
-                                        );
-                                    }
+                    tokio::spawn(async move {
+                        // Create a continuation that processes physical plans
+                        let physical_continuation: PhysicalPlanContinuation =
+                            Arc::new(move |physical_plan| {
+                                let mut result_tx = message_tx_clone.clone();
+                                let goal = goal_clone.clone();
+
+                                Box::pin(async move {
+                                    result_tx
+                                        .send(NewPhysicalPartial(physical_plan, goal))
+                                        .await
+                                        .expect("Failed to send implementation result");
                                 })
-                                .filter_map(|result| async move { result.ok() })
-                                .for_each(|physical_plan| {
-                                    let mut result_tx = message_tx.clone();
-                                    let goal = goal.clone();
-                                    async move {
-                                        result_tx
-                                            .send(NewPhysicalPartial(physical_plan, goal))
-                                            .await
-                                            .expect("Failed to send implementation result");
-                                    }
-                                })
-                                .await;
-                        }
-                    ));
+                            });
+
+                        // Launch the implementation rule application with the continuation
+                        engine_clone
+                            .launch_implementation_rule(
+                                rule_name,
+                                &plan_clone,
+                                &props_clone,
+                                physical_continuation,
+                            )
+                            .await;
+                    });
                 }
             }
         });

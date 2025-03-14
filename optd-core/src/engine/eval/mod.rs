@@ -1,40 +1,70 @@
-//! This module provides the evaluation machinery for expressions in the DSL.
-//!
-//! The evaluation system is designed to handle both deterministic and non-deterministic
-//! expression evaluation through a streaming approach. Rather than producing a single
-//! value, expressions evaluate to streams of possible values, capturing all potential
-//! evaluation paths. This is critical for applications like query optimization where
-//! pattern matching and rule application may yield multiple valid transformations.
-//!
-//! Key components of the evaluation system include:
-//!
-//! - `expr`: Expression evaluation dispatcher and high-level control flow
-//! - `binary`: Evaluation of binary operations (arithmetic, logical, comparison)
-//! - `unary`: Evaluation of unary operations (negation, not)
-//! - `core`: Evaluation of primitive data types and data structures
-//! - `match`: Pattern matching and binding for rule application
-//! - `operator`: Evaluation of query plan operators with their children
-//!
-//! Expressions are evaluated in a non-blocking manner, with results propagated through
-//! streams that can be consumed incrementally. This approach efficiently handles the
-//! potential combinatorial explosion of evaluation paths in complex rule applications.
-
-use super::{expander::Expander, utils::streams::ValueStream, Engine};
+use super::generator::{Continuation, Generator};
+use super::{Engine, UnitFuture};
+use core::evaluate_core_expr;
+use expr::{
+    evaluate_binary_expr, evaluate_function_call, evaluate_if_then_else, evaluate_let_binding,
+    evaluate_reference, evaluate_unary_expr,
+};
+use optd_dsl::analyzer::hir::Expr;
+use r#match::evaluate_pattern_match;
+use std::sync::Arc;
+use Expr::*;
 
 mod binary;
 mod core;
 mod expr;
-pub(crate) mod r#match;
+mod r#match;
 mod operator;
 mod unary;
 
-/// Evaluates an expression in the given context.
-///
-/// This trait serves as the evaluation interface for expressions from HIR.
-/// Expression types from HIR must implement this trait to be evaluated
-/// by the engine.
-pub(crate) trait Evaluate {
-    fn evaluate<E>(self, engine: Engine<E>) -> ValueStream
+/// Trait for evaluating expressions using Continuation Passing Style (CPS).
+pub trait Evaluate {
+    /// Evaluates an expression and passes results to the provided continuation.
+    ///
+    /// # Parameters
+    /// * `self` - The expression to evaluate
+    /// * `engine` - The evaluation engine (owned)
+    /// * `k` - The continuation to receive each evaluation result
+    fn evaluate<G>(self, engine: Engine<G>, k: Continuation) -> UnitFuture
     where
-        E: Expander;
+        G: Generator;
+}
+
+impl Evaluate for Arc<Expr> {
+    fn evaluate<G>(self, engine: Engine<G>, k: Continuation) -> UnitFuture
+    where
+        G: Generator,
+    {
+        Box::pin(async move {
+            match &*self {
+                PatternMatch(expr, match_arms) => {
+                    evaluate_pattern_match(expr.clone(), match_arms.clone(), engine, k).await
+                }
+                IfThenElse(cond, then_expr, else_expr) => {
+                    evaluate_if_then_else(
+                        cond.clone(),
+                        then_expr.clone(),
+                        else_expr.clone(),
+                        engine,
+                        k,
+                    )
+                    .await
+                }
+                Let(ident, assignee, after) => {
+                    evaluate_let_binding(ident.clone(), assignee.clone(), after.clone(), engine, k)
+                        .await
+                }
+                Binary(left, op, right) => {
+                    evaluate_binary_expr(left.clone(), op.clone(), right.clone(), engine, k).await
+                }
+                Unary(op, expr) => evaluate_unary_expr(op.clone(), expr.clone(), engine, k).await,
+                Call(fun, args) => {
+                    evaluate_function_call(fun.clone(), args.clone(), engine, k).await
+                }
+                Ref(ident) => evaluate_reference(ident.clone(), engine, k).await,
+                CoreExpr(expr) => evaluate_core_expr(expr.clone(), engine, k).await,
+                CoreVal(val) => k(val.clone()).await,
+            }
+        })
+    }
 }

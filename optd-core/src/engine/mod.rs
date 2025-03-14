@@ -1,9 +1,3 @@
-//! Interface to the Optimizer engine for rule and function evaluation.
-//!
-//! This module provides the primary interface for invoking optimization rules and functions
-//! defined in the OPTD language. It handles the execution of rules against input
-//! plans and manages the transformation of plans according to those rules.
-
 use crate::{
     bridge::{
         from_cir::{
@@ -14,48 +8,57 @@ use crate::{
             value_to_partial_physical,
         },
     },
+    capture,
     cir::{
+        goal::Cost,
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
     },
-    error::Error,
 };
-use error::EngineError;
 use eval::Evaluate;
-use expander::Expander;
-use futures::StreamExt;
+use generator::Generator;
 use optd_dsl::analyzer::{
     context::Context,
     hir::{CoreData, Expr, Literal, Value},
 };
 use std::sync::Arc;
-use utils::streams::{CostStream, PartialLogicalPlanStream, PartialPhysicalPlanStream};
-use EngineError::*;
-use Error::*;
+use utils::UnitFuture;
 use Expr::*;
-use Literal::*;
 
-pub(crate) mod error;
 mod eval;
-pub(crate) mod expander;
+pub(crate) mod generator;
+#[cfg(test)]
+pub(super) mod test_utils;
 pub(crate) mod utils;
 
-/// Result type for rule applications
-type RuleResult<T> = Result<T, Error>;
+/// Type alias for a continuation that receives a PartialLogicalPlan
+pub(crate) type LogicalPlanContinuation =
+    Arc<dyn Fn(PartialLogicalPlan) -> UnitFuture + Send + Sync + 'static>;
+
+/// Type alias for a continuation that receives a PartialPhysicalPlan
+pub(crate) type PhysicalPlanContinuation =
+    Arc<dyn Fn(PartialPhysicalPlan) -> UnitFuture + Send + Sync + 'static>;
+
+/// Type alias for a continuation that receives a cost value
+pub(crate) type CostContinuation = Arc<dyn Fn(Cost) -> UnitFuture + Send + Sync + 'static>;
+
+/// Type alias for a continuation that receives LogicalProperties
+pub(crate) type PropertiesContinuation =
+    Arc<dyn Fn(LogicalProperties) -> UnitFuture + Send + Sync + 'static>;
 
 /// The engine for evaluating HIR expressions and applying rules.
 #[derive(Debug, Clone)]
-pub(crate) struct Engine<E: Expander> {
+pub(crate) struct Engine<G: Generator> {
     /// The original HIR context containing all defined expressions and rules
     pub(crate) context: Context,
     /// The expander for resolving group references
-    pub(crate) expander: E,
+    pub(crate) generator: G,
 }
 
-impl<E: Expander> Engine<E> {
+impl<E: Generator> Engine<E> {
     /// Creates a new engine with the given context and expander.
-    pub(crate) fn new(context: Context, expander: E) -> Self {
-        Self { context, expander }
+    pub(crate) fn new(context: Context, generator: E) -> Self {
+        Self { context, generator }
     }
 
     /// Creates a new engine with an updated context but the same expander.
@@ -71,112 +74,153 @@ impl<E: Expander> Engine<E> {
     pub(crate) fn with_context(self, context: Context) -> Self {
         Self {
             context,
-            expander: self.expander,
+            generator: self.generator,
         }
     }
 
-    /// Interprets a function with the given name and input.
+    /// Launches a logical rule application for a given plan.
     ///
-    /// This applies a logical rule to an input plan and returns all possible
-    /// transformations of the plan according to the rule.
+    /// This applies a logical rule to an input plan and passes all possible
+    /// transformations of the plan to the continuation.
     ///
     /// # Parameters
     /// * `rule_name` - The name of the rule to apply
     /// * `plan` - The logical plan to transform
-    ///
-    /// # Returns
-    /// A stream of possible transformed logical plans
-    pub(crate) fn match_and_apply_logical_rule(
+    /// * `k` - The continuation to receive transformed logical plans
+    pub(crate) fn launch_logical_rule(
         self,
-        rule_name: &str,
+        rule_name: String,
         plan: &PartialLogicalPlan,
-    ) -> PartialLogicalPlanStream {
-        let rule_call = self.create_rule_call(rule_name, vec![partial_logical_to_value(plan)]);
+        k: LogicalPlanContinuation,
+    ) -> UnitFuture {
+        let rule_call = self.create_rule_call(&rule_name, vec![partial_logical_to_value(plan)]);
 
-        rule_call
-            .evaluate(self)
-            .map(move |result| Self::process_rule_result(result, value_to_partial_logical))
-            .boxed()
+        Box::pin(async move {
+            rule_call
+                .evaluate(
+                    self,
+                    Arc::new(move |result| {
+                        Box::pin(capture!([k, rule_name], async move {
+                            Self::process_result(
+                                result,
+                                value_to_partial_logical,
+                                &format!("logical rule '{}'", rule_name),
+                                k,
+                            )
+                            .await;
+                        }))
+                    }),
+                )
+                .await;
+        })
     }
 
-    /// Interprets a function with the given name and inputs.
+    /// Launches an implementation rule application for a given plan and properties.
     ///
-    /// This applies an implementation rule to an input logical plan and required physical properties,
-    /// returning all possible physical implementations according to the rule.
+    /// This applies an implementation rule to an input logical plan and required physical
+    /// properties, passing all possible physical implementations to the continuation.
     ///
     /// # Parameters
     /// * `rule_name` - The name of the rule to apply
     /// * `plan` - The logical plan to transform
     /// * `props` - The physical properties required for the implementation
-    ///
-    /// # Returns
-    /// A stream of possible physical plan implementations
-    pub(crate) fn match_and_apply_implementation_rule(
+    /// * `k` - The continuation to receive physical plan implementations
+    pub(crate) fn launch_implementation_rule(
         self,
-        rule_name: &str,
+        rule_name: String,
         plan: &PartialLogicalPlan,
         props: &PhysicalProperties,
-    ) -> PartialPhysicalPlanStream {
+        k: PhysicalPlanContinuation,
+    ) -> UnitFuture {
         let plan_value = partial_logical_to_value(plan);
         let props_value = physical_properties_to_value(props);
 
-        let rule_call = self.create_rule_call(rule_name, vec![plan_value, props_value]);
+        let rule_call = self.create_rule_call(&rule_name, vec![plan_value, props_value]);
 
-        rule_call
-            .evaluate(self)
-            .map(|result| Self::process_rule_result(result, value_to_partial_physical))
-            .boxed()
+        Box::pin(async move {
+            rule_call
+                .evaluate(
+                    self,
+                    Arc::new(move |result| {
+                        Box::pin(capture!([k, rule_name], async move {
+                            Self::process_result(
+                                result,
+                                value_to_partial_physical,
+                                &format!("implementation rule '{}'", rule_name),
+                                k,
+                            )
+                            .await;
+                        }))
+                    }),
+                )
+                .await;
+        })
     }
 
     /// Evaluates the cost of a physical plan.
     ///
     /// This calls the reserved "cost" function of the DSL to compute the cost
-    /// of a given physical plan. The cost is used by the optimizer to compare
-    /// different implementation alternatives.
+    /// of a given physical plan, passing results to the continuation.
     ///
     /// # Parameters
     /// * `plan` - The physical plan to evaluate the cost for
-    ///
-    /// # Returns
-    /// A stream of possible cost values for the plan
-    pub(crate) fn cost_plan(self, plan: &PartialPhysicalPlan) -> CostStream {
+    /// * `k` - The continuation to receive cost values
+    pub(crate) fn launch_cost_plan(
+        self,
+        plan: &PartialPhysicalPlan,
+        k: CostContinuation,
+    ) -> UnitFuture {
         // Create a call to the reserved "cost" function
         let rule_call = self.create_rule_call("cost", vec![partial_physical_to_value(plan)]);
 
-        rule_call
-            .evaluate(self)
-            .map(|result| Self::process_rule_result(result, value_to_cost))
-            .boxed()
+        Box::pin(async move {
+            rule_call
+                .evaluate(
+                    self,
+                    Arc::new(move |result| {
+                        Box::pin(capture!([k], async move {
+                            Self::process_result(result, value_to_cost, "cost function", k).await;
+                        }))
+                    }),
+                )
+                .await;
+        })
     }
 
     /// Derives logical properties for a given logical plan.
     ///
     /// This calls the reserved "derive" function of the DSL to compute
-    /// the logical properties for a given logical plan. These properties are
-    /// used for various optimization decisions like cardinality estimation,
-    /// schema inference, and cost calculations.
+    /// the logical properties for a given logical plan and passes them to the continuation.
     ///
     /// # Parameters
     /// * `plan` - The logical plan to derive properties for
-    ///
-    /// # Returns
-    /// The logical properties derived from the plan
-    pub(crate) async fn derive_properties(
+    /// * `k` - The continuation to receive the logical properties
+    pub(crate) fn launch_derive_properties(
         self,
         plan: &PartialLogicalPlan,
-    ) -> Result<LogicalProperties, Error> {
+        k: PropertiesContinuation,
+    ) -> UnitFuture {
         // Create a call to the reserved "derive" function
         let rule_call = self.create_rule_call("derive", vec![partial_logical_to_value(plan)]);
 
-        // Evaluate the rule and transform the result into logical properties
-        let result = rule_call
-            .evaluate(self)
-            .next()
-            .await
-            .ok_or(Engine(NoResult))?;
-
-        // Process the result and transform to logical properties
-        Self::process_rule_result(result, value_to_logical_properties)
+        Box::pin(async move {
+            rule_call
+                .evaluate(
+                    self,
+                    Arc::new(move |result| {
+                        Box::pin(capture!([k], async move {
+                            Self::process_result(
+                                result,
+                                value_to_logical_properties,
+                                "derive function",
+                                k,
+                            )
+                            .await;
+                        }))
+                    }),
+                )
+                .await;
+        })
     }
 
     /// Creates a rule call expression with the given name and arguments.
@@ -194,26 +238,38 @@ impl<E: Expander> Engine<E> {
         Call(rule_name_expr.into(), arg_exprs).into()
     }
 
-    /// Processes the result of a rule evaluation.
+    /// Helper function to process values and handle failures
+    ///
+    /// This abstracts the common pattern of handling failures and value transformation
+    /// for all rule application functions.
     ///
     /// # Parameters
-    /// * `result` - The result of evaluating a rule
-    /// * `transform` - A function to transform the result value to the desired output type
-    ///
-    /// # Returns
-    /// Either a transformed value or an error
-    fn process_rule_result<T, F>(result: Result<Value, Error>, transform: F) -> RuleResult<T>
-    where
+    /// * `value` - The value from rule evaluation
+    /// * `transform` - Function to transform value to desired type
+    /// * `context` - Context string for error messages
+    /// * `k` - Continuation to call with transformed value on success
+    async fn process_result<T, F>(
+        value: Value,
+        transform: F,
+        context: &str,
+        k: Arc<dyn Fn(T) -> UnitFuture + Send + Sync + 'static>,
+    ) where
         F: FnOnce(&Value) -> T,
     {
-        result.and_then(|value| match &value.0 {
-            CoreData::Fail(boxed_msg) => match &boxed_msg.0 {
-                CoreData::Literal(String(error_message)) => {
-                    Err(Engine(Fail(error_message.clone())))
+        match &value.0 {
+            CoreData::Fail(boxed_msg) => {
+                if let CoreData::Literal(Literal::String(error_message)) = &boxed_msg.0 {
+                    eprintln!("Error in {}: {}", context, error_message);
+                    // Don't call continuation for failed rules
+                } else {
+                    panic!("Fail expression must evaluate to a string message");
                 }
-                _ => panic!("Fail expression must evaluate to a string message"),
-            },
-            _ => Ok(transform(&value)),
-        })
+            }
+            _ => {
+                // Transform and pass to continuation
+                let transformed = transform(&value);
+                k(transformed).await;
+            }
+        }
     }
 }
