@@ -320,3 +320,314 @@ where
     // Pass the value to the continuation
     k(value).await;
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::engine::{
+        test_utils::{
+            array_val, boolean, evaluate_and_collect, int, lit_expr, lit_val, ref_expr, string,
+            MockGenerator,
+        },
+        Engine,
+    };
+    use optd_dsl::analyzer::{
+        context::Context,
+        hir::{BinOp, CoreData, Expr, FunKind, Literal, Value},
+    };
+    use std::sync::Arc;
+
+    /// Test if-then-else expressions with true and false conditions
+    #[tokio::test]
+    async fn test_if_then_else() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // if true then "yes" else "no"
+        let true_condition = Arc::new(Expr::IfThenElse(
+            lit_expr(boolean(true)),
+            lit_expr(string("yes")),
+            lit_expr(string("no")),
+        ));
+        let true_results = evaluate_and_collect(true_condition, engine.clone()).await;
+
+        // if false then "yes" else "no"
+        let false_condition = Arc::new(Expr::IfThenElse(
+            lit_expr(boolean(false)),
+            lit_expr(string("yes")),
+            lit_expr(string("no")),
+        ));
+        let false_results = evaluate_and_collect(false_condition, engine.clone()).await;
+
+        // Let's create a more complex condition: if x > 10 then x * 2 else x / 2
+        let mut ctx = Context::default();
+        ctx.bind("x".to_string(), lit_val(int(20)));
+        let engine_with_x = Engine::new(ctx, MockGenerator::new());
+
+        let complex_condition = Arc::new(Expr::IfThenElse(
+            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Lt, lit_expr(int(10)))),
+            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Div, lit_expr(int(2)))),
+            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Mul, lit_expr(int(2)))),
+        ));
+
+        let complex_results = evaluate_and_collect(complex_condition, engine_with_x).await;
+
+        // Check results
+        match &true_results[0].0 {
+            CoreData::Literal(Literal::String(value)) => {
+                assert_eq!(value, "yes"); // true condition should select "yes"
+            }
+            _ => panic!("Expected string value"),
+        }
+
+        match &false_results[0].0 {
+            CoreData::Literal(Literal::String(value)) => {
+                assert_eq!(value, "no"); // false condition should select "no"
+            }
+            _ => panic!("Expected string value"),
+        }
+
+        match &complex_results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 40); // 20 * 2 = 40 (since x > 10)
+            }
+            _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test let bindings and variable references
+    #[tokio::test]
+    async fn test_let_binding() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // let x = 10 in x + 5
+        let let_expr = Arc::new(Expr::Let(
+            "x".to_string(),
+            lit_expr(int(10)),
+            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, lit_expr(int(5)))),
+        ));
+
+        let results = evaluate_and_collect(let_expr, engine).await;
+
+        // Check result
+        match &results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 15); // 10 + 5 = 15
+            }
+            _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test nested let bindings
+    #[tokio::test]
+    async fn test_nested_let_bindings() {
+        let mock_gen = MockGenerator::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx, mock_gen);
+
+        // let x = 10 in
+        //   let y = x * 2 in
+        //     x + y
+        let nested_let_expr = Arc::new(Expr::Let(
+            "x".to_string(),
+            lit_expr(int(10)),
+            Arc::new(Expr::Let(
+                "y".to_string(),
+                Arc::new(Expr::Binary(ref_expr("x"), BinOp::Mul, lit_expr(int(2)))),
+                Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, ref_expr("y"))),
+            )),
+        ));
+
+        let results = evaluate_and_collect(nested_let_expr, engine).await;
+
+        // Check result
+        match &results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 30); // 10 + (10 * 2) = 30
+            }
+            _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test function calls with user-defined functions (closures)
+    #[tokio::test]
+    async fn test_function_call_closure() {
+        let mock_gen = MockGenerator::new();
+        let mut ctx = Context::default();
+
+        // Define a function: fn(x, y) => x + y
+        let add_function = Value(CoreData::Function(FunKind::Closure(
+            vec!["x".to_string(), "y".to_string()],
+            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, ref_expr("y"))),
+        )));
+
+        ctx.bind("add".to_string(), add_function);
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Call the function: add(10, 20)
+        let call_expr = Arc::new(Expr::Call(
+            ref_expr("add"),
+            vec![lit_expr(int(10)), lit_expr(int(20))],
+        ));
+
+        let results = evaluate_and_collect(call_expr, engine).await;
+
+        // Check result
+        match &results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 30); // 10 + 20 = 30
+            }
+            _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test function calls with built-in functions (Rust UDFs)
+    #[tokio::test]
+    async fn test_function_call_rust_udf() {
+        let mock_gen = MockGenerator::new();
+        let mut ctx = Context::default();
+
+        // Define a Rust UDF that calculates the sum of array elements
+        let sum_function = Value(CoreData::Function(FunKind::RustUDF(|args| {
+            match &args[0].0 {
+                CoreData::Array(elements) => {
+                    let mut sum = 0;
+                    for elem in elements {
+                        if let CoreData::Literal(Literal::Int64(value)) = &elem.0 {
+                            sum += value;
+                        }
+                    }
+                    Value(CoreData::Literal(Literal::Int64(sum)))
+                }
+                _ => panic!("Expected array argument"),
+            }
+        })));
+
+        ctx.bind("sum".to_string(), sum_function);
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Call the function: sum([1, 2, 3, 4, 5])
+        let call_expr = Arc::new(Expr::Call(
+            ref_expr("sum"),
+            vec![Arc::new(Expr::CoreVal(array_val(vec![
+                lit_val(int(1)),
+                lit_val(int(2)),
+                lit_val(int(3)),
+                lit_val(int(4)),
+                lit_val(int(5)),
+            ])))],
+        ));
+
+        let results = evaluate_and_collect(call_expr, engine).await;
+
+        // Check result
+        match &results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 15); // 1 + 2 + 3 + 4 + 5 = 15
+            }
+            _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test complex program with multiple expression types
+    #[tokio::test]
+    async fn test_complex_program() {
+        let mock_gen = MockGenerator::new();
+        let mut ctx = Context::default();
+
+        // Define a function to compute factorial: fn(n) => if n <= 1 then 1 else n * factorial(n-1)
+        let factorial_function = Value(CoreData::Function(FunKind::Closure(
+            vec!["n".to_string()],
+            Arc::new(Expr::IfThenElse(
+                Arc::new(Expr::Binary(
+                    ref_expr("n"),
+                    BinOp::Lt,
+                    lit_expr(int(2)), // n < 2
+                )),
+                lit_expr(int(1)), // then 1
+                Arc::new(Expr::Binary(
+                    ref_expr("n"),
+                    BinOp::Mul,
+                    Arc::new(Expr::Call(
+                        ref_expr("factorial"),
+                        vec![Arc::new(Expr::Binary(
+                            ref_expr("n"),
+                            BinOp::Sub,
+                            lit_expr(int(1)),
+                        ))],
+                    )),
+                )), // else n * factorial(n-1)
+            )),
+        )));
+
+        ctx.bind("factorial".to_string(), factorial_function);
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Create a program that:
+        // 1. Defines variables for different values
+        // 2. Calls factorial on one of them
+        // 3. Performs some arithmetic on the result
+        let program = Arc::new(Expr::Let(
+            "a".to_string(),
+            lit_expr(int(5)), // a = 5
+            Arc::new(Expr::Let(
+                "b".to_string(),
+                lit_expr(int(3)), // b = 3
+                Arc::new(Expr::Let(
+                    "fact_a".to_string(),
+                    Arc::new(Expr::Call(ref_expr("factorial"), vec![ref_expr("a")])), // fact_a = factorial(a)
+                    Arc::new(Expr::Binary(ref_expr("fact_a"), BinOp::Div, ref_expr("b"))), // fact_a / b
+                )),
+            )),
+        ));
+
+        let results = evaluate_and_collect(program, engine).await;
+
+        // Check result: factorial(5) / 3 = 120 / 3 = 40
+        match &results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 40);
+            }
+            _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test variable reference in various contexts
+    #[tokio::test]
+    async fn test_variable_references() {
+        let mock_gen = MockGenerator::new();
+
+        // Test that variables from outer scope are visible in inner scope
+        let mut ctx = Context::default();
+        ctx.bind("outer_var".to_string(), lit_val(int(100)));
+        ctx.push_scope();
+        ctx.bind("inner_var".to_string(), lit_val(int(200)));
+
+        let engine = Engine::new(ctx, mock_gen);
+
+        // Reference to a variable in the current (inner) scope
+        let inner_ref = Arc::new(Expr::Ref("inner_var".to_string()));
+        let inner_results = evaluate_and_collect(inner_ref, engine.clone()).await;
+
+        // Reference to a variable in the outer scope
+        let outer_ref = Arc::new(Expr::Ref("outer_var".to_string()));
+        let outer_results = evaluate_and_collect(outer_ref, engine.clone()).await;
+
+        // Check results
+        match &inner_results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 200);
+            }
+            _ => panic!("Expected integer value"),
+        }
+
+        match &outer_results[0].0 {
+            CoreData::Literal(Literal::Int64(value)) => {
+                assert_eq!(*value, 100);
+            }
+            _ => panic!("Expected integer value"),
+        }
+    }
+}
