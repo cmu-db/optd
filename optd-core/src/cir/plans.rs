@@ -25,10 +25,18 @@ pub struct PhysicalPlan(pub Operator<Arc<PhysicalPlan>>);
 
 /// Represents partially materialized logical plans.
 ///
-/// Partial logical plans are partially materialized [`LogicalPlan`]s, representing the top of a
-/// logical plan tree, where the unmaterialized leaves of this structure are [`GroupId`]s.
+/// Partial logical plans are partially materialized [`LogicalPlan`]s, representing a connected
+/// sub-tree/DAG. When we say partial, we mean that parts of the plan are not fully materialized,
+/// allowing for more efficient rule matching and binding. However, the parts that _are_
+/// materialized are connected, and they form a valid tree/DAG.
 ///
-/// We use partial plans because most rules only need to match and bind to the top of the
+/// The nodes of a partial plan can either be unmaterialized [`GroupId`]s or materialized
+/// [`Operator`]s (that have other partial plan nodes as children). Because of this, you can cast
+/// both logical expressions (a single operator with groups as children) and logical plans (a
+/// tree/DAG of operators) into a `PartialLogicalPlan`. Note that a partial plan with only an
+/// unmaterialized group at the root is not only possible, but common.
+///
+/// We use partial plans because most rules only need to match and bind to a specific section of a
 /// plan (the root and maybe some of its children), and it would be expensive to materialize the
 /// entire plan when the rule engine only needs to know about the top. In other words, partial plans
 /// allow us to give the rule engine exactly what it needs and nothing else.
@@ -42,8 +50,16 @@ pub enum PartialLogicalPlan {
 
 /// Represents a partially materialized physical plan.
 ///
-/// Partial physical plans are partially materialized [`PhysicalPlan`]s, representing the top of a
-/// physical execution plan tree, where the unmaterialized leaves of this structure are [`Goal`]s.
+/// Partial physical plans are partially materialized [`PhysicalPlan`]s, representing a connected
+/// sub-tree/DAG. When we say partial, we mean that parts of the plan are not fully materialized,
+/// allowing for more efficient rule matching and binding. However, the parts that _are_
+/// materialized are connected, and they form a valid tree/DAG.
+///
+/// The nodes of a partial plan can either be unmaterialized [`Goal`]s or materialized [`Operator`]s
+/// (that have other partial plan nodes as children). Because of this, you can cast both physical
+/// expressions (a single operator with groups as children) and physical plans (a tree/DAG of
+/// operators) into a `PartialPhysicalPlan`. Note that a partial plan with only an unmaterialized
+/// group at the root is not only possible, but common.
 ///
 /// We use partial plans because most rules only need to match and bind to the top of the
 /// plan (the root and maybe some of its children), and it would be expensive to materialize the

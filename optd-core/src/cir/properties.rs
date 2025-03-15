@@ -16,7 +16,7 @@ pub struct LogicalProperties(pub Option<PropertiesData>);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PhysicalProperties(pub Option<PropertiesData>);
 
-/// Represents various types of property data that can be associated with execution operators.
+/// Represents various types of property data that can be associated with operators.
 ///
 /// This enum provides a flexible way to store different types of metadata and properties for both
 /// logical and physical plan nodes.
