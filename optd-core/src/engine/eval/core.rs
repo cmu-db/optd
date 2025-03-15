@@ -11,13 +11,14 @@ use CoreData::*;
 
 /// Evaluates a core expression by generating all possible evaluation paths.
 ///
-/// This function dispatches to specialized handlers based on the expression type,
-/// passing all possible values the expression could evaluate to the continuation.
+/// This function dispatches to specialized handlers based on the expression type, passing all
+/// possible values the expression could evaluate to the continuation.
 ///
 /// # Parameters
-/// * `data` - The core expression data to evaluate
-/// * `engine` - The evaluation engine
-/// * `k` - The continuation to receive evaluation results
+///
+/// * `data` - The core expression data to evaluate.
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
 pub(super) async fn evaluate_core_expr<G>(
     data: CoreData<Arc<Expr>>,
     engine: Engine<G>,
@@ -27,7 +28,7 @@ pub(super) async fn evaluate_core_expr<G>(
 {
     match data {
         Literal(lit) => {
-            // Directly continue with the literal value
+            // Directly continue with the literal value.
             k(Value(Literal(lit))).await;
         }
         Array(items) => {
@@ -43,7 +44,7 @@ pub(super) async fn evaluate_core_expr<G>(
             evaluate_map(items, engine, k).await;
         }
         Function(fun_type) => {
-            // Directly continue with the function value
+            // Directly continue with the function value.
             k(Value(Function(fun_type))).await;
         }
         Fail(msg) => {
@@ -56,7 +57,7 @@ pub(super) async fn evaluate_core_expr<G>(
             evaluate_physical_operator(op, engine, k).await;
         }
         Null => {
-            // Directly continue with null value
+            // Directly continue with null value.
             k(Value(Null)).await;
         }
     }
@@ -65,10 +66,11 @@ pub(super) async fn evaluate_core_expr<G>(
 /// Evaluates a collection expression (Array, Tuple, or Struct).
 ///
 /// # Parameters
-/// * `items` - The collection items to evaluate
-/// * `constructor` - Function to construct the appropriate collection type
-/// * `engine` - The evaluation engine
-/// * `k` - The continuation to receive evaluation results
+///
+/// * `items` - The collection items to evaluate.
+/// * `constructor` - Function to construct the appropriate collection type.
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
 async fn evaluate_collection<G, F>(
     items: Vec<Arc<Expr>>,
     constructor: F,
@@ -94,29 +96,30 @@ async fn evaluate_collection<G, F>(
 /// Evaluates a map expression.
 ///
 /// # Parameters
-/// * `items` - The key-value pairs to evaluate
-/// * `engine` - The evaluation engine
-/// * `k` - The continuation to receive evaluation results
+///
+/// * `items` - The key-value pairs to evaluate.
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
 async fn evaluate_map<G>(items: Vec<(Arc<Expr>, Arc<Expr>)>, engine: Engine<G>, k: Continuation)
 where
     G: Generator,
 {
-    // Extract keys and values
+    // Extract keys and values.
     let (keys, values): (Vec<Arc<Expr>>, Vec<Arc<Expr>>) = items.into_iter().unzip();
 
-    // First evaluate all key expressions
+    // First evaluate all key expressions.
     evaluate_sequence(
         keys,
         engine.clone(),
         Arc::new(move |keys_values| {
             Box::pin(capture!([values, engine, k], async move {
-                // Then evaluate all value expressions
+                // Then evaluate all value expressions.
                 evaluate_sequence(
                     values,
                     engine,
                     Arc::new(move |values_values| {
                         Box::pin(capture!([keys_values, k], async move {
-                            // Create map from keys and values
+                            // Create a map from keys and values.
                             let map_items = keys_values.into_iter().zip(values_values).collect();
                             k(Value(Map(map_items))).await;
                         }))
@@ -132,6 +135,7 @@ where
 /// Evaluates a fail expression.
 ///
 /// # Parameters
+///
 /// * `msg` - The message expression to evaluate
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive evaluation results
@@ -251,7 +255,7 @@ mod tests {
                     _ => panic!("Expected string literal"),
                 }
                 match &elements[2].0 {
-                    CoreData::Literal(Literal::Bool(value)) => assert_eq!(*value, true),
+                    CoreData::Literal(Literal::Bool(value)) => assert!(*value),
                     _ => panic!("Expected boolean literal"),
                 }
             }

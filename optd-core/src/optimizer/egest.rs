@@ -1,11 +1,6 @@
 use super::{memo::Memoize, Optimizer};
 use crate::{
-    cir::{
-        expressions::OptimizedExpression,
-        goal::Goal,
-        operators::{Child, Operator},
-        plans::PhysicalPlan,
-    },
+    cir::{Child, Goal, Operator, OptimizedExpression, PhysicalPlan},
     error::Error,
 };
 use async_recursion::async_recursion;

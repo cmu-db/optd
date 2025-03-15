@@ -9,18 +9,18 @@ use optd_dsl::analyzer::hir::{
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-/// A configurable mock generator for testing the evaluation engine
+/// A configurable mock generator for testing the evaluation engine.
 #[derive(Clone)]
 pub struct MockGenerator {
-    /// Maps group IDs to their materialized values
+    /// Maps group IDs to their materialized values.
     group_mappings: Arc<Mutex<HashMap<String, Vec<Value>>>>,
 
-    /// Maps goals to their implementations
+    /// Maps goals to their implementations.
     goal_mappings: Arc<Mutex<HashMap<String, Vec<Value>>>>,
 }
 
 impl MockGenerator {
-    /// Creates a new empty mock generator
+    /// Creates a new empty mock generator.
     pub fn new() -> Self {
         Self {
             group_mappings: Arc::new(Mutex::new(HashMap::new())),
@@ -28,18 +28,18 @@ impl MockGenerator {
         }
     }
 
-    /// Registers a logical operator value to be returned when a specific group is requested
+    /// Registers a logical operator value to be returned when a specific group is requested.
     pub fn register_group(&self, group_id: GroupId, value: Value) {
         let key = format!("{:?}", group_id);
         let mut mappings = self.group_mappings.lock().unwrap();
-        mappings.entry(key).or_insert_with(Vec::new).push(value);
+        mappings.entry(key).or_default().push(value);
     }
 
-    /// Registers a physical operator value to be returned when a specific goal is requested
+    /// Registers a physical operator value to be returned when a specific goal is requested.
     pub fn register_goal(&self, goal: &Goal, value: Value) {
         let key = format!("{:?}:{:?}", goal.group_id, goal.properties);
         let mut mappings = self.goal_mappings.lock().unwrap();
-        mappings.entry(key).or_insert_with(Vec::new).push(value);
+        mappings.entry(key).or_default().push(value);
     }
 }
 
@@ -73,82 +73,82 @@ impl Generator for MockGenerator {
     }
 }
 
-/// Helper to create a literal expression
+/// Helper to create a literal expression.
 pub fn lit_expr(literal: Literal) -> Arc<Expr> {
     Arc::new(Expr::CoreExpr(CoreData::Literal(literal)))
 }
 
-/// Helper to create a literal value
+/// Helper to create a literal value.
 pub fn lit_val(literal: Literal) -> Value {
     Value(CoreData::Literal(literal))
 }
 
-/// Helper to create an integer literal
+/// Helper to create an integer literal.
 pub fn int(i: i64) -> Literal {
     Literal::Int64(i)
 }
 
-/// Helper to create a string literal
+/// Helper to create a string literal.
 pub fn string(s: &str) -> Literal {
     Literal::String(s.to_string())
 }
 
-/// Helper to create a boolean literal
+/// Helper to create a boolean literal.
 pub fn boolean(b: bool) -> Literal {
     Literal::Bool(b)
 }
 
-/// Helper to create a reference expression
+/// Helper to create a reference expression.
 pub fn ref_expr(name: &str) -> Arc<Expr> {
     Arc::new(Expr::Ref(name.to_string()))
 }
 
-/// Helper to create a pattern match arm
+/// Helper to create a pattern match arm.
 pub fn match_arm(pattern: Pattern, expr: Arc<Expr>) -> MatchArm {
     MatchArm { pattern, expr }
 }
 
-/// Helper to create an array value
+/// Helper to create an array value.
 pub fn array_val(items: Vec<Value>) -> Value {
     Value(CoreData::Array(items))
 }
 
-/// Helper to create a struct value
+/// Helper to create a struct value.
 pub fn struct_val(name: &str, fields: Vec<Value>) -> Value {
     Value(CoreData::Struct(name.to_string(), fields))
 }
 
-/// Helper to create a pattern matching expression
+/// Helper to create a pattern matching expression.
 pub fn pattern_match_expr(expr: Arc<Expr>, arms: Vec<MatchArm>) -> Arc<Expr> {
     Arc::new(Expr::PatternMatch(expr, arms))
 }
 
-/// Helper to create a bind pattern
+/// Helper to create a bind pattern.
 pub fn bind_pattern(name: &str, inner: Pattern) -> Pattern {
     Pattern::Bind(name.to_string(), Box::new(inner))
 }
 
-/// Helper to create a wildcard pattern
+/// Helper to create a wildcard pattern.
 pub fn wildcard_pattern() -> Pattern {
     Pattern::Wildcard
 }
 
-/// Helper to create a literal pattern
+/// Helper to create a literal pattern.
 pub fn literal_pattern(lit: Literal) -> Pattern {
     Pattern::Literal(lit)
 }
 
-/// Helper to create a struct pattern
+/// Helper to create a struct pattern.
 pub fn struct_pattern(name: &str, fields: Vec<Pattern>) -> Pattern {
     Pattern::Struct(name.to_string(), fields)
 }
 
-/// Helper to create an array decomposition pattern
+/// Helper to create an array decomposition pattern.
 pub fn array_decomp_pattern(head: Pattern, tail: Pattern) -> Pattern {
     Pattern::ArrayDecomp(Box::new(head), Box::new(tail))
 }
 
-/// Helper to create an operator pattern
+/// Helper to create an operator pattern.
 pub fn operator_pattern(tag: &str, data: Vec<Pattern>, children: Vec<Pattern>) -> Pattern {
     Pattern::Operator(Operator {
         tag: tag.to_string(),
@@ -157,7 +157,7 @@ pub fn operator_pattern(tag: &str, data: Vec<Pattern>, children: Vec<Pattern>) -
     })
 }
 
-/// Helper to create a simple logical operator value
+/// Helper to create a simple logical operator value.
 pub fn create_logical_operator(tag: &str, data: Vec<Value>, children: Vec<Value>) -> Value {
     let op = Operator {
         tag: tag.to_string(),
@@ -170,7 +170,7 @@ pub fn create_logical_operator(tag: &str, data: Vec<Value>, children: Vec<Value>
     ))))
 }
 
-/// Helper to create a simple physical operator value
+/// Helper to create a simple physical operator value.
 pub fn create_physical_operator(tag: &str, data: Vec<Value>, children: Vec<Value>) -> Value {
     let op = Operator {
         tag: tag.to_string(),
@@ -183,7 +183,7 @@ pub fn create_physical_operator(tag: &str, data: Vec<Value>, children: Vec<Value
     )))
 }
 
-/// Runs a test by evaluating the expression and collecting all results
+/// Runs a test by evaluating the expression and collecting all results.
 pub async fn evaluate_and_collect<G>(expr: Arc<Expr>, engine: Engine<G>) -> Vec<Value>
 where
     G: Generator,

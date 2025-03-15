@@ -1,40 +1,32 @@
 //! This module provides implementation for binary operations between values.
 //!
-//! Binary operations are fundamental for expression evaluation, allowing values
-//! to be combined and compared in various ways. The module supports operations on
-//! different value types, including:
-//! - Arithmetic operations on numbers (add, subtract, multiply, divide)
-//! - Comparison operations for various types (equality, less than)
-//! - Logical operations on boolean values (AND, OR)
-//! - Collection operations (concatenation, range creation)
+//! Binary operations are fundamental for expression evaluation, allowing values to be combined and
+//! compared in various ways. The module supports operations on different value types, including:
+//!
+//! - Arithmetic operations on numbers (add, subtract, multiply, divide).
+//! - Comparison operations for various types (equality, less than).
+//! - Logical operations on boolean values (AND, OR).
+//! - Collection operations (concatenation, range creation).
 
 use optd_dsl::analyzer::hir::{BinOp, CoreData, Literal, Value};
 
 /// Evaluates a binary operation between two values.
 ///
-/// This function performs binary operations on values based on their types
-/// and the operation requested. It handles arithmetic, logical, comparison,
-/// and collection operations.
-///
-/// # Parameters
-/// * `left` - The left operand value
-/// * `op` - The binary operation to perform
-/// * `right` - The right operand value
-///
-/// # Returns
-/// The result of applying the operation to the operands
+/// This function performs binary operations on values based on their types and the operation
+/// requested. It handles arithmetic, logical, comparison, and collection operations.
 ///
 /// # Panics
-/// Panics when the operation is not defined for the given operand types
+///
+/// Panics when the operation is not defined for the given operand types.
 pub(super) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
     use self::Literal::*;
     use BinOp::*;
     use CoreData::*;
 
-    match (&left.0, op, &right.0) {
-        // Handle operations between two literals
+    match (left.0, op, right.0) {
+        // Handle operations between two literals.
         (Literal(l), op, Literal(r)) => match (l, op, r) {
-            // Integer operations (arithmetic, comparison)
+            // Integer operations (arithmetic, comparison).
             (Int64(l), Add | Sub | Mul | Div | Eq | Lt, Int64(r)) => Value(Literal(match op {
                 Add => Int64(l + r), // Integer addition
                 Sub => Int64(l - r), // Integer subtraction
@@ -45,12 +37,12 @@ pub(super) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
                 _ => unreachable!(), // This branch is unreachable due to pattern guard
             })),
 
-            // Integer range operation (creates an array of sequential integers)
+            // Integer range operation (creates an array of sequential integers).
             (Int64(l), Range, Int64(r)) => {
-                Value(Array((*l..=*r).map(|n| Value(Literal(Int64(n)))).collect()))
+                Value(Array((l..=r).map(|n| Value(Literal(Int64(n)))).collect()))
             }
 
-            // Float operations (arithmetic, comparison)
+            // Float operations (arithmetic, comparison).
             (Float64(l), op, Float64(r)) => Value(Literal(match op {
                 Add => Float64(l + r),                  // Float addition
                 Sub => Float64(l - r),                  // Float subtraction
@@ -60,41 +52,41 @@ pub(super) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
                 _ => panic!("Invalid float operation"), // Other operations not supported
             })),
 
-            // Boolean operations (logical, comparison)
+            // Boolean operations (logical, comparison).
             (Bool(l), op, Bool(r)) => Value(Literal(match op {
-                And => Bool(*l && *r),                    // Logical AND
-                Or => Bool(*l || *r),                     // Logical OR
-                Eq => Bool(*l == *r),                     // Boolean equality comparison
+                And => Bool(l && r),                      // Logical AND
+                Or => Bool(l || r),                       // Logical OR
+                Eq => Bool(l == r),                       // Boolean equality comparison
                 _ => panic!("Invalid boolean operation"), // Other operations not supported
             })),
 
-            // String operations (comparison, concatenation)
+            // String operations (comparison, concatenation).
             (String(l), op, String(r)) => Value(Literal(match op {
                 Eq => Bool(l == r),                      // String equality comparison
-                Concat => String(l.to_string() + r),     // String concatenation
+                Concat => String(format!("{l}{r}")),     // String concatenation
                 _ => panic!("Invalid string operation"), // Other operations not supported
             })),
 
-            // Any other combination of literal types is not supported
-            _ => panic!("Invalid binary operation: {:?} {:?} {:?}", left, op, right),
+            // Any other combination of literal types is not supported.
+            expr => panic!("Invalid binary operation: {:?}", expr),
         },
 
-        // Array concatenation (joins two arrays)
+        // Array concatenation (joins two arrays).
         (Array(l), Concat, Array(r)) => {
             let mut result = l.clone();
             result.extend(r.iter().cloned());
             Value(Array(result))
         }
 
-        // Map concatenation (joins two maps)
+        // Map concatenation (joins two maps).
         (Map(l), Concat, Map(r)) => {
             let mut result = l.clone();
             result.extend(r.iter().cloned());
             Value(Map(result))
         }
 
-        // Any other combination of value types or operations is not supported
-        _ => panic!("Invalid binary operation: {:?} {:?} {:?}", left, op, right),
+        // Any other combination of value types or operations is not supported.
+        expr => panic!("Invalid binary operation: {:?}", expr),
     }
 }
 

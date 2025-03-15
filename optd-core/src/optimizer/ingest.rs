@@ -1,15 +1,5 @@
 use super::{memo::Memoize, Optimizer, OptimizerMessage};
-use crate::{
-    cir::{
-        expressions::{LogicalExpression, PhysicalExpression},
-        goal::Goal,
-        group::GroupId,
-        operators::{Child, Operator},
-        plans::{PartialLogicalPlan, PartialPhysicalPlan},
-    },
-    engine::PropertiesContinuation,
-    error::Error,
-};
+use crate::{cir::*, engine::PropertiesContinuation, error::Error};
 use async_recursion::async_recursion;
 use futures::{future::try_join_all, SinkExt};
 use std::{collections::HashSet, sync::Arc};
