@@ -323,6 +323,7 @@ impl<M: Memoize> Optimizer<M> {
                     }
 
                     // TODO: Execute jobs!
+                    // TODO: cleanup tasks! check if orphan and no pending jobs.
                 },
                 else => break,
             }

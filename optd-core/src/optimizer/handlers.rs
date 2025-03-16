@@ -1,5 +1,9 @@
 use super::{
-    ingest::{LogicalIngest, PhysicalIngest}, jobs::JobKind, memo::{Memoize, MergeResult}, tasks::TaskKind, JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage
+    ingest::{LogicalIngest, PhysicalIngest},
+    jobs::JobKind,
+    memo::{Memoize, MergeResult},
+    tasks::TaskKind,
+    JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
 };
 use crate::{
     capture,
@@ -230,7 +234,6 @@ impl<M: Memoize> Optimizer<M> {
         // i need to do something like was done previously (i.e. we start afterwards)
         self.subscribe_task_to_group(group_id, origin).await;
 
-
         self.subscribe_to_group(group_id, sender).await;
     }
 
@@ -261,6 +264,8 @@ impl<M: Memoize> Optimizer<M> {
             .await
             .expect("Failed to get logical properties");
 
+        // NOTE: We don't want to make a job out of this, as it is merely a way to
+        // unblock an existing pending job. We send it to the channel without blocking.
         tokio::spawn(async move {
             sender
                 .send(props)
