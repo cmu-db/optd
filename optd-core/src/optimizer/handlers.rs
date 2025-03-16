@@ -68,27 +68,6 @@ impl<M: Memoize> Optimizer<M> {
         }
     }
 
-    /// This method handles converting an optimized expression to a complete physical plan
-    /// and sending it to the client through the provided channel.
-    pub(super) async fn process_egest_optimized(
-        &self,
-        expr: OptimizedExpression,
-        mut response_tx: Sender<PhysicalPlan>,
-    ) {
-        let plan = self
-            .egest_best_plan(&expr)
-            .await
-            .expect("Failed to egest plan from memo")
-            .expect("Expression has not been recursively optimized");
-
-        tokio::spawn(async move {
-            response_tx
-                .send(plan)
-                .await
-                .expect("Failed to send physical plan");
-        });
-    }
-
     /// This method handles new logical plan alternatives discovered through
     /// transformation rule application.
     pub(super) async fn process_new_logical_partial(

@@ -63,13 +63,6 @@ enum OptimizerMessage {
     /// handling within the optimizer's message processing system.
     OptimizeRequest(OptimizeRequest),
 
-    /// Convert an optimized expression to a physical plan and send it to the client.
-    ///
-    /// This message is triggered when a new optimized expression is available
-    /// and needs to be materialized into a complete physical plan before
-    /// being sent to the client through the result channel.
-    EgestOptimized(OptimizedExpression, Sender<PhysicalPlan>),
-
     /// New logical plan alternative for a group from applying transformation rules.
     ///
     /// The JobId represents the completed job that produced this result.
@@ -306,9 +299,6 @@ impl<M: Memoize> Optimizer<M> {
                         OptimizeRequest(request) => {
                             self.process_optimize_request(request.logical_plan, request.response_tx).await;
                         }
-                        EgestOptimized(expr, sender) => {
-                            self.process_egest_optimized(expr, sender).await;
-                        },
                         NewLogicalPartial(plan, group_id, job_id) => {
                             self.process_new_logical_partial(plan, group_id, job_id).await;
                         },
