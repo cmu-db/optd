@@ -73,7 +73,7 @@ impl<M: Memoize> Optimizer<M> {
             InternalLogicalIngest::NeedsProperties(expressions) => {
                 let pending_dependencies = expressions
                     .into_iter()
-                    .map(|expr| self.create_job(task_id, JobKind::DeriveLogicalProperties(expr)))
+                    .map(|expr| self.schedule_job(task_id, JobKind::DeriveLogicalProperties(expr)))
                     .collect();
 
                 LogicalIngest::NeedsDependencies(pending_dependencies)

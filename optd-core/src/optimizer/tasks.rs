@@ -1,18 +1,35 @@
-use super::{jobs::JobId, memo::Memoize, Optimizer};
+use super::{
+    ingest::LogicalIngest,
+    jobs::{JobId, JobKind},
+    memo::Memoize,
+    Optimizer,
+};
 use crate::{
     cir::{
         expressions::{LogicalExpression, PhysicalExpression},
         goal::Goal,
         group::GroupId,
-        plans::LogicalPlan,
+        plans::{LogicalPlan, PhysicalPlan},
+        properties::PhysicalProperties,
         rules::{ImplementationRule, TransformationRule},
     },
     engine::{LogicalExprContinuation, OptimizedExprContinuation},
 };
+use futures::channel::mpsc::Sender;
 use std::collections::{HashMap, HashSet};
+use JobKind::*;
+use TaskKind::*;
+
+//
+// Type definitions
+//
 
 /// Unique identifier for tasks in the optimization system
 pub(super) type TaskId = i64;
+
+//
+// Core task structures
+//
 
 /// A task represents a higher-level objective in the optimization process
 ///
@@ -30,22 +47,14 @@ pub(super) struct Task {
     pub uncompleted_jobs: HashSet<JobId>,
 }
 
-/// Subscribers for a group in a transformation task
-pub(super) struct TransformSubscribers {
-    /// Map of group IDs to their continuations
-    pub subscribers: HashMap<GroupId, Vec<LogicalExprContinuation>>,
-}
-
-/// Subscribers for a goal in an implementation task
-pub(super) struct ImplementSubscribers {
-    /// Map of group IDs to their continuations
-    pub subscribers: HashMap<GroupId, Vec<LogicalExprContinuation>>,
-}
-
-/// Subscribers for a goal in a cost evaluation task
-pub(super) struct CostSubscribers {
-    /// Map of goals to their continuations
-    pub subscribers: HashMap<Goal, Vec<OptimizedExprContinuation>>,
+impl Task {
+    fn new(kind: TaskKind) -> Self {
+        Self {
+            children: Vec::new(),
+            kind,
+            uncompleted_jobs: HashSet::new(),
+        }
+    }
 }
 
 /// Enumeration of different types of tasks in the optimizer
@@ -57,7 +66,7 @@ pub(super) enum TaskKind {
     ///
     /// This task coordinates the overall optimization process, exploring
     /// alternative plans and selecting the best implementation.
-    OptimizePlan(LogicalPlan),
+    OptimizePlan(OptimizePlanTask),
 
     /// Task to explore implementations for a specific goal
     ///
@@ -74,157 +83,291 @@ pub(super) enum TaskKind {
     /// Task to apply a specific implementation rule to a logical expression
     ///
     /// This task generates physical implementations from a logical expression
-    /// using a specified implementation strategy. It maintains a set of subscribers
+    /// using a specified implementation strategy. It maintains a set of continuations
     /// that will be notified of the implementation results.
-    ImplementExpression(ImplementationRule, LogicalExpression, ImplementSubscribers),
+    ImplementExpression(ImplementExpressionTask),
 
     /// Task to apply a specific transformation rule to a logical expression
     ///
     /// This task generates alternative logical expressions that are
-    /// semantically equivalent to the original. It maintains a set of subscribers
+    /// semantically equivalent to the original. It maintains a set of continuations
     /// that will be notified of the transformation results.
-    TransformExpression(TransformationRule, LogicalExpression, TransformSubscribers),
+    TransformExpression(TransformExpressionTask),
 
     /// Task to compute the cost of a physical expression
     ///
     /// This task estimates the execution cost of a physical implementation
-    /// to aid in selecting the optimal plan. It maintains a set of subscribers
+    /// to aid in selecting the optimal plan. It maintains a set of continuations
     /// that will be notified of the costing results.
-    CostExpression(PhysicalExpression, CostSubscribers),
+    CostExpression(CostExpressionTask),
 }
 
-/// Task-related implementation for the Optimizer
+//
+// Task variant structs
+//
+
+pub(super) struct OptimizePlanTask {
+    pub plan: LogicalPlan,
+    pub response_tx: Sender<PhysicalPlan>,
+}
+
+impl OptimizePlanTask {
+    pub fn new(plan: LogicalPlan, response_tx: Sender<PhysicalPlan>) -> Self {
+        Self { plan, response_tx }
+    }
+}
+
+pub(super) struct ImplementExpressionTask {
+    pub rule: ImplementationRule,
+    pub expr: LogicalExpression,
+    pub conts: HashMap<GroupId, Vec<LogicalExprContinuation>>,
+}
+
+impl ImplementExpressionTask {
+    pub fn new(rule: ImplementationRule, expr: LogicalExpression) -> Self {
+        Self {
+            rule,
+            expr,
+            conts: HashMap::new(),
+        }
+    }
+}
+
+pub(super) struct TransformExpressionTask {
+    pub rule: TransformationRule,
+    pub expr: LogicalExpression,
+    pub conts: HashMap<GroupId, Vec<LogicalExprContinuation>>,
+}
+
+impl TransformExpressionTask {
+    pub fn new(rule: TransformationRule, expr: LogicalExpression) -> Self {
+        Self {
+            rule,
+            expr,
+            conts: HashMap::new(),
+        }
+    }
+}
+
+pub(super) struct CostExpressionTask {
+    pub expr: PhysicalExpression,
+    pub conts: HashMap<Goal, Vec<OptimizedExprContinuation>>,
+}
+
+impl CostExpressionTask {
+    pub fn new(expr: PhysicalExpression) -> Self {
+        Self {
+            expr,
+            conts: HashMap::new(),
+        }
+    }
+}
+
+/// Result of attempting to launch an optimize plan task
+pub(super) enum OptimizePlanResult {
+    Success(TaskId),
+    NeedsDependencies(HashSet<JobId>),
+}
+
+//
+// Optimizer task implementation
+//
+
 impl<M: Memoize> Optimizer<M> {
+    //
+    // Task launching
+    //
+
+    /// Tries to launch a top-level optimization task for a logical plan
+    pub(super) async fn launch_optimize_plan_task(
+        &mut self,
+        plan: LogicalPlan,
+        response_tx: Sender<PhysicalPlan>,
+    ) -> OptimizePlanResult {
+        // First try to ingest the plan into the memo
+        match self.try_ingest_logical(&plan.clone().into(), 0).await {
+            LogicalIngest::Success(group_id) => {
+                let task_kind = OptimizePlanTask::new(plan, response_tx);
+                let task_id = self.add_new_task(OptimizePlan(task_kind));
+
+                // Create a goal for the root group
+                let goal = Goal(group_id, PhysicalProperties(None));
+                let goal = self.goal_repr.find(&goal);
+
+                // Subscribe the task to the goal
+                self.subscribe_task_to_goal(goal, task_id).await;
+
+                OptimizePlanResult::Success(task_id)
+            }
+            LogicalIngest::NeedsDependencies(dependencies) => {
+                // Cannot launch the task yet, need to wait for dependencies
+                OptimizePlanResult::NeedsDependencies(dependencies)
+            }
+        }
+    }
+
+    /// Launches a task to start applying a transformation rule to a logical expression
+    pub(super) fn launch_transform_expression_task(
+        &mut self,
+        rule: TransformationRule,
+        expr: LogicalExpression,
+        parent: TaskId,
+    ) -> TaskId {
+        let task_kind = TransformExpressionTask::new(rule.clone(), expr.clone());
+        let task_id = self.add_new_task(TransformExpression(task_kind));
+
+        self.add_child_to_task(parent, task_id);
+        self.schedule_job(task_id, LaunchTransformationRule(rule, expr));
+
+        task_id
+    }
+
+    /// Launches a task to start applying an implementation rule to a logical expression
+    pub(super) fn launch_implement_expression_task(
+        &mut self,
+        rule: ImplementationRule,
+        expr: LogicalExpression,
+        parent: TaskId,
+    ) -> TaskId {
+        let task_kind = ImplementExpressionTask::new(rule.clone(), expr.clone());
+        let task_id = self.add_new_task(ImplementExpression(task_kind));
+
+        self.add_child_to_task(parent, task_id);
+        self.schedule_job(task_id, LaunchImplementationRule(rule, expr));
+
+        task_id
+    }
+
+    /// Launches a task to start computing the cost of a physical expression
+    pub(super) fn lauch_cost_expression_task(
+        &mut self,
+        expr: PhysicalExpression,
+        parent: TaskId,
+    ) -> TaskId {
+        let task_kind = CostExpressionTask::new(expr.clone());
+        let task_id = self.add_new_task(CostExpression(task_kind));
+
+        self.add_child_to_task(parent, task_id);
+        self.schedule_job(task_id, LaunchCostExpression(expr));
+
+        task_id
+    }
+
+    //
+    // Exploration tasks
+    //
+
     /// Ensures a group exploration task exists and sets up a parent-child relationship
-    ///
-    /// This method finds an existing exploration task for a group or creates one
-    /// if none exists. It then establishes a parent-child relationship between the
-    /// exploration task and the subscriber task.
-    ///
-    /// # Parameters
-    /// * `group_id` - The ID of the group to explore
-    /// * `child_task_id` - The ID of the subscriber task
     pub(super) async fn ensure_group_exploration_task(
         &mut self,
         group_id: GroupId,
         child_task_id: TaskId,
     ) {
-        // Find or create the exploration task
-        let task_id = match self.find_group_exploration_task(group_id) {
-            Some(id) => id,
-            None => self.create_group_exploration_task(group_id).await,
+        let task_id = match self.group_explorations_task_index.get(&group_id) {
+            Some(id) => *id,
+            None => self.launch_group_exploration_task(group_id).await,
         };
 
-        // Add the subscriber task as a child of the exploration task
         self.add_child_to_task(task_id, child_task_id);
     }
 
     /// Ensures a goal exploration task exists and sets up a parent-child relationship
-    ///
-    /// This method finds an existing exploration task for a goal or creates one
-    /// if none exists. It then establishes a parent-child relationship between the
-    /// exploration task and the subscriber task.
-    ///
-    /// # Parameters
-    /// * `goal` - The goal to explore
-    /// * `child_task_id` - The ID of the subscriber task
-    pub(super) async fn ensure_goal_exploration_task(&mut self, goal: Goal, child_task_id: TaskId) {
-        // Find or create the exploration task
-        let task_id = match self.find_goal_exploration_task(&goal) {
-            Some(id) => id,
-            None => self.create_goal_exploration_task(goal.clone()).await,
+    pub(super) async fn ensure_goal_exploration_task(
+        &mut self,
+        goal: &Goal,
+        child_task_id: TaskId,
+    ) {
+        let task_id = match self.goal_exploration_task_index.get(&goal) {
+            Some(id) => *id,
+            None => self.launch_goal_exploration_task(goal).await,
         };
 
-        // Add the subscriber task as a child of the exploration task
         self.add_child_to_task(task_id, child_task_id);
     }
 
-    /// Creates a group exploration task with bootstrapped jobs
-    async fn create_group_exploration_task(&mut self, group_id: GroupId) -> TaskId {
-        // Create the exploration task
-        let task_id = self.create_task(TaskKind::ExploreGroup(group_id));
+    //
+    // Helper methods for launching exploration tasks
+    //
 
-        // Schedule transformation jobs for existing expressions
+    async fn launch_group_exploration_task(&mut self, group_id: GroupId) -> TaskId {
+        // Create task and register it in the group exploration index
+        let task_id = self.add_new_task(ExploreGroup(group_id));
+        self.group_explorations_task_index.insert(group_id, task_id);
+
+        let transformations = self.rule_book.get_transformations().to_vec();
         let expressions = self
             .memo
             .get_all_logical_exprs(group_id)
             .await
             .expect("Failed to get logical expressions for group");
 
-        self.create_transformation_jobs(task_id, &expressions);
+        // Schedule transformation jobs for all expression-rule combinations
+        expressions
+            .into_iter()
+            .flat_map(|expr| {
+                transformations
+                    .iter()
+                    .map(move |rule| (rule.clone(), expr.clone()))
+            })
+            .for_each(|(rule, expr)| {
+                self.schedule_job(task_id, LaunchTransformationRule(rule, expr));
+            });
 
         task_id
     }
 
-    /// Creates a goal exploration task with bootstrapped jobs
-    async fn create_goal_exploration_task(&mut self, goal: Goal) -> TaskId {
-        // Create the exploration task
-        let task_id = self.create_task(TaskKind::ExploreGoal(goal.clone()));
+    async fn launch_goal_exploration_task(&mut self, goal: &Goal) -> TaskId {
+        // Create task and register it in the goal exploration index
+        let task_id = self.add_new_task(ExploreGoal(goal.clone()));
+        self.goal_exploration_task_index
+            .insert(goal.clone(), task_id);
 
-        // Schedule implementation jobs for existing expressions
-        let expressions = self
+        // Ensure we also explore the group associated with this goal
+        self.ensure_group_exploration_task(goal.0, task_id).await;
+
+        let implementations = self.rule_book.get_implementations().to_vec();
+        let logical_expressions = self
             .memo
             .get_all_logical_exprs(goal.0)
             .await
             .expect("Failed to get logical expressions for goal");
 
-        self.create_implementation_jobs(task_id, &expressions);
+        // Schedule implementation jobs for all expression-rule combinations
+        logical_expressions
+            .into_iter()
+            .flat_map(|expr| {
+                implementations
+                    .iter()
+                    .map(move |rule| (rule.clone(), expr.clone()))
+            })
+            .for_each(|(rule, expr)| {
+                self.schedule_job(task_id, LaunchImplementationRule(rule, expr));
+            });
 
-        // Schedule cost jobs for existing physical expressions
-        let physical_exprs = self
+        let physical_expressions = self
             .memo
-            .get_all_physical_exprs(&goal)
+            .get_all_physical_exprs(goal)
             .await
-            .expect("Failed to get physical expressions for goal");
+            .expect("Failed to get physical expression for goal");
 
-        self.create_cost_jobs(task_id, &physical_exprs);
-
-        // Ensure we also explore the group associated with this goal
-        self.ensure_group_exploration_task(goal.0, task_id).await;
+        // Schedule costing jobs for all physical expressions
+        physical_expressions.into_iter().for_each(|expr| {
+            self.schedule_job(task_id, LaunchCostExpression(expr));
+        });
 
         task_id
     }
 
-    /// Finds an existing exploration task for a group
-    fn find_group_exploration_task(&self, group_id: GroupId) -> Option<TaskId> {
-        self.tasks.iter().find_map(|(id, task)| {
-            if let TaskKind::ExploreGroup(task_group_id) = &task.kind {
-                if *task_group_id == group_id {
-                    return Some(*id);
-                }
-            }
-            None
-        })
-    }
-
-    /// Finds an existing exploration task for a goal
-    fn find_goal_exploration_task(&self, goal: &Goal) -> Option<TaskId> {
-        self.tasks.iter().find_map(|(id, task)| {
-            if let TaskKind::ExploreGoal(task_goal) = &task.kind {
-                if *task_goal == *goal {
-                    return Some(*id);
-                }
-            }
-            None
-        })
-    }
-
-    /// Creates a new task with the specified kind
-    fn create_task(&mut self, kind: TaskKind) -> TaskId {
+    /// Helper method to add and allocate a new task with a specified kind
+    fn add_new_task(&mut self, kind: TaskKind) -> TaskId {
         let task_id = self.next_task_id;
         self.next_task_id += 1;
 
-        let task = Task {
-            children: Vec::new(),
-            kind,
-            uncompleted_jobs: HashSet::new(),
-        };
-
-        self.tasks.insert(task_id, task);
+        self.tasks.insert(task_id, Task::new(kind));
         task_id
     }
 
-    /// Adds a child task to a parent task if not already present
+    /// Helper method to add a child task to a parent task if not already present
     fn add_child_to_task(&mut self, parent_id: TaskId, child_id: TaskId) {
         if let Some(task) = self.tasks.get_mut(&parent_id) {
             if !task.children.contains(&child_id) {

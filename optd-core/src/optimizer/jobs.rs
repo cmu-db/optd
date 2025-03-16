@@ -61,7 +61,7 @@ pub(super) enum JobKind {
 
 /// Job-related implementation for the Optimizer
 impl<M: Memoize> Optimizer<M> {
-    /// Creates a new job and associates it with a task
+    /// Schedules a new job and associates it with a task
     ///
     /// This method creates a job of the specified kind, associates it with
     /// the given task, adds it to the pending jobs collection, and updates
@@ -73,93 +73,23 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// # Returns
     /// The ID of the created job
-    pub(super) fn create_job(&mut self, task_id: TaskId, kind: JobKind) -> JobId {
+    pub(super) fn schedule_job(&mut self, task_id: TaskId, kind: JobKind) -> JobId {
         // Generate a new job ID
         let job_id = self.next_job_id;
         self.next_job_id += 1;
 
-        // Create the job
+        // Create & schedule the job
         let job = Job(task_id, kind);
-
-        // Add job to pending jobs
         self.pending_jobs.insert(job_id, job);
-
-        // Add job to the schedule queue
         self.job_schedule_queue.push_back(job_id);
 
-        // Add the job to the task's uncompleted_jobs set
-        if let Some(task) = self.tasks.get_mut(&task_id) {
-            task.uncompleted_jobs.insert(job_id);
-        }
+        // Add job to task's uncompleted jobs set - crash if task doesn't exist
+        self.tasks
+            .get_mut(&task_id)
+            .expect("Task must exist when creating a job for it")
+            .uncompleted_jobs
+            .insert(job_id);
 
         job_id
-    }
-
-    /// Creates transformation jobs for a set of expressions
-    ///
-    /// For each combination of expression and transformation rule,
-    /// creates a job to apply the rule to the expression.
-    ///
-    /// # Parameters
-    /// * `task_id` - The ID of the task that will own these jobs
-    /// * `expressions` - The logical expressions to transform
-    pub(super) fn create_transformation_jobs(
-        &mut self,
-        task_id: TaskId,
-        expressions: &[LogicalExpression],
-    ) {
-        // Get all transformation rules
-        let transformations = self.rule_book.get_transformations().to_vec();
-
-        // Create a job for each (expression, rule) pair
-        for expr in expressions {
-            for rule in &transformations {
-                self.create_job(
-                    task_id,
-                    JobKind::LaunchTransformationRule(rule.clone(), expr.clone()),
-                );
-            }
-        }
-    }
-
-    /// Creates implementation jobs for a set of expressions
-    ///
-    /// For each combination of expression and implementation rule,
-    /// creates a job to apply the rule to the expression.
-    ///
-    /// # Parameters
-    /// * `task_id` - The ID of the task that will own these jobs
-    /// * `expressions` - The logical expressions to implement
-    pub(super) fn create_implementation_jobs(
-        &mut self,
-        task_id: TaskId,
-        expressions: &[LogicalExpression],
-    ) {
-        // Get all implementation rules
-        let implementations = self.rule_book.get_implementations().to_vec();
-
-        // Create a job for each (expression, rule) pair
-        for expr in expressions {
-            for rule in &implementations {
-                self.create_job(
-                    task_id,
-                    JobKind::LaunchImplementationRule(rule.clone(), expr.clone()),
-                );
-            }
-        }
-    }
-
-    /// Creates cost evaluation jobs for physical expressions
-    ///
-    /// For each physical expression, creates a job to compute its cost.
-    ///
-    /// # Parameters
-    /// * `task_id` - The ID of the task that will own these jobs
-    /// * `expressions` - The physical expressions to cost
-    pub(super) fn create_cost_jobs(&mut self, task_id: TaskId, expressions: &[PhysicalExpression]) {
-        // Create a job for each expression
-        for expr in expressions {
-            self.create_job(task_id, JobKind::LaunchCostExpression(expr.clone()));
-        }
     }
 }

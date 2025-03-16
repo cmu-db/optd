@@ -169,6 +169,18 @@ pub struct Optimizer<M: Memoize> {
     /// that may involve multiple jobs (and subtasks).
     tasks: HashMap<TaskId, Task>,
 
+    /// Maps group IDs to their associated exploration task IDs
+    ///
+    /// This index provides efficient lookup of the exploration task for a specific group,
+    /// enabling faster processing of group-related messages and dependency tracking.
+    group_explorations_task_index: HashMap<GroupId, TaskId>,
+
+    /// Maps optimization goals to their associated exploration task IDs
+    ///
+    /// This index provides efficient lookup of the exploration task for a specific goal,
+    /// enabling faster processing of goal-related messages and implementation tracking.
+    goal_exploration_task_index: HashMap<Goal, TaskId>,
+
     /// Tracks all uncompleted jobs that are pending (not yet started)
     ///
     /// Maps job IDs to their job definitions.
@@ -221,17 +233,19 @@ pub struct Optimizer<M: Memoize> {
 }
 
 impl<M: Memoize> Optimizer<M> {
-    /// Launch a new optimizer with the given memo and HIR context
+    /// Create a new optimizer instance with the given memo and HIR context
     ///
-    /// This method creates, initializes, and launches the optimizer in one step.
-    /// It returns a sender that can be used to communicate with the optimizer.
-    pub fn launch(memo: M, hir: HIR) -> Sender<OptimizeRequest> {
-        // Initialize all channels
-        let (message_tx, message_rx) = mpsc::channel(0);
-        let (optimize_tx, optimize_rx) = mpsc::channel(0);
-
-        // Create the optimizer with initialized channels and state
-        let optimizer = Self {
+    /// This method creates and initializes all the necessary state for the optimizer
+    /// but does not start processing. Use `launch` to create and start the optimizer
+    /// in one step.
+    pub fn new(
+        memo: M,
+        hir: HIR,
+        message_tx: Sender<OptimizerMessage>,
+        message_rx: Receiver<OptimizerMessage>,
+        optimize_rx: Receiver<OptimizeRequest>,
+    ) -> Self {
+        Self {
             //
             // Core optimization components
             //
@@ -244,6 +258,8 @@ impl<M: Memoize> Optimizer<M> {
             //
             pending_messages: Vec::new(),
             tasks: HashMap::new(),
+            group_explorations_task_index: HashMap::new(),
+            goal_exploration_task_index: HashMap::new(),
             pending_jobs: HashMap::new(),
             job_schedule_queue: VecDeque::new(),
             running_jobs: HashMap::new(),
@@ -268,7 +284,20 @@ impl<M: Memoize> Optimizer<M> {
             message_tx,
             message_rx,
             optimize_rx,
-        };
+        }
+    }
+
+    /// Launch a new optimizer with the given memo and HIR context
+    ///
+    /// This method creates, initializes, and launches the optimizer in one step.
+    /// It returns a sender that can be used to communicate with the optimizer.
+    pub fn launch(memo: M, hir: HIR) -> Sender<OptimizeRequest> {
+        // Initialize all channels
+        let (message_tx, message_rx) = mpsc::channel(0);
+        let (optimize_tx, optimize_rx) = mpsc::channel(0);
+
+        // Create the optimizer with initialized channels and state
+        let optimizer = Self::new(memo, hir, message_tx.clone(), message_rx, optimize_rx);
 
         // Start the background processing loop
         tokio::spawn(async move {
@@ -322,8 +351,8 @@ impl<M: Memoize> Optimizer<M> {
                         },
                     }
 
-                    // TODO: Execute jobs!
-                    // TODO: cleanup tasks! check if orphan and no pending jobs.
+                    // TODO(later): Execute jobs!
+                    // TODO(later): cleanup tasks! check if orphan and no pending jobs.
                 },
                 else => break,
             }

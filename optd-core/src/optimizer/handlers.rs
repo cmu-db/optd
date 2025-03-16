@@ -437,7 +437,7 @@ impl<M: Memoize> Optimizer<M> {
                         if let Some(continuations) = subscribers.subscribers.get(&group_id) {
                             for continuation in continuations {
                                 // Create a job to process the continuation with this expression
-                                self.create_job(
+                                self.schedule_job(
                                     task_id,
                                     JobKind::ContinueWithLogical(
                                         expr.clone(),
@@ -472,7 +472,7 @@ impl<M: Memoize> Optimizer<M> {
                         if let Some(continuations) = subscribers.subscribers.get(&goal) {
                             for continuation in continuations {
                                 // Create a job to process the continuation with this expression
-                                self.create_job(
+                                self.schedule_job(
                                     task_id,
                                     JobKind::ContinueWithOptimized(
                                         expr.0.clone(),
