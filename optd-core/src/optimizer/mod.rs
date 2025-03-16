@@ -15,7 +15,7 @@ use futures::{
     channel::mpsc::{self, Receiver, Sender},
     SinkExt,
 };
-use jobs::{Job, JobId, JobKind};
+use jobs::{Job, JobId};
 use memo::Memoize;
 use merge_repr::Representative;
 use optd_dsl::analyzer::{context::Context, hir::HIR};
@@ -310,59 +310,32 @@ impl<M: Memoize> Optimizer<M> {
                             self.process_egest_optimized(expr, sender).await;
                         },
                         NewLogicalPartial(plan, group_id, job_id) => {
-                            // self.process_new_logical_partial(plan, group_id, job_id).await;
+                            self.process_new_logical_partial(plan, group_id, job_id).await;
                         },
                         NewPhysicalPartial(plan, goal, job_id) => {
-                            // self.process_new_physical_partial(plan, goal, job_id).await;
+                            self.process_new_physical_partial(plan, goal, job_id).await;
                         },
                         NewOptimizedExpression(expr, goal, job_id) => {
-                            // self.process_new_optimized_expr(expr, goal, job_id).await;
+                            self.process_new_optimized_expr(expr, goal, job_id).await;
                         },
                         CreateGroup(props, expr, job_id) => {
                             self.process_create_group(props, expr, job_id).await;
                         },
                         SubscribeGroup(group_id, cont, job_id) => {
-                            // self.process_group_subscription(group_id, cont, job_id).await;
+                            self.process_group_subscription(group_id, cont, job_id).await;
                         },
                         SubscribeGoal(goal, cont, job_id) => {
-                            // self.process_goal_subscription(goal, cont, job_id).await;
+                            self.process_goal_subscription(goal, cont, job_id).await;
                         },
                         RetrieveProperties(group_id, sender) => {
                             self.process_retrieve_properties(group_id, sender).await;
                         },
                     }
+
+                    // TODO: Execute jobs!
                 },
                 else => break,
             }
         }
-    }
-
-    /// Creates a new job and associates it with a task
-    ///
-    /// This helper method creates a job of the specified kind, associates it with
-    /// the given task, adds it to the pending jobs collection, and updates the
-    /// task's uncompleted jobs set.
-    ///
-    /// # Parameters
-    /// * `task_id` - The ID of the task that's launching this job
-    /// * `kind` - The kind of job to create
-    ///
-    /// # Returns
-    /// The ID of the created job
-    pub(super) fn create_job(&mut self, task_id: TaskId, kind: JobKind) -> JobId {
-        // Generate a new job ID
-        let job_id = self.next_job_id;
-        self.next_job_id += 1;
-
-        // Create & schedule the job
-        let job = Job(task_id, kind);
-        self.pending_jobs.insert(job_id, job);
-        self.job_schedule_queue.push_back(job_id);
-
-        // Add the job to the task's uncompleted_jobs set
-        let task = self.tasks.get_mut(&task_id).expect("Task not found");
-        task.uncompleted_jobs.insert(job_id);
-
-        job_id
     }
 }

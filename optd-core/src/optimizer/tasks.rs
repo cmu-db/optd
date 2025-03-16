@@ -1,4 +1,4 @@
-use super::jobs::JobId;
+use super::{jobs::JobId, memo::Memoize, Optimizer};
 use crate::{
     cir::{
         expressions::{LogicalExpression, PhysicalExpression},
@@ -91,4 +91,145 @@ pub(super) enum TaskKind {
     /// to aid in selecting the optimal plan. It maintains a set of subscribers
     /// that will be notified of the costing results.
     CostExpression(PhysicalExpression, CostSubscribers),
+}
+
+/// Task-related implementation for the Optimizer
+impl<M: Memoize> Optimizer<M> {
+    /// Ensures a group exploration task exists and sets up a parent-child relationship
+    ///
+    /// This method finds an existing exploration task for a group or creates one
+    /// if none exists. It then establishes a parent-child relationship between the
+    /// exploration task and the subscriber task.
+    ///
+    /// # Parameters
+    /// * `group_id` - The ID of the group to explore
+    /// * `child_task_id` - The ID of the subscriber task
+    pub(super) async fn ensure_group_exploration_task(
+        &mut self,
+        group_id: GroupId,
+        child_task_id: TaskId,
+    ) {
+        // Find or create the exploration task
+        let task_id = match self.find_group_exploration_task(group_id) {
+            Some(id) => id,
+            None => self.create_group_exploration_task(group_id).await,
+        };
+
+        // Add the subscriber task as a child of the exploration task
+        self.add_child_to_task(task_id, child_task_id);
+    }
+
+    /// Ensures a goal exploration task exists and sets up a parent-child relationship
+    ///
+    /// This method finds an existing exploration task for a goal or creates one
+    /// if none exists. It then establishes a parent-child relationship between the
+    /// exploration task and the subscriber task.
+    ///
+    /// # Parameters
+    /// * `goal` - The goal to explore
+    /// * `child_task_id` - The ID of the subscriber task
+    pub(super) async fn ensure_goal_exploration_task(&mut self, goal: Goal, child_task_id: TaskId) {
+        // Find or create the exploration task
+        let task_id = match self.find_goal_exploration_task(&goal) {
+            Some(id) => id,
+            None => self.create_goal_exploration_task(goal.clone()).await,
+        };
+
+        // Add the subscriber task as a child of the exploration task
+        self.add_child_to_task(task_id, child_task_id);
+    }
+
+    /// Creates a group exploration task with bootstrapped jobs
+    async fn create_group_exploration_task(&mut self, group_id: GroupId) -> TaskId {
+        // Create the exploration task
+        let task_id = self.create_task(TaskKind::ExploreGroup(group_id));
+
+        // Schedule transformation jobs for existing expressions
+        let expressions = self
+            .memo
+            .get_all_logical_exprs(group_id)
+            .await
+            .expect("Failed to get logical expressions for group");
+
+        self.create_transformation_jobs(task_id, &expressions);
+
+        task_id
+    }
+
+    /// Creates a goal exploration task with bootstrapped jobs
+    async fn create_goal_exploration_task(&mut self, goal: Goal) -> TaskId {
+        // Create the exploration task
+        let task_id = self.create_task(TaskKind::ExploreGoal(goal.clone()));
+
+        // Schedule implementation jobs for existing expressions
+        let expressions = self
+            .memo
+            .get_all_logical_exprs(goal.0)
+            .await
+            .expect("Failed to get logical expressions for goal");
+
+        self.create_implementation_jobs(task_id, &expressions);
+
+        // Schedule cost jobs for existing physical expressions
+        let physical_exprs = self
+            .memo
+            .get_all_physical_exprs(&goal)
+            .await
+            .expect("Failed to get physical expressions for goal");
+
+        self.create_cost_jobs(task_id, &physical_exprs);
+
+        // Ensure we also explore the group associated with this goal
+        self.ensure_group_exploration_task(goal.0, task_id).await;
+
+        task_id
+    }
+
+    /// Finds an existing exploration task for a group
+    fn find_group_exploration_task(&self, group_id: GroupId) -> Option<TaskId> {
+        self.tasks.iter().find_map(|(id, task)| {
+            if let TaskKind::ExploreGroup(task_group_id) = &task.kind {
+                if *task_group_id == group_id {
+                    return Some(*id);
+                }
+            }
+            None
+        })
+    }
+
+    /// Finds an existing exploration task for a goal
+    fn find_goal_exploration_task(&self, goal: &Goal) -> Option<TaskId> {
+        self.tasks.iter().find_map(|(id, task)| {
+            if let TaskKind::ExploreGoal(task_goal) = &task.kind {
+                if *task_goal == *goal {
+                    return Some(*id);
+                }
+            }
+            None
+        })
+    }
+
+    /// Creates a new task with the specified kind
+    fn create_task(&mut self, kind: TaskKind) -> TaskId {
+        let task_id = self.next_task_id;
+        self.next_task_id += 1;
+
+        let task = Task {
+            children: Vec::new(),
+            kind,
+            uncompleted_jobs: HashSet::new(),
+        };
+
+        self.tasks.insert(task_id, task);
+        task_id
+    }
+
+    /// Adds a child task to a parent task if not already present
+    fn add_child_to_task(&mut self, parent_id: TaskId, child_id: TaskId) {
+        if let Some(task) = self.tasks.get_mut(&parent_id) {
+            if !task.children.contains(&child_id) {
+                task.children.push(child_id);
+            }
+        }
+    }
 }

@@ -1,7 +1,5 @@
 use super::{
-    ingest::{LogicalIngest, PhysicalIngest},
-    memo::{Memoize, MergeResult},
-    JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
+    ingest::{LogicalIngest, PhysicalIngest}, jobs::JobKind, memo::{Memoize, MergeResult}, tasks::TaskKind, JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage
 };
 use crate::{
     capture,
@@ -13,7 +11,7 @@ use crate::{
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
     },
-    engine::CostContinuation,
+    engine::{CostContinuation, LogicalExprContinuation, OptimizedExprContinuation},
 };
 use futures::{
     channel::{
@@ -97,6 +95,7 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         plan: PartialLogicalPlan,
         group_id: GroupId,
+        job_id: JobId,
     ) {
         let group_id = self.group_repr.find(&group_id);
 
@@ -132,6 +131,7 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         plan: PartialPhysicalPlan,
         goal: Goal,
+        job_id: JobId,
     ) {
         let goal = self.goal_repr.find(&goal);
         let PhysicalIngest {
@@ -185,6 +185,7 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         expr: OptimizedExpression,
         goal: Goal,
+        job_id: JobId,
     ) {
         // Update the expression & goal to use representative goals
         let goal = self.goal_repr.find(&goal);
@@ -238,9 +239,19 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_group_subscription(
         &mut self,
         group_id: GroupId,
-        sender: Sender<LogicalExpression>,
+        cont: LogicalExprContinuation,
+        job_id: JobId,
     ) {
         let group_id = self.group_repr.find(&group_id);
+
+        // TODO: make helper on this getter
+        let origin = self.running_jobs.get(&job_id).expect("No current job").0;
+
+        // TODO: Rn subscriber is wrong, as I need to load regardless if it is a new group or not
+        // i need to do something like was done previously (i.e. we start afterwards)
+        self.subscribe_task_to_group(group_id, origin).await;
+
+
         self.subscribe_to_group(group_id, sender).await;
     }
 
@@ -249,9 +260,11 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_goal_subscription(
         &mut self,
         goal: Goal,
-        sender: Sender<OptimizedExpression>,
+        cont: OptimizedExprContinuation,
+        job_id: JobId,
     ) {
         let goal = self.goal_repr.find(&goal);
+
         self.subscribe_to_goal(goal, sender).await;
     }
 
@@ -418,5 +431,75 @@ impl<M: Memoize> Optimizer<M> {
             },
             expr.1,
         )
+    }
+
+    /// Notify subscribers about a new logical expression in a group.
+    ///
+    /// This method creates jobs for all subscriber tasks to process the new
+    /// logical expression through their registered continuations.
+    ///
+    /// # Parameters
+    /// * `group_id` - The ID of the group that has a new expression
+    /// * `expr` - The new logical expression
+    fn notify_group_subscribers(&mut self, group_id: GroupId, expr: LogicalExpression) {
+        let group_id = self.group_repr.find(&group_id);
+
+        // Get all subscriber tasks for this group
+        if let Some(subscriber_tasks) = self.group_subscribers.get(&group_id) {
+            for &task_id in subscriber_tasks {
+                if let Some(task) = self.tasks.get(&task_id) {
+                    // Find the continuation based on the task type
+                    if let TaskKind::TransformExpression(_, _, subscribers) = &task.kind {
+                        if let Some(continuations) = subscribers.subscribers.get(&group_id) {
+                            for continuation in continuations {
+                                // Create a job to process the continuation with this expression
+                                self.create_job(
+                                    task_id,
+                                    JobKind::ContinueWithLogical(
+                                        expr.clone(),
+                                        continuation.clone(),
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Notify subscribers about a new optimized expression for a goal.
+    ///
+    /// This method creates jobs for all subscriber tasks to process the new
+    /// optimized expression through their registered continuations.
+    ///
+    /// # Parameters
+    /// * `goal` - The goal that has a new optimized expression
+    /// * `expr` - The new optimized expression
+    fn notify_goal_subscribers(&mut self, goal: Goal, expr: OptimizedExpression) {
+        let goal = self.goal_repr.find(&goal);
+
+        // Get all subscriber tasks for this goal
+        if let Some(subscriber_tasks) = self.goal_subscribers.get(&goal) {
+            for &task_id in subscriber_tasks {
+                if let Some(task) = self.tasks.get(&task_id) {
+                    // Find the continuation based on the task type
+                    if let TaskKind::CostExpression(_, subscribers) = &task.kind {
+                        if let Some(continuations) = subscribers.subscribers.get(&goal) {
+                            for continuation in continuations {
+                                // Create a job to process the continuation with this expression
+                                self.create_job(
+                                    task_id,
+                                    JobKind::ContinueWithOptimized(
+                                        expr.0.clone(),
+                                        continuation.clone(),
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
