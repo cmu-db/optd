@@ -114,7 +114,7 @@ impl<M: Memoize> Optimizer<M> {
 
         let transformations = self.rule_book.get_transformations().to_vec();
         let engine = self.engine.clone();
-        let message_tx = self.message_tx.clone();
+        let message_tx = self.engine_tx.clone();
 
         // Spawn a task to explore the group
         tokio::spawn(async move {
@@ -165,7 +165,7 @@ impl<M: Memoize> Optimizer<M> {
         let implementations = self.rule_book.get_implementations().to_vec();
         let props = goal.1.clone();
         let engine = self.engine.clone();
-        let message_tx = self.message_tx.clone();
+        let message_tx = self.engine_tx.clone();
 
         let physical_exprs = self
             .memo
@@ -182,6 +182,7 @@ impl<M: Memoize> Optimizer<M> {
                 let goal_clone = goal.clone();
                 let expr_clone = expr.clone();
 
+                // TODO(sarvesh): turn this into a job
                 tokio::spawn(async move {
                     // Create a continuation that processes cost values
                     let cost_continuation: CostContinuation = Arc::new(move |cost| {

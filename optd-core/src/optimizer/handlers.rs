@@ -1,7 +1,7 @@
 use super::{
     ingest::{LogicalIngest, PhysicalIngest},
     memo::{Memoize, MergeResult},
-    OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
+    JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
 };
 use crate::{
     capture,
@@ -223,7 +223,7 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         properties: LogicalProperties,
         expression: LogicalExpression,
-        job_id: i64,
+        job_id: JobId,
     ) {
         self.memo
             .create_group(&expression, &properties)
@@ -361,7 +361,7 @@ impl<M: Memoize> Optimizer<M> {
     /// This method is called when a group creation job completes. It updates all
     /// pending messages that were waiting for this job and processes any that
     /// are now ready (have no more pending dependencies).
-    async fn resolve_dependencies(&mut self, completed_job_id: i64) {
+    async fn resolve_dependencies(&mut self, completed_job_id: JobId) {
         // Update dependencies and collect ready messages
         let ready_indices: Vec<_> = self
             .pending_messages

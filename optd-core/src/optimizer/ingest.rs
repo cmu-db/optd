@@ -1,4 +1,9 @@
-use super::{memo::Memoize, Optimizer, OptimizerMessage};
+use super::{
+    jobs::{JobId, JobKind},
+    memo::Memoize,
+    tasks::TaskId,
+    Optimizer,
+};
 use crate::{
     cir::{
         expressions::{LogicalExpression, PhysicalExpression},
@@ -7,14 +12,12 @@ use crate::{
         operators::{Child, Operator},
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
     },
-    engine::PropertiesContinuation,
     error::Error,
 };
 use async_recursion::async_recursion;
-use futures::{future::try_join_all, SinkExt};
+use futures::future::try_join_all;
 use std::{collections::HashSet, sync::Arc};
 use Child::*;
-use OptimizerMessage::CreateGroup;
 
 /// Result type for logical plan ingestion exposed to clients
 pub(super) enum LogicalIngest {
@@ -23,7 +26,7 @@ pub(super) enum LogicalIngest {
 
     /// Plan requires dependencies to be created
     /// Contains a set of job IDs for the launched dependency tasks
-    NeedsDependencies(HashSet<i64>),
+    NeedsDependencies(HashSet<JobId>),
 }
 
 /// Internal result type for logical expression processing
@@ -46,6 +49,10 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// Attempts direct ingestion or spawns property derivation tasks when needed.
     ///
+    /// # Parameters
+    /// * `logical_plan` - The logical plan to ingest
+    /// * `task_id` - The ID of the task that will track these jobs
+    ///
     /// # Returns
     /// - `Success(group_id)`: Plan was successfully ingested
     ///    - `group_id`: The ID of the group that contains the plan
@@ -54,6 +61,7 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn try_ingest_logical(
         &mut self,
         logical_plan: &PartialLogicalPlan,
+        task_id: TaskId,
     ) -> LogicalIngest {
         let ingest_result = self
             .ingest_logical_plan(logical_plan)
@@ -65,37 +73,7 @@ impl<M: Memoize> Optimizer<M> {
             InternalLogicalIngest::NeedsProperties(expressions) => {
                 let pending_dependencies = expressions
                     .into_iter()
-                    .map(|expr| {
-                        let job_id = self.next_dep_id;
-                        self.next_dep_id += 1;
-
-                        let message_tx = self.message_tx.clone();
-                        let engine = self.engine.clone();
-                        let expr_clone = expr.clone();
-
-                        // Create a continuation for processing derived properties
-                        let properties_continuation: PropertiesContinuation =
-                            Arc::new(move |properties| {
-                                let mut message_tx = message_tx.clone();
-                                let expr = expr_clone.clone();
-
-                                Box::pin(async move {
-                                    message_tx
-                                        .send(CreateGroup(properties, expr, job_id))
-                                        .await
-                                        .expect("Failed to send CreateGroup message");
-                                })
-                            });
-
-                        // Launch the derive properties operation with the continuation
-                        tokio::spawn(async move {
-                            engine
-                                .launch_derive_properties(&expr.into(), properties_continuation)
-                                .await;
-                        });
-
-                        job_id
-                    })
+                    .map(|expr| self.create_job(task_id, JobKind::DeriveLogicalProperties(expr)))
                     .collect();
 
                 LogicalIngest::NeedsDependencies(pending_dependencies)
@@ -121,16 +99,6 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Ingests a partial logical plan into the memo table.
-    ///
-    /// This function handles both materialized and unmaterialized logical plans,
-    /// recursively processing operators in materialized plans.
-    ///
-    /// # Arguments
-    /// * `partial_plan` - The partial logical plan to ingest
-    ///
-    /// # Returns
-    /// * For unmaterialized plans: Found(group_id) since the group already exists
-    /// * For materialized plans: Result from recursive operator ingestion
     #[async_recursion]
     async fn ingest_logical_plan(
         &self,
@@ -148,16 +116,6 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Ingests a partial physical plan into the memo table.
-    ///
-    /// This function handles both materialized and unmaterialized physical plans,
-    /// recursively processing operators in materialized plans.
-    ///
-    /// # Arguments
-    /// * `partial_plan` - The partial physical plan to ingest
-    ///
-    /// # Returns
-    /// * A PhysicalIngest containing the Goal associated with the physical plan
-    ///   and the PhysicalExpression if newly created (None if it already existed)
     #[async_recursion]
     async fn ingest_physical_plan(
         &self,
@@ -169,8 +127,6 @@ impl<M: Memoize> Optimizer<M> {
             }
             PartialPhysicalPlan::UnMaterialized(goal) => {
                 let goal = self.goal_repr.find(goal);
-                // For unmaterialized plans, we always return new_expr=None because
-                // we're using an existing goal
                 Ok(PhysicalIngest {
                     goal,
                     new_expr: None,
@@ -180,17 +136,6 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Processes a logical operator and attempts to find it in the memo table.
-    ///
-    /// This function ingests a logical operator into the memo structure, recursively
-    /// processing its children. If the expression is not found in the memo, it collects
-    /// expressions that need property derivation.
-    ///
-    /// # Arguments
-    /// * `operator` - The logical operator to ingest
-    ///
-    /// # Returns
-    /// * LogicalIngestion::Found when expression is in memo or added to memo
-    /// * LogicalIngestion::NeedsProperties when properties are needed before adding to memo
     async fn ingest_logical_operator(
         &self,
         operator: &Operator<Arc<PartialLogicalPlan>>,
@@ -259,17 +204,6 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Processes a physical operator and integrates it into the memo table.
-    ///
-    /// This function ingests a physical operator into the memo structure, recursively
-    /// processing its children. Unlike logical operators, physical operators don't
-    /// require property derivation.
-    ///
-    /// # Arguments
-    /// * `operator` - The physical operator to ingest
-    ///
-    /// # Returns
-    /// * A PhysicalIngest containing the Goal associated with the physical expression
-    ///   and the PhysicalExpression if newly created (None if it already existed)
     async fn ingest_physical_operator(
         &self,
         operator: &Operator<Arc<PartialPhysicalPlan>>,
@@ -293,7 +227,6 @@ impl<M: Memoize> Optimizer<M> {
         // Try to find the expression in the memo
         if let Some(goal) = self.memo.find_physical_expr(&physical_expr).await? {
             let goal = self.goal_repr.find(&goal);
-            // Expression already exists, return goal with new_expr=None
             return Ok(PhysicalIngest {
                 goal,
                 new_expr: None,
@@ -303,7 +236,6 @@ impl<M: Memoize> Optimizer<M> {
         // Expression doesn't exist, create a new goal
         let goal = self.memo.create_goal(&physical_expr).await?;
 
-        // Return goal with new_expr containing the physical expression we just created
         Ok(PhysicalIngest {
             goal,
             new_expr: Some(physical_expr),
@@ -311,15 +243,6 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Helper function to process a Child structure containing a logical plan.
-    ///
-    /// This function handles both singleton and variable-length children,
-    /// applying the appropriate ingestion function to each.
-    ///
-    /// # Arguments
-    /// * `child` - The Child structure to process
-    ///
-    /// # Returns
-    /// * Processed Child structure with LogicalIngestion results
     async fn process_logical_child(
         &self,
         child: &Child<Arc<PartialLogicalPlan>>,
@@ -338,15 +261,6 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Helper function to process a Child structure containing a physical plan.
-    ///
-    /// This function handles both singleton and variable-length children,
-    /// applying the appropriate ingestion function to each.
-    ///
-    /// # Arguments
-    /// * `child` - The Child structure to process
-    ///
-    /// # Returns
-    /// * Processed Child structure with Goal results
     async fn process_physical_child(
         &self,
         child: &Child<Arc<PartialPhysicalPlan>>,
@@ -354,13 +268,11 @@ impl<M: Memoize> Optimizer<M> {
         match child {
             Singleton(plan) => {
                 let result = self.ingest_physical_plan(plan).await?;
-                // Extract just the goal from the PhysicalIngest
                 Ok(Singleton(result.goal))
             }
             VarLength(plans) => {
                 let results =
                     try_join_all(plans.iter().map(|plan| self.ingest_physical_plan(plan))).await?;
-                // Extract just the goals from the PhysicalIngest results
                 let goals = results.into_iter().map(|ingest| ingest.goal).collect();
                 Ok(VarLength(goals))
             }
