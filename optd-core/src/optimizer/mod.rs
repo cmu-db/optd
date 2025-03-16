@@ -39,7 +39,7 @@ mod tasks;
 #[derive(Debug)]
 pub struct OptimizeRequest {
     /// The logical plan to optimize
-    pub logical_plan: LogicalPlan,
+    pub plan: LogicalPlan,
 
     /// Channel for receiving optimized physical plans
     ///
@@ -61,7 +61,7 @@ enum OptimizerMessage {
     ///
     /// Wraps the external client request as an internal message for consistent
     /// handling within the optimizer's message processing system.
-    OptimizeRequest(OptimizeRequest),
+    OptimizeRequestWrapper(OptimizeRequest),
 
     /// New logical plan alternative for a group from applying transformation rules.
     ///
@@ -318,15 +318,15 @@ impl<M: Memoize> Optimizer<M> {
                 Some(request) = self.optimize_rx.next() => {
                     let mut message_tx = self.message_tx.clone();
                     tokio::spawn(async move {
-                        message_tx.send(OptimizeRequest(request))
+                        message_tx.send(OptimizeRequestWrapper(request))
                             .await
                             .expect("Failed to forward optimize request");
                     });
                 },
                 Some(message) = self.message_rx.next() => {
                     match message {
-                        OptimizeRequest(request) => {
-                            self.process_optimize_request(request.logical_plan, request.response_tx).await;
+                        OptimizeRequestWrapper(request) => {
+                            self.process_optimize_request(request.plan, request.response_tx).await;
                         }
                         NewLogicalPartial(plan, group_id, job_id) => {
                             self.process_new_logical_partial(plan, group_id, job_id).await;
@@ -351,8 +351,8 @@ impl<M: Memoize> Optimizer<M> {
                         },
                     }
 
-                    // TODO(later): Execute jobs!
-                    // TODO(later): cleanup tasks! check if orphan and no pending jobs.
+                    // TODO(later): cleanup tasks, remove job from task! check if orphan and no pending jobs.
+                    // TODO(later): Execute new jobs according to limit!
                 },
                 else => break,
             }

@@ -25,7 +25,7 @@ pub(super) enum LogicalIngest {
     Success(GroupId),
 
     /// Plan requires dependencies to be created
-    /// Contains a set of job IDs for the launched dependency tasks
+    /// Contains a set of job IDs for the launched dependency jobs
     NeedsDependencies(HashSet<JobId>),
 }
 
@@ -41,13 +41,13 @@ pub(super) struct PhysicalIngest {
     /// The new goal matched with the physical plan
     pub goal: Goal,
     /// The physical expression if newly created, None if it already existed
-    pub new_expr: Option<PhysicalExpression>,
+    pub new_expression: Option<PhysicalExpression>,
 }
 
 impl<M: Memoize> Optimizer<M> {
     /// Process a logical plan for ingestion into the memo.
     ///
-    /// Attempts direct ingestion or spawns property derivation tasks when needed.
+    /// Attempts direct ingestion or schedules property derivation jobs when needed.
     ///
     /// # Parameters
     /// * `logical_plan` - The logical plan to ingest
@@ -56,8 +56,8 @@ impl<M: Memoize> Optimizer<M> {
     /// # Returns
     /// - `Success(group_id)`: Plan was successfully ingested
     ///    - `group_id`: The ID of the group that contains the plan
-    /// - `NeedsDependencies(job_ids)`: Property derivation tasks were launched
-    ///    - `job_ids`: Set of job IDs for the launched tasks
+    /// - `NeedsDependencies(job_ids)`: Property derivation jobs were launched
+    ///    - `job_ids`: Set of job IDs for the launched jobs
     pub(super) async fn try_ingest_logical(
         &mut self,
         logical_plan: &PartialLogicalPlan,
@@ -129,7 +129,7 @@ impl<M: Memoize> Optimizer<M> {
                 let goal = self.goal_repr.find(goal);
                 Ok(PhysicalIngest {
                     goal,
-                    new_expr: None,
+                    new_expression: None,
                 })
             }
         }
@@ -155,8 +155,8 @@ impl<M: Memoize> Optimizer<M> {
             .into_iter()
             .map(|child_result| match child_result {
                 Singleton(InternalLogicalIngest::Found(group_id)) => Singleton(group_id),
-                Singleton(InternalLogicalIngest::NeedsProperties(exprs)) => {
-                    need_properties.extend(exprs);
+                Singleton(InternalLogicalIngest::NeedsProperties(expressions)) => {
+                    need_properties.extend(expressions);
                     Singleton(GroupId(0)) // Placeholder
                 }
                 VarLength(results) => {
@@ -164,8 +164,8 @@ impl<M: Memoize> Optimizer<M> {
                         .into_iter()
                         .map(|result| match result {
                             InternalLogicalIngest::Found(group_id) => group_id,
-                            InternalLogicalIngest::NeedsProperties(exprs) => {
-                                need_properties.extend(exprs);
+                            InternalLogicalIngest::NeedsProperties(expressions) => {
+                                need_properties.extend(expressions);
                                 GroupId(0) // Placeholder
                             }
                         })
@@ -181,14 +181,14 @@ impl<M: Memoize> Optimizer<M> {
         }
 
         // Create the logical expression with processed children
-        let logical_expr = LogicalExpression {
+        let logical_expression = LogicalExpression {
             tag: operator.tag.clone(),
             data: operator.data.clone(),
             children,
         };
 
         // Try to add the expression to memo
-        let group_maybe = self.memo.find_logical_expr(&logical_expr).await?;
+        let group_maybe = self.memo.find_logical_expr(&logical_expression).await?;
 
         match group_maybe {
             Some(group_id) => {
@@ -198,7 +198,9 @@ impl<M: Memoize> Optimizer<M> {
             }
             None => {
                 // Expression doesn't exist, needs property derivation
-                Ok(InternalLogicalIngest::NeedsProperties(vec![logical_expr]))
+                Ok(InternalLogicalIngest::NeedsProperties(vec![
+                    logical_expression,
+                ]))
             }
         }
     }
@@ -218,27 +220,27 @@ impl<M: Memoize> Optimizer<M> {
         .await?;
 
         // Create the physical expression with processed children
-        let physical_expr = PhysicalExpression {
+        let physical_expression = PhysicalExpression {
             tag: operator.tag.clone(),
             data: operator.data.clone(),
             children,
         };
 
         // Try to find the expression in the memo
-        if let Some(goal) = self.memo.find_physical_expr(&physical_expr).await? {
+        if let Some(goal) = self.memo.find_physical_expr(&physical_expression).await? {
             let goal = self.goal_repr.find(&goal);
             return Ok(PhysicalIngest {
                 goal,
-                new_expr: None,
+                new_expression: None,
             });
         }
 
         // Expression doesn't exist, create a new goal
-        let goal = self.memo.create_goal(&physical_expr).await?;
+        let goal = self.memo.create_goal(&physical_expression).await?;
 
         Ok(PhysicalIngest {
             goal,
-            new_expr: Some(physical_expr),
+            new_expression: Some(physical_expression),
         })
     }
 

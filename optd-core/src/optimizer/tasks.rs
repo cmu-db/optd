@@ -135,20 +135,20 @@ pub(super) struct ImplementExpressionTask {
     pub rule: ImplementationRule,
 
     /// The logical expression to implement
-    pub expr: LogicalExpression,
+    pub expression: LogicalExpression,
 
     /// Continuations for each group that need to be notified when
     /// new logical expressions are created
-    pub conts: HashMap<GroupId, Vec<LogicalExprContinuation>>,
+    pub continuations: HashMap<GroupId, Vec<LogicalExprContinuation>>,
 }
 
 impl ImplementExpressionTask {
     /// Creates a new implementation task with the given rule and expression
-    pub fn new(rule: ImplementationRule, expr: LogicalExpression) -> Self {
+    pub fn new(rule: ImplementationRule, expression: LogicalExpression) -> Self {
         Self {
             rule,
-            expr,
-            conts: HashMap::new(),
+            expression,
+            continuations: HashMap::new(),
         }
     }
 }
@@ -162,20 +162,20 @@ pub(super) struct TransformExpressionTask {
     pub rule: TransformationRule,
 
     /// The logical expression to transform
-    pub expr: LogicalExpression,
+    pub expression: LogicalExpression,
 
     /// Continuations for each group that need to be notified when
     /// new logical expressions are created
-    pub conts: HashMap<GroupId, Vec<LogicalExprContinuation>>,
+    pub continuations: HashMap<GroupId, Vec<LogicalExprContinuation>>,
 }
 
 impl TransformExpressionTask {
     /// Creates a new transformation task with the given rule and expression
-    pub fn new(rule: TransformationRule, expr: LogicalExpression) -> Self {
+    pub fn new(rule: TransformationRule, expression: LogicalExpression) -> Self {
         Self {
             rule,
-            expr,
-            conts: HashMap::new(),
+            expression,
+            continuations: HashMap::new(),
         }
     }
 }
@@ -186,19 +186,19 @@ impl TransformExpressionTask {
 /// notifying dependent tasks about costing results.
 pub(super) struct CostExpressionTask {
     /// The physical expression to cost
-    pub expr: PhysicalExpression,
+    pub expression: PhysicalExpression,
 
     /// Continuations for each goal that need to be notified when
     /// optimized expressions are created
-    pub conts: HashMap<Goal, Vec<OptimizedExprContinuation>>,
+    pub continuations: HashMap<Goal, Vec<OptimizedExprContinuation>>,
 }
 
 impl CostExpressionTask {
     /// Creates a new cost estimation task for the given physical expression
-    pub fn new(expr: PhysicalExpression) -> Self {
+    pub fn new(expression: PhysicalExpression) -> Self {
         Self {
-            expr,
-            conts: HashMap::new(),
+            expression,
+            continuations: HashMap::new(),
         }
     }
 }
@@ -267,18 +267,18 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) fn launch_transform_expression_task(
         &mut self,
         rule: TransformationRule,
-        expr: LogicalExpression,
+        expression: LogicalExpression,
         parent: TaskId,
     ) -> TaskId {
         // Create and register the transformation task
-        let task_kind = TransformExpressionTask::new(rule.clone(), expr.clone());
+        let task_kind = TransformExpressionTask::new(rule.clone(), expression.clone());
         let task_id = self.register_new_task(TransformExpression(task_kind));
 
         // Register this task as a child of the parent task
         self.register_child_to_task(parent, task_id);
 
         // Schedule a job to actually launch the transformation rule
-        self.schedule_job(task_id, LaunchTransformationRule(rule, expr));
+        self.schedule_job(task_id, LaunchTransformationRule(rule, expression));
 
         task_id
     }
@@ -290,18 +290,18 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) fn launch_implement_expression_task(
         &mut self,
         rule: ImplementationRule,
-        expr: LogicalExpression,
+        expression: LogicalExpression,
         parent: TaskId,
     ) -> TaskId {
         // Create and register the implementation task
-        let task_kind = ImplementExpressionTask::new(rule.clone(), expr.clone());
+        let task_kind = ImplementExpressionTask::new(rule.clone(), expression.clone());
         let task_id = self.register_new_task(ImplementExpression(task_kind));
 
         // Set up parent-child relationship
         self.register_child_to_task(parent, task_id);
 
         // Schedule a job to actually launch the implementation rule
-        self.schedule_job(task_id, LaunchImplementationRule(rule, expr));
+        self.schedule_job(task_id, LaunchImplementationRule(rule, expression));
 
         task_id
     }
@@ -312,18 +312,18 @@ impl<M: Memoize> Optimizer<M> {
     /// among the alternatives.
     pub(super) fn lauch_cost_expression_task(
         &mut self,
-        expr: PhysicalExpression,
+        expression: PhysicalExpression,
         parent: TaskId,
     ) -> TaskId {
         // Create and register the cost estimation task
-        let task_kind = CostExpressionTask::new(expr.clone());
+        let task_kind = CostExpressionTask::new(expression.clone());
         let task_id = self.register_new_task(CostExpression(task_kind));
 
         // Set up parent-child relationship
         self.register_child_to_task(parent, task_id);
 
         // Schedule a job to actually launch the cost estimation
-        self.schedule_job(task_id, LaunchCostExpression(expr));
+        self.schedule_job(task_id, LaunchCostExpression(expression));
 
         task_id
     }
