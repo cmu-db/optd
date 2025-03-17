@@ -124,27 +124,31 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// This method handles fully optimized physical expressions with cost information.
+    ///
+    /// When a new optimized expression is found, it's added to the memo. If it becomes
+    /// the new best expression for its goal, continuations are notified and client
+    /// tasks receive the egested physical plan.
     pub(super) async fn process_new_optimized_expr(
         &mut self,
-        expr: OptimizedExpression,
+        expression: OptimizedExpression,
         goal: Goal,
-        job_id: JobId,
     ) {
         // Update the expression & goal to use representative goals
         let goal = self.goal_repr.find(&goal);
-        let expr = self.normalize_optimized_expression(&expr);
+        let expression = self.normalize_optimized_expression(&expression);
 
         // Add the optimized expression to the memo
         let new_best = self
             .memo
-            .add_optimized_physical_expr(&goal, &expr)
+            .add_optimized_physical_expr(&goal, &expression)
             .await
             .expect("Failed to add optimized physical expression");
 
         // If this is the new best expression found so far for this goal,
-        // notify all subscribers
+        // schedule continuation jobs for all subscribers, and send to clients
         if new_best {
-            todo!()
+            self.schedule_optimized_continuations(&goal, expression.clone());
+            self.egest_to_subscribers(&goal, expression).await;
         }
     }
 
@@ -293,10 +297,9 @@ impl<M: Memoize> Optimizer<M> {
             // Take ownership of the message
             let pending = self.pending_messages.swap_remove(*i);
 
-            // Re-send the message to be processed
+            // Re-send the message to be processed in a new co-routine to not block the
+            // main co-routine.
             let mut message_tx = self.message_tx.clone();
-
-            // We launch a co-routine to not block the main co-routine.
             tokio::spawn(async move {
                 message_tx
                     .send(pending.message)

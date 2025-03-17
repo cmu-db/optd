@@ -334,8 +334,8 @@ impl<M: Memoize> Optimizer<M> {
                         NewPhysicalPartial(plan, goal, job_id) => {
                             self.process_new_physical_partial(plan, goal, job_id).await;
                         },
-                        NewOptimizedExpression(expr, goal, job_id) => {
-                            self.process_new_optimized_expr(expr, goal, job_id).await;
+                        NewOptimizedExpression(expr, goal, _) => {
+                            self.process_new_optimized_expr(expr, goal).await;
                         },
                         CreateGroup(props, expr, job_id) => {
                             self.process_create_group(props, expr, job_id).await;
