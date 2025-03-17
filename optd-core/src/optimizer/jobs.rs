@@ -1,7 +1,7 @@
 use super::{memo::Memoize, tasks::TaskId, Optimizer};
 use crate::{
     cir::{
-        expressions::{LogicalExpression, PhysicalExpression},
+        expressions::{LogicalExpression, OptimizedExpression, PhysicalExpression},
         rules::{ImplementationRule, TransformationRule},
     },
     engine::{LogicalExprContinuation, OptimizedExprContinuation},
@@ -56,7 +56,7 @@ pub(super) enum JobKind {
     ///
     /// This job represents a continuation-passing-style callback for
     /// handling the result of an optimized physical expression operation.
-    ContinueWithOptimized(PhysicalExpression, OptimizedExprContinuation),
+    ContinueWithOptimized(OptimizedExpression, OptimizedExprContinuation),
 }
 
 /// Job-related implementation for the Optimizer

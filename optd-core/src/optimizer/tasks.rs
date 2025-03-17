@@ -73,7 +73,7 @@ pub(super) enum TaskKind {
     ///
     /// This task generates and evaluates physical implementations that
     /// satisfy the properties required by the goal.
-    ExploreGoal(Goal),
+    ExploreGoal(ExploreGoalTask),
 
     /// Task to explore expressions in a logical group
     ///
@@ -126,6 +126,22 @@ impl OptimizePlanTask {
     }
 }
 
+/// Task data for exploring a goal and its equivalent goals
+///
+/// Contains a mapping of group IDs to their associated physical properties
+/// for all goals in the equivalence class.
+pub(super) struct ExploreGoalTask {
+    /// Mapping of group IDs to physical properties for all equivalent goals
+    pub equivalent_goals: HashMap<GroupId, Vec<PhysicalProperties>>,
+}
+
+impl ExploreGoalTask {
+    /// Creates a new goal exploration task
+    pub fn new(equivalent_goals: HashMap<GroupId, Vec<PhysicalProperties>>) -> Self {
+        Self { equivalent_goals }
+    }
+}
+
 /// Task data for implementing a logical expression using a specific rule
 ///
 /// Tracks the implementation rule, expression, and continuation callbacks
@@ -150,6 +166,25 @@ impl ImplementExpressionTask {
             expression,
             continuations: HashMap::new(),
         }
+    }
+
+    /// Registers a logical expression continuation for a specific group
+    ///
+    /// Multiple continuations can be registered for the same group, and all will
+    /// be notified when new logical expressions are created for that group.
+    ///
+    /// # Parameters
+    /// * `group_id` - The group ID to associate this continuation with
+    /// * `continuation` - The continuation to call when a new expression is created
+    pub(super) fn register_continuation(
+        &mut self,
+        group_id: GroupId,
+        continuation: LogicalExprContinuation,
+    ) {
+        self.continuations
+            .entry(group_id)
+            .or_default()
+            .push(continuation);
     }
 }
 
@@ -178,6 +213,25 @@ impl TransformExpressionTask {
             continuations: HashMap::new(),
         }
     }
+
+    /// Registers a logical expression continuation for a specific group
+    ///
+    /// Multiple continuations can be registered for the same group, and all will
+    /// be notified when new logical expressions are created for that group.
+    ///
+    /// # Parameters
+    /// * `group_id` - The group ID to associate this continuation with
+    /// * `continuation` - The continuation to call when a new expression is created
+    pub(super) fn register_continuation(
+        &mut self,
+        group_id: GroupId,
+        continuation: LogicalExprContinuation,
+    ) {
+        self.continuations
+            .entry(group_id)
+            .or_default()
+            .push(continuation);
+    }
 }
 
 /// Task data for costing a physical expression
@@ -200,6 +254,25 @@ impl CostExpressionTask {
             expression,
             continuations: HashMap::new(),
         }
+    }
+
+    /// Registers an optimized expression continuation for a specific goal
+    ///
+    /// Multiple continuations can be registered for the same goal, and all will
+    /// be notified when new optimized expressions are created for that goal.
+    ///
+    /// # Parameters
+    /// * `goal` - The goal to associate this continuation with
+    /// * `continuation` - The continuation to call when a new optimized expression is created
+    pub(super) fn register_continuation(
+        &mut self,
+        goal: Goal,
+        continuation: OptimizedExprContinuation,
+    ) {
+        self.continuations
+            .entry(goal)
+            .or_default()
+            .push(continuation);
     }
 }
 
@@ -410,49 +483,66 @@ impl<M: Memoize> Optimizer<M> {
     /// Launches a new task to explore all possible implementations for a goal
     ///
     /// This schedules jobs to apply all implementation rules to all logical expressions
-    /// and cost all physical expressions in the goal's group.
+    /// and cost all physical expressions in all equivalent goals. It handles multiple
+    /// equivalent goals across different groups with various physical properties.
     async fn launch_goal_exploration_task(&mut self, goal: &Goal) -> TaskId {
+        // Get all equivalent goals grouped by group ID and their associated physical properties
+        let equivalent_goals = self
+            .memo
+            .get_equivalent_goals(goal)
+            .await
+            .expect("Failed to get equivalent goals");
+
         // Create task and register it in the goal exploration index
-        let task_id = self.register_new_task(ExploreGoal(goal.clone()));
+        let task_kind = ExploreGoalTask::new(equivalent_goals.clone());
+        let task_id = self.register_new_task(ExploreGoal(task_kind));
         self.goal_exploration_task_index
             .insert(goal.clone(), task_id);
 
-        // Ensure we also explore the group associated with this goal
-        // This is necessary since new logical expressions can lead to new implementations
-        self.ensure_group_exploration_task(goal.0, task_id).await;
+        // Process all group IDs in the equivalent goals map
+        for (group_id, properties_list) in &equivalent_goals {
+            // Ensure we explore each group associated with the equivalent goals
+            // This is necessary since new logical expressions can lead to new implementations
+            self.ensure_group_exploration_task(*group_id, task_id).await;
 
-        // Get all implementation rules and all logical expressions in the goal's group
-        let implementations = self.rule_book.get_implementations().to_vec();
-        let logical_expressions = self
-            .memo
-            .get_all_logical_exprs(goal.0)
-            .await
-            .expect("Failed to get logical expressions for goal");
+            // Get all implementation rules and all logical expressions in this group
+            let implementations = self.rule_book.get_implementations().to_vec();
+            let logical_expressions = self
+                .memo
+                .get_all_logical_exprs(*group_id)
+                .await
+                .expect("Failed to get logical expressions for group");
 
-        // Schedule implementation jobs for all expression-rule combinations
-        // This creates a Cartesian product of rules × expressions
-        logical_expressions
-            .into_iter()
-            .flat_map(|expr| {
-                implementations
-                    .iter()
-                    .map(move |rule| (rule.clone(), expr.clone()))
-            })
-            .for_each(|(rule, expr)| {
-                self.schedule_job(task_id, LaunchImplementationRule(rule, expr));
-            });
+            // Schedule implementation jobs for all expression-rule combinations for this group
+            // This creates a Cartesian product of rules × expressions
+            logical_expressions
+                .into_iter()
+                .flat_map(|expr| {
+                    implementations
+                        .iter()
+                        .map(move |rule| (rule.clone(), expr.clone()))
+                })
+                .for_each(|(rule, expr)| {
+                    self.schedule_job(task_id, LaunchImplementationRule(rule, expr));
+                });
 
-        // Get all physical expressions for the goal and schedule costing jobs
-        let physical_expressions = self
-            .memo
-            .get_all_physical_exprs(goal)
-            .await
-            .expect("Failed to get physical expression for goal");
+            // For each combination of group ID and physical properties, create a goal and get expressions
+            for props in properties_list {
+                let current_goal = Goal(*group_id, props.clone());
 
-        // Schedule costing jobs for all physical expressions
-        physical_expressions.into_iter().for_each(|expr| {
-            self.schedule_job(task_id, LaunchCostExpression(expr));
-        });
+                // Get all physical expressions for this specific goal and schedule costing jobs
+                let physical_expressions = self
+                    .memo
+                    .get_all_physical_exprs(&current_goal)
+                    .await
+                    .expect("Failed to get physical expressions for goal");
+
+                // Schedule costing jobs for all physical expressions for this goal
+                physical_expressions.into_iter().for_each(|expr| {
+                    self.schedule_job(task_id, LaunchCostExpression(expr));
+                });
+            }
+        }
 
         task_id
     }

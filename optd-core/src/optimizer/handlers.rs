@@ -3,7 +3,7 @@ use super::{
     ingest::{LogicalIngest, PhysicalIngest},
     jobs::JobKind,
     memo::{Memoize, MergeResult},
-    tasks::{OptimizePlanResult, TaskKind},
+    tasks::{OptimizePlanResult, TaskKind, TransformExpressionTask},
     Job, JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
 };
 use crate::{
@@ -27,6 +27,7 @@ use futures::{
 };
 use JobKind::*;
 use OptimizerMessage::*;
+use TaskKind::*;
 
 impl<M: Memoize> Optimizer<M> {
     /// This method initiates the optimization process for a logical plan by launching
@@ -145,7 +146,7 @@ impl<M: Memoize> Optimizer<M> {
         // If this is the new best expression found so far for this goal,
         // notify all subscribers
         if new_best {
-            // TODO: NOTIFY!
+            todo!()
         }
     }
 
@@ -165,8 +166,8 @@ impl<M: Memoize> Optimizer<M> {
         self.resolve_dependencies(job_id).await;
     }
 
-    /// Sends existing logical expressions for the group to the subscriber
-    /// and initiates exploration of the group if it hasn't been explored yet.
+    /// Registers a continuation for receiving logical expressions from a group.
+    /// The continuation will receive notifications about both existing and new expressions.
     pub(super) async fn process_group_subscription(
         &mut self,
         group_id: GroupId,
@@ -176,17 +177,36 @@ impl<M: Memoize> Optimizer<M> {
         let group_id = self.group_repr.find(&group_id);
         let related_task_id = self.running_jobs[&job_id].0;
 
-        // Register cont here.
+        // Register the continuation directly with the task
+        match &mut self
+            .tasks
+            .get_mut(&related_task_id)
+            .expect("Task does not exist")
+            .kind
+        {
+            TaskKind::TransformExpression(task) => {
+                task.register_continuation(group_id, continuation.clone())
+            }
+            TaskKind::ImplementExpression(task) => {
+                task.register_continuation(group_id, continuation.clone())
+            }
+            _ => panic!("Task type cannot produce group subscription"),
+        }
 
+        // Subscribe to future expressions and bootstrap with existing ones
         let expressions = self
             .subscribe_task_to_group(group_id, related_task_id)
             .await;
-
-        // TODO: Register continuation & schedule jobs!
+        for expr in expressions {
+            self.schedule_job(
+                related_task_id,
+                ContinueWithLogical(expr, continuation.clone()),
+            );
+        }
     }
 
-    /// Sends the best existing physical expression for the goal to the subscriber
-    /// and initiates implementation of the goal if it hasn't been launched yet.
+    /// Registers a continuation for receiving optimized physical expressions for a goal.
+    /// The continuation will be notified about the best existing expression and any better ones found.
     pub(super) async fn process_goal_subscription(
         &mut self,
         goal: Goal,
@@ -196,10 +216,28 @@ impl<M: Memoize> Optimizer<M> {
         let goal = self.goal_repr.find(&goal);
         let related_task_id = self.running_jobs[&job_id].0;
 
-        // Register cont here.
+        // Verify task type and register the continuation
+        match &mut self
+            .tasks
+            .get_mut(&related_task_id)
+            .expect("Task does not exist")
+            .kind
+        {
+            TaskKind::CostExpression(task) => {
+                task.register_continuation(goal.clone(), continuation.clone())
+            }
+            _ => panic!("Only cost tasks can subscribe to goals"),
+        }
 
-        if let Some(expression) = self.subscribe_task_to_goal(goal, related_task_id).await {
-            // TODO: Register continuation & schedule jobs!
+        // Subscribe to future optimized expressions and bootstrap with current best
+        if let Some(best_expr) = self
+            .subscribe_task_to_goal(goal.clone(), related_task_id)
+            .await
+        {
+            self.schedule_job(
+                related_task_id,
+                ContinueWithOptimized(best_expr, continuation),
+            );
         }
     }
 
@@ -227,85 +265,12 @@ impl<M: Memoize> Optimizer<M> {
         });
     }
 
-    // TODO: This big thing needs to be thought over
     /// Helper method to handle different types of merge results
     ///
     /// This method processes the results of group and goal merges, updating
     /// representatives, subscribers, and exploration status appropriately.
     async fn handle_merge_result(&mut self, result: MergeResult) {
-        match result {
-            MergeResult::GroupMerge {
-                prev_group_id,
-                new_group_id,
-                expressions,
-            } => {
-                // Update representative tracking
-                self.group_repr.merge(&prev_group_id, &new_group_id);
-
-                // Get subscribers for the previous group
-                let subscribers = self
-                    .group_subscribers
-                    .remove(&prev_group_id)
-                    .unwrap_or_default();
-
-                // Send expressions to all subscribers
-                for expr in &expressions {
-                    for mut subscriber in subscribers.clone() {
-                        tokio::spawn(capture!([expr], async move {
-                            subscriber
-                                .send(expr)
-                                .await
-                                .expect("Failed to send logical expression");
-                        }));
-                    }
-                }
-
-                // Add subscribers to new group
-                self.group_subscribers
-                    .entry(new_group_id)
-                    .or_default()
-                    .extend(subscribers);
-
-                // Inherit exploration status
-                if self.exploring_groups.remove(&prev_group_id) {
-                    self.exploring_groups.insert(new_group_id);
-                }
-            }
-            MergeResult::GoalMerge {
-                prev_goal,
-                new_goal,
-                expression,
-            } => {
-                // Update goal representative
-                self.goal_repr.merge(&prev_goal, &new_goal);
-
-                // Get subscribers for the previous goal
-                let subscribers = self.goal_subscribers.remove(&prev_goal).unwrap_or_default();
-
-                // Send optimized expression if present
-                if let Some(expr) = &expression {
-                    for mut subscriber in subscribers.clone() {
-                        tokio::spawn(capture!([expr], async move {
-                            subscriber
-                                .send(expr)
-                                .await
-                                .expect("Failed to send optimized expression");
-                        }));
-                    }
-                }
-
-                // Add subscribers to new goal
-                self.goal_subscribers
-                    .entry(new_goal.clone())
-                    .or_default()
-                    .extend(subscribers);
-
-                // Inherit exploration status
-                if self.exploring_goals.remove(&prev_goal) {
-                    self.exploring_goals.insert(new_goal);
-                }
-            }
-        }
+        todo!()
     }
 
     /// Helper method to resolve dependencies after a group creation job completes

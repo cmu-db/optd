@@ -90,7 +90,7 @@ impl<M: Memoize> Optimizer<M> {
     /// A PhysicalIngest containing the Goal associated with the physical plan
     /// and the PhysicalExpression if newly created (None if it already existed)
     pub(super) async fn try_ingest_physical(
-        &self,
+        &mut self,
         physical_plan: &PartialPhysicalPlan,
     ) -> PhysicalIngest {
         self.ingest_physical_plan(physical_plan)
@@ -118,7 +118,7 @@ impl<M: Memoize> Optimizer<M> {
     /// Ingests a partial physical plan into the memo table.
     #[async_recursion]
     async fn ingest_physical_plan(
-        &self,
+        &mut self,
         partial_plan: &PartialPhysicalPlan,
     ) -> Result<PhysicalIngest, Error> {
         match partial_plan {
@@ -136,6 +136,9 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Processes a logical operator and attempts to find it in the memo table.
+    ///
+    /// Uses parallel processing for children since it has an immutable self reference.
+    /// This allows for better performance when processing multiple children.
     async fn ingest_logical_operator(
         &self,
         operator: &Operator<Arc<PartialLogicalPlan>>,
@@ -206,18 +209,19 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Processes a physical operator and integrates it into the memo table.
+    ///
+    /// Uses sequential processing for children since it has a mutable self reference.
+    /// This is required to avoid multiple mutable borrows of self.
     async fn ingest_physical_operator(
-        &self,
+        &mut self,
         operator: &Operator<Arc<PartialPhysicalPlan>>,
     ) -> Result<PhysicalIngest, Error> {
         // Process children
-        let children = try_join_all(
-            operator
-                .children
-                .iter()
-                .map(|child| self.process_physical_child(child)),
-        )
-        .await?;
+        let mut children = Vec::with_capacity(operator.children.len());
+        for child in &operator.children {
+            let processed_child = self.process_physical_child(child).await?;
+            children.push(processed_child);
+        }
 
         // Create the physical expression with processed children
         let physical_expression = PhysicalExpression {
@@ -245,6 +249,9 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Helper function to process a Child structure containing a logical plan.
+    ///
+    /// This uses parallel processing with try_join_all since it operates on an immutable &self
+    /// reference, allowing multiple children to be processed concurrently for better performance.
     async fn process_logical_child(
         &self,
         child: &Child<Arc<PartialLogicalPlan>>,
@@ -255,6 +262,7 @@ impl<M: Memoize> Optimizer<M> {
                 Ok(Singleton(result))
             }
             VarLength(plans) => {
+                // Parallel processing is safe with immutable self reference
                 let results =
                     try_join_all(plans.iter().map(|plan| self.ingest_logical_plan(plan))).await?;
                 Ok(VarLength(results))
@@ -263,8 +271,11 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Helper function to process a Child structure containing a physical plan.
+    ///
+    /// This uses sequential processing since it operates on a mutable &mut self reference,
+    /// which cannot be shared across multiple concurrent operations.
     async fn process_physical_child(
-        &self,
+        &mut self,
         child: &Child<Arc<PartialPhysicalPlan>>,
     ) -> Result<Child<Goal>, Error> {
         match child {
@@ -273,8 +284,13 @@ impl<M: Memoize> Optimizer<M> {
                 Ok(Singleton(result.goal))
             }
             VarLength(plans) => {
-                let results =
-                    try_join_all(plans.iter().map(|plan| self.ingest_physical_plan(plan))).await?;
+                // Sequential processing required for mutable self reference
+                let mut results = Vec::with_capacity(plans.len());
+                for plan in plans {
+                    let result = self.ingest_physical_plan(plan).await?;
+                    results.push(result);
+                }
+
                 let goals = results.into_iter().map(|ingest| ingest.goal).collect();
                 Ok(VarLength(goals))
             }
