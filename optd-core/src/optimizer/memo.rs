@@ -31,8 +31,8 @@ pub(crate) enum MergeResult {
         /// Original group ID that was merged
         prev_group_id: GroupId,
 
-        /// Representative group ID after merging
-        representative_group_id: GroupId,
+        /// New group ID after merging
+        new_group_id: GroupId,
 
         /// New logical expressions added to the group
         new_expressions: Vec<LogicalExpression>,
@@ -43,8 +43,8 @@ pub(crate) enum MergeResult {
         /// Original goal that was merged
         prev_goal: Goal,
 
-        /// Representative goal after merging
-        representative_goal: Goal,
+        /// New goal after merging
+        new_goal: Goal,
 
         /// New (potential) optimized expression added to the goal
         new_expression: Option<OptimizedExpression>,

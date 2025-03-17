@@ -464,7 +464,7 @@ impl<M: Memoize> Optimizer<M> {
             .await
             .expect("Failed to get logical expressions for group");
 
-        // Schedule transformation jobs for all expression-rule combinations
+        // Schedule transformation tasks for all expression-rule combinations
         // This creates a Cartesian product of rules × expressions
         expressions
             .into_iter()
@@ -474,7 +474,7 @@ impl<M: Memoize> Optimizer<M> {
                     .map(move |rule| (rule.clone(), expr.clone()))
             })
             .for_each(|(rule, expr)| {
-                self.schedule_job(task_id, LaunchTransformationRule(rule, expr));
+                self.launch_transform_expression_task(rule, expr, task_id);
             });
 
         task_id
@@ -523,7 +523,7 @@ impl<M: Memoize> Optimizer<M> {
                         .map(move |rule| (rule.clone(), expr.clone()))
                 })
                 .for_each(|(rule, expr)| {
-                    self.schedule_job(task_id, LaunchImplementationRule(rule, expr));
+                    self.launch_implement_expression_task(rule, expr, task_id);
                 });
 
             // For each combination of group ID and physical properties, create a goal, get

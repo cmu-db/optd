@@ -274,7 +274,7 @@ impl<M: Memoize> Optimizer<M> {
     async fn handle_merge_result(&mut self, result: MergeResult) {
         todo!()
     }
-
+    
     /// Helper method to resolve dependencies after a group creation job completes
     ///
     /// This method is called when a group creation job completes. It updates all
