@@ -96,7 +96,7 @@ impl<M: Memoize> Optimizer<M> {
                     // Get the best optimized expression for this goal
                     let best_expr = match self.memo.get_best_optimized_physical_expr(&goal).await? {
                         Some(expr) => expr,
-                        None => return Ok(None),
+                        None => return Ok::<_, Error>(None),
                     };
 
                     // Recursively egest the plan for this expression

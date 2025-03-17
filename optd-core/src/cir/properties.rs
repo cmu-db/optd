@@ -4,14 +4,14 @@ use ordered_float::OrderedFloat;
 ///
 /// Logical properties describe characteristics of the data produced by
 /// a logical group, such as schema, uniqueness constraints, or statistics.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct LogicalProperties(pub Option<PropertiesData>);
 
 /// Represents physical properties of a physical plan node.
 ///
 /// Physical properties describe execution characteristics of a physical plan node,
 /// such as sort order, distribution, or resource requirements.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct PhysicalProperties(pub Option<PropertiesData>);
 
 /// Represents various types of property data that can be associated with plan nodes.

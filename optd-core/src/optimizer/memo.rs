@@ -14,6 +14,21 @@ use crate::{
 /// Type alias for results returned by Memoize trait methods
 pub type MemoizeResult<T> = Result<T, Error>;
 
+/// Errors that can occur during memoization operations.
+#[derive(Debug)]
+pub enum MemoizeError {
+    GroupNotFound(GroupId),
+    GoalNotFound(Goal),
+    LogicalExprNotFound(LogicalExpression),
+    PhysicalExprNotFound(PhysicalExpression),
+}
+
+impl From<MemoizeError> for Error {
+    fn from(err: MemoizeError) -> Self {
+        Error::Memo(err)
+    }
+}
+
 /// Status of a rule application or costing operation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -25,32 +40,21 @@ pub enum Status {
 }
 
 /// Results of merge operations for different entity types
-pub(crate) enum MergeResult {
+pub enum MergeResult {
     /// Result of merging two groups
     GroupMerge {
-        /// Original group ID that was merged
-        prev_group_id: GroupId,
-
-        /// New group ID after merging
-        new_group_id: GroupId,
-
-        /// New logical expressions added to the group
-        new_expressions: Vec<LogicalExpression>,
+        /// Merged groups and their logical expressions
+        merged_groups: HashMap<GroupId, Vec<LogicalExpression>>,
+        /// Representative group ID after merging
+        representative: GroupId,
     },
 
     /// Result of merging two goals
     GoalMerge {
-        /// Original goal that was merged
-        prev_goal: Goal,
-
-        /// New goal after merging
-        new_goal: Goal,
-
-        /// New (potential) optimized expression added to the goal
-        new_expression: Option<OptimizedExpression>,
-
-        /// New equivalent goals created during the merge process
-        new_equivalent_goals: HashMap<GroupId, Vec<PhysicalProperties>>,
+        /// Newly found equivalent goals and their optimized expressions
+        equivalent_goals: HashMap<Goal, Option<OptimizedExpression>>,
+        /// Representative goal after merging
+        representative: Goal,
     },
 }
 
@@ -183,7 +187,7 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         logical_expr: &LogicalExpression,
         rule: &TransformationRule,
-    ) -> MemoizeResult<Option<Status>>;
+    ) -> MemoizeResult<Status>;
 
     /// Sets the status of applying a transformation rule on a logical expression
     async fn set_transformation_status(
@@ -202,7 +206,7 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         logical_expr: &LogicalExpression,
         rule: &ImplementationRule,
-    ) -> MemoizeResult<Option<Status>>;
+    ) -> MemoizeResult<Status>;
 
     /// Sets the status of applying an implementation rule on a logical expression
     async fn set_implementation_status(
@@ -217,10 +221,8 @@ pub trait Memoize: Send + Sync + 'static {
     /// Returns `Status::Dirty` if there are ongoing events that may affect the costing
     /// or `Status::Clean` if the costing does not need to be re-evaluated.
     /// Returns None if the physical expression has not been costed.
-    async fn get_costing_status(
-        &self,
-        physical_expr: &PhysicalExpression,
-    ) -> MemoizeResult<Option<Status>>;
+    async fn get_costing_status(&self, physical_expr: &PhysicalExpression)
+        -> MemoizeResult<Status>;
 
     /// Sets the status of costing a physical expression
     async fn set_costing_status(

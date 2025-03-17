@@ -28,7 +28,7 @@ mod generator;
 mod handlers;
 mod ingest;
 mod jobs;
-mod memo;
+pub mod memo;
 mod merge_repr;
 mod subscriptions;
 mod tasks;
