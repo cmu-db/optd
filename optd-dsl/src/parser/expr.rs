@@ -36,7 +36,7 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
     recursive(|expr| {
         let literal = {
             let lit_int = select! { Token::Int64(n) => Literal::Int64(n) };
-            let lit_float = select! { Token::Float64(f) => Literal::Float64(f) };
+            let lit_float = select! { Token::Float64(f) => Literal::Float64(*f) };
             let lit_string = select! { Token::String(s) => Literal::String(s) };
             let lit_bool = select! { Token::Bool(b) => Literal::Bool(b) };
             let lit_unit = just(Token::Unit).map(|_| Literal::Unit);
@@ -352,7 +352,6 @@ mod tests {
         parser::ast::{Expr, Literal, Pattern},
     };
     use chumsky::{prelude::end, Stream};
-    use ordered_float::OrderedFloat;
 
     fn parse_expr(input: &str) -> (Option<Spanned<Expr>>, Vec<Simple<Token, Span>>) {
         let (tokens, _) = lex(input, "test.txt");
@@ -428,7 +427,7 @@ mod tests {
         assert!(errors.is_empty(), "Expected no errors for float");
         assert_expr_eq(
             &result.unwrap().value,
-            &Expr::Literal(Literal::Float64(OrderedFloat(f64::consts::PI))),
+            &Expr::Literal(Literal::Float64(f64::consts::PI)),
         );
 
         // Strings
@@ -963,7 +962,7 @@ mod tests {
                         if let Expr::Binary(left, BinOp::Mul, right) = &*args[1].value {
                             assert_expr_eq(&left.value, &Expr::Ref("y".to_string()));
                             if let Expr::Literal(Literal::Float64(f)) = &*right.value {
-                                assert_eq!(f.into_inner(), 2.5);
+                                assert_eq!(*f, 2.5);
                             } else {
                                 panic!("Expected float literal in second argument");
                             }

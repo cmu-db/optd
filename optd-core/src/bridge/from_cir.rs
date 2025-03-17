@@ -147,6 +147,5 @@ fn properties_data_to_value(data: &PropertiesData) -> Value {
             let values = elements.iter().map(properties_data_to_value).collect();
             Value(Array(values))
         }
-        PropertiesData::Logical(plan) => partial_logical_to_value(&plan.clone().into()),
     }
 }

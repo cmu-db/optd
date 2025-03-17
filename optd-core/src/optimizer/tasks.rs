@@ -434,7 +434,7 @@ impl<M: Memoize> Optimizer<M> {
         child_task_id: TaskId,
     ) {
         // Check if we already have an exploration task for this goal
-        let task_id = match self.goal_exploration_task_index.get(&goal) {
+        let task_id = match self.goal_exploration_task_index.get(goal) {
             Some(id) => *id,
             None => self.launch_goal_exploration_task(goal).await,
         };
@@ -566,7 +566,7 @@ impl<M: Memoize> Optimizer<M> {
     fn register_child_to_task(&mut self, parent_id: TaskId, child_id: TaskId) {
         self.tasks
             .get_mut(&parent_id)
-            .expect(&format!("Parent task {} not found", parent_id))
+            .expect("Parent task not found")
             .children
             .push(child_id);
     }

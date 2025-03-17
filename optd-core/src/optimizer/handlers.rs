@@ -1,5 +1,4 @@
 use super::{
-    generator::OptimizerGenerator,
     ingest::{LogicalIngest, PhysicalIngest},
     jobs::JobKind,
     memo::{Memoize, MergeResult},
@@ -7,7 +6,6 @@ use super::{
     Job, JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
 };
 use crate::{
-    capture,
     cir::{
         expressions::{LogicalExpression, OptimizedExpression, PhysicalExpression},
         goal::Goal,
@@ -69,7 +67,7 @@ impl<M: Memoize> Optimizer<M> {
                 // Perform the merge in the memo and process all results
                 let merge_results = self
                     .memo
-                    .merge_groups(&group_id, &new_group_id)
+                    .merge_groups(group_id, new_group_id)
                     .await
                     .expect("Failed to merge groups");
 
@@ -118,8 +116,9 @@ impl<M: Memoize> Optimizer<M> {
                 self.handle_merge_result(result).await;
             }
 
-            // If a new expression was created, schedule a costing job
+            // If a new expression was created, launch a costing task
             if let Some(expr) = new_expr {
+                // TODO todo!()
                 self.schedule_job(related_task_id, LaunchCostExpression(expr));
             }
         }
@@ -251,7 +250,7 @@ impl<M: Memoize> Optimizer<M> {
         let group_id = self.group_repr.find(&group_id);
         let props = self
             .memo
-            .get_logical_properties(&group_id)
+            .get_logical_properties(group_id)
             .await
             .expect("Failed to get logical properties");
 

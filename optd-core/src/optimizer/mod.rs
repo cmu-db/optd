@@ -238,7 +238,7 @@ impl<M: Memoize> Optimizer<M> {
     /// This method creates and initializes all the necessary state for the optimizer
     /// but does not start processing. Use `launch` to create and start the optimizer
     /// in one step.
-    pub fn new(
+    fn new(
         memo: M,
         hir: HIR,
         message_tx: Sender<OptimizerMessage>,
