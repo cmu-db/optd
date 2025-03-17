@@ -116,10 +116,9 @@ impl<M: Memoize> Optimizer<M> {
                 self.handle_merge_result(result).await;
             }
 
-            // If a new expression was created, launch a costing task
+            // If an expression was just created, its status is always dirty
             if let Some(expr) = new_expr {
-                // TODO todo!()
-                self.schedule_job(related_task_id, LaunchCostExpression(expr));
+                self.launch_cost_expression_task(expr, related_task_id);
             }
         }
     }

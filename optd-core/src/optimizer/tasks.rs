@@ -383,7 +383,7 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// Cost estimation helps determine which physical implementation is best
     /// among the alternatives.
-    pub(super) fn lauch_cost_expression_task(
+    pub(super) fn launch_cost_expression_task(
         &mut self,
         expression: PhysicalExpression,
         parent: TaskId,
@@ -483,8 +483,8 @@ impl<M: Memoize> Optimizer<M> {
     /// Launches a new task to explore all possible implementations for a goal
     ///
     /// This schedules jobs to apply all implementation rules to all logical expressions
-    /// and cost all physical expressions in all equivalent goals. It handles multiple
-    /// equivalent goals across different groups with various physical properties.
+    /// and launches cost tasks for all physical expressions in all equivalent goals.
+    /// It handles multiple equivalent goals across different groups with various physical properties.
     async fn launch_goal_exploration_task(&mut self, goal: &Goal) -> TaskId {
         // Get all equivalent goals grouped by group ID and their associated physical properties
         let equivalent_goals = self
@@ -526,27 +526,25 @@ impl<M: Memoize> Optimizer<M> {
                     self.schedule_job(task_id, LaunchImplementationRule(rule, expr));
                 });
 
-            // For each combination of group ID and physical properties, create a goal and get expressions
+            // For each combination of group ID and physical properties, create a goal, get
+            // all physical expressions, and launch cost tasks for each
             for props in properties_list {
                 let current_goal = Goal(*group_id, props.clone());
 
-                // Get all physical expressions for this specific goal and schedule costing jobs
                 let physical_expressions = self
                     .memo
                     .get_all_physical_exprs(&current_goal)
                     .await
                     .expect("Failed to get physical expressions for goal");
 
-                // Schedule costing jobs for all physical expressions for this goal
                 physical_expressions.into_iter().for_each(|expr| {
-                    self.schedule_job(task_id, LaunchCostExpression(expr));
+                    self.launch_cost_expression_task(expr, task_id);
                 });
             }
         }
 
         task_id
     }
-
     /// Helper method to register a new task of a specified kind
     ///
     /// Assigns a unique task ID and adds the task to the task registry.
