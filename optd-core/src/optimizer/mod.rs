@@ -1,10 +1,12 @@
 use crate::{
     cir::{
-        expressions::{LogicalExpression, OptimizedExpression},
-        goal::Goal,
+        expressions::{
+            LogicalExpression, LogicalExpressionId, OptimizedExpression, PhysicalExpressionId,
+        },
+        goal::{Goal, GoalId},
         group::GroupId,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
-        properties::LogicalProperties,
+        properties::{LogicalProperties, PhysicalProperties},
         rules::RuleBook,
     },
     engine::{LogicalExprContinuation, OptimizedExprContinuation},
@@ -17,7 +19,6 @@ use futures::{
 };
 use jobs::{Job, JobId};
 use memo::Memoize;
-use merge_repr::Representative;
 use optd_dsl::analyzer::{context::Context, hir::HIR};
 use std::collections::{HashMap, HashSet, VecDeque};
 use tasks::{Task, TaskId};
@@ -29,7 +30,6 @@ mod handlers;
 mod ingest;
 mod jobs;
 mod memo;
-mod merge_repr;
 mod subscriptions;
 mod tasks;
 
@@ -177,11 +177,17 @@ pub struct Optimizer<M: Memoize> {
     /// enabling faster processing of group-related messages and dependency tracking.
     group_explorations_task_index: HashMap<GroupId, TaskId>,
 
+    expression_exploration_task_index: HashMap<LogicalExpressionId, TaskId>,
+
     /// Maps optimization goals to their associated exploration task IDs
     ///
     /// This index provides efficient lookup of the exploration task for a specific goal,
     /// enabling faster processing of goal-related messages and implementation tracking.
-    goal_exploration_task_index: HashMap<Goal, TaskId>,
+    goal_exploration_task_index: HashMap<GoalId, TaskId>,
+
+    expression_implementation_task_index:
+        HashMap<LogicalExpressionId, Vec<(PhysicalProperties, TaskId)>>,
+    expression_costing_task_index: HashMap<PhysicalExpressionId, TaskId>,
 
     /// Tracks all uncompleted jobs that are pending (not yet started)
     ///
@@ -204,15 +210,6 @@ pub struct Optimizer<M: Memoize> {
 
     /// Next available job ID for job creation
     next_job_id: JobId,
-
-    //
-    // Representative tracking
-    //
-    /// Maps groups to their representatives for merging
-    group_repr: Representative<GroupId>,
-
-    /// Maps goals to their representatives for merging
-    goal_repr: Representative<Goal>,
 
     //
     // Subscription management
@@ -261,18 +258,15 @@ impl<M: Memoize> Optimizer<M> {
             pending_messages: Vec::new(),
             tasks: HashMap::new(),
             group_explorations_task_index: HashMap::new(),
+            expression_exploration_task_index: HashMap::new(),
             goal_exploration_task_index: HashMap::new(),
+            expression_implementation_task_index: HashMap::new(),
+            expression_costing_task_index: HashMap::new(),
             pending_jobs: HashMap::new(),
             job_schedule_queue: VecDeque::new(),
             running_jobs: HashMap::new(),
             next_task_id: TaskId(0),
             next_job_id: JobId(0),
-
-            //
-            // Representative tracking
-            //
-            group_repr: Representative::new(),
-            goal_repr: Representative::new(),
 
             //
             // Subscription management

@@ -109,8 +109,7 @@ impl<M: Memoize> Optimizer<M> {
                 self.ingest_logical_operator(operator).await
             }
             PartialLogicalPlan::UnMaterialized(group_id) => {
-                let group_id = self.group_repr.find(group_id);
-                Ok(InternalLogicalIngest::Found(group_id))
+                Ok(InternalLogicalIngest::Found(*group_id))
             }
         }
     }
@@ -125,13 +124,10 @@ impl<M: Memoize> Optimizer<M> {
             PartialPhysicalPlan::Materialized(operator) => {
                 self.ingest_physical_operator(operator).await
             }
-            PartialPhysicalPlan::UnMaterialized(goal) => {
-                let goal = self.goal_repr.find(goal);
-                Ok(PhysicalIngest {
-                    goal,
-                    new_expression: None,
-                })
-            }
+            PartialPhysicalPlan::UnMaterialized(goal) => Ok(PhysicalIngest {
+                goal: goal.clone(),
+                new_expression: None,
+            }),
         }
     }
 
@@ -196,7 +192,6 @@ impl<M: Memoize> Optimizer<M> {
         match group_maybe {
             Some(group_id) => {
                 // Expression already exists in this group
-                let group_id = self.group_repr.find(&group_id);
                 Ok(InternalLogicalIngest::Found(group_id))
             }
             None => {
@@ -232,7 +227,6 @@ impl<M: Memoize> Optimizer<M> {
 
         // Try to find the expression in the memo
         if let Some(goal) = self.memo.find_physical_expr(&physical_expression).await? {
-            let goal = self.goal_repr.find(&goal);
             return Ok(PhysicalIngest {
                 goal,
                 new_expression: None,

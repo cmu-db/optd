@@ -72,8 +72,6 @@ impl<M: Memoize> Optimizer<M> {
     ) -> Result<Option<Child<Arc<PhysicalPlan>>>, Error> {
         match child {
             Singleton(goal) => {
-                let goal = self.goal_repr.find(goal);
-
                 // Get the best optimized expression for this goal
                 let best_expr = match self.memo.get_best_optimized_physical_expr(&goal).await? {
                     Some(expr) => expr,
@@ -91,8 +89,6 @@ impl<M: Memoize> Optimizer<M> {
             VarLength(goals) => {
                 // For each goal, get its best physical plan
                 let plan_futures = goals.iter().map(|goal| async move {
-                    let goal = self.goal_repr.find(goal);
-
                     // Get the best optimized expression for this goal
                     let best_expr = match self.memo.get_best_optimized_physical_expr(&goal).await? {
                         Some(expr) => expr,

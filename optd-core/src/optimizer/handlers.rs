@@ -7,10 +7,9 @@ use super::{
 };
 use crate::{
     cir::{
-        expressions::{LogicalExpression, OptimizedExpression, PhysicalExpression},
+        expressions::{LogicalExpression, OptimizedExpression},
         goal::Goal,
         group::GroupId,
-        operators::Child,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
     },
@@ -39,7 +38,6 @@ impl<M: Memoize> Optimizer<M> {
                 // The goal represents what we want to achieve: optimize the root group
                 // with no specific physical properties required
                 let goal = Goal(group_id, PhysicalProperties(None));
-                let goal = self.goal_repr.find(&goal);
 
                 // Subscribe the task to the goal
                 // This ensures the task will be notified when optimized expressions
@@ -68,7 +66,6 @@ impl<M: Memoize> Optimizer<M> {
         group_id: GroupId,
         job_id: JobId,
     ) {
-        let group_id = self.group_repr.find(&group_id);
         let related_task_id = self.running_jobs[&job_id].0;
 
         match self.try_ingest_logical(&plan, related_task_id).await {
@@ -105,7 +102,6 @@ impl<M: Memoize> Optimizer<M> {
         goal: Goal,
         job_id: JobId,
     ) {
-        let goal = self.goal_repr.find(&goal);
         let related_task_id = self.running_jobs[&job_id].0;
 
         let PhysicalIngest {
@@ -142,10 +138,6 @@ impl<M: Memoize> Optimizer<M> {
         expression: OptimizedExpression,
         goal: Goal,
     ) {
-        // Update the expression & goal to use representative goals
-        let goal = self.goal_repr.find(&goal);
-        let expression = self.normalize_optimized_expression(&expression);
-
         // Add the optimized expression to the memo
         let new_best = self
             .memo
@@ -185,7 +177,6 @@ impl<M: Memoize> Optimizer<M> {
         continuation: LogicalExprContinuation,
         job_id: JobId,
     ) {
-        let group_id = self.group_repr.find(&group_id);
         let related_task_id = self.running_jobs[&job_id].0;
 
         // Register the continuation directly with the task
@@ -224,7 +215,6 @@ impl<M: Memoize> Optimizer<M> {
         continuation: OptimizedExprContinuation,
         job_id: JobId,
     ) {
-        let goal = self.goal_repr.find(&goal);
         let related_task_id = self.running_jobs[&job_id].0;
 
         // Verify task type and register the continuation
@@ -259,7 +249,6 @@ impl<M: Memoize> Optimizer<M> {
         group_id: GroupId,
         sender: oneshot::Sender<LogicalProperties>,
     ) {
-        let group_id = self.group_repr.find(&group_id);
         let props = self
             .memo
             .get_logical_properties(group_id)
@@ -316,36 +305,5 @@ impl<M: Memoize> Optimizer<M> {
                     .expect("Failed to re-send ready message");
             });
         }
-    }
-
-    /// Helper method to normalize an optimized expression by updating all children goals
-    /// to use their representative goals.
-    ///
-    /// This ensures consistency in the memo by always working with canonical representatives.
-    fn normalize_optimized_expression(&self, expr: &OptimizedExpression) -> OptimizedExpression {
-        let normalized_children = expr
-            .0
-            .children
-            .iter()
-            .map(|child| match child {
-                Child::Singleton(goal) => {
-                    let goal = self.goal_repr.find(goal);
-                    Child::Singleton(goal)
-                }
-                Child::VarLength(goals) => {
-                    let goals = goals.iter().map(|goal| self.goal_repr.find(goal)).collect();
-                    Child::VarLength(goals)
-                }
-            })
-            .collect();
-
-        OptimizedExpression(
-            PhysicalExpression {
-                tag: expr.0.tag.clone(),
-                data: expr.0.data.clone(),
-                children: normalized_children,
-            },
-            expr.1,
-        )
     }
 }

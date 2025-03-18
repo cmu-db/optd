@@ -16,11 +16,17 @@ use std::sync::Arc;
 /// representing a compact form suitable for the memo structure.
 pub type LogicalExpression = Operator<GroupId>;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LogicalExpressionId(pub i64);
+
 /// A physical expression in the memo structure.
 ///
 /// Physical expressions use goal IDs rather than full plans for
 /// their children, representing a compact form suitable for the memo structure.
 pub type PhysicalExpression = Operator<Goal>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PhysicalExpressionId(pub i64);
 
 /// An optimized physical expression with its associated cost.
 #[derive(Clone, Debug)]

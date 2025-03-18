@@ -1,6 +1,6 @@
 use crate::{
     cir::{
-        expressions::{LogicalExpression, OptimizedExpression, PhysicalExpression},
+        expressions::{LogicalExpression, LogicalExpressionId, OptimizedExpression, PhysicalExpression},
         goal::Goal,
         group::GroupId,
         properties::{LogicalProperties, PhysicalProperties},
@@ -28,19 +28,15 @@ pub(crate) enum MergeResult {
     /// Result of merging two groups
     GroupMerge {
         /// Original group ID that was merged
-        prev_group_id: GroupId,
+        groups: (Vec<(GroupId, Vec<LogicalExpressionId>)>, GroupId),
 
-        /// New group ID after merging
-        new_group_id: GroupId,
-
-        /// New logical expressions added to the group
-        new_expressions: Vec<LogicalExpression>,
+        exprs: Vec<(Vec<LogicalExpressionId>, LogicalExpressionId)>,
     },
 
     /// Result of merging two goals
     GoalMerge {
         /// Original goal that was merged
-        prev_goal: Goal,
+        repr_goal: Goal,
 
         /// New goal after merging
         new_goal: Goal,
@@ -89,7 +85,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// Creates a new group with a logical expression and properties
     ///
     /// Returns the ID of the newly created group.
-                                async fn create_group(
+    async fn create_group(
         &mut self,
         logical_expr: &LogicalExpression,
         props: &LogicalProperties,
