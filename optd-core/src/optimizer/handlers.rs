@@ -2,8 +2,8 @@ use super::{
     ingest::{LogicalIngest, PhysicalIngest},
     jobs::JobKind,
     memo::{Memoize, MergeResult},
-    tasks::{OptimizePlanResult, TaskKind, TransformExpressionTask},
-    Job, JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
+    tasks::{OptimizePlanResult, TaskKind},
+    JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
 };
 use crate::{
     cir::{
@@ -12,20 +12,16 @@ use crate::{
         group::GroupId,
         operators::Child,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
-        properties::{LogicalProperties, PhysicalProperties},
+        properties::LogicalProperties,
     },
-    engine::{CostContinuation, Engine, LogicalExprContinuation, OptimizedExprContinuation},
+    engine::{LogicalExprContinuation, OptimizedExprContinuation},
 };
 use futures::{
-    channel::{
-        mpsc::{self, Sender},
-        oneshot,
-    },
+    channel::{mpsc::Sender, oneshot},
     SinkExt,
 };
 use JobKind::*;
 use OptimizerMessage::*;
-use TaskKind::*;
 
 impl<M: Memoize> Optimizer<M> {
     /// This method initiates the optimization process for a logical plan by launching
@@ -274,7 +270,7 @@ impl<M: Memoize> Optimizer<M> {
     async fn handle_merge_result(&mut self, result: MergeResult) {
         todo!()
     }
-    
+
     /// Helper method to resolve dependencies after a group creation job completes
     ///
     /// This method is called when a group creation job completes. It updates all

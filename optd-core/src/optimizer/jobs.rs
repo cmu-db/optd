@@ -2,6 +2,7 @@ use super::{memo::Memoize, tasks::TaskId, Optimizer};
 use crate::{
     cir::{
         expressions::{LogicalExpression, OptimizedExpression, PhysicalExpression},
+        properties::PhysicalProperties,
         rules::{ImplementationRule, TransformationRule},
     },
     engine::{LogicalExprContinuation, OptimizedExprContinuation},
@@ -34,11 +35,11 @@ pub(super) enum JobKind {
     /// semantically equivalent to the original.
     LaunchTransformationRule(TransformationRule, LogicalExpression),
 
-    /// Applies an implementation rule to a logical expression
+    /// Applies an implementation rule to a logical expression and properties
     ///
     /// This job generates physical implementations of a logical expression
     /// based on specific implementation strategies.
-    LaunchImplementationRule(ImplementationRule, LogicalExpression),
+    LaunchImplementationRule(ImplementationRule, LogicalExpression, PhysicalProperties),
 
     /// Computes the cost of a physical expression
     ///
@@ -83,7 +84,7 @@ impl<M: Memoize> Optimizer<M> {
         self.pending_jobs.insert(job_id, job);
         self.job_schedule_queue.push_back(job_id);
 
-        // Add job to task's uncompleted jobs set - crash if task doesn't exist
+        // Add job to task's uncompleted jobs set
         self.tasks
             .get_mut(&task_id)
             .expect("Task must exist when creating a job for it")

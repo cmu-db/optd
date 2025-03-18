@@ -153,6 +153,9 @@ pub(super) struct ImplementExpressionTask {
     /// The logical expression to implement
     pub expression: LogicalExpression,
 
+    // The properties to implement the expression with
+    pub properties: PhysicalProperties,
+
     /// Continuations for each group that need to be notified when
     /// new logical expressions are created
     pub continuations: HashMap<GroupId, Vec<LogicalExprContinuation>>,
@@ -160,10 +163,15 @@ pub(super) struct ImplementExpressionTask {
 
 impl ImplementExpressionTask {
     /// Creates a new implementation task with the given rule and expression
-    pub fn new(rule: ImplementationRule, expression: LogicalExpression) -> Self {
+    pub fn new(
+        rule: ImplementationRule,
+        expression: LogicalExpression,
+        properties: PhysicalProperties,
+    ) -> Self {
         Self {
             rule,
             expression,
+            properties,
             continuations: HashMap::new(),
         }
     }
@@ -357,24 +365,30 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Launches a task to start applying an implementation rule to a logical expression
+    /// and physical properties to create physical expressions
     ///
-    /// Implementation rules convert logical expressions to equivalent physical expressions,
-    /// which represent concrete execution strategies.
+    /// Implementation rules convert logical expressions and properties to equivalent
+    /// physical expressions which represent concrete execution strategies.
     pub(super) fn launch_implement_expression_task(
         &mut self,
         rule: ImplementationRule,
         expression: LogicalExpression,
+        properties: PhysicalProperties,
         parent: TaskId,
     ) -> TaskId {
         // Create and register the implementation task
-        let task_kind = ImplementExpressionTask::new(rule.clone(), expression.clone());
+        let task_kind =
+            ImplementExpressionTask::new(rule.clone(), expression.clone(), properties.clone());
         let task_id = self.register_new_task(ImplementExpression(task_kind));
 
         // Set up parent-child relationship
         self.register_child_to_task(parent, task_id);
 
         // Schedule a job to actually launch the implementation rule
-        self.schedule_job(task_id, LaunchImplementationRule(rule, expression));
+        self.schedule_job(
+            task_id,
+            LaunchImplementationRule(rule, expression, properties),
+        );
 
         task_id
     }
@@ -499,13 +513,11 @@ impl<M: Memoize> Optimizer<M> {
         self.goal_exploration_task_index
             .insert(goal.clone(), task_id);
 
-        // Process all group IDs in the equivalent goals map
         for (group_id, properties_list) in &equivalent_goals {
             // Ensure we explore each group associated with the equivalent goals
             // This is necessary since new logical expressions can lead to new implementations
             self.ensure_group_exploration_task(*group_id, task_id).await;
 
-            // Get all implementation rules and all logical expressions in this group
             let implementations = self.rule_book.get_implementations().to_vec();
             let logical_expressions = self
                 .memo
@@ -513,38 +525,38 @@ impl<M: Memoize> Optimizer<M> {
                 .await
                 .expect("Failed to get logical expressions for group");
 
-            // Schedule implementation jobs for all expression-rule combinations for this group
-            // This creates a Cartesian product of rules × expressions
+            // Schedule implementation jobs for all expression-rule-properties combinations for this group
+            // This creates a Cartesian product of rules × properties × expressions.
             logical_expressions
                 .into_iter()
                 .flat_map(|expr| {
-                    implementations
-                        .iter()
-                        .map(move |rule| (rule.clone(), expr.clone()))
+                    implementations.iter().flat_map(move |rule| {
+                        let expr = expr.clone();
+                        properties_list
+                            .iter()
+                            .map(move |props| (rule.clone(), expr.clone(), props.clone()))
+                    })
                 })
-                .for_each(|(rule, expr)| {
-                    self.launch_implement_expression_task(rule, expr, task_id);
+                .for_each(|(rule, expr, props)| {
+                    self.launch_implement_expression_task(rule, expr, props, task_id);
                 });
-
-            // For each combination of group ID and physical properties, create a goal, get
-            // all physical expressions, and launch cost tasks for each
-            for props in properties_list {
-                let current_goal = Goal(*group_id, props.clone());
-
-                let physical_expressions = self
-                    .memo
-                    .get_all_physical_exprs(&current_goal)
-                    .await
-                    .expect("Failed to get physical expressions for goal");
-
-                physical_expressions.into_iter().for_each(|expr| {
-                    self.launch_cost_expression_task(expr, task_id);
-                });
-            }
         }
+
+        // Launch costing for all physical expressions in the original goal
+        // (this includes all the equivalent goals).
+        let physical_expressions = self
+            .memo
+            .get_all_physical_exprs(goal)
+            .await
+            .expect("Failed to get physical expressions for goal");
+
+        physical_expressions.into_iter().for_each(|expr| {
+            self.launch_cost_expression_task(expr, task_id);
+        });
 
         task_id
     }
+
     /// Helper method to register a new task of a specified kind
     ///
     /// Assigns a unique task ID and adds the task to the task registry.

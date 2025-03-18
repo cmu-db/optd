@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     cir::{
         expressions::{LogicalExpression, OptimizedExpression, PhysicalExpression},
@@ -10,6 +8,7 @@ use crate::{
     },
     error::Error,
 };
+use std::collections::HashMap;
 
 /// Type alias for results returned by Memoize trait methods
 pub type MemoizeResult<T> = Result<T, Error>;
@@ -193,7 +192,7 @@ pub trait Memoize: Send + Sync + 'static {
         status: Status,
     ) -> MemoizeResult<()>;
 
-    /// Checks the status of applying an implementation rule on a logical expression
+    /// Checks the status of applying an implementation rule on a logical expression and properties
     ///
     /// Returns `Status::Dirty` if there are ongoing events that may affect the transformation
     /// or `Status::Clean` if the implementation does not need to be re-evaluated.
@@ -201,13 +200,15 @@ pub trait Memoize: Send + Sync + 'static {
     async fn get_implementation_status(
         &self,
         logical_expr: &LogicalExpression,
+        properties: &PhysicalProperties,
         rule: &ImplementationRule,
     ) -> MemoizeResult<Option<Status>>;
 
-    /// Sets the status of applying an implementation rule on a logical expression
+    /// Sets the status of applying an implementation rule on a logical expression and properties
     async fn set_implementation_status(
         &mut self,
         logical_expr: &LogicalExpression,
+        properties: &PhysicalProperties,
         rule: &ImplementationRule,
         status: Status,
     ) -> MemoizeResult<()>;
