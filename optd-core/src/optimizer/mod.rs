@@ -36,7 +36,7 @@ mod tasks;
 /// External client request to optimize a query in the optimizer.
 ///
 /// Defines the public API for submitting a query and receiving execution plans.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct OptimizeRequest {
     /// The logical plan to optimize
     pub plan: LogicalPlan,
@@ -60,8 +60,10 @@ enum OptimizerMessage {
     /// Process an optimization request.
     ///
     /// Wraps the external client request as an internal message for consistent
-    /// handling within the optimizer's message processing system.
-    OptimizeRequestWrapper(OptimizeRequest),
+    /// handling within the optimizer's message processing system, and also
+    /// includes a task ID in case ingestion fails and needs to produce new
+    /// derivation jobs.
+    OptimizeRequestWrapper(OptimizeRequest, TaskId),
 
     /// New logical plan alternative for a group from applying transformation rules.
     ///
@@ -263,8 +265,8 @@ impl<M: Memoize> Optimizer<M> {
             pending_jobs: HashMap::new(),
             job_schedule_queue: VecDeque::new(),
             running_jobs: HashMap::new(),
-            next_task_id: 0,
-            next_job_id: 0,
+            next_task_id: TaskId(0),
+            next_job_id: JobId(0),
 
             //
             // Representative tracking
@@ -316,17 +318,24 @@ impl<M: Memoize> Optimizer<M> {
         loop {
             tokio::select! {
                 Some(request) = self.optimize_rx.next() => {
+                    let OptimizeRequest { plan, response_tx } = request.clone();
+                    let task_id = self.launch_optimize_plan_task(plan, response_tx).await;
                     let mut message_tx = self.message_tx.clone();
-                    tokio::spawn(async move {
-                        message_tx.send(OptimizeRequestWrapper(request))
-                            .await
-                            .expect("Failed to forward optimize request");
-                    });
+
+                    // Forward the optimization request to the message processing loop
+                    // in a new coroutine to avoid a deadlock.
+                    tokio::spawn(
+                        async move {
+                            message_tx.send(OptimizeRequestWrapper(request, task_id))
+                                .await
+                                .expect("Failed to forward optimize request");
+                        }
+                    );
                 },
                 Some(message) = self.message_rx.next() => {
                     match message {
-                        OptimizeRequestWrapper(request) => {
-                            self.process_optimize_request(request.plan, request.response_tx).await;
+                        OptimizeRequestWrapper(request, task_id_opt) => {
+                            self.process_optimize_request(request.plan, request.response_tx, task_id_opt).await;
                         }
                         NewLogicalPartial(plan, group_id, job_id) => {
                             self.process_new_logical_partial(plan, group_id, job_id).await;

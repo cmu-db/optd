@@ -2,8 +2,8 @@ use super::{
     ingest::{LogicalIngest, PhysicalIngest},
     jobs::JobKind,
     memo::{Memoize, MergeResult},
-    tasks::{OptimizePlanResult, TaskKind},
-    JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
+    tasks::TaskKind,
+    JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage, TaskId,
 };
 use crate::{
     cir::{
@@ -12,7 +12,7 @@ use crate::{
         group::GroupId,
         operators::Child,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
-        properties::LogicalProperties,
+        properties::{LogicalProperties, PhysicalProperties},
     },
     engine::{LogicalExprContinuation, OptimizedExprContinuation},
 };
@@ -30,19 +30,32 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         plan: LogicalPlan,
         response_tx: Sender<PhysicalPlan>,
+        task_id: TaskId,
     ) {
-        if let OptimizePlanResult::NeedsDependencies(pending_dependencies) = self
-            .launch_optimize_plan_task(plan.clone(), response_tx.clone())
-            .await
-        {
-            // Store the request as a pending message that will be processed
-            // once all create group dependencies are resolved.
-            let pending_message = PendingMessage {
-                message: OptimizeRequestWrapper(OptimizeRequest { plan, response_tx }),
-                pending_dependencies,
-            };
+        // First try to ingest the plan into the memo
+        match self.try_ingest_logical(&plan.clone().into(), task_id).await {
+            LogicalIngest::Success(group_id) => {
+                // Create a goal for the root group
+                // The goal represents what we want to achieve: optimize the root group
+                // with no specific physical properties required
+                let goal = Goal(group_id, PhysicalProperties(None));
+                let goal = self.goal_repr.find(&goal);
 
-            self.pending_messages.push(pending_message);
+                // Subscribe the task to the goal
+                // This ensures the task will be notified when optimized expressions
+                // for this goal are found
+                self.subscribe_task_to_goal(goal, task_id).await;
+            }
+            LogicalIngest::NeedsDependencies(pending_dependencies) => {
+                // Store the request as a pending message that will be processed
+                // once all create group dependencies are resolved.
+                let pending_message = PendingMessage {
+                    message: OptimizeRequestWrapper(OptimizeRequest { plan, response_tx }, task_id),
+                    pending_dependencies,
+                };
+
+                self.pending_messages.push(pending_message);
+            }
         }
     }
 

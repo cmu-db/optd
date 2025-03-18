@@ -9,7 +9,8 @@ use crate::{
 };
 
 /// Unique identifier for jobs in the optimization system
-pub(super) type JobId = i64;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct JobId(pub i64);
 
 /// A job represents a discrete unit of work within the optimization process
 ///
@@ -77,7 +78,7 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) fn schedule_job(&mut self, task_id: TaskId, kind: JobKind) -> JobId {
         // Generate a new job ID
         let job_id = self.next_job_id;
-        self.next_job_id += 1;
+        self.next_job_id.0 += 1;
 
         // Create & schedule the job
         let job = Job(task_id, kind);

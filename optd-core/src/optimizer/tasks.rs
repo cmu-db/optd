@@ -25,7 +25,8 @@ use TaskKind::*;
 //
 
 /// Unique identifier for tasks in the optimization system
-pub(super) type TaskId = i64;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct TaskId(pub i64);
 
 //
 // Core task structures
@@ -284,18 +285,6 @@ impl CostExpressionTask {
     }
 }
 
-/// Result of attempting to launch an optimize plan task
-///
-/// Can either indicate success with the new task ID, or
-/// that dependencies need to be resolved first.
-pub(super) enum OptimizePlanResult {
-    /// Task was successfully launched with the given task ID
-    Success(TaskId),
-
-    /// Task couldn't be launched yet because it needs dependencies to be resolved
-    NeedsDependencies(HashSet<JobId>),
-}
-
 //
 // Optimizer task implementation
 //
@@ -305,40 +294,13 @@ impl<M: Memoize> Optimizer<M> {
     // Task launching
     //
 
-    /// Tries to launch a top-level optimization task for a logical plan
-    ///
-    /// This is the entry point for optimizing a logical plan, which may succeed immediately
-    /// or require waiting for dependencies to be resolved first.
     pub(super) async fn launch_optimize_plan_task(
         &mut self,
         plan: LogicalPlan,
         response_tx: Sender<PhysicalPlan>,
-    ) -> OptimizePlanResult {
-        // First try to ingest the plan into the memo
-        match self.try_ingest_logical(&plan.clone().into(), 0).await {
-            LogicalIngest::Success(group_id) => {
-                // Successfully ingested the plan, create and register the task
-                let task_kind = OptimizePlanTask::new(plan, response_tx);
-                let task_id = self.register_new_task(OptimizePlan(task_kind));
-
-                // Create a goal for the root group
-                // The goal represents what we want to achieve: optimize the root group
-                // with no specific physical properties required
-                let goal = Goal(group_id, PhysicalProperties(None));
-                let goal = self.goal_repr.find(&goal);
-
-                // Subscribe the task to the goal
-                // This ensures the task will be notified when optimized expressions
-                // for this goal are found
-                self.subscribe_task_to_goal(goal, task_id).await;
-
-                OptimizePlanResult::Success(task_id)
-            }
-            LogicalIngest::NeedsDependencies(dependencies) => {
-                // Cannot launch the task yet, need to wait for dependencies
-                OptimizePlanResult::NeedsDependencies(dependencies)
-            }
-        }
+    ) -> TaskId {
+        let task_kind = OptimizePlanTask::new(plan, response_tx);
+        self.register_new_task(OptimizePlan(task_kind))
     }
 
     /// Launches a task to start applying a transformation rule to a logical expression
@@ -563,7 +525,7 @@ impl<M: Memoize> Optimizer<M> {
     fn register_new_task(&mut self, kind: TaskKind) -> TaskId {
         // Generate a unique task ID
         let task_id = self.next_task_id;
-        self.next_task_id += 1;
+        self.next_task_id.0 += 1;
 
         // Create and register the task
         self.tasks.insert(task_id, Task::new(kind));

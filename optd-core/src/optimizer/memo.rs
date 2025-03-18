@@ -89,7 +89,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// Creates a new group with a logical expression and properties
     ///
     /// Returns the ID of the newly created group.
-    async fn create_group(
+                                async fn create_group(
         &mut self,
         logical_expr: &LogicalExpression,
         props: &LogicalProperties,
