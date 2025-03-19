@@ -61,7 +61,7 @@ impl<M: Memoize> Optimizer<M> {
     /// task for the goal, and returns the best existing optimized expression for bootstrapping.
     ///
     /// # Parameters
-    /// * `goal_id` - The goal to subscribe to
+    /// * `goal` - The goal to subscribe to
     /// * `subscriber_task_id` - The ID of the task that wants to receive notifications
     ///
     /// # Returns
@@ -69,9 +69,15 @@ impl<M: Memoize> Optimizer<M> {
     /// optimized expression is available yet
     pub(super) async fn subscribe_task_to_goal(
         &mut self,
-        goal_id: GoalId,
+        goal: &Goal,
         subscriber_task_id: TaskId,
     ) -> Option<OptimizedExpression> {
+        let goal_id = self
+            .memo
+            .get_goal_id(goal)
+            .await
+            .expect("Failed to get goal ID");
+
         // Add the task to goal subscribers list if not already there
         if !self
             .goal_subscribers
@@ -91,7 +97,7 @@ impl<M: Memoize> Optimizer<M> {
 
         // Return best expression for bootstrapping
         self.memo
-            .get_best_optimized_physical_expr(goal_id)
+            .get_best_optimized_physical_expr(goal)
             .await
             .expect("Failed to get best optimized physical expression")
     }

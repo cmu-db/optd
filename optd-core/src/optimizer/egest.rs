@@ -2,7 +2,7 @@ use super::{memo::Memoize, Optimizer};
 use crate::{
     cir::{
         expressions::OptimizedExpression,
-        goal::GoalId,
+        goal::Goal,
         operators::{Child, Operator},
         plans::PhysicalPlan,
     },
@@ -55,11 +55,15 @@ impl<M: Memoize> Optimizer<M> {
     /// Handles both singleton and variable-length children.
     async fn egest_child_plan(
         &self,
-        child: &Child<GoalId>,
+        child: &Child<Goal>,
     ) -> Result<Option<Child<Arc<PhysicalPlan>>>, Error> {
         match child {
-            Singleton(goal_id) => {
-                let best_expr = match self.memo.get_best_optimized_physical_expr(*goal_id).await? {
+            Singleton(goal) => {
+                let best_expr = match self
+                    .memo
+                    .get_best_optimized_physical_expr(goal)
+                    .await?
+                {
                     Some(expr) => expr,
                     None => return Ok(None),
                 };
@@ -69,13 +73,16 @@ impl<M: Memoize> Optimizer<M> {
                 };
                 Ok(Some(Singleton(plan.into())))
             }
-            VarLength(goal_ids) => {
-                let futures = goal_ids.iter().map(|goal_id| async move {
-                    let best_expr =
-                        match self.memo.get_best_optimized_physical_expr(*goal_id).await? {
-                            Some(expr) => expr,
-                            None => return Ok(None),
-                        };
+            VarLength(goals) => {
+                let futures = goals.iter().map(|goal| async move {
+                    let best_expr = match self
+                        .memo
+                        .get_best_optimized_physical_expr(goal)
+                        .await?
+                    {
+                        Some(expr) => expr,
+                        None => return Ok(None),
+                    };
 
                     let plan = match self.egest_best_plan(&best_expr).await? {
                         Some(plan) => plan,

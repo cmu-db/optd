@@ -2,7 +2,7 @@ use super::{memo::Memoize, Optimizer};
 use crate::{
     cir::{
         expressions::{LogicalExpression, PhysicalExpression},
-        goal::GoalId,
+        goal::Goal,
         group::GroupId,
         operators::{Child, Operator},
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
@@ -25,8 +25,8 @@ pub(super) enum LogicalIngest {
 
 /// Result type for physical plan ingestion.
 pub(super) struct PhysicalIngest {
-    /// The goal ID matched with the ingested physical plan.
-    pub goal_id: GoalId,
+    /// The goal matched with the ingested physical plan.
+    pub goal: Goal,
     /// The physical expression if newly created, None if it already existed.
     pub new_expression: Option<PhysicalExpression>,
 }
@@ -72,18 +72,10 @@ impl<M: Memoize> Optimizer<M> {
                 .ingest_physical_operator(operator)
                 .await
                 .expect("Failed to ingest physical operator"),
-            PartialPhysicalPlan::UnMaterialized(goal) => {
-                let goal_id = self
-                    .memo
-                    .get_goal_id(goal)
-                    .await
-                    .expect("Failed to get goal ID");
-
-                PhysicalIngest {
-                    goal_id,
-                    new_expression: None,
-                }
-            }
+            PartialPhysicalPlan::UnMaterialized(goal) => PhysicalIngest {
+                goal: goal.clone(),
+                new_expression: None,
+            },
         }
     }
 
@@ -185,14 +177,14 @@ impl<M: Memoize> Optimizer<M> {
         };
 
         // Base case: try to find the expression in the memo or create it if missing.
-        if let Some(goal_id) = self.memo.find_physical_expr(&physical_expression).await? {
+        if let Some(goal) = self.memo.find_physical_expr(&physical_expression).await? {
             Ok(PhysicalIngest {
-                goal_id,
+                goal,
                 new_expression: None,
             })
         } else {
             Ok(PhysicalIngest {
-                goal_id: self.memo.create_goal(&physical_expression).await?,
+                goal: self.memo.create_goal(&physical_expression).await?,
                 new_expression: Some(physical_expression),
             })
         }
@@ -201,11 +193,11 @@ impl<M: Memoize> Optimizer<M> {
     async fn process_physical_child(
         &mut self,
         child: &Child<Arc<PartialPhysicalPlan>>,
-    ) -> Result<Child<GoalId>, Error> {
+    ) -> Result<Child<Goal>, Error> {
         match child {
             Singleton(plan) => {
                 let result = self.ingest_physical_plan(plan).await;
-                Ok(Singleton(result.goal_id))
+                Ok(Singleton(result.goal))
             }
             VarLength(plans) => {
                 let mut results = Vec::with_capacity(plans.len());
@@ -214,7 +206,7 @@ impl<M: Memoize> Optimizer<M> {
                     results.push(result);
                 }
 
-                let goals = results.into_iter().map(|ingest| ingest.goal_id).collect();
+                let goals = results.into_iter().map(|ingest| ingest.goal).collect();
                 Ok(VarLength(goals))
             }
         }

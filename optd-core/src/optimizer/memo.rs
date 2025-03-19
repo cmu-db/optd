@@ -40,11 +40,11 @@ pub(crate) enum MergeResult {
 
     /// Result of merging two goals
     GoalMerge {
-        /// Original goal that was merged
-        repr_goal: Goal,
+        /// Original goal id that was merged
+        repr_goal: GoalId,
 
-        /// New goal after merging
-        new_goal: Goal,
+        /// New goal id after merging
+        new_goal: GoalId,
 
         /// New (potential) optimized expression added to the goal
         new_expression: Option<OptimizedExpression>,
@@ -116,7 +116,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// Returns None if no optimized expression exists for the goal.
     async fn get_best_optimized_physical_expr(
         &self,
-        goal: GoalId,
+        goal: &Goal,
     ) -> MemoizeResult<Option<OptimizedExpression>>;
 
     /// Gets all physical expressions in a goal
@@ -141,14 +141,14 @@ pub trait Memoize: Send + Sync + 'static {
     async fn find_physical_expr(
         &self,
         physical_expr: &PhysicalExpression,
-    ) -> MemoizeResult<Option<GoalId>>;
+    ) -> MemoizeResult<Option<Goal>>;
 
     /// Creates a new goal associated with the provided physical expression
     ///
     /// Allocates a new unique group ID for the goal and initializes it with empty properties.
     /// This creates an isolated goal that may later participate in the memo structure
     /// through merges with equivalent goals during optimization.
-    async fn create_goal(&mut self, physical_expr: &PhysicalExpression) -> MemoizeResult<GoalId>;
+    async fn create_goal(&mut self, physical_expr: &PhysicalExpression) -> MemoizeResult<Goal>;
 
     /// Merges goals 1 and 2, creating a new goal containing all expressions
     ///
@@ -156,8 +156,8 @@ pub trait Memoize: Send + Sync + 'static {
     /// Returns a vector of merge results for all affected entities.
     async fn merge_goals(
         &mut self,
-        goal_1: GoalId,
-        goal_2: GoalId,
+        goal_1: &Goal,
+        goal_2: &Goal,
     ) -> MemoizeResult<Vec<MergeResult>>;
 
     /// Adds an optimized physical expression to a goal
@@ -232,7 +232,6 @@ pub trait Memoize: Send + Sync + 'static {
     ) -> MemoizeResult<()>;
 
     async fn get_goal_id(&mut self, goal: &Goal) -> MemoizeResult<GoalId>;
-    async fn materialize_goal_from_id(&self, goal_id: GoalId) -> MemoizeResult<Goal>;
 
     async fn get_logical_expr_id(
         &mut self,

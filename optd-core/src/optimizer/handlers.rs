@@ -39,11 +39,10 @@ impl<M: Memoize> Optimizer<M> {
                 // The goal represents what we want to achieve: optimize the root group
                 // with no specific physical properties required.
                 let goal = Goal(group_id, PhysicalProperties(None));
-                let goal_id = self.memo.get_goal_id(&goal).await.expect("Goal not found");
 
                 // This ensures the task will be notified when optimized expressions
                 // for this goal are found.
-                self.subscribe_task_to_goal(goal_id, task_id).await;
+                self.subscribe_task_to_goal(&goal, task_id).await;
             }
             Missing(operators) => {
                 // Store the request as a pending message that will be processed
@@ -123,20 +122,18 @@ impl<M: Memoize> Optimizer<M> {
         goal: Goal,
         job_id: JobId,
     ) {
-        let goal_id = self.memo.get_goal_id(&goal).await.expect("Goal not found");
-
         // First, ingest the physical plan to determine if it's new or not.
         let PhysicalIngest {
-            goal_id: ingested_goal_id,
+            goal: ingested_goal,
             new_expression,
         } = self.ingest_physical_plan(&plan).await;
 
-        if ingested_goal_id != goal_id {
+        if ingested_goal != goal {
             // Atomically perform the merge in the memo and process all
             // results in memory.
             let merge_results = self
                 .memo
-                .merge_goals(ingested_goal_id, goal_id)
+                .merge_goals(&ingested_goal, &goal)
                 .await
                 .expect("Failed to merge goals");
 
@@ -255,7 +252,7 @@ impl<M: Memoize> Optimizer<M> {
         }
 
         // Subscribe to future optimized expressions and bootstrap with current best
-        if let Some(best_expr) = self.subscribe_task_to_goal(goal_id, related_task_id).await {
+        if let Some(best_expr) = self.subscribe_task_to_goal(&goal, related_task_id).await {
             self.schedule_job(
                 related_task_id,
                 ContinueWithOptimized(best_expr, continuation),
