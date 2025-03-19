@@ -141,14 +141,17 @@ pub trait Memoize: Send + Sync + 'static {
     async fn find_physical_expr(
         &self,
         physical_expr: &PhysicalExpression,
-    ) -> MemoizeResult<Option<Goal>>;
+    ) -> MemoizeResult<Option<(GoalId, Goal)>>;
 
     /// Creates a new goal associated with the provided physical expression
     ///
     /// Allocates a new unique group ID for the goal and initializes it with empty properties.
     /// This creates an isolated goal that may later participate in the memo structure
     /// through merges with equivalent goals during optimization.
-    async fn create_goal(&mut self, physical_expr: &PhysicalExpression) -> MemoizeResult<Goal>;
+    async fn create_goal(
+        &mut self,
+        physical_expr: &PhysicalExpression,
+    ) -> MemoizeResult<(GoalId, Goal)>;
 
     /// Merges goals 1 and 2, creating a new goal containing all expressions
     ///
@@ -156,8 +159,8 @@ pub trait Memoize: Send + Sync + 'static {
     /// Returns a vector of merge results for all affected entities.
     async fn merge_goals(
         &mut self,
-        goal_1: &Goal,
-        goal_2: &Goal,
+        goal_1: GoalId,
+        goal_2: GoalId,
     ) -> MemoizeResult<Vec<MergeResult>>;
 
     /// Adds an optimized physical expression to a goal

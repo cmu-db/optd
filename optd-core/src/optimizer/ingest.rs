@@ -7,7 +7,7 @@ use super::{
 use crate::{
     cir::{
         expressions::{LogicalExpression, PhysicalExpression},
-        goal::Goal,
+        goal::{Goal, GoalId},
         group::GroupId,
         operators::{Child, Operator},
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
@@ -38,6 +38,7 @@ enum InternalLogicalIngest {
 
 /// Result type for physical plan ingestion that includes the new expression if created
 pub(super) struct PhysicalIngest {
+    pub goal_id: GoalId,
     /// The new goal matched with the physical plan
     pub goal: Goal,
     /// The physical expression if newly created, None if it already existed
@@ -124,10 +125,14 @@ impl<M: Memoize> Optimizer<M> {
             PartialPhysicalPlan::Materialized(operator) => {
                 self.ingest_physical_operator(operator).await
             }
-            PartialPhysicalPlan::UnMaterialized(goal) => Ok(PhysicalIngest {
-                goal: goal.clone(),
-                new_expression: None,
-            }),
+            PartialPhysicalPlan::UnMaterialized(goal) => {
+                let goal_id = self.memo.get_goal_id(goal).await?;
+                Ok(PhysicalIngest {
+                    goal_id,
+                    goal: goal.clone(),
+                    new_expression: None,
+                })
+            }
         }
     }
 
@@ -226,17 +231,19 @@ impl<M: Memoize> Optimizer<M> {
         };
 
         // Try to find the expression in the memo
-        if let Some(goal) = self.memo.find_physical_expr(&physical_expression).await? {
+        if let Some((goal_id, goal)) = self.memo.find_physical_expr(&physical_expression).await? {
             return Ok(PhysicalIngest {
+                goal_id,
                 goal,
                 new_expression: None,
             });
         }
 
         // Expression doesn't exist, create a new goal
-        let goal = self.memo.create_goal(&physical_expression).await?;
+        let (goal_id, goal) = self.memo.create_goal(&physical_expression).await?;
 
         Ok(PhysicalIngest {
+            goal_id,
             goal,
             new_expression: Some(physical_expression),
         })

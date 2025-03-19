@@ -105,16 +105,19 @@ impl<M: Memoize> Optimizer<M> {
     ) {
         let related_task_id = self.running_jobs[&job_id].0;
 
+        let goal_id = self.memo.get_goal_id(&goal).await.unwrap();
+
         let PhysicalIngest {
-            goal: new_goal,
+            goal_id: new_goal_id,
+            goal: _,
             new_expression: new_expr,
         } = self.try_ingest_physical(&plan).await;
 
-        if new_goal != goal {
+        if new_goal_id != goal_id {
             // Perform the merge in the memo and process all results
             let merge_results = self
                 .memo
-                .merge_goals(&goal, &new_goal)
+                .merge_goals(goal_id, new_goal_id)
                 .await
                 .expect("Failed to merge goals");
 
