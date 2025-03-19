@@ -9,7 +9,7 @@ use super::{group::GroupId, properties::PhysicalProperties};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Goal(pub GroupId, pub PhysicalProperties);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct GoalId(pub i64);
 
 /// Represents the cost of a goal / optimized expression in the memo.

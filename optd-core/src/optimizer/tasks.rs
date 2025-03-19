@@ -1,5 +1,4 @@
 use super::{
-    ingest::LogicalIngest,
     jobs::{JobId, JobKind},
     memo::Memoize,
     Optimizer,
@@ -7,7 +6,7 @@ use super::{
 use crate::{
     cir::{
         expressions::{LogicalExpression, PhysicalExpression},
-        goal::Goal,
+        goal::{Goal, GoalId},
         group::GroupId,
         plans::{LogicalPlan, PhysicalPlan},
         properties::PhysicalProperties,
@@ -253,7 +252,7 @@ pub(super) struct CostExpressionTask {
 
     /// Continuations for each goal that need to be notified when
     /// optimized expressions are created
-    pub continuations: HashMap<Goal, Vec<OptimizedExprContinuation>>,
+    pub continuations: HashMap<GoalId, Vec<OptimizedExprContinuation>>,
 }
 
 impl CostExpressionTask {
@@ -275,7 +274,7 @@ impl CostExpressionTask {
     /// * `continuation` - The continuation to call when a new optimized expression is created
     pub(super) fn register_continuation(
         &mut self,
-        goal: Goal,
+        goal: GoalId,
         continuation: OptimizedExprContinuation,
     ) {
         self.continuations
@@ -406,13 +405,13 @@ impl<M: Memoize> Optimizer<M> {
     /// as part of its work. If an exploration task already exists, we reuse it.
     pub(super) async fn ensure_goal_exploration_task(
         &mut self,
-        goal: &Goal,
+        goal_id: GoalId,
         child_task_id: TaskId,
     ) {
         // Check if we already have an exploration task for this goal
-        let task_id = match self.goal_exploration_task_index.get(goal) {
+        let task_id = match self.goal_exploration_task_index.get(&goal_id) {
             Some(id) => *id,
-            None => self.launch_goal_exploration_task(goal).await,
+            None => self.launch_goal_exploration_task(goal_id).await,
         };
 
         // Set up parent-child relationship
@@ -461,19 +460,18 @@ impl<M: Memoize> Optimizer<M> {
     /// This schedules jobs to apply all implementation rules to all logical expressions
     /// and launches cost tasks for all physical expressions in all equivalent goals.
     /// It handles multiple equivalent goals across different groups with various physical properties.
-    async fn launch_goal_exploration_task(&mut self, goal: &Goal) -> TaskId {
+    async fn launch_goal_exploration_task(&mut self, goal_id: GoalId) -> TaskId {
         // Get all equivalent goals grouped by group ID and their associated physical properties
         let equivalent_goals = self
             .memo
-            .get_equivalent_goals(goal)
+            .get_equivalent_goals(goal_id)
             .await
             .expect("Failed to get equivalent goals");
 
         // Create task and register it in the goal exploration index
         let task_kind = ExploreGoalTask::new(equivalent_goals.clone());
         let task_id = self.register_new_task(ExploreGoal(task_kind));
-        self.goal_exploration_task_index
-            .insert(goal.clone(), task_id);
+        self.goal_exploration_task_index.insert(goal_id, task_id);
 
         for (group_id, properties_list) in &equivalent_goals {
             // Ensure we explore each group associated with the equivalent goals
@@ -508,7 +506,7 @@ impl<M: Memoize> Optimizer<M> {
         // (this includes all the equivalent goals).
         let physical_expressions = self
             .memo
-            .get_all_physical_exprs(goal)
+            .get_all_physical_exprs(goal_id)
             .await
             .expect("Failed to get physical expressions for goal");
 

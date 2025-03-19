@@ -1,7 +1,10 @@
 use crate::{
     cir::{
-        expressions::{LogicalExpression, LogicalExpressionId, OptimizedExpression, PhysicalExpression},
-        goal::Goal,
+        expressions::{
+            LogicalExpression, LogicalExpressionId, OptimizedExpression, PhysicalExpression,
+            PhysicalExpressionId,
+        },
+        goal::{Goal, GoalId},
         group::GroupId,
         properties::{LogicalProperties, PhysicalProperties},
         rules::{ImplementationRule, TransformationRule},
@@ -28,9 +31,11 @@ pub(crate) enum MergeResult {
     /// Result of merging two groups
     GroupMerge {
         /// Original group ID that was merged
-        groups: (Vec<(GroupId, Vec<LogicalExpressionId>)>, GroupId),
+        merged_groups: Vec<(GroupId, Vec<LogicalExpression>)>,
 
-        exprs: Vec<(Vec<LogicalExpressionId>, LogicalExpressionId)>,
+        new_repr_group: GroupId,
+
+        merged_exprs: Vec<(Vec<LogicalExpression>, LogicalExpression)>,
     },
 
     /// Result of merging two goals
@@ -111,13 +116,13 @@ pub trait Memoize: Send + Sync + 'static {
     /// Returns None if no optimized expression exists for the goal.
     async fn get_best_optimized_physical_expr(
         &self,
-        goal: &Goal,
+        goal: GoalId,
     ) -> MemoizeResult<Option<OptimizedExpression>>;
 
     /// Gets all physical expressions in a goal
     ///
     /// Returns a vector of physical expressions in the specified goal.
-    async fn get_all_physical_exprs(&self, goal: &Goal) -> MemoizeResult<Vec<PhysicalExpression>>;
+    async fn get_all_physical_exprs(&self, goal: GoalId) -> MemoizeResult<Vec<PhysicalExpression>>;
 
     /// Gets all goals in the same equivalence class
     ///
@@ -126,7 +131,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// all equivalent implementations across multiple groups.
     async fn get_equivalent_goals(
         &self,
-        goal: &Goal,
+        goal: GoalId,
     ) -> MemoizeResult<HashMap<GroupId, Vec<PhysicalProperties>>>;
 
     /// Searches for a physical expression in the memo
@@ -163,7 +168,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         goal: &Goal,
         optimized_expr: &OptimizedExpression,
-    ) -> MemoizeResult<bool>;
+    ) -> MemoizeResult<(bool, GoalId)>;
 
     //
     // Rule and costing status operations
@@ -225,4 +230,14 @@ pub trait Memoize: Send + Sync + 'static {
         physical_expr: &PhysicalExpression,
         status: Status,
     ) -> MemoizeResult<()>;
+
+    async fn get_goal_id(&mut self, goal: &Goal) -> MemoizeResult<GoalId>;
+    async fn get_logical_expr_id(
+        &mut self,
+        logical_expr: &LogicalExpression,
+    ) -> MemoizeResult<LogicalExpressionId>;
+    async fn get_physical_expr_id(
+        &mut self,
+        physical_expr: &PhysicalExpression,
+    ) -> MemoizeResult<PhysicalExpressionId>;
 }

@@ -9,7 +9,6 @@ use crate::{
     error::Error,
 };
 use async_recursion::async_recursion;
-use futures::future::try_join_all;
 use std::sync::Arc;
 use Child::*;
 
@@ -28,23 +27,18 @@ impl<M: Memoize> Optimizer<M> {
     /// * Err(Error) if a memo operation fails
     #[async_recursion]
     pub(super) async fn egest_best_plan(
-        &self,
+        &mut self,
         expr: &OptimizedExpression,
     ) -> Result<Option<PhysicalPlan>, Error> {
-        // Process all child goals to get their best physical plans
-        let child_results = try_join_all(
-            expr.0
-                .children
-                .iter()
-                .map(|child| self.egest_child_plan(child)),
-        )
-        .await?;
-
-        // If any child plan is None, return None
-        let child_plans = match child_results.into_iter().collect() {
-            Some(plans) => plans,
-            None => return Ok(None),
-        };
+        // Process all children goals recursively
+        let mut child_plans = Vec::with_capacity(expr.0.children.len());
+        for child in &expr.0.children {
+            let child_plan = self.egest_child_plan(child).await?;
+            match child_plan {
+                Some(plan) => child_plans.push(plan),
+                None => return Ok(None),
+            }
+        }
 
         // Construct the physical plan with the materialized children
         Ok(Some(PhysicalPlan(Operator {
@@ -67,13 +61,14 @@ impl<M: Memoize> Optimizer<M> {
     /// * Ok(None) if the goal has no best expression
     /// * Err(Error) if a memo operation fails
     async fn egest_child_plan(
-        &self,
+        &mut self,
         child: &Child<Goal>,
     ) -> Result<Option<Child<Arc<PhysicalPlan>>>, Error> {
         match child {
             Singleton(goal) => {
                 // Get the best optimized expression for this goal
-                let best_expr = match self.memo.get_best_optimized_physical_expr(&goal).await? {
+                let goal_id = self.memo.get_goal_id(&goal).await?;
+                let best_expr = match self.memo.get_best_optimized_physical_expr(goal_id).await? {
                     Some(expr) => expr,
                     None => return Ok(None),
                 };
@@ -87,13 +82,16 @@ impl<M: Memoize> Optimizer<M> {
                 Ok(Some(Singleton(plan.into())))
             }
             VarLength(goals) => {
-                // For each goal, get its best physical plan
-                let plan_futures = goals.iter().map(|goal| async move {
+                let mut result_plans = Vec::with_capacity(goals.len());
+                for goal in goals {
+                    let goal_id = self.memo.get_goal_id(goal).await?;
+
                     // Get the best optimized expression for this goal
-                    let best_expr = match self.memo.get_best_optimized_physical_expr(&goal).await? {
-                        Some(expr) => expr,
-                        None => return Ok(None),
-                    };
+                    let best_expr =
+                        match self.memo.get_best_optimized_physical_expr(goal_id).await? {
+                            Some(expr) => expr,
+                            None => return Ok(None),
+                        };
 
                     // Recursively egest the plan for this expression
                     let plan = match self.egest_best_plan(&best_expr).await? {
@@ -101,19 +99,10 @@ impl<M: Memoize> Optimizer<M> {
                         None => return Ok(None),
                     };
 
-                    Ok(Some(plan.into()))
-                });
+                    result_plans.push(plan.into());
+                }
 
-                // Collect all plans
-                let all_plans = try_join_all(plan_futures).await?;
-
-                // If any plan is None, return None
-                let plans = match all_plans.into_iter().collect() {
-                    Some(plans) => plans,
-                    None => return Ok(None),
-                };
-
-                Ok(Some(VarLength(plans)))
+                Ok(Some(VarLength(result_plans)))
             }
         }
     }

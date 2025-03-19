@@ -38,11 +38,12 @@ impl<M: Memoize> Optimizer<M> {
                 // The goal represents what we want to achieve: optimize the root group
                 // with no specific physical properties required
                 let goal = Goal(group_id, PhysicalProperties(None));
+                let goal_id = self.memo.get_goal_id(&goal).await.expect("Goal not found");
 
                 // Subscribe the task to the goal
                 // This ensures the task will be notified when optimized expressions
                 // for this goal are found
-                self.subscribe_task_to_goal(goal, task_id).await;
+                self.subscribe_task_to_goal(goal_id, task_id).await;
             }
             LogicalIngest::NeedsDependencies(pending_dependencies) => {
                 // Store the request as a pending message that will be processed
@@ -139,7 +140,7 @@ impl<M: Memoize> Optimizer<M> {
         goal: Goal,
     ) {
         // Add the optimized expression to the memo
-        let new_best = self
+        let (new_best, goal_id) = self
             .memo
             .add_optimized_physical_expr(&goal, &expression)
             .await
@@ -148,8 +149,8 @@ impl<M: Memoize> Optimizer<M> {
         // If this is the new best expression found so far for this goal,
         // schedule continuation jobs for all subscribers, and send to clients
         if new_best {
-            self.schedule_optimized_continuations(&goal, expression.clone());
-            self.egest_to_subscribers(&goal, expression).await;
+            self.schedule_optimized_continuations(goal_id, expression.clone());
+            self.egest_to_subscribers(goal_id, expression).await;
         }
     }
 
@@ -216,6 +217,7 @@ impl<M: Memoize> Optimizer<M> {
         job_id: JobId,
     ) {
         let related_task_id = self.running_jobs[&job_id].0;
+        let goal_id = self.memo.get_goal_id(&goal).await.expect("Goal not found");
 
         // Verify task type and register the continuation
         match &mut self
@@ -225,16 +227,13 @@ impl<M: Memoize> Optimizer<M> {
             .kind
         {
             TaskKind::CostExpression(task) => {
-                task.register_continuation(goal.clone(), continuation.clone())
+                task.register_continuation(goal_id, continuation.clone())
             }
             _ => panic!("Only cost tasks can subscribe to goals"),
         }
 
         // Subscribe to future optimized expressions and bootstrap with current best
-        if let Some(best_expr) = self
-            .subscribe_task_to_goal(goal.clone(), related_task_id)
-            .await
-        {
+        if let Some(best_expr) = self.subscribe_task_to_goal(goal_id, related_task_id).await {
             self.schedule_job(
                 related_task_id,
                 ContinueWithOptimized(best_expr, continuation),

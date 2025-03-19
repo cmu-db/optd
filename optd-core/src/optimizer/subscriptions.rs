@@ -6,7 +6,7 @@ use super::{
 };
 use crate::cir::{
     expressions::{LogicalExpression, OptimizedExpression},
-    goal::Goal,
+    goal::{Goal, GoalId},
     group::GroupId,
 };
 use futures::SinkExt;
@@ -61,7 +61,7 @@ impl<M: Memoize> Optimizer<M> {
     /// task for the goal, and returns the best existing optimized expression for bootstrapping.
     ///
     /// # Parameters
-    /// * `goal` - The goal to subscribe to
+    /// * `goal_id` - The goal to subscribe to
     /// * `subscriber_task_id` - The ID of the task that wants to receive notifications
     ///
     /// # Returns
@@ -69,29 +69,29 @@ impl<M: Memoize> Optimizer<M> {
     /// optimized expression is available yet
     pub(super) async fn subscribe_task_to_goal(
         &mut self,
-        goal: Goal,
+        goal_id: GoalId,
         subscriber_task_id: TaskId,
     ) -> Option<OptimizedExpression> {
         // Add the task to goal subscribers list if not already there
         if !self
             .goal_subscribers
-            .entry(goal.clone())
+            .entry(goal_id)
             .or_default()
             .contains(&subscriber_task_id)
         {
             self.goal_subscribers
-                .entry(goal.clone())
+                .entry(goal_id)
                 .or_default()
                 .push(subscriber_task_id);
         }
 
         // Ensure there's a goal exploration task
-        self.ensure_goal_exploration_task(&goal, subscriber_task_id)
+        self.ensure_goal_exploration_task(goal_id, subscriber_task_id)
             .await;
 
         // Return best expression for bootstrapping
         self.memo
-            .get_best_optimized_physical_expr(&goal)
+            .get_best_optimized_physical_expr(goal_id)
             .await
             .expect("Failed to get best optimized physical expression")
     }
@@ -159,15 +159,15 @@ impl<M: Memoize> Optimizer<M> {
     /// jobs to process the new optimized expression.
     ///
     /// # Parameters
-    /// * `goal` - The goal that has a new best expression
+    /// * `goal_id` - The goal that has a new best expression
     /// * `expression` - The new optimized expression to continue with
     pub(super) fn schedule_optimized_continuations(
         &mut self,
-        goal: &Goal,
+        goal_id: GoalId,
         expression: OptimizedExpression,
     ) {
         // Return early if no subscribers
-        let subscribers = match self.goal_subscribers.get(goal) {
+        let subscribers = match self.goal_subscribers.get(&goal_id) {
             Some(subs) => subs,
             None => return,
         };
@@ -179,7 +179,7 @@ impl<M: Memoize> Optimizer<M> {
                 self.tasks.get(&task_id).and_then(|task| match &task.kind {
                     CostExpression(cost_task) => cost_task
                         .continuations
-                        .get(goal)
+                        .get(&goal_id)
                         .map(|conts| (task_id, conts)),
                     _ => None,
                 })
@@ -207,17 +207,17 @@ impl<M: Memoize> Optimizer<M> {
     /// sends it to any optimize plan tasks that are waiting for results.
     ///
     /// # Parameters
-    /// * `goal` - The goal that has a new best expression
+    /// * `goal_id` - The goal that has a new best expression
     /// * `expression` - The optimized expression to egest as a physical plan
     pub(super) async fn egest_to_subscribers(
         &mut self,
-        goal: &Goal,
+        goal_id: GoalId,
         expression: OptimizedExpression,
     ) {
         // Find all optimize plan tasks that are subscribed to this root goal
         let send_channels: Vec<_> = self
             .goal_subscribers
-            .get(goal)
+            .get(&goal_id)
             .into_iter()
             .flatten()
             .filter_map(|&task_id| {

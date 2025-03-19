@@ -218,7 +218,7 @@ pub struct Optimizer<M: Memoize> {
     group_subscribers: HashMap<GroupId, Vec<TaskId>>,
 
     /// Subscribers to *optimized* physical expressions for goals
-    goal_subscribers: HashMap<Goal, Vec<TaskId>>,
+    goal_subscribers: HashMap<GoalId, Vec<TaskId>>,
 
     //
     // Communication channels
