@@ -1,7 +1,8 @@
-use super::{memo::Memoize, Optimizer};
+use super::Optimizer;
 use crate::{
     cir::{Child, Goal, Operator, OptimizedExpression, PhysicalPlan},
     error::Error,
+    memo::Memoize,
 };
 use async_recursion::async_recursion;
 use futures::future::try_join_all;

@@ -1,10 +1,11 @@
-use super::{memo::Memoize, Optimizer, OptimizerMessage};
+use super::{Optimizer, OptimizerMessage};
 use crate::{
     cir::{
         Goal, GroupId, LogicalExpression, OptimizedExpression, PartialLogicalPlan,
         PartialPhysicalPlan,
     },
     engine::{CostContinuation, LogicalPlanContinuation, PhysicalPlanContinuation},
+    memo::Memoize,
 };
 use async_recursion::async_recursion;
 use futures::{

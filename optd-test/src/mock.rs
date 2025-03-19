@@ -1,42 +1,23 @@
-use crate::{
-    cir::{
-        Goal, GroupId, LogicalExpression, LogicalProperties, OptimizedExpression,
-        PhysicalExpression,
-    },
-    error::Error,
+use optd_core::cir::{
+    Goal, GroupId, LogicalExpression, LogicalProperties, OptimizedExpression, PhysicalExpression,
 };
+use optd_core::memo::{Memoize, MemoizeResult};
 
-pub(crate) type MemoizeResult<T> = Result<T, Error>;
+pub struct MockMemo;
 
-/// Results of merge operations for different entity types
-#[allow(dead_code)]
-pub(crate) enum MergeResult {
-    /// Result of merging two groups
-    GroupMerge {
-        /// Original group ID that was merged
-        prev_group_id: GroupId,
-        /// New group ID after merging
-        new_group_id: GroupId,
-        /// New logical expressions added to the group
-        expressions: Vec<LogicalExpression>,
-    },
-    /// Result of merging two goals
-    GoalMerge {
-        /// Original goal that was merged
-        prev_goal: Goal,
-        /// New goal after merging
-        new_goal: Goal,
-        /// New (potential) optimized expression added to the goal
-        expression: Option<OptimizedExpression>,
-    },
+impl MockMemo {
+    pub fn new() -> Self {
+        MockMemo {}
+    }
 }
 
-#[trait_variant::make(Send)]
-pub trait Memoize: Send + Sync + 'static {
+impl Memoize for MockMemo {
     /// Retrieves logical properties for a group
     ///
     /// Returns the properties associated with the group or an error if not found.
-    async fn get_logical_properties(&self, group_id: &GroupId) -> MemoizeResult<LogicalProperties>;
+    async fn get_logical_properties(&self, group_id: &GroupId) -> MemoizeResult<LogicalProperties> {
+        todo!()
+    }
 
     /// Gets all logical expressions in a group
     ///
@@ -44,7 +25,9 @@ pub trait Memoize: Send + Sync + 'static {
     async fn get_all_logical_exprs(
         &self,
         group_id: GroupId,
-    ) -> MemoizeResult<Vec<LogicalExpression>>;
+    ) -> MemoizeResult<Vec<LogicalExpression>> {
+        todo!()
+    }
 
     /// Finds group containing a logical expression, if it exists
     ///
@@ -52,7 +35,9 @@ pub trait Memoize: Send + Sync + 'static {
     async fn find_logical_expr(
         &self,
         logical_expr: &LogicalExpression,
-    ) -> MemoizeResult<Option<GroupId>>;
+    ) -> MemoizeResult<Option<GroupId>> {
+        todo!()
+    }
 
     /// Creates a new group with a logical expression and properties
     ///
@@ -61,7 +46,9 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         logical_expr: &LogicalExpression,
         props: &LogicalProperties,
-    ) -> MemoizeResult<GroupId>;
+    ) -> MemoizeResult<GroupId> {
+        todo!()
+    }
 
     /// Merges groups 1 and 2, creating a new group containing all expressions
     ///
@@ -71,7 +58,9 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         group_1: &GroupId,
         group_2: &GroupId,
-    ) -> MemoizeResult<Vec<MergeResult>>;
+    ) -> MemoizeResult<Vec<MergeResult>> {
+        todo!()
+    }
 
     /// Gets the best optimized physical expression for a goal
     ///
@@ -80,13 +69,17 @@ pub trait Memoize: Send + Sync + 'static {
     async fn get_best_optimized_physical_expr(
         &self,
         goal: &Goal,
-    ) -> MemoizeResult<Option<OptimizedExpression>>;
+    ) -> MemoizeResult<Option<OptimizedExpression>> {
+        todo!()
+    }
 
     /// Gets all physical expressions in a goal
     ///
     /// Returns a vector of physical expressions in the specified goal.
     /// If the goal doesn't exist, returns an empty vector.
-    async fn get_all_physical_exprs(&self, goal: &Goal) -> MemoizeResult<Vec<PhysicalExpression>>;
+    async fn get_all_physical_exprs(&self, goal: &Goal) -> MemoizeResult<Vec<PhysicalExpression>> {
+        todo!()
+    }
 
     /// Searches for a physical expression in the memo
     ///
@@ -95,20 +88,26 @@ pub trait Memoize: Send + Sync + 'static {
     async fn find_physical_expr(
         &self,
         physical_expr: &PhysicalExpression,
-    ) -> MemoizeResult<Option<Goal>>;
+    ) -> MemoizeResult<Option<Goal>> {
+        todo!()
+    }
 
     /// Creates a new goal associated with the provided physical expression
     ///
     /// Allocates a new unique group ID for the goal and initializes it with empty properties.
     /// This creates an isolated goal that may later participate in the memo structure
     /// through merges with equivalent goals during optimization.
-    async fn create_goal(&self, physical_expr: &PhysicalExpression) -> MemoizeResult<Goal>;
+    async fn create_goal(&self, physical_expr: &PhysicalExpression) -> MemoizeResult<Goal> {
+        todo!()
+    }
 
     /// Merges goals 1 and 2, creating a new goal containing all expressions
     ///
     /// May trigger cascading merges of parent entities.
     /// Returns a vector of merge results for all affected entities.
-    async fn merge_goals(&self, goal_1: &Goal, goal_2: &Goal) -> MemoizeResult<Vec<MergeResult>>;
+    async fn merge_goals(&self, goal_1: &Goal, goal_2: &Goal) -> MemoizeResult<Vec<MergeResult>> {
+        todo!()
+    }
 
     /// Adds an optimized physical expression to a goal
     ///
@@ -118,5 +117,7 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         goal: &Goal,
         optimized_expr: &OptimizedExpression,
-    ) -> MemoizeResult<bool>;
+    ) -> MemoizeResult<bool> {
+        todo!()
+    }
 }

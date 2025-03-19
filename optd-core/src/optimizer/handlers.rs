@@ -1,6 +1,5 @@
 use super::{
     ingest::{LogicalIngest, PhysicalIngest},
-    memo::{Memoize, MergeResult},
     OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
 };
 use crate::{
@@ -11,6 +10,7 @@ use crate::{
         PhysicalPlan, PhysicalProperties,
     },
     engine::CostContinuation,
+    memo::{Memoize, MergeResult},
 };
 use futures::{
     channel::{
