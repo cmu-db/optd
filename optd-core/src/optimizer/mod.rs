@@ -135,7 +135,7 @@ pub struct Optimizer<M: Memoize> {
     /// Tracks all uncompleted jobs that are pending (not yet started)
     pending_jobs: HashMap<JobId, Job>,
 
-    /// Queue of pending job IDs in order they should be scheduled
+    /// Queue of pending job IDs, ordered by scheduling time
     job_schedule_queue: VecDeque<JobId>,
 
     /// Tracks all uncompleted jobs that are currently running

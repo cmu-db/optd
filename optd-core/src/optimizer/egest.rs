@@ -2,45 +2,47 @@ use super::{memo::Memoize, Optimizer};
 use crate::{
     cir::{
         expressions::OptimizedExpression,
-        goal::Goal,
+        goal::GoalId,
         operators::{Child, Operator},
         plans::PhysicalPlan,
     },
     error::Error,
 };
 use async_recursion::async_recursion;
+use futures::future::try_join_all;
 use std::sync::Arc;
 use Child::*;
 
 impl<M: Memoize> Optimizer<M> {
-    /// Egest a physical plan from the memo table based on the best available physical expressions.
+    /// Reconstructs a physical plan from an optimized expression in the memo.
     ///
-    /// This function reconstructs a complete physical plan by recursively retrieving
-    /// the best optimized expressions for each goal referenced by the physical expression.
-    ///
-    /// # Arguments
-    /// * `expr` - The optimized physical expression to egest
+    /// Recursively retrieves the best physical plan for each goal ID referenced
+    /// by the optimized expression.
     ///
     /// # Returns
-    /// * Ok(Some(PhysicalPlan)) if all child plans can be successfully materialized
-    /// * Ok(None) if any child goal has no best expression
-    /// * Err(Error) if a memo operation fails
+    /// * `Ok(Some(PhysicalPlan))` if all child plans were successfully materialized
+    /// * `Ok(None)` if any goal ID lacks a best expression
+    /// * `Err(Error)` if a memo operation fails
     #[async_recursion]
     pub(super) async fn egest_best_plan(
-        &mut self,
+        &self,
         expr: &OptimizedExpression,
     ) -> Result<Option<PhysicalPlan>, Error> {
-        // Process all children goals recursively
-        let mut child_plans = Vec::with_capacity(expr.0.children.len());
-        for child in &expr.0.children {
-            let child_plan = self.egest_child_plan(child).await?;
-            match child_plan {
-                Some(plan) => child_plans.push(plan),
-                None => return Ok(None),
-            }
-        }
+        // Recursively egest all children plans.
+        let child_results = try_join_all(
+            expr.0
+                .children
+                .iter()
+                .map(|child| self.egest_child_plan(child)),
+        )
+        .await?;
 
-        // Construct the physical plan with the materialized children
+        let child_plans = match child_results.into_iter().collect::<Option<Vec<_>>>() {
+            Some(plans) => plans,
+            None => return Ok(None),
+        };
+
+        // Base case: construct the physical plan with the materialized children.
         Ok(Some(PhysicalPlan(Operator {
             tag: expr.0.tag.clone(),
             data: expr.0.data.clone(),
@@ -48,59 +50,45 @@ impl<M: Memoize> Optimizer<M> {
         })))
     }
 
-    /// Helper function to egest a single child plan.
+    /// Egests a single child plan structure.
     ///
-    /// This function handles both singleton and variable-length children,
-    /// recursively retrieving the best physical plan for each goal.
-    ///
-    /// # Arguments
-    /// * `child` - The child structure containing goals
-    ///
-    /// # Returns
-    /// * Ok(Some(Child<Arc<PhysicalPlan>>)) if the goal can be successfully materialized
-    /// * Ok(None) if the goal has no best expression
-    /// * Err(Error) if a memo operation fails
+    /// Handles both singleton and variable-length children.
     async fn egest_child_plan(
-        &mut self,
-        child: &Child<Goal>,
+        &self,
+        child: &Child<GoalId>,
     ) -> Result<Option<Child<Arc<PhysicalPlan>>>, Error> {
         match child {
-            Singleton(goal) => {
-                // Get the best optimized expression for this goal
-                let goal_id = self.memo.get_goal_id(&goal).await?;
-                let best_expr = match self.memo.get_best_optimized_physical_expr(goal_id).await? {
+            Singleton(goal_id) => {
+                let best_expr = match self.memo.get_best_optimized_physical_expr(*goal_id).await? {
                     Some(expr) => expr,
                     None => return Ok(None),
                 };
-
-                // Recursively egest the plan for this expression
                 let plan = match self.egest_best_plan(&best_expr).await? {
                     Some(plan) => plan,
                     None => return Ok(None),
                 };
-
                 Ok(Some(Singleton(plan.into())))
             }
-            VarLength(goals) => {
-                let mut result_plans = Vec::with_capacity(goals.len());
-                for goal in goals {
-                    let goal_id = self.memo.get_goal_id(goal).await?;
-
-                    // Get the best optimized expression for this goal
+            VarLength(goal_ids) => {
+                let futures = goal_ids.iter().map(|goal_id| async move {
                     let best_expr =
-                        match self.memo.get_best_optimized_physical_expr(goal_id).await? {
+                        match self.memo.get_best_optimized_physical_expr(*goal_id).await? {
                             Some(expr) => expr,
                             None => return Ok(None),
                         };
 
-                    // Recursively egest the plan for this expression
                     let plan = match self.egest_best_plan(&best_expr).await? {
                         Some(plan) => plan,
                         None => return Ok(None),
                     };
 
-                    result_plans.push(plan.into());
-                }
+                    Ok(Some(plan.into()))
+                });
+
+                let result_plans = match try_join_all(futures).await?.into_iter().collect() {
+                    Some(plans) => plans,
+                    None => return Ok(None),
+                };
 
                 Ok(Some(VarLength(result_plans)))
             }

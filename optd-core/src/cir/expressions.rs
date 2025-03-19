@@ -1,5 +1,5 @@
 use super::{
-    goal::{Cost, Goal},
+    goal::{Cost, Goal, GoalId},
     group::GroupId,
     operators::{Child, Operator},
     plans::{PartialLogicalPlan, PartialPhysicalPlan},
@@ -23,7 +23,7 @@ pub struct LogicalExpressionId(pub i64);
 ///
 /// Physical expressions use goal IDs rather than full plans for
 /// their children, representing a compact form suitable for the memo structure.
-pub type PhysicalExpression = Operator<Goal>;
+pub type PhysicalExpression = Operator<GoalId>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PhysicalExpressionId(pub i64);
@@ -50,12 +50,12 @@ impl From<LogicalExpression> for PartialLogicalPlan {
     }
 }
 
-impl From<PhysicalExpression> for PartialPhysicalPlan {
-    /// Converts a physical expression to a partial physical plan.
+impl From<Operator<Goal>> for PartialPhysicalPlan {
+    /// Converts an operator with Goals to a partial physical plan.
     ///
-    /// This creates a materialized partial plan where each child goal ID
-    /// is converted to an unmaterialized partial plan reference.
-    fn from(expr: PhysicalExpression) -> Self {
+    /// Note: This takes Operator<Goal> rather than PhysicalExpression (which is Operator<GoalId>)
+    /// because physical expressions in partial plans still need the full Goal information.
+    fn from(expr: Operator<Goal>) -> Self {
         PartialPhysicalPlan::Materialized(Operator {
             tag: expr.tag,
             data: expr.data,

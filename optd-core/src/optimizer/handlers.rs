@@ -20,7 +20,9 @@ use futures::{
     SinkExt,
 };
 use JobKind::*;
+use LogicalIngest::*;
 use OptimizerMessage::*;
+use TaskKind::*;
 
 impl<M: Memoize> Optimizer<M> {
     /// This method initiates the optimization process for a logical plan by launching
@@ -31,23 +33,28 @@ impl<M: Memoize> Optimizer<M> {
         response_tx: Sender<PhysicalPlan>,
         task_id: TaskId,
     ) {
-        // First try to ingest the plan into the memo
-        match self.try_ingest_logical(&plan.clone().into(), task_id).await {
-            LogicalIngest::Success(group_id) => {
-                // Create a goal for the root group
+        // First, resolve the logical plan to a group.
+        match self.probe_ingest_logical_plan(&plan.clone().into()).await {
+            Found(group_id) => {
                 // The goal represents what we want to achieve: optimize the root group
-                // with no specific physical properties required
+                // with no specific physical properties required.
                 let goal = Goal(group_id, PhysicalProperties(None));
                 let goal_id = self.memo.get_goal_id(&goal).await.expect("Goal not found");
 
-                // Subscribe the task to the goal
                 // This ensures the task will be notified when optimized expressions
-                // for this goal are found
+                // for this goal are found.
                 self.subscribe_task_to_goal(goal_id, task_id).await;
             }
-            LogicalIngest::NeedsDependencies(pending_dependencies) => {
+            Missing(operators) => {
                 // Store the request as a pending message that will be processed
-                // once all create group dependencies are resolved.
+                // once all create task dependencies are resolved.
+                let pending_dependencies = operators
+                    .iter()
+                    .map(|operator| {
+                        self.schedule_job(task_id, DeriveLogicalProperties(operator.clone()))
+                    })
+                    .collect();
+
                 let pending_message = PendingMessage {
                     message: OptimizeRequestWrapper(OptimizeRequest { plan, response_tx }, task_id),
                     pending_dependencies,
@@ -59,19 +66,18 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// This method handles new logical plan alternatives discovered through
-    /// transformation rule application. It may need dependencies. It might
-    /// trigger group & goal merge (whic will triger notifications)
+    /// transformation rule application.
     pub(super) async fn process_new_logical_partial(
         &mut self,
         plan: PartialLogicalPlan,
         group_id: GroupId,
         job_id: JobId,
     ) {
-        let related_task_id = self.running_jobs[&job_id].0;
-
-        match self.try_ingest_logical(&plan, related_task_id).await {
-            LogicalIngest::Success(new_group_id) if new_group_id != group_id => {
-                // Perform the merge in the memo and process all results
+        // First, resolve the logical plan to a group.
+        match self.probe_ingest_logical_plan(&plan).await {
+            Found(new_group_id) if new_group_id != group_id => {
+                // Atomically perform the merge in the memo and process all
+                // results in memory.
                 let merge_results = self
                     .memo
                     .merge_groups(group_id, new_group_id)
@@ -82,15 +88,29 @@ impl<M: Memoize> Optimizer<M> {
                     self.handle_merge_result(result).await;
                 }
             }
-            LogicalIngest::Success(_) => {
-                // Group already exists, nothing to merge
+            Found(_) => {
+                // Group already exists, nothing to merge or do.
             }
-            LogicalIngest::NeedsDependencies(pending_dependencies) => {
-                // Store as pending message to process after dependencies are resolved
-                self.pending_messages.push(PendingMessage {
+            Missing(operators) => {
+                // Store the request as a pending message that will be processed
+                // once all create task dependencies are resolved.
+                let related_task_id = self.running_jobs[&job_id].0;
+                let pending_dependencies = operators
+                    .iter()
+                    .map(|operator| {
+                        self.schedule_job(
+                            related_task_id,
+                            DeriveLogicalProperties(operator.clone()),
+                        )
+                    })
+                    .collect();
+
+                let pending_message = PendingMessage {
                     message: NewLogicalPartial(plan, group_id, job_id),
                     pending_dependencies,
-                });
+                };
+
+                self.pending_messages.push(pending_message);
             }
         }
     }
@@ -103,21 +123,20 @@ impl<M: Memoize> Optimizer<M> {
         goal: Goal,
         job_id: JobId,
     ) {
-        let related_task_id = self.running_jobs[&job_id].0;
+        let goal_id = self.memo.get_goal_id(&goal).await.expect("Goal not found");
 
-        let goal_id = self.memo.get_goal_id(&goal).await.unwrap();
-
+        // First, ingest the physical plan to determine if it's new or not.
         let PhysicalIngest {
-            goal_id: new_goal_id,
-            goal: _,
-            new_expression: new_expr,
-        } = self.try_ingest_physical(&plan).await;
+            goal_id: ingested_goal_id,
+            new_expression,
+        } = self.ingest_physical_plan(&plan).await;
 
-        if new_goal_id != goal_id {
-            // Perform the merge in the memo and process all results
+        if ingested_goal_id != goal_id {
+            // Atomically perform the merge in the memo and process all
+            // results in memory.
             let merge_results = self
                 .memo
-                .merge_goals(goal_id, new_goal_id)
+                .merge_goals(ingested_goal_id, goal_id)
                 .await
                 .expect("Failed to merge goals");
 
@@ -125,9 +144,11 @@ impl<M: Memoize> Optimizer<M> {
                 self.handle_merge_result(result).await;
             }
 
-            // If an expression was just created, its status is always dirty
-            if let Some(expr) = new_expr {
-                self.launch_cost_expression_task(expr, related_task_id);
+            // If a physical expression was just created, its status is always dirty
+            // and will need to be costed.
+            if let Some(expression) = new_expression {
+                let related_task_id = self.running_jobs[&job_id].0;
+                self.launch_cost_expression_task(expression, related_task_id);
             }
         }
     }
@@ -229,9 +250,7 @@ impl<M: Memoize> Optimizer<M> {
             .expect("Task does not exist")
             .kind
         {
-            TaskKind::CostExpression(task) => {
-                task.register_continuation(goal_id, continuation.clone())
-            }
+            CostExpression(task) => task.register_continuation(goal_id, continuation.clone()),
             _ => panic!("Only cost tasks can subscribe to goals"),
         }
 
@@ -271,7 +290,7 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// This method processes the results of group and goal merges, updating
     /// representatives, subscribers, and exploration status appropriately.
-    async fn handle_merge_result(&mut self, result: MergeResult) {
+    async fn handle_merge_result(&mut self, _result: MergeResult) {
         todo!()
     }
 
