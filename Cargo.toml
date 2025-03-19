@@ -1,5 +1,5 @@
 [workspace]
-members = ["optd-core", "optd-dsl"]
+members = ["optd-core", "optd-dsl", "optd-test"]
 resolver = "2"
 
 [workspace.package]

@@ -1,0 +1,10 @@
+[package]
+name = "optd-test"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+optd-core = { path = "../optd-core" }
+optd-dsl = { path = "../optd-dsl" }
