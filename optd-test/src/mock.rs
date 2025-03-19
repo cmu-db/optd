@@ -1,7 +1,7 @@
 use optd_core::cir::{
     Goal, GroupId, LogicalExpression, LogicalProperties, OptimizedExpression, PhysicalExpression,
 };
-use optd_core::memo::{Memoize, MemoizeResult};
+use optd_core::memo::{Memoize, MemoizeResult, MergeResult};
 
 pub struct MockMemo;
 

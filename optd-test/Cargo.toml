@@ -8,3 +8,5 @@ repository.workspace = true
 [dependencies]
 optd-core = { path = "../optd-core" }
 optd-dsl = { path = "../optd-dsl" }
+futures = "0.3"
+tokio = { version = "1.44", features = ["rt", "macros"] }
