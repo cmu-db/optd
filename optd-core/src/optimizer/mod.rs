@@ -46,101 +46,54 @@ pub struct OptimizeRequest {
     /// Streams results back as they become available, allowing clients to:
     /// * Receive progressively better plans during optimization
     /// * Terminate early when a "good enough" plan is found
-    /// * Control optimization duration by consuming or dropping the receiver
     pub response_tx: Sender<PhysicalPlan>,
 }
 
 /// Messages passed within the optimization system.
 ///
-/// This enum unifies all the message types that flow through the optimizer,
-/// enabling centralized message handling. Each message that includes a JobId
-/// represents the result of a completed job, allowing the optimizer to track
-/// which tasks are progressing and update their completion status.
+/// Each message that includes a JobId represents the result of a completed job,
+/// allowing the optimizer to track which tasks are progressing.
 enum OptimizerMessage {
-    /// Process an optimization request.
-    ///
-    /// Wraps the external client request as an internal message for consistent
-    /// handling within the optimizer's message processing system, and also
-    /// includes a task ID in case ingestion fails and needs to produce new
-    /// derivation jobs.
+    /// Process an optimization request
     OptimizeRequestWrapper(OptimizeRequest, TaskId),
 
-    /// New logical plan alternative for a group from applying transformation rules.
-    ///
-    /// The JobId represents the completed job that produced this result.
-    /// It allows the optimizer to track which tasks launched this job and
-    /// update their completion status.
+    /// New logical plan alternative for a group from applying transformation rules
     NewLogicalPartial(PartialLogicalPlan, GroupId, JobId),
 
-    /// New physical implementation for a goal, awaiting recursive optimization.
-    ///
-    /// The JobId represents the completed job that produced this physical implementation.
-    /// This allows the optimizer to update task status and track job completion.
-    ///
-    /// Intermediate result without full costing or optimized child operators.
+    /// New physical implementation for a goal, awaiting recursive optimization
     NewPhysicalPartial(PartialPhysicalPlan, Goal, JobId),
 
-    /// Fully optimized physical expression with complete costing.
-    ///
-    /// The JobId represents the completed costing job that produced this optimized expression.
-    /// This allows the optimizer to track which cost evaluation job has completed.
-    ///
-    /// May not be the globally optimal plan for the goal.
+    /// Fully optimized physical expression with complete costing
     NewOptimizedExpression(OptimizedExpression, Goal, JobId),
 
-    /// Create a new group with the provided logical properties.
-    ///
-    /// The JobId represents the completed property derivation job.
-    /// This allows pending messages waiting on this job to be processed.
-    ///
-    /// Used when the engine derives properties for a logical expression.
+    /// Create a new group with the provided logical properties
     CreateGroup(LogicalProperties, LogicalExpression, JobId),
 
-    /// Subscribe to all logical expressions in a specific group.
-    ///
-    /// The JobId represents the job that's requesting the subscription.
-    /// This allows the job to receive notifications about expressions in the group.
-    ///
-    /// Provides notifications for existing and new expressions in the equivalence class.
+    /// Subscribe to logical expressions in a specific group
     SubscribeGroup(GroupId, LogicalExprContinuation, JobId),
 
-    /// Subscribe to optimized physical implementations for a goal.
-    ///
-    /// The JobId represents the job that's requesting the subscription.
-    /// This allows the job to receive notifications about optimized expressions for the goal.
-    ///
-    /// Only sends notifications for plans better than previously discovered ones,
-    /// implementing pruning to focus on promising candidates.
+    /// Subscribe to optimized physical implementations for a goal
     SubscribeGoal(Goal, OptimizedExprContinuation, JobId),
 
-    /// Retrieve logical properties for a specific group.
-    ///
-    /// Gets properties (schema, cardinality, statistics) needed for rules and costing.
+    /// Retrieve logical properties for a specific group
     RetrieveProperties(GroupId, oneshot::Sender<LogicalProperties>),
 }
 
 /// A message that is waiting for dependencies before it can be processed.
 ///
-/// This structure represents a message that requires one or more groups to be
-/// created before it can be fully processed. It tracks the set of job IDs
-/// that must exist before the message can be handled.
+/// Tracks the set of job IDs that must exist before the message can be handled.
 struct PendingMessage {
     /// The message awaiting processing
     message: OptimizerMessage,
 
     /// Set of job IDs whose groups must be created before this message can be processed
-    ///
-    /// As groups are created, their corresponding job IDs are removed from this set.
-    /// When the set becomes empty, the message is ready for processing.
     pending_dependencies: HashSet<JobId>,
 }
 
 /// The central access point to the OPTD optimizer.
 ///
-/// This struct provides the main interface to the query optimization system,
-/// allowing clients to submit logical plans for optimization and receive
-/// optimized physical plans in return. It contains all state necessary for
-/// optimization, including channels for communication between components.
+/// Provides the interface to submit logical plans for optimization and receive
+/// optimized physical plans in return.
 pub struct Optimizer<M: Memoize> {
     //
     // Core optimization components
@@ -158,51 +111,34 @@ pub struct Optimizer<M: Memoize> {
     // Dependency tracking
     //
     /// Messages waiting for dependencies to be resolved
-    ///
-    /// Each entry represents a message that can only be processed once
-    /// certain groups have been created. The associated set tracks (right now) which
-    /// group creation tasks must complete before the message can be processed.
     pending_messages: Vec<PendingMessage>,
 
     /// Mapping of task IDs to their corresponding tasks
-    ///
-    /// This tracks the dependency graph of tasks, including the jobs they have launched
-    /// and their relationships to other tasks. Tasks represent higher-level objectives
-    /// that may involve multiple jobs (and subtasks).
     tasks: HashMap<TaskId, Task>,
 
-    /// Maps group IDs to their associated exploration task IDs
-    ///
-    /// This index provides efficient lookup of the exploration task for a specific group,
-    /// enabling faster processing of group-related messages and dependency tracking.
+    /// Maps group IDs to their exploration task IDs
     group_explorations_task_index: HashMap<GroupId, TaskId>,
 
+    /// Maps logical expression IDs to their exploration task IDs
     expression_exploration_task_index: HashMap<LogicalExpressionId, TaskId>,
 
-    /// Maps optimization goals to their associated exploration task IDs
-    ///
-    /// This index provides efficient lookup of the exploration task for a specific goal,
-    /// enabling faster processing of goal-related messages and implementation tracking.
+    /// Maps optimization goals to their exploration task IDs
     goal_exploration_task_index: HashMap<GoalId, TaskId>,
 
+    /// Maps logical expression IDs to implementation tasks with physical properties
     expression_implementation_task_index:
         HashMap<LogicalExpressionId, Vec<(PhysicalProperties, TaskId)>>,
+
+    /// Maps physical expression IDs to costing task IDs
     expression_costing_task_index: HashMap<PhysicalExpressionId, TaskId>,
 
     /// Tracks all uncompleted jobs that are pending (not yet started)
-    ///
-    /// Maps job IDs to their job definitions.
     pending_jobs: HashMap<JobId, Job>,
 
     /// Queue of pending job IDs in order they should be scheduled
-    ///
-    /// Jobs are dequeued from this queue for scheduling in FIFO order.
     job_schedule_queue: VecDeque<JobId>,
 
     /// Tracks all uncompleted jobs that are currently running
-    ///
-    /// Jobs are removed from this map when they complete their execution, which
-    /// is signaled by receiving a message with their JobId.
     running_jobs: HashMap<JobId, Job>,
 
     /// Next available task ID for task creation
@@ -217,7 +153,7 @@ pub struct Optimizer<M: Memoize> {
     /// Subscribers to logical expressions in groups
     group_subscribers: HashMap<GroupId, Vec<TaskId>>,
 
-    /// Subscribers to *optimized* physical expressions for goals
+    /// Subscribers to optimized physical expressions for goals
     goal_subscribers: HashMap<GoalId, Vec<TaskId>>,
 
     //
@@ -234,9 +170,7 @@ pub struct Optimizer<M: Memoize> {
 impl<M: Memoize> Optimizer<M> {
     /// Create a new optimizer instance with the given memo and HIR context
     ///
-    /// This method creates and initializes all the necessary state for the optimizer
-    /// but does not start processing. Use `launch` to create and start the optimizer
-    /// in one step.
+    /// Use `launch` to create and start the optimizer in one step.
     fn new(
         memo: M,
         hir: HIR,
@@ -283,10 +217,7 @@ impl<M: Memoize> Optimizer<M> {
         }
     }
 
-    /// Launch a new optimizer with the given memo and HIR context
-    ///
-    /// This method creates, initializes, and launches the optimizer in one step.
-    /// It returns a sender that can be used to communicate with the optimizer.
+    /// Launch a new optimizer and return a sender for client communication
     pub fn launch(memo: M, hir: HIR) -> Sender<OptimizeRequest> {
         // Initialize all channels
         let (message_tx, message_rx) = mpsc::channel(0);
@@ -305,9 +236,6 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Run the optimizer's main processing loop
-    ///
-    /// This method continuously processes incoming requests and task results,
-    /// handling optimization requests, engine results, and subscription requests.
     async fn run(mut self) {
         loop {
             tokio::select! {
