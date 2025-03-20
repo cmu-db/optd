@@ -6,7 +6,7 @@ use crate::{
     },
     engine::{
         generator::{Continuation, Generator},
-        CostedPhysicalPlanContrinuation, LogicalPlanContinuation,
+        CostedPhysicalPlanContinuation, LogicalPlanContinuation,
     },
 };
 use futures::{channel::mpsc::Sender, SinkExt};
@@ -90,7 +90,7 @@ impl Generator for OptimizerGenerator {
         let cir_goal = hir_goal_to_cir(physical_goal);
 
         // Create an optimized expression continuation that will invoke the provided continuation
-        let continuation: CostedPhysicalPlanContrinuation = Arc::new(move |(plan, cost)| {
+        let continuation: CostedPhysicalPlanContinuation = Arc::new(move |(plan, cost)| {
             let k = k.clone();
             // TODO(Alexis): Once we define statistics, there should be a custom CIR representation.
             Box::pin(async move {

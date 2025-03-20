@@ -13,7 +13,7 @@ use crate::{
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
     },
-    engine::{CostedPhysicalPlanContrinuation, LogicalPlanContinuation},
+    engine::{CostedPhysicalPlanContinuation, LogicalPlanContinuation},
     error::Error,
 };
 use futures::{
@@ -51,7 +51,7 @@ impl<M: Memoize> Optimizer<M> {
                     .iter()
                     .cloned()
                     .map(|logical_expr| {
-                        self.schedule_job(task_id, JobKind::derive_logical_properties(logical_expr))
+                        self.schedule_job(task_id, JobKind::DeriveLogicalProperties(logical_expr))
                     })
                     .collect();
 
@@ -99,7 +99,7 @@ impl<M: Memoize> Optimizer<M> {
                     .map(|logical_expr| {
                         self.schedule_job(
                             related_task_id,
-                            JobKind::derive_logical_properties(logical_expr),
+                            JobKind::DeriveLogicalProperties(logical_expr),
                         )
                     })
                     .collect();
@@ -212,7 +212,7 @@ impl<M: Memoize> Optimizer<M> {
         for expr in expressions {
             self.schedule_job(
                 related_task_id,
-                JobKind::continue_with_logical(expr, continuation.clone()),
+                JobKind::ContinueWithLogical(expr, continuation.clone()),
             );
         }
 
@@ -224,11 +224,11 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_goal_subscription(
         &mut self,
         goal: &Goal,
-        continuation: CostedPhysicalPlanContrinuation,
+        continuation: CostedPhysicalPlanContinuation,
         job_id: JobId,
     ) -> Result<(), Error> {
         let related_task_id = self.running_jobs[&job_id].0;
-        let goal_id = self.memo.get_goal_id(&goal).await?;
+        let goal_id = self.memo.get_goal_id(goal).await?;
 
         // Verify task type and register the continuation
         match &mut self.tasks.get_mut(&related_task_id).unwrap().kind {
@@ -238,11 +238,11 @@ impl<M: Memoize> Optimizer<M> {
 
         // Subscribe to future optimized expressions and bootstrap with current best
         if let Some((best_expr_id, cost)) =
-            self.subscribe_task_to_goal(&goal, related_task_id).await?
+            self.subscribe_task_to_goal(goal, related_task_id).await?
         {
             self.schedule_job(
                 related_task_id,
-                JobKind::continue_with_optimized(best_expr_id, cost, continuation),
+                JobKind::ContinueWithCostedPhysical(best_expr_id, cost, continuation),
             );
         }
 

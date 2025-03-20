@@ -36,7 +36,7 @@ pub(crate) type LogicalPlanContinuation =
     Arc<dyn Fn(PartialLogicalPlan) -> UnitFuture + Send + Sync + 'static>;
 
 /// Type alias for a continuation that receives a PartialPhysicalPlan + Cost
-pub(crate) type CostedPhysicalPlanContrinuation =
+pub(crate) type CostedPhysicalPlanContinuation =
     Arc<dyn Fn((PartialPhysicalPlan, Cost)) -> UnitFuture + Send + Sync + 'static>;
 
 /// Type alias for a continuation that receives a PartialPhysicalPlan

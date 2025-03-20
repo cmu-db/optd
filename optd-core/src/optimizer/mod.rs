@@ -7,7 +7,7 @@ use crate::{
         properties::{LogicalProperties, PhysicalProperties},
         rules::RuleBook,
     },
-    engine::{CostedPhysicalPlanContrinuation, LogicalPlanContinuation},
+    engine::{CostedPhysicalPlanContinuation, LogicalPlanContinuation},
 };
 use futures::channel::oneshot;
 use futures::StreamExt;
@@ -73,7 +73,7 @@ enum OptimizerMessage {
     SubscribeGroup(GroupId, LogicalPlanContinuation, JobId),
 
     /// Subscribe to optimized physical implementations for a goal
-    SubscribeGoal(Goal, CostedPhysicalPlanContrinuation, JobId),
+    SubscribeGoal(Goal, CostedPhysicalPlanContinuation, JobId),
 
     /// Retrieve logical properties for a specific group
     RetrieveProperties(GroupId, oneshot::Sender<LogicalProperties>),

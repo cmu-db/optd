@@ -11,7 +11,7 @@ use crate::{
         plans::{LogicalPlan, PhysicalPlan},
         rules::{ImplementationRule, TransformationRule},
     },
-    engine::{CostedPhysicalPlanContrinuation, LogicalPlanContinuation},
+    engine::{CostedPhysicalPlanContinuation, LogicalPlanContinuation},
     error::Error,
 };
 use futures::channel::mpsc::Sender;
@@ -256,7 +256,7 @@ pub(super) struct CostExpressionTask {
 
     /// Continuations for each goal that need to be notified when
     /// optimized expressions are created
-    pub continuations: HashMap<GoalId, Vec<CostedPhysicalPlanContrinuation>>,
+    pub continuations: HashMap<GoalId, Vec<CostedPhysicalPlanContinuation>>,
 }
 
 impl CostExpressionTask {
@@ -279,7 +279,7 @@ impl CostExpressionTask {
     pub(super) fn register_continuation(
         &mut self,
         goal: GoalId,
-        continuation: CostedPhysicalPlanContrinuation,
+        continuation: CostedPhysicalPlanContinuation,
     ) {
         self.continuations
             .entry(goal)
@@ -327,7 +327,7 @@ impl<M: Memoize> Optimizer<M> {
         // Schedule a job to actually launch the transformation rule
         self.schedule_job(
             task_id,
-            JobKind::transformation_rule(rule, expression_id, group_id),
+            JobKind::TransformationRule(rule, expression_id, group_id),
         );
 
         task_id
@@ -360,7 +360,7 @@ impl<M: Memoize> Optimizer<M> {
         if is_dirty {
             self.schedule_job(
                 task_id,
-                JobKind::implementation_rule(rule, expression_id, goal_id),
+                JobKind::ImplementationRule(rule, expression_id, goal_id),
             );
         }
 
@@ -384,7 +384,7 @@ impl<M: Memoize> Optimizer<M> {
         self.register_child_to_task(parent, task_id);
 
         // Schedule a job to actually launch the cost estimation
-        self.schedule_job(task_id, JobKind::cost_expression(expression_id));
+        self.schedule_job(task_id, JobKind::CostExpression(expression_id));
 
         task_id
     }
@@ -491,7 +491,8 @@ impl<M: Memoize> Optimizer<M> {
 
             // Ensure we explore each group associated with the equivalent goals
             // This is necessary since new logical expressions can lead to new implementations
-            self.ensure_group_exploration_task(group_id, task_id).await;
+            self.ensure_group_exploration_task(group_id, task_id)
+                .await?;
 
             let implementations = self.rule_book.get_implementations().to_vec();
             let logical_expressions = self
@@ -502,16 +503,12 @@ impl<M: Memoize> Optimizer<M> {
 
             // Schedule implementation jobs for all expression-rule-properties combinations for this group
             // This creates a Cartesian product of rules × properties × expressions.
-            logical_expressions
-                .into_iter()
-                .flat_map(|expr| {
-                    implementations
-                        .iter()
-                        .map(move |rule| (rule.clone(), expr.clone()))
-                })
-                .for_each(|(rule, expr_id)| {
-                    self.launch_implement_expression_task(rule, expr_id, goal_id, task_id);
-                });
+            for expr_id in logical_expressions {
+                for rule in implementations.iter() {
+                    self.launch_implement_expression_task(rule.clone(), expr_id, goal_id, task_id)
+                        .await;
+                }
+            }
         }
 
         // Launch costing for all physical expressions in the original goal

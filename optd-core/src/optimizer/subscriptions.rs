@@ -134,7 +134,7 @@ impl<M: Memoize> Optimizer<M> {
                         conts.iter().map(move |cont| {
                             (
                                 task_id,
-                                JobKind::continue_with_logical(expression_id, cont.clone()),
+                                JobKind::ContinueWithLogical(expression_id, cont.clone()),
                             )
                         })
                     })
@@ -187,7 +187,7 @@ impl<M: Memoize> Optimizer<M> {
                 conts.iter().map(move |cont| {
                     (
                         task_id,
-                        JobKind::continue_with_optimized(expression_id, cost, cont.clone()),
+                        JobKind::ContinueWithCostedPhysical(expression_id, cost, cont.clone()),
                     )
                 })
             })
