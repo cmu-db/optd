@@ -1,18 +1,19 @@
 use super::{
     jobs::{JobId, JobKind},
-    memo::Memoize,
+    memo::{Memoize, Status},
     Optimizer,
 };
 use crate::{
     cir::{
-        expressions::{LogicalExpression, PhysicalExpression},
-        goal::{Goal, GoalId},
+        expressions::{LogicalExpression, LogicalExpressionId, PhysicalExpressionId},
+        goal::{self, Goal, GoalId},
         group::GroupId,
         plans::{LogicalPlan, PhysicalPlan},
-        properties::PhysicalProperties,
+        properties::{self, PhysicalProperties},
         rules::{ImplementationRule, TransformationRule},
     },
     engine::{LogicalExprContinuation, OptimizedExprContinuation},
+    error::Error,
 };
 use futures::channel::mpsc::Sender;
 use std::collections::{HashMap, HashSet};
@@ -130,13 +131,13 @@ impl OptimizePlanTask {
 /// Contains a mapping of group IDs to their associated physical properties
 /// for all goals in the equivalence class.
 pub(super) struct ExploreGoalTask {
-    /// Mapping of group IDs to physical properties for all equivalent goals
-    pub equivalent_goals: HashMap<GroupId, Vec<PhysicalProperties>>,
+    /// All equivalent goals in the task
+    pub equivalent_goals: Vec<GoalId>,
 }
 
 impl ExploreGoalTask {
     /// Creates a new goal exploration task
-    pub fn new(equivalent_goals: HashMap<GroupId, Vec<PhysicalProperties>>) -> Self {
+    pub fn new(equivalent_goals: Vec<GoalId>) -> Self {
         Self { equivalent_goals }
     }
 }
@@ -149,11 +150,14 @@ pub(super) struct ImplementExpressionTask {
     /// The implementation rule to apply
     pub rule: ImplementationRule,
 
-    /// The logical expression to implement
-    pub expression: LogicalExpression,
+    // Whether the task has launched the implementation rule:
+    // this field remains false while the memo status is clean.
+    pub is_launched: bool,
 
-    // The properties to implement the expression with
-    pub properties: PhysicalProperties,
+    /// The logical expression to implement
+    pub expression_id: LogicalExpressionId,
+
+    pub goal_id: GoalId,
 
     /// Continuations for each group that need to be notified when
     /// new logical expressions are created
@@ -164,13 +168,15 @@ impl ImplementExpressionTask {
     /// Creates a new implementation task with the given rule and expression
     pub fn new(
         rule: ImplementationRule,
-        expression: LogicalExpression,
-        properties: PhysicalProperties,
+        is_launched: bool,
+        expression_id: LogicalExpressionId,
+        goal_id: GoalId,
     ) -> Self {
         Self {
             rule,
-            expression,
-            properties,
+            is_launched,
+            expression_id,
+            goal_id,
             continuations: HashMap::new(),
         }
     }
@@ -204,7 +210,7 @@ pub(super) struct TransformExpressionTask {
     pub rule: TransformationRule,
 
     /// The logical expression to transform
-    pub expression: LogicalExpression,
+    pub expression_id: LogicalExpressionId,
 
     /// Continuations for each group that need to be notified when
     /// new logical expressions are created
@@ -213,10 +219,10 @@ pub(super) struct TransformExpressionTask {
 
 impl TransformExpressionTask {
     /// Creates a new transformation task with the given rule and expression
-    pub fn new(rule: TransformationRule, expression: LogicalExpression) -> Self {
+    pub fn new(rule: TransformationRule, expression_id: LogicalExpressionId) -> Self {
         Self {
             rule,
-            expression,
+            expression_id,
             continuations: HashMap::new(),
         }
     }
@@ -247,7 +253,7 @@ impl TransformExpressionTask {
 /// notifying dependent tasks about costing results.
 pub(super) struct CostExpressionTask {
     /// The physical expression to cost
-    pub expression: PhysicalExpression,
+    pub expression_id: PhysicalExpressionId,
 
     /// Continuations for each goal that need to be notified when
     /// optimized expressions are created
@@ -256,9 +262,9 @@ pub(super) struct CostExpressionTask {
 
 impl CostExpressionTask {
     /// Creates a new cost estimation task for the given physical expression
-    pub fn new(expression: PhysicalExpression) -> Self {
+    pub fn new(expression_id: PhysicalExpressionId) -> Self {
         Self {
-            expression,
+            expression_id,
             continuations: HashMap::new(),
         }
     }
@@ -308,12 +314,12 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) fn launch_transform_expression_task(
         &mut self,
         rule: TransformationRule,
-        expression: LogicalExpression,
+        expression_id: LogicalExpressionId,
         group_id: GroupId,
         parent: TaskId,
     ) -> TaskId {
         // Create and register the transformation task
-        let task_kind = TransformExpressionTask::new(rule.clone(), expression.clone());
+        let task_kind = TransformExpressionTask::new(rule.clone(), expression_id);
         let task_id = self.register_new_task(TransformExpression(task_kind));
 
         // Register this task as a child of the parent task
@@ -322,7 +328,7 @@ impl<M: Memoize> Optimizer<M> {
         // Schedule a job to actually launch the transformation rule
         self.schedule_job(
             task_id,
-            JobKind::transformation_rule(rule, expression, group_id),
+            JobKind::transformation_rule(rule, expression_id, group_id),
         );
 
         task_id
@@ -333,27 +339,31 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// Implementation rules convert logical expressions and properties to equivalent
     /// physical expressions which represent concrete execution strategies.
-    pub(super) fn launch_implement_expression_task(
+    pub(super) async fn launch_implement_expression_task(
         &mut self,
         rule: ImplementationRule,
-        expression: LogicalExpression,
-        group_id: GroupId,
-        properties: PhysicalProperties,
+        expression_id: LogicalExpressionId,
+        goal_id: GoalId,
         parent: TaskId,
     ) -> TaskId {
-        // Create and register the implementation task
-        let task_kind =
-            ImplementExpressionTask::new(rule.clone(), expression.clone(), properties.clone());
-        let task_id = self.register_new_task(ImplementExpression(task_kind));
+        let is_dirty = self
+            .memo
+            .get_implementation_status(expression_id, goal_id, &rule)
+            .await
+            .expect("Failed to get implementation status")
+            == Status::Dirty;
 
-        // Set up parent-child relationship
+        let task_kind =
+            ImplementExpressionTask::new(rule.clone(), is_dirty, expression_id, goal_id);
+        let task_id = self.register_new_task(ImplementExpression(task_kind));
         self.register_child_to_task(parent, task_id);
 
-        // Schedule a job to actually launch the implementation rule
-        self.schedule_job(
-            task_id,
-            JobKind::implementation_rule(rule, expression, group_id, properties),
-        );
+        if is_dirty {
+            self.schedule_job(
+                task_id,
+                JobKind::implementation_rule(rule, expression_id, goal_id),
+            );
+        }
 
         task_id
     }
@@ -364,19 +374,18 @@ impl<M: Memoize> Optimizer<M> {
     /// among the alternatives.
     pub(super) fn launch_cost_expression_task(
         &mut self,
-        expression: PhysicalExpression,
-        goal: &Goal,
+        expression_id: PhysicalExpressionId,
         parent: TaskId,
     ) -> TaskId {
         // Create and register the cost estimation task
-        let task_kind = CostExpressionTask::new(expression.clone());
+        let task_kind = CostExpressionTask::new(expression_id);
         let task_id = self.register_new_task(CostExpression(task_kind));
 
         // Set up parent-child relationship
         self.register_child_to_task(parent, task_id);
 
         // Schedule a job to actually launch the cost estimation
-        self.schedule_job(task_id, JobKind::cost_expression(expression, goal.clone()));
+        self.schedule_job(task_id, JobKind::cost_expression(expression_id));
 
         task_id
     }
@@ -393,7 +402,7 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         group_id: GroupId,
         child_task_id: TaskId,
-    ) {
+    ) -> Result<(), Error> {
         // Check if we already have an exploration task for this group
         let task_id = match self.group_explorations_task_index.get(&group_id) {
             Some(id) => *id,
@@ -402,6 +411,8 @@ impl<M: Memoize> Optimizer<M> {
 
         // Set up parent-child relationship
         self.register_child_to_task(task_id, child_task_id);
+
+        Ok(())
     }
 
     /// Ensures a goal exploration task exists and sets up a parent-child relationship
@@ -411,17 +422,18 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn ensure_goal_exploration_task(
         &mut self,
         goal_id: GoalId,
-        goal: &Goal,
         child_task_id: TaskId,
-    ) {
+    ) -> Result<(), Error> {
         // Check if we already have an exploration task for this goal
         let task_id = match self.goal_exploration_task_index.get(&goal_id) {
             Some(id) => *id,
-            None => self.launch_goal_exploration_task(goal, goal_id).await,
+            None => self.launch_goal_exploration_task(goal_id).await?,
         };
 
         // Set up parent-child relationship
         self.register_child_to_task(task_id, child_task_id);
+
+        Ok(())
     }
 
     //
@@ -449,13 +461,13 @@ impl<M: Memoize> Optimizer<M> {
         // This creates a Cartesian product of rules × expressions
         expressions
             .into_iter()
-            .flat_map(|expr| {
+            .flat_map(|expr_id| {
                 transformations
                     .iter()
-                    .map(move |rule| (rule.clone(), expr.clone()))
+                    .map(move |rule| (rule.clone(), expr_id))
             })
-            .for_each(|(rule, expr)| {
-                self.launch_transform_expression_task(rule, expr, group_id, task_id);
+            .for_each(|(rule, expr_id)| {
+                self.launch_transform_expression_task(rule, expr_id, group_id, task_id);
             });
 
         task_id
@@ -466,28 +478,26 @@ impl<M: Memoize> Optimizer<M> {
     /// This schedules jobs to apply all implementation rules to all logical expressions
     /// and launches cost tasks for all physical expressions in all equivalent goals.
     /// It handles multiple equivalent goals across different groups with various physical properties.
-    async fn launch_goal_exploration_task(&mut self, goal: &Goal, goal_id: GoalId) -> TaskId {
+    async fn launch_goal_exploration_task(&mut self, goal_id: GoalId) -> Result<TaskId, Error> {
         // Get all equivalent goals grouped by group ID and their associated physical properties
-        let equivalent_goals = self
-            .memo
-            .get_equivalent_goals(goal)
-            .await
-            .expect("Failed to get equivalent goals");
+        let equivalent_goals = self.memo.get_equivalent_goals(goal_id).await?;
 
         // Create task and register it in the goal exploration index
         let task_kind = ExploreGoalTask::new(equivalent_goals.clone());
         let task_id = self.register_new_task(ExploreGoal(task_kind));
         self.goal_exploration_task_index.insert(goal_id, task_id);
 
-        for (group_id, properties_list) in &equivalent_goals {
+        for goal_id in equivalent_goals {
+            let Goal(group_id, _) = self.memo.materialize_goal(goal_id).await?;
+
             // Ensure we explore each group associated with the equivalent goals
             // This is necessary since new logical expressions can lead to new implementations
-            self.ensure_group_exploration_task(*group_id, task_id).await;
+            self.ensure_group_exploration_task(group_id, task_id).await;
 
             let implementations = self.rule_book.get_implementations().to_vec();
             let logical_expressions = self
                 .memo
-                .get_all_logical_exprs(*group_id)
+                .get_all_logical_exprs(group_id)
                 .await
                 .expect("Failed to get logical expressions for group");
 
@@ -496,15 +506,12 @@ impl<M: Memoize> Optimizer<M> {
             logical_expressions
                 .into_iter()
                 .flat_map(|expr| {
-                    implementations.iter().flat_map(move |rule| {
-                        let expr = expr.clone();
-                        properties_list
-                            .iter()
-                            .map(move |props| (rule.clone(), expr.clone(), props.clone()))
-                    })
+                    implementations
+                        .iter()
+                        .map(move |rule| (rule.clone(), expr.clone()))
                 })
-                .for_each(|(rule, expr, props)| {
-                    self.launch_implement_expression_task(rule, expr, *group_id, props, task_id);
+                .for_each(|(rule, expr_id)| {
+                    self.launch_implement_expression_task(rule, expr_id, goal_id, task_id);
                 });
         }
 
@@ -512,15 +519,15 @@ impl<M: Memoize> Optimizer<M> {
         // (this includes all the equivalent goals).
         let physical_expressions = self
             .memo
-            .get_all_physical_exprs(goal)
+            .get_all_physical_exprs(goal_id)
             .await
             .expect("Failed to get physical expressions for goal");
 
-        physical_expressions.into_iter().for_each(|expr| {
-            self.launch_cost_expression_task(expr, goal, task_id);
+        physical_expressions.into_iter().for_each(|expr_id| {
+            self.launch_cost_expression_task(expr_id, task_id);
         });
 
-        task_id
+        Ok(task_id)
     }
 
     /// Helper method to register a new task of a specified kind

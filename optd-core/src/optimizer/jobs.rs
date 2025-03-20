@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use futures::{channel::mpsc, SinkExt};
+use futures::SinkExt;
 use optd_dsl::analyzer::context::Context;
 
 use super::{
@@ -8,13 +8,17 @@ use super::{
 };
 use crate::{
     cir::{
-        expressions::{LogicalExpression, OptimizedExpression, PhysicalExpression},
-        goal::Goal,
+        expressions::{
+            LogicalExpression, LogicalExpressionId, OptimizedExpression, PhysicalExpression,
+            PhysicalExpressionId,
+        },
+        goal::{self, Cost, Goal, GoalId},
         group::GroupId,
         properties::PhysicalProperties,
         rules::{ImplementationRule, TransformationRule},
     },
     engine::{Engine, LogicalExprContinuation, OptimizedExprContinuation},
+    error::Error,
 };
 
 /// Unique identifier for jobs in the optimization system
@@ -77,49 +81,49 @@ impl JobKind {
 
     pub fn transformation_rule(
         rule_name: TransformationRule,
-        logical_expr: LogicalExpression,
+        logical_expr_id: LogicalExpressionId,
         group_id: GroupId,
     ) -> Self {
         Self::TransformationRule(TransformationRuleJob {
             rule_name,
-            logical_expr,
+            logical_expr_id,
             group_id,
         })
     }
 
     pub fn implementation_rule(
         rule_name: ImplementationRule,
-        logical_expr: LogicalExpression,
-        group_id: GroupId,
-        physical_properties: PhysicalProperties,
+        expression_id: LogicalExpressionId,
+        goal_id: GoalId,
     ) -> Self {
         Self::ImplementationRule(ImplementationRuleJob {
             rule_name,
-            logical_expr,
-            group_id,
-            physical_properties,
+            expression_id,
+            goal_id,
         })
     }
 
-    pub fn cost_expression(physical_expr: PhysicalExpression, goal: Goal) -> Self {
-        Self::CostExpression(CostExpressionJob {
-            physical_expr,
-            goal,
-        })
+    pub fn cost_expression(expression_id: PhysicalExpressionId) -> Self {
+        Self::CostExpression(CostExpressionJob { expression_id })
     }
 
     pub fn continue_with_logical(
-        logical_expr: LogicalExpression,
+        logical_expr_id: LogicalExpressionId,
         k: LogicalExprContinuation,
     ) -> Self {
-        Self::ContinueWithLogical(ContinueWithLogicalJob { logical_expr, k })
+        Self::ContinueWithLogical(ContinueWithLogicalJob { logical_expr_id, k })
     }
 
     pub fn continue_with_optimized(
-        optimized_expr: OptimizedExpression,
+        expression_id: PhysicalExpressionId,
+        cost: Cost,
         k: OptimizedExprContinuation,
     ) -> Self {
-        Self::ContinueWithOptimized(ContinueWithOptimizedJob { optimized_expr, k })
+        Self::ContinueWithOptimized(ContinueWithOptimizedJob {
+            expression_id,
+            cost,
+            k,
+        })
     }
 }
 
@@ -129,31 +133,30 @@ pub(super) struct DeriveLogicalPropertiesJob {
 
 pub(super) struct TransformationRuleJob {
     rule_name: TransformationRule,
-    logical_expr: LogicalExpression,
+    logical_expr_id: LogicalExpressionId,
     group_id: GroupId,
 }
 
 pub(super) struct ImplementationRuleJob {
     rule_name: ImplementationRule,
-    logical_expr: LogicalExpression,
-    group_id: GroupId,
-    physical_properties: PhysicalProperties,
+    expression_id: LogicalExpressionId,
+    goal_id: GoalId,
 }
 
 pub(super) struct CostExpressionJob {
-    physical_expr: PhysicalExpression,
-    goal: Goal,
+    expression_id: PhysicalExpressionId,
 }
 
 pub(super) struct ContinueWithLogicalJob {
-    pub logical_expr: LogicalExpression,
+    pub logical_expr_id: LogicalExpressionId,
     pub k: LogicalExprContinuation,
 }
 
 impl ContinueWithLogicalJob {}
 
 pub(super) struct ContinueWithOptimizedJob {
-    pub optimized_expr: OptimizedExpression,
+    pub expression_id: PhysicalExpressionId,
+    pub cost: Cost,
     pub k: OptimizedExprContinuation,
 }
 
@@ -235,69 +238,72 @@ impl<M: Memoize> Optimizer<M> {
     ) {
         let TransformationRuleJob {
             rule_name,
-            logical_expr,
+            logical_expr_id,
             group_id,
         } = job;
 
         let engine = self.new_engine(job_id);
         let message_tx = self.message_tx.clone();
-        engine
-            .launch_transformation_rule(
-                rule_name.0,
-                &logical_expr.into(),
-                Arc::new(move |partial_logical_plan| {
-                    let mut message_tx = message_tx.clone();
-                    Box::pin(async move {
-                        message_tx
-                            .send(OptimizerMessage::NewLogicalPartial(
-                                partial_logical_plan,
-                                group_id,
-                                job_id,
-                            ))
-                            .await
-                            .unwrap();
-                    })
-                }),
-            )
-            .await;
+
+        // TODO: Materialize here!
+        /*engine
+        .launch_transformation_rule(
+            rule_name.0,
+            &logical_expr.into(),
+            Arc::new(move |partial_logical_plan| {
+                let mut message_tx = message_tx.clone();
+                Box::pin(async move {
+                    message_tx
+                        .send(OptimizerMessage::NewLogicalPartial(
+                            partial_logical_plan,
+                            group_id,
+                            job_id,
+                        ))
+                        .await
+                        .unwrap();
+                })
+            }),
+        )
+        .await;*/
     }
 
     pub(super) async fn execute_implementation_rule_job(
         &mut self,
         job: ImplementationRuleJob,
         job_id: JobId,
-    ) {
+    ) -> Result<(), Error> {
         let ImplementationRuleJob {
             rule_name: implementation_rule,
-            logical_expr,
-            group_id,
-            physical_properties,
+            expression_id,
+            goal_id,
         } = job;
 
         let engine = self.new_engine(job_id);
         let message_tx = self.message_tx.clone();
 
-        engine
-            .launch_implementation_rule(
-                implementation_rule.0,
-                &logical_expr.into(),
-                &physical_properties.clone(),
-                Arc::new(move |partial_physical_plan| {
-                    let mut message_tx = message_tx.clone();
-                    let goal = Goal(group_id, physical_properties.clone());
-                    Box::pin(async move {
-                        message_tx
-                            .send(OptimizerMessage::NewPhysicalPartial(
-                                partial_physical_plan,
-                                goal,
-                                job_id,
-                            ))
-                            .await
-                            .unwrap();
-                    })
-                }),
-            )
-            .await;
+        // TODO: Materialize here!
+        /*engine
+                .launch_implementation_rule(
+                    implementation_rule.0,
+                    &logical_expr.into(),
+                    &physical_properties.clone(),
+                    Arc::new(move |partial_physical_plan| {
+                        let mut message_tx = message_tx.clone();
+                        Box::pin(async move {
+                            message_tx
+                                .send(OptimizerMessage::NewPhysicalPartial(
+                                    partial_physical_plan,
+                                    goal_id,
+                                    job_id,
+                                ))
+                                .await
+                                .unwrap();
+                        })
+                    }),
+                )
+                .await;
+        */
+        Ok(())
     }
 
     pub(super) async fn execute_cost_expression_job(
@@ -305,46 +311,52 @@ impl<M: Memoize> Optimizer<M> {
         job: CostExpressionJob,
         job_id: JobId,
     ) {
-        let CostExpressionJob {
-            physical_expr,
-            goal,
-        } = job;
+        let CostExpressionJob { expression_id } = job;
 
         let engine = self.new_engine(job_id);
         let message_tx = self.message_tx.clone();
 
-        engine
-            .launch_cost_plan(
-                &physical_expr.clone().into(),
-                Arc::new(move |cost| {
-                    let mut message_tx = message_tx.clone();
-                    let goal = goal.clone();
-                    let physical_expr = physical_expr.clone();
-                    Box::pin(async move {
-                        message_tx
-                            .send(OptimizerMessage::NewOptimizedExpression(
-                                OptimizedExpression(physical_expr, cost),
-                                goal,
-                                job_id,
-                            ))
-                            .await
-                            .unwrap();
-                    })
-                }),
-            )
-            .await;
+        // TODO: Will need to materialize here!
+
+        /*engine
+        .launch_cost_plan(
+            &physical_expr.clone().into(),
+            Arc::new(move |cost| {
+                let mut message_tx = message_tx.clone();
+                let physical_expr = physical_expr.clone();
+                Box::pin(async move {
+                    message_tx
+                        .send(OptimizerMessage::NewCostedPhysical(
+                            OptimizedExpression(physical_expr, cost),
+                            goal_id,
+                            job_id,
+                        ))
+                        .await
+                        .unwrap();
+                })
+            }),
+        )
+        .await;*/
     }
 
     pub(super) async fn execute_continue_with_logical_job(&mut self, job: ContinueWithLogicalJob) {
-        let ContinueWithLogicalJob { logical_expr, k } = job;
-        k(logical_expr).await;
+        let ContinueWithLogicalJob { logical_expr_id, k } = job;
+
+        // TODO: Will need to materialize here!
+        // k(logical_expr).await;
     }
 
     pub(super) async fn execute_continue_with_optimized_job(
         &mut self,
         job: ContinueWithOptimizedJob,
     ) {
-        let ContinueWithOptimizedJob { optimized_expr, k } = job;
-        k(optimized_expr).await;
+        let ContinueWithOptimizedJob {
+            expression_id,
+            cost,
+            k,
+        } = job;
+
+        // TODO: Will need to materialize here!s
+        // k(optimized_expr).await;
     }
 }

@@ -1,9 +1,7 @@
 use crate::{
     cir::{
-        expressions::{
-            LogicalExpression, LogicalExpressionId, OptimizedExpression, PhysicalExpressionId,
-        },
-        goal::{Goal, GoalId},
+        expressions::{LogicalExpression, LogicalExpressionId, PhysicalExpressionId},
+        goal::{Cost, Goal, GoalId},
         group::GroupId,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
@@ -19,6 +17,7 @@ use futures::{
 };
 use jobs::{Job, JobId};
 use memo::Memoize;
+use merge_repr::Representative;
 use optd_dsl::analyzer::{context::Context, hir::HIR};
 use std::collections::{HashMap, HashSet, VecDeque};
 use tasks::{Task, TaskId};
@@ -30,6 +29,7 @@ mod handlers;
 mod ingest;
 mod jobs;
 mod memo;
+mod merge_repr;
 mod subscriptions;
 mod tasks;
 
@@ -61,15 +61,15 @@ enum OptimizerMessage {
     NewLogicalPartial(PartialLogicalPlan, GroupId, JobId),
 
     /// New physical implementation for a goal, awaiting recursive optimization
-    NewPhysicalPartial(PartialPhysicalPlan, Goal, JobId),
+    NewPhysicalPartial(PartialPhysicalPlan, GoalId, JobId),
 
-    /// Fully optimized physical expression with complete costing
-    NewOptimizedExpression(OptimizedExpression, Goal, JobId),
+    /// Fully optimized physical expressionession with complete costing
+    NewCostedPhysical(PhysicalExpressionId, Cost, JobId),
 
     /// Create a new group with the provided logical properties
     CreateGroup(LogicalProperties, LogicalExpression, JobId),
 
-    /// Subscribe to logical expressions in a specific group
+    /// Subscribe to logical expressionessions in a specific group
     SubscribeGroup(GroupId, LogicalExprContinuation, JobId),
 
     /// Subscribe to optimized physical implementations for a goal
@@ -95,80 +95,48 @@ struct PendingMessage {
 /// Provides the interface to submit logical plans for optimization and receive
 /// optimized physical plans in return.
 pub struct Optimizer<M: Memoize> {
-    //
-    // Core optimization components
-    //
-    /// The memo instance for storing optimization data
+    // Core components
     memo: M,
-
-    /// The rule book containing transformation and implementation rules
     rule_book: RuleBook,
-
-    /// The HIR context for rule evaluation
     hir_context: Context,
 
-    //
-    // Dependency tracking
-    //
-    /// Messages waiting for dependencies to be resolved
+    // Message handling
     pending_messages: Vec<PendingMessage>,
-
-    /// Mapping of task IDs to their corresponding tasks
-    tasks: HashMap<TaskId, Task>,
-
-    /// Maps group IDs to their exploration task IDs
-    group_explorations_task_index: HashMap<GroupId, TaskId>,
-
-    /// Maps logical expression IDs to their exploration task IDs
-    expression_exploration_task_index: HashMap<LogicalExpressionId, TaskId>,
-
-    /// Maps optimization goals to their exploration task IDs
-    goal_exploration_task_index: HashMap<GoalId, TaskId>,
-
-    /// Maps logical expression IDs to implementation tasks with physical properties
-    expression_implementation_task_index:
-        HashMap<LogicalExpressionId, Vec<(PhysicalProperties, TaskId)>>,
-
-    /// Maps physical expression IDs to costing task IDs
-    expression_costing_task_index: HashMap<PhysicalExpressionId, TaskId>,
-
-    /// Tracks all uncompleted jobs that are pending (not yet started)
-    pending_jobs: HashMap<JobId, Job>,
-
-    /// Queue of pending job IDs, ordered by scheduling time
-    job_schedule_queue: VecDeque<JobId>,
-
-    /// Tracks all uncompleted jobs that are currently running
-    running_jobs: HashMap<JobId, Job>,
-
-    /// Next available task ID for task creation
-    next_task_id: TaskId,
-
-    /// Next available job ID for job creation
-    next_job_id: JobId,
-
-    //
-    // Subscription management
-    //
-    /// Subscribers to logical expressions in groups
-    group_subscribers: HashMap<GroupId, Vec<TaskId>>,
-
-    /// Subscribers to optimized physical expressions for goals
-    goal_subscribers: HashMap<GoalId, Vec<TaskId>>,
-
-    //
-    // Communication channels
-    //
-    /// Optimizer message communication channel
     message_tx: Sender<OptimizerMessage>,
     message_rx: Receiver<OptimizerMessage>,
-
-    /// Optimization requests from external clients
     optimize_rx: Receiver<OptimizeRequest>,
+
+    // Task management
+    tasks: HashMap<TaskId, Task>,
+    next_task_id: TaskId,
+
+    // Job management
+    pending_jobs: HashMap<JobId, Job>,
+    job_schedule_queue: VecDeque<JobId>,
+    running_jobs: HashMap<JobId, Job>,
+    next_job_id: JobId,
+
+    // Task indexing
+    group_explorations_task_index: HashMap<GroupId, TaskId>,
+    expression_exploration_task_index: HashMap<LogicalExpressionId, TaskId>,
+    goal_exploration_task_index: HashMap<GoalId, TaskId>,
+    expression_implementation_task_index:
+        HashMap<LogicalExpressionId, Vec<(PhysicalProperties, TaskId)>>,
+    expression_costing_task_index: HashMap<PhysicalExpressionId, TaskId>,
+
+    // Subscriptions
+    group_subscribers: HashMap<GroupId, Vec<TaskId>>,
+    goal_subscribers: HashMap<GoalId, Vec<TaskId>>,
+
+    // Representative tracking
+    group_representatives: Representative<GroupId>,
+    goal_representatives: Representative<GoalId>,
+    logical_representatives: Representative<LogicalExpressionId>,
+    physical_representatives: Representative<PhysicalExpressionId>,
 }
 
 impl<M: Memoize> Optimizer<M> {
-    /// Create a new optimizer instance with the given memo and HIR context
+    /// Create a new optimizer instance with the given memo and HIR continuationext
     ///
     /// Use `launch` to create and start the optimizer in one step.
     fn new(
@@ -179,63 +147,61 @@ impl<M: Memoize> Optimizer<M> {
         optimize_rx: Receiver<OptimizeRequest>,
     ) -> Self {
         Self {
-            //
-            // Core optimization components
-            //
+            // Core components
             memo,
             rule_book: RuleBook::default(),
             hir_context: hir.context,
 
-            //
-            // Dependency tracking
-            //
+            // Message handling
             pending_messages: Vec::new(),
+            message_tx,
+            message_rx,
+            optimize_rx,
+
+            // Task management
             tasks: HashMap::new(),
+            next_task_id: TaskId(0),
+
+            // Job management
+            pending_jobs: HashMap::new(),
+            job_schedule_queue: VecDeque::new(),
+            running_jobs: HashMap::new(),
+            next_job_id: JobId(0),
+
+            // Task indexing
             group_explorations_task_index: HashMap::new(),
             expression_exploration_task_index: HashMap::new(),
             goal_exploration_task_index: HashMap::new(),
             expression_implementation_task_index: HashMap::new(),
             expression_costing_task_index: HashMap::new(),
-            pending_jobs: HashMap::new(),
-            job_schedule_queue: VecDeque::new(),
-            running_jobs: HashMap::new(),
-            next_task_id: TaskId(0),
-            next_job_id: JobId(0),
 
-            //
-            // Subscription management
-            //
+            // Subscriptions
             group_subscribers: HashMap::new(),
             goal_subscribers: HashMap::new(),
 
-            //
-            // Communication channels
-            //
-            message_tx,
-            message_rx,
-            optimize_rx,
+            // Representative tracking
+            group_representatives: Representative::new(),
+            goal_representatives: Representative::new(),
+            logical_representatives: Representative::new(),
+            physical_representatives: Representative::new(),
         }
     }
 
-    /// Launch a new optimizer and return a sender for client communication
+    /// Launch a new optimizer and return a sender for client communication.
     pub fn launch(memo: M, hir: HIR) -> Sender<OptimizeRequest> {
-        // Initialize all channels
         let (message_tx, message_rx) = mpsc::channel(0);
         let (optimize_tx, optimize_rx) = mpsc::channel(0);
 
-        // Create the optimizer with initialized channels and state
+        // Start the background processing loop.
         let optimizer = Self::new(memo, hir, message_tx.clone(), message_rx, optimize_rx);
-
-        // Start the background processing loop
         tokio::spawn(async move {
             optimizer.run().await;
         });
 
-        // Return the request sender for client communication
         optimize_tx
     }
 
-    /// Run the optimizer's main processing loop
+    /// Run the optimizer's main processing loop.
     async fn run(mut self) {
         loop {
             tokio::select! {
@@ -262,28 +228,25 @@ impl<M: Memoize> Optimizer<M> {
                         NewLogicalPartial(plan, group_id, job_id) => {
                             self.process_new_logical_partial(plan, group_id, job_id).await;
                         },
-                        NewPhysicalPartial(plan, goal, job_id) => {
-                            self.process_new_physical_partial(plan, &goal, job_id).await;
+                        NewPhysicalPartial(plan, goal_id, job_id) => {
+                            self.process_new_physical_partial(plan, goal_id, job_id).await;
                         },
-                        NewOptimizedExpression(expr, goal, _) => {
-                            self.process_new_optimized_expr(expr, goal).await;
+                        NewCostedPhysical(expression_id, cost, _) => {
+                            self.process_new_costed_physical(expression_id, cost).await;
                         },
-                        CreateGroup(props, expr, job_id) => {
-                            self.process_create_group(props, expr, job_id).await;
+                        CreateGroup(properties, expression, job_id) => {
+                            self.process_create_group(properties, expression, job_id).await;
                         },
-                        SubscribeGroup(group_id, cont, job_id) => {
-                            self.process_group_subscription(group_id, cont, job_id).await;
+                        SubscribeGroup(group_id, continuation, job_id) => {
+                            self.process_group_subscription(group_id, continuation, job_id).await;
                         },
-                        SubscribeGoal(goal, cont, job_id) => {
-                            self.process_goal_subscription(goal, cont, job_id).await;
+                        SubscribeGoal(goal, continuation, job_id) => {
+                            self.process_goal_subscription(&goal, continuation, job_id).await;
                         },
                         RetrieveProperties(group_id, sender) => {
                             self.process_retrieve_properties(group_id, sender).await;
                         },
                     }
-
-                    // TODO(later): cleanup tasks, remove job from task! check if orphan and no pending jobs.
-                    // TODO(later): Execute new jobs according to limit!
                 },
                 else => break,
             }

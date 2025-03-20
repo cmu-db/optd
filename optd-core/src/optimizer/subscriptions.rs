@@ -4,10 +4,15 @@ use super::{
     tasks::{TaskId, TaskKind},
     Optimizer,
 };
-use crate::cir::{
-    expressions::{LogicalExpression, OptimizedExpression},
-    goal::{Goal, GoalId},
-    group::GroupId,
+use crate::{
+    cir::{
+        expressions::{
+            LogicalExpression, LogicalExpressionId, OptimizedExpression, PhysicalExpressionId,
+        },
+        goal::{Cost, Goal, GoalId},
+        group::GroupId,
+    },
+    error::Error,
 };
 use futures::SinkExt;
 use TaskKind::*;
@@ -29,7 +34,7 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         group_id: GroupId,
         subscriber_task_id: TaskId,
-    ) -> Vec<LogicalExpression> {
+    ) -> Result<Vec<LogicalExpressionId>, Error> {
         // Add the task to group subscribers list if not already there
         if !self
             .group_subscribers
@@ -45,13 +50,10 @@ impl<M: Memoize> Optimizer<M> {
 
         // Ensure there's a group exploration task
         self.ensure_group_exploration_task(group_id, subscriber_task_id)
-            .await;
+            .await?;
 
         // Return existing expressions for bootstrapping
-        self.memo
-            .get_all_logical_exprs(group_id)
-            .await
-            .expect("Failed to get logical expressions for group")
+        self.memo.get_all_logical_exprs(group_id).await
     }
 
     /// Subscribe a task to optimized expressions for a specific goal
@@ -70,12 +72,8 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         goal: &Goal,
         subscriber_task_id: TaskId,
-    ) -> Option<OptimizedExpression> {
-        let goal_id = self
-            .memo
-            .get_goal_id(goal)
-            .await
-            .expect("Failed to get goal ID");
+    ) -> Result<Option<(PhysicalExpressionId, Cost)>, Error> {
+        let goal_id = self.memo.get_goal_id(goal).await?;
 
         // Add the task to goal subscribers list if not already there
         if !self
@@ -91,14 +89,11 @@ impl<M: Memoize> Optimizer<M> {
         }
 
         // Ensure there's a goal exploration task
-        self.ensure_goal_exploration_task(goal_id, goal, subscriber_task_id)
-            .await;
+        self.ensure_goal_exploration_task(goal_id, subscriber_task_id)
+            .await?;
 
         // Return best expression for bootstrapping
-        self.memo
-            .get_best_optimized_physical_expr(goal)
-            .await
-            .expect("Failed to get best optimized physical expression")
+        self.memo.get_best_optimized_physical_expr(goal).await
     }
 
     /// Schedules logical expression continuation jobs for group subscribers
@@ -113,7 +108,7 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) fn schedule_logical_continuations(
         &mut self,
         group_id: GroupId,
-        expression: LogicalExpression,
+        expression_id: LogicalExpressionId,
     ) {
         // Return early if no subscribers
         let subscribers = match self.group_subscribers.get(&group_id) {
@@ -138,11 +133,10 @@ impl<M: Memoize> Optimizer<M> {
             .flat_map(|(task_id, continuations)| {
                 continuations
                     .map(|conts| {
-                        let expression = expression.clone();
                         conts.iter().map(move |cont| {
                             (
                                 task_id,
-                                JobKind::continue_with_logical(expression.clone(), cont.clone()),
+                                JobKind::continue_with_logical(expression_id, cont.clone()),
                             )
                         })
                     })
@@ -165,11 +159,13 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// # Parameters
     /// * `goal_id` - The goal that has a new best expression
-    /// * `expression` - The new optimized expression to continue with
+    /// * `expression_id` - The new physical expression to continue with
+    /// * `cost` - The corresponding cost
     pub(super) fn schedule_optimized_continuations(
         &mut self,
         goal_id: GoalId,
-        expression: OptimizedExpression,
+        expression_id: PhysicalExpressionId,
+        cost: Cost,
     ) {
         // Return early if no subscribers
         let subscribers = match self.goal_subscribers.get(&goal_id) {
@@ -190,11 +186,10 @@ impl<M: Memoize> Optimizer<M> {
                 })
             })
             .flat_map(|(task_id, conts)| {
-                let expression = expression.clone();
                 conts.iter().map(move |cont| {
                     (
                         task_id,
-                        JobKind::continue_with_optimized(expression.clone(), cont.clone()),
+                        JobKind::continue_with_optimized(expression_id, cost, cont.clone()),
                     )
                 })
             })
@@ -217,8 +212,8 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn egest_to_subscribers(
         &mut self,
         goal_id: GoalId,
-        expression: OptimizedExpression,
-    ) {
+        expression_id: PhysicalExpressionId,
+    ) -> Result<(), Error> {
         // Find all optimize plan tasks that are subscribed to this root goal
         let send_channels: Vec<_> = self
             .goal_subscribers
@@ -239,10 +234,9 @@ impl<M: Memoize> Optimizer<M> {
         // If we have any optimize plan tasks, egest the plan and send it
         if !send_channels.is_empty() {
             let physical_plan = self
-                .egest_best_plan(&expression)
-                .await
-                .expect("Failed to egest plan from memo")
-                .expect("Expression has not been recursively optimized");
+                .egest_best_plan(expression_id)
+                .await?
+                .expect("No plan found");
 
             // Send the plan to all clients without blocking the optimizer
             for mut response_tx in send_channels {
@@ -255,5 +249,7 @@ impl<M: Memoize> Optimizer<M> {
                 });
             }
         }
+
+        Ok(())
     }
 }

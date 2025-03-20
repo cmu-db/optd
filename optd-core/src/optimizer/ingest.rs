@@ -66,16 +66,15 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn ingest_physical_plan(
         &mut self,
         physical_plan: &PartialPhysicalPlan,
-    ) -> PhysicalIngest {
+    ) -> Result<PhysicalIngest, Error> {
         match physical_plan {
-            PartialPhysicalPlan::Materialized(operator) => self
-                .ingest_physical_operator(operator)
-                .await
-                .expect("Failed to ingest physical operator"),
-            PartialPhysicalPlan::UnMaterialized(goal) => PhysicalIngest {
+            PartialPhysicalPlan::Materialized(operator) => {
+                self.ingest_physical_operator(operator).await
+            }
+            PartialPhysicalPlan::UnMaterialized(goal) => Ok(PhysicalIngest {
                 goal: goal.clone(),
                 new_expression: None,
-            },
+            }),
         }
     }
 
@@ -196,13 +195,13 @@ impl<M: Memoize> Optimizer<M> {
     ) -> Result<Child<Goal>, Error> {
         match child {
             Singleton(plan) => {
-                let result = self.ingest_physical_plan(plan).await;
+                let result = self.ingest_physical_plan(plan).await?;
                 Ok(Singleton(result.goal))
             }
             VarLength(plans) => {
                 let mut results = Vec::with_capacity(plans.len());
                 for plan in plans {
-                    let result = self.ingest_physical_plan(plan).await;
+                    let result = self.ingest_physical_plan(plan).await?;
                     results.push(result);
                 }
 

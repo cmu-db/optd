@@ -4,7 +4,7 @@ use crate::{
             LogicalExpression, LogicalExpressionId, OptimizedExpression, PhysicalExpression,
             PhysicalExpressionId,
         },
-        goal::{Goal, GoalId},
+        goal::{Cost, Goal, GoalId},
         group::GroupId,
         properties::{LogicalProperties, PhysicalProperties},
         rules::{ImplementationRule, TransformationRule},
@@ -77,7 +77,7 @@ pub trait Memoize: Send + Sync + 'static {
     async fn get_all_logical_exprs(
         &self,
         group_id: GroupId,
-    ) -> MemoizeResult<Vec<LogicalExpression>>;
+    ) -> MemoizeResult<Vec<LogicalExpressionId>>;
 
     /// Finds group containing a logical expression, if it exists
     ///
@@ -116,23 +116,23 @@ pub trait Memoize: Send + Sync + 'static {
     /// Returns None if no optimized expression exists for the goal.
     async fn get_best_optimized_physical_expr(
         &self,
-        goal: &Goal,
-    ) -> MemoizeResult<Option<OptimizedExpression>>;
+        goal_id: GoalId,
+    ) -> MemoizeResult<Option<(PhysicalExpressionId, Cost)>>;
 
     /// Gets all physical expressions in a goal
     ///
     /// Returns a vector of physical expressions in the specified goal.
-    async fn get_all_physical_exprs(&self, goal: &Goal) -> MemoizeResult<Vec<PhysicalExpression>>;
+    async fn get_all_physical_exprs(
+        &self,
+        goal: GoalId,
+    ) -> MemoizeResult<Vec<PhysicalExpressionId>>;
 
     /// Gets all goals in the same equivalence class
     ///
     /// Returns all goals that are equivalent to the given goal, grouped by their
     /// group ID with associated physical properties. This allows for exploring
     /// all equivalent implementations across multiple groups.
-    async fn get_equivalent_goals(
-        &self,
-        goal: &Goal,
-    ) -> MemoizeResult<HashMap<GroupId, Vec<PhysicalProperties>>>;
+    async fn get_equivalent_goals(&self, goal: GoalId) -> MemoizeResult<Vec<GoalId>>;
 
     /// Searches for a physical expression in the memo
     ///
@@ -156,18 +156,17 @@ pub trait Memoize: Send + Sync + 'static {
     /// Returns a vector of merge results for all affected entities.
     async fn merge_goals(
         &mut self,
-        goal_1: &Goal,
-        goal_2: &Goal,
+        goal_id_1: GoalId,
+        goal_id_2: GoalId,
     ) -> MemoizeResult<Vec<MergeResult>>;
 
-    /// Adds an optimized physical expression to a goal
+    /// Updates the cost of a physical expression
     ///
     /// Returns whether the optimized expression is now the best expression for the goal,
     /// allowing callers to determine if this expression should be propagated to subscribers.
-    async fn add_optimized_physical_expr(
+    async fn update_physical_expr_cost(
         &mut self,
-        goal: &Goal,
-        optimized_expr: &OptimizedExpression,
+        physical_expr_id: PhysicalExpressionId,
     ) -> MemoizeResult<(bool, GoalId)>;
 
     //
@@ -178,12 +177,11 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// Returns `Status::Dirty` if there are ongoing events that may affect the transformation
     /// or `Status::Clean` if the transformation does not need to be re-evaluated.
-    /// Returns None if the transformation rule has not been applied yet on the logical expression.
     async fn get_transformation_status(
         &self,
         logical_expr: &LogicalExpression,
         rule: &TransformationRule,
-    ) -> MemoizeResult<Option<Status>>;
+    ) -> MemoizeResult<Status>;
 
     /// Sets the status of applying a transformation rule on a logical expression
     async fn set_transformation_status(
@@ -197,19 +195,18 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// Returns `Status::Dirty` if there are ongoing events that may affect the transformation
     /// or `Status::Clean` if the implementation does not need to be re-evaluated.
-    /// Returns None if the implementation rule has not been applied yet on the logical expression.
     async fn get_implementation_status(
         &self,
-        logical_expr: &LogicalExpression,
-        properties: &PhysicalProperties,
+        logical_expr_id: LogicalExpressionId,
+        goal_id: GoalId,
         rule: &ImplementationRule,
-    ) -> MemoizeResult<Option<Status>>;
+    ) -> MemoizeResult<Status>;
 
     /// Sets the status of applying an implementation rule on a logical expression and properties
     async fn set_implementation_status(
         &mut self,
-        logical_expr: &LogicalExpression,
-        properties: &PhysicalProperties,
+        logical_expr_id: LogicalExpressionId,
+        goal_id: GoalId,
         rule: &ImplementationRule,
         status: Status,
     ) -> MemoizeResult<()>;
@@ -218,11 +215,8 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// Returns `Status::Dirty` if there are ongoing events that may affect the costing
     /// or `Status::Clean` if the costing does not need to be re-evaluated.
-    /// Returns None if the physical expression has not been costed.
-    async fn get_costing_status(
-        &self,
-        physical_expr: &PhysicalExpression,
-    ) -> MemoizeResult<Option<Status>>;
+    async fn get_costing_status(&self, physical_expr: &PhysicalExpression)
+        -> MemoizeResult<Status>;
 
     /// Sets the status of costing a physical expression
     async fn set_costing_status(
@@ -232,6 +226,7 @@ pub trait Memoize: Send + Sync + 'static {
     ) -> MemoizeResult<()>;
 
     async fn get_goal_id(&mut self, goal: &Goal) -> MemoizeResult<GoalId>;
+    async fn materialize_goal(&mut self, goal_id: GoalId) -> MemoizeResult<Goal>;
 
     async fn get_logical_expr_id(
         &mut self,
