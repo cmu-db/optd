@@ -127,7 +127,7 @@ impl<M: Memoize> Optimizer<M> {
         // First, ingest the physical plan to determine if it's new or not.
         let PhysicalIngest {
             goal_id: ingested_goal_id,
-            new_expression,
+            new_expression_id: new_expression,
         } = self.ingest_physical_plan(&plan).await?;
 
         if ingested_goal_id != goal_id {

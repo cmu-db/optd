@@ -305,7 +305,7 @@ impl<M: Memoize> Optimizer<M> {
         });
     }
 
-    async fn execute_continue_with_optimized_job(
+    fn execute_continue_with_optimized_job(
         &mut self,
         expression_id: PhysicalExpressionId,
         cost: Cost,

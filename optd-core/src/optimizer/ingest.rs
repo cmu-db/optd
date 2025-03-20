@@ -28,8 +28,8 @@ pub(super) enum LogicalIngest {
 pub(super) struct PhysicalIngest {
     /// The goal id matched with the ingested physical plan.
     pub goal_id: GoalId,
-    /// The physical expression if newly created, None if it already existed.
-    pub new_expression: Option<PhysicalExpressionId>,
+    /// The physical expression id if newly created, None if it already existed.
+    pub new_expression_id: Option<PhysicalExpressionId>,
 }
 
 impl<M: Memoize> Optimizer<M> {
@@ -75,7 +75,7 @@ impl<M: Memoize> Optimizer<M> {
                 let goal_id = self.memo.get_goal_id(goal).await?;
                 Ok(PhysicalIngest {
                     goal_id,
-                    new_expression: None,
+                    new_expression_id: None,
                 })
             }
         }
@@ -85,7 +85,7 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         operator: &Operator<Arc<PartialLogicalPlan>>,
     ) -> Result<LogicalIngest, Error> {
-        // Sequentially process the children ingestion
+        // Sequentially process the children ingestion.
         let mut children_results = Vec::with_capacity(operator.children.len());
         for child in &operator.children {
             let result = self.probe_ingest_logical_child(child).await?;
@@ -181,12 +181,12 @@ impl<M: Memoize> Optimizer<M> {
         if let Some(goal_id) = self.memo.find_physical_expr(expression_id).await? {
             Ok(PhysicalIngest {
                 goal_id,
-                new_expression: None,
+                new_expression_id: None,
             })
         } else {
             Ok(PhysicalIngest {
                 goal_id: self.memo.create_goal(expression_id).await?,
-                new_expression: Some(expression_id),
+                new_expression_id: Some(expression_id),
             })
         }
     }
