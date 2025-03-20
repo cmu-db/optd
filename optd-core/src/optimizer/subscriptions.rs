@@ -91,7 +91,7 @@ impl<M: Memoize> Optimizer<M> {
         }
 
         // Ensure there's a goal exploration task
-        self.ensure_goal_exploration_task(goal_id, subscriber_task_id)
+        self.ensure_goal_exploration_task(goal_id, goal, subscriber_task_id)
             .await;
 
         // Return best expression for bootstrapping

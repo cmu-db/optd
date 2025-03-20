@@ -120,7 +120,7 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_new_physical_partial(
         &mut self,
         plan: PartialPhysicalPlan,
-        goal: Goal,
+        goal: &Goal,
         job_id: JobId,
     ) {
         // First, ingest the physical plan to determine if it's new or not.
@@ -129,12 +129,12 @@ impl<M: Memoize> Optimizer<M> {
             new_expression,
         } = self.ingest_physical_plan(&plan).await;
 
-        if ingested_goal != goal {
+        if ingested_goal != *goal {
             // Atomically perform the merge in the memo and process all
             // results in memory.
             let merge_results = self
                 .memo
-                .merge_goals(&ingested_goal, &goal)
+                .merge_goals(&ingested_goal, goal)
                 .await
                 .expect("Failed to merge goals");
 

@@ -365,7 +365,7 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) fn launch_cost_expression_task(
         &mut self,
         expression: PhysicalExpression,
-        goal: Goal,
+        goal: &Goal,
         parent: TaskId,
     ) -> TaskId {
         // Create and register the cost estimation task
@@ -376,7 +376,7 @@ impl<M: Memoize> Optimizer<M> {
         self.register_child_to_task(parent, task_id);
 
         // Schedule a job to actually launch the cost estimation
-        self.schedule_job(task_id, JobKind::cost_expression(expression, goal));
+        self.schedule_job(task_id, JobKind::cost_expression(expression, goal.clone()));
 
         task_id
     }
@@ -411,12 +411,13 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn ensure_goal_exploration_task(
         &mut self,
         goal_id: GoalId,
+        goal: &Goal,
         child_task_id: TaskId,
     ) {
         // Check if we already have an exploration task for this goal
         let task_id = match self.goal_exploration_task_index.get(&goal_id) {
             Some(id) => *id,
-            None => self.launch_goal_exploration_task(goal_id).await,
+            None => self.launch_goal_exploration_task(goal, goal_id).await,
         };
 
         // Set up parent-child relationship
@@ -465,11 +466,11 @@ impl<M: Memoize> Optimizer<M> {
     /// This schedules jobs to apply all implementation rules to all logical expressions
     /// and launches cost tasks for all physical expressions in all equivalent goals.
     /// It handles multiple equivalent goals across different groups with various physical properties.
-    async fn launch_goal_exploration_task(&mut self, goal_id: GoalId) -> TaskId {
+    async fn launch_goal_exploration_task(&mut self, goal: &Goal, goal_id: GoalId) -> TaskId {
         // Get all equivalent goals grouped by group ID and their associated physical properties
         let equivalent_goals = self
             .memo
-            .get_equivalent_goals(goal_id)
+            .get_equivalent_goals(goal)
             .await
             .expect("Failed to get equivalent goals");
 
@@ -511,12 +512,11 @@ impl<M: Memoize> Optimizer<M> {
         // (this includes all the equivalent goals).
         let physical_expressions = self
             .memo
-            .get_all_physical_exprs(goal_id)
+            .get_all_physical_exprs(goal)
             .await
             .expect("Failed to get physical expressions for goal");
 
         physical_expressions.into_iter().for_each(|expr| {
-            // TODO: FIX ME!
             self.launch_cost_expression_task(expr, goal, task_id);
         });
 

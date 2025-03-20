@@ -263,7 +263,7 @@ impl<M: Memoize> Optimizer<M> {
                             self.process_new_logical_partial(plan, group_id, job_id).await;
                         },
                         NewPhysicalPartial(plan, goal, job_id) => {
-                            self.process_new_physical_partial(plan, goal, job_id).await;
+                            self.process_new_physical_partial(plan, &goal, job_id).await;
                         },
                         NewOptimizedExpression(expr, goal, _) => {
                             self.process_new_optimized_expr(expr, goal).await;

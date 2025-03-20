@@ -122,7 +122,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// Gets all physical expressions in a goal
     ///
     /// Returns a vector of physical expressions in the specified goal.
-    async fn get_all_physical_exprs(&self, goal: GoalId) -> MemoizeResult<Vec<PhysicalExpression>>;
+    async fn get_all_physical_exprs(&self, goal: &Goal) -> MemoizeResult<Vec<PhysicalExpression>>;
 
     /// Gets all goals in the same equivalence class
     ///
@@ -131,7 +131,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// all equivalent implementations across multiple groups.
     async fn get_equivalent_goals(
         &self,
-        goal: GoalId,
+        goal: &Goal,
     ) -> MemoizeResult<HashMap<GroupId, Vec<PhysicalProperties>>>;
 
     /// Searches for a physical expression in the memo
