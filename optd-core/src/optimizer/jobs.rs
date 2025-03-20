@@ -1,25 +1,15 @@
-use std::sync::Arc;
-
-use futures::SinkExt;
-use optd_dsl::analyzer::context::Context;
-
-use super::{
-    generator::OptimizerGenerator, memo::Memoize, tasks::TaskId, Optimizer, OptimizerMessage,
-};
+use super::{generator::OptimizerGenerator, memo::Memoize, tasks::TaskId, Optimizer};
 use crate::{
     cir::{
-        expressions::{
-            LogicalExpression, LogicalExpressionId, OptimizedExpression, PhysicalExpression,
-            PhysicalExpressionId,
-        },
-        goal::{self, Cost, Goal, GoalId},
+        expressions::{LogicalExpressionId, PhysicalExpressionId},
+        goal::{Cost, GoalId},
         group::GroupId,
-        properties::PhysicalProperties,
         rules::{ImplementationRule, TransformationRule},
     },
-    engine::{Engine, LogicalExprContinuation, OptimizedExprContinuation},
+    engine::{CostedPhysicalPlanContrinuation, Engine, LogicalPlanContinuation},
     error::Error,
 };
+use optd_dsl::analyzer::context::Context;
 
 /// Unique identifier for jobs in the optimization system
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -75,8 +65,8 @@ pub(super) enum JobKind {
 }
 
 impl JobKind {
-    pub fn derive_logical_properties(logical_expr: LogicalExpression) -> Self {
-        Self::DeriveLogicalProperties(DeriveLogicalPropertiesJob { logical_expr })
+    pub fn derive_logical_properties(logical_expr_id: LogicalExpressionId) -> Self {
+        Self::DeriveLogicalProperties(DeriveLogicalPropertiesJob { logical_expr_id })
     }
 
     pub fn transformation_rule(
@@ -109,7 +99,7 @@ impl JobKind {
 
     pub fn continue_with_logical(
         logical_expr_id: LogicalExpressionId,
-        k: LogicalExprContinuation,
+        k: LogicalPlanContinuation,
     ) -> Self {
         Self::ContinueWithLogical(ContinueWithLogicalJob { logical_expr_id, k })
     }
@@ -117,7 +107,7 @@ impl JobKind {
     pub fn continue_with_optimized(
         expression_id: PhysicalExpressionId,
         cost: Cost,
-        k: OptimizedExprContinuation,
+        k: CostedPhysicalPlanContrinuation,
     ) -> Self {
         Self::ContinueWithOptimized(ContinueWithOptimizedJob {
             expression_id,
@@ -128,7 +118,7 @@ impl JobKind {
 }
 
 pub(super) struct DeriveLogicalPropertiesJob {
-    pub logical_expr: LogicalExpression,
+    pub logical_expr_id: LogicalExpressionId,
 }
 
 pub(super) struct TransformationRuleJob {
@@ -149,15 +139,13 @@ pub(super) struct CostExpressionJob {
 
 pub(super) struct ContinueWithLogicalJob {
     pub logical_expr_id: LogicalExpressionId,
-    pub k: LogicalExprContinuation,
+    pub k: LogicalPlanContinuation,
 }
-
-impl ContinueWithLogicalJob {}
 
 pub(super) struct ContinueWithOptimizedJob {
     pub expression_id: PhysicalExpressionId,
     pub cost: Cost,
-    pub k: OptimizedExprContinuation,
+    pub k: CostedPhysicalPlanContrinuation,
 }
 
 /// Job-related implementation for the Optimizer
@@ -206,29 +194,30 @@ impl<M: Memoize> Optimizer<M> {
         job: DeriveLogicalPropertiesJob,
         job_id: JobId,
     ) {
-        let DeriveLogicalPropertiesJob { logical_expr } = job;
+        let DeriveLogicalPropertiesJob { logical_expr_id } = job;
 
         let engine = self.new_engine(job_id);
         let message_tx = self.message_tx.clone();
-        engine
-            .launch_derive_properties(
-                &logical_expr.clone().into(),
-                Arc::new(move |logical_props| {
-                    let mut message_tx = message_tx.clone();
-                    let logical_expr = logical_expr.clone();
-                    Box::pin(async move {
-                        message_tx
-                            .send(OptimizerMessage::CreateGroup(
-                                logical_props,
-                                logical_expr,
-                                job_id,
-                            ))
-                            .await
-                            .unwrap();
-                    })
-                }),
-            )
-            .await;
+        // TODO: Materialize here!
+        /*engine
+        .launch_derive_properties(
+            &logical_expr.clone().into(),
+            Arc::new(move |logical_props| {
+                let mut message_tx = message_tx.clone();
+                let logical_expr = logical_expr.clone();
+                Box::pin(async move {
+                    message_tx
+                        .send(OptimizerMessage::CreateGroup(
+                            logical_expr_id,
+                            logical_props,
+                            job_id,
+                        ))
+                        .await
+                        .unwrap();
+                })
+            }),
+        )
+        .await;*/
     }
 
     pub(super) async fn execute_transformation_rule_job(

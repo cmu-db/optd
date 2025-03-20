@@ -1,13 +1,13 @@
 use crate::{
     cir::{
-        expressions::{LogicalExpression, LogicalExpressionId, PhysicalExpressionId},
+        expressions::{LogicalExpressionId, PhysicalExpressionId},
         goal::{Cost, Goal, GoalId},
         group::GroupId,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
         rules::RuleBook,
     },
-    engine::{LogicalExprContinuation, OptimizedExprContinuation},
+    engine::{CostedPhysicalPlanContrinuation, LogicalPlanContinuation},
 };
 use futures::channel::oneshot;
 use futures::StreamExt;
@@ -67,13 +67,13 @@ enum OptimizerMessage {
     NewCostedPhysical(PhysicalExpressionId, Cost, JobId),
 
     /// Create a new group with the provided logical properties
-    CreateGroup(LogicalProperties, LogicalExpression, JobId),
+    CreateGroup(LogicalExpressionId, LogicalProperties, JobId),
 
     /// Subscribe to logical expressionessions in a specific group
-    SubscribeGroup(GroupId, LogicalExprContinuation, JobId),
+    SubscribeGroup(GroupId, LogicalPlanContinuation, JobId),
 
     /// Subscribe to optimized physical implementations for a goal
-    SubscribeGoal(Goal, OptimizedExprContinuation, JobId),
+    SubscribeGoal(Goal, CostedPhysicalPlanContrinuation, JobId),
 
     /// Retrieve logical properties for a specific group
     RetrieveProperties(GroupId, oneshot::Sender<LogicalProperties>),
@@ -234,8 +234,8 @@ impl<M: Memoize> Optimizer<M> {
                         NewCostedPhysical(expression_id, cost, _) => {
                             self.process_new_costed_physical(expression_id, cost).await;
                         },
-                        CreateGroup(properties, expression, job_id) => {
-                            self.process_create_group(properties, expression, job_id).await;
+                        CreateGroup( expression_id, properties, job_id) => {
+                            self.process_create_group(expression_id, &properties, job_id).await;
                         },
                         SubscribeGroup(group_id, continuation, job_id) => {
                             self.process_group_subscription(group_id, continuation, job_id).await;

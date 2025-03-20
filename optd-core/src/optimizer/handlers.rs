@@ -7,13 +7,13 @@ use super::{
 };
 use crate::{
     cir::{
-        expressions::{LogicalExpression, OptimizedExpression, PhysicalExpressionId},
+        expressions::{LogicalExpressionId, PhysicalExpressionId},
         goal::{Cost, Goal, GoalId},
         group::GroupId,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
     },
-    engine::{LogicalExprContinuation, OptimizedExprContinuation},
+    engine::{CostedPhysicalPlanContrinuation, LogicalPlanContinuation},
     error::Error,
 };
 use futures::{
@@ -34,7 +34,7 @@ impl<M: Memoize> Optimizer<M> {
         task_id: TaskId,
     ) -> Result<(), Error> {
         // First, resolve the logical plan to a group.
-        match self.probe_ingest_logical_plan(&plan.clone().into()).await {
+        match self.probe_ingest_logical_plan(&plan.clone().into()).await? {
             Found(group_id) => {
                 // The goal represents what we want to achieve: optimize the root group
                 // with no specific physical properties required.
@@ -76,7 +76,7 @@ impl<M: Memoize> Optimizer<M> {
         job_id: JobId,
     ) -> Result<(), Error> {
         // First, resolve the logical plan to a group.
-        match self.probe_ingest_logical_plan(&plan).await {
+        match self.probe_ingest_logical_plan(&plan).await? {
             Found(new_group_id) if new_group_id != group_id => {
                 // Atomically perform the merge in the memo and process all
                 // results in memory.
@@ -126,11 +126,9 @@ impl<M: Memoize> Optimizer<M> {
     ) -> Result<(), Error> {
         // First, ingest the physical plan to determine if it's new or not.
         let PhysicalIngest {
-            goal: ingested_goal,
+            goal_id: ingested_goal_id,
             new_expression,
         } = self.ingest_physical_plan(&plan).await?;
-
-        let ingested_goal_id = self.memo.get_goal_id(&ingested_goal).await?;
 
         if ingested_goal_id != goal_id {
             // Atomically perform the merge in the memo and process all
@@ -177,11 +175,11 @@ impl<M: Memoize> Optimizer<M> {
     /// and updates any pending messages that depend on this group.
     pub(super) async fn process_create_group(
         &mut self,
-        properties: LogicalProperties,
-        expression: LogicalExpression,
+        expression_id: LogicalExpressionId,
+        properties: &LogicalProperties,
         job_id: JobId,
     ) -> Result<(), Error> {
-        self.memo.create_group(&expression, &properties).await?;
+        self.memo.create_group(expression_id, properties).await?;
         self.resolve_dependencies(job_id).await;
         Ok(())
     }
@@ -191,7 +189,7 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_group_subscription(
         &mut self,
         group_id: GroupId,
-        continuation: LogicalExprContinuation,
+        continuation: LogicalPlanContinuation,
         job_id: JobId,
     ) -> Result<(), Error> {
         let related_task_id = self.running_jobs[&job_id].0;
@@ -226,7 +224,7 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_goal_subscription(
         &mut self,
         goal: &Goal,
-        continuation: OptimizedExprContinuation,
+        continuation: CostedPhysicalPlanContrinuation,
         job_id: JobId,
     ) -> Result<(), Error> {
         let related_task_id = self.running_jobs[&job_id].0;

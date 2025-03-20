@@ -6,9 +6,7 @@ use super::{
 };
 use crate::{
     cir::{
-        expressions::{
-            LogicalExpression, LogicalExpressionId, OptimizedExpression, PhysicalExpressionId,
-        },
+        expressions::{LogicalExpressionId, PhysicalExpressionId},
         goal::{Cost, Goal, GoalId},
         group::GroupId,
     },
@@ -93,7 +91,7 @@ impl<M: Memoize> Optimizer<M> {
             .await?;
 
         // Return best expression for bootstrapping
-        self.memo.get_best_optimized_physical_expr(goal).await
+        self.memo.get_best_optimized_physical_expr(goal_id).await
     }
 
     /// Schedules logical expression continuation jobs for group subscribers

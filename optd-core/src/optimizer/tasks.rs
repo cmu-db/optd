@@ -5,14 +5,13 @@ use super::{
 };
 use crate::{
     cir::{
-        expressions::{LogicalExpression, LogicalExpressionId, PhysicalExpressionId},
-        goal::{self, Goal, GoalId},
+        expressions::{LogicalExpressionId, PhysicalExpressionId},
+        goal::{Goal, GoalId},
         group::GroupId,
         plans::{LogicalPlan, PhysicalPlan},
-        properties::{self, PhysicalProperties},
         rules::{ImplementationRule, TransformationRule},
     },
-    engine::{LogicalExprContinuation, OptimizedExprContinuation},
+    engine::{CostedPhysicalPlanContrinuation, LogicalPlanContinuation},
     error::Error,
 };
 use futures::channel::mpsc::Sender;
@@ -161,7 +160,7 @@ pub(super) struct ImplementExpressionTask {
 
     /// Continuations for each group that need to be notified when
     /// new logical expressions are created
-    pub continuations: HashMap<GroupId, Vec<LogicalExprContinuation>>,
+    pub continuations: HashMap<GroupId, Vec<LogicalPlanContinuation>>,
 }
 
 impl ImplementExpressionTask {
@@ -192,7 +191,7 @@ impl ImplementExpressionTask {
     pub(super) fn register_continuation(
         &mut self,
         group_id: GroupId,
-        continuation: LogicalExprContinuation,
+        continuation: LogicalPlanContinuation,
     ) {
         self.continuations
             .entry(group_id)
@@ -214,7 +213,7 @@ pub(super) struct TransformExpressionTask {
 
     /// Continuations for each group that need to be notified when
     /// new logical expressions are created
-    pub continuations: HashMap<GroupId, Vec<LogicalExprContinuation>>,
+    pub continuations: HashMap<GroupId, Vec<LogicalPlanContinuation>>,
 }
 
 impl TransformExpressionTask {
@@ -238,7 +237,7 @@ impl TransformExpressionTask {
     pub(super) fn register_continuation(
         &mut self,
         group_id: GroupId,
-        continuation: LogicalExprContinuation,
+        continuation: LogicalPlanContinuation,
     ) {
         self.continuations
             .entry(group_id)
@@ -257,7 +256,7 @@ pub(super) struct CostExpressionTask {
 
     /// Continuations for each goal that need to be notified when
     /// optimized expressions are created
-    pub continuations: HashMap<GoalId, Vec<OptimizedExprContinuation>>,
+    pub continuations: HashMap<GoalId, Vec<CostedPhysicalPlanContrinuation>>,
 }
 
 impl CostExpressionTask {
@@ -280,7 +279,7 @@ impl CostExpressionTask {
     pub(super) fn register_continuation(
         &mut self,
         goal: GoalId,
-        continuation: OptimizedExprContinuation,
+        continuation: CostedPhysicalPlanContrinuation,
     ) {
         self.continuations
             .entry(goal)

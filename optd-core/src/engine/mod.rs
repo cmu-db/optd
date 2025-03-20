@@ -10,7 +10,6 @@ use crate::{
     },
     capture,
     cir::{
-        expressions::LogicalExpression,
         goal::Cost,
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
@@ -36,20 +35,19 @@ pub(crate) mod utils;
 pub(crate) type LogicalPlanContinuation =
     Arc<dyn Fn(PartialLogicalPlan) -> UnitFuture + Send + Sync + 'static>;
 
-/// Type alias for a continuation that receives a LogicalExpression
-pub(crate) type LogicalExprContinuation =
-    Arc<dyn Fn(LogicalExpression) -> UnitFuture + Send + Sync + 'static>;
+/// Type alias for a continuation that receives a PartialPhysicalPlan + Cost
+pub(crate) type CostedPhysicalPlanContrinuation =
+    Arc<dyn Fn((PartialPhysicalPlan, Cost)) -> UnitFuture + Send + Sync + 'static>;
 
 /// Type alias for a continuation that receives a PartialPhysicalPlan
-pub(crate) type PhysicalPlanContinuation =
+type PhysicalPlanContinuation =
     Arc<dyn Fn(PartialPhysicalPlan) -> UnitFuture + Send + Sync + 'static>;
 
 /// Type alias for a continuation that receives a cost value
-pub(crate) type CostContinuation = Arc<dyn Fn(Cost) -> UnitFuture + Send + Sync + 'static>;
+type CostContinuation = Arc<dyn Fn(Cost) -> UnitFuture + Send + Sync + 'static>;
 
 /// Type alias for a continuation that receives LogicalProperties
-pub(crate) type PropertiesContinuation =
-    Arc<dyn Fn(LogicalProperties) -> UnitFuture + Send + Sync + 'static>;
+type PropertiesContinuation = Arc<dyn Fn(LogicalProperties) -> UnitFuture + Send + Sync + 'static>;
 
 /// The engine for evaluating HIR expressions and applying rules.
 #[derive(Debug, Clone)]

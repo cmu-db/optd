@@ -6,11 +6,11 @@ use crate::{
     },
     engine::{
         generator::{Continuation, Generator},
-        LogicalExprContinuation,
+        CostedPhysicalPlanContrinuation, LogicalPlanContinuation,
     },
 };
 use futures::{channel::mpsc::Sender, SinkExt};
-use optd_dsl::analyzer::hir::{Goal, GroupId};
+use optd_dsl::analyzer::hir::{CoreData, Goal, GroupId, Literal, Value};
 use std::sync::Arc;
 
 /// Implementation of the Generator trait that connects the engine to the optimizer.
@@ -54,16 +54,13 @@ impl Generator for OptimizerGenerator {
     /// * `group_id` - The ID of the group to expand
     /// * `k` - The continuation to process each expression in the group
     async fn yield_group(&self, group_id: GroupId, k: Continuation) {
-        // Convert HIR group ID to CIR representation
         let cir_group_id = hir_group_id_to_cir(&group_id);
 
         // Create a logical expression continuation that will invoke the provided continuation
-        let continuation: LogicalExprContinuation = Arc::new(move |expr| {
+        let continuation: LogicalPlanContinuation = Arc::new(move |plan| {
             let k = k.clone();
-            let value = partial_logical_to_value(&expr.into());
-
             Box::pin(async move {
-                k(value).await;
+                k(partial_logical_to_value(&plan)).await;
             })
         });
 
@@ -90,17 +87,18 @@ impl Generator for OptimizerGenerator {
     /// * `physical_goal` - The goal describing required properties
     /// * `k` - The continuation to process each implementation
     async fn yield_goal(&self, physical_goal: &Goal, k: Continuation) {
-        // Convert HIR goal to CIR representation
         let cir_goal = hir_goal_to_cir(physical_goal);
 
-        // TODO: Apply right continuation.
         // Create an optimized expression continuation that will invoke the provided continuation
-        /*let continuation: OptimizedExprContinuation = Arc::new(move |expr| {
+        let continuation: CostedPhysicalPlanContrinuation = Arc::new(move |(plan, cost)| {
             let k = k.clone();
-            let value = partial_physical_to_value(&expr.0.into());
-
+            // TODO(Alexis): Once we define statistics, there should be a custom CIR representation.
             Box::pin(async move {
-                k(value).await;
+                let input = Value(CoreData::Tuple(vec![
+                    partial_physical_to_value(&plan),
+                    Value(CoreData::Literal(Literal::Float64(cost.0))),
+                ]));
+                k(input).await;
             })
         });
 
@@ -115,6 +113,6 @@ impl Generator for OptimizerGenerator {
                 self.current_job_id,
             ))
             .await
-            .expect("Failed to send goal subscription - channel closed");*/
+            .expect("Failed to send goal subscription - channel closed");
     }
 }

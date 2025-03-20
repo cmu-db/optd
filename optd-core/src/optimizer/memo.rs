@@ -1,8 +1,7 @@
 use crate::{
     cir::{
         expressions::{
-            LogicalExpression, LogicalExpressionId, OptimizedExpression, PhysicalExpression,
-            PhysicalExpressionId,
+            LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
         },
         goal::{Cost, Goal, GoalId},
         group::GroupId,
@@ -30,7 +29,6 @@ pub enum Status {
 pub(crate) enum MergeResult {
     /// Result of merging two groups
     GroupMerge {
-        /// Original group ID that was merged
         merged_groups: Vec<(GroupId, Vec<LogicalExpression>)>,
 
         new_repr_group: GroupId,
@@ -40,17 +38,11 @@ pub(crate) enum MergeResult {
 
     /// Result of merging two goals
     GoalMerge {
-        /// Original goal id that was merged
-        repr_goal: GoalId,
+        merged_goals: Vec<(GoalId, Vec<PhysicalExpression>)>,
 
-        /// New goal id after merging
-        new_goal: GoalId,
+        new_repr_goal: GoalId,
 
-        /// New (potential) optimized expression added to the goal
-        new_expression: Option<OptimizedExpression>,
-
-        /// New equivalent goals created during the merge process
-        new_equivalent_goals: HashMap<GroupId, Vec<PhysicalProperties>>,
+        merged_exprs: Vec<(Vec<PhysicalExpression>, PhysicalExpression)>,
     },
 }
 
@@ -84,7 +76,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// Returns the group ID if the expression exists, None otherwise.
     async fn find_logical_expr(
         &self,
-        logical_expr: &LogicalExpression,
+        logical_expr_id: LogicalExpressionId,
     ) -> MemoizeResult<Option<GroupId>>;
 
     /// Creates a new group with a logical expression and properties
@@ -92,7 +84,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// Returns the ID of the newly created group.
     async fn create_group(
         &mut self,
-        logical_expr: &LogicalExpression,
+        logical_expr_id: LogicalExpressionId,
         props: &LogicalProperties,
     ) -> MemoizeResult<GroupId>;
 
@@ -140,15 +132,15 @@ pub trait Memoize: Send + Sync + 'static {
     /// Returns None if the expression isn't found in any goal.
     async fn find_physical_expr(
         &self,
-        physical_expr: &PhysicalExpression,
-    ) -> MemoizeResult<Option<Goal>>;
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoizeResult<Option<GoalId>>;
 
     /// Creates a new goal associated with the provided physical expression
     ///
     /// Allocates a new unique group ID for the goal and initializes it with empty properties.
     /// This creates an isolated goal that may later participate in the memo structure
     /// through merges with equivalent goals during optimization.
-    async fn create_goal(&mut self, physical_expr: &PhysicalExpression) -> MemoizeResult<Goal>;
+    async fn create_goal(&mut self, physical_expr: PhysicalExpressionId) -> MemoizeResult<GoalId>;
 
     /// Merges goals 1 and 2, creating a new goal containing all expressions
     ///
@@ -179,14 +171,14 @@ pub trait Memoize: Send + Sync + 'static {
     /// or `Status::Clean` if the transformation does not need to be re-evaluated.
     async fn get_transformation_status(
         &self,
-        logical_expr: &LogicalExpression,
+        logical_expr: LogicalExpressionId,
         rule: &TransformationRule,
     ) -> MemoizeResult<Status>;
 
     /// Sets the status of applying a transformation rule on a logical expression
     async fn set_transformation_status(
         &mut self,
-        logical_expr: &LogicalExpression,
+        logical_expr: LogicalExpressionId,
         rule: &TransformationRule,
         status: Status,
     ) -> MemoizeResult<()>;
@@ -215,30 +207,36 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// Returns `Status::Dirty` if there are ongoing events that may affect the costing
     /// or `Status::Clean` if the costing does not need to be re-evaluated.
-    async fn get_costing_status(&self, physical_expr: &PhysicalExpression)
-        -> MemoizeResult<Status>;
+    async fn get_costing_status(
+        &self,
+        physical_expr: PhysicalExpressionId,
+    ) -> MemoizeResult<Status>;
 
     /// Sets the status of costing a physical expression
     async fn set_costing_status(
         &mut self,
-        physical_expr: &PhysicalExpression,
+        physical_expr: PhysicalExpressionId,
         status: Status,
     ) -> MemoizeResult<()>;
 
     async fn get_goal_id(&mut self, goal: &Goal) -> MemoizeResult<GoalId>;
     async fn materialize_goal(&self, goal_id: GoalId) -> MemoizeResult<Goal>;
 
-    async fn materialize_physical_expr(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoizeResult<PhysicalExpression>;
-
     async fn get_logical_expr_id(
         &mut self,
         logical_expr: &LogicalExpression,
     ) -> MemoizeResult<LogicalExpressionId>;
+    async fn materialize_logical_expr(
+        &self,
+        logical_expr_id: LogicalExpressionId,
+    ) -> MemoizeResult<LogicalExpression>;
+
     async fn get_physical_expr_id(
         &mut self,
         physical_expr: &PhysicalExpression,
     ) -> MemoizeResult<PhysicalExpressionId>;
+    async fn materialize_physical_expr(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoizeResult<PhysicalExpression>;
 }
