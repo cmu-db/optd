@@ -10,7 +10,6 @@ use crate::cir::{
     group::GroupId,
 };
 use futures::SinkExt;
-use JobKind::*;
 use TaskKind::*;
 
 impl<M: Memoize> Optimizer<M> {
@@ -143,7 +142,7 @@ impl<M: Memoize> Optimizer<M> {
                         conts.iter().map(move |cont| {
                             (
                                 task_id,
-                                ContinueWithLogical(expression.clone(), cont.clone()),
+                                JobKind::continue_with_logical(expression.clone(), cont.clone()),
                             )
                         })
                     })
@@ -195,7 +194,7 @@ impl<M: Memoize> Optimizer<M> {
                 conts.iter().map(move |cont| {
                     (
                         task_id,
-                        ContinueWithOptimized(expression.clone(), cont.clone()),
+                        JobKind::continue_with_optimized(expression.clone(), cont.clone()),
                     )
                 })
             })

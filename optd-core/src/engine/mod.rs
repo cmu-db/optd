@@ -87,7 +87,7 @@ impl<E: Generator> Engine<E> {
         }
     }
 
-    /// Launches a logical rule application for a given plan.
+    /// Launches a transformation rule application for a given plan.
     ///
     /// This applies a logical rule to an input plan and passes all possible
     /// transformations of the plan to the continuation.
@@ -96,7 +96,7 @@ impl<E: Generator> Engine<E> {
     /// * `rule_name` - The name of the rule to apply
     /// * `plan` - The logical plan to transform
     /// * `k` - The continuation to receive transformed logical plans
-    pub(crate) fn launch_logical_rule(
+    pub(crate) fn launch_transformation_rule(
         self,
         rule_name: String,
         plan: &PartialLogicalPlan,

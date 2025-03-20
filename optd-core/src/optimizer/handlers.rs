@@ -19,7 +19,6 @@ use futures::{
     channel::{mpsc::Sender, oneshot},
     SinkExt,
 };
-use JobKind::*;
 use LogicalIngest::*;
 use OptimizerMessage::*;
 use TaskKind::*;
@@ -44,13 +43,14 @@ impl<M: Memoize> Optimizer<M> {
                 // for this goal are found.
                 self.subscribe_task_to_goal(&goal, task_id).await;
             }
-            Missing(operators) => {
+            Missing(logical_exprs) => {
                 // Store the request as a pending message that will be processed
                 // once all create task dependencies are resolved.
-                let pending_dependencies = operators
+                let pending_dependencies = logical_exprs
                     .iter()
-                    .map(|operator| {
-                        self.schedule_job(task_id, DeriveLogicalProperties(operator.clone()))
+                    .cloned()
+                    .map(|logical_expr| {
+                        self.schedule_job(task_id, JobKind::derive_logical_properties(logical_expr))
                     })
                     .collect();
 
@@ -90,16 +90,17 @@ impl<M: Memoize> Optimizer<M> {
             Found(_) => {
                 // Group already exists, nothing to merge or do.
             }
-            Missing(operators) => {
+            Missing(logical_exprs) => {
                 // Store the request as a pending message that will be processed
                 // once all create task dependencies are resolved.
                 let related_task_id = self.running_jobs[&job_id].0;
-                let pending_dependencies = operators
+                let pending_dependencies = logical_exprs
                     .iter()
-                    .map(|operator| {
+                    .cloned()
+                    .map(|logical_expr| {
                         self.schedule_job(
                             related_task_id,
-                            DeriveLogicalProperties(operator.clone()),
+                            JobKind::derive_logical_properties(logical_expr),
                         )
                     })
                     .collect();
@@ -145,7 +146,7 @@ impl<M: Memoize> Optimizer<M> {
             // and will need to be costed.
             if let Some(expression) = new_expression {
                 let related_task_id = self.running_jobs[&job_id].0;
-                self.launch_cost_expression_task(expression, related_task_id);
+                self.launch_cost_expression_task(expression, goal, related_task_id);
             }
         }
     }
@@ -224,7 +225,7 @@ impl<M: Memoize> Optimizer<M> {
         for expr in expressions {
             self.schedule_job(
                 related_task_id,
-                ContinueWithLogical(expr, continuation.clone()),
+                JobKind::continue_with_logical(expr, continuation.clone()),
             );
         }
     }
@@ -255,7 +256,7 @@ impl<M: Memoize> Optimizer<M> {
         if let Some(best_expr) = self.subscribe_task_to_goal(&goal, related_task_id).await {
             self.schedule_job(
                 related_task_id,
-                ContinueWithOptimized(best_expr, continuation),
+                JobKind::continue_with_optimized(best_expr, continuation),
             );
         }
     }

@@ -16,7 +16,6 @@ use crate::{
 };
 use futures::channel::mpsc::Sender;
 use std::collections::{HashMap, HashSet};
-use JobKind::*;
 use TaskKind::*;
 
 //
@@ -310,6 +309,7 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         rule: TransformationRule,
         expression: LogicalExpression,
+        group_id: GroupId,
         parent: TaskId,
     ) -> TaskId {
         // Create and register the transformation task
@@ -320,7 +320,10 @@ impl<M: Memoize> Optimizer<M> {
         self.register_child_to_task(parent, task_id);
 
         // Schedule a job to actually launch the transformation rule
-        self.schedule_job(task_id, LaunchTransformationRule(rule, expression));
+        self.schedule_job(
+            task_id,
+            JobKind::transformation_rule(rule, expression, group_id),
+        );
 
         task_id
     }
@@ -334,6 +337,7 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         rule: ImplementationRule,
         expression: LogicalExpression,
+        group_id: GroupId,
         properties: PhysicalProperties,
         parent: TaskId,
     ) -> TaskId {
@@ -348,7 +352,7 @@ impl<M: Memoize> Optimizer<M> {
         // Schedule a job to actually launch the implementation rule
         self.schedule_job(
             task_id,
-            LaunchImplementationRule(rule, expression, properties),
+            JobKind::implementation_rule(rule, expression, group_id, properties),
         );
 
         task_id
@@ -361,6 +365,7 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) fn launch_cost_expression_task(
         &mut self,
         expression: PhysicalExpression,
+        goal: Goal,
         parent: TaskId,
     ) -> TaskId {
         // Create and register the cost estimation task
@@ -371,7 +376,7 @@ impl<M: Memoize> Optimizer<M> {
         self.register_child_to_task(parent, task_id);
 
         // Schedule a job to actually launch the cost estimation
-        self.schedule_job(task_id, LaunchCostExpression(expression));
+        self.schedule_job(task_id, JobKind::cost_expression(expression, goal));
 
         task_id
     }
@@ -449,7 +454,7 @@ impl<M: Memoize> Optimizer<M> {
                     .map(move |rule| (rule.clone(), expr.clone()))
             })
             .for_each(|(rule, expr)| {
-                self.launch_transform_expression_task(rule, expr, task_id);
+                self.launch_transform_expression_task(rule, expr, group_id, task_id);
             });
 
         task_id
@@ -498,7 +503,7 @@ impl<M: Memoize> Optimizer<M> {
                     })
                 })
                 .for_each(|(rule, expr, props)| {
-                    self.launch_implement_expression_task(rule, expr, props, task_id);
+                    self.launch_implement_expression_task(rule, expr, *group_id, props, task_id);
                 });
         }
 
@@ -511,7 +516,8 @@ impl<M: Memoize> Optimizer<M> {
             .expect("Failed to get physical expressions for goal");
 
         physical_expressions.into_iter().for_each(|expr| {
-            self.launch_cost_expression_task(expr, task_id);
+            // TODO: FIX ME!
+            self.launch_cost_expression_task(expr, goal, task_id);
         });
 
         task_id
