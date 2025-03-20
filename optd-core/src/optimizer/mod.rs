@@ -33,6 +33,9 @@ mod merge_repr;
 mod subscriptions;
 mod tasks;
 
+/// Default maximum number of concurrent jobs to run in the optimizer.
+const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1000;
+
 /// External client request to optimize a query in the optimizer.
 ///
 /// Defines the public API for submitting a query and receiving execution plans.
@@ -115,6 +118,7 @@ pub struct Optimizer<M: Memoize> {
     job_schedule_queue: VecDeque<JobId>,
     running_jobs: HashMap<JobId, Job>,
     next_job_id: JobId,
+    max_concurrent_jobs: usize,
 
     // Task indexing
     group_explorations_task_index: HashMap<GroupId, TaskId>,
@@ -167,6 +171,7 @@ impl<M: Memoize> Optimizer<M> {
             job_schedule_queue: VecDeque::new(),
             running_jobs: HashMap::new(),
             next_job_id: JobId(0),
+            max_concurrent_jobs: DEFAULT_MAX_CONCURRENT_JOBS,
 
             // Task indexing
             group_explorations_task_index: HashMap::new(),
@@ -221,6 +226,7 @@ impl<M: Memoize> Optimizer<M> {
                     );
                 },
                 Some(message) = self.message_rx.next() => {
+                    // Process the next message in the channel.
                     match message {
                         OptimizeRequestWrapper(request, task_id_opt) => {
                             self.process_optimize_request(request.plan, request.response_tx, task_id_opt).await;
@@ -247,6 +253,9 @@ impl<M: Memoize> Optimizer<M> {
                             self.process_retrieve_properties(group_id, sender).await;
                         },
                     }
+
+                    // Launch pending jobs according to a policy.
+                    self.launch_pending_jobs().await;
                 },
                 else => break,
             }

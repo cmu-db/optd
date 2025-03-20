@@ -9,7 +9,6 @@ use crate::{
     engine::{CostedPhysicalPlanContinuation, Engine, LogicalPlanContinuation},
     error::Error,
 };
-use optd_dsl::analyzer::context::Context;
 
 /// Unique identifier for jobs in the optimization system
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -20,12 +19,14 @@ pub(super) struct JobId(pub i64);
 /// Jobs are launched by tasks and represent atomic operations that contribute to
 /// completing the task. Multiple jobs may be launched by a single task, and all
 /// jobs must complete before a task is considered (temporarily) finished.
+#[derive(Clone)]
 pub(super) struct Job(pub TaskId, pub JobKind);
 
 /// Enumeration of different types of jobs in the optimizer
 ///
 /// Each variant represents a specific optimization operation that can be
 /// performed asynchronously and independently.
+#[derive(Clone)]
 pub(super) enum JobKind {
     /// Derives logical properties for a logical expression
     ///
@@ -64,8 +65,57 @@ pub(super) enum JobKind {
     ContinueWithCostedPhysical(PhysicalExpressionId, Cost, CostedPhysicalPlanContinuation),
 }
 
-/// Job-related implementation for the Optimizer
 impl<M: Memoize> Optimizer<M> {
+    pub(super) async fn launch_pending_jobs(&mut self) -> Result<(), Error> {
+        // Launch jobs only if we're below the maximum concurrent jobs limit, in FIFO order.
+        while self.running_jobs.len() < self.max_concurrent_jobs
+            && !self.job_schedule_queue.is_empty()
+        {
+            let job_id = match self.job_schedule_queue.pop_front() {
+                Some(id) => id,
+                None => break,
+            };
+
+            // Move the job from pending to running.
+            let job = self.pending_jobs.remove(&job_id).unwrap();
+            self.running_jobs.insert(job_id, job.clone());
+
+            // Dispatch & execute the job in a new co-routine.
+            match job.1 {
+                JobKind::DeriveLogicalProperties(logical_expr_id) => {
+                    self.derive_logical_properties_job(logical_expr_id, job_id);
+                }
+                JobKind::TransformationRule(rule_name, logical_expr_id, group_id) => {
+                    self.execute_transformation_rule_job(
+                        rule_name,
+                        logical_expr_id,
+                        group_id,
+                        job_id,
+                    );
+                }
+                JobKind::ImplementationRule(rule_name, expression_id, goal_id) => {
+                    self.execute_implementation_rule_job(
+                        rule_name,
+                        expression_id,
+                        goal_id,
+                        job_id,
+                    )?;
+                }
+                JobKind::CostExpression(expression_id) => {
+                    self.execute_cost_expression_job(expression_id, job_id);
+                }
+                JobKind::ContinueWithLogical(logical_expr_id, k) => {
+                    self.execute_continue_with_logical_job(logical_expr_id, k);
+                }
+                JobKind::ContinueWithCostedPhysical(expression_id, cost, k) => {
+                    self.execute_continue_with_optimized_job(expression_id, cost, k);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Schedules a new job and associates it with a task
     ///
     /// This method creates a job of the specified kind, associates it with
@@ -98,7 +148,7 @@ impl<M: Memoize> Optimizer<M> {
         job_id
     }
 
-    pub(super) async fn derive_logical_properties_job(
+    fn derive_logical_properties_job(
         &mut self,
         logical_expr_id: LogicalExpressionId,
         job_id: JobId,
@@ -109,29 +159,33 @@ impl<M: Memoize> Optimizer<M> {
         );
 
         let message_tx = self.message_tx.clone();
-        // TODO: Materialize here!
-        /*engine
-        .launch_derive_properties(
-            &logical_expr.clone().into(),
-            Arc::new(move |logical_props| {
-                let mut message_tx = message_tx.clone();
-                let logical_expr = logical_expr.clone();
-                Box::pin(async move {
-                    message_tx
-                        .send(OptimizerMessage::CreateGroup(
-                            logical_expr_id,
-                            logical_props,
-                            job_id,
-                        ))
-                        .await
-                        .unwrap();
-                })
-            }),
-        )
-        .await;*/
+
+        // Spawn inside the function, not in launch_pending_jobs
+        tokio::spawn(async move {
+            // TODO: Materialize here!
+            /*engine
+            .launch_derive_properties(
+                &logical_expr.clone().into(),
+                Arc::new(move |logical_props| {
+                    let mut message_tx = message_tx.clone();
+                    let logical_expr = logical_expr.clone();
+                    Box::pin(async move {
+                        message_tx
+                            .send(OptimizerMessage::CreateGroup(
+                                logical_expr_id,
+                                logical_props,
+                                job_id,
+                            ))
+                            .await
+                            .unwrap();
+                    })
+                }),
+            )
+            .await;*/
+        });
     }
 
-    pub(super) async fn execute_transformation_rule_job(
+    fn execute_transformation_rule_job(
         &mut self,
         rule_name: TransformationRule,
         logical_expr_id: LogicalExpressionId,
@@ -145,28 +199,30 @@ impl<M: Memoize> Optimizer<M> {
         let message_tx = self.message_tx.clone();
 
         // TODO: Materialize here!
-        /*engine
-        .launch_transformation_rule(
-            rule_name.0,
-            &logical_expr.into(),
-            Arc::new(move |partial_logical_plan| {
-                let mut message_tx = message_tx.clone();
-                Box::pin(async move {
-                    message_tx
-                        .send(OptimizerMessage::NewLogicalPartial(
-                            partial_logical_plan,
-                            group_id,
-                            job_id,
-                        ))
-                        .await
-                        .unwrap();
-                })
-            }),
-        )
-        .await;*/
+        tokio::spawn(async move {
+            /*engine
+            .launch_transformation_rule(
+                rule_name.0,
+                &logical_expr.into(),
+                Arc::new(move |partial_logical_plan| {
+                    let mut message_tx = message_tx.clone();
+                    Box::pin(async move {
+                        message_tx
+                            .send(OptimizerMessage::NewLogicalPartial(
+                                partial_logical_plan,
+                                group_id,
+                                job_id,
+                            ))
+                            .await
+                            .unwrap();
+                    })
+                }),
+            )
+            .await;*/
+        });
     }
 
-    pub(super) async fn execute_implementation_rule_job(
+    fn execute_implementation_rule_job(
         &mut self,
         rule_name: ImplementationRule,
         expression_id: LogicalExpressionId,
@@ -180,35 +236,34 @@ impl<M: Memoize> Optimizer<M> {
         let message_tx = self.message_tx.clone();
 
         // TODO: Materialize here!
-        /*engine
-                .launch_implementation_rule(
-                    rule_name.0,
-                    &logical_expr.into(),
-                    &physical_properties.clone(),
-                    Arc::new(move |partial_physical_plan| {
-                        let mut message_tx = message_tx.clone();
-                        Box::pin(async move {
-                            message_tx
-                                .send(OptimizerMessage::NewPhysicalPartial(
-                                    partial_physical_plan,
-                                    goal_id,
-                                    job_id,
-                                ))
-                                .await
-                                .unwrap();
-                        })
-                    }),
-                )
-                .await;
-        */
+        tokio::spawn(async move {
+            /*engine
+                    .launch_implementation_rule(
+                        rule_name.0,
+                        &logical_expr.into(),
+                        &physical_properties.clone(),
+                        Arc::new(move |partial_physical_plan| {
+                            let mut message_tx = message_tx.clone();
+                            Box::pin(async move {
+                                message_tx
+                                    .send(OptimizerMessage::NewPhysicalPartial(
+                                        partial_physical_plan,
+                                        goal_id,
+                                        job_id,
+                                    ))
+                                    .await
+                                    .unwrap();
+                            })
+                        }),
+                    )
+                    .await;
+            */
+        });
+
         Ok(())
     }
 
-    pub(super) async fn execute_cost_expression_job(
-        &mut self,
-        expression_id: PhysicalExpressionId,
-        job_id: JobId,
-    ) {
+    fn execute_cost_expression_job(&mut self, expression_id: PhysicalExpressionId, job_id: JobId) {
         let engine = Engine::new(
             self.hir_context.clone(),
             OptimizerGenerator::new(self.message_tx.clone(), job_id),
@@ -216,44 +271,49 @@ impl<M: Memoize> Optimizer<M> {
         let message_tx = self.message_tx.clone();
 
         // TODO: Will need to materialize here!
-
-        /*engine
-        .launch_cost_plan(
-            &physical_expr.clone().into(),
-            Arc::new(move |cost| {
-                let mut message_tx = message_tx.clone();
-                let physical_expr = physical_expr.clone();
-                Box::pin(async move {
-                    message_tx
-                        .send(OptimizerMessage::NewCostedPhysical(
-                            OptimizedExpression(physical_expr, cost),
-                            goal_id,
-                            job_id,
-                        ))
-                        .await
-                        .unwrap();
-                })
-            }),
-        )
-        .await;*/
+        tokio::spawn(async move {
+            /*engine
+            .launch_cost_plan(
+                &physical_expr.clone().into(),
+                Arc::new(move |cost| {
+                    let mut message_tx = message_tx.clone();
+                    let physical_expr = physical_expr.clone();
+                    Box::pin(async move {
+                        message_tx
+                            .send(OptimizerMessage::NewCostedPhysical(
+                                OptimizedExpression(physical_expr, cost),
+                                goal_id,
+                                job_id,
+                            ))
+                            .await
+                            .unwrap();
+                    })
+                }),
+            )
+            .await;*/
+        });
     }
 
-    pub(super) async fn execute_continue_with_logical_job(
+    fn execute_continue_with_logical_job(
         &mut self,
         logical_expr_id: LogicalExpressionId,
         k: LogicalPlanContinuation,
     ) {
         // TODO: Will need to materialize here!
-        // k(logical_expr).await;
+        tokio::spawn(async move {
+            // k(logical_expr).await;
+        });
     }
 
-    pub(super) async fn execute_continue_with_optimized_job(
+    async fn execute_continue_with_optimized_job(
         &mut self,
         expression_id: PhysicalExpressionId,
         cost: Cost,
         k: CostedPhysicalPlanContinuation,
     ) {
-        // TODO: Will need to materialize here!s
-        // k(optimized_expr).await;
+        // TODO: Will need to materialize here!
+        tokio::spawn(async move {
+            // k(optimized_expr).await;
+        });
     }
 }
