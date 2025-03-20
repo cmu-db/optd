@@ -133,10 +133,10 @@ pub struct Optimizer<M: Memoize> {
     goal_subscribers: HashMap<GoalId, Vec<TaskId>>,
 
     // Representative tracking
-    group_representatives: Representative<GroupId>,
-    goal_representatives: Representative<GoalId>,
-    logical_representatives: Representative<LogicalExpressionId>,
-    physical_representatives: Representative<PhysicalExpressionId>,
+    group_repr: Representative<GroupId>,
+    goal_repr: Representative<GoalId>,
+    logical_expr_repr: Representative<LogicalExpressionId>,
+    physical_expr_repr: Representative<PhysicalExpressionId>,
 }
 
 impl<M: Memoize> Optimizer<M> {
@@ -185,10 +185,10 @@ impl<M: Memoize> Optimizer<M> {
             goal_subscribers: HashMap::new(),
 
             // Representative tracking
-            group_representatives: Representative::new(),
-            goal_representatives: Representative::new(),
-            logical_representatives: Representative::new(),
-            physical_representatives: Representative::new(),
+            group_repr: Representative::new(),
+            goal_repr: Representative::new(),
+            logical_expr_repr: Representative::new(),
+            physical_expr_repr: Representative::new(),
         }
     }
 
