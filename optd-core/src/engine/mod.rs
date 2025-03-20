@@ -10,7 +10,7 @@ use crate::{
     },
     capture,
     cir::{
-        expressions::{LogicalExpression, OptimizedExpression},
+        expressions::LogicalExpression,
         goal::Cost,
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
@@ -39,10 +39,6 @@ pub(crate) type LogicalPlanContinuation =
 /// Type alias for a continuation that receives a LogicalExpression
 pub(crate) type LogicalExprContinuation =
     Arc<dyn Fn(LogicalExpression) -> UnitFuture + Send + Sync + 'static>;
-
-/// Type alias for a continuation that receives an OptimizedExpression
-pub(crate) type OptimizedExprContinuation =
-    Arc<dyn Fn(OptimizedExpression) -> UnitFuture + Send + Sync + 'static>;
 
 /// Type alias for a continuation that receives a PartialPhysicalPlan
 pub(crate) type PhysicalPlanContinuation =

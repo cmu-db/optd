@@ -1,8 +1,8 @@
 use super::{memo::Memoize, Optimizer};
 use crate::{
     cir::{
-        expressions::OptimizedExpression,
-        goal::Goal,
+        expressions::PhysicalExpressionId,
+        goal::{Goal, GoalId},
         operators::{Child, Operator},
         plans::PhysicalPlan,
     },
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use Child::*;
 
 impl<M: Memoize> Optimizer<M> {
-    /// Reconstructs a physical plan from an optimized expression in the memo.
+    /// Reconstructs a physical plan from a physical expression id in the memo.
     ///
     /// Recursively retrieves the best physical plan for each goal ID referenced
     /// by the optimized expression.
@@ -26,11 +26,13 @@ impl<M: Memoize> Optimizer<M> {
     #[async_recursion]
     pub(super) async fn egest_best_plan(
         &self,
-        expr: &OptimizedExpression,
+        expression_id: PhysicalExpressionId,
     ) -> Result<Option<PhysicalPlan>, Error> {
+        let expression = self.memo.materialize_physical_expr(expression_id).await?;
+
         // Recursively egest all children plans.
         let child_results = try_join_all(
-            expr.0
+            expression
                 .children
                 .iter()
                 .map(|child| self.egest_child_plan(child)),
@@ -44,8 +46,8 @@ impl<M: Memoize> Optimizer<M> {
 
         // Base case: construct the physical plan with the materialized children.
         Ok(Some(PhysicalPlan(Operator {
-            tag: expr.0.tag.clone(),
-            data: expr.0.data.clone(),
+            tag: expression.tag.clone(),
+            data: expression.data.clone(),
             children: child_plans,
         })))
     }
@@ -55,36 +57,30 @@ impl<M: Memoize> Optimizer<M> {
     /// Handles both singleton and variable-length children.
     async fn egest_child_plan(
         &self,
-        child: &Child<Goal>,
+        child: &Child<GoalId>,
     ) -> Result<Option<Child<Arc<PhysicalPlan>>>, Error> {
         match child {
-            Singleton(goal) => {
-                let best_expr = match self
-                    .memo
-                    .get_best_optimized_physical_expr(goal)
-                    .await?
-                {
-                    Some(expr) => expr,
-                    None => return Ok(None),
-                };
-                let plan = match self.egest_best_plan(&best_expr).await? {
+            Singleton(goal_id) => {
+                let (best_expr, _) =
+                    match self.memo.get_best_optimized_physical_expr(*goal_id).await? {
+                        Some(expr) => expr,
+                        None => return Ok(None),
+                    };
+                let plan = match self.egest_best_plan(best_expr).await? {
                     Some(plan) => plan,
                     None => return Ok(None),
                 };
                 Ok(Some(Singleton(plan.into())))
             }
             VarLength(goals) => {
-                let futures = goals.iter().map(|goal| async move {
-                    let best_expr = match self
-                        .memo
-                        .get_best_optimized_physical_expr(goal)
-                        .await?
-                    {
-                        Some(expr) => expr,
-                        None => return Ok(None),
-                    };
+                let futures = goals.iter().map(|goal_id| async move {
+                    let (best_expr, _) =
+                        match self.memo.get_best_optimized_physical_expr(*goal_id).await? {
+                            Some(expr) => expr,
+                            None => return Ok(None),
+                        };
 
-                    let plan = match self.egest_best_plan(&best_expr).await? {
+                    let plan = match self.egest_best_plan(best_expr).await? {
                         Some(plan) => plan,
                         None => return Ok(None),
                     };

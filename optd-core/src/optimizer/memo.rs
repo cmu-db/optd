@@ -226,7 +226,12 @@ pub trait Memoize: Send + Sync + 'static {
     ) -> MemoizeResult<()>;
 
     async fn get_goal_id(&mut self, goal: &Goal) -> MemoizeResult<GoalId>;
-    async fn materialize_goal(&mut self, goal_id: GoalId) -> MemoizeResult<Goal>;
+    async fn materialize_goal(&self, goal_id: GoalId) -> MemoizeResult<Goal>;
+
+    async fn materialize_physical_expr(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoizeResult<PhysicalExpression>;
 
     async fn get_logical_expr_id(
         &mut self,

@@ -6,7 +6,7 @@ use crate::{
     },
     engine::{
         generator::{Continuation, Generator},
-        LogicalExprContinuation, OptimizedExprContinuation,
+        LogicalExprContinuation,
     },
 };
 use futures::{channel::mpsc::Sender, SinkExt};
@@ -93,8 +93,9 @@ impl Generator for OptimizerGenerator {
         // Convert HIR goal to CIR representation
         let cir_goal = hir_goal_to_cir(physical_goal);
 
+        // TODO: Apply right continuation.
         // Create an optimized expression continuation that will invoke the provided continuation
-        let continuation: OptimizedExprContinuation = Arc::new(move |expr| {
+        /*let continuation: OptimizedExprContinuation = Arc::new(move |expr| {
             let k = k.clone();
             let value = partial_physical_to_value(&expr.0.into());
 
@@ -114,6 +115,6 @@ impl Generator for OptimizerGenerator {
                 self.current_job_id,
             ))
             .await
-            .expect("Failed to send goal subscription - channel closed");
+            .expect("Failed to send goal subscription - channel closed");*/
     }
 }
