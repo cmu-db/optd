@@ -20,9 +20,9 @@ impl<M: Memoize> Optimizer<M> {
     /// transforms any child goal IDs into their corresponding best physical plans.
     ///
     /// # Returns
-    /// * `Ok(Some(PhysicalPlan))` if all child plans were successfully constructed from their IDs
-    /// * `Ok(None)` if any goal ID lacks a best expression ID
-    /// * `Err(Error)` if a memo operation fails
+    /// * `Ok(Some(PhysicalPlan))` if all child plans were successfully constructed from their IDs.
+    /// * `Ok(None)` if any goal ID lacks a best expression ID.
+    /// * `Err(Error)` if a memo operation fails.
     #[async_recursion]
     pub(super) async fn egest_best_plan(
         &self,

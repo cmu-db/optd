@@ -41,8 +41,8 @@ impl<M: Memoize> Optimizer<M> {
     /// in the background.
     ///
     /// # Returns
-    /// - `Found(group_id)`: Plan exists in the memo
-    /// - `Missing(expressions)`: Expressions needing property derivation
+    /// - `Found(group_id)`: Plan exists in the memo.
+    /// - `Missing(expressions)`: Expressions needing property derivation.
     pub(super) async fn probe_ingest_logical_plan(
         &mut self,
         logical_plan: &PartialLogicalPlan,
