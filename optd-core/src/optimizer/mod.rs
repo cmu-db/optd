@@ -17,7 +17,6 @@ use futures::{
 };
 use jobs::{Job, JobId};
 use memo::Memoize;
-use merge_repr::Representative;
 use optd_dsl::analyzer::{context::Context, hir::HIR};
 use std::collections::{HashMap, HashSet, VecDeque};
 use tasks::{Task, TaskId};
@@ -29,7 +28,6 @@ mod handlers;
 mod ingest;
 mod jobs;
 mod memo;
-mod merge_repr;
 mod subscriptions;
 mod tasks;
 
@@ -132,12 +130,6 @@ pub struct Optimizer<M: Memoize> {
     // Subscriptions.
     group_subscribers: HashMap<GroupId, Vec<TaskId>>,
     goal_subscribers: HashMap<GoalId, Vec<TaskId>>,
-
-    // Representative tracking.
-    group_repr: Representative<GroupId>,
-    goal_repr: Representative<GoalId>,
-    logical_expr_repr: Representative<LogicalExpressionId>,
-    physical_expr_repr: Representative<PhysicalExpressionId>,
 }
 
 impl<M: Memoize> Optimizer<M> {
@@ -184,12 +176,6 @@ impl<M: Memoize> Optimizer<M> {
             // Subscriptions.
             group_subscribers: HashMap::new(),
             goal_subscribers: HashMap::new(),
-
-            // Representative tracking.
-            group_repr: Representative::new(),
-            goal_repr: Representative::new(),
-            logical_expr_repr: Representative::new(),
-            physical_expr_repr: Representative::new(),
         }
     }
 

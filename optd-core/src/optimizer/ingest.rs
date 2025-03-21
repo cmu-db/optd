@@ -132,7 +132,7 @@ impl<M: Memoize> Optimizer<M> {
         let logical_expression_id = self.memo.get_logical_expr_id(&logical_expression).await?;
 
         // Base case: check if the expression already exists in the memo.
-        match self.memo.find_logical_expr(logical_expression_id).await? {
+        match self.memo.find_logical_expr_group(logical_expression_id).await? {
             Some(group_id) => Ok(Found(group_id)),
             None => Ok(Missing(vec![logical_expression_id])),
         }
@@ -178,7 +178,7 @@ impl<M: Memoize> Optimizer<M> {
         let expression_id = self.memo.get_physical_expr_id(&expression).await?;
 
         // Base case: try to find the expression in the memo or create it if missing.
-        if let Some(goal_id) = self.memo.find_physical_expr(expression_id).await? {
+        if let Some(goal_id) = self.memo.find_physical_expr_goal(expression_id).await? {
             Ok(PhysicalIngest {
                 goal_id,
                 new_expression_id: None,

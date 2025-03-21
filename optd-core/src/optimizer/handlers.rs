@@ -20,6 +20,7 @@ use futures::{
     channel::{mpsc::Sender, oneshot},
     SinkExt,
 };
+use JobKind::*;
 use LogicalIngest::*;
 use OptimizerMessage::*;
 use TaskKind::*;
@@ -27,13 +28,20 @@ use TaskKind::*;
 impl<M: Memoize> Optimizer<M> {
     /// This method initiates the optimization process for a logical plan by launching
     /// an optimization task. It may need dependencies.
+    ///
+    /// # Parameters
+    /// * `plan` - The logical plan to optimize.
+    /// * `response_tx` - Channel to send the resulting physical plan.
+    /// * `task_id` - ID of the task that initiated this request.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_optimize_request(
         &mut self,
         plan: LogicalPlan,
         response_tx: Sender<PhysicalPlan>,
         task_id: TaskId,
     ) -> Result<(), Error> {
-        // First, resolve the logical plan to a group.
         match self.probe_ingest_logical_plan(&plan.clone().into()).await? {
             Found(group_id) => {
                 // The goal represents what we want to achieve: optimize the root group
@@ -51,8 +59,8 @@ impl<M: Memoize> Optimizer<M> {
                 let pending_dependencies = logical_exprs
                     .iter()
                     .cloned()
-                    .map(|logical_expr| {
-                        self.schedule_job(task_id, JobKind::DeriveLogicalProperties(logical_expr))
+                    .map(|logical_expr_id| {
+                        self.schedule_job(task_id, DeriveLogicalProperties(logical_expr_id))
                     })
                     .collect();
 
@@ -70,19 +78,26 @@ impl<M: Memoize> Optimizer<M> {
 
     /// This method handles new logical plan alternatives discovered through
     /// transformation rule application.
+    ///
+    /// # Parameters
+    /// * `plan` - The partial logical plan to process.
+    /// * `group_id` - ID of the group associated with this plan.
+    /// * `job_id` - ID of the job that generated this plan.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_new_logical_partial(
         &mut self,
         plan: PartialLogicalPlan,
         group_id: GroupId,
         job_id: JobId,
     ) -> Result<(), Error> {
-        // First, resolve the logical plan to a group.
         match self.probe_ingest_logical_plan(&plan).await? {
             Found(new_group_id) if new_group_id != group_id => {
-                // Atomically perform the merge in the memo and process all
-                // results in memory.
+                // Atomically perform the merge in the memo and process all results.
                 let merge_results = self.memo.merge_groups(group_id, new_group_id).await?;
-                // TODO(Alexis): Perform the merge!
+
+                // TODO: Handle merge results.
             }
             Found(_) => {
                 // Group already exists, nothing to merge or do.
@@ -94,11 +109,8 @@ impl<M: Memoize> Optimizer<M> {
                 let pending_dependencies = logical_exprs
                     .iter()
                     .cloned()
-                    .map(|logical_expr| {
-                        self.schedule_job(
-                            related_task_id,
-                            JobKind::DeriveLogicalProperties(logical_expr),
-                        )
+                    .map(|logical_expr_id| {
+                        self.schedule_job(related_task_id, DeriveLogicalProperties(logical_expr_id))
                     })
                     .collect();
 
@@ -116,29 +128,36 @@ impl<M: Memoize> Optimizer<M> {
 
     /// This method handles new physical implementations discovered through
     /// implementation rule application.
+    ///
+    /// # Parameters
+    /// * `plan` - The partial physical plan to process.
+    /// * `goal_id` - ID of the goal associated with this plan.
+    /// * `job_id` - ID of the job that generated this plan.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_new_physical_partial(
         &mut self,
         plan: PartialPhysicalPlan,
         goal_id: GoalId,
         job_id: JobId,
     ) -> Result<(), Error> {
-        // First, ingest the physical plan to determine if it's new or not.
         let PhysicalIngest {
             goal_id: ingested_goal_id,
-            new_expression_id: new_expression,
+            new_expression_id,
         } = self.ingest_physical_plan(&plan).await?;
 
         if ingested_goal_id != goal_id {
-            // Atomically perform the merge in the memo and process all
-            // results in memory.
+            // Atomically perform the merge in the memo and process all results.
             let merge_results = self.memo.merge_goals(ingested_goal_id, goal_id).await?;
-            // TODO(Alexis): Perform the merge!
+
+            // TODO: Handle merge results.
 
             // If a physical expression was just created, its status is *always* dirty
             // and will need to be costed.
-            if let Some(expression) = new_expression {
+            if let Some(expression_id) = new_expression_id {
                 let related_task_id = self.running_jobs[&job_id].0;
-                self.launch_cost_expression_task(expression, related_task_id)
+                self.launch_cost_expression_task(expression_id, related_task_id)
                     .await?;
             }
         }
@@ -149,8 +168,15 @@ impl<M: Memoize> Optimizer<M> {
     /// This method handles fully optimized physical expressions with cost information.
     ///
     /// When a new optimized expression is found, it's added to the memo. If it becomes
-    /// the new best expression for its goal, continuations are notified and client
-    /// tasks egest the corresponding materialized physical plan.
+    /// the new best expression for its goal, continuations are notified and and clients
+    /// receive the corresponding egested plan.
+    ///
+    /// # Parameters
+    /// * `expression_id` - ID of the physical expression to process.
+    /// * `cost` - Cost information for the expression.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_new_costed_physical(
         &mut self,
         expression_id: PhysicalExpressionId,
@@ -170,6 +196,14 @@ impl<M: Memoize> Optimizer<M> {
 
     /// This method handles group creation for expressions with derived properties
     /// and updates any pending messages that depend on this group.
+    ///
+    /// # Parameters
+    /// * `expression_id` - ID of the logical expression to create a group for.
+    /// * `properties` - Logical properties associated with the expression.
+    /// * `job_id` - ID of the job that initiated this request.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_create_group(
         &mut self,
         expression_id: LogicalExpressionId,
@@ -183,6 +217,14 @@ impl<M: Memoize> Optimizer<M> {
 
     /// Registers a continuation for receiving logical expressions from a group.
     /// The continuation will receive notifications about both existing and new expressions.
+    ///
+    /// # Parameters
+    /// * `group_id` - ID of the group to subscribe to.
+    /// * `continuation` - Continuation to call when new expressions are found.
+    /// * `job_id` - ID of the job that initiated this request.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_group_subscription(
         &mut self,
         group_id: GroupId,
@@ -225,17 +267,18 @@ impl<M: Memoize> Optimizer<M> {
                     .add_implementation_dependency(*expression_id, *goal_id, rule, group_id)
                     .await?;
             }
-            _ => panic!("Task type cannot produce group subscription"),
+            _ => panic!("Task type cannot produce group subscription."),
         }
 
         // Subscribe to future expressions and bootstrap with existing ones.
         let expressions = self
             .subscribe_task_to_group(group_id, related_task_id)
             .await?;
-        for expr in expressions {
+
+        for expression_id in expressions {
             self.schedule_job(
                 related_task_id,
-                JobKind::ContinueWithLogical(expr, continuation.clone()),
+                ContinueWithLogical(expression_id, continuation.clone()),
             );
         }
 
@@ -244,6 +287,14 @@ impl<M: Memoize> Optimizer<M> {
 
     /// Registers a continuation for receiving optimized physical expressions for a goal.
     /// The continuation will be notified about the best existing expression and any better ones found.
+    ///
+    /// # Parameters
+    /// * `goal` - The goal to subscribe to.
+    /// * `continuation` - Continuation to call when new optimized expressions are found.
+    /// * `job_id` - ID of the job that initiated this request.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_goal_subscription(
         &mut self,
         goal: &Goal,
@@ -270,7 +321,7 @@ impl<M: Memoize> Optimizer<M> {
                     .add_cost_dependency(*expression_id, goal_id)
                     .await?;
             }
-            _ => panic!("Only cost tasks can subscribe to goals"),
+            _ => panic!("Only cost tasks can subscribe to goals."),
         }
 
         // Subscribe to future optimized expressions and bootstrap with current best
@@ -280,7 +331,7 @@ impl<M: Memoize> Optimizer<M> {
         {
             self.schedule_job(
                 related_task_id,
-                JobKind::ContinueWithCostedPhysical(best_expr_id, cost, continuation),
+                ContinueWithCostedPhysical(best_expr_id, cost, continuation),
             );
         }
 
@@ -289,6 +340,13 @@ impl<M: Memoize> Optimizer<M> {
 
     /// Retrieves the logical properties for the given group from the memo
     /// and sends them back to the requestor through the provided oneshot channel.
+    ///
+    /// # Parameters
+    /// * `group_id` - ID of the group to retrieve properties for.
+    /// * `sender` - Channel to send the properties through.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_retrieve_properties(
         &mut self,
         group_id: GroupId,
@@ -302,27 +360,33 @@ impl<M: Memoize> Optimizer<M> {
         tokio::spawn(async move {
             sender
                 .send(props)
-                .expect("Failed to send properties - channel closed");
+                .expect("Failed to send properties - channel closed.");
         });
 
         Ok(())
     }
 
-    /// Helper method to handle different types of merge results
+    /// Helper method to handle different types of merge results.
     ///
     /// This method processes the results of group and goal merges, updating
-    /// representatives, subscribers, and exploration status appropriately.
+    /// subscribers and tasks appropriately.
+    ///
+    /// # Parameters
+    /// * `_result` - The merge result to handle.
     async fn handle_merge_result(&mut self, _result: MergeResult) {
         todo!()
     }
 
-    /// Helper method to resolve dependencies after a group creation job completes
+    /// Helper method to resolve dependencies after a group creation job completes.
     ///
     /// This method is called when a group creation job completes. It updates all
     /// pending messages that were waiting for this job and processes any that
     /// are now ready (have no more pending dependencies).
+    ///
+    /// # Parameters
+    /// * `completed_job_id` - ID of the completed job.
     async fn resolve_dependencies(&mut self, completed_job_id: JobId) {
-        // Update dependencies and collect ready messages
+        // Update dependencies and collect ready messages.
         let ready_indices: Vec<_> = self
             .pending_messages
             .iter_mut()
@@ -333,9 +397,9 @@ impl<M: Memoize> Optimizer<M> {
             })
             .collect();
 
-        // Process all ready messages (in reverse order to avoid index issues when removing)
+        // Process all ready messages (in reverse order to avoid index issues when removing).
         for i in ready_indices.iter().rev() {
-            // Take ownership of the message
+            // Take ownership of the message.
             let pending = self.pending_messages.swap_remove(*i);
 
             // Re-send the message to be processed in a new co-routine to not block the
@@ -345,7 +409,7 @@ impl<M: Memoize> Optimizer<M> {
                 message_tx
                     .send(pending.message)
                     .await
-                    .expect("Failed to re-send ready message - channel closed");
+                    .expect("Failed to re-send ready message - channel closed.");
             });
         }
     }

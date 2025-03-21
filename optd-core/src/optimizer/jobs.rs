@@ -9,6 +9,7 @@ use crate::{
     engine::{CostedPhysicalPlanContinuation, Engine, LogicalPlanContinuation},
     error::Error,
 };
+use JobKind::*;
 
 /// Unique identifier for jobs in the optimization system
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -82,10 +83,10 @@ impl<M: Memoize> Optimizer<M> {
 
             // Dispatch & execute the job in a new co-routine.
             match job.1 {
-                JobKind::DeriveLogicalProperties(logical_expr_id) => {
+                DeriveLogicalProperties(logical_expr_id) => {
                     self.derive_logical_properties_job(logical_expr_id, job_id);
                 }
-                JobKind::StartTransformationRule(rule_name, logical_expr_id, group_id) => {
+                StartTransformationRule(rule_name, logical_expr_id, group_id) => {
                     self.execute_transformation_rule_job(
                         rule_name,
                         logical_expr_id,
@@ -93,7 +94,7 @@ impl<M: Memoize> Optimizer<M> {
                         job_id,
                     );
                 }
-                JobKind::StartImplementationRule(rule_name, expression_id, goal_id) => {
+                StartImplementationRule(rule_name, expression_id, goal_id) => {
                     self.execute_implementation_rule_job(
                         rule_name,
                         expression_id,
@@ -101,13 +102,13 @@ impl<M: Memoize> Optimizer<M> {
                         job_id,
                     )?;
                 }
-                JobKind::StartCostExpression(expression_id) => {
+                StartCostExpression(expression_id) => {
                     self.execute_cost_expression_job(expression_id, job_id);
                 }
-                JobKind::ContinueWithLogical(logical_expr_id, k) => {
+                ContinueWithLogical(logical_expr_id, k) => {
                     self.execute_continue_with_logical_job(logical_expr_id, k);
                 }
-                JobKind::ContinueWithCostedPhysical(expression_id, cost, k) => {
+                ContinueWithCostedPhysical(expression_id, cost, k) => {
                     self.execute_continue_with_optimized_job(expression_id, cost, k);
                 }
             }

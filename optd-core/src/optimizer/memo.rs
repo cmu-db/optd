@@ -31,8 +31,8 @@ pub struct MergeGroupResult {
     /// All expressions listed in `merged_exprs` must be contained within these groups.
     pub merged_groups: Vec<(GroupId, Vec<LogicalExpressionId>)>,
 
-    /// ID of the new representative group.
-    pub new_repr_group: GroupId,
+    /// ID of the new representative group id.
+    pub new_repr_group_id: GroupId,
 
     /// Expressions that were merged as a result of the group merge.
     /// These logical expressions are guaranteed to be part of the groups
@@ -47,8 +47,8 @@ pub struct MergeGoalResult {
     /// All expressions listed in `merged_exprs` must be contained within these goals.
     pub merged_goals: Vec<(GoalId, Vec<PhysicalExpressionId>)>,
 
-    /// ID of the new representative goal.
-    pub new_repr_goal: GoalId,
+    /// ID of the new representative goal id.
+    pub new_repr_goal_id: GoalId,
 
     /// Expressions that were merged as a result of the goal merge.
     /// These physical expressions are guaranteed to be part of the goals
@@ -96,7 +96,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// The properties associated with the group or an error if not found.
     async fn get_logical_properties(&self, group_id: GroupId) -> MemoizeResult<LogicalProperties>;
 
-    /// Gets all logical expression IDs in a group.
+    /// Gets all logical expression IDs in a group (only representative IDs).
     ///
     /// # Parameters
     /// * `group_id` - ID of the group to retrieve expressions from.
@@ -115,7 +115,7 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// # Returns
     /// The group ID if the expression exists, None otherwise.
-    async fn find_logical_expr(
+    async fn find_logical_expr_group(
         &self,
         logical_expr_id: LogicalExpressionId,
     ) -> MemoizeResult<Option<GroupId>>;
@@ -139,16 +139,16 @@ pub trait Memoize: Send + Sync + 'static {
     /// May trigger cascading merges of parent groups & goals.
     ///
     /// # Parameters
-    /// * `group_1` - ID of the first group to merge.
-    /// * `group_2` - ID of the second group to merge.
+    /// * `group_id_1` - ID of the first group to merge.
+    /// * `group_id_2` - ID of the second group to merge.
     ///
     /// # Returns
     /// Merge results for all affected entities including newly dirtied
     /// transformations, implementations and costings.
     async fn merge_groups(
         &mut self,
-        group_1: GroupId,
-        group_2: GroupId,
+        group_id_1: GroupId,
+        group_id_2: GroupId,
     ) -> MemoizeResult<MergeResult>;
 
     //
@@ -168,7 +168,7 @@ pub trait Memoize: Send + Sync + 'static {
         goal_id: GoalId,
     ) -> MemoizeResult<Option<(PhysicalExpressionId, Cost)>>;
 
-    /// Gets all physical expression IDs in a goal.
+    /// Gets all physical expression IDs in a goal (only representative IDs).
     ///
     /// # Parameters
     /// * `goal_id` - ID of the goal to retrieve expressions from.
@@ -197,7 +197,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// # Returns
     /// The associated Goal ID if the physical expression exists,
     /// None if the expression isn't found in any goal.
-    async fn find_physical_expr(
+    async fn find_physical_expr_goal(
         &self,
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoizeResult<Option<GoalId>>;
@@ -443,4 +443,54 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoizeResult<PhysicalExpression>;
+
+    //
+    // Representative ID operations.
+    //
+
+    /// Finds the representative group ID for a given group ID.
+    ///
+    /// # Parameters
+    /// * `group_id` - The group ID to find the representative for.
+    ///
+    /// # Returns
+    /// The representative group ID (which may be the same as the input if
+    /// it's already the representative).
+    async fn find_repr_group(&self, group_id: GroupId) -> MemoizeResult<GroupId>;
+
+    /// Finds the representative goal ID for a given goal ID.
+    ///
+    /// # Parameters
+    /// * `goal_id` - The goal ID to find the representative for.
+    ///
+    /// # Returns
+    /// The representative goal ID (which may be the same as the input if
+    /// it's already the representative).
+    async fn find_repr_goal(&self, goal_id: GoalId) -> MemoizeResult<GoalId>;
+
+    /// Finds the representative logical expression ID for a given logical expression ID.
+    ///
+    /// # Parameters
+    /// * `logical_expr_id` - The logical expression ID to find the representative for.
+    ///
+    /// # Returns
+    /// The representative logical expression ID (which may be the same as the input if
+    /// it's already the representative).
+    async fn find_repr_logical_expr(
+        &self,
+        logical_expr_id: LogicalExpressionId,
+    ) -> MemoizeResult<LogicalExpressionId>;
+
+    /// Finds the representative physical expression ID for a given physical expression ID.
+    ///
+    /// # Parameters
+    /// * `physical_expr_id` - The physical expression ID to find the representative for.
+    ///
+    /// # Returns
+    /// The representative physical expression ID (which may be the same as the input if
+    /// it's already the representative).
+    async fn find_repr_physical_expr(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoizeResult<PhysicalExpressionId>;
 }
