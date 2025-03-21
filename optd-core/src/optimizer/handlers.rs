@@ -324,7 +324,7 @@ impl<M: Memoize> Optimizer<M> {
             _ => panic!("Only cost tasks can subscribe to goals."),
         }
 
-        // Subscribe to future optimized expressions and bootstrap with current best
+        // Subscribe to future optimized expressions and bootstrap with current best.
         if let Some((best_expr_id, cost)) = self
             .subscribe_task_to_goal(goal_id, related_task_id)
             .await?
@@ -399,7 +399,6 @@ impl<M: Memoize> Optimizer<M> {
 
         // Process all ready messages (in reverse order to avoid index issues when removing).
         for i in ready_indices.iter().rev() {
-            // Take ownership of the message.
             let pending = self.pending_messages.swap_remove(*i);
 
             // Re-send the message to be processed in a new co-routine to not block the
