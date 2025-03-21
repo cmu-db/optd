@@ -297,7 +297,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// # Returns
     /// `Status::Dirty` if there are ongoing events that may affect the costing,
     /// `Status::Clean` if the costing does not need to be re-evaluated.
-    async fn get_costing_status(
+    async fn get_cost_status(
         &self,
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoizeResult<Status>;
@@ -307,7 +307,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// # Parameters
     /// * `physical_expr_id` - ID of the physical expression to update.
     /// * `status` - The new status to set.
-    async fn set_costing_status(
+    async fn set_cost_status(
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         status: Status,
