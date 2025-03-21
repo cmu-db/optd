@@ -41,14 +41,14 @@ const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1000;
 /// Defines the public API for submitting a query and receiving execution plans.
 #[derive(Clone, Debug)]
 pub struct OptimizeRequest {
-    /// The logical plan to optimize
+    /// The logical plan to optimize.
     pub plan: LogicalPlan,
 
-    /// Channel for receiving optimized physical plans
+    /// Channel for receiving optimized physical plans.
     ///
     /// Streams results back as they become available, allowing clients to:
-    /// * Receive progressively better plans during optimization
-    /// * Terminate early when a "good enough" plan is found
+    /// * Receive progressively better plans during optimization.
+    /// * Terminate early when a "good enough" plan is found.
     pub response_tx: Sender<PhysicalPlan>,
 }
 
@@ -57,28 +57,28 @@ pub struct OptimizeRequest {
 /// Each message that includes a JobId represents the result of a completed job,
 /// allowing the optimizer to track which tasks are progressing.
 enum OptimizerMessage {
-    /// Process an optimization request
+    /// Process an optimization request.
     OptimizeRequestWrapper(OptimizeRequest, TaskId),
 
-    /// New logical plan alternative for a group from applying transformation rules
+    /// New logical plan alternative for a group from applying transformation rules.
     NewLogicalPartial(PartialLogicalPlan, GroupId, JobId),
 
-    /// New physical implementation for a goal, awaiting recursive optimization
+    /// New physical implementation for a goal, awaiting recursive optimization.
     NewPhysicalPartial(PartialPhysicalPlan, GoalId, JobId),
 
-    /// Fully optimized physical expressionession with complete costing
+    /// Fully optimized physical expression with complete costing.
     NewCostedPhysical(PhysicalExpressionId, Cost, JobId),
 
-    /// Create a new group with the provided logical properties
+    /// Create a new group with the provided logical properties.
     CreateGroup(LogicalExpressionId, LogicalProperties, JobId),
 
-    /// Subscribe to logical expressionessions in a specific group
+    /// Subscribe to logical expressions in a specific group.
     SubscribeGroup(GroupId, LogicalPlanContinuation, JobId),
 
-    /// Subscribe to optimized physical implementations for a goal
+    /// Subscribe to costed physical expressions for a goal.
     SubscribeGoal(Goal, CostedPhysicalPlanContinuation, JobId),
 
-    /// Retrieve logical properties for a specific group
+    /// Retrieve logical properties for a specific group.
     RetrieveProperties(GroupId, oneshot::Sender<LogicalProperties>),
 }
 
@@ -86,41 +86,41 @@ enum OptimizerMessage {
 ///
 /// Tracks the set of job IDs that must exist before the message can be handled.
 struct PendingMessage {
-    /// The message awaiting processing
+    /// The message stashed for later processing.
     message: OptimizerMessage,
 
-    /// Set of job IDs whose groups must be created before this message can be processed
+    /// Set of job IDs whose groups must be created before this message can be processed.
     pending_dependencies: HashSet<JobId>,
 }
 
-/// The central access point to the OPTD optimizer.
+/// The central access point to the optimizer.
 ///
 /// Provides the interface to submit logical plans for optimization and receive
 /// optimized physical plans in return.
 pub struct Optimizer<M: Memoize> {
-    // Core components
+    // Core components.
     memo: M,
     rule_book: RuleBook,
     hir_context: Context,
 
-    // Message handling
+    // Message handling.
     pending_messages: Vec<PendingMessage>,
     message_tx: Sender<OptimizerMessage>,
     message_rx: Receiver<OptimizerMessage>,
     optimize_rx: Receiver<OptimizeRequest>,
 
-    // Task management
+    // Task management.
     tasks: HashMap<TaskId, Task>,
     next_task_id: TaskId,
 
-    // Job management
+    // Job management.
     pending_jobs: HashMap<JobId, Job>,
     job_schedule_queue: VecDeque<JobId>,
     running_jobs: HashMap<JobId, Job>,
     next_job_id: JobId,
     max_concurrent_jobs: usize,
 
-    // Task indexing
+    // Task indexing.
     group_explorations_task_index: HashMap<GroupId, TaskId>,
     expression_exploration_task_index: HashMap<LogicalExpressionId, TaskId>,
     goal_exploration_task_index: HashMap<GoalId, TaskId>,
@@ -128,11 +128,11 @@ pub struct Optimizer<M: Memoize> {
         HashMap<LogicalExpressionId, Vec<(PhysicalProperties, TaskId)>>,
     expression_costing_task_index: HashMap<PhysicalExpressionId, TaskId>,
 
-    // Subscriptions
+    // Subscriptions.
     group_subscribers: HashMap<GroupId, Vec<TaskId>>,
     goal_subscribers: HashMap<GoalId, Vec<TaskId>>,
 
-    // Representative tracking
+    // Representative tracking.
     group_repr: Representative<GroupId>,
     goal_repr: Representative<GoalId>,
     logical_expr_repr: Representative<LogicalExpressionId>,
@@ -140,9 +140,9 @@ pub struct Optimizer<M: Memoize> {
 }
 
 impl<M: Memoize> Optimizer<M> {
-    /// Create a new optimizer instance with the given memo and HIR continuationext
+    /// Create a new optimizer instance with the given memo and HIR context.
     ///
-    /// Use `launch` to create and start the optimizer in one step.
+    /// Use `launch` to create and start the optimizer.
     fn new(
         memo: M,
         hir: HIR,
@@ -151,40 +151,40 @@ impl<M: Memoize> Optimizer<M> {
         optimize_rx: Receiver<OptimizeRequest>,
     ) -> Self {
         Self {
-            // Core components
+            // Core components.
             memo,
             rule_book: RuleBook::default(),
             hir_context: hir.context,
 
-            // Message handling
+            // Message handling.
             pending_messages: Vec::new(),
             message_tx,
             message_rx,
             optimize_rx,
 
-            // Task management
+            // Task management.
             tasks: HashMap::new(),
             next_task_id: TaskId(0),
 
-            // Job management
+            // Job management.
             pending_jobs: HashMap::new(),
             job_schedule_queue: VecDeque::new(),
             running_jobs: HashMap::new(),
             next_job_id: JobId(0),
             max_concurrent_jobs: DEFAULT_MAX_CONCURRENT_JOBS,
 
-            // Task indexing
+            // Task indexing.
             group_explorations_task_index: HashMap::new(),
             expression_exploration_task_index: HashMap::new(),
             goal_exploration_task_index: HashMap::new(),
             expression_implementation_task_index: HashMap::new(),
             expression_costing_task_index: HashMap::new(),
 
-            // Subscriptions
+            // Subscriptions.
             group_subscribers: HashMap::new(),
             goal_subscribers: HashMap::new(),
 
-            // Representative tracking
+            // Representative tracking.
             group_repr: Representative::new(),
             goal_repr: Representative::new(),
             logical_expr_repr: Representative::new(),
@@ -227,35 +227,42 @@ impl<M: Memoize> Optimizer<M> {
                 },
                 Some(message) = self.message_rx.next() => {
                     // Process the next message in the channel.
-                    match message {
+                    let processed_result = match message {
                         OptimizeRequestWrapper(request, task_id_opt) => {
-                            self.process_optimize_request(request.plan, request.response_tx, task_id_opt).await;
+                            self.process_optimize_request(request.plan, request.response_tx, task_id_opt).await
                         }
                         NewLogicalPartial(plan, group_id, job_id) => {
-                            self.process_new_logical_partial(plan, group_id, job_id).await;
+                            self.process_new_logical_partial(plan, group_id, job_id).await
                         },
                         NewPhysicalPartial(plan, goal_id, job_id) => {
-                            self.process_new_physical_partial(plan, goal_id, job_id).await;
+                            self.process_new_physical_partial(plan, goal_id, job_id).await
                         },
                         NewCostedPhysical(expression_id, cost, _) => {
-                            self.process_new_costed_physical(expression_id, cost).await;
+                            self.process_new_costed_physical(expression_id, cost).await
                         },
                         CreateGroup( expression_id, properties, job_id) => {
-                            self.process_create_group(expression_id, &properties, job_id).await;
+                            self.process_create_group(expression_id, &properties, job_id).await
                         },
                         SubscribeGroup(group_id, continuation, job_id) => {
-                            self.process_group_subscription(group_id, continuation, job_id).await;
+                            self.process_group_subscription(group_id, continuation, job_id).await
                         },
                         SubscribeGoal(goal, continuation, job_id) => {
-                            self.process_goal_subscription(&goal, continuation, job_id).await;
+                            self.process_goal_subscription(&goal, continuation, job_id).await
                         },
                         RetrieveProperties(group_id, sender) => {
-                            self.process_retrieve_properties(group_id, sender).await;
+                            self.process_retrieve_properties(group_id, sender).await
                         },
-                    }
+                    };
 
-                    // Launch pending jobs according to a policy.
-                    self.launch_pending_jobs().await;
+                    // TODO(Alexis): If an error occurs we could restart or reboot the memo.
+                    // Rather than failing (e.g. memo could be distributed).
+                    processed_result.expect("Failed to process message");
+
+                    // Launch pending jobs according to a policy (currently FIFO).
+                    // TODO(Alexis): Ditto for error handling.
+                    self.launch_pending_jobs().await.expect("Failed to launch pending jobs");
+
+                    // TODO(Yuchen): Code to cleanup messages & updates statuses here.
                 },
                 else => break,
             }
