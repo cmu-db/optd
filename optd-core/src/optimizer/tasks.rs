@@ -180,30 +180,6 @@ impl ImplementExpressionTask {
             continuations: HashMap::new(),
         }
     }
-
-    /// Registers a logical expression continuation for a specific group.
-    ///
-    /// Multiple continuations can be registered for the same group, and all will
-    /// be notified when new logical expressions are created for that group.
-    ///
-    /// # Parameters
-    /// * `group_id` - The group ID to associate this continuation with.
-    /// * `continuation` - The continuation to call when a new expression is created.
-    pub(super) fn register_continuation(
-        &mut self,
-        group_id: GroupId,
-        continuation: LogicalPlanContinuation,
-    ) {
-        self.continuations
-            .entry(group_id)
-            .or_default()
-            .push(continuation);
-    }
-
-    /// Marks the task as launched, indicating that the implementation rule has started.
-    pub(super) fn mark_started(&mut self) {
-        self.has_started = true;
-    }
 }
 
 /// Task data for transforming a logical expression using a specific rule.
@@ -239,30 +215,6 @@ impl TransformExpressionTask {
             continuations: HashMap::new(),
         }
     }
-
-    /// Registers a logical expression continuation for a specific group.
-    ///
-    /// Multiple continuations can be registered for the same group, and all will
-    /// be notified when new logical expressions are created for that group.
-    ///
-    /// # Parameters
-    /// * `group_id` - The group ID to associate this continuation with.
-    /// * `continuation` - The continuation to call when a new expression is created.
-    pub(super) fn register_continuation(
-        &mut self,
-        group_id: GroupId,
-        continuation: LogicalPlanContinuation,
-    ) {
-        self.continuations
-            .entry(group_id)
-            .or_default()
-            .push(continuation);
-    }
-
-    /// Marks the task as started, indicating that the transformation rule has started.
-    pub(super) fn mark_started(&mut self) {
-        self.has_started = true;
-    }
 }
 
 /// Task data for costing a physical expression.
@@ -289,30 +241,6 @@ impl CostExpressionTask {
             has_started,
             continuations: HashMap::new(),
         }
-    }
-
-    /// Registers an optimized expression continuation for a specific goal.
-    ///
-    /// Multiple continuations can be registered for the same goal, and all will
-    /// be notified when new optimized expressions are created for that goal.
-    ///
-    /// # Parameters
-    /// * `goal_id` - The goal ID to associate this continuation with.
-    /// * `continuation` - The continuation to call when a new optimized expression is created.
-    pub(super) fn register_continuation(
-        &mut self,
-        goal_id: GoalId,
-        continuation: CostedPhysicalPlanContinuation,
-    ) {
-        self.continuations
-            .entry(goal_id)
-            .or_default()
-            .push(continuation);
-    }
-
-    /// Marks the task as started, indicating that the cost estimation has started.
-    pub(super) fn mark_started(&mut self) {
-        self.has_started = true;
     }
 }
 

@@ -368,7 +368,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// # Parameters
     /// * `physical_expr_id` - ID of the physical expression to cost.
     /// * `goal_id` - ID of the goal that the costing depends on.
-    async fn add_costing_dependency(
+    async fn add_cost_dependency(
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         goal_id: GoalId,
