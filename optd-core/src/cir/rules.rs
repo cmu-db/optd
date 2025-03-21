@@ -1,6 +1,6 @@
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TransformationRule(pub String);
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ImplementationRule(pub String);
 
 #[derive(Debug, Default)]

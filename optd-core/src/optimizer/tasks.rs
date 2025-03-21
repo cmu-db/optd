@@ -359,8 +359,8 @@ impl<M: Memoize> Optimizer<M> {
         let task_id = self.register_new_task(TransformExpression(task));
         self.register_child_to_task(parent, task_id);
 
-        self.expression_exploration_task_index
-            .insert(expression_id, task_id);
+        self.expression_transformation_task_index
+            .insert((expression_id, rule.clone()), task_id);
 
         if is_dirty {
             self.schedule_job(
@@ -394,9 +394,7 @@ impl<M: Memoize> Optimizer<M> {
         self.register_child_to_task(parent, task_id);
 
         self.expression_implementation_task_index
-            .entry(expression_id)
-            .or_default()
-            .push((goal_id, task_id));
+            .insert((expression_id, goal_id, rule.clone()), task_id);
 
         if is_dirty {
             self.schedule_job(

@@ -8,7 +8,7 @@ use super::{
 use crate::{
     cir::{
         expressions::{LogicalExpressionId, PhysicalExpressionId},
-        goal::{self, Cost, Goal, GoalId},
+        goal::{Cost, Goal, GoalId},
         group::GroupId,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
@@ -82,10 +82,7 @@ impl<M: Memoize> Optimizer<M> {
                 // Atomically perform the merge in the memo and process all
                 // results in memory.
                 let merge_results = self.memo.merge_groups(group_id, new_group_id).await?;
-
-                for result in merge_results {
-                    self.handle_merge_result(result).await;
-                }
+                // TODO(Alexis): Perform the merge!
             }
             Found(_) => {
                 // Group already exists, nothing to merge or do.
@@ -135,15 +132,14 @@ impl<M: Memoize> Optimizer<M> {
             // Atomically perform the merge in the memo and process all
             // results in memory.
             let merge_results = self.memo.merge_goals(ingested_goal_id, goal_id).await?;
-            for result in merge_results {
-                self.handle_merge_result(result).await;
-            }
+            // TODO(Alexis): Perform the merge!
 
             // If a physical expression was just created, its status is *always* dirty
             // and will need to be costed.
             if let Some(expression) = new_expression {
                 let related_task_id = self.running_jobs[&job_id].0;
-                self.launch_cost_expression_task(expression, related_task_id).await?;
+                self.launch_cost_expression_task(expression, related_task_id)
+                    .await?;
             }
         }
 

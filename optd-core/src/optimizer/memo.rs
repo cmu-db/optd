@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// Type alias for results returned by Memoize trait methods
-pub(crate) type MemoizeResult<T> = Result<T, Error>;
+pub type MemoizeResult<T> = Result<T, Error>;
 
 /// Status of a rule application or costing operation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,37 +24,55 @@ pub enum Status {
     Clean,
 }
 
-/// Results of merge operations for different entity types.
-pub enum MergeResult {
-    /// Result of merging two groups.
-    GroupMerge {
-        /// Groups that were merged along with their expressions.
-        /// All expressions listed in `merged_exprs` must be contained within these groups.
-        merged_groups: Vec<(GroupId, Vec<LogicalExpressionId>)>,
+/// Result of merging two groups.
+#[derive(Debug)]
+pub struct MergeGroupResult {
+    /// Groups that were merged along with their expressions.
+    /// All expressions listed in `merged_exprs` must be contained within these groups.
+    pub merged_groups: Vec<(GroupId, Vec<LogicalExpressionId>)>,
 
-        /// ID of the new representative group.
-        new_repr_group: GroupId,
+    /// ID of the new representative group.
+    pub new_repr_group: GroupId,
 
-        /// Expressions that were merged as a result of the group merge.
-        /// These logical expressions are guaranteed to be part of the groups
-        /// listed in `merged_groups`.
-        merged_exprs: Vec<(Vec<LogicalExpressionId>, LogicalExpressionId)>,
-    },
+    /// Expressions that were merged as a result of the group merge.
+    /// These logical expressions are guaranteed to be part of the groups
+    /// listed in `merged_groups`.
+    pub merged_exprs: Vec<(Vec<LogicalExpressionId>, LogicalExpressionId)>,
+}
 
-    /// Result of merging two goals.
-    GoalMerge {
-        /// Goals that were merged along with their expressions.
-        /// All expressions listed in `merged_exprs` must be contained within these goals.
-        merged_goals: Vec<(GoalId, Vec<PhysicalExpressionId>)>,
+/// Result of merging two goals.
+#[derive(Debug)]
+pub struct MergeGoalResult {
+    /// Goals that were merged along with their expressions.
+    /// All expressions listed in `merged_exprs` must be contained within these goals.
+    pub merged_goals: Vec<(GoalId, Vec<PhysicalExpressionId>)>,
 
-        /// ID of the new representative goal.
-        new_repr_goal: GoalId,
+    /// ID of the new representative goal.
+    pub new_repr_goal: GoalId,
 
-        /// Expressions that were merged as a result of the goal merge.
-        /// These physical expressions are guaranteed to be part of the goals
-        /// listed in `merged_goals`.
-        merged_exprs: Vec<(Vec<PhysicalExpressionId>, PhysicalExpressionId)>,
-    },
+    /// Expressions that were merged as a result of the goal merge.
+    /// These physical expressions are guaranteed to be part of the goals
+    /// listed in `merged_goals`.
+    pub merged_exprs: Vec<(Vec<PhysicalExpressionId>, PhysicalExpressionId)>,
+}
+
+/// Results of merge operations with newly dirtied expressions.
+#[derive(Debug)]
+pub struct MergeResult {
+    /// Group merge results.
+    pub group_merges: Vec<MergeGroupResult>,
+
+    /// Goal merge results.
+    pub goal_merges: Vec<MergeGoalResult>,
+
+    /// Transformations that were marked as dirty and need new application.
+    pub dirty_transformations: Vec<(LogicalExpressionId, TransformationRule)>,
+
+    /// Implementations that were marked as dirty and need new application.
+    pub dirty_implementations: Vec<(LogicalExpressionId, GoalId, ImplementationRule)>,
+
+    /// Costings that were marked as dirty and need recomputation.
+    pub dirty_costings: Vec<PhysicalExpressionId>,
 }
 
 /// Core interface for memo-based query optimization.
@@ -125,12 +143,13 @@ pub trait Memoize: Send + Sync + 'static {
     /// * `group_2` - ID of the second group to merge.
     ///
     /// # Returns
-    /// A vector of merge results for all affected entities.
+    /// Merge results for all affected entities including newly dirtied
+    /// transformations, implementations and costings.
     async fn merge_groups(
         &mut self,
         group_1: GroupId,
         group_2: GroupId,
-    ) -> MemoizeResult<Vec<MergeResult>>;
+    ) -> MemoizeResult<MergeResult>;
 
     //
     // Physical expression and goal operations.
@@ -204,12 +223,13 @@ pub trait Memoize: Send + Sync + 'static {
     /// * `goal_id_2` - ID of the second goal to merge.
     ///
     /// # Returns
-    /// A vector of merge results for all affected entities.
+    /// Merge results for all affected entities including newly dirtied
+    /// transformations, implementations and costings.
     async fn merge_goals(
         &mut self,
         goal_id_1: GoalId,
         goal_id_2: GoalId,
-    ) -> MemoizeResult<Vec<MergeResult>>;
+    ) -> MemoizeResult<MergeResult>;
 
     /// Updates the cost of a physical expression ID.
     ///
@@ -244,17 +264,15 @@ pub trait Memoize: Send + Sync + 'static {
         rule: &TransformationRule,
     ) -> MemoizeResult<Status>;
 
-    /// Sets the status of applying a transformation rule on a logical expression ID.
+    /// Sets the status of a transformation rule as clean on a logical expression ID.
     ///
     /// # Parameters
     /// * `logical_expr_id` - ID of the logical expression to update.
     /// * `rule` - Transformation rule to set status for.
-    /// * `status` - The new status to set.
-    async fn set_transformation_status(
+    async fn set_transformation_clean(
         &mut self,
         logical_expr_id: LogicalExpressionId,
         rule: &TransformationRule,
-        status: Status,
     ) -> MemoizeResult<()>;
 
     /// Checks the status of applying an implementation rule on a logical expression ID and goal ID.
@@ -274,19 +292,17 @@ pub trait Memoize: Send + Sync + 'static {
         rule: &ImplementationRule,
     ) -> MemoizeResult<Status>;
 
-    /// Sets the status of applying an implementation rule on a logical expression ID and goal ID.
+    /// Sets the status of an implementation rule as clean on a logical expression ID and goal ID.
     ///
     /// # Parameters
     /// * `logical_expr_id` - ID of the logical expression to update.
     /// * `goal_id` - ID of the goal to update against.
     /// * `rule` - Implementation rule to set status for.
-    /// * `status` - The new status to set.
-    async fn set_implementation_status(
+    async fn set_implementation_clean(
         &mut self,
         logical_expr_id: LogicalExpressionId,
         goal_id: GoalId,
         rule: &ImplementationRule,
-        status: Status,
     ) -> MemoizeResult<()>;
 
     /// Checks the status of costing a physical expression ID.
@@ -302,15 +318,60 @@ pub trait Memoize: Send + Sync + 'static {
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoizeResult<Status>;
 
-    /// Sets the status of costing a physical expression ID.
+    /// Sets the status of costing a physical expression ID as clean.
     ///
     /// # Parameters
     /// * `physical_expr_id` - ID of the physical expression to update.
-    /// * `status` - The new status to set.
-    async fn set_cost_status(
+    async fn set_cost_clean(&mut self, physical_expr_id: PhysicalExpressionId)
+        -> MemoizeResult<()>;
+
+    /// Adds a dependency between a transformation rule application and a group.
+    ///
+    /// This registers that the application of the transformation rule on the logical expression
+    /// depends on the group. When the group changes, the transformation status should be set to dirty.
+    ///
+    /// # Parameters
+    /// * `logical_expr_id` - ID of the logical expression the rule is applied to.
+    /// * `rule` - Transformation rule that depends on the group.
+    /// * `group_id` - ID of the group that the transformation depends on.
+    async fn add_transformation_dependency(
+        &mut self,
+        logical_expr_id: LogicalExpressionId,
+        rule: &TransformationRule,
+        group_id: GroupId,
+    ) -> MemoizeResult<()>;
+
+    /// Adds a dependency between an implementation rule application and a group.
+    ///
+    /// This registers that the application of the implementation rule on the logical expression
+    /// for a specific goal depends on the group. When the group changes, the implementation status
+    /// should be set to dirty.
+    ///
+    /// # Parameters
+    /// * `logical_expr_id` - ID of the logical expression the rule is applied to.
+    /// * `goal_id` - ID of the goal the implementation targets.
+    /// * `rule` - Implementation rule that depends on the group.
+    /// * `group_id` - ID of the group that the implementation depends on.
+    async fn add_implementation_dependency(
+        &mut self,
+        logical_expr_id: LogicalExpressionId,
+        goal_id: GoalId,
+        rule: &ImplementationRule,
+        group_id: GroupId,
+    ) -> MemoizeResult<()>;
+
+    /// Adds a dependency between costing a physical expression and a goal.
+    ///
+    /// This registers that the costing of the physical expression depends on the goal.
+    /// When the goal changes, the costing status should be set to dirty.
+    ///
+    /// # Parameters
+    /// * `physical_expr_id` - ID of the physical expression to cost.
+    /// * `goal_id` - ID of the goal that the costing depends on.
+    async fn add_costing_dependency(
         &mut self,
         physical_expr_id: PhysicalExpressionId,
-        status: Status,
+        goal_id: GoalId,
     ) -> MemoizeResult<()>;
 
     //
