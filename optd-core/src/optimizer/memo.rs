@@ -64,7 +64,7 @@ pub(crate) enum MergeResult {
 /// query optimization. The memo stores logical and physical expressions by their IDs,
 /// manages expression properties, and tracks optimization status.
 #[trait_variant::make(Send)]
-pub(crate) trait Memoize: Send + Sync + 'static {
+pub trait Memoize: Send + Sync + 'static {
     //
     // Logical expression and group operations.
     //
