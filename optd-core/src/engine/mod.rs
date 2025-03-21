@@ -241,10 +241,10 @@ impl<E: Generator> Engine<E> {
         Call(rule_name_expr.into(), arg_exprs).into()
     }
 
-    /// Helper function to process values and handle failures
+    /// Helper function to process values and handle failures.
     ///
-    /// This abstracts the common pattern of handling failures and value transformation
-    /// for all rule application functions.
+    /// Concretly, this function checks if the value is a reserved "fail" expression
+    /// and prints an error message if it is. Otherwise, it passes to the continuation.
     ///
     /// # Parameters
     /// * `value` - The value from rule evaluation
