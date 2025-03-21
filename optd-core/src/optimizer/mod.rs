@@ -4,7 +4,7 @@ use crate::{
         goal::{Cost, Goal, GoalId},
         group::GroupId,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
-        properties::{LogicalProperties, PhysicalProperties},
+        properties::LogicalProperties,
         rules::RuleBook,
     },
     engine::{CostedPhysicalPlanContinuation, LogicalPlanContinuation},

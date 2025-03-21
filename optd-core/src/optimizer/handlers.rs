@@ -143,7 +143,7 @@ impl<M: Memoize> Optimizer<M> {
             // and will need to be costed.
             if let Some(expression) = new_expression {
                 let related_task_id = self.running_jobs[&job_id].0;
-                self.launch_cost_expression_task(expression, related_task_id);
+                self.launch_cost_expression_task(expression, related_task_id).await?;
             }
         }
 

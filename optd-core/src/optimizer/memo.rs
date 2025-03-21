@@ -16,7 +16,7 @@ pub(crate) type MemoizeResult<T> = Result<T, Error>;
 
 /// Status of a rule application or costing operation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Status {
+pub enum Status {
     /// There exist ongoing jobs that may generate more expressions or costs from this expression.
     Dirty,
 
@@ -25,7 +25,7 @@ pub(crate) enum Status {
 }
 
 /// Results of merge operations for different entity types.
-pub(crate) enum MergeResult {
+pub enum MergeResult {
     /// Result of merging two groups.
     GroupMerge {
         /// Groups that were merged along with their expressions.
