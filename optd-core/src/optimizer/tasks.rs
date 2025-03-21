@@ -327,7 +327,7 @@ impl<M: Memoize> Optimizer<M> {
         // Schedule a job to actually launch the transformation rule
         self.schedule_job(
             task_id,
-            JobKind::TransformationRule(rule, expression_id, group_id),
+            JobKind::StartTransformationRule(rule, expression_id, group_id),
         );
 
         task_id
@@ -360,7 +360,7 @@ impl<M: Memoize> Optimizer<M> {
         if is_dirty {
             self.schedule_job(
                 task_id,
-                JobKind::ImplementationRule(rule, expression_id, goal_id),
+                JobKind::StartImplementationRule(rule, expression_id, goal_id),
             );
         }
 
@@ -384,7 +384,7 @@ impl<M: Memoize> Optimizer<M> {
         self.register_child_to_task(parent, task_id);
 
         // Schedule a job to actually launch the cost estimation
-        self.schedule_job(task_id, JobKind::CostExpression(expression_id));
+        self.schedule_job(task_id, JobKind::StartCostExpression(expression_id));
 
         task_id
     }

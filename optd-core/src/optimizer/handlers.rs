@@ -8,7 +8,7 @@ use super::{
 use crate::{
     cir::{
         expressions::{LogicalExpressionId, PhysicalExpressionId},
-        goal::{Cost, Goal, GoalId},
+        goal::{self, Cost, Goal, GoalId},
         group::GroupId,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
@@ -39,10 +39,11 @@ impl<M: Memoize> Optimizer<M> {
                 // The goal represents what we want to achieve: optimize the root group
                 // with no specific physical properties required.
                 let goal = Goal(group_id, PhysicalProperties(None));
+                let goal_id = self.memo.get_goal_id(&goal).await?;
 
                 // This ensures the task will be notified when optimized expressions
                 // for this goal are found.
-                self.subscribe_task_to_goal(&goal, task_id).await?;
+                self.subscribe_task_to_goal(goal_id, task_id).await?;
             }
             Missing(logical_exprs) => {
                 // Store the request as a pending message that will be processed
@@ -237,8 +238,9 @@ impl<M: Memoize> Optimizer<M> {
         }
 
         // Subscribe to future optimized expressions and bootstrap with current best
-        if let Some((best_expr_id, cost)) =
-            self.subscribe_task_to_goal(goal, related_task_id).await?
+        if let Some((best_expr_id, cost)) = self
+            .subscribe_task_to_goal(goal_id, related_task_id)
+            .await?
         {
             self.schedule_job(
                 related_task_id,

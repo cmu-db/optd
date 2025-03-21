@@ -34,23 +34,23 @@ pub(super) enum JobKind {
     /// statistical properties of a logical expression.
     DeriveLogicalProperties(LogicalExpressionId),
 
-    /// Applies a transformation rule to a logical expression
+    /// Starts applying a transformation rule to a logical expression
     ///
     /// This job generates alternative logical expressions that are
     /// semantically equivalent to the original.
-    TransformationRule(TransformationRule, LogicalExpressionId, GroupId),
+    StartTransformationRule(TransformationRule, LogicalExpressionId, GroupId),
 
-    /// Applies an implementation rule to a logical expression and properties
+    /// Starts applying an implementation rule to a logical expression and properties
     ///
     /// This job generates physical implementations of a logical expression
     /// based on specific implementation strategies.
-    ImplementationRule(ImplementationRule, LogicalExpressionId, GoalId),
+    StartImplementationRule(ImplementationRule, LogicalExpressionId, GoalId),
 
-    /// Computes the cost of a physical expression
+    /// Starts computing the cost of a physical expression
     ///
     /// This job estimates the execution cost of a physical implementation
     /// to aid in selecting the optimal plan.
-    CostExpression(PhysicalExpressionId),
+    StartCostExpression(PhysicalExpressionId),
 
     /// Continues processing with a logical expression result
     ///
@@ -85,7 +85,7 @@ impl<M: Memoize> Optimizer<M> {
                 JobKind::DeriveLogicalProperties(logical_expr_id) => {
                     self.derive_logical_properties_job(logical_expr_id, job_id);
                 }
-                JobKind::TransformationRule(rule_name, logical_expr_id, group_id) => {
+                JobKind::StartTransformationRule(rule_name, logical_expr_id, group_id) => {
                     self.execute_transformation_rule_job(
                         rule_name,
                         logical_expr_id,
@@ -93,7 +93,7 @@ impl<M: Memoize> Optimizer<M> {
                         job_id,
                     );
                 }
-                JobKind::ImplementationRule(rule_name, expression_id, goal_id) => {
+                JobKind::StartImplementationRule(rule_name, expression_id, goal_id) => {
                     self.execute_implementation_rule_job(
                         rule_name,
                         expression_id,
@@ -101,7 +101,7 @@ impl<M: Memoize> Optimizer<M> {
                         job_id,
                     )?;
                 }
-                JobKind::CostExpression(expression_id) => {
+                JobKind::StartCostExpression(expression_id) => {
                     self.execute_cost_expression_job(expression_id, job_id);
                 }
                 JobKind::ContinueWithLogical(logical_expr_id, k) => {
