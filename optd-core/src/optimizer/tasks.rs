@@ -27,10 +27,6 @@ use TaskKind::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct TaskId(pub i64);
 
-/// Unique identifier for continuations in the optimization system.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct ContinuationId(pub i64);
-
 //
 // Core task structures.
 //
@@ -163,18 +159,9 @@ pub(super) struct ImplementExpressionTask {
     /// The goal ID for this implementation.
     pub goal_id: GoalId,
 
-    /// Next continuation ID to assign.
-    pub next_continuation_id: ContinuationId,
-
-    /// Maps continuation IDs to their actual continuations.
-    pub continuations: HashMap<ContinuationId, LogicalPlanContinuation>,
-
-    /// Maps groups to continuation IDs that need to be notified when
-    /// new logical expressions are created for that group.
-    pub group_continuations: HashMap<GroupId, Vec<ContinuationId>>,
-
-    /// Maps continuation IDs to the logical expressions they've been notified about.
-    pub launched_continuations: HashMap<ContinuationId, Vec<LogicalExpressionId>>,
+    /// Continuations for each group that need to be notified when
+    /// new logical expressions are created.
+    pub continuations: HashMap<GroupId, Vec<LogicalPlanContinuation>>,
 }
 
 impl ImplementExpressionTask {
@@ -190,10 +177,7 @@ impl ImplementExpressionTask {
             has_started,
             expression_id,
             goal_id,
-            next_continuation_id: ContinuationId(0),
             continuations: HashMap::new(),
-            group_continuations: HashMap::new(),
-            launched_continuations: HashMap::new(),
         }
     }
 }
@@ -212,18 +196,9 @@ pub(super) struct TransformExpressionTask {
     /// The logical expression to transform.
     pub expression_id: LogicalExpressionId,
 
-    /// Next continuation ID to assign.
-    pub next_continuation_id: ContinuationId,
-
-    /// Maps continuation IDs to their actual continuations.
-    pub continuations: HashMap<ContinuationId, LogicalPlanContinuation>,
-
-    /// Maps groups to continuation IDs that need to be notified when
-    /// new logical expressions are created for that group.
-    pub group_continuations: HashMap<GroupId, Vec<ContinuationId>>,
-
-    /// Maps continuation IDs to the logical expressions they've been notified about.
-    pub launched_continuations: HashMap<ContinuationId, Vec<LogicalExpressionId>>,
+    /// Continuations for each group that need to be notified when
+    /// new logical expressions are created.
+    pub continuations: HashMap<GroupId, Vec<LogicalPlanContinuation>>,
 }
 
 impl TransformExpressionTask {
@@ -237,10 +212,7 @@ impl TransformExpressionTask {
             rule,
             has_started,
             expression_id,
-            next_continuation_id: ContinuationId(0),
             continuations: HashMap::new(),
-            group_continuations: HashMap::new(),
-            launched_continuations: HashMap::new(),
         }
     }
 }
@@ -256,18 +228,9 @@ pub(super) struct CostExpressionTask {
     /// Whether the task has started the cost estimation.
     pub has_started: bool,
 
-    /// Next continuation ID to assign.
-    pub next_continuation_id: ContinuationId,
-
-    /// Maps continuation IDs to their actual continuations.
-    pub continuations: HashMap<ContinuationId, CostedPhysicalPlanContinuation>,
-
-    /// Maps goals to continuation IDs that need to be notified when
-    /// optimized expressions are created for that goal.
-    pub goal_continuations: HashMap<GoalId, Vec<ContinuationId>>,
-
-    /// Maps continuation IDs to the physical expressions they've been notified about.
-    pub launched_continuations: HashMap<ContinuationId, Vec<PhysicalExpressionId>>,
+    /// Continuations for each goal that need to be notified when
+    /// optimized expressions are created.
+    pub continuations: HashMap<GoalId, Vec<CostedPhysicalPlanContinuation>>,
 }
 
 impl CostExpressionTask {
@@ -276,10 +239,7 @@ impl CostExpressionTask {
         Self {
             expression_id,
             has_started,
-            next_continuation_id: ContinuationId(0),
             continuations: HashMap::new(),
-            goal_continuations: HashMap::new(),
-            launched_continuations: HashMap::new(),
         }
     }
 }
