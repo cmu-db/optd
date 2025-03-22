@@ -43,9 +43,9 @@ pub struct MergeGroupResult {
 /// Result of merging two goals.
 #[derive(Debug)]
 pub struct MergeGoalResult {
-    /// Goals that were merged along with their expressions.
+    /// Goals that were merged along with their potential best costed expression.
     /// All expressions listed in `merged_exprs` must be contained within these goals.
-    pub merged_goals: Vec<(GoalId, Vec<PhysicalExpressionId>)>,
+    pub merged_goals: Vec<(GoalId, Option<(PhysicalExpressionId, Cost)>)>,
 
     /// ID of the new representative goal id.
     pub new_repr_goal_id: GoalId,

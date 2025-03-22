@@ -395,7 +395,25 @@ impl<M: Memoize> Optimizer<M> {
             // 2. Task updates using indexes.
         }
 
-        todo!()
+        for goal_merge in result.goal_merges {
+            let all_exprs_by_goal = goal_merge.merged_goals;
+
+            // For each goal, schedule expressions from all OTHER goals,
+            // ignoring any potential duplicates due to merges for now.
+            for (i, (current_goal_id, _)) in all_exprs_by_goal.iter().enumerate() {
+                let other_goals_exprs: Vec<_> = all_exprs_by_goal
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, _)| *j != i) // Filter out the current goal.
+                    .flat_map(|(_, (_, exprs))| exprs)
+                    .copied()
+                    .collect();
+
+                self.schedule_optimized_continuations(*current_goal_id, &other_goals_exprs);
+            }
+
+            // 2. Task updates using indexes.
+        }
     }
 
     /// Helper method to resolve dependencies after a group creation job completes.
