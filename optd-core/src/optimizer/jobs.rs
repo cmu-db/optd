@@ -168,7 +168,7 @@ impl<M: Memoize> Optimizer<M> {
     /// This creates an engine instance and launches the property derivation process
     /// for the specified logical expression.
     async fn derive_logical_properties_job(
-        &mut self,
+        &self,
         expression_id: LogicalExpressionId,
         job_id: JobId,
     ) -> Result<(), Error> {
@@ -297,7 +297,7 @@ impl<M: Memoize> Optimizer<M> {
     /// This creates an engine instance and launches the cost calculation process
     /// for the specified physical expression.
     async fn execute_cost_expression_job(
-        &mut self,
+        &self,
         expression_id: PhysicalExpressionId,
         job_id: JobId,
     ) -> Result<(), Error> {
@@ -335,7 +335,7 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// This materializes the logical expression and passes it to the continuation.
     async fn execute_continue_with_logical_job(
-        &mut self,
+        &self,
         expression_id: LogicalExpressionId,
         k: LogicalPlanContinuation,
     ) -> Result<(), Error> {
@@ -357,7 +357,7 @@ impl<M: Memoize> Optimizer<M> {
     /// This materializes the physical expression and passes it along with its cost
     /// to the continuation.
     async fn execute_continue_with_optimized_job(
-        &mut self,
+        &self,
         physical_expr_id: PhysicalExpressionId,
         cost: Cost,
         k: CostedPhysicalPlanContinuation,
