@@ -6,7 +6,7 @@ use super::{
 use crate::{
     cir::{
         expressions::{LogicalExpressionId, PhysicalExpressionId},
-        goal::{Goal, GoalId},
+        goal::GoalId,
         group::GroupId,
         plans::{LogicalPlan, PhysicalPlan},
         properties::PhysicalProperties,
