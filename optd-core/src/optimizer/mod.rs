@@ -4,7 +4,7 @@ use crate::{
         goal::{Cost, Goal, GoalId},
         group::GroupId,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
-        properties::LogicalProperties,
+        properties::{LogicalProperties, PhysicalProperties},
         rules::RuleBook,
     },
     engine::{CostedPhysicalPlanContinuation, LogicalPlanContinuation},
@@ -120,7 +120,8 @@ pub struct Optimizer<M: Memoize> {
 
     // Task indexing.
     group_exploration_task_index: HashMap<GroupId, TaskId>,
-    goal_exploration_task_index: HashMap<GoalId, TaskId>,
+    group_implementation_task_index: HashMap<GroupId, Vec<(PhysicalProperties, TaskId)>>,
+    goal_optimization_task_index: HashMap<GoalId, TaskId>,
 
     // Subscriptions.
     group_subscribers: HashMap<GroupId, Vec<TaskId>>,
@@ -163,7 +164,8 @@ impl<M: Memoize> Optimizer<M> {
 
             // Task indexing.
             group_exploration_task_index: HashMap::new(),
-            goal_exploration_task_index: HashMap::new(),
+            group_implementation_task_index: HashMap::new(),
+            goal_optimization_task_index: HashMap::new(),
 
             // Subscriptions.
             group_subscribers: HashMap::new(),

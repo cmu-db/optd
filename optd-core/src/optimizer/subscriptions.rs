@@ -67,7 +67,7 @@ impl<M: Memoize> Optimizer<M> {
             subscribers.push(subscriber_task_id);
         }
 
-        self.ensure_goal_exploration_task(goal_id, subscriber_task_id)
+        self.ensure_goal_optimize_task(goal_id, subscriber_task_id)
             .await?;
 
         self.memo.get_best_optimized_physical_expr(goal_id).await
