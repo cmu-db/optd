@@ -453,7 +453,7 @@ impl<M: Memoize> Optimizer<M> {
     /// finding equivalent goals, launching group implementation tasks, and
     /// costing physical expressions.
     async fn launch_goal_optimize_task(&mut self, goal_id: GoalId) -> Result<TaskId, Error> {
-        let groups_with_properies = self.memo.resolve_goal_to_groups(goal_id).await?;
+        let groups_with_properies = self.memo.resolve_to_groups_and_props(goal_id).await?;
         let task_id = self.register_new_task(OptimizeGoal(goal_id));
         self.goal_optimization_task_index.insert(goal_id, task_id);
 

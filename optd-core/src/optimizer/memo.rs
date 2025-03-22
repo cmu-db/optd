@@ -188,7 +188,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// # Returns
     /// A vector of tuples containing group IDs and their associated physical properties
     /// that correspond to the given goal.
-    async fn resolve_goal_to_groups(
+    async fn resolve_to_groups_and_props(
         &self,
         goal_id: GoalId,
     ) -> MemoizeResult<Vec<(GroupId, Vec<PhysicalProperties>)>>;
