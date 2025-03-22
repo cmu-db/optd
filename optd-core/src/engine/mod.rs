@@ -93,10 +93,10 @@ impl<E: Generator> Engine<E> {
     pub(crate) fn launch_transformation_rule(
         self,
         rule_name: String,
-        plan: &PartialLogicalPlan,
+        plan: PartialLogicalPlan,
         k: LogicalPlanContinuation,
     ) -> UnitFuture {
-        let rule_call = self.create_rule_call(&rule_name, vec![partial_logical_to_value(plan)]);
+        let rule_call = self.create_rule_call(&rule_name, vec![partial_logical_to_value(&plan)]);
 
         Box::pin(async move {
             rule_call
@@ -131,12 +131,12 @@ impl<E: Generator> Engine<E> {
     pub(crate) fn launch_implementation_rule(
         self,
         rule_name: String,
-        plan: &PartialLogicalPlan,
-        props: &PhysicalProperties,
+        plan: PartialLogicalPlan,
+        props: PhysicalProperties,
         k: PhysicalPlanContinuation,
     ) -> UnitFuture {
-        let plan_value = partial_logical_to_value(plan);
-        let props_value = physical_properties_to_value(props);
+        let plan_value = partial_logical_to_value(&plan);
+        let props_value = physical_properties_to_value(&props);
 
         let rule_call = self.create_rule_call(&rule_name, vec![plan_value, props_value]);
 
@@ -170,11 +170,11 @@ impl<E: Generator> Engine<E> {
     /// * `k` - The continuation to receive cost values
     pub(crate) fn launch_cost_plan(
         self,
-        plan: &PartialPhysicalPlan,
+        plan: PartialPhysicalPlan,
         k: CostContinuation,
     ) -> UnitFuture {
         // Create a call to the reserved "cost" function
-        let rule_call = self.create_rule_call("cost", vec![partial_physical_to_value(plan)]);
+        let rule_call = self.create_rule_call("cost", vec![partial_physical_to_value(&plan)]);
 
         Box::pin(async move {
             rule_call
@@ -200,11 +200,11 @@ impl<E: Generator> Engine<E> {
     /// * `k` - The continuation to receive the logical properties
     pub(crate) fn launch_derive_properties(
         self,
-        plan: &PartialLogicalPlan,
+        plan: PartialLogicalPlan,
         k: PropertiesContinuation,
     ) -> UnitFuture {
         // Create a call to the reserved "derive" function
-        let rule_call = self.create_rule_call("derive", vec![partial_logical_to_value(plan)]);
+        let rule_call = self.create_rule_call("derive", vec![partial_logical_to_value(&plan)]);
 
         Box::pin(async move {
             rule_call

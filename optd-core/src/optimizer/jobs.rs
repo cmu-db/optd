@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use super::{
     generator::OptimizerGenerator, memo::Memoize, tasks::TaskId, Optimizer, OptimizerMessage,
 };
@@ -15,14 +13,17 @@ use crate::{
     engine::{CostedPhysicalPlanContinuation, Engine, LogicalPlanContinuation},
     error::Error,
 };
-use futures::SinkExt;
+use futures::{future::try_join_all, SinkExt};
+use std::sync::Arc;
+use Child::*;
 use JobKind::*;
+use OptimizerMessage::*;
 
-/// Unique identifier for jobs in the optimization system
+/// Unique identifier for jobs in the optimization system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct JobId(pub i64);
 
-/// A job represents a discrete unit of work within the optimization process
+/// A job represents a discrete unit of work within the optimization process.
 ///
 /// Jobs are launched by tasks and represent atomic operations that contribute to
 /// completing the task. Multiple jobs may be launched by a single task, and all
@@ -30,43 +31,43 @@ pub(super) struct JobId(pub i64);
 #[derive(Clone)]
 pub(super) struct Job(pub TaskId, pub JobKind);
 
-/// Enumeration of different types of jobs in the optimizer
+/// Enumeration of different types of jobs in the optimizer.
 ///
 /// Each variant represents a specific optimization operation that can be
 /// performed asynchronously and independently.
 #[derive(Clone)]
 pub(super) enum JobKind {
-    /// Derives logical properties for a logical expression
+    /// Derives logical properties for a logical expression.
     ///
     /// This job computes schema, cardinality estimates, and other
     /// statistical properties of a logical expression.
     DeriveLogicalProperties(LogicalExpressionId),
 
-    /// Starts applying a transformation rule to a logical expression
+    /// Starts applying a transformation rule to a logical expression.
     ///
     /// This job generates alternative logical expressions that are
     /// semantically equivalent to the original.
     StartTransformationRule(TransformationRule, LogicalExpressionId, GroupId),
 
-    /// Starts applying an implementation rule to a logical expression and properties
+    /// Starts applying an implementation rule to a logical expression and properties.
     ///
     /// This job generates physical implementations of a logical expression
     /// based on specific implementation strategies.
     StartImplementationRule(ImplementationRule, LogicalExpressionId, GoalId),
 
-    /// Starts computing the cost of a physical expression
+    /// Starts computing the cost of a physical expression.
     ///
     /// This job estimates the execution cost of a physical implementation
     /// to aid in selecting the optimal plan.
     StartCostExpression(PhysicalExpressionId),
 
-    /// Continues processing with a logical expression result
+    /// Continues processing with a logical expression result.
     ///
     /// This job represents a continuation-passing-style callback for
     /// handling the result of a logical expression operation.
     ContinueWithLogical(LogicalExpressionId, LogicalPlanContinuation),
 
-    /// Continues processing with an optimized expression result
+    /// Continues processing with an optimized expression result.
     ///
     /// This job represents a continuation-passing-style callback for
     /// handling the result of an optimized physical expression operation.
@@ -74,15 +75,20 @@ pub(super) enum JobKind {
 }
 
 impl<M: Memoize> Optimizer<M> {
+    /// Launches all pending jobs until either the maximum concurrent job limit is
+    /// reached or there are no more jobs to launch.
+    ///
+    /// Jobs are launched in FIFO order from the job schedule queue if the number
+    /// of currently running jobs is below the maximum concurrent jobs limit.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during job launching.
     pub(super) async fn launch_pending_jobs(&mut self) -> Result<(), Error> {
         // Launch jobs only if we're below the maximum concurrent jobs limit, in FIFO order.
         while self.running_jobs.len() < self.max_concurrent_jobs
             && !self.job_schedule_queue.is_empty()
         {
-            let job_id = match self.job_schedule_queue.pop_front() {
-                Some(id) => id,
-                None => break,
-            };
+            let job_id = self.job_schedule_queue.pop_front().unwrap();
 
             // Move the job from pending to running.
             let job = self.pending_jobs.remove(&job_id).unwrap();
@@ -125,41 +131,45 @@ impl<M: Memoize> Optimizer<M> {
         Ok(())
     }
 
-    /// Schedules a new job and associates it with a task
+    /// Schedules a new job and associates it with a task.
     ///
     /// This method creates a job of the specified kind, associates it with
     /// the given task, adds it to the pending jobs collection, and updates
     /// the task's uncompleted jobs set.
     ///
     /// # Parameters
-    /// * `task_id` - The ID of the task that's launching this job
-    /// * `kind` - The kind of job to create
+    /// * `task_id` - The ID of the task that's launching this job.
+    /// * `kind` - The kind of job to create.
     ///
     /// # Returns
-    /// The ID of the created job
+    /// * The ID of the created job.
     pub(super) fn schedule_job(&mut self, task_id: TaskId, kind: JobKind) -> JobId {
-        // Generate a new job ID
+        // Generate a new job ID.
         let job_id = self.next_job_id;
         self.next_job_id.0 += 1;
 
-        // Create & schedule the job
+        // Create & schedule the job.
         let job = Job(task_id, kind);
         self.pending_jobs.insert(job_id, job);
         self.job_schedule_queue.push_back(job_id);
 
-        // Add job to task's uncompleted jobs set
+        // Add job to task's uncompleted jobs set.
         self.tasks
             .get_mut(&task_id)
-            .expect("Task must exist when creating a job for it")
+            .unwrap()
             .uncompleted_jobs
             .insert(job_id);
 
         job_id
     }
 
+    /// Executes a job to derive logical properties for a logical expression.
+    ///
+    /// This creates an engine instance and launches the property derivation process
+    /// for the specified logical expression.
     async fn derive_logical_properties_job(
         &mut self,
-        logical_expr_id: LogicalExpressionId,
+        expression_id: LogicalExpressionId,
         job_id: JobId,
     ) -> Result<(), Error> {
         let engine = Engine::new(
@@ -167,30 +177,24 @@ impl<M: Memoize> Optimizer<M> {
             OptimizerGenerator::new(self.message_tx.clone(), job_id),
         );
 
-        let message_tx = self.message_tx.clone();
-        // Materialize the logical expression and convert to a partial logical plan for the engine to use.
-        let partial_logical_plan = self
+        let plan = self
             .memo
-            .materialize_logical_expr(logical_expr_id)
+            .materialize_logical_expr(expression_id)
             .await?
             .into();
 
-        // Spawn inside the function, not in launch_pending_jobs
+        let message_tx = self.message_tx.clone();
         tokio::spawn(async move {
             engine
                 .launch_derive_properties(
-                    &partial_logical_plan,
+                    plan,
                     Arc::new(move |logical_props| {
                         let mut message_tx = message_tx.clone();
                         Box::pin(async move {
                             message_tx
-                                .send(OptimizerMessage::CreateGroup(
-                                    logical_expr_id,
-                                    logical_props,
-                                    job_id,
-                                ))
+                                .send(CreateGroup(expression_id, logical_props, job_id))
                                 .await
-                                .unwrap();
+                                .expect("Failed to send create group - channel closed");
                         })
                     }),
                 )
@@ -199,10 +203,14 @@ impl<M: Memoize> Optimizer<M> {
         Ok(())
     }
 
+    /// Executes a job to apply a transformation rule to a logical expression.
+    ///
+    /// This creates an engine instance and launches the transformation rule
+    /// application process for the specified logical expression.
     async fn execute_transformation_rule_job(
-        &mut self,
+        &self,
         rule_name: TransformationRule,
-        logical_expr_id: LogicalExpressionId,
+        expression_id: LogicalExpressionId,
         group_id: GroupId,
         job_id: JobId,
     ) -> Result<(), Error> {
@@ -210,30 +218,26 @@ impl<M: Memoize> Optimizer<M> {
             self.hir_context.clone(),
             OptimizerGenerator::new(self.message_tx.clone(), job_id),
         );
-        let message_tx = self.message_tx.clone();
 
-        // Materialize the logical expression and convert to a partial logical plan for the engine to use.
-        let partial_logical_plan = self
+        let plan = self
             .memo
-            .materialize_logical_expr(logical_expr_id)
+            .materialize_logical_expr(expression_id)
             .await?
             .into();
+
+        let message_tx = self.message_tx.clone();
         tokio::spawn(async move {
             engine
                 .launch_transformation_rule(
                     rule_name.0,
-                    &partial_logical_plan,
-                    Arc::new(move |partial_logical_plan| {
+                    plan,
+                    Arc::new(move |plan| {
                         let mut message_tx = message_tx.clone();
                         Box::pin(async move {
                             message_tx
-                                .send(OptimizerMessage::NewLogicalPartial(
-                                    partial_logical_plan,
-                                    group_id,
-                                    job_id,
-                                ))
+                                .send(NewLogicalPartial(plan, group_id, job_id))
                                 .await
-                                .unwrap();
+                                .expect("Failed to send new logical partial - channel closed");
                         })
                     }),
                 )
@@ -242,8 +246,12 @@ impl<M: Memoize> Optimizer<M> {
         Ok(())
     }
 
+    /// Executes a job to apply an implementation rule to a logical expression.
+    ///
+    /// This creates an engine instance and launches the implementation rule
+    /// application process for the specified logical expression and goal.
     async fn execute_implementation_rule_job(
-        &mut self,
+        &self,
         rule_name: ImplementationRule,
         expression_id: LogicalExpressionId,
         goal_id: GoalId,
@@ -254,33 +262,27 @@ impl<M: Memoize> Optimizer<M> {
             OptimizerGenerator::new(self.message_tx.clone(), job_id),
         );
 
-        let message_tx = self.message_tx.clone();
-        // Materialize the logical expression and convert to a partial logical plan for the engine to use.
-        let partial_logical_plan = self
+        let Goal(_, physical_props) = self.memo.materialize_goal(goal_id).await?;
+        let plan = self
             .memo
             .materialize_logical_expr(expression_id)
             .await?
             .into();
 
-        let Goal(_, physical_props) = self.memo.materialize_goal(goal_id).await?;
-
+        let message_tx = self.message_tx.clone();
         tokio::spawn(async move {
             engine
                 .launch_implementation_rule(
                     rule_name.0,
-                    &partial_logical_plan,
-                    &physical_props,
-                    Arc::new(move |partial_physical_plan| {
+                    plan,
+                    physical_props,
+                    Arc::new(move |plan| {
                         let mut message_tx = message_tx.clone();
                         Box::pin(async move {
                             message_tx
-                                .send(OptimizerMessage::NewPhysicalPartial(
-                                    partial_physical_plan,
-                                    goal_id,
-                                    job_id,
-                                ))
+                                .send(NewPhysicalPartial(plan, goal_id, job_id))
                                 .await
-                                .unwrap();
+                                .expect("Failed to send new physical partial - channel closed");
                         })
                     }),
                 )
@@ -290,120 +292,130 @@ impl<M: Memoize> Optimizer<M> {
         Ok(())
     }
 
+    /// Executes a job to compute the cost of a physical expression.
+    ///
+    /// This creates an engine instance and launches the cost calculation process
+    /// for the specified physical expression.
     async fn execute_cost_expression_job(
         &mut self,
-        physical_expr_id: PhysicalExpressionId,
+        expression_id: PhysicalExpressionId,
         job_id: JobId,
     ) -> Result<(), Error> {
         let engine = Engine::new(
             self.hir_context.clone(),
             OptimizerGenerator::new(self.message_tx.clone(), job_id),
         );
-        let message_tx = self.message_tx.clone();
 
-        // Materialize the physical expression and convert to a partial logical plan for the engine to use.
-        let partial_physical_plan = self
-            .materialize_partial_physical_plan(physical_expr_id)
+        let plan = self
+            .materialize_partial_physical_plan(expression_id)
             .await?;
 
+        let message_tx = self.message_tx.clone();
         tokio::spawn(async move {
             engine
                 .launch_cost_plan(
-                    &partial_physical_plan,
+                    plan,
                     Arc::new(move |cost| {
                         let mut message_tx = message_tx.clone();
                         Box::pin(async move {
                             message_tx
-                                .send(OptimizerMessage::NewCostedPhysical(
-                                    physical_expr_id,
-                                    cost,
-                                    job_id,
-                                ))
+                                .send(NewCostedPhysical(expression_id, cost, job_id))
                                 .await
-                                .unwrap();
+                                .expect("Failed to send new costed physical - channel closed");
                         })
                     }),
                 )
                 .await;
         });
+
         Ok(())
     }
 
+    /// Executes a job to continue processing with a logical expression result.
+    ///
+    /// This materializes the logical expression and passes it to the continuation.
     async fn execute_continue_with_logical_job(
         &mut self,
-        logical_expr_id: LogicalExpressionId,
+        expression_id: LogicalExpressionId,
         k: LogicalPlanContinuation,
     ) -> Result<(), Error> {
-        // Materialize the logical expression and convert to a partial logical plan for the engine to use.
-        let logical_partial_plan = self
+        let plan = self
             .memo
-            .materialize_logical_expr(logical_expr_id)
+            .materialize_logical_expr(expression_id)
             .await?
             .into();
+
         tokio::spawn(async move {
-            k(logical_partial_plan).await;
+            k(plan).await;
         });
+
         Ok(())
     }
 
+    /// Executes a job to continue processing with an optimized physical expression result.
+    ///
+    /// This materializes the physical expression and passes it along with its cost
+    /// to the continuation.
     async fn execute_continue_with_optimized_job(
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         cost: Cost,
         k: CostedPhysicalPlanContinuation,
     ) -> Result<(), Error> {
-        // Materialize the physical expression and convert to a partial logical plan for the engine to use.
-        let partial_physical_plan = self
+        let plan = self
             .materialize_partial_physical_plan(physical_expr_id)
             .await?;
 
         tokio::spawn(async move {
-            k((partial_physical_plan, cost)).await;
+            k((plan, cost)).await;
         });
+
         Ok(())
     }
 
-    /// Converts a physical expression ID to a partial physical plan
-    /// Needs to materialize both the expression and also the children goals.
+    /// Converts a physical expression ID to a partial physical plan.
+    ///
+    /// This method materializes both the expression and its children goals.
     async fn materialize_partial_physical_plan(
-        &mut self,
-        physical_expr_id: PhysicalExpressionId,
+        &self,
+        expression_id: PhysicalExpressionId,
     ) -> Result<PartialPhysicalPlan, Error> {
-        let physical_expr = self
-            .memo
-            .materialize_physical_expr(physical_expr_id)
-            .await?;
-        let mut children = Vec::with_capacity(physical_expr.children.len());
-        for child in physical_expr.children {
-            let child = self.materialize_physical_child_goal(child).await?;
-            children.push(child);
-        }
+        let expression = self.memo.materialize_physical_expr(expression_id).await?;
+
+        let children = try_join_all(
+            expression
+                .children
+                .iter()
+                .map(|child| self.materialize_physical_child_goal(child.clone())),
+        )
+        .await?;
 
         Ok(PartialPhysicalPlan::Materialized(Operator {
-            tag: physical_expr.tag,
-            data: physical_expr.data,
+            tag: expression.tag,
+            data: expression.data,
             children,
         }))
     }
 
+    /// Materializes a child goal into a partial physical plan.
+    ///
+    /// Handles both singleton and variable-length child types.
     async fn materialize_physical_child_goal(
-        &mut self,
+        &self,
         child: Child<GoalId>,
     ) -> Result<Child<Arc<PartialPhysicalPlan>>, Error> {
         match child {
-            Child::Singleton(goal_id) => {
+            Singleton(goal_id) => {
                 let goal = self.memo.materialize_goal(goal_id).await?;
-                Ok(Child::Singleton(Arc::new(
-                    PartialPhysicalPlan::UnMaterialized(goal),
-                )))
+                Ok(Singleton(PartialPhysicalPlan::UnMaterialized(goal).into()))
             }
-            Child::VarLength(goal_ids) => {
-                let mut goals = Vec::with_capacity(goal_ids.len());
-                for goal_id in goal_ids {
+            VarLength(goal_ids) => {
+                let goals = try_join_all(goal_ids.into_iter().map(|goal_id| async move {
                     let goal = self.memo.materialize_goal(goal_id).await?;
-                    goals.push(Arc::new(PartialPhysicalPlan::UnMaterialized(goal)));
-                }
-                Ok(Child::VarLength(goals))
+                    Ok(PartialPhysicalPlan::UnMaterialized(goal).into())
+                }))
+                .await?;
+                Ok(VarLength(goals))
             }
         }
     }
