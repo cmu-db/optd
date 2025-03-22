@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use super::{
     ingest::{LogicalIngest, PhysicalIngest},
     jobs::JobKind,
@@ -381,6 +383,7 @@ impl<M: Memoize> Optimizer<M> {
         // First, handle all the group merges.
         for group_merge in result.group_merges {
             let all_exprs_by_group = group_merge.merged_groups;
+            let new_repr_group_id = group_merge.new_repr_group_id;
 
             // 1. For each group, schedule expressions from all OTHER groups,
             // ignoring any potential duplicates due to merges for now.
@@ -396,51 +399,13 @@ impl<M: Memoize> Optimizer<M> {
                 self.schedule_logical_continuations(*current_group_id, &other_groups_exprs);
             }
 
-            // 2. Merge the exploration tasks for all groups into a single task.
-            let exploring_task_ids: Vec<_> = all_exprs_by_group
-                .iter()
-                .filter_map(|(group_id, _)| {
-                    self.group_exploration_task_index.get(group_id).copied()
-                })
-                .collect();
+            // 2. Handle exploration tasks for the merged groups.
+            self.merge_exploration_tasks(&all_exprs_by_group, new_repr_group_id)
+                .await;
 
-            match exploring_task_ids.len() {
-                0 => {
-                    // No exploration tasks existed, nothing to do.
-                }
-                1 => {
-                    // Just one task exists, update its index to point to the new representative.
-                    let task_id = exploring_task_ids[0];
-                    self.group_exploration_task_index
-                        .insert(group_merge.new_repr_group_id, task_id);
-                }
-                _ => {
-                    // Multiple tasks exist, we need to merge them.
-                    let primary_task_id = exploring_task_ids[0];
-
-                    let transfers: Vec<_> = exploring_task_ids[1..]
-                        .iter()
-                        .filter_map(|&task_id| {
-                            self.tasks
-                                .get(&task_id)
-                                .map(|task| (task.children.clone(), task.uncompleted_jobs.clone()))
-                        })
-                        .collect();
-
-                    if let Some(primary_task) = self.tasks.get_mut(&primary_task_id) {
-                        for (children, jobs) in transfers {
-                            primary_task.children.extend(children);
-                            primary_task.uncompleted_jobs.extend(jobs);
-                        }
-                    }
-
-                    for (group_id, _) in all_exprs_by_group.iter() {
-                        self.group_exploration_task_index.remove(group_id);
-                    }
-                    self.group_exploration_task_index
-                        .insert(group_merge.new_repr_group_id, primary_task_id);
-                }
-            }
+            // 3. Handle implementation tasks for the merged groups.
+            self.merge_implementation_tasks(&all_exprs_by_group, new_repr_group_id)
+                .await;
         }
 
         // Second, handle all the goal merges.
@@ -474,9 +439,86 @@ impl<M: Memoize> Optimizer<M> {
             }
 
             // 2. Task updates using indexes.
+            // Need to launch new cost expressions.
         }
 
         // 3. Dirty stuff.
+    }
+
+    /// Helper method to merge exploration tasks for merged groups.
+    ///
+    /// # Parameters
+    /// * `all_exprs_by_group` - All groups and their expressions that were merged.
+    /// * `new_repr_group_id` - The new representative group ID.
+    async fn merge_exploration_tasks(
+        &mut self,
+        all_exprs_by_group: &[(GroupId, Vec<LogicalExpressionId>)],
+        new_repr_group_id: GroupId,
+    ) {
+        // Collect all task IDs associated with the merged groups.
+        let exploring_tasks: Vec<_> = all_exprs_by_group
+            .iter()
+            .filter_map(|(group_id, _)| {
+                self.group_exploration_task_index
+                    .get(group_id)
+                    .copied()
+                    .map(|task_id| (task_id, *group_id))
+            })
+            .collect();
+
+        match exploring_tasks.as_slice() {
+            [] => return, // No tasks exist, nothing to do.
+
+            [(task_id, group_id)] => {
+                // Just one task exists - update its index and kind.
+                if *group_id != new_repr_group_id {
+                    self.group_exploration_task_index.remove(group_id);
+                }
+
+                self.group_exploration_task_index
+                    .insert(new_repr_group_id, *task_id);
+
+                let task = self.tasks.get_mut(task_id).unwrap();
+                task.kind = ExploreGroup(new_repr_group_id);
+            }
+
+            [(primary_task_id, _), rest @ ..] => {
+                // Multiple tasks - merge them into the primary task.
+                let children_to_add: Vec<_> = rest
+                    .iter()
+                    .filter_map(|(task_id, _)| self.tasks.get(task_id))
+                    .flat_map(|task| task.children.clone())
+                    .collect();
+
+                let primary_task = self.tasks.get_mut(primary_task_id).unwrap();
+                primary_task.children.extend(children_to_add);
+                primary_task.kind = ExploreGroup(new_repr_group_id);
+
+                self.group_exploration_task_index
+                    .insert(new_repr_group_id, *primary_task_id);
+
+                for (group_id, _) in all_exprs_by_group {
+                    self.group_exploration_task_index.remove(group_id);
+                }
+
+                for (task_id, _) in rest {
+                    self.tasks.remove(task_id);
+                }
+            }
+        }
+    }
+
+    /// Helper method to merge implementation tasks for merged groups.
+    ///
+    /// # Parameters
+    /// * `all_exprs_by_group` - All groups and their expressions that were merged.
+    /// * `new_repr_group_id` - The new representative group ID.
+    async fn merge_implementation_tasks(
+        &mut self,
+        all_exprs_by_group: &[(GroupId, Vec<LogicalExpressionId>)],
+        new_repr_group_id: GroupId,
+    ) {
+        todo!()
     }
 
     /// Helper method to resolve dependencies after a group creation job completes.
