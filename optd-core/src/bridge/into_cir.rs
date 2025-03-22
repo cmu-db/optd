@@ -2,7 +2,7 @@ use crate::cir::{
     goal::{Cost, Goal},
     group::GroupId,
     operators::{Child, Operator, OperatorData},
-    plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan},
+    plans::{PartialLogicalPlan, PartialPhysicalPlan},
     properties::{LogicalProperties, PhysicalProperties, PropertiesData},
 };
 use optd_dsl::analyzer::hir::{self, CoreData, Literal, Materializable, Value};
@@ -91,25 +91,6 @@ pub(crate) fn hir_goal_to_cir(hir_goal: &hir::Goal) -> Goal {
 //=============================================================================
 // HIR to CIR conversion helpers
 //=============================================================================
-
-/// Converts a HIR Value into a complete LogicalPlan (not a partial plan).
-///
-/// Used when fully materializing a logical expression for use in properties.
-fn value_to_logical(value: &Value) -> LogicalPlan {
-    match &value.0 {
-        Logical(logical_op) => match &logical_op.0 {
-            UnMaterialized(_) => {
-                panic!("Cannot convert UnMaterialized LogicalOperator to LogicalPlan")
-            }
-            Materialized(op) => LogicalPlan(Operator {
-                tag: op.tag.clone(),
-                data: convert_values_to_operator_data(&op.data),
-                children: convert_values_to_children(&op.children, value_to_logical),
-            }),
-        },
-        _ => panic!("Expected Logical CoreData variant, found: {:?}", value.0),
-    }
-}
 
 /// Convert HIR properties value to CIR PhysicalProperties
 fn value_to_physical_properties(properties_value: &Value) -> PhysicalProperties {

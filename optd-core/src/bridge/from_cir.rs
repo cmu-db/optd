@@ -3,7 +3,7 @@ use crate::cir::{
     group::GroupId,
     operators::{Child, OperatorData},
     plans::{PartialLogicalPlan, PartialPhysicalPlan},
-    properties::{LogicalProperties, PhysicalProperties, PropertiesData},
+    properties::{PhysicalProperties, PropertiesData},
 };
 use optd_dsl::analyzer::hir::{
     self, CoreData, Literal, LogicalOp, Materializable, Operator, PhysicalOp, Value,
@@ -55,14 +55,6 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
 
             Value(Physical(PhysicalOp(Materialized(operator))))
         }
-    }
-}
-
-/// Converts LogicalProperties to a HIR Value representation.
-pub(crate) fn logical_properties_to_value(properties: &LogicalProperties) -> Value {
-    match &properties.0 {
-        Some(data) => properties_data_to_value(data),
-        None => Value(Null),
     }
 }
 
