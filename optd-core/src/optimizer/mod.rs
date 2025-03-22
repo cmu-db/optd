@@ -5,7 +5,7 @@ use crate::{
         group::GroupId,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::LogicalProperties,
-        rules::{ImplementationRule, RuleBook, TransformationRule},
+        rules::RuleBook,
     },
     engine::{CostedPhysicalPlanContinuation, LogicalPlanContinuation},
 };
@@ -119,13 +119,8 @@ pub struct Optimizer<M: Memoize> {
     max_concurrent_jobs: usize,
 
     // Task indexing.
-    group_explorations_task_index: HashMap<GroupId, TaskId>,
-    expression_transformation_task_index:
-        HashMap<LogicalExpressionId, Vec<(TransformationRule, TaskId)>>,
+    group_exploration_task_index: HashMap<GroupId, TaskId>,
     goal_exploration_task_index: HashMap<GoalId, TaskId>,
-    expression_implementation_task_index:
-        HashMap<LogicalExpressionId, Vec<(GoalId, ImplementationRule, TaskId)>>,
-    expression_costing_task_index: HashMap<PhysicalExpressionId, TaskId>,
 
     // Subscriptions.
     group_subscribers: HashMap<GroupId, Vec<TaskId>>,
@@ -167,11 +162,8 @@ impl<M: Memoize> Optimizer<M> {
             max_concurrent_jobs: DEFAULT_MAX_CONCURRENT_JOBS,
 
             // Task indexing.
-            group_explorations_task_index: HashMap::new(),
-            expression_transformation_task_index: HashMap::new(),
+            group_exploration_task_index: HashMap::new(),
             goal_exploration_task_index: HashMap::new(),
-            expression_implementation_task_index: HashMap::new(),
-            expression_costing_task_index: HashMap::new(),
 
             // Subscriptions.
             group_subscribers: HashMap::new(),

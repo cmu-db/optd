@@ -396,7 +396,51 @@ impl<M: Memoize> Optimizer<M> {
                 self.schedule_logical_continuations(*current_group_id, &other_groups_exprs);
             }
 
-            // 2. Task updates using indexes.
+            // 2. Merge the exploration tasks for all groups into a single task.
+            let exploring_task_ids: Vec<_> = all_exprs_by_group
+                .iter()
+                .filter_map(|(group_id, _)| {
+                    self.group_exploration_task_index.get(group_id).copied()
+                })
+                .collect();
+
+            match exploring_task_ids.len() {
+                0 => {
+                    // No exploration tasks existed, nothing to do.
+                }
+                1 => {
+                    // Just one task exists, update its index to point to the new representative.
+                    let task_id = exploring_task_ids[0];
+                    self.group_exploration_task_index
+                        .insert(group_merge.new_repr_group_id, task_id);
+                }
+                _ => {
+                    // Multiple tasks exist, we need to merge them.
+                    let primary_task_id = exploring_task_ids[0];
+
+                    let transfers: Vec<_> = exploring_task_ids[1..]
+                        .iter()
+                        .filter_map(|&task_id| {
+                            self.tasks
+                                .get(&task_id)
+                                .map(|task| (task.children.clone(), task.uncompleted_jobs.clone()))
+                        })
+                        .collect();
+
+                    if let Some(primary_task) = self.tasks.get_mut(&primary_task_id) {
+                        for (children, jobs) in transfers {
+                            primary_task.children.extend(children);
+                            primary_task.uncompleted_jobs.extend(jobs);
+                        }
+                    }
+
+                    for (group_id, _) in all_exprs_by_group.iter() {
+                        self.group_exploration_task_index.remove(group_id);
+                    }
+                    self.group_exploration_task_index
+                        .insert(group_merge.new_repr_group_id, primary_task_id);
+                }
+            }
         }
 
         // Second, handle all the goal merges.
@@ -411,7 +455,7 @@ impl<M: Memoize> Optimizer<M> {
                 let best_from_others = all_exprs_by_goal
                     .iter()
                     .enumerate()
-                    .filter(|(j, _)| *j != i)
+                    .filter(|(j, _)| *j != i) // Filter out the current goal.
                     .filter_map(|(_, (_, expr_cost))| *expr_cost)
                     .filter(|(_, cost)| current_cost.map_or(true, |current| cost < current))
                     .fold(None, |acc, (expr_id, cost)| match acc {

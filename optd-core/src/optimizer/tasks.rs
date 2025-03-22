@@ -271,11 +271,6 @@ impl<M: Memoize> Optimizer<M> {
         let task_id = self.register_new_task(TransformExpression(task));
         self.register_child_to_task(parent, task_id);
 
-        self.expression_transformation_task_index
-            .entry(expression_id)
-            .or_default()
-            .push((rule.clone(), task_id));
-
         if is_dirty {
             self.schedule_job(
                 task_id,
@@ -307,11 +302,6 @@ impl<M: Memoize> Optimizer<M> {
         let task_id = self.register_new_task(ImplementExpression(task));
         self.register_child_to_task(parent, task_id);
 
-        self.expression_implementation_task_index
-            .entry(expression_id)
-            .or_default()
-            .push((goal_id, rule.clone(), task_id));
-
         if is_dirty {
             self.schedule_job(
                 task_id,
@@ -336,9 +326,6 @@ impl<M: Memoize> Optimizer<M> {
         let task_id = self.register_new_task(CostExpression(task));
         self.register_child_to_task(parent, task_id);
 
-        self.expression_costing_task_index
-            .insert(expression_id, task_id);
-
         if is_dirty {
             self.schedule_job(task_id, StartCostExpression(expression_id));
         }
@@ -359,7 +346,7 @@ impl<M: Memoize> Optimizer<M> {
         group_id: GroupId,
         child_task_id: TaskId,
     ) -> Result<(), Error> {
-        let task_id = match self.group_explorations_task_index.get(&group_id) {
+        let task_id = match self.group_exploration_task_index.get(&group_id) {
             Some(id) => *id,
             None => self.launch_group_exploration_task(group_id).await?,
         };
@@ -398,7 +385,7 @@ impl<M: Memoize> Optimizer<M> {
     /// logical expressions in the group.
     async fn launch_group_exploration_task(&mut self, group_id: GroupId) -> Result<TaskId, Error> {
         let task_id = self.register_new_task(ExploreGroup(group_id));
-        self.group_explorations_task_index.insert(group_id, task_id);
+        self.group_exploration_task_index.insert(group_id, task_id);
 
         // Get all transformation rules and all logical expressions in the group.
         let transformations = self.rule_book.get_transformations().to_vec();
@@ -406,10 +393,15 @@ impl<M: Memoize> Optimizer<M> {
 
         // Schedule transformation tasks for all expression-rule combinations.
         // This creates a Cartesian product of rules × expressions.
-        for expr_id in expressions {
+        for expression_id in expressions {
             for rule in &transformations {
-                self.launch_transform_expression_task(rule.clone(), expr_id, group_id, task_id)
-                    .await?;
+                self.launch_transform_expression_task(
+                    rule.clone(),
+                    expression_id,
+                    group_id,
+                    task_id,
+                )
+                .await?;
             }
         }
 
@@ -440,10 +432,15 @@ impl<M: Memoize> Optimizer<M> {
 
             // Schedule implementation tasks for all expression-rule combinations.
             // This creates a Cartesian product of rules × expressions.
-            for expr_id in logical_expressions {
+            for expression_id in logical_expressions {
                 for rule in &implementations {
-                    self.launch_implement_expression_task(rule.clone(), expr_id, goal_id, task_id)
-                        .await?;
+                    self.launch_implement_expression_task(
+                        rule.clone(),
+                        expression_id,
+                        goal_id,
+                        task_id,
+                    )
+                    .await?;
                 }
             }
         }
@@ -451,8 +448,9 @@ impl<M: Memoize> Optimizer<M> {
         // Launch costing for all physical expressions in the original goal
         // (this includes all the equivalent goals).
         let physical_expressions = self.memo.get_all_physical_exprs(goal_id).await?;
-        for expr_id in physical_expressions {
-            self.launch_cost_expression_task(expr_id, task_id).await?;
+        for expression_id in physical_expressions {
+            self.launch_cost_expression_task(expression_id, task_id)
+                .await?;
         }
 
         Ok(task_id)
