@@ -5,10 +5,11 @@ use super::{
 };
 use crate::{
     cir::{
-        expressions::{LogicalExpressionId, PhysicalExpressionId},
+        expressions::{LogicalExpressionId, PhysicalExpression, PhysicalExpressionId},
         goal::{Goal, GoalId},
         group::GroupId,
         plans::{LogicalPlan, PhysicalPlan},
+        properties::PhysicalProperties,
         rules::{ImplementationRule, TransformationRule},
     },
     engine::{CostedPhysicalPlanContinuation, LogicalPlanContinuation},
@@ -73,7 +74,7 @@ pub(super) enum TaskKind {
     ///
     /// This task generates and evaluates physical implementations that
     /// satisfy the properties required by the goal.
-    ExploreGoal(Vec<GoalId>),
+    ExploreGoal(HashMap<GroupId, Vec<PhysicalProperties>>),
 
     /// Task to explore expressions in a logical group.
     ///
@@ -415,20 +416,31 @@ impl<M: Memoize> Optimizer<M> {
     async fn launch_goal_exploration_task(&mut self, goal_id: GoalId) -> Result<TaskId, Error> {
         let equivalent_goals = self.memo.get_equivalent_goals(goal_id).await?;
 
-        let task_id = self.register_new_task(ExploreGoal(equivalent_goals.clone()));
+        // First pass: materialize goals and build HashMap for ExploreGoal.
+        let mut implement_groups_with = HashMap::new();
+        let mut materialized_goals = Vec::new();
+
+        for equiv_goal_id in &equivalent_goals {
+            let goal = self.memo.materialize_goal(*equiv_goal_id).await?;
+            let Goal(group_id, properties) = &goal;
+
+            implement_groups_with
+                .entry(*group_id)
+                .or_insert_with(Vec::new)
+                .push(properties.clone());
+
+            materialized_goals.push((equiv_goal_id, goal));
+        }
+
+        let task_id = self.register_new_task(ExploreGoal(implement_groups_with));
         self.goal_exploration_task_index.insert(goal_id, task_id);
 
-        for goal_id in equivalent_goals {
-            let Goal(group_id, _) = self.memo.materialize_goal(goal_id).await?;
-
+        // Second pass: using already materialized goals.
+        for (equiv_goal_id, Goal(group_id, _)) in materialized_goals {
             // Ensure we explore each group associated with the equivalent goals
             // This is necessary since new logical expressions can lead to new implementations.
-            self.ensure_group_exploration_task(group_id, task_id)
-                .await?;
-
-            // Get all transformation rules and all logical expressions in the group.
             let implementations = self.rule_book.get_implementations().to_vec();
-            let logical_expressions = self.memo.get_all_logical_exprs(group_id).await?;
+            let logical_expressions = self.subscribe_task_to_group(group_id, task_id).await?;
 
             // Schedule implementation tasks for all expression-rule combinations.
             // This creates a Cartesian product of rules × expressions.
@@ -437,7 +449,7 @@ impl<M: Memoize> Optimizer<M> {
                     self.launch_implement_expression_task(
                         rule.clone(),
                         expression_id,
-                        goal_id,
+                        *equiv_goal_id,
                         task_id,
                     )
                     .await?;
