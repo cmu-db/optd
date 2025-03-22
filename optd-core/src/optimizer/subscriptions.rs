@@ -75,14 +75,9 @@ impl<M: Memoize> Optimizer<M> {
 
     /// Schedules logical expression continuation jobs for group subscribers.
     ///
-    /// This method efficiently processes multiple logical expressions by:
-    /// 1. Finding all tasks subscribed to the specified group
-    /// 2. Collecting all relevant continuations across subscribers
-    /// 3. Scheduling all jobs in a single batch
-    ///
     /// # Parameters
-    /// * `group_id` - The ID of the group that has new expressions
-    /// * `expression_ids` - A slice of logical expression IDs to continue with
+    /// * `group_id` - The ID of the group that has new expressions.
+    /// * `expression_ids` - A slice of logical expression IDs to continue with.
     pub(super) fn schedule_logical_continuations(
         &mut self,
         group_id: GroupId,
@@ -124,25 +119,18 @@ impl<M: Memoize> Optimizer<M> {
 
     /// Schedules optimized expression continuation jobs for goal subscribers.
     ///
-    /// This method efficiently processes multiple physical expressions by:
-    /// 1. Finding all tasks subscribed to the specified goal
-    /// 2. Collecting all relevant continuations across subscribers
-    /// 3. Creating continuation jobs for all expressions and their costs
-    /// 4. Scheduling all jobs in a single batch
-    ///
     /// # Parameters
-    /// * `goal_id` - The ID of the goal that has new best expressions
-    /// * `expressions` - A slice of tuples with physical expression IDs and their costs
+    /// * `goal_id` - The ID of the goal that has new best expressions.
+    /// * `expression_id` - The ID of the optimized expression to continue with.
+    /// * `cost` - The cost of the optimized expression.
     pub(super) fn schedule_optimized_continuations(
         &mut self,
         goal_id: GoalId,
-        expressions: &[(PhysicalExpressionId, Cost)],
+        expression_id: PhysicalExpressionId,
+        cost: Cost,
     ) {
         // Skip processing if there are no expressions or subscribers.
         let Some(subscribers) = self.goal_subscribers.get(&goal_id) else {
-            return;
-        };
-        if expressions.is_empty() {
             return;
         };
 
@@ -158,13 +146,11 @@ impl<M: Memoize> Optimizer<M> {
                 })
             })
             .flat_map(|(task_id, conts)| {
-                expressions.iter().flat_map(move |&(expr_id, cost)| {
-                    conts.iter().map(move |cont| {
-                        (
-                            task_id,
-                            ContinueWithCostedPhysical(expr_id, cost, cont.clone()),
-                        )
-                    })
+                conts.iter().map(move |cont| {
+                    (
+                        task_id,
+                        ContinueWithCostedPhysical(expression_id, cost, cont.clone()),
+                    )
                 })
             })
             .collect();

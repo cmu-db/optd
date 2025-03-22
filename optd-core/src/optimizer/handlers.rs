@@ -191,7 +191,7 @@ impl<M: Memoize> Optimizer<M> {
         // If this is the new best expression found so far for this goal,
         // schedule continuation jobs for all subscribers and send to clients.
         if new_best {
-            self.schedule_optimized_continuations(goal_id, &[(expression_id, cost)]);
+            self.schedule_optimized_continuations(goal_id, expression_id, cost);
             self.egest_to_subscribers(goal_id, expression_id).await?;
         }
 
@@ -378,10 +378,11 @@ impl<M: Memoize> Optimizer<M> {
     /// # Parameters
     /// * `result` - The merge result to handle.
     async fn handle_merge_result(&mut self, result: MergeResult) {
+        // First, handle all the group merges.
         for group_merge in result.group_merges {
             let all_exprs_by_group = group_merge.merged_groups;
 
-            // For each group, schedule expressions from all OTHER groups,
+            // 1. For each group, schedule expressions from all OTHER groups,
             // ignoring any potential duplicates due to merges for now.
             for (i, (current_group_id, _)) in all_exprs_by_group.iter().enumerate() {
                 let other_groups_exprs: Vec<_> = all_exprs_by_group
@@ -398,21 +399,34 @@ impl<M: Memoize> Optimizer<M> {
             // 2. Task updates using indexes.
         }
 
+        // Second, handle all the goal merges.
         for goal_merge in result.goal_merges {
-            let all_exprs_by_goal = goal_merge.merged_goals;
+            let all_exprs_by_goal = &goal_merge.merged_goals;
 
-            // For each goal, schedule expressions from all OTHER goals,
-            // ignoring any potential duplicates due to merges for now.
-            for (i, (current_goal_id, _)) in all_exprs_by_goal.iter().enumerate() {
-                let other_goals_exprs: Vec<_> = all_exprs_by_goal
+            // 1. For each goal, schedule the best expression from all OTHER goals only if it is
+            // better than the current best expression for the goal.
+            for (i, (current_goal_id, current_best)) in all_exprs_by_goal.iter().enumerate() {
+                let current_cost = current_best.as_ref().map(|(_, cost)| cost);
+
+                let best_from_others = all_exprs_by_goal
                     .iter()
                     .enumerate()
-                    .filter(|(j, _)| *j != i) // Filter out the current goal.
-                    .flat_map(|(_, (_, exprs))| exprs)
-                    .copied()
-                    .collect();
+                    .filter(|(j, _)| *j != i)
+                    .filter_map(|(_, (_, expr_cost))| *expr_cost)
+                    .filter(|(_, cost)| current_cost.map_or(true, |current| cost < current))
+                    .fold(None, |acc, (expr_id, cost)| match acc {
+                        None => Some((expr_id, cost)),
+                        Some((_, acc_cost)) if cost < acc_cost => Some((expr_id, cost)),
+                        Some(_) => acc,
+                    });
 
-                self.schedule_optimized_continuations(*current_goal_id, &other_goals_exprs);
+                if let Some((best_expr_id, best_cost)) = best_from_others {
+                    self.schedule_optimized_continuations(
+                        *current_goal_id,
+                        best_expr_id,
+                        best_cost,
+                    );
+                }
             }
 
             // 2. Task updates using indexes.
