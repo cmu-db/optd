@@ -73,7 +73,7 @@ pub(super) enum TaskKind {
     ///
     /// This task generates and evaluates physical implementations that
     /// satisfy the properties required by the goal.
-    ExploreGoal(ExploreGoalTask),
+    ExploreGoal(Vec<GoalId>),
 
     /// Task to explore expressions in a logical group.
     ///
@@ -123,22 +123,6 @@ impl OptimizePlanTask {
     /// Creates a new optimize plan task with the given plan and response channel.
     pub fn new(plan: LogicalPlan, response_tx: Sender<PhysicalPlan>) -> Self {
         Self { plan, response_tx }
-    }
-}
-
-/// Task data for exploring a goal and its equivalent goals.
-///
-/// Contains a mapping of group IDs to their associated physical properties
-/// for all goals in the equivalence class.
-pub(super) struct ExploreGoalTask {
-    /// All equivalent goals in the task.
-    pub equivalent_goals: Vec<GoalId>,
-}
-
-impl ExploreGoalTask {
-    /// Creates a new goal exploration task.
-    pub fn new(equivalent_goals: Vec<GoalId>) -> Self {
-        Self { equivalent_goals }
     }
 }
 
@@ -439,8 +423,7 @@ impl<M: Memoize> Optimizer<M> {
     async fn launch_goal_exploration_task(&mut self, goal_id: GoalId) -> Result<TaskId, Error> {
         let equivalent_goals = self.memo.get_equivalent_goals(goal_id).await?;
 
-        let task = ExploreGoalTask::new(equivalent_goals.clone());
-        let task_id = self.register_new_task(ExploreGoal(task));
+        let task_id = self.register_new_task(ExploreGoal(equivalent_goals.clone()));
         self.goal_exploration_task_index.insert(goal_id, task_id);
 
         for goal_id in equivalent_goals {

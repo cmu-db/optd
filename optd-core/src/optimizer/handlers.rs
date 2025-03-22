@@ -414,6 +414,8 @@ impl<M: Memoize> Optimizer<M> {
 
             // 2. Task updates using indexes.
         }
+
+        // 3. Dirty stuff.
     }
 
     /// Helper method to resolve dependencies after a group creation job completes.
