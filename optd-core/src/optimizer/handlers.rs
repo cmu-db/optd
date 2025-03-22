@@ -183,7 +183,10 @@ impl<M: Memoize> Optimizer<M> {
         cost: Cost,
     ) -> Result<(), Error> {
         let expression_id = self.memo.find_repr_physical_expr(expression_id).await?;
-        let (new_best, goal_id) = self.memo.update_physical_expr_cost(expression_id).await?;
+        let (new_best, goal_id) = self
+            .memo
+            .update_physical_expr_cost(expression_id, cost)
+            .await?;
 
         // If this is the new best expression found so far for this goal,
         // schedule continuation jobs for all subscribers and send to clients.

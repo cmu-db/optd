@@ -235,14 +235,16 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// # Parameters
     /// * `physical_expr_id` - ID of the physical expression to update.
+    /// * `new_cost` - New cost to assign to the physical expression.
     ///
     /// # Returns
     /// A tuple containing:
     /// - Whether the expression is now the best for its goal.
-    /// - The goal ID this expression belongs to.
+    /// - The representative goal ID this expression belongs to.
     async fn update_physical_expr_cost(
         &mut self,
         physical_expr_id: PhysicalExpressionId,
+        new_cost: Cost,
     ) -> MemoizeResult<(bool, GoalId)>;
 
     //
