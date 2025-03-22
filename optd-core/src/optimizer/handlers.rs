@@ -97,8 +97,7 @@ impl<M: Memoize> Optimizer<M> {
             Found(new_group_id) if new_group_id != group_id => {
                 // Atomically perform the merge in the memo and process all results.
                 let merge_results = self.memo.merge_groups(group_id, new_group_id).await?;
-
-                // TODO: Handle merge results.
+                self.handle_merge_result(merge_results).await;
             }
             Found(_) => {
                 // Group already exists, nothing to merge or do.
@@ -152,8 +151,7 @@ impl<M: Memoize> Optimizer<M> {
         if ingested_goal_id != goal_id {
             // Atomically perform the merge in the memo and process all results.
             let merge_results = self.memo.merge_goals(ingested_goal_id, goal_id).await?;
-
-            // TODO: Handle merge results.
+            self.handle_merge_result(merge_results).await;
 
             // If a physical expression was just created, its status is *always* dirty
             // and will need to be costed.
@@ -190,7 +188,7 @@ impl<M: Memoize> Optimizer<M> {
         // If this is the new best expression found so far for this goal,
         // schedule continuation jobs for all subscribers and send to clients.
         if new_best {
-            self.schedule_optimized_continuations(goal_id, expression_id, cost);
+            self.schedule_optimized_continuations(goal_id, &[(expression_id, cost)]);
             self.egest_to_subscribers(goal_id, expression_id).await?;
         }
 
@@ -377,15 +375,24 @@ impl<M: Memoize> Optimizer<M> {
     /// # Parameters
     /// * `result` - The merge result to handle.
     async fn handle_merge_result(&mut self, result: MergeResult) {
-        // We need to:
-        // 1. Apply continuation jobs to all subscribers. Easy but how to know what's new and avoid dups...
-        // I could add that in the task...
-        // 2. Exploration updates.
-        for goal_merge in result.goal_merges {
-            let exploring = goal_merge
-                .merged_goals
-                .into_iter()
-                .any(|(goal_id, _)| self.goal_exploration_task_index.contains_key(&goal_id));
+        for group_merge in result.group_merges {
+            let all_exprs_by_group = group_merge.merged_groups;
+
+            // For each group, schedule expressions from all OTHER groups,
+            // ignoring any potential duplicates due to merges for now.
+            for (i, (current_group_id, _)) in all_exprs_by_group.iter().enumerate() {
+                let other_groups_exprs: Vec<_> = all_exprs_by_group
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, _)| *j != i) // Filter out the current group.
+                    .flat_map(|(_, (_, exprs))| exprs)
+                    .copied()
+                    .collect();
+
+                self.schedule_logical_continuations(*current_group_id, &other_groups_exprs);
+            }
+
+            // 2. Task updates using indexes.
         }
 
         todo!()

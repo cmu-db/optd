@@ -75,80 +75,78 @@ impl<M: Memoize> Optimizer<M> {
 
     /// Schedules logical expression continuation jobs for group subscribers.
     ///
-    /// This method finds all tasks that have subscribed to the specified group,
-    /// collects their logical expression continuations, and schedules continuation
-    /// jobs to process the new expression.
+    /// This method efficiently processes multiple logical expressions by:
+    /// 1. Finding all tasks subscribed to the specified group
+    /// 2. Collecting all relevant continuations across subscribers
+    /// 3. Scheduling all jobs in a single batch
     ///
     /// # Parameters
-    /// * `group_id` - The ID of the group that has a new expression.
-    /// * `expression_id` - The ID of the new logical expression to continue with.
+    /// * `group_id` - The ID of the group that has new expressions
+    /// * `expression_ids` - A slice of logical expression IDs to continue with
     pub(super) fn schedule_logical_continuations(
         &mut self,
         group_id: GroupId,
-        expression_id: LogicalExpressionId,
+        expression_ids: &[LogicalExpressionId],
     ) {
-        // Return early if no subscribers.
-        let subscribers = match self.group_subscribers.get(&group_id) {
-            Some(subs) => subs,
-            None => return,
+        // Skip processing if there are no expressions or subscribers.
+        let Some(subscribers) = self.group_subscribers.get(&group_id) else {
+            return;
+        };
+        if expression_ids.is_empty() {
+            return;
         };
 
-        // Collect all continuation jobs to schedule.
-        let continuation_jobs: Vec<_> = subscribers
+        let all_continuation_jobs: Vec<_> = subscribers
             .iter()
             .filter_map(|&task_id| {
-                self.tasks.get(&task_id).map(|task| {
+                self.tasks.get(&task_id).and_then(|task| {
                     let continuations = match &task.kind {
                         TransformExpression(task) => task.continuations.get(&group_id),
                         ImplementExpression(task) => task.continuations.get(&group_id),
                         _ => None,
                     };
-
-                    (task_id, continuations)
+                    continuations.map(|conts| (task_id, conts))
                 })
             })
-            .flat_map(|(task_id, continuations)| {
-                continuations
-                    .map(|conts| {
-                        conts.iter().map(move |cont| {
-                            (task_id, ContinueWithLogical(expression_id, cont.clone()))
-                        })
-                    })
-                    .into_iter()
-                    .flatten()
+            .flat_map(|(task_id, conts)| {
+                expression_ids.iter().flat_map(move |&expr_id| {
+                    conts
+                        .iter()
+                        .map(move |cont| (task_id, ContinueWithLogical(expr_id, cont.clone())))
+                })
             })
             .collect();
 
-        // Schedule all collected jobs.
-        for (task_id, job) in continuation_jobs {
+        for (task_id, job) in all_continuation_jobs {
             self.schedule_job(task_id, job);
         }
     }
 
     /// Schedules optimized expression continuation jobs for goal subscribers.
     ///
-    /// This method finds all tasks that have subscribed to the specified goal,
-    /// collects their optimized expression continuations, and schedules continuation
-    /// jobs to process the new optimized expression.
+    /// This method efficiently processes multiple physical expressions by:
+    /// 1. Finding all tasks subscribed to the specified goal
+    /// 2. Collecting all relevant continuations across subscribers
+    /// 3. Creating continuation jobs for all expressions and their costs
+    /// 4. Scheduling all jobs in a single batch
     ///
     /// # Parameters
-    /// * `goal_id` - The ID of the goal that has a new best expression.
-    /// * `expression_id` - The ID of the new physical expression to continue with.
-    /// * `cost` - The corresponding cost.
+    /// * `goal_id` - The ID of the goal that has new best expressions
+    /// * `expressions` - A slice of tuples with physical expression IDs and their costs
     pub(super) fn schedule_optimized_continuations(
         &mut self,
         goal_id: GoalId,
-        expression_id: PhysicalExpressionId,
-        cost: Cost,
+        expressions: &[(PhysicalExpressionId, Cost)],
     ) {
-        // Return early if no subscribers.
-        let subscribers = match self.goal_subscribers.get(&goal_id) {
-            Some(subs) => subs,
-            None => return,
+        // Skip processing if there are no expressions or subscribers.
+        let Some(subscribers) = self.goal_subscribers.get(&goal_id) else {
+            return;
+        };
+        if expressions.is_empty() {
+            return;
         };
 
-        // Collect all continuation jobs to schedule.
-        let continuation_jobs: Vec<_> = subscribers
+        let all_continuation_jobs: Vec<_> = subscribers
             .iter()
             .filter_map(|&task_id| {
                 self.tasks.get(&task_id).and_then(|task| match &task.kind {
@@ -160,17 +158,19 @@ impl<M: Memoize> Optimizer<M> {
                 })
             })
             .flat_map(|(task_id, conts)| {
-                conts.iter().map(move |cont| {
-                    (
-                        task_id,
-                        ContinueWithCostedPhysical(expression_id, cost, cont.clone()),
-                    )
+                expressions.iter().flat_map(move |&(expr_id, cost)| {
+                    conts.iter().map(move |cont| {
+                        (
+                            task_id,
+                            ContinueWithCostedPhysical(expr_id, cost, cont.clone()),
+                        )
+                    })
                 })
             })
             .collect();
 
-        // Schedule all collected jobs.
-        for (task_id, job) in continuation_jobs {
+        // Schedule all collected jobs in batch.
+        for (task_id, job) in all_continuation_jobs {
             self.schedule_job(task_id, job);
         }
     }
