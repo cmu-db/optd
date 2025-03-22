@@ -7,9 +7,9 @@ use super::{
 };
 use crate::{
     cir::{
-        expressions::{LogicalExpressionId, PhysicalExpressionId},
+        expressions::{self, LogicalExpressionId, PhysicalExpressionId},
         goal::{Cost, Goal, GoalId},
-        group::GroupId,
+        group::{self, GroupId},
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
     },
@@ -92,6 +92,7 @@ impl<M: Memoize> Optimizer<M> {
         group_id: GroupId,
         job_id: JobId,
     ) -> Result<(), Error> {
+        let group_id = self.memo.find_repr_group(group_id).await?;
         match self.probe_ingest_logical_plan(&plan).await? {
             Found(new_group_id) if new_group_id != group_id => {
                 // Atomically perform the merge in the memo and process all results.
@@ -142,6 +143,7 @@ impl<M: Memoize> Optimizer<M> {
         goal_id: GoalId,
         job_id: JobId,
     ) -> Result<(), Error> {
+        let goal_id = self.memo.find_repr_goal(goal_id).await?;
         let PhysicalIngest {
             goal_id: ingested_goal_id,
             new_expression_id,
@@ -183,11 +185,16 @@ impl<M: Memoize> Optimizer<M> {
         cost: Cost,
     ) -> Result<(), Error> {
         let (new_best, goal_id) = self.memo.update_physical_expr_cost(expression_id).await?;
+        let expression_id = self.memo.find_repr_physical_expr(expression_id).await?;
+        let related_task_id = self
+            .expression_costing_task_index
+            .get(&expression_id)
+            .unwrap();
 
         // If this is the new best expression found so far for this goal,
         // schedule continuation jobs for all subscribers and send to clients.
         if new_best {
-            self.schedule_optimized_continuations(goal_id, expression_id, cost);
+            self.notify_task_physical_continuations(*related_task_id, goal_id, expression_id, cost);
             self.egest_to_subscribers(goal_id, expression_id).await?;
         }
 
@@ -236,35 +243,59 @@ impl<M: Memoize> Optimizer<M> {
         // Register the continuation and notify the memo about the dependency to ensure the
         // operation corresponding to the task gets invalidated when the group has new expressions.
         match &mut self.tasks.get_mut(&related_task_id).unwrap().kind {
-            TransformExpression(TransformExpressionTask {
-                rule,
-                expression_id,
-                continuations,
-                ..
-            }) => {
-                continuations
+            TransformExpression(transform_task) => {
+                // Get the task's next continuation ID.
+                let cont_id = transform_task.next_continuation_id;
+                transform_task.next_continuation_id.0 += 1;
+
+                // Register the continuation in the task.
+                transform_task
+                    .continuations
+                    .insert(cont_id, continuation.clone());
+                transform_task
+                    .launched_continuations
+                    .insert(cont_id, Vec::new());
+                transform_task
+                    .group_continuations
                     .entry(group_id)
                     .or_default()
-                    .push(continuation.clone());
+                    .push(cont_id);
 
+                // Notify the memo about the dependency.
                 self.memo
-                    .add_transformation_dependency(*expression_id, rule, group_id)
+                    .add_transformation_dependency(
+                        transform_task.expression_id,
+                        &transform_task.rule,
+                        group_id,
+                    )
                     .await?;
             }
-            ImplementExpression(ImplementExpressionTask {
-                rule,
-                expression_id,
-                goal_id,
-                continuations,
-                ..
-            }) => {
-                continuations
+            ImplementExpression(implement_task) => {
+                // Get the task's next continuation ID.
+                let cont_id = implement_task.next_continuation_id;
+                implement_task.next_continuation_id.0 += 1;
+
+                // Register the continuation in the task.
+                implement_task
+                    .continuations
+                    .insert(cont_id, continuation.clone());
+                implement_task
+                    .launched_continuations
+                    .insert(cont_id, Vec::new());
+                implement_task
+                    .group_continuations
                     .entry(group_id)
                     .or_default()
-                    .push(continuation.clone());
+                    .push(cont_id);
 
+                // Notify the memo about the dependency.
                 self.memo
-                    .add_implementation_dependency(*expression_id, *goal_id, rule, group_id)
+                    .add_implementation_dependency(
+                        implement_task.expression_id,
+                        implement_task.goal_id,
+                        &implement_task.rule,
+                        group_id,
+                    )
                     .await?;
             }
             _ => panic!("Task type cannot produce group subscription."),
@@ -275,12 +306,9 @@ impl<M: Memoize> Optimizer<M> {
             .subscribe_task_to_group(group_id, related_task_id)
             .await?;
 
-        for expression_id in expressions {
-            self.schedule_job(
-                related_task_id,
-                ContinueWithLogical(expression_id, continuation.clone()),
-            );
-        }
+        expressions.iter().for_each(|expression_id| {
+            self.notify_task_logical_continuations(related_task_id, group_id, *expression_id);
+        });
 
         Ok(())
     }
@@ -307,18 +335,27 @@ impl<M: Memoize> Optimizer<M> {
         // Register the continuation and notify the memo about the dependency to ensure the
         // operation corresponding to the task gets invalidated when the goal has a new optimum.
         match &mut self.tasks.get_mut(&related_task_id).unwrap().kind {
-            CostExpression(CostExpressionTask {
-                expression_id,
-                continuations,
-                ..
-            }) => {
-                continuations
-                    .entry(goal_id)
-                    .or_default()
-                    .push(continuation.clone());
+            CostExpression(cost_task) => {
+                // Register new continuation and get its ID
+                let cont_id = cost_task.next_continuation_id;
+                cost_task.next_continuation_id.0 += 1;
 
+                // Store the continuation
+                cost_task
+                    .continuations
+                    .insert(cont_id, continuation.clone());
+                cost_task.launched_continuations.insert(cont_id, Vec::new());
+
+                // Add the continuation ID to the goal's continuations
+                cost_task
+                    .goal_continuations
+                    .entry(goal_id)
+                    .or_insert_with(Vec::new)
+                    .push(cont_id);
+
+                // Notify the memo about the dependency
                 self.memo
-                    .add_cost_dependency(*expression_id, goal_id)
+                    .add_cost_dependency(cost_task.expression_id, goal_id)
                     .await?;
             }
             _ => panic!("Only cost tasks can subscribe to goals."),
@@ -372,8 +409,19 @@ impl<M: Memoize> Optimizer<M> {
     /// subscribers and tasks appropriately.
     ///
     /// # Parameters
-    /// * `_result` - The merge result to handle.
-    async fn handle_merge_result(&mut self, _result: MergeResult) {
+    /// * `result` - The merge result to handle.
+    async fn handle_merge_result(&mut self, result: MergeResult) {
+        // We need to:
+        // 1. Apply continuation jobs to all subscribers. Easy but how to know what's new and avoid dups...
+        // I could add that in the task...
+        // 2. Exploration updates.
+        for goal_merge in result.goal_merges {
+            let exploring = goal_merge
+                .merged_goals
+                .into_iter()
+                .any(|(goal_id, _)| self.goal_exploration_task_index.contains_key(&goal_id));
+        }
+
         todo!()
     }
 

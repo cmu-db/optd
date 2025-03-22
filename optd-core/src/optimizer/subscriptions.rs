@@ -73,106 +73,167 @@ impl<M: Memoize> Optimizer<M> {
         self.memo.get_best_optimized_physical_expr(goal_id).await
     }
 
-    /// Schedules logical expression continuation jobs for group subscribers.
+    /// Notifies all registered continuations about a new logical expression in a group.
     ///
-    /// This method finds all tasks that have subscribed to the specified group,
-    /// collects their logical expression continuations, and schedules continuation
-    /// jobs to process the new expression.
+    /// When a new logical expression is added to a group, we need to inform all continuations
+    /// that have been registered for this group.
     ///
     /// # Parameters
-    /// * `group_id` - The ID of the group that has a new expression.
-    /// * `expression_id` - The ID of the new logical expression to continue with.
-    pub(super) fn schedule_logical_continuations(
+    /// * `group_id` - The group containing the new expression
+    /// * `expression_id` - The new logical expression
+    pub(super) fn notify_all_logical_continuations(
         &mut self,
         group_id: GroupId,
         expression_id: LogicalExpressionId,
     ) {
-        // Return early if no subscribers.
-        let subscribers = match self.group_subscribers.get(&group_id) {
-            Some(subs) => subs,
-            None => return,
-        };
-
-        // Collect all continuation jobs to schedule.
-        let continuation_jobs: Vec<_> = subscribers
-            .iter()
-            .filter_map(|&task_id| {
-                self.tasks.get(&task_id).map(|task| {
-                    let continuations = match &task.kind {
-                        TransformExpression(task) => task.continuations.get(&group_id),
-                        ImplementExpression(task) => task.continuations.get(&group_id),
-                        _ => None,
-                    };
-
-                    (task_id, continuations)
-                })
-            })
-            .flat_map(|(task_id, continuations)| {
-                continuations
-                    .map(|conts| {
-                        conts.iter().map(move |cont| {
-                            (task_id, ContinueWithLogical(expression_id, cont.clone()))
-                        })
-                    })
-                    .into_iter()
-                    .flatten()
-            })
-            .collect();
-
-        // Schedule all collected jobs.
-        for (task_id, job) in continuation_jobs {
-            self.schedule_job(task_id, job);
-        }
+        // Get all subscribers and schedule continuation jobs for each.
+        self.group_subscribers
+            .get(&group_id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .for_each(|task_id| {
+                self.notify_task_logical_continuations(task_id, group_id, expression_id);
+            });
     }
 
-    /// Schedules optimized expression continuation jobs for goal subscribers.
-    ///
-    /// This method finds all tasks that have subscribed to the specified goal,
-    /// collects their optimized expression continuations, and schedules continuation
-    /// jobs to process the new optimized expression.
+    /// Notifies continuations in a specific task about a new logical expression.
     ///
     /// # Parameters
-    /// * `goal_id` - The ID of the goal that has a new best expression.
-    /// * `expression_id` - The ID of the new physical expression to continue with.
-    /// * `cost` - The corresponding cost.
-    pub(super) fn schedule_optimized_continuations(
+    /// * `task_id` - The task containing the continuations to notify
+    /// * `group_id` - The group containing the new expression
+    /// * `expression_id` - The new logical expression
+    pub(super) fn notify_task_logical_continuations(
+        &mut self,
+        task_id: TaskId,
+        group_id: GroupId,
+        expression_id: LogicalExpressionId,
+    ) {
+        // Collect all jobs to schedule and register their launch.
+        let task = self.tasks.get_mut(&task_id).unwrap();
+
+        let jobs = match &mut task.kind {
+            TransformExpression(transform_task) => transform_task
+                .group_continuations
+                .get(&group_id)
+                .map(|cont_ids| {
+                    cont_ids
+                        .iter()
+                        .filter_map(|&cont_id| {
+                            transform_task
+                                .launched_continuations
+                                .get_mut(&cont_id)
+                                .unwrap()
+                                .push(expression_id);
+
+                            transform_task
+                                .continuations
+                                .get(&cont_id)
+                                .map(|cont| ContinueWithLogical(expression_id, cont.clone()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            ImplementExpression(implement_task) => implement_task
+                .group_continuations
+                .get(&group_id)
+                .map(|cont_ids| {
+                    cont_ids
+                        .iter()
+                        .filter_map(|&cont_id| {
+                            implement_task
+                                .launched_continuations
+                                .get_mut(&cont_id)
+                                .unwrap()
+                                .push(expression_id);
+
+                            implement_task
+                                .continuations
+                                .get(&cont_id)
+                                .map(|cont| ContinueWithLogical(expression_id, cont.clone()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            _ => Vec::default(),
+        };
+
+        // Schedule all jobs.
+        jobs.into_iter().for_each(|job| {
+            self.schedule_job(task_id, job);
+        });
+    }
+
+    /// Notifies all registered continuations about a new best physical expression for a goal.
+    ///
+    /// When a better physical implementation is found for a goal, we need to inform
+    /// all registered continuations to ensure the optimizer converges to the best overall plan.
+    ///
+    /// # Parameters
+    /// * `goal_id` - The goal with the improved implementation
+    /// * `expression_id` - The new physical expression
+    /// * `cost` - The associated cost
+    pub(super) fn notify_all_physical_continuations(
         &mut self,
         goal_id: GoalId,
         expression_id: PhysicalExpressionId,
         cost: Cost,
     ) {
-        // Return early if no subscribers.
-        let subscribers = match self.goal_subscribers.get(&goal_id) {
-            Some(subs) => subs,
-            None => return,
+        // Get all subscribers and schedule continuation jobs for each.
+        self.goal_subscribers
+            .get(&goal_id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .for_each(|task_id| {
+                self.notify_task_physical_continuations(task_id, goal_id, expression_id, cost);
+            });
+    }
+
+    /// Notifies continuations in a specific task about a new best physical expression.
+    ///
+    /// # Parameters
+    /// * `task_id` - The task containing the continuations to notify
+    /// * `goal_id` - The goal with the improved implementation
+    /// * `expression_id` - The new physical expression
+    /// * `cost` - The associated cost
+    pub(super) fn notify_task_physical_continuations(
+        &mut self,
+        task_id: TaskId,
+        goal_id: GoalId,
+        expression_id: PhysicalExpressionId,
+        cost: Cost,
+    ) {
+        // Collect all jobs to schedule and register their launch.
+        let task = self.tasks.get_mut(&task_id).unwrap();
+        let jobs = if let CostExpression(cost_task) = &mut task.kind {
+            cost_task
+                .goal_continuations
+                .get(&goal_id)
+                .map(|cont_ids| {
+                    cont_ids
+                        .iter()
+                        .filter_map(|&cont_id| {
+                            cost_task
+                                .launched_continuations
+                                .get_mut(&cont_id)
+                                .unwrap()
+                                .push(expression_id);
+                            cost_task.continuations.get(&cont_id).map(|cont| {
+                                ContinueWithCostedPhysical(expression_id, cost, cont.clone())
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::default()
         };
 
-        // Collect all continuation jobs to schedule.
-        let continuation_jobs: Vec<_> = subscribers
-            .iter()
-            .filter_map(|&task_id| {
-                self.tasks.get(&task_id).and_then(|task| match &task.kind {
-                    CostExpression(cost_task) => cost_task
-                        .continuations
-                        .get(&goal_id)
-                        .map(|conts| (task_id, conts)),
-                    _ => None,
-                })
-            })
-            .flat_map(|(task_id, conts)| {
-                conts.iter().map(move |cont| {
-                    (
-                        task_id,
-                        ContinueWithCostedPhysical(expression_id, cost, cont.clone()),
-                    )
-                })
-            })
-            .collect();
-
-        // Schedule all collected jobs.
-        for (task_id, job) in continuation_jobs {
+        // Schedule all jobs.
+        jobs.into_iter().for_each(|job| {
             self.schedule_job(task_id, job);
-        }
+        });
     }
 
     /// Egests and sends optimized plans to optimize plan task subscribers.

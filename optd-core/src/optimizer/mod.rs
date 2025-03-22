@@ -121,10 +121,10 @@ pub struct Optimizer<M: Memoize> {
     // Task indexing.
     group_explorations_task_index: HashMap<GroupId, TaskId>,
     expression_transformation_task_index:
-        HashMap<(LogicalExpressionId, TransformationRule), TaskId>,
+        HashMap<LogicalExpressionId, Vec<(TransformationRule, TaskId)>>,
     goal_exploration_task_index: HashMap<GoalId, TaskId>,
     expression_implementation_task_index:
-        HashMap<(LogicalExpressionId, GoalId, ImplementationRule), TaskId>,
+        HashMap<LogicalExpressionId, Vec<(GoalId, ImplementationRule, TaskId)>>,
     expression_costing_task_index: HashMap<PhysicalExpressionId, TaskId>,
 
     // Subscriptions.

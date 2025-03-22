@@ -27,6 +27,10 @@ use TaskKind::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct TaskId(pub i64);
 
+/// Unique identifier for continuations in the optimization system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct ContinuationId(pub i64);
+
 //
 // Core task structures.
 //
@@ -159,9 +163,18 @@ pub(super) struct ImplementExpressionTask {
     /// The goal ID for this implementation.
     pub goal_id: GoalId,
 
-    /// Continuations for each group that need to be notified when
-    /// new logical expressions are created.
-    pub continuations: HashMap<GroupId, Vec<LogicalPlanContinuation>>,
+    /// Next continuation ID to assign.
+    pub next_continuation_id: ContinuationId,
+
+    /// Maps continuation IDs to their actual continuations.
+    pub continuations: HashMap<ContinuationId, LogicalPlanContinuation>,
+
+    /// Maps groups to continuation IDs that need to be notified when
+    /// new logical expressions are created for that group.
+    pub group_continuations: HashMap<GroupId, Vec<ContinuationId>>,
+
+    /// Maps continuation IDs to the logical expressions they've been notified about.
+    pub launched_continuations: HashMap<ContinuationId, Vec<LogicalExpressionId>>,
 }
 
 impl ImplementExpressionTask {
@@ -177,7 +190,10 @@ impl ImplementExpressionTask {
             has_started,
             expression_id,
             goal_id,
+            next_continuation_id: ContinuationId(0),
             continuations: HashMap::new(),
+            group_continuations: HashMap::new(),
+            launched_continuations: HashMap::new(),
         }
     }
 }
@@ -196,9 +212,18 @@ pub(super) struct TransformExpressionTask {
     /// The logical expression to transform.
     pub expression_id: LogicalExpressionId,
 
-    /// Continuations for each group that need to be notified when
-    /// new logical expressions are created.
-    pub continuations: HashMap<GroupId, Vec<LogicalPlanContinuation>>,
+    /// Next continuation ID to assign.
+    pub next_continuation_id: ContinuationId,
+
+    /// Maps continuation IDs to their actual continuations.
+    pub continuations: HashMap<ContinuationId, LogicalPlanContinuation>,
+
+    /// Maps groups to continuation IDs that need to be notified when
+    /// new logical expressions are created for that group.
+    pub group_continuations: HashMap<GroupId, Vec<ContinuationId>>,
+
+    /// Maps continuation IDs to the logical expressions they've been notified about.
+    pub launched_continuations: HashMap<ContinuationId, Vec<LogicalExpressionId>>,
 }
 
 impl TransformExpressionTask {
@@ -212,7 +237,10 @@ impl TransformExpressionTask {
             rule,
             has_started,
             expression_id,
+            next_continuation_id: ContinuationId(0),
             continuations: HashMap::new(),
+            group_continuations: HashMap::new(),
+            launched_continuations: HashMap::new(),
         }
     }
 }
@@ -228,9 +256,18 @@ pub(super) struct CostExpressionTask {
     /// Whether the task has started the cost estimation.
     pub has_started: bool,
 
-    /// Continuations for each goal that need to be notified when
-    /// optimized expressions are created.
-    pub continuations: HashMap<GoalId, Vec<CostedPhysicalPlanContinuation>>,
+    /// Next continuation ID to assign.
+    pub next_continuation_id: ContinuationId,
+
+    /// Maps continuation IDs to their actual continuations.
+    pub continuations: HashMap<ContinuationId, CostedPhysicalPlanContinuation>,
+
+    /// Maps goals to continuation IDs that need to be notified when
+    /// optimized expressions are created for that goal.
+    pub goal_continuations: HashMap<GoalId, Vec<ContinuationId>>,
+
+    /// Maps continuation IDs to the physical expressions they've been notified about.
+    pub launched_continuations: HashMap<ContinuationId, Vec<PhysicalExpressionId>>,
 }
 
 impl CostExpressionTask {
@@ -239,7 +276,10 @@ impl CostExpressionTask {
         Self {
             expression_id,
             has_started,
+            next_continuation_id: ContinuationId(0),
             continuations: HashMap::new(),
+            goal_continuations: HashMap::new(),
+            launched_continuations: HashMap::new(),
         }
     }
 }
@@ -288,7 +328,9 @@ impl<M: Memoize> Optimizer<M> {
         self.register_child_to_task(parent, task_id);
 
         self.expression_transformation_task_index
-            .insert((expression_id, rule.clone()), task_id);
+            .entry(expression_id)
+            .or_default()
+            .push((rule.clone(), task_id));
 
         if is_dirty {
             self.schedule_job(
@@ -322,7 +364,9 @@ impl<M: Memoize> Optimizer<M> {
         self.register_child_to_task(parent, task_id);
 
         self.expression_implementation_task_index
-            .insert((expression_id, goal_id, rule.clone()), task_id);
+            .entry(expression_id)
+            .or_default()
+            .push((goal_id, rule.clone(), task_id));
 
         if is_dirty {
             self.schedule_job(
