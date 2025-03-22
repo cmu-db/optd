@@ -453,20 +453,19 @@ impl<M: Memoize> Optimizer<M> {
     /// finding equivalent goals, launching group implementation tasks, and
     /// costing physical expressions.
     async fn launch_goal_optimize_task(&mut self, goal_id: GoalId) -> Result<TaskId, Error> {
-        let equivalent_goals = self.memo.get_equivalent_goals(goal_id).await?;
+        let groups_with_properies = self.memo.resolve_goal_to_groups(goal_id).await?;
         let task_id = self.register_new_task(OptimizeGoal(goal_id));
         self.goal_optimization_task_index.insert(goal_id, task_id);
 
-        // Launch group implementation tasks for all equivalent goals.
-        for equiv_goal_id in &equivalent_goals {
-            let goal = self.memo.materialize_goal(*equiv_goal_id).await?;
-            let Goal(group_id, properties) = &goal;
-
-            self.launch_group_implementation_task(*group_id, properties, *equiv_goal_id, task_id)
-                .await?;
+        // Launch group implementation tasks for all equivalent group + properties.
+        for (group_id, all_properties) in groups_with_properies {
+            for properties in all_properties {
+                self.launch_group_implementation_task(group_id, &properties, goal_id, task_id)
+                    .await?;
+            }
         }
 
-        // Launch costing for all physical expressions in the original goal
+        // Launch costing for all physical expressions in the original goal.
         let physical_expressions = self.memo.get_all_physical_exprs(goal_id).await?;
         for expression_id in physical_expressions {
             self.launch_cost_expression_task(expression_id, task_id)

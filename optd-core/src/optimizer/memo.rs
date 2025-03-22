@@ -5,7 +5,7 @@ use crate::{
         },
         goal::{Cost, Goal, GoalId},
         group::GroupId,
-        properties::LogicalProperties,
+        properties::{LogicalProperties, PhysicalProperties},
         rules::{ImplementationRule, TransformationRule},
     },
     error::Error,
@@ -180,14 +180,18 @@ pub trait Memoize: Send + Sync + 'static {
         goal_id: GoalId,
     ) -> MemoizeResult<Vec<PhysicalExpressionId>>;
 
-    /// Gets all goal IDs in the same equivalence class.
+    /// Resolves a goal ID to its corresponding group IDs and their physical properties.
     ///
     /// # Parameters
-    /// * `goal_id` - ID of the goal to find equivalents for.
+    /// * `goal_id` - ID of the goal to resolve to groups.
     ///
     /// # Returns
-    /// A vector of goal IDs that are equivalent to the given goal.
-    async fn get_equivalent_goals(&self, goal_id: GoalId) -> MemoizeResult<Vec<GoalId>>;
+    /// A vector of tuples containing group IDs and their associated physical properties
+    /// that correspond to the given goal.
+    async fn resolve_goal_to_groups(
+        &self,
+        goal_id: GoalId,
+    ) -> MemoizeResult<Vec<(GroupId, Vec<PhysicalProperties>)>>;
 
     /// Searches for a physical expression ID in the memo.
     ///
