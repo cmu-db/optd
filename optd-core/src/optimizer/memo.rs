@@ -24,40 +24,47 @@ pub enum Status {
     Clean,
 }
 
+/// Information about a merged group, including its ID and expressions
+#[derive(Debug)]
+pub struct MergedGroupInfo {
+    /// ID of the merged group
+    pub group_id: GroupId,
+
+    /// All logical expressions in this group
+    pub expressions: Vec<LogicalExpressionId>,
+}
+
 /// Result of merging two groups.
 #[derive(Debug)]
 pub struct MergeGroupResult {
     /// Groups that were merged along with their expressions.
-    /// All expressions listed in `merged_exprs` must be contained within these groups.
-    pub merged_groups: Vec<(GroupId, Vec<LogicalExpressionId>)>,
+    pub merged_groups: Vec<MergedGroupInfo>,
 
     /// ID of the new representative group id.
     pub new_repr_group_id: GroupId,
+}
 
-    /// Expressions that were merged as a result of the group merge.
-    /// These logical expressions are guaranteed to be part of the groups
-    /// listed in `merged_groups`.
-    pub merged_exprs: Vec<(Vec<LogicalExpressionId>, LogicalExpressionId)>,
+/// Information about a merged goal, including its ID and expressions
+#[derive(Debug)]
+pub struct MergedGoalInfo {
+    /// ID of the merged goal
+    pub goal_id: GoalId,
+
+    /// The best costed expression for this goal, if any
+    pub best_expr: Option<(PhysicalExpressionId, Cost)>,
+
+    /// All physical expressions in this goal
+    pub expressions: Vec<PhysicalExpressionId>,
 }
 
 /// Result of merging two goals.
 #[derive(Debug)]
 pub struct MergeGoalResult {
     /// Goals that were merged along with their potential best costed expression.
-    /// All expressions listed in `merged_exprs` must be contained within these goals.
-    pub merged_goals: Vec<(
-        GoalId,
-        Option<(PhysicalExpressionId, Cost)>,
-        Vec<PhysicalExpressionId>,
-    )>,
+    pub merged_goals: Vec<MergedGoalInfo>,
 
     /// ID of the new representative goal id.
     pub new_repr_goal_id: GoalId,
-
-    /// Expressions that were merged as a result of the goal merge.
-    /// These physical expressions are guaranteed to be part of the goals
-    /// listed in `merged_goals`.
-    pub merged_exprs: Vec<(Vec<PhysicalExpressionId>, PhysicalExpressionId)>,
 }
 
 /// Results of merge operations with newly dirtied expressions.
