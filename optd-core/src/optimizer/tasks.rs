@@ -353,9 +353,8 @@ impl<M: Memoize> Optimizer<M> {
             .or_default()
             .push((properties.clone(), task_id));
 
-        // Subscribe the task to the goal to ensure it gets notified of new expressions.
         // Launch the implementation task each all expression-rule combinations.
-        let logical_expressions = self.subscribe_task_to_group(group_id, task_id).await?;
+        let logical_expressions = self.memo.get_all_logical_exprs(group_id).await?;
         let implementations = self.rule_book.get_implementations().to_vec();
 
         for expression_id in &logical_expressions {
