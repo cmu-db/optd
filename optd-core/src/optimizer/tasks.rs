@@ -74,7 +74,7 @@ pub(super) enum TaskKind {
     ExploreGroup(GroupId),
 
     /// Task to implement a group with specific physical properties.
-    ImplementGroup(GroupImplementationTask),
+    ImplementGroup(ImplementGroupTask),
 
     /// Task to apply a specific implementation rule to a logical expression.
     ImplementExpression(ImplementExpressionTask),
@@ -106,7 +106,7 @@ impl OptimizePlanTask {
 }
 
 /// Task data for implementing a group with specific physical properties for a goal.
-pub(super) struct GroupImplementationTask {
+pub(super) struct ImplementGroupTask {
     /// The group to implement.
     pub group_id: GroupId,
 
@@ -117,7 +117,7 @@ pub(super) struct GroupImplementationTask {
     pub goal_id: GoalId,
 }
 
-impl GroupImplementationTask {
+impl ImplementGroupTask {
     pub fn new(group_id: GroupId, properties: PhysicalProperties, goal_id: GoalId) -> Self {
         Self {
             group_id,
@@ -344,7 +344,7 @@ impl<M: Memoize> Optimizer<M> {
         goal_id: GoalId,
         parent_task_id: TaskId,
     ) -> Result<TaskId, Error> {
-        let task = GroupImplementationTask::new(group_id, properties.clone(), goal_id);
+        let task = ImplementGroupTask::new(group_id, properties.clone(), goal_id);
         let task_id = self.register_new_task(ImplementGroup(task));
         self.register_child_to_task(parent_task_id, task_id);
 

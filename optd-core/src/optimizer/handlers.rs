@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use super::{
     ingest::{LogicalIngest, PhysicalIngest},
     jobs::JobKind,
@@ -22,6 +20,7 @@ use futures::{
     channel::{mpsc::Sender, oneshot},
     SinkExt,
 };
+use std::collections::HashMap;
 use JobKind::*;
 use LogicalIngest::*;
 use OptimizerMessage::*;
@@ -470,40 +469,33 @@ impl<M: Memoize> Optimizer<M> {
             [] => return, // No tasks exist, nothing to do.
 
             [(task_id, group_id)] => {
-                // Just one task exists - update its index and kind.
+                // Just one task exists - update its index.
                 if *group_id != new_repr_group_id {
                     self.group_exploration_task_index.remove(group_id);
                 }
 
                 self.group_exploration_task_index
                     .insert(new_repr_group_id, *task_id);
-
-                let task = self.tasks.get_mut(task_id).unwrap();
-                task.kind = ExploreGroup(new_repr_group_id);
             }
 
             [(primary_task_id, _), rest @ ..] => {
                 // Multiple tasks - merge them into the primary task.
-                let children_to_add: Vec<_> = rest
-                    .iter()
-                    .filter_map(|(task_id, _)| self.tasks.get(task_id))
-                    .flat_map(|task| task.children.clone())
-                    .collect();
+                let mut children_to_add = Vec::new();
+                for (task_id, _) in rest {
+                    let task = self.tasks.get(task_id).unwrap();
+                    children_to_add.extend(task.children.clone());
+                    self.tasks.remove(task_id);
+                }
 
                 let primary_task = self.tasks.get_mut(primary_task_id).unwrap();
                 primary_task.children.extend(children_to_add);
-                primary_task.kind = ExploreGroup(new_repr_group_id);
-
-                self.group_exploration_task_index
-                    .insert(new_repr_group_id, *primary_task_id);
 
                 for (group_id, _) in all_exprs_by_group {
                     self.group_exploration_task_index.remove(group_id);
                 }
 
-                for (task_id, _) in rest {
-                    self.tasks.remove(task_id);
-                }
+                self.group_exploration_task_index
+                    .insert(new_repr_group_id, *primary_task_id);
             }
         }
     }
@@ -518,7 +510,86 @@ impl<M: Memoize> Optimizer<M> {
         all_exprs_by_group: &[(GroupId, Vec<LogicalExpressionId>)],
         new_repr_group_id: GroupId,
     ) {
-        todo!()
+        // Collect all implementation tasks associated with the merged groups,
+        // grouped by physical properties.
+        let mut tasks_by_properties: HashMap<_, Vec<(TaskId, GroupId)>> = HashMap::new();
+        for (group_id, _) in all_exprs_by_group {
+            if let Some(tasks) = self.group_implementation_task_index.get(group_id) {
+                for (properties, task_id) in tasks {
+                    tasks_by_properties
+                        .entry(properties.clone())
+                        .or_default()
+                        .push((*task_id, *group_id));
+                }
+            }
+        }
+
+        // Process each set of tasks with the same physical properties.
+        for (properties, tasks_with_group) in tasks_by_properties {
+            match tasks_with_group.as_slice() {
+                [] => unreachable!(),
+
+                [(task_id, group_id)] => {
+                    // Just one task exists for these properties - update its index.
+                    if *group_id != new_repr_group_id {
+                        let group_tasks = self
+                            .group_implementation_task_index
+                            .get_mut(group_id)
+                            .unwrap();
+
+                        group_tasks.retain(|(props, _)| *props != properties);
+                        if group_tasks.is_empty() {
+                            self.group_implementation_task_index.remove(group_id);
+                        }
+
+                        self.group_implementation_task_index
+                            .entry(new_repr_group_id)
+                            .or_default()
+                            .push((properties.clone(), *task_id));
+                    }
+                }
+
+                [(primary_task_id, _), rest @ ..] => {
+                    // Multiple tasks with the same properties - merge them into the primary task.
+                    let mut children_to_add = Vec::new();
+                    for (task_id, group_id) in rest {
+                        let task = self.tasks.get(task_id).unwrap();
+                        children_to_add.extend(task.children.clone());
+
+                        let group_tasks = self
+                            .group_implementation_task_index
+                            .get_mut(group_id)
+                            .unwrap();
+                        group_tasks.retain(|(props, tid)| *props != properties || *tid != *task_id);
+                        if group_tasks.is_empty() {
+                            self.group_implementation_task_index.remove(group_id);
+                        }
+
+                        self.tasks.remove(task_id);
+                    }
+
+                    let primary_task = self.tasks.get_mut(primary_task_id).unwrap();
+                    primary_task.children.extend(children_to_add);
+
+                    for (group_id, _) in all_exprs_by_group {
+                        let group_tasks = self
+                            .group_implementation_task_index
+                            .get_mut(group_id)
+                            .unwrap();
+
+                        group_tasks.retain(|(props, _)| *props != properties);
+                        if group_tasks.is_empty() {
+                            self.group_implementation_task_index.remove(group_id);
+                        }
+                    }
+
+                    self.group_implementation_task_index
+                        .entry(new_repr_group_id)
+                        .or_default()
+                        .push((properties.clone(), *primary_task_id));
+                }
+            }
+        }
     }
 
     /// Helper method to resolve dependencies after a group creation job completes.
