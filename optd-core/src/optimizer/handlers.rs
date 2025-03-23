@@ -1,3 +1,5 @@
+use core::task;
+
 use super::{
     ingest::{LogicalIngest, PhysicalIngest},
     jobs::JobKind,

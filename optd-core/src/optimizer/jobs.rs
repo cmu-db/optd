@@ -1,3 +1,5 @@
+use super::tasks::{ImplementExpressionTask, TaskKind, TransformExpressionTask};
+use super::Task;
 use super::{
     generator::OptimizerGenerator, memo::Memoize, tasks::TaskId, Optimizer, OptimizerMessage,
 };
@@ -161,6 +163,57 @@ impl<M: Memoize> Optimizer<M> {
             .insert(job_id);
 
         job_id
+    }
+
+    pub(super) async fn complete_job(&mut self, job_id: JobId) -> Result<(), Error> {
+        // Remove the job from the running jobs.
+        let Job(task_id, _) = self.running_jobs.remove(&job_id).unwrap();
+
+        if let Some(task) = self.tasks.get_mut(&task_id) {
+            // Remove the job from the task's uncompleted jobs set.
+            task.uncompleted_jobs.remove(&job_id);
+            if task.uncompleted_jobs.is_empty() {
+                // If the task has no uncompleted jobs, mark it as clean.
+                match &task.kind {
+                    TaskKind::ImplementExpression(ImplementExpressionTask {
+                        rule,
+                        expression_id,
+                        goal_id,
+                        ..
+                    }) => {
+                        self.memo
+                            .set_implementation_clean(*expression_id, *goal_id, rule)
+                            .await?;
+                    }
+                    TaskKind::TransformExpression(TransformExpressionTask {
+                        expression_id,
+                        rule,
+                        ..
+                    }) => {
+                        self.memo
+                            .set_transformation_clean(*expression_id, rule)
+                            .await?;
+                    }
+                    TaskKind::CostExpression(task) => {
+                        self.memo.set_cost_clean(task.expression_id).await?;
+                    }
+                    // We don't track status for the other task kinds.
+                    _ => (),
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn get_related_task(&self, job_id: JobId) -> Option<&Task> {
+        let Job(task_id, _) = self.running_jobs.get(&job_id).unwrap();
+        self.tasks.get(task_id)
+    }
+
+    pub(super) fn get_related_task_mut(&mut self, job_id: JobId) -> Option<&mut Task> {
+        let Job(task_id, _) = self.running_jobs.get(&job_id).unwrap();
+        self.tasks.get_mut(task_id)
     }
 
     /// Executes a job to derive logical properties for a logical expression.

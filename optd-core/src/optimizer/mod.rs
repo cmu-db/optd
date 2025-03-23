@@ -51,6 +51,7 @@ pub struct OptimizeRequest {
     pub response_tx: Sender<PhysicalPlan>,
 }
 
+// TODO(yuchen): might want to seperate out the job id as a metadata field.
 /// Messages passed within the optimization system.
 ///
 /// Each message that includes a JobId represents the result of a completed job,
@@ -189,7 +190,7 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Run the optimizer's main processing loop.
-    async fn run(mut self) {
+    async fn run(mut self) -> Result<(), crate::error::Error> {
         loop {
             tokio::select! {
                 Some(request) = self.optimize_rx.next() => {
@@ -209,44 +210,62 @@ impl<M: Memoize> Optimizer<M> {
                 },
                 Some(message) = self.message_rx.next() => {
                     // Process the next message in the channel.
-                    let processed_result = match message {
-                        OptimizeRequestWrapper(request, task_id_opt) => {
-                            self.process_optimize_request(request.plan, request.response_tx, task_id_opt).await
-                        }
-                        NewLogicalPartial(plan, group_id, job_id) => {
-                            self.process_new_logical_partial(plan, group_id, job_id).await
-                        },
-                        NewPhysicalPartial(plan, goal_id, job_id) => {
-                            self.process_new_physical_partial(plan, goal_id, job_id).await
-                        },
-                        NewCostedPhysical(expression_id, cost, _) => {
-                            self.process_new_costed_physical(expression_id, cost).await
-                        },
-                        CreateGroup( expression_id, properties, job_id) => {
-                            self.process_create_group(expression_id, &properties, job_id).await
-                        },
-                        SubscribeGroup(group_id, continuation, job_id) => {
-                            self.process_group_subscription(group_id, continuation, job_id).await
-                        },
-                        SubscribeGoal(goal, continuation, job_id) => {
-                            self.process_goal_subscription(&goal, continuation, job_id).await
-                        },
-                        RetrieveProperties(group_id, sender) => {
-                            self.process_retrieve_properties(group_id, sender).await
-                        },
-                    };
-
                     // TODO(Alexis): If an error occurs we could restart or reboot the memo.
                     // Rather than failing (e.g. memo could be distributed).
-                    processed_result.expect("Failed to process message");
+                    match message {
+                        OptimizeRequestWrapper(request, task_id_opt) => {
+                            self.process_optimize_request(request.plan, request.response_tx, task_id_opt).await?;
+                        }
+                        NewLogicalPartial(plan, group_id, job_id) => {
+                            if self.get_related_task(job_id).is_some() {
+                                self.process_new_logical_partial(plan, group_id, job_id).await?;
+                                self.complete_job(job_id).await?;
+                            }
+                        }
+                        NewPhysicalPartial(plan, goal_id, job_id) => {
+                            if self.get_related_task(job_id).is_some() {
+                                self.process_new_physical_partial(plan, goal_id, job_id).await?;
+                                self.complete_job(job_id).await?;
+                            }
+                        }
+                        NewCostedPhysical(expression_id, cost, job_id) => {
+                            if self.get_related_task(job_id).is_some() {
+                                self.process_new_costed_physical(expression_id, cost).await?;
+                                self.complete_job(job_id).await?;
+                            }
+                        }
+                        CreateGroup( expression_id, properties, job_id) => {
+                            if self.get_related_task(job_id).is_some() {
+                                self.process_create_group(expression_id, &properties, job_id).await?;
+                                self.complete_job(job_id).await?;
+                            }
+                        }
+                        SubscribeGroup(group_id, continuation, job_id) => {
+                            if self.get_related_task(job_id).is_some() {
+                                self.process_group_subscription(group_id, continuation, job_id).await?;
+                                self.complete_job(job_id).await?;
+                            }
+                        }
+                        SubscribeGoal(goal, continuation, job_id) => {
+                            if self.get_related_task(job_id).is_some() {
+                                self.process_goal_subscription(&goal, continuation, job_id).await?;
+                                self.complete_job(job_id).await?;
+                            }
+                        }
+                        RetrieveProperties(group_id, sender) => {
+                            self.process_retrieve_properties(group_id, sender).await?;
+                        }
+                    };
+
+
+
 
                     // Launch pending jobs according to a policy (currently FIFO).
                     // TODO(Alexis): Ditto for error handling.
                     self.launch_pending_jobs().await.expect("Failed to launch pending jobs");
 
-                    // TODO(Yuchen): Code to cleanup messages & updates statuses here.
                 },
-                else => break,
+                else => break Ok(()),
             }
         }
     }
