@@ -28,6 +28,7 @@ mod handlers;
 mod ingest;
 mod jobs;
 mod memo;
+mod merge;
 mod subscriptions;
 mod tasks;
 
