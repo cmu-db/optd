@@ -98,7 +98,7 @@ impl<M: Memoize> Optimizer<M> {
             Found(new_group_id) if new_group_id != group_id => {
                 // Atomically perform the merge in the memo and process all results.
                 let merge_results = self.memo.merge_groups(group_id, new_group_id).await?;
-                self.handle_merge_result(merge_results).await;
+                self.handle_merge_result(merge_results).await?;
             }
             Found(_) => {
                 // Group already exists, nothing to merge or do.
@@ -152,7 +152,7 @@ impl<M: Memoize> Optimizer<M> {
         if ingested_goal_id != goal_id {
             // Atomically perform the merge in the memo and process all results.
             let merge_results = self.memo.merge_goals(ingested_goal_id, goal_id).await?;
-            self.handle_merge_result(merge_results).await;
+            self.handle_merge_result(merge_results).await?;
 
             // If a physical expression was just created, its status is *always* dirty
             // and will need to be costed.
@@ -378,7 +378,7 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// # Parameters
     /// * `result` - The merge result to handle.
-    async fn handle_merge_result(&mut self, result: MergeResult) {
+    async fn handle_merge_result(&mut self, result: MergeResult) -> Result<(), Error> {
         // First, handle all the group merges.
         for group_merge in result.group_merges {
             let all_exprs_by_group = group_merge.merged_groups;
@@ -405,6 +405,8 @@ impl<M: Memoize> Optimizer<M> {
             // 3. Handle implementation tasks for the merged groups.
             self.merge_implementation_tasks(&all_exprs_by_group, new_repr_group_id)
                 .await;
+
+            // 4. Merge subscribers.
         }
 
         // Second, handle all the goal merges.
@@ -434,14 +436,19 @@ impl<M: Memoize> Optimizer<M> {
                         best_expr_id,
                         best_cost,
                     );
+                    self.egest_to_subscribers(*current_goal_id, best_expr_id)
+                        .await?;
                 }
             }
 
-            // 2. Task updates using indexes.
-            // Need to launch new cost expressions.
+            // 2. Handling costing tasks for the merged goals.
+
+            // 3. Merge subscribers.
         }
 
-        // 3. Dirty stuff.
+        // Third, launch the newly dirty stuff if needed.
+
+        Ok(())
     }
 
     /// Helper method to merge exploration tasks for merged groups.
