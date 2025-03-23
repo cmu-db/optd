@@ -20,6 +20,7 @@ use std::sync::Arc;
 use Child::*;
 use JobKind::*;
 use OptimizerMessage::*;
+use TaskKind::*;
 
 /// Unique identifier for jobs in the optimization system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -77,61 +78,9 @@ pub(super) enum JobKind {
 }
 
 impl<M: Memoize> Optimizer<M> {
-    /// Launches all pending jobs until either the maximum concurrent job limit is
-    /// reached or there are no more jobs to launch.
-    ///
-    /// Jobs are launched in FIFO order from the job schedule queue if the number
-    /// of currently running jobs is below the maximum concurrent jobs limit.
-    ///
-    /// # Returns
-    /// * `Result<(), Error>` - Success or error during job launching.
-    pub(super) async fn launch_pending_jobs(&mut self) -> Result<(), Error> {
-        // Launch jobs only if we're below the maximum concurrent jobs limit, in FIFO order.
-        while self.running_jobs.len() < self.max_concurrent_jobs
-            && !self.job_schedule_queue.is_empty()
-        {
-            let job_id = self.job_schedule_queue.pop_front().unwrap();
-
-            // Move the job from pending to running.
-            let job = self.pending_jobs.remove(&job_id).unwrap();
-            self.running_jobs.insert(job_id, job.clone());
-
-            // Dispatch & execute the job in a new co-routine.
-            match job.1 {
-                DeriveLogicalProperties(logical_expr_id) => {
-                    self.derive_logical_properties_job(logical_expr_id, job_id)
-                        .await?;
-                }
-                StartTransformationRule(rule_name, logical_expr_id, group_id) => {
-                    self.execute_transformation_rule_job(
-                        rule_name,
-                        logical_expr_id,
-                        group_id,
-                        job_id,
-                    )
-                    .await?;
-                }
-                StartImplementationRule(rule_name, expression_id, goal_id) => {
-                    self.execute_implementation_rule_job(rule_name, expression_id, goal_id, job_id)
-                        .await?;
-                }
-                StartCostExpression(expression_id) => {
-                    self.execute_cost_expression_job(expression_id, job_id)
-                        .await?;
-                }
-                ContinueWithLogical(logical_expr_id, k) => {
-                    self.execute_continue_with_logical_job(logical_expr_id, k)
-                        .await?;
-                }
-                ContinueWithCostedPhysical(expression_id, cost, k) => {
-                    self.execute_continue_with_optimized_job(expression_id, cost, k)
-                        .await?;
-                }
-            }
-        }
-
-        Ok(())
-    }
+    //
+    // Job Scheduling and Management
+    //
 
     /// Schedules a new job and associates it with a task.
     ///
@@ -165,40 +114,49 @@ impl<M: Memoize> Optimizer<M> {
         job_id
     }
 
-    pub(super) async fn complete_job(&mut self, job_id: JobId) -> Result<(), Error> {
-        // Remove the job from the running jobs.
-        let Job(task_id, _) = self.running_jobs.remove(&job_id).unwrap();
+    /// Launches all pending jobs until either the maximum concurrent job limit is
+    /// reached or there are no more jobs to launch.
+    ///
+    /// Jobs are launched in FIFO order from the job schedule queue if the number
+    /// of currently running jobs is below the maximum concurrent jobs limit.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during job launching.
+    pub(super) async fn launch_pending_jobs(&mut self) -> Result<(), Error> {
+        // Launch jobs only if we're below the maximum concurrent jobs limit, in FIFO order.
+        while self.running_jobs.len() < self.max_concurrent_jobs
+            && !self.job_schedule_queue.is_empty()
+        {
+            let job_id = self.job_schedule_queue.pop_front().unwrap();
 
-        if let Some(task) = self.tasks.get_mut(&task_id) {
-            // Remove the job from the task's uncompleted jobs set.
-            task.uncompleted_jobs.remove(&job_id);
-            if task.uncompleted_jobs.is_empty() {
-                // If the task has no uncompleted jobs, mark it as clean.
-                match &task.kind {
-                    TaskKind::ImplementExpression(ImplementExpressionTask {
-                        rule,
-                        expression_id,
-                        goal_id,
-                        ..
-                    }) => {
-                        self.memo
-                            .set_implementation_clean(*expression_id, *goal_id, rule)
-                            .await?;
-                    }
-                    TaskKind::TransformExpression(TransformExpressionTask {
-                        expression_id,
-                        rule,
-                        ..
-                    }) => {
-                        self.memo
-                            .set_transformation_clean(*expression_id, rule)
-                            .await?;
-                    }
-                    TaskKind::CostExpression(task) => {
-                        self.memo.set_cost_clean(task.expression_id).await?;
-                    }
-                    // We don't track status for the other task kinds.
-                    _ => (),
+            // Move the job from pending to running.
+            let job = self.pending_jobs.remove(&job_id).unwrap();
+            self.running_jobs.insert(job_id, job.clone());
+
+            // Dispatch & execute the job in a new co-routine.
+            match job.1 {
+                DeriveLogicalProperties(logical_expr_id) => {
+                    self.derive_logical_properties(logical_expr_id, job_id)
+                        .await?;
+                }
+                StartTransformationRule(rule_name, logical_expr_id, group_id) => {
+                    self.execute_transformation_rule(rule_name, logical_expr_id, group_id, job_id)
+                        .await?;
+                }
+                StartImplementationRule(rule_name, expression_id, goal_id) => {
+                    self.execute_implementation_rule(rule_name, expression_id, goal_id, job_id)
+                        .await?;
+                }
+                StartCostExpression(expression_id) => {
+                    self.execute_cost_expression(expression_id, job_id).await?;
+                }
+                ContinueWithLogical(logical_expr_id, k) => {
+                    self.execute_continue_with_logical(logical_expr_id, k)
+                        .await?;
+                }
+                ContinueWithCostedPhysical(expression_id, cost, k) => {
+                    self.execute_continue_with_optimized(expression_id, cost, k)
+                        .await?;
                 }
             }
         }
@@ -206,21 +164,80 @@ impl<M: Memoize> Optimizer<M> {
         Ok(())
     }
 
+    /// Marks a job as completed and updates related task status.
+    ///
+    /// This method removes the job from running jobs, updates the task's
+    /// uncompleted jobs set, and marks the task as clean if it has no more
+    /// uncompleted jobs.
+    ///
+    /// # Parameters
+    /// * `job_id` - The ID of the job to mark as completed.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during job completion.
+    pub(super) async fn complete_job(&mut self, job_id: JobId) -> Result<(), Error> {
+        // Remove the job from the running jobs.
+        let Job(task_id, _) = self.running_jobs.remove(&job_id).unwrap();
+
+        // Remove the job from the task's uncompleted jobs set.
+        let task = self.tasks.get_mut(&task_id).unwrap();
+        task.uncompleted_jobs.remove(&job_id);
+
+        // If the task has no uncompleted jobs, mark it as clean.
+        if task.uncompleted_jobs.is_empty() {
+            match &task.kind {
+                ImplementExpression(ImplementExpressionTask {
+                    rule,
+                    expression_id,
+                    goal_id,
+                    ..
+                }) => {
+                    self.memo
+                        .set_implementation_clean(*expression_id, *goal_id, rule)
+                        .await?;
+                }
+                TransformExpression(TransformExpressionTask {
+                    expression_id,
+                    rule,
+                    ..
+                }) => {
+                    self.memo
+                        .set_transformation_clean(*expression_id, rule)
+                        .await?;
+                }
+                CostExpression(task) => {
+                    self.memo.set_cost_clean(task.expression_id).await?;
+                }
+                _ => {} // We don't track status for the other task kinds.
+            }
+        }
+
+        // TODO(Alexis): Cleanup the parentless tasks to free up resources.
+
+        Ok(())
+    }
+
+    /// Retrieves the task associated with a specific job.
+    ///
+    /// # Parameters
+    /// * `job_id` - The ID of the job to find the related task for.
+    ///
+    /// # Returns
+    /// * `Option<&Task>` - The task associated with the job, if found.
     pub(super) fn get_related_task(&self, job_id: JobId) -> Option<&Task> {
         let Job(task_id, _) = self.running_jobs.get(&job_id).unwrap();
         self.tasks.get(task_id)
     }
 
-    pub(super) fn get_related_task_mut(&mut self, job_id: JobId) -> Option<&mut Task> {
-        let Job(task_id, _) = self.running_jobs.get(&job_id).unwrap();
-        self.tasks.get_mut(task_id)
-    }
+    //
+    // Job Execution Methods
+    //
 
     /// Executes a job to derive logical properties for a logical expression.
     ///
     /// This creates an engine instance and launches the property derivation process
     /// for the specified logical expression.
-    async fn derive_logical_properties_job(
+    async fn derive_logical_properties(
         &self,
         expression_id: LogicalExpressionId,
         job_id: JobId,
@@ -260,7 +277,7 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// This creates an engine instance and launches the transformation rule
     /// application process for the specified logical expression.
-    async fn execute_transformation_rule_job(
+    async fn execute_transformation_rule(
         &self,
         rule_name: TransformationRule,
         expression_id: LogicalExpressionId,
@@ -303,7 +320,7 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// This creates an engine instance and launches the implementation rule
     /// application process for the specified logical expression and goal.
-    async fn execute_implementation_rule_job(
+    async fn execute_implementation_rule(
         &self,
         rule_name: ImplementationRule,
         expression_id: LogicalExpressionId,
@@ -349,7 +366,7 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// This creates an engine instance and launches the cost calculation process
     /// for the specified physical expression.
-    async fn execute_cost_expression_job(
+    async fn execute_cost_expression(
         &self,
         expression_id: PhysicalExpressionId,
         job_id: JobId,
@@ -387,7 +404,7 @@ impl<M: Memoize> Optimizer<M> {
     /// Executes a job to continue processing with a logical expression result.
     ///
     /// This materializes the logical expression and passes it to the continuation.
-    async fn execute_continue_with_logical_job(
+    async fn execute_continue_with_logical(
         &self,
         expression_id: LogicalExpressionId,
         k: LogicalPlanContinuation,
@@ -409,7 +426,7 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// This materializes the physical expression and passes it along with its cost
     /// to the continuation.
-    async fn execute_continue_with_optimized_job(
+    async fn execute_continue_with_optimized(
         &self,
         physical_expr_id: PhysicalExpressionId,
         cost: Cost,
@@ -425,6 +442,10 @@ impl<M: Memoize> Optimizer<M> {
 
         Ok(())
     }
+
+    //
+    // Plan Materialization Helpers
+    //
 
     /// Converts a physical expression ID to a partial physical plan.
     ///

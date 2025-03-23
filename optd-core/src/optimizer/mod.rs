@@ -8,6 +8,7 @@ use crate::{
         rules::RuleBook,
     },
     engine::{CostedPhysicalPlanContinuation, LogicalPlanContinuation},
+    error::Error,
 };
 use futures::channel::oneshot;
 use futures::StreamExt;
@@ -183,14 +184,16 @@ impl<M: Memoize> Optimizer<M> {
         // Start the background processing loop.
         let optimizer = Self::new(memo, hir, message_tx.clone(), message_rx, optimize_rx);
         tokio::spawn(async move {
-            optimizer.run().await;
+            // TODO(Alexis): If an error occurs we could restart or reboot the memo.
+            // Rather than failing (e.g. memo could be distributed).
+            optimizer.run().await.expect("Optimizer failure");
         });
 
         optimize_tx
     }
 
     /// Run the optimizer's main processing loop.
-    async fn run(mut self) -> Result<(), crate::error::Error> {
+    async fn run(mut self) -> Result<(), Error> {
         loop {
             tokio::select! {
                 Some(request) = self.optimize_rx.next() => {
@@ -210,8 +213,6 @@ impl<M: Memoize> Optimizer<M> {
                 },
                 Some(message) = self.message_rx.next() => {
                     // Process the next message in the channel.
-                    // TODO(Alexis): If an error occurs we could restart or reboot the memo.
-                    // Rather than failing (e.g. memo could be distributed).
                     match message {
                         OptimizeRequestWrapper(request, task_id_opt) => {
                             self.process_optimize_request(request.plan, request.response_tx, task_id_opt).await?;
@@ -257,13 +258,8 @@ impl<M: Memoize> Optimizer<M> {
                         }
                     };
 
-
-
-
                     // Launch pending jobs according to a policy (currently FIFO).
-                    // TODO(Alexis): Ditto for error handling.
-                    self.launch_pending_jobs().await.expect("Failed to launch pending jobs");
-
+                    self.launch_pending_jobs().await?;
                 },
                 else => break Ok(()),
             }
