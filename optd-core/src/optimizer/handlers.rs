@@ -8,7 +8,7 @@ use super::{
 use crate::{
     cir::{
         expressions::{LogicalExpressionId, PhysicalExpressionId},
-        goal::{Cost, Goal, GoalId},
+        goal::{Cost, Goal, GoalId, GoalMemberId},
         group::GroupId,
         plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
         properties::{LogicalProperties, PhysicalProperties},
@@ -143,22 +143,17 @@ impl<M: Memoize> Optimizer<M> {
         job_id: JobId,
     ) -> Result<(), Error> {
         let goal_id = self.memo.find_repr_goal(goal_id).await?;
-        let PhysicalIngest {
-            goal_id: ingested_goal_id,
-            new_expression_id,
-        } = self.ingest_physical_plan(&plan).await?;
 
-        if ingested_goal_id != goal_id {
-            // Atomically perform the merge in the memo and process all results.
-            let merge_results = self.memo.merge_goals(ingested_goal_id, goal_id).await?;
-            self.handle_merge_result(merge_results).await?;
+        let member = self.probe_ingest_physical_plan(&plan).await?;
+        let is_new = self.memo.add_goal_member(goal_id, member).await?;
 
-            // If a physical expression was just created, its status is *always* dirty
-            // and will need to be costed.
-            if let Some(expression_id) = new_expression_id {
-                let related_task_id = self.running_jobs[&job_id].0;
-                self.launch_cost_expression_task(expression_id, related_task_id)
-                    .await?;
+        if is_new {
+            match member {
+                GoalMemberId::PhysicalExpressionId(_) => {
+                    // We need a costing expression index...
+                    todo!()
+                }
+                GoalMemberId::GoalId(_) => todo!(),
             }
         }
 
@@ -183,7 +178,7 @@ impl<M: Memoize> Optimizer<M> {
         cost: Cost,
     ) -> Result<(), Error> {
         let expression_id = self.memo.find_repr_physical_expr(expression_id).await?;
-        let (new_best, goal_id) = self
+        let new_best = self
             .memo
             .update_physical_expr_cost(expression_id, cost)
             .await?;
@@ -191,8 +186,9 @@ impl<M: Memoize> Optimizer<M> {
         // If this is the new best expression found so far for this goal,
         // schedule continuation jobs for all subscribers and send to clients.
         if new_best {
-            self.schedule_optimized_continuations(goal_id, expression_id, cost);
-            self.egest_to_subscribers(goal_id, expression_id).await?;
+            // Needs to send to parents and job must contain goal.
+            // self.schedule_optimized_continuations(goal_id, expression_id, cost);
+            // self.egest_to_subscribers(goal_id, expression_id).await?;
         }
 
         Ok(())

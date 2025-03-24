@@ -11,7 +11,7 @@ pub struct Goal(pub GroupId, pub PhysicalProperties);
 
 /// Represents a member of a goal, which can be either a physical expression
 /// or a reference to another goal
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum GoalMemberId {
     /// A physical expression that can satisfy the goal
     PhysicalExpressionId(PhysicalExpressionId),
