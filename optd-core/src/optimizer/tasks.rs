@@ -244,7 +244,7 @@ impl<M: Memoize> Optimizer<M> {
     /// that will be notified of the transformation results.
     ///
     /// Only schedules the starting job if the transformation is marked as dirty in the memo.
-    pub(super) async fn launch_transform_expression_task(
+    async fn launch_transform_expression_task(
         &mut self,
         rule: TransformationRule,
         expression_id: LogicalExpressionId,
@@ -278,7 +278,7 @@ impl<M: Memoize> Optimizer<M> {
     /// that will be notified of the implementation results.
     ///
     /// Only schedules the starting job if the implementation is marked as dirty in the memo.
-    pub(super) async fn launch_implement_expression_task(
+    async fn launch_implement_expression_task(
         &mut self,
         rule: ImplementationRule,
         expression_id: LogicalExpressionId,
@@ -305,29 +305,35 @@ impl<M: Memoize> Optimizer<M> {
         Ok(task_id)
     }
 
-    /// Launches a task to start computing the cost of a physical expression.
+    /// Ensures a cost expression task exists and sets up a parent-child relationship.
     ///
-    /// This task estimates the execution cost of a physical implementation
-    /// to aid in selecting the optimal plan. It maintains a set of continuations
-    /// that will be notified of the costing results.
-    ///
-    /// Only schedules the starting job if the cost is marked as dirty in the memo.
-    pub(super) async fn launch_cost_expression_task(
+    /// This is used when a task needs to cost a physical expression as part of its work.
+    /// If a costing task already exists, we reuse it.
+    pub(super) async fn ensure_cost_expression_task(
         &mut self,
         expression_id: PhysicalExpressionId,
-        parent: TaskId,
-    ) -> Result<TaskId, Error> {
-        let is_dirty = self.memo.get_cost_status(expression_id).await? == Status::Dirty;
+        parent_task_id: TaskId,
+    ) -> Result<(), Error> {
+        let task_id = match self.cost_expression_task_index.get(&expression_id) {
+            Some(id) => *id,
+            None => {
+                let is_dirty = self.memo.get_cost_status(expression_id).await? == Status::Dirty;
+                let task = CostExpressionTask::new(expression_id, is_dirty);
+                let task_id = self.register_new_task(CostExpression(task));
+                self.cost_expression_task_index
+                    .insert(expression_id, task_id);
 
-        let task = CostExpressionTask::new(expression_id, is_dirty);
-        let task_id = self.register_new_task(CostExpression(task));
-        self.register_child_to_task(parent, task_id);
+                if is_dirty {
+                    self.schedule_job(task_id, StartCostExpression(expression_id));
+                }
 
-        if is_dirty {
-            self.schedule_job(task_id, StartCostExpression(expression_id));
-        }
+                task_id
+            }
+        };
 
-        Ok(task_id)
+        self.register_child_to_task(task_id, parent_task_id);
+
+        Ok(())
     }
 
     //
@@ -428,13 +434,13 @@ impl<M: Memoize> Optimizer<M> {
             }
         }
 
-        // For all goal members, launch cost expression tasks for physical expressions
+        // For all goal members, ensure cost expression tasks for physical expressions
         // and ensure goal optimization tasks for goal references.
         let goal_members = self.memo.get_all_goal_members(goal_id).await?;
         for member in goal_members {
             match member {
                 GoalMemberId::PhysicalExpressionId(expr_id) => {
-                    self.launch_cost_expression_task(expr_id, task_id).await?;
+                    self.ensure_cost_expression_task(expr_id, task_id).await?;
                 }
                 GoalMemberId::GoalId(referenced_goal_id) => {
                     self.ensure_goal_optimize_task(referenced_goal_id, task_id)
