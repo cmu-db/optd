@@ -87,10 +87,7 @@ impl<M: Memoize> Optimizer<M> {
         let Some(subscribers) = self.group_subscribers.get(&group_id) else {
             return;
         };
-        if expression_ids.is_empty() {
-            return;
-        };
-
+        
         let all_continuation_jobs: Vec<_> = subscribers
             .iter()
             .filter_map(|&task_id| {
