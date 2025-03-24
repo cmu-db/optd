@@ -20,17 +20,13 @@ use std::collections::{HashMap, HashSet};
 use JobKind::*;
 use TaskKind::*;
 
-//
-// Type definitions.
-//
+//=============================================================================
+// Type definitions and core structures
+//=============================================================================
 
 /// Unique identifier for tasks in the optimization system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct TaskId(pub i64);
-
-//
-// Core task structures.
-//
 
 /// A task represents a higher-level objective in the optimization process.
 ///
@@ -38,8 +34,11 @@ pub(super) struct TaskId(pub i64);
 /// They represent structured, potentially hierarchical components of the
 /// optimization process.
 pub(super) struct Task {
-    /// Tasks that depend on this task to complete.
-    pub children: Vec<TaskId>,
+    /// Tasks that created this task (parent tasks).
+    pub parents: HashSet<TaskId>,
+
+    /// Tasks that were created by this task (children tasks).
+    pub children: HashSet<TaskId>,
 
     /// The specific kind of task.
     pub kind: TaskKind,
@@ -49,10 +48,11 @@ pub(super) struct Task {
 }
 
 impl Task {
-    /// Creates a new task with the specified kind and empty child list and job set.
+    /// Creates a new task with the specified kind and empty parent, child list, and job set.
     fn new(kind: TaskKind) -> Self {
         Self {
-            children: Vec::new(),
+            parents: HashSet::new(),
+            children: HashSet::new(),
             kind,
             uncompleted_jobs: HashSet::new(),
         }
@@ -83,9 +83,9 @@ pub(super) enum TaskKind {
     CostExpression(CostExpressionTask),
 }
 
-//
-// Task variant structs.
-//
+//=============================================================================
+// Task variant structs
+//=============================================================================
 
 /// Task data for optimizing a logical plan.
 pub(super) struct OptimizePlanTask {
@@ -214,14 +214,14 @@ impl CostExpressionTask {
     }
 }
 
-//
-// Optimizer task implementation.
-//
+//=============================================================================
+// Optimizer task implementation
+//=============================================================================
 
 impl<M: Memoize> Optimizer<M> {
-    //
-    // Task launching.
-    //
+    //-------------------------------------------------------------------------
+    // Public API
+    //-------------------------------------------------------------------------
 
     /// Launches a new task to optimize a logical plan into a physical plan.
     ///
@@ -234,8 +234,84 @@ impl<M: Memoize> Optimizer<M> {
         response_tx: Sender<PhysicalPlan>,
     ) -> TaskId {
         let task = OptimizePlanTask::new(plan, response_tx);
-        self.register_new_task(OptimizePlan(task))
+        self.register_new_task(OptimizePlan(task), None)
     }
+
+    /// Ensures a group exploration task exists and sets up a parent-child relationship.
+    ///
+    /// This is used when a task needs to explore all possible expressions in a group
+    /// as part of its work. If an exploration task already exists, we reuse it.
+    pub(super) async fn ensure_group_exploration_task(
+        &mut self,
+        group_id: GroupId,
+        parent_task_id: TaskId,
+    ) -> Result<(), Error> {
+        let task_id = match self.group_exploration_task_index.get(&group_id) {
+            Some(id) => *id,
+            None => {
+                self.launch_group_exploration_task(group_id, parent_task_id)
+                    .await?
+            }
+        };
+
+        self.register_parent_child_relationship(parent_task_id, task_id);
+        Ok(())
+    }
+
+    /// Ensures a goal optimization task exists and sets up a parent-child relationship.
+    ///
+    /// This is used when a task needs to optimize a goal as part of its work.
+    /// If an optimization task already exists, we reuse it.
+    pub(super) async fn ensure_goal_optimize_task(
+        &mut self,
+        goal_id: GoalId,
+        parent_task_id: TaskId,
+    ) -> Result<(), Error> {
+        let task_id = match self.goal_optimization_task_index.get(&goal_id) {
+            Some(id) => *id,
+            None => {
+                self.launch_goal_optimize_task(goal_id, parent_task_id)
+                    .await?
+            }
+        };
+
+        self.register_parent_child_relationship(parent_task_id, task_id);
+        Ok(())
+    }
+
+    /// Ensures a cost expression task exists and sets up a parent-child relationship.
+    ///
+    /// This is used when a task needs to cost a physical expression as part of its work.
+    /// If a costing task already exists, we reuse it.
+    pub(super) async fn ensure_cost_expression_task(
+        &mut self,
+        expression_id: PhysicalExpressionId,
+        parent_task_id: TaskId,
+    ) -> Result<(), Error> {
+        let task_id = match self.cost_expression_task_index.get(&expression_id) {
+            Some(id) => *id,
+            None => {
+                let is_dirty = self.memo.get_cost_status(expression_id).await? == Status::Dirty;
+                let task = CostExpressionTask::new(expression_id, is_dirty);
+                let task_id = self.register_new_task(CostExpression(task), Some(parent_task_id));
+                self.cost_expression_task_index
+                    .insert(expression_id, task_id);
+
+                if is_dirty {
+                    self.schedule_job(task_id, StartCostExpression(expression_id));
+                }
+
+                task_id
+            }
+        };
+
+        self.register_parent_child_relationship(parent_task_id, task_id);
+        Ok(())
+    }
+
+    //-------------------------------------------------------------------------
+    // Internal task launching methods
+    //-------------------------------------------------------------------------
 
     /// Launches a task to start applying a transformation rule to a logical expression.
     ///
@@ -249,7 +325,7 @@ impl<M: Memoize> Optimizer<M> {
         rule: TransformationRule,
         expression_id: LogicalExpressionId,
         group_id: GroupId,
-        parent: TaskId,
+        parent_task_id: TaskId,
     ) -> Result<TaskId, Error> {
         let is_dirty = self
             .memo
@@ -258,8 +334,7 @@ impl<M: Memoize> Optimizer<M> {
             == Status::Dirty;
 
         let task = TransformExpressionTask::new(rule.clone(), is_dirty, expression_id);
-        let task_id = self.register_new_task(TransformExpression(task));
-        self.register_child_to_task(parent, task_id);
+        let task_id = self.register_new_task(TransformExpression(task), Some(parent_task_id));
 
         if is_dirty {
             self.schedule_job(
@@ -283,7 +358,7 @@ impl<M: Memoize> Optimizer<M> {
         rule: ImplementationRule,
         expression_id: LogicalExpressionId,
         goal_id: GoalId,
-        parent: TaskId,
+        parent_task_id: TaskId,
     ) -> Result<TaskId, Error> {
         let is_dirty = self
             .memo
@@ -292,8 +367,7 @@ impl<M: Memoize> Optimizer<M> {
             == Status::Dirty;
 
         let task = ImplementExpressionTask::new(rule.clone(), is_dirty, expression_id, goal_id);
-        let task_id = self.register_new_task(ImplementExpression(task));
-        self.register_child_to_task(parent, task_id);
+        let task_id = self.register_new_task(ImplementExpression(task), Some(parent_task_id));
 
         if is_dirty {
             self.schedule_job(
@@ -305,92 +379,18 @@ impl<M: Memoize> Optimizer<M> {
         Ok(task_id)
     }
 
-    /// Ensures a cost expression task exists and sets up a parent-child relationship.
-    ///
-    /// This is used when a task needs to cost a physical expression as part of its work.
-    /// If a costing task already exists, we reuse it.
-    pub(super) async fn ensure_cost_expression_task(
-        &mut self,
-        expression_id: PhysicalExpressionId,
-        parent_task_id: TaskId,
-    ) -> Result<(), Error> {
-        let task_id = match self.cost_expression_task_index.get(&expression_id) {
-            Some(id) => *id,
-            None => {
-                let is_dirty = self.memo.get_cost_status(expression_id).await? == Status::Dirty;
-                let task = CostExpressionTask::new(expression_id, is_dirty);
-                let task_id = self.register_new_task(CostExpression(task));
-                self.cost_expression_task_index
-                    .insert(expression_id, task_id);
-
-                if is_dirty {
-                    self.schedule_job(task_id, StartCostExpression(expression_id));
-                }
-
-                task_id
-            }
-        };
-
-        self.register_child_to_task(task_id, parent_task_id);
-
-        Ok(())
-    }
-
-    //
-    // Exploration tasks.
-    //
-
-    /// Ensures a group exploration task exists and sets up a parent-child relationship.
-    ///
-    /// This is used when a task needs to explore all possible expressions in a group
-    /// as part of its work. If an exploration task already exists, we reuse it.
-    pub(super) async fn ensure_group_exploration_task(
-        &mut self,
-        group_id: GroupId,
-        child_task_id: TaskId,
-    ) -> Result<(), Error> {
-        let task_id = match self.group_exploration_task_index.get(&group_id) {
-            Some(id) => *id,
-            None => self.launch_group_exploration_task(group_id).await?,
-        };
-
-        self.register_child_to_task(task_id, child_task_id);
-
-        Ok(())
-    }
-
-    /// Ensures a goal optimization task exists and sets up a parent-child relationship.
-    ///
-    /// This is used when a task needs to optimize a goal as part of its work.
-    /// If an optimization task already exists, we reuse it.
-    pub(super) async fn ensure_goal_optimize_task(
-        &mut self,
-        goal_id: GoalId,
-        child_task_id: TaskId,
-    ) -> Result<(), Error> {
-        let task_id = match self.goal_optimization_task_index.get(&goal_id) {
-            Some(id) => *id,
-            None => self.launch_goal_optimize_task(goal_id).await?,
-        };
-
-        self.register_child_to_task(task_id, child_task_id);
-
-        Ok(())
-    }
-
-    //
-    // Helper methods for launching exploration tasks.
-    //
-
     /// Launches a new task to explore all possible transformations for a logical group.
     ///
     /// This schedules jobs to apply all available transformation rules to all
     /// logical expressions in the group.
-    async fn launch_group_exploration_task(&mut self, group_id: GroupId) -> Result<TaskId, Error> {
-        let task_id = self.register_new_task(ExploreGroup(group_id));
+    async fn launch_group_exploration_task(
+        &mut self,
+        group_id: GroupId,
+        parent_task_id: TaskId,
+    ) -> Result<TaskId, Error> {
+        let task_id = self.register_new_task(ExploreGroup(group_id), Some(parent_task_id));
         self.group_exploration_task_index.insert(group_id, task_id);
 
-        // Subscribe the task to the group to ensure it gets notified of new expressions.
         // Launch the transformation task for all expression-rule combinations.
         let transformations = self.rule_book.get_transformations().to_vec();
         let expressions = self.memo.get_all_logical_exprs(group_id).await?;
@@ -414,16 +414,20 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// This method creates and manages the tasks needed to optimize a goal by
     /// ensuring group exploration, launching implementation tasks, and processing goal members.
-    async fn launch_goal_optimize_task(&mut self, goal_id: GoalId) -> Result<TaskId, Error> {
-        let task_id = self.register_new_task(OptimizeGoal(goal_id));
+    async fn launch_goal_optimize_task(
+        &mut self,
+        goal_id: GoalId,
+        parent_task_id: TaskId,
+    ) -> Result<TaskId, Error> {
+        let task_id = self.register_new_task(OptimizeGoal(goal_id), Some(parent_task_id));
         self.goal_optimization_task_index.insert(goal_id, task_id);
 
-        // Launch implementation tasks for all expression-rule combinations, so we need to
-        // ensure that the group exploration task exists.
+        // Launch implementation tasks for all expression-rule combinations.
         let Goal(group_id, _) = self.memo.materialize_goal(goal_id).await?;
         self.ensure_group_exploration_task(group_id, task_id)
             .await?;
 
+        // Launch implementation tasks for all logical expressions in the group.
         let logical_expressions = self.memo.get_all_logical_exprs(group_id).await?;
         let implementations = self.rule_book.get_implementations().to_vec();
 
@@ -434,8 +438,7 @@ impl<M: Memoize> Optimizer<M> {
             }
         }
 
-        // For all goal members, ensure cost expression tasks for physical expressions
-        // and ensure goal optimization tasks for goal references.
+        // Process all goal members: physical expressions and subgoals.
         let goal_members = self.memo.get_all_goal_members(goal_id).await?;
         for member in goal_members {
             match member {
@@ -452,27 +455,39 @@ impl<M: Memoize> Optimizer<M> {
         Ok(task_id)
     }
 
+    //-------------------------------------------------------------------------
+    // Helper methods for task management
+    //-------------------------------------------------------------------------
+
     /// Helper method to register a new task of a specified kind.
     ///
-    /// Assigns a unique task ID and adds the task to the task registry.
-    fn register_new_task(&mut self, kind: TaskKind) -> TaskId {
+    /// Assigns a unique task ID, adds the task to the task registry,
+    /// and sets up the parent relationship if provided.
+    fn register_new_task(&mut self, kind: TaskKind, parent: Option<TaskId>) -> TaskId {
         // Generate a unique task ID.
         let task_id = self.next_task_id;
         self.next_task_id.0 += 1;
 
         // Create and register the task.
-        self.tasks.insert(task_id, Task::new(kind));
+        let mut task = Task::new(kind);
+        if let Some(parent_id) = parent {
+            task.parents.insert(parent_id);
+        }
+        self.tasks.insert(task_id, task);
+
         task_id
     }
 
-    /// Helper method to register a child task to a parent task.
+    /// Sets up the bidirectional parent-child relationship between tasks.
     ///
-    /// This sets up the hierarchical relationship between tasks.
-    fn register_child_to_task(&mut self, parent_id: TaskId, child_id: TaskId) {
-        self.tasks
-            .get_mut(&parent_id)
-            .unwrap()
-            .children
-            .push(child_id);
+    /// Updates both the parent's children list and the child's parents set.
+    fn register_parent_child_relationship(&mut self, parent_id: TaskId, child_id: TaskId) {
+        // Add child to parent's children list if not already there.
+        let parent = self.tasks.get_mut(&parent_id).unwrap();
+        parent.children.insert(child_id);
+
+        // Add parent to child's parents set.
+        let child = self.tasks.get_mut(&child_id).unwrap();
+        child.parents.insert(parent_id);
     }
 }
