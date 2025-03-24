@@ -1,5 +1,5 @@
 use super::{
-    ingest::{LogicalIngest, PhysicalIngest},
+    ingest::LogicalIngest,
     jobs::JobKind,
     memo::Memoize,
     tasks::{CostExpressionTask, ImplementExpressionTask, TaskKind, TransformExpressionTask},
@@ -149,11 +149,13 @@ impl<M: Memoize> Optimizer<M> {
 
         if is_new {
             match member {
-                GoalMemberId::PhysicalExpressionId(_) => {
-                    // We need a costing expression index...
-                    todo!()
+                GoalMemberId::PhysicalExpressionId(expression_id) => {
+                    let parent_task_id = self.running_jobs[&job_id].0;
+                    // TODO(Alexis): Needs to ensure cost expression task exists and then subs.
                 }
-                GoalMemberId::GoalId(_) => todo!(),
+                GoalMemberId::GoalId(_) => {
+                    // TODO(Alexis); Need to launch a new implement
+                }
             }
         }
 
@@ -186,7 +188,7 @@ impl<M: Memoize> Optimizer<M> {
         // If this is the new best expression found so far for this goal,
         // schedule continuation jobs for all subscribers and send to clients.
         if new_best {
-            // Needs to send to parents and job must contain goal.
+            // TODO(Alexis): Needs to send to parents.
             // self.schedule_optimized_continuations(goal_id, expression_id, cost);
             // self.egest_to_subscribers(goal_id, expression_id).await?;
         }

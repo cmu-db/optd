@@ -52,7 +52,6 @@ pub struct OptimizeRequest {
     pub response_tx: Sender<PhysicalPlan>,
 }
 
-// TODO(yuchen): might want to seperate out the job id as a metadata field.
 /// Messages passed within the optimization system.
 ///
 /// Each message that includes a JobId represents the result of a completed job,

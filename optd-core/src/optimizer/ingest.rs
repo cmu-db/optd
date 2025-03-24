@@ -1,10 +1,8 @@
 use super::{memo::Memoize, Optimizer};
 use crate::{
     cir::{
-        expressions::{
-            LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
-        },
-        goal::{GoalId, GoalMemberId},
+        expressions::{LogicalExpression, LogicalExpressionId, PhysicalExpression},
+        goal::GoalMemberId,
         group::GroupId,
         operators::{Child, Operator},
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
@@ -22,14 +20,6 @@ pub(super) enum LogicalIngest {
     Found(GroupId),
     /// Plan requires groups to be created for missing expressions.
     Missing(Vec<LogicalExpressionId>),
-}
-
-/// Result type for physical plan ingestion.
-pub(super) struct PhysicalIngest {
-    /// The goal id matched with the ingested physical plan.
-    pub goal_id: GoalId,
-    /// The physical expression id if newly created, None if it already existed.
-    pub new_expression_id: Option<PhysicalExpressionId>,
 }
 
 impl<M: Memoize> Optimizer<M> {
