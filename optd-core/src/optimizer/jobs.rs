@@ -3,22 +3,19 @@ use super::Task;
 use super::{
     generator::OptimizerGenerator, memo::Memoize, tasks::TaskId, Optimizer, OptimizerMessage,
 };
-use crate::cir::goal::GoalMemberId;
 use crate::{
     cir::{
         expressions::{LogicalExpressionId, PhysicalExpressionId},
         goal::{Cost, Goal, GoalId},
         group::GroupId,
-        operators::{Child, Operator},
-        plans::PartialPhysicalPlan,
+        operators::Child,
         rules::{ImplementationRule, TransformationRule},
     },
     engine::{CostedPhysicalPlanContinuation, Engine, LogicalPlanContinuation},
     error::Error,
 };
-use futures::{future::try_join_all, SinkExt};
+use futures::SinkExt;
 use std::sync::Arc;
-use Child::*;
 use JobKind::*;
 use OptimizerMessage::*;
 use TaskKind::*;
@@ -377,9 +374,7 @@ impl<M: Memoize> Optimizer<M> {
             OptimizerGenerator::new(self.message_tx.clone(), job_id),
         );
 
-        let plan = self
-            .materialize_partial_physical_plan(expression_id)
-            .await?;
+        let plan = self.egest_partial_plan(expression_id).await?;
 
         let message_tx = self.message_tx.clone();
         tokio::spawn(async move {
@@ -433,9 +428,7 @@ impl<M: Memoize> Optimizer<M> {
         cost: Cost,
         k: CostedPhysicalPlanContinuation,
     ) -> Result<(), Error> {
-        let plan = self
-            .materialize_partial_physical_plan(physical_expr_id)
-            .await?;
+        let plan = self.egest_partial_plan(physical_expr_id).await?;
 
         tokio::spawn(async move {
             k((plan, cost)).await;

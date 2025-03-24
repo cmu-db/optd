@@ -122,7 +122,6 @@ pub struct Optimizer<M: Memoize> {
 
     // Task indexing.
     group_exploration_task_index: HashMap<GroupId, TaskId>,
-    group_implementation_task_index: HashMap<GroupId, Vec<(PhysicalProperties, TaskId)>>,
     goal_optimization_task_index: HashMap<GoalId, TaskId>,
 
     // Subscriptions.
@@ -166,7 +165,6 @@ impl<M: Memoize> Optimizer<M> {
 
             // Task indexing.
             group_exploration_task_index: HashMap::new(),
-            group_implementation_task_index: HashMap::new(),
             goal_optimization_task_index: HashMap::new(),
 
             // Subscriptions.

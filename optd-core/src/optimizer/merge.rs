@@ -43,11 +43,7 @@ impl<M: Memoize> Optimizer<M> {
             self.merge_exploration_tasks(&all_exprs_by_group, new_repr_group_id)
                 .await;
 
-            // 3. Handle implementation tasks for the merged groups.
-            self.merge_implementation_tasks(&all_exprs_by_group, new_repr_group_id)
-                .await;
-
-            // 4. Merge subscribers.
+            // 3. Merge subscribers.
         }
 
         // Second, handle all the goal merges.
@@ -147,98 +143,6 @@ impl<M: Memoize> Optimizer<M> {
 
                 self.group_exploration_task_index
                     .insert(new_repr_group_id, *primary_task_id);
-            }
-        }
-    }
-
-    /// Helper method to merge implementation tasks for merged groups.
-    async fn merge_implementation_tasks(
-        &mut self,
-        all_exprs_by_group: &[MergedGroupInfo],
-        new_repr_group_id: GroupId,
-    ) {
-        // Collect all implementation tasks associated with the merged groups,
-        // grouped by physical properties.
-        let mut tasks_by_properties: HashMap<_, Vec<(TaskId, GroupId)>> = HashMap::new();
-        for group_info in all_exprs_by_group {
-            if let Some(tasks) = self
-                .group_implementation_task_index
-                .get(&group_info.group_id)
-            {
-                for (properties, task_id) in tasks {
-                    tasks_by_properties
-                        .entry(properties.clone())
-                        .or_default()
-                        .push((*task_id, group_info.group_id));
-                }
-            }
-        }
-
-        // Process each set of tasks with the same physical properties.
-        for (properties, tasks_with_group) in tasks_by_properties {
-            match tasks_with_group.as_slice() {
-                [] => unreachable!(),
-
-                [(task_id, group_id)] => {
-                    // Just one task exists for these properties - update its index.
-                    if *group_id != new_repr_group_id {
-                        let group_tasks = self
-                            .group_implementation_task_index
-                            .get_mut(group_id)
-                            .unwrap();
-
-                        group_tasks.retain(|(props, _)| *props != properties);
-                        if group_tasks.is_empty() {
-                            self.group_implementation_task_index.remove(group_id);
-                        }
-
-                        self.group_implementation_task_index
-                            .entry(new_repr_group_id)
-                            .or_default()
-                            .push((properties.clone(), *task_id));
-                    }
-                }
-
-                [(primary_task_id, _), rest @ ..] => {
-                    // Multiple tasks with the same properties - merge them into the primary task.
-                    let mut children_to_add = Vec::new();
-                    for (task_id, group_id) in rest {
-                        let task = self.tasks.get(task_id).unwrap();
-                        children_to_add.extend(task.children.clone());
-
-                        let group_tasks = self
-                            .group_implementation_task_index
-                            .get_mut(group_id)
-                            .unwrap();
-                        group_tasks.retain(|(props, tid)| *props != properties || *tid != *task_id);
-                        if group_tasks.is_empty() {
-                            self.group_implementation_task_index.remove(group_id);
-                        }
-
-                        self.tasks.remove(task_id);
-                    }
-
-                    let primary_task = self.tasks.get_mut(primary_task_id).unwrap();
-                    primary_task.children.extend(children_to_add);
-
-                    for group_info in all_exprs_by_group {
-                        if let Some(group_tasks) = self
-                            .group_implementation_task_index
-                            .get_mut(&group_info.group_id)
-                        {
-                            group_tasks.retain(|(props, _)| *props != properties);
-                            if group_tasks.is_empty() {
-                                self.group_implementation_task_index
-                                    .remove(&group_info.group_id);
-                            }
-                        }
-                    }
-
-                    self.group_implementation_task_index
-                        .entry(new_repr_group_id)
-                        .or_default()
-                        .push((properties.clone(), *primary_task_id));
-                }
             }
         }
     }

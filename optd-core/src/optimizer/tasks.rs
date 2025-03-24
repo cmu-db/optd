@@ -6,7 +6,7 @@ use super::{
 use crate::{
     cir::{
         expressions::{LogicalExpressionId, PhysicalExpressionId},
-        goal::GoalId,
+        goal::{Goal, GoalId, GoalMemberId},
         group::GroupId,
         plans::{LogicalPlan, PhysicalPlan},
         properties::PhysicalProperties,
@@ -72,9 +72,6 @@ pub(super) enum TaskKind {
 
     /// Task to explore expressions in a logical group.
     ExploreGroup(GroupId),
-
-    /// Task to implement a group with specific physical properties.
-    ImplementGroup(ImplementGroupTask),
 
     /// Task to apply a specific implementation rule to a logical expression.
     ImplementExpression(ImplementExpressionTask),
@@ -333,45 +330,6 @@ impl<M: Memoize> Optimizer<M> {
         Ok(task_id)
     }
 
-    /// Launches a task to implement a group with specific physical properties for a goal.
-    ///
-    /// This task applies implementation rules to logical expressions in a group
-    /// to satisfy specific physical properties for a target goal.
-    pub(super) async fn launch_group_implementation_task(
-        &mut self,
-        group_id: GroupId,
-        properties: &PhysicalProperties,
-        goal_id: GoalId,
-        parent_task_id: TaskId,
-    ) -> Result<TaskId, Error> {
-        let task = ImplementGroupTask::new(group_id, properties.clone(), goal_id);
-        let task_id = self.register_new_task(ImplementGroup(task));
-        self.register_child_to_task(parent_task_id, task_id);
-
-        self.group_implementation_task_index
-            .entry(group_id)
-            .or_default()
-            .push((properties.clone(), task_id));
-
-        // Launch the implementation task each all expression-rule combinations.
-        let logical_expressions = self.memo.get_all_logical_exprs(group_id).await?;
-        let implementations = self.rule_book.get_implementations().to_vec();
-
-        for expression_id in &logical_expressions {
-            for rule in &implementations {
-                self.launch_implement_expression_task(
-                    rule.clone(),
-                    *expression_id,
-                    goal_id,
-                    task_id,
-                )
-                .await?;
-            }
-        }
-
-        Ok(task_id)
-    }
-
     //
     // Exploration tasks.
     //
@@ -449,26 +407,40 @@ impl<M: Memoize> Optimizer<M> {
     /// Launches a new task to optimize a goal.
     ///
     /// This method creates and manages the tasks needed to optimize a goal by
-    /// finding equivalent goals, launching group implementation tasks, and
-    /// costing physical expressions.
+    /// ensuring group exploration, launching implementation tasks, and processing goal members.
     async fn launch_goal_optimize_task(&mut self, goal_id: GoalId) -> Result<TaskId, Error> {
-        let groups_with_properies = self.memo.resolve_to_groups_and_props(goal_id).await?;
         let task_id = self.register_new_task(OptimizeGoal(goal_id));
         self.goal_optimization_task_index.insert(goal_id, task_id);
 
-        // Launch group implementation tasks for all equivalent group + properties.
-        for (group_id, all_properties) in groups_with_properies {
-            for properties in all_properties {
-                self.launch_group_implementation_task(group_id, &properties, goal_id, task_id)
+        // Launch implementation tasks for all expression-rule combinations, so we need to
+        // ensure that the group exploration task exists.
+        let Goal(group_id, _) = self.memo.materialize_goal(goal_id).await?;
+        self.ensure_group_exploration_task(group_id, task_id)
+            .await?;
+
+        let logical_expressions = self.memo.get_all_logical_exprs(group_id).await?;
+        let implementations = self.rule_book.get_implementations().to_vec();
+
+        for expr_id in logical_expressions {
+            for rule in &implementations {
+                self.launch_implement_expression_task(rule.clone(), expr_id, goal_id, task_id)
                     .await?;
             }
         }
 
-        // Launch costing for all physical expressions in the original goal.
-        let physical_expressions = self.memo.get_all_physical_exprs(goal_id).await?;
-        for expression_id in physical_expressions {
-            self.launch_cost_expression_task(expression_id, task_id)
-                .await?;
+        // For all goal members, launch cost expression tasks for physical expressions
+        // and ensure goal optimization tasks for goal references.
+        let goal_members = self.memo.get_all_goal_members(goal_id).await?;
+        for member in goal_members {
+            match member {
+                GoalMemberId::PhysicalExpressionId(expr_id) => {
+                    self.launch_cost_expression_task(expr_id, task_id).await?;
+                }
+                GoalMemberId::GoalId(referenced_goal_id) => {
+                    self.ensure_goal_optimize_task(referenced_goal_id, task_id)
+                        .await?;
+                }
+            }
         }
 
         Ok(task_id)
