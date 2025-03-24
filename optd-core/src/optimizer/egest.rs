@@ -4,7 +4,7 @@ use crate::{
         expressions::PhysicalExpressionId,
         goal::GoalMemberId,
         operators::{Child, Operator},
-        plans::PhysicalPlan,
+        plans::{PartialPhysicalPlan, PhysicalPlan},
     },
     error::Error,
 };
@@ -12,12 +12,16 @@ use async_recursion::async_recursion;
 use futures::future::try_join_all;
 use std::sync::Arc;
 use Child::*;
+use GoalMemberId::*;
 
 impl<M: Memoize> Optimizer<M> {
     /// Recursively transforms a physical expression ID in the memo into a complete physical plan.
     ///
     /// This function retrieves the physical expression from the memo and recursively
-    /// transforms any child goal IDs into their corresponding best physical plans.
+    /// transforms any child goal members into their corresponding best physical plans.
+    ///
+    /// # Parameters
+    /// * `expression_id` - ID of the physical expression to transform into a complete plan.
     ///
     /// # Returns
     /// * `Ok(Some(PhysicalPlan))` if all child plans were successfully constructed from their IDs.
@@ -30,7 +34,6 @@ impl<M: Memoize> Optimizer<M> {
     ) -> Result<Option<PhysicalPlan>, Error> {
         let expression = self.memo.materialize_physical_expr(expression_id).await?;
 
-        // Recursively egest all children plans.
         let child_results = try_join_all(
             expression
                 .children
@@ -44,12 +47,43 @@ impl<M: Memoize> Optimizer<M> {
             None => return Ok(None),
         };
 
-        // Base case: construct the physical plan with the materialized children.
         Ok(Some(PhysicalPlan(Operator {
             tag: expression.tag,
             data: expression.data,
             children: child_plans,
         })))
+    }
+
+    /// Converts a physical expression ID to a partial physical plan.
+    ///
+    /// This method materializes the expression and recursively processes its children,
+    /// preserving goal references as unmaterialized plans.
+    ///
+    /// # Parameters
+    /// * `expression_id` - ID of the physical expression to convert to a partial plan.
+    ///
+    /// # Returns
+    /// * `PartialPhysicalPlan` - The materialized partial plan.
+    /// * `Err(Error)` if a memo operation fails.
+    pub(super) async fn egest_partial_plan(
+        &self,
+        expression_id: PhysicalExpressionId,
+    ) -> Result<PartialPhysicalPlan, Error> {
+        let expression = self.memo.materialize_physical_expr(expression_id).await?;
+
+        let children = try_join_all(
+            expression
+                .children
+                .iter()
+                .map(|child| self.egest_partial_child(child.clone())),
+        )
+        .await?;
+
+        Ok(PartialPhysicalPlan::Materialized(Operator {
+            tag: expression.tag,
+            data: expression.data,
+            children,
+        }))
     }
 
     async fn egest_child_plan(
@@ -58,7 +92,7 @@ impl<M: Memoize> Optimizer<M> {
     ) -> Result<Option<Child<Arc<PhysicalPlan>>>, Error> {
         match child {
             Singleton(member) => {
-                let plan = match self.egest_goal_member(member).await? {
+                let plan = match self.process_goal_member(*member).await? {
                     Some(plan) => plan,
                     None => return Ok(None),
                 };
@@ -66,7 +100,7 @@ impl<M: Memoize> Optimizer<M> {
             }
             VarLength(members) => {
                 let futures = members.iter().map(|member| async move {
-                    let plan = match self.egest_goal_member(member).await? {
+                    let plan = match self.process_goal_member(*member).await? {
                         Some(plan) => plan,
                         None => return Ok(None),
                     };
@@ -83,24 +117,83 @@ impl<M: Memoize> Optimizer<M> {
         }
     }
 
-    async fn egest_goal_member(
+    async fn process_goal_member(
         &self,
-        member: &GoalMemberId,
+        member: GoalMemberId,
     ) -> Result<Option<PhysicalPlan>, Error> {
         match member {
-            GoalMemberId::PhysicalExpressionId(expr_id) => {
-                // Directly materialize the physical expression.
-                self.egest_best_plan(*expr_id).await
-            }
-            GoalMemberId::GoalId(goal_id) => {
-                // Get the best expression for this goal and materialize it.
+            GoalMemberId::PhysicalExpressionId(expr_id) => self.egest_best_plan(expr_id).await,
+            GoalId(goal_id) => {
                 let (best_expr_id, _) =
-                    match self.memo.get_best_optimized_physical_expr(*goal_id).await? {
+                    match self.memo.get_best_optimized_physical_expr(goal_id).await? {
                         Some(expr) => expr,
                         None => return Ok(None),
                     };
 
                 self.egest_best_plan(best_expr_id).await
+            }
+        }
+    }
+
+    async fn egest_partial_child(
+        &self,
+        child: Child<GoalMemberId>,
+    ) -> Result<Child<Arc<PartialPhysicalPlan>>, Error> {
+        match child {
+            Singleton(member) => match member {
+                GoalMemberId::GoalId(goal_id) => {
+                    let goal = self.memo.materialize_goal(goal_id).await?;
+                    Ok(Singleton(PartialPhysicalPlan::UnMaterialized(goal).into()))
+                }
+                GoalMemberId::PhysicalExpressionId(expr_id) => {
+                    let expr = self.memo.materialize_physical_expr(expr_id).await?;
+
+                    let children = try_join_all(
+                        expr.children
+                            .iter()
+                            .map(|child| self.egest_partial_child(child.clone())),
+                    )
+                    .await?;
+
+                    let op = Operator {
+                        tag: expr.tag,
+                        data: expr.data,
+                        children,
+                    };
+
+                    Ok(Singleton(PartialPhysicalPlan::Materialized(op).into()))
+                }
+            },
+            VarLength(members) => {
+                let goals = try_join_all(members.into_iter().map(|member| async move {
+                    match member {
+                        GoalMemberId::GoalId(goal_id) => {
+                            let goal = self.memo.materialize_goal(goal_id).await?;
+                            Ok(PartialPhysicalPlan::UnMaterialized(goal).into())
+                        }
+                        GoalMemberId::PhysicalExpressionId(expr_id) => {
+                            let expr = self.memo.materialize_physical_expr(expr_id).await?;
+
+                            let children = try_join_all(
+                                expr.children
+                                    .iter()
+                                    .map(|child| self.egest_partial_child(child.clone())),
+                            )
+                            .await?;
+
+                            let op = Operator {
+                                tag: expr.tag,
+                                data: expr.data,
+                                children,
+                            };
+
+                            Ok(PartialPhysicalPlan::Materialized(op).into())
+                        }
+                    }
+                }))
+                .await?;
+
+                Ok(VarLength(goals))
             }
         }
     }

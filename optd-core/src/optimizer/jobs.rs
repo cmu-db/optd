@@ -3,6 +3,7 @@ use super::Task;
 use super::{
     generator::OptimizerGenerator, memo::Memoize, tasks::TaskId, Optimizer, OptimizerMessage,
 };
+use crate::cir::goal::GoalMemberId;
 use crate::{
     cir::{
         expressions::{LogicalExpressionId, PhysicalExpressionId},
@@ -441,56 +442,5 @@ impl<M: Memoize> Optimizer<M> {
         });
 
         Ok(())
-    }
-
-    //
-    // Plan Materialization Helpers
-    //
-
-    /// Converts a physical expression ID to a partial physical plan.
-    ///
-    /// This method materializes both the expression and its children goals.
-    async fn materialize_partial_physical_plan(
-        &self,
-        expression_id: PhysicalExpressionId,
-    ) -> Result<PartialPhysicalPlan, Error> {
-        let expression = self.memo.materialize_physical_expr(expression_id).await?;
-
-        let children = try_join_all(
-            expression
-                .children
-                .iter()
-                .map(|child| self.materialize_physical_child_goal(child.clone())),
-        )
-        .await?;
-
-        Ok(PartialPhysicalPlan::Materialized(Operator {
-            tag: expression.tag,
-            data: expression.data,
-            children,
-        }))
-    }
-
-    /// Materializes a child goal into a partial physical plan.
-    ///
-    /// Handles both singleton and variable-length child types.
-    async fn materialize_physical_child_goal(
-        &self,
-        child: Child<GoalId>,
-    ) -> Result<Child<Arc<PartialPhysicalPlan>>, Error> {
-        match child {
-            Singleton(goal_id) => {
-                let goal = self.memo.materialize_goal(goal_id).await?;
-                Ok(Singleton(PartialPhysicalPlan::UnMaterialized(goal).into()))
-            }
-            VarLength(goal_ids) => {
-                let goals = try_join_all(goal_ids.into_iter().map(|goal_id| async move {
-                    let goal = self.memo.materialize_goal(goal_id).await?;
-                    Ok(PartialPhysicalPlan::UnMaterialized(goal).into())
-                }))
-                .await?;
-                Ok(VarLength(goals))
-            }
-        }
     }
 }
