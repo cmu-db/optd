@@ -1,5 +1,5 @@
 use super::{
-    goal::GoalId,
+    goal::GoalMemberId,
     group::GroupId,
     operators::{Child, Operator},
     plans::PartialLogicalPlan,
@@ -23,7 +23,7 @@ pub struct LogicalExpressionId(pub i64);
 ///
 /// Physical expressions use goal IDs rather than full plans for
 /// their children, representing a compact form suitable for the memo structure.
-pub type PhysicalExpression = Operator<GoalId>;
+pub type PhysicalExpression = Operator<GoalMemberId>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct PhysicalExpressionId(pub i64);

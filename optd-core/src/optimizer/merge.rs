@@ -3,11 +3,7 @@ use super::{
     Optimizer, TaskId,
 };
 use crate::{
-    cir::{
-        expressions::{LogicalExpressionId, PhysicalExpressionId},
-        goal::{Cost, GoalId},
-        group::GroupId,
-    },
+    cir::{goal::GoalId, group::GroupId},
     error::Error,
 };
 use std::collections::HashMap;

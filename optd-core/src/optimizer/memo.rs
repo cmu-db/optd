@@ -3,9 +3,9 @@ use crate::{
         expressions::{
             LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
         },
-        goal::{Cost, Goal, GoalId},
+        goal::{Cost, Goal, GoalId, GoalMemberId},
         group::GroupId,
-        properties::{LogicalProperties, PhysicalProperties},
+        properties::LogicalProperties,
         rules::{ImplementationRule, TransformationRule},
     },
     error::Error,
@@ -53,8 +53,8 @@ pub struct MergedGoalInfo {
     /// The best costed expression for this goal, if any
     pub best_expr: Option<(PhysicalExpressionId, Cost)>,
 
-    /// All physical expressions in this goal
-    pub expressions: Vec<PhysicalExpressionId>,
+    /// All members in this goal, which can be physical expressions or references to other goals
+    pub members: Vec<GoalMemberId>,
 }
 
 /// Result of merging two goals.
@@ -191,60 +191,28 @@ pub trait Memoize: Send + Sync + 'static {
         goal_id: GoalId,
     ) -> MemoizeResult<Vec<PhysicalExpressionId>>;
 
-    /// Resolves a goal ID to its corresponding group IDs and their physical properties.
+    /// Gets all members of a goal, which can be physical expressions or other goals.
     ///
     /// # Parameters
-    /// * `goal_id` - ID of the goal to resolve to groups.
+    /// * `goal_id` - ID of the goal to retrieve members from.
     ///
     /// # Returns
-    /// A vector of tuples containing group IDs and their associated physical properties
-    /// that correspond to the given goal.
-    async fn resolve_to_groups_and_props(
-        &self,
+    /// A vector of goal members, each being either a physical expression ID or another goal ID.
+    async fn get_all_goal_members(&self, goal_id: GoalId) -> MemoizeResult<Vec<GoalMemberId>>;
+
+    /// Adds a member to a goal.
+    ///
+    /// # Parameters
+    /// * `goal_id` - ID of the goal to add the member to.
+    /// * `member` - The member to add, either a physical expression ID or another goal ID.
+    ///
+    /// # Returns
+    /// True if the member was added to the goal, or false if it already existed.
+    async fn add_goal_member(
+        &mut self,
         goal_id: GoalId,
-    ) -> MemoizeResult<Vec<(GroupId, Vec<PhysicalProperties>)>>;
-
-    /// Searches for a physical expression ID in the memo.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - ID of the physical expression to find.
-    ///
-    /// # Returns
-    /// The associated Goal ID if the physical expression exists,
-    /// None if the expression isn't found in any goal.
-    async fn find_physical_expr_goal(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoizeResult<Option<GoalId>>;
-
-    /// Creates a new goal associated with the provided physical expression ID.
-    ///
-    /// # Parameters
-    /// * `physical_expr_id` - ID of the physical expression to associate with the goal.
-    ///
-    /// # Returns
-    /// The ID of the newly created goal.
-    async fn create_goal(
-        &mut self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoizeResult<GoalId>;
-
-    /// Merges goals 1 and 2, unifying them under a common representative.
-    ///
-    /// May trigger cascading merges of parent entities.
-    ///
-    /// # Parameters
-    /// * `goal_id_1` - ID of the first goal to merge.
-    /// * `goal_id_2` - ID of the second goal to merge.
-    ///
-    /// # Returns
-    /// Merge results for all affected entities including newly dirtied
-    /// transformations, implementations and costings.
-    async fn merge_goals(
-        &mut self,
-        goal_id_1: GoalId,
-        goal_id_2: GoalId,
-    ) -> MemoizeResult<MergeResult>;
+        member: GoalMemberId,
+    ) -> MemoizeResult<bool>;
 
     /// Updates the cost of a physical expression ID.
     ///
@@ -253,14 +221,12 @@ pub trait Memoize: Send + Sync + 'static {
     /// * `new_cost` - New cost to assign to the physical expression.
     ///
     /// # Returns
-    /// A tuple containing:
-    /// - Whether the expression is now the best for its goal.
-    /// - The representative goal ID this expression belongs to.
+    /// Whether the cost of the expression has improved.
     async fn update_physical_expr_cost(
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
-    ) -> MemoizeResult<(bool, GoalId)>;
+    ) -> MemoizeResult<bool>;
 
     //
     // Rule and costing status operations.

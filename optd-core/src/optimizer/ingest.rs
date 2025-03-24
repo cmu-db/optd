@@ -4,7 +4,7 @@ use crate::{
         expressions::{
             LogicalExpression, LogicalExpressionId, PhysicalExpression, PhysicalExpressionId,
         },
-        goal::GoalId,
+        goal::{GoalId, GoalMemberId},
         group::GroupId,
         operators::{Child, Operator},
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
@@ -55,28 +55,31 @@ impl<M: Memoize> Optimizer<M> {
         }
     }
 
-    /// Ingests a physical plan into the memo.
+    /// Probes for a physical plan in the memo.
     ///
-    /// Unlike logical plans, physical plans can be directly ingested without
-    /// requiring asynchronous property derivation.
+    /// Recursively processes the physical plan to obtain the goal member identifiers
+    /// throughout the tree. Unlike logical plans, this doesn't require
+    /// asynchronous property derivation.
+    ///
+    /// # Parameters
+    /// * `physical_plan` - The physical plan to probe.
     ///
     /// # Returns
-    /// Information about the ingested physical plan.
+    /// The goal member identifier corresponding to the physical plan,
+    /// which can be either a physical expression ID or a goal ID.
     #[async_recursion]
-    pub(super) async fn ingest_physical_plan(
+    pub(super) async fn probe_ingest_physical_plan(
         &mut self,
         physical_plan: &PartialPhysicalPlan,
-    ) -> Result<PhysicalIngest, Error> {
+    ) -> Result<GoalMemberId, Error> {
         match physical_plan {
             PartialPhysicalPlan::Materialized(operator) => {
-                self.ingest_physical_operator(operator).await
+                self.probe_ingest_physical_operator(operator).await
             }
             PartialPhysicalPlan::UnMaterialized(goal) => {
+                // Base case: is a goal.
                 let goal_id = self.memo.get_goal_id(goal).await?;
-                Ok(PhysicalIngest {
-                    goal_id,
-                    new_expression_id: None,
-                })
+                Ok(GoalMemberId::GoalId(goal_id))
             }
         }
     }
@@ -101,7 +104,7 @@ impl<M: Memoize> Optimizer<M> {
                 Singleton(Found(group_id)) => Singleton(group_id),
                 Singleton(Missing(expressions)) => {
                     missing_expressions.extend(expressions);
-                    Singleton(GroupId(0)) // Placeholder
+                    Singleton(GroupId(0)) // Placeholder.
                 }
                 VarLength(results) => {
                     let group_ids = results
@@ -110,7 +113,7 @@ impl<M: Memoize> Optimizer<M> {
                             Found(group_id) => group_id,
                             Missing(expressions) => {
                                 missing_expressions.extend(expressions);
-                                GroupId(0) // Placeholder
+                                GroupId(0) // Placeholder.
                             }
                         })
                         .collect();
@@ -163,10 +166,10 @@ impl<M: Memoize> Optimizer<M> {
         }
     }
 
-    async fn ingest_physical_operator(
+    async fn probe_ingest_physical_operator(
         &mut self,
         operator: &Operator<Arc<PartialPhysicalPlan>>,
-    ) -> Result<PhysicalIngest, Error> {
+    ) -> Result<GoalMemberId, Error> {
         // Sequentially process the children ingestion.
         let mut children = Vec::with_capacity(operator.children.len());
         for child in &operator.children {
@@ -174,6 +177,7 @@ impl<M: Memoize> Optimizer<M> {
             children.push(processed_child);
         }
 
+        // Base case: is an expression.
         let expression = PhysicalExpression {
             tag: operator.tag.clone(),
             data: operator.data.clone(),
@@ -181,36 +185,25 @@ impl<M: Memoize> Optimizer<M> {
         };
         let expression_id = self.memo.get_physical_expr_id(&expression).await?;
 
-        // Base case: try to find the expression in the memo or create it if missing.
-        if let Some(goal_id) = self.memo.find_physical_expr_goal(expression_id).await? {
-            Ok(PhysicalIngest {
-                goal_id,
-                new_expression_id: None,
-            })
-        } else {
-            Ok(PhysicalIngest {
-                goal_id: self.memo.create_goal(expression_id).await?,
-                new_expression_id: Some(expression_id),
-            })
-        }
+        Ok(GoalMemberId::PhysicalExpressionId(expression_id))
     }
 
     async fn process_physical_child(
         &mut self,
         child: &Child<Arc<PartialPhysicalPlan>>,
-    ) -> Result<Child<GoalId>, Error> {
+    ) -> Result<Child<GoalMemberId>, Error> {
         match child {
             Singleton(plan) => {
-                let PhysicalIngest { goal_id, .. } = self.ingest_physical_plan(plan).await?;
-                Ok(Singleton(goal_id))
+                let member = self.probe_ingest_physical_plan(plan).await?;
+                Ok(Singleton(member))
             }
             VarLength(plans) => {
-                let mut goals = Vec::with_capacity(plans.len());
+                let mut members = Vec::with_capacity(plans.len());
                 for plan in plans {
-                    let result = self.ingest_physical_plan(plan).await?;
-                    goals.push(result.goal_id);
+                    let member = self.probe_ingest_physical_plan(plan).await?;
+                    members.push(member);
                 }
-                Ok(VarLength(goals))
+                Ok(VarLength(members))
             }
         }
     }
