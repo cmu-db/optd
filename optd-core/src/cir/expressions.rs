@@ -1,8 +1,8 @@
 use super::{
-    goal::{Cost, Goal},
+    goal::GoalMemberId,
     group::GroupId,
     operators::{Child, Operator},
-    plans::{PartialLogicalPlan, PartialPhysicalPlan},
+    plans::PartialLogicalPlan,
 };
 use std::sync::Arc;
 
@@ -16,15 +16,17 @@ use std::sync::Arc;
 /// representing a compact form suitable for the memo structure.
 pub type LogicalExpression = Operator<GroupId>;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+pub struct LogicalExpressionId(pub i64);
+
 /// A physical expression in the memo structure.
 ///
 /// Physical expressions use goal IDs rather than full plans for
 /// their children, representing a compact form suitable for the memo structure.
-pub type PhysicalExpression = Operator<Goal>;
+pub type PhysicalExpression = Operator<GoalMemberId>;
 
-/// An optimized physical expression with its associated cost.
-#[derive(Clone, Debug)]
-pub struct OptimizedExpression(pub PhysicalExpression, pub Cost);
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+pub struct PhysicalExpressionId(pub i64);
 
 //=============================================================================
 // Conversion Implementations
@@ -37,20 +39,6 @@ impl From<LogicalExpression> for PartialLogicalPlan {
     /// is converted to an unmaterialized partial plan reference.
     fn from(expr: LogicalExpression) -> Self {
         PartialLogicalPlan::Materialized(Operator {
-            tag: expr.tag,
-            data: expr.data,
-            children: convert_children(expr.children),
-        })
-    }
-}
-
-impl From<PhysicalExpression> for PartialPhysicalPlan {
-    /// Converts a physical expression to a partial physical plan.
-    ///
-    /// This creates a materialized partial plan where each child goal ID
-    /// is converted to an unmaterialized partial plan reference.
-    fn from(expr: PhysicalExpression) -> Self {
-        PartialPhysicalPlan::Materialized(Operator {
             tag: expr.tag,
             data: expr.data,
             children: convert_children(expr.children),

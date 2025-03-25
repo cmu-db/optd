@@ -1,227 +1,109 @@
-use super::{memo::Memoize, Optimizer, OptimizerMessage};
+use super::{memo::Memoize, Optimizer};
 use crate::{
     cir::{
-        expressions::{LogicalExpression, PhysicalExpression},
-        goal::Goal,
+        expressions::{LogicalExpression, LogicalExpressionId, PhysicalExpression},
+        goal::GoalMemberId,
         group::GroupId,
         operators::{Child, Operator},
         plans::{PartialLogicalPlan, PartialPhysicalPlan},
     },
-    engine::PropertiesContinuation,
     error::Error,
 };
 use async_recursion::async_recursion;
-use futures::{future::try_join_all, SinkExt};
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 use Child::*;
-use OptimizerMessage::CreateGroup;
+use LogicalIngest::*;
 
-/// Result type for logical plan ingestion exposed to clients
+/// Result type for logical plan probing.
 pub(super) enum LogicalIngest {
-    /// Plan was successfully ingested
-    Success(GroupId),
-
-    /// Plan requires dependencies to be created
-    /// Contains a set of job IDs for the launched dependency tasks
-    NeedsDependencies(HashSet<i64>),
-}
-
-/// Internal result type for logical expression processing
-/// This enum is used internally during recursive plan traversal
-enum InternalLogicalIngest {
+    /// Plan was successfully found in the memo.
     Found(GroupId),
-    NeedsProperties(Vec<LogicalExpression>),
-}
-
-/// Result type for physical plan ingestion that includes the new expression if created
-pub(super) struct PhysicalIngest {
-    /// The new goal matched with the physical plan
-    pub goal: Goal,
-    /// The physical expression if newly created, None if it already existed
-    pub new_expr: Option<PhysicalExpression>,
+    /// Plan requires groups to be created for missing expressions.
+    Missing(Vec<LogicalExpressionId>),
 }
 
 impl<M: Memoize> Optimizer<M> {
-    /// Process a logical plan for ingestion into the memo.
+    /// Probes for a logical plan in the memo.
     ///
-    /// Attempts direct ingestion or spawns property derivation tasks when needed.
+    /// Logical plans need property derivation which occurs asynchronously
+    /// in separate jobs after this function returns. This separation lets
+    /// the optimizer continue processing while properties are computed
+    /// in the background.
     ///
     /// # Returns
-    /// - `Success(group_id)`: Plan was successfully ingested
-    ///    - `group_id`: The ID of the group that contains the plan
-    /// - `NeedsDependencies(job_ids)`: Property derivation tasks were launched
-    ///    - `job_ids`: Set of job IDs for the launched tasks
-    pub(super) async fn try_ingest_logical(
+    /// - `Found(group_id)`: Plan exists in the memo.
+    /// - `Missing(expressions)`: Expressions needing property derivation.
+    pub(super) async fn probe_ingest_logical_plan(
         &mut self,
         logical_plan: &PartialLogicalPlan,
-    ) -> LogicalIngest {
-        let ingest_result = self
-            .ingest_logical_plan(logical_plan)
-            .await
-            .expect("Failed to ingest logical plan");
-
-        match ingest_result {
-            InternalLogicalIngest::Found(group_id) => LogicalIngest::Success(group_id),
-            InternalLogicalIngest::NeedsProperties(expressions) => {
-                let pending_dependencies = expressions
-                    .into_iter()
-                    .map(|expr| {
-                        let job_id = self.next_dep_id;
-                        self.next_dep_id += 1;
-
-                        let message_tx = self.message_tx.clone();
-                        let engine = self.engine.clone();
-                        let expr_clone = expr.clone();
-
-                        // Create a continuation for processing derived properties
-                        let properties_continuation: PropertiesContinuation =
-                            Arc::new(move |properties| {
-                                let mut message_tx = message_tx.clone();
-                                let expr = expr_clone.clone();
-
-                                Box::pin(async move {
-                                    message_tx
-                                        .send(CreateGroup(properties, expr, job_id))
-                                        .await
-                                        .expect("Failed to send CreateGroup message");
-                                })
-                            });
-
-                        // Launch the derive properties operation with the continuation
-                        tokio::spawn(async move {
-                            engine
-                                .launch_derive_properties(&expr.into(), properties_continuation)
-                                .await;
-                        });
-
-                        job_id
-                    })
-                    .collect();
-
-                LogicalIngest::NeedsDependencies(pending_dependencies)
-            }
-        }
-    }
-
-    /// Process a physical plan for ingestion into the memo.
-    ///
-    /// Directly ingests the physical plan and returns the associated goal along with the
-    /// physical expression if it was newly created.
-    ///
-    /// # Returns
-    /// A PhysicalIngest containing the Goal associated with the physical plan
-    /// and the PhysicalExpression if newly created (None if it already existed)
-    pub(super) async fn try_ingest_physical(
-        &self,
-        physical_plan: &PartialPhysicalPlan,
-    ) -> PhysicalIngest {
-        self.ingest_physical_plan(physical_plan)
-            .await
-            .expect("Failed to ingest physical plan")
-    }
-
-    /// Ingests a partial logical plan into the memo table.
-    ///
-    /// This function handles both materialized and unmaterialized logical plans,
-    /// recursively processing operators in materialized plans.
-    ///
-    /// # Arguments
-    /// * `partial_plan` - The partial logical plan to ingest
-    ///
-    /// # Returns
-    /// * For unmaterialized plans: Found(group_id) since the group already exists
-    /// * For materialized plans: Result from recursive operator ingestion
-    #[async_recursion]
-    async fn ingest_logical_plan(
-        &self,
-        partial_plan: &PartialLogicalPlan,
-    ) -> Result<InternalLogicalIngest, Error> {
-        match partial_plan {
+    ) -> Result<LogicalIngest, Error> {
+        match logical_plan {
             PartialLogicalPlan::Materialized(operator) => {
-                self.ingest_logical_operator(operator).await
+                self.probe_ingest_logical_operator(operator).await
             }
-            PartialLogicalPlan::UnMaterialized(group_id) => {
-                let group_id = self.group_repr.find(group_id);
-                Ok(InternalLogicalIngest::Found(group_id))
-            }
+            PartialLogicalPlan::UnMaterialized(group_id) => Ok(Found(*group_id)),
         }
     }
 
-    /// Ingests a partial physical plan into the memo table.
+    /// Probes for a physical plan in the memo.
     ///
-    /// This function handles both materialized and unmaterialized physical plans,
-    /// recursively processing operators in materialized plans.
+    /// Recursively processes the physical plan to obtain the goal member identifiers
+    /// throughout the tree. Unlike logical plans, this doesn't require
+    /// asynchronous property derivation.
     ///
-    /// # Arguments
-    /// * `partial_plan` - The partial physical plan to ingest
+    /// # Parameters
+    /// * `physical_plan` - The physical plan to probe.
     ///
     /// # Returns
-    /// * A PhysicalIngest containing the Goal associated with the physical plan
-    ///   and the PhysicalExpression if newly created (None if it already existed)
+    /// The goal member identifier corresponding to the physical plan,
+    /// which can be either a physical expression ID or a goal ID.
     #[async_recursion]
-    async fn ingest_physical_plan(
-        &self,
-        partial_plan: &PartialPhysicalPlan,
-    ) -> Result<PhysicalIngest, Error> {
-        match partial_plan {
+    pub(super) async fn probe_ingest_physical_plan(
+        &mut self,
+        physical_plan: &PartialPhysicalPlan,
+    ) -> Result<GoalMemberId, Error> {
+        match physical_plan {
             PartialPhysicalPlan::Materialized(operator) => {
-                self.ingest_physical_operator(operator).await
+                self.probe_ingest_physical_operator(operator).await
             }
             PartialPhysicalPlan::UnMaterialized(goal) => {
-                let goal = self.goal_repr.find(goal);
-                // For unmaterialized plans, we always return new_expr=None because
-                // we're using an existing goal
-                Ok(PhysicalIngest {
-                    goal,
-                    new_expr: None,
-                })
+                // Base case: is a goal.
+                let goal_id = self.memo.get_goal_id(goal).await?;
+                Ok(GoalMemberId::GoalId(goal_id))
             }
         }
     }
 
-    /// Processes a logical operator and attempts to find it in the memo table.
-    ///
-    /// This function ingests a logical operator into the memo structure, recursively
-    /// processing its children. If the expression is not found in the memo, it collects
-    /// expressions that need property derivation.
-    ///
-    /// # Arguments
-    /// * `operator` - The logical operator to ingest
-    ///
-    /// # Returns
-    /// * LogicalIngestion::Found when expression is in memo or added to memo
-    /// * LogicalIngestion::NeedsProperties when properties are needed before adding to memo
-    async fn ingest_logical_operator(
-        &self,
+    async fn probe_ingest_logical_operator(
+        &mut self,
         operator: &Operator<Arc<PartialLogicalPlan>>,
-    ) -> Result<InternalLogicalIngest, Error> {
-        // Process children
-        let children = try_join_all(
-            operator
-                .children
-                .iter()
-                .map(|child| self.process_logical_child(child)),
-        )
-        .await?;
+    ) -> Result<LogicalIngest, Error> {
+        // Sequentially process the children ingestion.
+        let mut children_results = Vec::with_capacity(operator.children.len());
+        for child in &operator.children {
+            let result = self.probe_ingest_logical_child(child).await?;
+            children_results.push(result);
+        }
 
-        // Transform in a single pass, tracking expressions that need properties
-        let mut need_properties = Vec::new();
-        let children = children
+        // Collect *all* missing expressions from children in order to reduce
+        // the number of times the optimizer needs to probe the ingestion.
+        let mut missing_expressions = Vec::new();
+        let children = children_results
             .into_iter()
             .map(|child_result| match child_result {
-                Singleton(InternalLogicalIngest::Found(group_id)) => Singleton(group_id),
-                Singleton(InternalLogicalIngest::NeedsProperties(exprs)) => {
-                    need_properties.extend(exprs);
-                    Singleton(GroupId(0)) // Placeholder
+                Singleton(Found(group_id)) => Singleton(group_id),
+                Singleton(Missing(expressions)) => {
+                    missing_expressions.extend(expressions);
+                    Singleton(GroupId(0)) // Placeholder.
                 }
                 VarLength(results) => {
                     let group_ids = results
                         .into_iter()
                         .map(|result| match result {
-                            InternalLogicalIngest::Found(group_id) => group_id,
-                            InternalLogicalIngest::NeedsProperties(exprs) => {
-                                need_properties.extend(exprs);
-                                GroupId(0) // Placeholder
+                            Found(group_id) => group_id,
+                            Missing(expressions) => {
+                                missing_expressions.extend(expressions);
+                                GroupId(0) // Placeholder.
                             }
                         })
                         .collect();
@@ -230,139 +112,88 @@ impl<M: Memoize> Optimizer<M> {
             })
             .collect();
 
-        // If any children need properties, return the expressions
-        if !need_properties.is_empty() {
-            return Ok(InternalLogicalIngest::NeedsProperties(need_properties));
+        // If any children have missing expressions, return those.
+        if !missing_expressions.is_empty() {
+            return Ok(Missing(missing_expressions));
         }
 
-        // Create the logical expression with processed children
-        let logical_expr = LogicalExpression {
+        let logical_expression = LogicalExpression {
             tag: operator.tag.clone(),
             data: operator.data.clone(),
             children,
         };
+        let logical_expression_id = self.memo.get_logical_expr_id(&logical_expression).await?;
 
-        // Try to add the expression to memo
-        let group_maybe = self.memo.find_logical_expr(&logical_expr).await?;
-
-        match group_maybe {
-            Some(group_id) => {
-                // Expression already exists in this group
-                let group_id = self.group_repr.find(&group_id);
-                Ok(InternalLogicalIngest::Found(group_id))
-            }
-            None => {
-                // Expression doesn't exist, needs property derivation
-                Ok(InternalLogicalIngest::NeedsProperties(vec![logical_expr]))
-            }
+        // Base case: check if the expression already exists in the memo.
+        match self
+            .memo
+            .find_logical_expr_group(logical_expression_id)
+            .await?
+        {
+            Some(group_id) => Ok(Found(group_id)),
+            None => Ok(Missing(vec![logical_expression_id])),
         }
     }
 
-    /// Processes a physical operator and integrates it into the memo table.
-    ///
-    /// This function ingests a physical operator into the memo structure, recursively
-    /// processing its children. Unlike logical operators, physical operators don't
-    /// require property derivation.
-    ///
-    /// # Arguments
-    /// * `operator` - The physical operator to ingest
-    ///
-    /// # Returns
-    /// * A PhysicalIngest containing the Goal associated with the physical expression
-    ///   and the PhysicalExpression if newly created (None if it already existed)
-    async fn ingest_physical_operator(
-        &self,
-        operator: &Operator<Arc<PartialPhysicalPlan>>,
-    ) -> Result<PhysicalIngest, Error> {
-        // Process children
-        let children = try_join_all(
-            operator
-                .children
-                .iter()
-                .map(|child| self.process_physical_child(child)),
-        )
-        .await?;
-
-        // Create the physical expression with processed children
-        let physical_expr = PhysicalExpression {
-            tag: operator.tag.clone(),
-            data: operator.data.clone(),
-            children,
-        };
-
-        // Try to find the expression in the memo
-        if let Some(goal) = self.memo.find_physical_expr(&physical_expr).await? {
-            let goal = self.goal_repr.find(&goal);
-            // Expression already exists, return goal with new_expr=None
-            return Ok(PhysicalIngest {
-                goal,
-                new_expr: None,
-            });
-        }
-
-        // Expression doesn't exist, create a new goal
-        let goal = self.memo.create_goal(&physical_expr).await?;
-
-        // Return goal with new_expr containing the physical expression we just created
-        Ok(PhysicalIngest {
-            goal,
-            new_expr: Some(physical_expr),
-        })
-    }
-
-    /// Helper function to process a Child structure containing a logical plan.
-    ///
-    /// This function handles both singleton and variable-length children,
-    /// applying the appropriate ingestion function to each.
-    ///
-    /// # Arguments
-    /// * `child` - The Child structure to process
-    ///
-    /// # Returns
-    /// * Processed Child structure with LogicalIngestion results
-    async fn process_logical_child(
-        &self,
+    #[async_recursion]
+    async fn probe_ingest_logical_child(
+        &mut self,
         child: &Child<Arc<PartialLogicalPlan>>,
-    ) -> Result<Child<InternalLogicalIngest>, Error> {
+    ) -> Result<Child<LogicalIngest>, Error> {
         match child {
             Singleton(plan) => {
-                let result = self.ingest_logical_plan(plan).await?;
+                let result = self.probe_ingest_logical_plan(plan).await?;
                 Ok(Singleton(result))
             }
             VarLength(plans) => {
-                let results =
-                    try_join_all(plans.iter().map(|plan| self.ingest_logical_plan(plan))).await?;
+                let mut results = Vec::with_capacity(plans.len());
+                for plan in plans {
+                    let result = self.probe_ingest_logical_plan(plan).await?;
+                    results.push(result);
+                }
                 Ok(VarLength(results))
             }
         }
     }
 
-    /// Helper function to process a Child structure containing a physical plan.
-    ///
-    /// This function handles both singleton and variable-length children,
-    /// applying the appropriate ingestion function to each.
-    ///
-    /// # Arguments
-    /// * `child` - The Child structure to process
-    ///
-    /// # Returns
-    /// * Processed Child structure with Goal results
+    async fn probe_ingest_physical_operator(
+        &mut self,
+        operator: &Operator<Arc<PartialPhysicalPlan>>,
+    ) -> Result<GoalMemberId, Error> {
+        // Sequentially process the children ingestion.
+        let mut children = Vec::with_capacity(operator.children.len());
+        for child in &operator.children {
+            let processed_child = self.process_physical_child(child).await?;
+            children.push(processed_child);
+        }
+
+        // Base case: is an expression.
+        let expression = PhysicalExpression {
+            tag: operator.tag.clone(),
+            data: operator.data.clone(),
+            children,
+        };
+        let expression_id = self.memo.get_physical_expr_id(&expression).await?;
+
+        Ok(GoalMemberId::PhysicalExpressionId(expression_id))
+    }
+
     async fn process_physical_child(
-        &self,
+        &mut self,
         child: &Child<Arc<PartialPhysicalPlan>>,
-    ) -> Result<Child<Goal>, Error> {
+    ) -> Result<Child<GoalMemberId>, Error> {
         match child {
             Singleton(plan) => {
-                let result = self.ingest_physical_plan(plan).await?;
-                // Extract just the goal from the PhysicalIngest
-                Ok(Singleton(result.goal))
+                let member = self.probe_ingest_physical_plan(plan).await?;
+                Ok(Singleton(member))
             }
             VarLength(plans) => {
-                let results =
-                    try_join_all(plans.iter().map(|plan| self.ingest_physical_plan(plan))).await?;
-                // Extract just the goals from the PhysicalIngest results
-                let goals = results.into_iter().map(|ingest| ingest.goal).collect();
-                Ok(VarLength(goals))
+                let mut members = Vec::with_capacity(plans.len());
+                for plan in plans {
+                    let member = self.probe_ingest_physical_plan(plan).await?;
+                    members.push(member);
+                }
+                Ok(VarLength(members))
             }
         }
     }

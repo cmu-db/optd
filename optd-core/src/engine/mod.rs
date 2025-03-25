@@ -35,16 +35,19 @@ pub(crate) mod utils;
 pub(crate) type LogicalPlanContinuation =
     Arc<dyn Fn(PartialLogicalPlan) -> UnitFuture + Send + Sync + 'static>;
 
+/// Type alias for a continuation that receives a PartialPhysicalPlan + Cost
+pub(crate) type CostedPhysicalPlanContinuation =
+    Arc<dyn Fn((PartialPhysicalPlan, Cost)) -> UnitFuture + Send + Sync + 'static>;
+
 /// Type alias for a continuation that receives a PartialPhysicalPlan
-pub(crate) type PhysicalPlanContinuation =
+type PhysicalPlanContinuation =
     Arc<dyn Fn(PartialPhysicalPlan) -> UnitFuture + Send + Sync + 'static>;
 
 /// Type alias for a continuation that receives a cost value
-pub(crate) type CostContinuation = Arc<dyn Fn(Cost) -> UnitFuture + Send + Sync + 'static>;
+type CostContinuation = Arc<dyn Fn(Cost) -> UnitFuture + Send + Sync + 'static>;
 
 /// Type alias for a continuation that receives LogicalProperties
-pub(crate) type PropertiesContinuation =
-    Arc<dyn Fn(LogicalProperties) -> UnitFuture + Send + Sync + 'static>;
+type PropertiesContinuation = Arc<dyn Fn(LogicalProperties) -> UnitFuture + Send + Sync + 'static>;
 
 /// The engine for evaluating HIR expressions and applying rules.
 #[derive(Debug, Clone)]
@@ -78,7 +81,7 @@ impl<E: Generator> Engine<E> {
         }
     }
 
-    /// Launches a logical rule application for a given plan.
+    /// Launches a transformation rule application for a given plan.
     ///
     /// This applies a logical rule to an input plan and passes all possible
     /// transformations of the plan to the continuation.
@@ -87,13 +90,13 @@ impl<E: Generator> Engine<E> {
     /// * `rule_name` - The name of the rule to apply
     /// * `plan` - The logical plan to transform
     /// * `k` - The continuation to receive transformed logical plans
-    pub(crate) fn launch_logical_rule(
+    pub(crate) fn launch_transformation_rule(
         self,
         rule_name: String,
-        plan: &PartialLogicalPlan,
+        plan: PartialLogicalPlan,
         k: LogicalPlanContinuation,
     ) -> UnitFuture {
-        let rule_call = self.create_rule_call(&rule_name, vec![partial_logical_to_value(plan)]);
+        let rule_call = self.create_rule_call(&rule_name, vec![partial_logical_to_value(&plan)]);
 
         Box::pin(async move {
             rule_call
@@ -128,12 +131,12 @@ impl<E: Generator> Engine<E> {
     pub(crate) fn launch_implementation_rule(
         self,
         rule_name: String,
-        plan: &PartialLogicalPlan,
-        props: &PhysicalProperties,
+        plan: PartialLogicalPlan,
+        props: PhysicalProperties,
         k: PhysicalPlanContinuation,
     ) -> UnitFuture {
-        let plan_value = partial_logical_to_value(plan);
-        let props_value = physical_properties_to_value(props);
+        let plan_value = partial_logical_to_value(&plan);
+        let props_value = physical_properties_to_value(&props);
 
         let rule_call = self.create_rule_call(&rule_name, vec![plan_value, props_value]);
 
@@ -167,11 +170,11 @@ impl<E: Generator> Engine<E> {
     /// * `k` - The continuation to receive cost values
     pub(crate) fn launch_cost_plan(
         self,
-        plan: &PartialPhysicalPlan,
+        plan: PartialPhysicalPlan,
         k: CostContinuation,
     ) -> UnitFuture {
         // Create a call to the reserved "cost" function
-        let rule_call = self.create_rule_call("cost", vec![partial_physical_to_value(plan)]);
+        let rule_call = self.create_rule_call("cost", vec![partial_physical_to_value(&plan)]);
 
         Box::pin(async move {
             rule_call
@@ -197,11 +200,11 @@ impl<E: Generator> Engine<E> {
     /// * `k` - The continuation to receive the logical properties
     pub(crate) fn launch_derive_properties(
         self,
-        plan: &PartialLogicalPlan,
+        plan: PartialLogicalPlan,
         k: PropertiesContinuation,
     ) -> UnitFuture {
         // Create a call to the reserved "derive" function
-        let rule_call = self.create_rule_call("derive", vec![partial_logical_to_value(plan)]);
+        let rule_call = self.create_rule_call("derive", vec![partial_logical_to_value(&plan)]);
 
         Box::pin(async move {
             rule_call
@@ -238,10 +241,10 @@ impl<E: Generator> Engine<E> {
         Call(rule_name_expr.into(), arg_exprs).into()
     }
 
-    /// Helper function to process values and handle failures
+    /// Helper function to process values and handle failures.
     ///
-    /// This abstracts the common pattern of handling failures and value transformation
-    /// for all rule application functions.
+    /// Concretly, this function checks if the value is a reserved "fail" expression
+    /// and prints an error message if it is. Otherwise, it passes to the continuation.
     ///
     /// # Parameters
     /// * `value` - The value from rule evaluation

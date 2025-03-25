@@ -24,7 +24,7 @@ pub fn pattern_parser() -> impl Parser<Token, Spanned<Pattern>, Error = Simple<T
         .map_with_span(Spanned::new);
 
         let lit_int = select! { Token::Int64(n) => Literal::Int64(n) };
-        let lit_float = select! { Token::Float64(f) => Literal::Float64(f) };
+        let lit_float = select! { Token::Float64(f) => Literal::Float64(*f) };
         let lit_string = select! { Token::String(s) => Literal::String(s) };
         let lit_bool = select! { Token::Bool(b) => Literal::Bool(b) };
         let lit_unit = just(Token::Unit).map(|_| Literal::Unit);
