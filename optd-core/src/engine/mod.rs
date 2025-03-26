@@ -11,8 +11,7 @@ use crate::{
     capture,
     cir::{Cost, LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan, PhysicalProperties},
 };
-use eval::Evaluate;
-use generator::Generator;
+
 use optd_dsl::analyzer::{
     context::Context,
     hir::{CoreData, Expr, Literal, Value},
@@ -22,25 +21,22 @@ use utils::UnitFuture;
 use Expr::*;
 
 mod eval;
-pub(crate) mod generator;
-#[cfg(test)]
-pub(super) mod test_utils;
+use eval::Evaluate;
+
+mod generator;
+pub use generator::Generator;
+
 pub(crate) mod utils;
 
-/// Type alias for a continuation that receives a PartialLogicalPlan
-pub(crate) type LogicalPlanContinuation =
-    Arc<dyn Fn(PartialLogicalPlan) -> UnitFuture + Send + Sync + 'static>;
+#[cfg(test)]
+pub(super) mod test_utils;
 
-/// Type alias for a continuation that receives a PartialPhysicalPlan
-pub(crate) type PhysicalPlanContinuation =
-    Arc<dyn Fn(PartialPhysicalPlan) -> UnitFuture + Send + Sync + 'static>;
-
-/// Type alias for a continuation that receives a cost value
-pub(crate) type CostContinuation = Arc<dyn Fn(Cost) -> UnitFuture + Send + Sync + 'static>;
-
-/// Type alias for a continuation that receives LogicalProperties
-pub(crate) type PropertiesContinuation =
-    Arc<dyn Fn(LogicalProperties) -> UnitFuture + Send + Sync + 'static>;
+/// A type alias for continuations used in the rule engine.
+///
+/// The engine uses continuation-passing-style (CPS) since it requires advanced control flow to
+/// expand and iterate over expressions within groups (where each expression requires
+/// plan-dependent state).
+pub type Continuation<Input> = Arc<dyn Fn(Input) -> UnitFuture + Send + Sync + 'static>;
 
 /// The engine for evaluating HIR expressions and applying rules.
 #[derive(Debug, Clone)]
@@ -87,7 +83,7 @@ impl<G: Generator> Engine<G> {
         self,
         rule_name: String,
         plan: &PartialLogicalPlan,
-        k: LogicalPlanContinuation,
+        k: Continuation<PartialLogicalPlan>,
     ) -> UnitFuture {
         let rule_call = self.create_rule_call(&rule_name, vec![partial_logical_to_value(plan)]);
 
@@ -126,7 +122,7 @@ impl<G: Generator> Engine<G> {
         rule_name: String,
         plan: &PartialLogicalPlan,
         props: &PhysicalProperties,
-        k: PhysicalPlanContinuation,
+        k: Continuation<PartialPhysicalPlan>,
     ) -> UnitFuture {
         let plan_value = partial_logical_to_value(plan);
         let props_value = physical_properties_to_value(props);
@@ -164,7 +160,7 @@ impl<G: Generator> Engine<G> {
     pub(crate) fn launch_cost_plan(
         self,
         plan: &PartialPhysicalPlan,
-        k: CostContinuation,
+        k: Continuation<Cost>,
     ) -> UnitFuture {
         // Create a call to the reserved "cost" function
         let rule_call = self.create_rule_call("cost", vec![partial_physical_to_value(plan)]);
@@ -194,7 +190,7 @@ impl<G: Generator> Engine<G> {
     pub(crate) fn launch_derive_properties(
         self,
         plan: &PartialLogicalPlan,
-        k: PropertiesContinuation,
+        k: Continuation<LogicalProperties>,
     ) -> UnitFuture {
         // Create a call to the reserved "derive" function
         let rule_call = self.create_rule_call("derive", vec![partial_logical_to_value(plan)]);

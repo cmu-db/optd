@@ -1,7 +1,4 @@
-use crate::engine::{
-    generator::{Continuation, Generator},
-    Engine, Evaluate,
-};
+use crate::engine::{generator::Generator, Continuation, Engine, Evaluate};
 use optd_dsl::analyzer::hir::{
     CoreData, Expr, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern,
     PhysicalOp, Value,
@@ -44,7 +41,7 @@ impl MockGenerator {
 }
 
 impl Generator for MockGenerator {
-    async fn yield_group(&self, group_id: GroupId, k: Continuation) {
+    async fn yield_group(&self, group_id: GroupId, k: Continuation<Value>) {
         let key = format!("{:?}", group_id);
         let values = {
             let mappings = self.group_mappings.lock().unwrap();
@@ -56,7 +53,7 @@ impl Generator for MockGenerator {
         }
     }
 
-    async fn yield_goal(&self, physical_goal: &Goal, k: Continuation) {
+    async fn yield_goal(&self, physical_goal: &Goal, k: Continuation<Value>) {
         let key = format!(
             "{:?}:{:?}",
             physical_goal.group_id, physical_goal.properties

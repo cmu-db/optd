@@ -6,11 +6,11 @@ use super::{
 use crate::{
     capture,
     cir::{
-        Child, Goal, GroupId, LogicalExpression, LogicalPlan, LogicalProperties,
+        Child, Cost, Goal, GroupId, LogicalExpression, LogicalPlan, LogicalProperties,
         OptimizedExpression, PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpression,
         PhysicalPlan, PhysicalProperties,
     },
-    engine::CostContinuation,
+    engine::Continuation,
 };
 use futures::{
     channel::{
@@ -154,7 +154,7 @@ impl<M: Memoize> Optimizer<M> {
                 let engine = self.engine.clone();
 
                 // Create a continuation that sends the costed expression
-                let continuation: CostContinuation = Arc::new(move |cost| {
+                let continuation: Continuation<Cost> = Arc::new(move |cost| {
                     let mut message_tx = message_tx.clone();
                     let goal = goal.clone();
                     let expr = expr.clone();

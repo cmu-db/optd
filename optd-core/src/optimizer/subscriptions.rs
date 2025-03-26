@@ -1,10 +1,10 @@
 use super::{memo::Memoize, Optimizer, OptimizerMessage};
 use crate::{
     cir::{
-        Goal, GroupId, LogicalExpression, OptimizedExpression, PartialLogicalPlan,
+        Cost, Goal, GroupId, LogicalExpression, OptimizedExpression, PartialLogicalPlan,
         PartialPhysicalPlan,
     },
-    engine::{CostContinuation, LogicalPlanContinuation, PhysicalPlanContinuation},
+    engine::Continuation,
 };
 use async_recursion::async_recursion;
 use futures::{
@@ -127,7 +127,7 @@ impl<M: Memoize> Optimizer<M> {
 
                     tokio::spawn(async move {
                         // Create a continuation that processes transformed logical plans
-                        let logical_continuation: LogicalPlanContinuation =
+                        let logical_continuation: Continuation<PartialLogicalPlan> =
                             Arc::new(move |transformed_plan| {
                                 let mut result_tx = message_tx_clone.clone();
                                 Box::pin(async move {
@@ -182,7 +182,7 @@ impl<M: Memoize> Optimizer<M> {
 
                 tokio::spawn(async move {
                     // Create a continuation that processes cost values
-                    let cost_continuation: CostContinuation = Arc::new(move |cost| {
+                    let cost_continuation: Continuation<Cost> = Arc::new(move |cost| {
                         let mut result_tx = message_tx_clone.clone();
                         let goal = goal_clone.clone();
                         let expr = expr_clone.clone();
@@ -221,7 +221,7 @@ impl<M: Memoize> Optimizer<M> {
 
                     tokio::spawn(async move {
                         // Create a continuation that processes physical plans
-                        let physical_continuation: PhysicalPlanContinuation =
+                        let physical_continuation: Continuation<PartialPhysicalPlan> =
                             Arc::new(move |physical_plan| {
                                 let mut result_tx = message_tx_clone.clone();
                                 let goal = goal_clone.clone();

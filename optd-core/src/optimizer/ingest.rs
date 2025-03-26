@@ -1,5 +1,5 @@
 use super::{memo::Memoize, Optimizer, OptimizerMessage};
-use crate::{cir::*, engine::PropertiesContinuation, error::Error};
+use crate::{cir::*, engine::Continuation, error::Error};
 use async_recursion::async_recursion;
 use futures::{future::try_join_all, SinkExt};
 use std::{collections::HashSet, sync::Arc};
@@ -64,7 +64,7 @@ impl<M: Memoize> Optimizer<M> {
                         let expr_clone = expr.clone();
 
                         // Create a continuation for processing derived properties
-                        let properties_continuation: PropertiesContinuation =
+                        let properties_continuation: Continuation<LogicalProperties> =
                             Arc::new(move |properties| {
                                 let mut message_tx = message_tx.clone();
                                 let expr = expr_clone.clone();

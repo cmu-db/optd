@@ -3,8 +3,8 @@ use super::{
     Engine, Evaluate, Generator,
 };
 use crate::capture;
-use crate::engine::generator::Continuation;
 use crate::engine::utils::evaluate_sequence;
+use crate::engine::Continuation;
 use optd_dsl::analyzer::hir::{CoreData, Expr, Value};
 use std::sync::Arc;
 use CoreData::*;
@@ -22,7 +22,7 @@ use CoreData::*;
 pub(super) async fn evaluate_core_expr<G>(
     data: CoreData<Arc<Expr>>,
     engine: Engine<G>,
-    k: Continuation,
+    k: Continuation<Value>,
 ) where
     G: Generator,
 {
@@ -75,7 +75,7 @@ async fn evaluate_collection<G, F>(
     items: Vec<Arc<Expr>>,
     constructor: F,
     engine: Engine<G>,
-    k: Continuation,
+    k: Continuation<Value>,
 ) where
     G: Generator,
     F: FnOnce(Vec<Value>) -> CoreData<Value> + Clone + Send + Sync + 'static,
@@ -100,8 +100,11 @@ async fn evaluate_collection<G, F>(
 /// * `items` - The key-value pairs to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-async fn evaluate_map<G>(items: Vec<(Arc<Expr>, Arc<Expr>)>, engine: Engine<G>, k: Continuation)
-where
+async fn evaluate_map<G>(
+    items: Vec<(Arc<Expr>, Arc<Expr>)>,
+    engine: Engine<G>,
+    k: Continuation<Value>,
+) where
     G: Generator,
 {
     // Extract keys and values.
@@ -139,7 +142,7 @@ where
 /// * `msg` - The message expression to evaluate
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive evaluation results
-async fn evaluate_fail<G>(msg: Arc<Expr>, engine: Engine<G>, k: Continuation)
+async fn evaluate_fail<G>(msg: Arc<Expr>, engine: Engine<G>, k: Continuation<Value>)
 where
     G: Generator,
 {
