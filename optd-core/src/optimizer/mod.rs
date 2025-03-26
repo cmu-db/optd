@@ -1,11 +1,7 @@
 use crate::{
     cir::{
-        expressions::{LogicalExpression, OptimizedExpression},
-        goal::Goal,
-        group::GroupId,
-        plans::{LogicalPlan, PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan},
-        properties::LogicalProperties,
-        rules::RuleBook,
+        Goal, GroupId, LogicalExpression, LogicalPlan, LogicalProperties, OptimizedExpression,
+        PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan, RuleBook,
     },
     engine::Engine,
 };

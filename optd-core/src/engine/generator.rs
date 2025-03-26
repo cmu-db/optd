@@ -15,8 +15,8 @@ pub type Continuation = Arc<dyn Fn(Value) -> UnitFuture + Send + Sync + 'static>
 pub trait Generator: Clone + Send + Sync + 'static {
     /// Expands a logical group and passes each expression to the continuation.
     ///
-    /// Instead of returning a stream, this function invokes the provided continuation
-    /// for each expression in the group.
+    /// Instead of returning a stream, this function invokes the provided continuation for each
+    /// expression in the group.
     ///
     /// # Parameters
     /// * `group_id` - The ID of the group to expand
@@ -25,8 +25,8 @@ pub trait Generator: Clone + Send + Sync + 'static {
 
     /// Expands a physical goal and passes each implementation to the continuation.
     ///
-    /// Processes physical implementations that satisfy the goal, invoking the continuation
-    /// for each valid implementation.
+    /// Processes physical implementations that satisfy the goal, invoking the continuation for each
+    /// valid implementation.
     ///
     /// # Parameters
     /// * `physical_goal` - The goal describing required properties

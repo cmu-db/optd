@@ -22,6 +22,7 @@ pub trait Evaluate {
     /// Evaluates an expression and passes results to the provided continuation.
     ///
     /// # Parameters
+    ///
     /// * `self` - The expression to evaluate
     /// * `engine` - The evaluation engine (owned)
     /// * `k` - The continuation to receive each evaluation result

@@ -1,10 +1,8 @@
 use super::{memo::Memoize, Optimizer, OptimizerMessage};
 use crate::{
     cir::{
-        expressions::{LogicalExpression, OptimizedExpression},
-        goal::Goal,
-        group::GroupId,
-        plans::{PartialLogicalPlan, PartialPhysicalPlan},
+        Goal, GroupId, LogicalExpression, OptimizedExpression, PartialLogicalPlan,
+        PartialPhysicalPlan,
     },
     engine::{CostContinuation, LogicalPlanContinuation, PhysicalPlanContinuation},
 };
