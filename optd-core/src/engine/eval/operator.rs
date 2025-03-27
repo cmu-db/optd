@@ -8,9 +8,6 @@ use optd_dsl::analyzer::hir::{
 };
 use std::sync::Arc;
 
-/// Specialized continuation type for operator values
-type OperatorContinuation = Continuation<Operator<Value>>;
-
 /// Evaluates a logical operator by generating all possible combinations of its components.
 ///
 /// # Parameters
@@ -105,7 +102,7 @@ async fn evaluate_operator<G>(
     children_exprs: Vec<Arc<Expr>>,
     tag: String,
     engine: Engine<G>,
-    k: OperatorContinuation,
+    k: Continuation<Operator<Value>>,
 ) where
     G: Generator,
 {

@@ -17,14 +17,6 @@ use std::sync::Arc;
 /// None means the match failed, Some(context) means it succeeded.
 type MatchResult = (Value, Option<Context>);
 
-/// Specialized continuation type for match results.
-type MatchContinuation = Arc<dyn Fn(MatchResult) -> UnitFuture + Send + Sync + 'static>;
-
-/// Specialized continuation type for sequence match results that takes a vector of all match
-/// results for the sequence.
-type MatchSequenceContinuation =
-    Arc<dyn Fn(Vec<MatchResult>) -> UnitFuture + Send + Sync + 'static>;
-
 /// Evaluates a pattern match expression.
 ///
 /// First evaluates the expression to match, then tries each match arm in order until a pattern
@@ -135,7 +127,7 @@ fn match_pattern<G>(
     pattern: Pattern,
     ctx: Context,
     r#gen: G,
-    k: MatchContinuation,
+    k: Continuation<MatchResult>,
 ) -> UnitFuture
 where
     G: Generator,
@@ -241,7 +233,7 @@ async fn match_bind_pattern<G>(
     inner_pattern: Pattern,
     ctx: Context,
     generator: G,
-    k: MatchContinuation,
+    k: Continuation<MatchResult>,
 ) where
     G: Generator,
 {
@@ -275,7 +267,7 @@ async fn match_array_pattern<G>(
     arr: &[Value],
     ctx: Context,
     generator: G,
-    k: MatchContinuation,
+    k: Continuation<MatchResult>,
 ) where
     G: Generator,
 {
@@ -343,7 +335,7 @@ async fn match_struct_pattern<G>(
     field_values: &[Value],
     ctx: Context,
     generator: G,
-    k: MatchContinuation,
+    k: Continuation<MatchResult>,
 ) where
     G: Generator,
 {
@@ -391,7 +383,7 @@ async fn match_materialized_operator<G>(
     operator: Operator<Value>,
     ctx: Context,
     r#gen: G,
-    k: MatchContinuation,
+    k: Continuation<MatchResult>,
 ) where
     G: Generator,
 {
@@ -478,7 +470,7 @@ async fn match_components<G>(
     values: Vec<Value>,
     ctx: Context,
     generator: G,
-    k: MatchSequenceContinuation,
+    k: Continuation<Vec<MatchResult>>,
 ) where
     G: Generator,
 {
@@ -497,7 +489,7 @@ fn match_components_sequentially<G>(
     ctx: Context,
     results: Vec<MatchResult>,
     generator: G,
-    k: MatchSequenceContinuation,
+    k: Continuation<Vec<MatchResult>>,
 ) -> UnitFuture
 where
     G: Generator,
