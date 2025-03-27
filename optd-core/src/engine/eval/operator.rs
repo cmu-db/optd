@@ -15,7 +15,7 @@ use std::sync::Arc;
 /// * `op` - The logical operator to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(super) async fn evaluate_logical_operator<G>(
+pub(crate) async fn evaluate_logical_operator<G>(
     op: LogicalOp<Arc<Expr>>,
     engine: Engine<G>,
     k: Continuation<Value>,
@@ -55,7 +55,7 @@ pub(super) async fn evaluate_logical_operator<G>(
 /// * `op` - The physical operator to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(super) async fn evaluate_physical_operator<G>(
+pub(crate) async fn evaluate_physical_operator<G>(
     op: PhysicalOp<Arc<Expr>>,
     engine: Engine<G>,
     k: Continuation<Value>,

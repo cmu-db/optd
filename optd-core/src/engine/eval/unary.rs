@@ -25,7 +25,7 @@ use optd_dsl::analyzer::hir::{CoreData, Literal, UnaryOp, Value};
 ///
 /// # Panics
 /// Panics when the operation is not defined for the given operand type
-pub(super) fn eval_unary_op(op: &UnaryOp, expr: Value) -> Value {
+pub(crate) fn eval_unary_op(op: &UnaryOp, expr: Value) -> Value {
     match (op, &expr.0) {
         // Numeric negation for integers
         (Neg, Literal(Int64(x))) => Value(Literal(Int64(-x))),

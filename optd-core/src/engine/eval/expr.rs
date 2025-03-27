@@ -282,7 +282,7 @@ pub(crate) async fn evaluate_closure_call<G>(
 /// * `args` - The argument expressions to evaluate
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive evaluation results
-pub(super) async fn evaluate_rust_udf_call<G>(
+pub(crate) async fn evaluate_rust_udf_call<G>(
     udf: fn(Vec<Value>) -> Value,
     args: Vec<Arc<Expr>>,
     engine: Engine<G>,

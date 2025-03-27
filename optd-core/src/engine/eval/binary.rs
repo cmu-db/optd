@@ -18,7 +18,7 @@ use optd_dsl::analyzer::hir::{BinOp, CoreData, Literal, Value};
 /// # Panics
 ///
 /// Panics when the operation is not defined for the given operand types.
-pub(super) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
+pub(crate) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
     use self::Literal::*;
     use BinOp::*;
     use CoreData::*;

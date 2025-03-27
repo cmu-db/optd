@@ -4,6 +4,7 @@ use super::{
     memo::{Memoize, MergeResult},
 };
 use crate::{
+    bridge::from_cir::partial_physical_to_value,
     capture,
     cir::{
         Child, Cost, Goal, GroupId, LogicalExpression, LogicalPlan, LogicalProperties,
@@ -169,9 +170,16 @@ impl<M: Memoize> Optimizer<M> {
                     })
                 });
 
-                // Launch the cost plan operation with the continuation
+                // Launch the cost plan operation with the continuation.
                 tokio::spawn(async move {
-                    engine.launch_cost_plan(&plan, continuation).await;
+                    engine
+                        .launch_rule(
+                            "cost",
+                            vec![partial_physical_to_value(&plan)],
+                            crate::bridge::into_cir::value_to_cost,
+                            continuation,
+                        )
+                        .await
                 });
             }
         }

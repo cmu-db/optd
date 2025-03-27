@@ -1,5 +1,11 @@
 use super::{Optimizer, OptimizerMessage, memo::Memoize};
 use crate::{
+    bridge::{
+        from_cir::{
+            partial_logical_to_value, partial_physical_to_value, physical_properties_to_value,
+        },
+        into_cir::{value_to_partial_logical, value_to_partial_physical},
+    },
     cir::{
         Cost, Goal, GroupId, LogicalExpression, OptimizedExpression, PartialLogicalPlan,
         PartialPhysicalPlan,
@@ -138,10 +144,16 @@ impl<M: Memoize> Optimizer<M> {
                                 })
                             });
 
-                        // Launch the logical rule application with the continuation
+                        // Applies the rule to the input plan and passes all possible
+                        // transformations of the plan to the continuation.
                         engine_clone
-                            .launch_logical_rule(rule_name, &plan_clone, logical_continuation)
-                            .await;
+                            .launch_rule(
+                                &rule_name,
+                                vec![partial_logical_to_value(&plan_clone)],
+                                value_to_partial_logical,
+                                logical_continuation,
+                            )
+                            .await
                     });
                 }
             }
@@ -198,10 +210,15 @@ impl<M: Memoize> Optimizer<M> {
                         })
                     });
 
-                    // Launch the cost plan operation with the continuation
+                    // Launch the cost plan operation with the continuation.
                     engine_clone
-                        .launch_cost_plan(&plan, cost_continuation)
-                        .await;
+                        .launch_rule(
+                            "cost",
+                            vec![partial_physical_to_value(&plan)],
+                            crate::bridge::into_cir::value_to_cost,
+                            cost_continuation,
+                        )
+                        .await
                 });
             }
         }
@@ -234,15 +251,19 @@ impl<M: Memoize> Optimizer<M> {
                                 })
                             });
 
-                        // Launch the implementation rule application with the continuation
+                        // Applies an implementation rule to the input logical plan and required
+                        // physical properties, passing all possible physical implementations to the
+                        // continuation.
+                        let plan_value = partial_logical_to_value(&plan_clone);
+                        let props_value = physical_properties_to_value(&props_clone);
                         engine_clone
-                            .launch_implementation_rule(
-                                rule_name,
-                                &plan_clone,
-                                &props_clone,
+                            .launch_rule(
+                                &rule_name,
+                                vec![plan_value, props_value],
+                                value_to_partial_physical,
                                 physical_continuation,
                             )
-                            .await;
+                            .await
                     });
                 }
             }
