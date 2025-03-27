@@ -79,32 +79,30 @@ impl<G: Generator> Engine<G> {
     /// * `rule_name` - The name of the rule to apply
     /// * `plan` - The logical plan to transform
     /// * `k` - The continuation to receive transformed logical plans
-    pub(crate) fn launch_logical_rule(
+    pub(crate) async fn launch_logical_rule(
         self,
         rule_name: String,
         plan: &PartialLogicalPlan,
         k: Continuation<PartialLogicalPlan>,
-    ) -> UnitFuture {
+    ) {
         let rule_call = self.create_rule_call(&rule_name, vec![partial_logical_to_value(plan)]);
 
-        Box::pin(async move {
-            rule_call
-                .evaluate(
-                    self,
-                    Arc::new(move |result| {
-                        Box::pin(capture!([k, rule_name], async move {
-                            Self::process_result(
-                                result,
-                                value_to_partial_logical,
-                                &format!("logical rule '{}'", rule_name),
-                                k,
-                            )
-                            .await;
-                        }))
-                    }),
-                )
-                .await;
-        })
+        rule_call
+            .evaluate(
+                self,
+                Arc::new(move |result| {
+                    Box::pin(capture!([k, rule_name], async move {
+                        Self::process_result(
+                            result,
+                            value_to_partial_logical,
+                            &format!("logical rule '{}'", rule_name),
+                            k,
+                        )
+                        .await;
+                    }))
+                }),
+            )
+            .await
     }
 
     /// Launches an implementation rule application for a given plan and properties.
@@ -157,26 +155,20 @@ impl<G: Generator> Engine<G> {
     /// # Parameters
     /// * `plan` - The physical plan to evaluate the cost for
     /// * `k` - The continuation to receive cost values
-    pub(crate) fn launch_cost_plan(
-        self,
-        plan: &PartialPhysicalPlan,
-        k: Continuation<Cost>,
-    ) -> UnitFuture {
+    pub(crate) async fn launch_cost_plan(self, plan: &PartialPhysicalPlan, k: Continuation<Cost>) {
         // Create a call to the reserved "cost" function
         let rule_call = self.create_rule_call("cost", vec![partial_physical_to_value(plan)]);
 
-        Box::pin(async move {
-            rule_call
-                .evaluate(
-                    self,
-                    Arc::new(move |result| {
-                        Box::pin(capture!([k], async move {
-                            Self::process_result(result, value_to_cost, "cost function", k).await;
-                        }))
-                    }),
-                )
-                .await;
-        })
+        rule_call
+            .evaluate(
+                self,
+                Arc::new(move |result| {
+                    Box::pin(capture!([k], async move {
+                        Self::process_result(result, value_to_cost, "cost function", k).await;
+                    }))
+                }),
+            )
+            .await
     }
 
     /// Derives logical properties for a given logical plan.
@@ -187,32 +179,30 @@ impl<G: Generator> Engine<G> {
     /// # Parameters
     /// * `plan` - The logical plan to derive properties for
     /// * `k` - The continuation to receive the logical properties
-    pub(crate) fn launch_derive_properties(
+    pub(crate) async fn launch_derive_properties(
         self,
         plan: &PartialLogicalPlan,
         k: Continuation<LogicalProperties>,
-    ) -> UnitFuture {
+    ) {
         // Create a call to the reserved "derive" function
         let rule_call = self.create_rule_call("derive", vec![partial_logical_to_value(plan)]);
 
-        Box::pin(async move {
-            rule_call
-                .evaluate(
-                    self,
-                    Arc::new(move |result| {
-                        Box::pin(capture!([k], async move {
-                            Self::process_result(
-                                result,
-                                value_to_logical_properties,
-                                "derive function",
-                                k,
-                            )
-                            .await;
-                        }))
-                    }),
-                )
-                .await;
-        })
+        rule_call
+            .evaluate(
+                self,
+                Arc::new(move |result| {
+                    Box::pin(capture!([k], async move {
+                        Self::process_result(
+                            result,
+                            value_to_logical_properties,
+                            "derive function",
+                            k,
+                        )
+                        .await;
+                    }))
+                }),
+            )
+            .await
     }
 
     /// Creates a rule call expression with the given name and arguments.
