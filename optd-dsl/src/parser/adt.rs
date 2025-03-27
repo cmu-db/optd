@@ -1,7 +1,8 @@
 use chumsky::{
+    Parser,
     error::Simple,
     prelude::{choice, just, recursive},
-    select, Parser,
+    select,
 };
 
 use crate::{
@@ -49,7 +50,7 @@ pub fn adt_parser() -> impl Parser<Token, Spanned<Adt>, Error = Simple<Token, Sp
 mod tests {
     use super::*;
     use crate::{lexer::lex::lex, parser::ast::Type};
-    use chumsky::{prelude::end, Stream};
+    use chumsky::{Stream, prelude::end};
 
     fn parse_adt(input: &str) -> (Option<Spanned<Adt>>, Vec<Simple<Token, Span>>) {
         let (tokens, _) = lex(input, "test.txt");

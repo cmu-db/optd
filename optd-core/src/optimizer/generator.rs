@@ -7,8 +7,8 @@ use crate::{
     engine::{Continuation, Generator},
 };
 use futures::{
-    channel::mpsc::{self, Sender},
     SinkExt, StreamExt,
+    channel::mpsc::{self, Sender},
 };
 use optd_dsl::analyzer::hir::{Goal, GroupId, Value};
 

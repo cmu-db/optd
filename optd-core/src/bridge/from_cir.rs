@@ -1,13 +1,13 @@
 //! Converts optd's type representations (CIR) into DSL [`Value`]s (HIR).
 
 use crate::cir::*;
+use CoreData::*;
+use Literal::*;
+use Materializable::*;
 use optd_dsl::analyzer::hir::{
     self, CoreData, Literal, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
 use std::sync::Arc;
-use CoreData::*;
-use Literal::*;
-use Materializable::*;
 
 /// Converts a [`PartialLogicalPlan`] into a [`Value`].
 pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {

@@ -1,13 +1,13 @@
 use super::{Continuation, Engine, Generator, UnitFuture};
+use Expr::*;
 use core::evaluate_core_expr;
 use expr::{
     evaluate_binary_expr, evaluate_function_call, evaluate_if_then_else, evaluate_let_binding,
     evaluate_reference, evaluate_unary_expr,
 };
-use optd_dsl::analyzer::hir::{Expr, Value};
 use r#match::evaluate_pattern_match;
+use optd_dsl::analyzer::hir::{Expr, Value};
 use std::sync::Arc;
-use Expr::*;
 
 mod binary;
 mod core;

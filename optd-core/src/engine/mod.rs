@@ -12,13 +12,13 @@ use crate::{
     cir::{Cost, LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan, PhysicalProperties},
 };
 
+use Expr::*;
 use optd_dsl::analyzer::{
     context::Context,
     hir::{CoreData, Expr, Literal, Value},
 };
 use std::sync::Arc;
 use utils::UnitFuture;
-use Expr::*;
 
 mod eval;
 use eval::Evaluate;

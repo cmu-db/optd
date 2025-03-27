@@ -1,6 +1,6 @@
 use super::eval::Evaluate;
 use crate::capture;
-use crate::engine::{generator::Generator, Engine};
+use crate::engine::{Engine, generator::Generator};
 use optd_dsl::analyzer::hir::{Expr, Value};
 use std::{future::Future, pin::Pin, sync::Arc};
 

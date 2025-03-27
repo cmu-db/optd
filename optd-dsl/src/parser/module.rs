@@ -1,7 +1,7 @@
 use crate::lexer::tokens::Token;
 use crate::utils::error::CompileError;
 use crate::utils::span::Span;
-use chumsky::{prelude::*, Stream};
+use chumsky::{Stream, prelude::*};
 
 use super::adt::adt_parser;
 use super::ast::{Item, Module};
