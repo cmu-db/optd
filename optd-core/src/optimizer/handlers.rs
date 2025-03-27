@@ -5,13 +5,11 @@ use super::{
 };
 use crate::{
     bridge::from_cir::partial_physical_to_value,
-    capture,
     cir::{
         Child, Cost, Goal, GroupId, LogicalExpression, LogicalPlan, LogicalProperties,
         OptimizedExpression, PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpression,
         PhysicalPlan, PhysicalProperties,
     },
-    engine::Continuation,
 };
 use OptimizerMessage::*;
 use futures::{
@@ -21,6 +19,7 @@ use futures::{
         oneshot,
     },
 };
+use optd_dsl::{capture, engine::Continuation};
 use std::sync::Arc;
 
 impl<M: Memoize> Optimizer<M> {

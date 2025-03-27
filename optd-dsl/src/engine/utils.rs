@@ -1,7 +1,7 @@
 use super::Continuation;
+use crate::analyzer::hir::{Expr, Value};
 use crate::capture;
 use crate::engine::{Engine, generator::Generator};
-use optd_dsl::analyzer::hir::{Expr, Value};
 use std::{future::Future, pin::Pin, sync::Arc};
 
 /// A macro that automatically clones variables before they're captured by a closure.

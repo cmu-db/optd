@@ -8,7 +8,7 @@
 //! - Logical operations on boolean values (AND, OR).
 //! - Collection operations (concatenation, range creation).
 
-use optd_dsl::analyzer::hir::{BinOp, CoreData, Literal, Value};
+use crate::analyzer::hir::{BinOp, CoreData, Literal, Value};
 
 /// Evaluates a binary operation between two values.
 ///
@@ -92,10 +92,10 @@ pub(crate) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use crate::analyzer::hir::{BinOp, CoreData, Literal, Value};
     use BinOp::*;
     use CoreData::*;
     use Literal::*;
-    use optd_dsl::analyzer::hir::{BinOp, CoreData, Literal, Value};
     use std::collections::HashMap;
 
     use super::eval_binary_op;

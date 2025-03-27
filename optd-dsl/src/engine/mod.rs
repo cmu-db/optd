@@ -1,4 +1,4 @@
-use optd_dsl::analyzer::{
+use crate::analyzer::{
     context::Context,
     hir::{CoreData, Expr, Literal, Value},
 };
@@ -24,7 +24,7 @@ pub type Continuation<Input> = Arc<dyn Fn(Input) -> UnitFuture + Send + Sync + '
 
 /// The engine for evaluating HIR expressions and applying rules.
 #[derive(Debug, Clone)]
-pub(crate) struct Engine<G: Generator> {
+pub struct Engine<G: Generator> {
     /// The original HIR context containing all defined expressions and rules
     pub(crate) context: Context,
     /// The expander for resolving group references
@@ -33,7 +33,7 @@ pub(crate) struct Engine<G: Generator> {
 
 impl<G: Generator> Engine<G> {
     /// Creates a new engine with the given context and expander.
-    pub(crate) fn new(context: Context, generator: G) -> Self {
+    pub fn new(context: Context, generator: G) -> Self {
         Self { context, generator }
     }
 
@@ -47,7 +47,7 @@ impl<G: Generator> Engine<G> {
     ///
     /// # Returns
     /// A new engine with the provided context and the existing expander
-    pub(crate) fn with_new_context(&self, context: Context) -> Self {
+    pub fn with_new_context(&self, context: Context) -> Self {
         Self {
             context,
             generator: self.clone().generator,

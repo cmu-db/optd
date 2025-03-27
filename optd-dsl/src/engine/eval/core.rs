@@ -1,9 +1,9 @@
 use super::operator::{evaluate_logical_operator, evaluate_physical_operator};
+use crate::analyzer::hir::{CoreData, Expr, Value};
 use crate::engine::utils::evaluate_sequence;
 use crate::engine::{Continuation, Generator};
 use crate::{capture, engine::Engine};
 use CoreData::*;
-use optd_dsl::analyzer::hir::{CoreData, Expr, Value};
 use std::sync::Arc;
 
 /// Evaluates a core expression by generating all possible evaluation paths.
@@ -157,13 +157,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::{
-        Engine,
-        test_utils::{MockGenerator, evaluate_and_collect, int, lit_expr, string},
-    };
-    use optd_dsl::analyzer::{
-        context::Context,
-        hir::{CoreData, Expr, FunKind, Literal, Value},
+    use crate::engine::test_utils::{MockGenerator, evaluate_and_collect, int, lit_expr, string};
+    use crate::{
+        analyzer::{
+            context::Context,
+            hir::{CoreData, Expr, FunKind, Literal, Value},
+        },
+        engine::Engine,
     };
     use std::sync::Arc;
 

@@ -10,7 +10,6 @@ use crate::{
         Cost, Goal, GroupId, LogicalExpression, OptimizedExpression, PartialLogicalPlan,
         PartialPhysicalPlan,
     },
-    engine::Continuation,
 };
 use OptimizerMessage::*;
 use async_recursion::async_recursion;
@@ -18,6 +17,7 @@ use futures::{
     SinkExt, StreamExt,
     channel::mpsc::{self, Sender},
 };
+use optd_dsl::engine::Continuation;
 use std::sync::Arc;
 
 impl<M: Memoize> Optimizer<M> {

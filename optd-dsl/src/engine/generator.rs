@@ -1,5 +1,5 @@
 use super::Continuation;
-use optd_dsl::analyzer::hir::{Goal, GroupId, Value};
+use crate::analyzer::hir::{Goal, GroupId, Value};
 
 /// Defines operations for expanding references in the query plan using CPS.
 ///

@@ -1,11 +1,11 @@
+use crate::analyzer::hir::{
+    CoreData, Expr, LogicalOp, Materializable, Operator, PhysicalOp, Value,
+};
 use crate::engine::utils::evaluate_sequence;
 use crate::engine::{Continuation, Generator};
 use crate::{capture, engine::Engine};
 use CoreData::{Logical, Physical};
 use Materializable::*;
-use optd_dsl::analyzer::hir::{
-    CoreData, Expr, LogicalOp, Materializable, Operator, PhysicalOp, Value,
-};
 use std::sync::Arc;
 
 /// Evaluates a logical operator by generating all possible combinations of its components.
@@ -137,18 +137,18 @@ async fn evaluate_operator<G>(
 
 #[cfg(test)]
 mod tests {
+    use crate::analyzer::{
+        context::Context,
+        hir::{
+            BinOp, CoreData, Expr, Goal, GroupId, Literal, LogicalOp, Materializable, Operator,
+            PhysicalOp, Value,
+        },
+    };
     use crate::engine::{
         Engine,
         test_utils::{
             MockGenerator, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val,
             string,
-        },
-    };
-    use optd_dsl::analyzer::{
-        context::Context,
-        hir::{
-            BinOp, CoreData, Expr, Goal, GroupId, Literal, LogicalOp, Materializable, Operator,
-            PhysicalOp, Value,
         },
     };
     use std::sync::Arc;

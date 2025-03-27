@@ -1,8 +1,8 @@
-use crate::engine::{Continuation, Engine, generator::Generator};
-use optd_dsl::analyzer::hir::{
+use crate::analyzer::hir::{
     CoreData, Expr, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern,
     PhysicalOp, Value,
 };
+use crate::engine::{Continuation, Engine, generator::Generator};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 

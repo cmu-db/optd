@@ -1,9 +1,6 @@
-use crate::{
-    cir::{
-        Goal, GroupId, LogicalExpression, LogicalPlan, LogicalProperties, OptimizedExpression,
-        PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan, RuleBook,
-    },
-    engine::Engine,
+use crate::cir::{
+    Goal, GroupId, LogicalExpression, LogicalPlan, LogicalProperties, OptimizedExpression,
+    PartialLogicalPlan, PartialPhysicalPlan, PhysicalPlan, RuleBook,
 };
 use OptimizerMessage::*;
 use futures::StreamExt;
@@ -16,6 +13,7 @@ use generator::OptimizerGenerator;
 use memo::Memoize;
 use merge_repr::Representative;
 use optd_dsl::analyzer::hir::HIR;
+use optd_dsl::engine::Engine;
 use std::collections::{HashMap, HashSet};
 
 mod egest;

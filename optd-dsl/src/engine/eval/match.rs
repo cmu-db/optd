@@ -1,15 +1,15 @@
+use crate::analyzer::{
+    context::Context,
+    hir::{
+        CoreData, Expr, LogicalOp, MatchArm, Materializable, Operator, Pattern, PhysicalOp, Value,
+    },
+};
 use crate::{
     capture,
     engine::{Continuation, Engine, Generator, UnitFuture},
 };
 use Materializable::*;
 use Pattern::*;
-use optd_dsl::analyzer::{
-    context::Context,
-    hir::{
-        CoreData, Expr, LogicalOp, MatchArm, Materializable, Operator, Pattern, PhysicalOp, Value,
-    },
-};
 use std::sync::Arc;
 
 /// A type representing a match result, which is a value and an optional context.
@@ -537,6 +537,13 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::analyzer::{
+        context::Context,
+        hir::{
+            BinOp, CoreData, Expr, FunKind, Goal, GroupId, Literal, LogicalOp, Materializable,
+            Operator, PhysicalOp, Value,
+        },
+    };
     use crate::engine::{
         Engine,
         test_utils::{
@@ -544,13 +551,6 @@ mod tests {
             create_physical_operator, evaluate_and_collect, int, lit_expr, lit_val,
             literal_pattern, match_arm, operator_pattern, pattern_match_expr, ref_expr, string,
             struct_pattern, struct_val, wildcard_pattern,
-        },
-    };
-    use optd_dsl::analyzer::{
-        context::Context,
-        hir::{
-            BinOp, CoreData, Expr, FunKind, Goal, GroupId, Literal, LogicalOp, Materializable,
-            Operator, PhysicalOp, Value,
         },
     };
     use std::sync::Arc;
