@@ -1,11 +1,12 @@
 use chumsky::{
+    Parser,
     error::Simple,
     prelude::{just, nested_delimiters},
-    select, Parser,
+    select,
 };
 
 use crate::{
-    lexer::tokens::{Token, ALL_DELIMITERS},
+    lexer::tokens::{ALL_DELIMITERS, Token},
     utils::span::{Span, Spanned},
 };
 
@@ -20,8 +21,8 @@ fn field_parser() -> impl Parser<Token, Spanned<Field>, Error = Simple<Token, Sp
         .map_with_span(Spanned::new)
 }
 
-pub(super) fn fields_list_parser(
-) -> impl Parser<Token, Vec<Spanned<Field>>, Error = Simple<Token, Span>> + Clone {
+pub(super) fn fields_list_parser()
+-> impl Parser<Token, Vec<Spanned<Field>>, Error = Simple<Token, Span>> + Clone {
     field_parser()
         .separated_by(just(Token::Comma))
         .allow_trailing()

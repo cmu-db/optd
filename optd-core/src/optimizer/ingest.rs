@@ -1,10 +1,10 @@
-use super::{memo::Memoize, Optimizer, OptimizerMessage};
+use super::{Optimizer, OptimizerMessage, memo::Memoize};
 use crate::{cir::*, engine::Continuation, error::Error};
-use async_recursion::async_recursion;
-use futures::{future::try_join_all, SinkExt};
-use std::{collections::HashSet, sync::Arc};
 use Child::*;
 use OptimizerMessage::CreateGroup;
+use async_recursion::async_recursion;
+use futures::{SinkExt, future::try_join_all};
+use std::{collections::HashSet, sync::Arc};
 
 /// Result type for logical plan ingestion exposed to clients
 pub(super) enum LogicalIngest {

@@ -1,11 +1,12 @@
 use chumsky::{
+    Parser,
     error::Simple,
     prelude::{choice, just, nested_delimiters, recursive},
-    select, Parser,
+    select,
 };
 
 use crate::{
-    lexer::tokens::{Token, ALL_DELIMITERS},
+    lexer::tokens::{ALL_DELIMITERS, Token},
     parser::ast::{Literal, Pattern},
     utils::span::{Span, Spanned},
 };
@@ -101,7 +102,7 @@ pub fn pattern_parser() -> impl Parser<Token, Spanned<Pattern>, Error = Simple<T
 mod tests {
     use super::*;
     use crate::lexer::lex::lex;
-    use chumsky::{prelude::end, Stream};
+    use chumsky::{Stream, prelude::end};
 
     fn parse_pattern(input: &str) -> (Option<Spanned<Pattern>>, Vec<Simple<Token, Span>>) {
         let (tokens, _) = lex(input, "test.txt");

@@ -1,13 +1,13 @@
 use super::{Engine, Generator};
 use crate::capture;
-use crate::engine::utils::evaluate_sequence;
 use crate::engine::Continuation;
+use crate::engine::utils::evaluate_sequence;
+use CoreData::{Logical, Physical};
+use Materializable::*;
 use optd_dsl::analyzer::hir::{
     CoreData, Expr, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
 use std::sync::Arc;
-use CoreData::{Logical, Physical};
-use Materializable::*;
 
 /// Specialized continuation type for operator values
 type OperatorContinuation = Continuation<Operator<Value>>;
@@ -142,11 +142,11 @@ async fn evaluate_operator<G>(
 #[cfg(test)]
 mod tests {
     use crate::engine::{
-        test_utils::{
-            create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val, string,
-            MockGenerator,
-        },
         Engine,
+        test_utils::{
+            MockGenerator, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val,
+            string,
+        },
     };
     use optd_dsl::analyzer::{
         context::Context,

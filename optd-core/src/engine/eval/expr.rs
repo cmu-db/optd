@@ -1,14 +1,14 @@
-use super::{binary::eval_binary_op, unary::eval_unary_op, Evaluate};
+use super::{Evaluate, binary::eval_binary_op, unary::eval_unary_op};
 use crate::{
     capture,
-    engine::{utils::evaluate_sequence, Continuation, Engine, Generator},
+    engine::{Continuation, Engine, Generator, utils::evaluate_sequence},
 };
+use CoreData::*;
+use FunKind::*;
 use optd_dsl::analyzer::hir::{
     BinOp, CoreData, Expr, FunKind, Identifier, Literal, UnaryOp, Value,
 };
 use std::sync::Arc;
-use CoreData::*;
-use FunKind::*;
 
 /// Evaluates an if-then-else expression.
 ///
@@ -325,11 +325,11 @@ where
 #[cfg(test)]
 mod tests {
     use crate::engine::{
-        test_utils::{
-            array_val, boolean, evaluate_and_collect, int, lit_expr, lit_val, ref_expr, string,
-            MockGenerator,
-        },
         Engine,
+        test_utils::{
+            MockGenerator, array_val, boolean, evaluate_and_collect, int, lit_expr, lit_val,
+            ref_expr, string,
+        },
     };
     use optd_dsl::analyzer::{
         context::Context,

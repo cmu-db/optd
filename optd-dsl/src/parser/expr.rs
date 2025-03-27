@@ -1,7 +1,8 @@
 use chumsky::{
+    Parser,
     error::Simple,
     prelude::{choice, just, recursive},
-    select, Parser,
+    select,
 };
 
 use crate::{
@@ -351,7 +352,7 @@ mod tests {
         lexer::lex::lex,
         parser::ast::{Expr, Literal, Pattern},
     };
-    use chumsky::{prelude::end, Stream};
+    use chumsky::{Stream, prelude::end};
     use ordered_float::OrderedFloat;
 
     fn parse_expr(input: &str) -> (Option<Spanned<Expr>>, Vec<Simple<Token, Span>>) {
@@ -1663,7 +1664,7 @@ mod tests {
     fn test_list_decomposition_match() {
         // Complex match expression with list decomposition patterns
         let (result, errors) = parse_expr(
-        "match numbers \
+            "match numbers \
          | [] -> \"empty list\" \
          | [x .. []] -> \"list with one element: \" ++ x.to_string() \
          | [x .. [y .. []]] -> \"list with two elements: \" ++ x.to_string() ++ \", \" ++ y.to_string() \
@@ -1673,7 +1674,7 @@ mod tests {
            in \"list with \" ++ (rest_count + 2).to_string() ++ \" elements, first two sum: \" ++ sum.to_string() \
          } \
          \\ _ -> \"not a list\"",
-    );
+        );
 
         assert!(
             result.is_some(),

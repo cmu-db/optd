@@ -1,7 +1,7 @@
 use super::{
+    OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
     ingest::{LogicalIngest, PhysicalIngest},
     memo::{Memoize, MergeResult},
-    OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
 };
 use crate::{
     capture,
@@ -12,15 +12,15 @@ use crate::{
     },
     engine::Continuation,
 };
+use OptimizerMessage::*;
 use futures::{
+    SinkExt, StreamExt,
     channel::{
         mpsc::{self, Sender},
         oneshot,
     },
-    SinkExt, StreamExt,
 };
 use std::sync::Arc;
-use OptimizerMessage::*;
 
 impl<M: Memoize> Optimizer<M> {
     /// This method initiates the optimization process for a logical plan and streams

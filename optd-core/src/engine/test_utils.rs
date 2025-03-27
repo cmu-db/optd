@@ -1,4 +1,4 @@
-use crate::engine::{generator::Generator, Continuation, Engine, Evaluate};
+use crate::engine::{Continuation, Engine, Evaluate, generator::Generator};
 use optd_dsl::analyzer::hir::{
     CoreData, Expr, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern,
     PhysicalOp, Value,

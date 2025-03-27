@@ -1,12 +1,12 @@
-use super::{memo::Memoize, Optimizer};
+use super::{Optimizer, memo::Memoize};
 use crate::{
     cir::{Child, Goal, Operator, OptimizedExpression, PhysicalPlan},
     error::Error,
 };
+use Child::*;
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
 use std::sync::Arc;
-use Child::*;
 
 impl<M: Memoize> Optimizer<M> {
     /// Egest a physical plan from the memo table based on the best available physical expressions.

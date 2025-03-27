@@ -92,11 +92,11 @@ pub(super) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use optd_dsl::analyzer::hir::{BinOp, CoreData, Literal, Value};
-    use std::collections::HashMap;
     use BinOp::*;
     use CoreData::*;
     use Literal::*;
+    use optd_dsl::analyzer::hir::{BinOp, CoreData, Literal, Value};
+    use std::collections::HashMap;
 
     use super::eval_binary_op;
 

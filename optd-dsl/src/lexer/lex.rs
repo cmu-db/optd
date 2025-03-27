@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use chumsky::{
+    Parser, Stream,
     error::Simple,
     prelude::{choice, end, just, none_of, skip_then_retry_until},
-    text::{digits, ident, int, TextParser},
-    Parser, Stream,
+    text::{TextParser, digits, ident, int},
 };
 use ordered_float::OrderedFloat;
 

@@ -24,7 +24,7 @@
 //! ```
 
 use clap::{Parser, Subcommand};
-use optd_dsl::compiler::compile::{parse, CompileOptions};
+use optd_dsl::compiler::compile::{CompileOptions, parse};
 use optd_dsl::utils::error::Diagnose;
 use std::fs;
 use std::path::PathBuf;

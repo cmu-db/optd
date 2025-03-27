@@ -1,7 +1,8 @@
 use chumsky::{
+    Parser,
     error::Simple,
     prelude::{choice, just},
-    select, Parser,
+    select,
 };
 
 use crate::{
@@ -31,8 +32,8 @@ use super::{
 ///
 /// Extern functions are identified by the absence of "=" and body, and must have a return type.
 /// They can be used to represent external implementations like Rust UDFs.
-pub fn function_parser(
-) -> impl Parser<Token, Spanned<Function>, Error = Simple<Token, Span>> + Clone {
+pub fn function_parser()
+-> impl Parser<Token, Spanned<Function>, Error = Simple<Token, Span>> + Clone {
     let annotations = delimited_parser(
         select! { Token::TermIdent(name) => name }
             .map_with_span(Spanned::new)
@@ -127,7 +128,7 @@ mod tests {
         lexer::lex::lex,
         parser::ast::{Expr, Type},
     };
-    use chumsky::{prelude::end, Stream};
+    use chumsky::{Stream, prelude::end};
 
     fn parse_function(input: &str) -> (Option<Spanned<Function>>, Vec<Simple<Token, Span>>) {
         let (tokens, _) = lex(input, "test.txt");

@@ -1,7 +1,8 @@
 use chumsky::{
+    Parser,
     error::Simple,
     prelude::{choice, just, recursive},
-    select, Parser,
+    select,
 };
 
 use crate::{
@@ -102,7 +103,7 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
 mod tests {
     use super::*;
     use crate::lexer::lex::lex;
-    use chumsky::{prelude::end, Stream};
+    use chumsky::{Stream, prelude::end};
 
     fn parse_type(input: &str) -> Result<Spanned<Type>, Vec<Simple<Token, Span>>> {
         let (tokens, _) = lex(input, "test.txt");

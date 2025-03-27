@@ -1,4 +1,4 @@
-use super::{memo::Memoize, Optimizer, OptimizerMessage};
+use super::{Optimizer, OptimizerMessage, memo::Memoize};
 use crate::{
     cir::{
         Cost, Goal, GroupId, LogicalExpression, OptimizedExpression, PartialLogicalPlan,
@@ -6,13 +6,13 @@ use crate::{
     },
     engine::Continuation,
 };
+use OptimizerMessage::*;
 use async_recursion::async_recursion;
 use futures::{
-    channel::mpsc::{self, Sender},
     SinkExt, StreamExt,
+    channel::mpsc::{self, Sender},
 };
 use std::sync::Arc;
-use OptimizerMessage::*;
 
 impl<M: Memoize> Optimizer<M> {
     /// Subscribe to logical expressions in a specific group.

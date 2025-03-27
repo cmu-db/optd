@@ -3,6 +3,8 @@ use crate::{
     capture,
     engine::{Continuation, UnitFuture},
 };
+use Materializable::*;
+use Pattern::*;
 use optd_dsl::analyzer::{
     context::Context,
     hir::{
@@ -10,8 +12,6 @@ use optd_dsl::analyzer::{
     },
 };
 use std::sync::Arc;
-use Materializable::*;
-use Pattern::*;
 
 /// A type representing a match result, which is a value and an optional context.
 ///
@@ -133,7 +133,7 @@ fn match_pattern<G>(
     value: Value,
     pattern: Pattern,
     ctx: Context,
-    gen: G,
+    r#gen: G,
     k: MatchContinuation,
 ) -> UnitFuture
 where
@@ -154,7 +154,7 @@ where
             }
             // Complex patterns.
             (Bind(ident, inner_pattern), _) => {
-                match_bind_pattern(value.clone(), ident, *inner_pattern, ctx, gen, k).await;
+                match_bind_pattern(value.clone(), ident, *inner_pattern, ctx, r#gen, k).await;
             }
             (ArrayDecomp(head_pat, tail_pat), CoreData::Array(arr)) => {
                 if arr.is_empty() {
@@ -162,7 +162,7 @@ where
                     return;
                 }
 
-                match_array_pattern(*head_pat, *tail_pat, arr, ctx, gen, k).await;
+                match_array_pattern(*head_pat, *tail_pat, arr, ctx, r#gen, k).await;
             }
             (Struct(pat_name, pat_fields), CoreData::Struct(val_name, val_fields)) => {
                 if pat_name != *val_name || pat_fields.len() != val_fields.len() {
@@ -170,7 +170,7 @@ where
                     return;
                 }
 
-                match_struct_pattern(pat_name, pat_fields, val_fields, ctx, gen, k).await;
+                match_struct_pattern(pat_name, pat_fields, val_fields, ctx, r#gen, k).await;
             }
             (Operator(op_pattern), CoreData::Logical(LogicalOp(Materialized(operator)))) => {
                 if op_pattern.tag != operator.tag
@@ -181,7 +181,8 @@ where
                     return;
                 }
 
-                match_materialized_operator(true, op_pattern, operator.clone(), ctx, gen, k).await;
+                match_materialized_operator(true, op_pattern, operator.clone(), ctx, r#gen, k)
+                    .await;
             }
             (Operator(op_pattern), CoreData::Physical(PhysicalOp(Materialized(operator)))) => {
                 if op_pattern.tag != operator.tag
@@ -192,16 +193,18 @@ where
                     return;
                 }
 
-                match_materialized_operator(false, op_pattern, operator.clone(), ctx, gen, k).await;
+                match_materialized_operator(false, op_pattern, operator.clone(), ctx, r#gen, k)
+                    .await;
             }
             // Unmaterialized operators.
             (Operator(op_pattern), CoreData::Logical(LogicalOp(UnMaterialized(group_id)))) => {
-                gen.clone()
+                r#gen
+                    .clone()
                     .yield_group(
                         *group_id,
                         Arc::new(move |expanded_value| {
-                            Box::pin(capture!([op_pattern, ctx, gen, k], async move {
-                                match_pattern(expanded_value, Operator(op_pattern), ctx, gen, k)
+                            Box::pin(capture!([op_pattern, ctx, r#gen, k], async move {
+                                match_pattern(expanded_value, Operator(op_pattern), ctx, r#gen, k)
                                     .await;
                             }))
                         }),
@@ -209,12 +212,13 @@ where
                     .await;
             }
             (Operator(op_pattern), CoreData::Physical(PhysicalOp(UnMaterialized(goal)))) => {
-                gen.clone()
+                r#gen
+                    .clone()
                     .yield_goal(
                         goal,
                         Arc::new(move |expanded_value| {
-                            Box::pin(capture!([op_pattern, ctx, gen, k], async move {
-                                match_pattern(expanded_value, Operator(op_pattern), ctx, gen, k)
+                            Box::pin(capture!([op_pattern, ctx, r#gen, k], async move {
+                                match_pattern(expanded_value, Operator(op_pattern), ctx, r#gen, k)
                                     .await;
                             }))
                         }),
@@ -385,7 +389,7 @@ async fn match_materialized_operator<G>(
     op_pattern: Operator<Pattern>,
     operator: Operator<Value>,
     ctx: Context,
-    gen: G,
+    r#gen: G,
     k: MatchContinuation,
 ) where
     G: Generator,
@@ -410,7 +414,7 @@ async fn match_materialized_operator<G>(
         all_patterns,
         all_values,
         ctx.clone(),
-        gen,
+        r#gen,
         Arc::new(move |results| {
             Box::pin(capture!([ctx, operator, k], async move {
                 // Check if all components matched successfully.
@@ -541,13 +545,13 @@ where
 #[cfg(test)]
 mod tests {
     use crate::engine::{
+        Engine,
         test_utils::{
-            array_decomp_pattern, array_val, bind_pattern, create_logical_operator,
+            MockGenerator, array_decomp_pattern, array_val, bind_pattern, create_logical_operator,
             create_physical_operator, evaluate_and_collect, int, lit_expr, lit_val,
             literal_pattern, match_arm, operator_pattern, pattern_match_expr, ref_expr, string,
-            struct_pattern, struct_val, wildcard_pattern, MockGenerator,
+            struct_pattern, struct_val, wildcard_pattern,
         },
-        Engine,
     };
     use optd_dsl::analyzer::{
         context::Context,
@@ -1499,9 +1503,11 @@ mod tests {
         for result in &results {
             match &result.0 {
                 CoreData::Literal(Literal::String(s)) => {
-                    assert!(expected_combinations
-                        .map(|(expected, _)| expected)
-                        .contains(&s.as_str()));
+                    assert!(
+                        expected_combinations
+                            .map(|(expected, _)| expected)
+                            .contains(&s.as_str())
+                    );
                 }
                 _ => panic!("Expected string literal"),
             }
