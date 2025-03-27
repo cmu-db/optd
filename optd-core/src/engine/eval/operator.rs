@@ -1,7 +1,6 @@
-use super::{Engine, Generator};
-use crate::capture;
-use crate::engine::Continuation;
 use crate::engine::utils::evaluate_sequence;
+use crate::engine::{Continuation, Generator};
+use crate::{capture, engine::Engine};
 use CoreData::{Logical, Physical};
 use Materializable::*;
 use optd_dsl::analyzer::hir::{

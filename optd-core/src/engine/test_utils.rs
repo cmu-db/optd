@@ -1,4 +1,4 @@
-use crate::engine::{Continuation, Engine, Evaluate, generator::Generator};
+use crate::engine::{Continuation, Engine, generator::Generator};
 use optd_dsl::analyzer::hir::{
     CoreData, Expr, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern,
     PhysicalOp, Value,
@@ -188,17 +188,18 @@ where
     let results = Arc::new(Mutex::new(Vec::new()));
     let results_clone = results.clone();
 
-    expr.evaluate(
-        engine,
-        Arc::new(move |value| {
-            let results = results_clone.clone();
-            Box::pin(async move {
-                let mut results_guard = results.lock().unwrap();
-                results_guard.push(value);
-            })
-        }),
-    )
-    .await;
+    engine
+        .evaluate(
+            expr,
+            Arc::new(move |value| {
+                let results = results_clone.clone();
+                Box::pin(async move {
+                    let mut results_guard = results.lock().unwrap();
+                    results_guard.push(value);
+                })
+            }),
+        )
+        .await;
 
     Arc::try_unwrap(results).unwrap().into_inner().unwrap()
 }

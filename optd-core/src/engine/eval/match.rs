@@ -1,7 +1,6 @@
-use super::{Engine, Evaluate, Generator};
 use crate::{
     capture,
-    engine::{Continuation, UnitFuture},
+    engine::{Continuation, Engine, Generator, UnitFuture},
 };
 use Materializable::*;
 use Pattern::*;
@@ -37,7 +36,7 @@ type MatchSequenceContinuation =
 /// * `match_arms` - The list of pattern-expression pairs to try.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(super) async fn evaluate_pattern_match<G>(
+pub(crate) async fn evaluate_pattern_match<G>(
     expr: Arc<Expr>,
     match_arms: Vec<MatchArm>,
     engine: Engine<G>,
@@ -50,16 +49,18 @@ pub(super) async fn evaluate_pattern_match<G>(
     }
 
     // First evaluate the expression to match.
-    expr.evaluate(
-        engine.clone(),
-        Arc::new(move |value| {
-            Box::pin(capture!([match_arms, engine, k], async move {
-                // Try to match against each arm in order.
-                try_match_arms(value, match_arms, engine, k).await;
-            }))
-        }),
-    )
-    .await;
+    engine
+        .clone()
+        .evaluate(
+            expr,
+            Arc::new(move |value| {
+                Box::pin(capture!([match_arms, engine, k], async move {
+                    // Try to match against each arm in order.
+                    try_match_arms(value, match_arms, engine, k).await;
+                }))
+            }),
+        )
+        .await;
 }
 
 /// Tries to match a value against a sequence of match arms.
@@ -104,7 +105,7 @@ where
                             // If we got a match, evaluate the arm's expression with the context.
                             Some(context) => {
                                 let engine_with_ctx = engine.with_new_context(context);
-                                first_arm.expr.evaluate(engine_with_ctx, k).await;
+                                engine_with_ctx.evaluate(first_arm.expr, k).await;
                             }
                             // If no match, try the next arm with the matching value and remaining
                             // arms.

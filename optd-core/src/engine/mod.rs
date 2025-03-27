@@ -11,8 +11,6 @@ use crate::{
     capture,
     cir::{Cost, LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan, PhysicalProperties},
 };
-
-use Expr::*;
 use optd_dsl::analyzer::{
     context::Context,
     hir::{CoreData, Expr, Literal, Value},
@@ -21,7 +19,6 @@ use std::sync::Arc;
 use utils::UnitFuture;
 
 mod eval;
-use eval::Evaluate;
 
 mod generator;
 pub use generator::Generator;
@@ -59,7 +56,7 @@ impl<G: Generator> Engine<G> {
     /// while preserving the original expander implementation.
     ///
     /// # Parameters
-    /// * `context` - The new context to use
+    ///  `context` - The new context to use
     ///
     /// # Returns
     /// A new engine with the provided context and the existing expander
@@ -68,6 +65,60 @@ impl<G: Generator> Engine<G> {
             context,
             generator: self.clone().generator,
         }
+    }
+
+    /// Evaluates an expression and passes results to the provided continuation.
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - The evaluation engine (owned)
+    /// * `expr` - The expression to evaluate
+    /// * `k` - The continuation to receive each evaluation result
+    pub fn evaluate(
+        self,
+        expr: Arc<Expr>,
+        k: Continuation<Value>,
+    ) -> impl Future<Output = ()> + Send {
+        use eval::core::evaluate_core_expr;
+        use eval::expr::{
+            evaluate_binary_expr, evaluate_function_call, evaluate_if_then_else,
+            evaluate_let_binding, evaluate_reference, evaluate_unary_expr,
+        };
+        use eval::r#match::evaluate_pattern_match;
+
+        Box::pin(async move {
+            match expr.as_ref() {
+                Expr::PatternMatch(expr, match_arms) => {
+                    evaluate_pattern_match(expr.clone(), match_arms.clone(), self, k).await
+                }
+                Expr::IfThenElse(cond, then_expr, else_expr) => {
+                    evaluate_if_then_else(
+                        cond.clone(),
+                        then_expr.clone(),
+                        else_expr.clone(),
+                        self,
+                        k,
+                    )
+                    .await
+                }
+                Expr::Let(ident, assignee, after) => {
+                    evaluate_let_binding(ident.clone(), assignee.clone(), after.clone(), self, k)
+                        .await
+                }
+                Expr::Binary(left, op, right) => {
+                    evaluate_binary_expr(left.clone(), op.clone(), right.clone(), self, k).await
+                }
+                Expr::Unary(op, expr) => {
+                    evaluate_unary_expr(op.clone(), expr.clone(), self, k).await
+                }
+                Expr::Call(fun, args) => {
+                    evaluate_function_call(fun.clone(), args.clone(), self, k).await
+                }
+                Expr::Ref(ident) => evaluate_reference(ident.clone(), self, k).await,
+                Expr::CoreExpr(expr) => evaluate_core_expr(expr.clone(), self, k).await,
+                Expr::CoreVal(val) => k(val.clone()).await,
+            }
+        })
     }
 
     /// Launches a logical rule application for a given plan.
@@ -87,22 +138,21 @@ impl<G: Generator> Engine<G> {
     ) {
         let rule_call = self.create_rule_call(&rule_name, vec![partial_logical_to_value(plan)]);
 
-        rule_call
-            .evaluate(
-                self,
-                Arc::new(move |result| {
-                    Box::pin(capture!([k, rule_name], async move {
-                        Self::process_result(
-                            result,
-                            value_to_partial_logical,
-                            &format!("logical rule '{}'", rule_name),
-                            k,
-                        )
-                        .await;
-                    }))
-                }),
-            )
-            .await
+        self.evaluate(
+            rule_call,
+            Arc::new(move |result| {
+                Box::pin(capture!([k, rule_name], async move {
+                    Self::process_result(
+                        result,
+                        value_to_partial_logical,
+                        &format!("logical rule '{}'", rule_name),
+                        k,
+                    )
+                    .await;
+                }))
+            }),
+        )
+        .await
     }
 
     /// Launches an implementation rule application for a given plan and properties.
@@ -128,22 +178,21 @@ impl<G: Generator> Engine<G> {
         let rule_call = self.create_rule_call(&rule_name, vec![plan_value, props_value]);
 
         Box::pin(async move {
-            rule_call
-                .evaluate(
-                    self,
-                    Arc::new(move |result| {
-                        Box::pin(capture!([k, rule_name], async move {
-                            Self::process_result(
-                                result,
-                                value_to_partial_physical,
-                                &format!("implementation rule '{}'", rule_name),
-                                k,
-                            )
-                            .await;
-                        }))
-                    }),
-                )
-                .await;
+            self.evaluate(
+                rule_call,
+                Arc::new(move |result| {
+                    Box::pin(capture!([k, rule_name], async move {
+                        Self::process_result(
+                            result,
+                            value_to_partial_physical,
+                            &format!("implementation rule '{}'", rule_name),
+                            k,
+                        )
+                        .await;
+                    }))
+                }),
+            )
+            .await;
         })
     }
 
@@ -159,16 +208,15 @@ impl<G: Generator> Engine<G> {
         // Create a call to the reserved "cost" function
         let rule_call = self.create_rule_call("cost", vec![partial_physical_to_value(plan)]);
 
-        rule_call
-            .evaluate(
-                self,
-                Arc::new(move |result| {
-                    Box::pin(capture!([k], async move {
-                        Self::process_result(result, value_to_cost, "cost function", k).await;
-                    }))
-                }),
-            )
-            .await
+        self.evaluate(
+            rule_call,
+            Arc::new(move |result| {
+                Box::pin(capture!([k], async move {
+                    Self::process_result(result, value_to_cost, "cost function", k).await;
+                }))
+            }),
+        )
+        .await
     }
 
     /// Derives logical properties for a given logical plan.
@@ -187,22 +235,16 @@ impl<G: Generator> Engine<G> {
         // Create a call to the reserved "derive" function
         let rule_call = self.create_rule_call("derive", vec![partial_logical_to_value(plan)]);
 
-        rule_call
-            .evaluate(
-                self,
-                Arc::new(move |result| {
-                    Box::pin(capture!([k], async move {
-                        Self::process_result(
-                            result,
-                            value_to_logical_properties,
-                            "derive function",
-                            k,
-                        )
+        self.evaluate(
+            rule_call,
+            Arc::new(move |result| {
+                Box::pin(capture!([k], async move {
+                    Self::process_result(result, value_to_logical_properties, "derive function", k)
                         .await;
-                    }))
-                }),
-            )
-            .await
+                }))
+            }),
+        )
+        .await
     }
 
     /// Creates a rule call expression with the given name and arguments.
@@ -214,10 +256,13 @@ impl<G: Generator> Engine<G> {
     /// # Returns
     /// A call expression representing the rule invocation
     fn create_rule_call(&self, rule_name: &str, args: Vec<Value>) -> Arc<Expr> {
-        let rule_name_expr = Ref(rule_name.to_string());
-        let arg_exprs = args.into_iter().map(|arg| CoreVal(arg).into()).collect();
+        let rule_name_expr = Expr::Ref(rule_name.to_string());
+        let arg_exprs = args
+            .into_iter()
+            .map(|arg| Expr::CoreVal(arg).into())
+            .collect();
 
-        Call(rule_name_expr.into(), arg_exprs).into()
+        Expr::Call(rule_name_expr.into(), arg_exprs).into()
     }
 
     /// Helper function to process values and handle failures

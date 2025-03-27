@@ -1,10 +1,7 @@
-use super::{
-    Engine, Evaluate, Generator,
-    operator::{evaluate_logical_operator, evaluate_physical_operator},
-};
-use crate::capture;
-use crate::engine::Continuation;
+use super::operator::{evaluate_logical_operator, evaluate_physical_operator};
 use crate::engine::utils::evaluate_sequence;
+use crate::engine::{Continuation, Generator};
+use crate::{capture, engine::Engine};
 use CoreData::*;
 use optd_dsl::analyzer::hir::{CoreData, Expr, Value};
 use std::sync::Arc;
@@ -19,7 +16,7 @@ use std::sync::Arc;
 /// * `data` - The core expression data to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(super) async fn evaluate_core_expr<G>(
+pub(crate) async fn evaluate_core_expr<G>(
     data: CoreData<Arc<Expr>>,
     engine: Engine<G>,
     k: Continuation<Value>,
@@ -146,15 +143,16 @@ async fn evaluate_fail<G>(msg: Arc<Expr>, engine: Engine<G>, k: Continuation<Val
 where
     G: Generator,
 {
-    msg.evaluate(
-        engine,
-        Arc::new(move |value| {
-            Box::pin(capture!([k], async move {
-                k(Value(Fail(value.into()))).await;
-            }))
-        }),
-    )
-    .await;
+    engine
+        .evaluate(
+            msg,
+            Arc::new(move |value| {
+                Box::pin(capture!([k], async move {
+                    k(Value(Fail(value.into()))).await;
+                }))
+            }),
+        )
+        .await;
 }
 
 #[cfg(test)]
