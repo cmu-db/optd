@@ -99,9 +99,8 @@ jobs:
     # https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability
     strategy:
       matrix:
-        # `Cargo.lock` version 4 requires 1.78.0
-        # datafusion 45.0.0 requires 1.81.0
-        msrv: ["1.81.0"] 
+        # Rust 2024 Edition MSRV
+        msrv: ["1.85.0"] 
     name: ubuntu / ${{ matrix.msrv }}
     steps:
       - uses: actions/checkout@v4
