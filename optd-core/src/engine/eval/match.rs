@@ -1,6 +1,8 @@
 use super::{Engine, Evaluate, Generator};
-use crate::engine::generator::Continuation;
-use crate::{capture, engine::UnitFuture};
+use crate::{
+    capture,
+    engine::{Continuation, UnitFuture},
+};
 use optd_dsl::analyzer::{
     context::Context,
     hir::{
@@ -39,7 +41,7 @@ pub(super) async fn evaluate_pattern_match<G>(
     expr: Arc<Expr>,
     match_arms: Vec<MatchArm>,
     engine: Engine<G>,
-    k: Continuation,
+    k: Continuation<Value>,
 ) where
     G: Generator,
 {
@@ -74,7 +76,7 @@ fn try_match_arms<G>(
     value: Value,
     match_arms: Vec<MatchArm>,
     engine: Engine<G>,
-    k: Continuation,
+    k: Continuation<Value>,
 ) -> UnitFuture
 where
     G: Generator,

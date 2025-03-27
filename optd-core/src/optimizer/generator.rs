@@ -4,13 +4,13 @@ use crate::{
         from_cir::{partial_logical_to_value, partial_physical_to_value},
         into_cir::{hir_goal_to_cir, hir_group_id_to_cir},
     },
-    engine::generator::{Continuation, Generator},
+    engine::{Continuation, Generator},
 };
 use futures::{
     channel::mpsc::{self, Sender},
     SinkExt, StreamExt,
 };
-use optd_dsl::analyzer::hir::{Goal, GroupId};
+use optd_dsl::analyzer::hir::{Goal, GroupId, Value};
 
 /// Implementation of the Generator trait that connects the engine to the optimizer.
 ///
@@ -31,7 +31,7 @@ impl Generator for OptimizerGenerator {
     /// # Parameters
     /// * `group_id` - The ID of the group to expand
     /// * `k` - The continuation to process each expression in the group
-    async fn yield_group(&self, group_id: GroupId, k: Continuation) {
+    async fn yield_group(&self, group_id: GroupId, k: Continuation<Value>) {
         // Create a channel to receive expressions from the optimizer
         let (tx, mut rx) = mpsc::channel(0);
 
@@ -65,7 +65,7 @@ impl Generator for OptimizerGenerator {
     /// # Parameters
     /// * `physical_goal` - The goal describing required properties
     /// * `k` - The continuation to process each implementation
-    async fn yield_goal(&self, physical_goal: &Goal, k: Continuation) {
+    async fn yield_goal(&self, physical_goal: &Goal, k: Continuation<Value>) {
         // Create a channel to receive optimized expressions from the optimizer
         let (tx, mut rx) = mpsc::channel(0);
 

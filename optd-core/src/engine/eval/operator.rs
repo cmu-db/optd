@@ -1,7 +1,7 @@
 use super::{Engine, Generator};
-use crate::engine::generator::Continuation;
+use crate::capture;
 use crate::engine::utils::evaluate_sequence;
-use crate::{capture, engine::utils::UnitFuture};
+use crate::engine::Continuation;
 use optd_dsl::analyzer::hir::{
     CoreData, Expr, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
@@ -10,7 +10,7 @@ use CoreData::{Logical, Physical};
 use Materializable::*;
 
 /// Specialized continuation type for operator values
-type OperatorContinuation = Arc<dyn Fn(Operator<Value>) -> UnitFuture + Send + Sync + 'static>;
+type OperatorContinuation = Continuation<Operator<Value>>;
 
 /// Evaluates a logical operator by generating all possible combinations of its components.
 ///
@@ -22,7 +22,7 @@ type OperatorContinuation = Arc<dyn Fn(Operator<Value>) -> UnitFuture + Send + S
 pub(super) async fn evaluate_logical_operator<G>(
     op: LogicalOp<Arc<Expr>>,
     engine: Engine<G>,
-    k: Continuation,
+    k: Continuation<Value>,
 ) where
     G: Generator,
 {
@@ -62,7 +62,7 @@ pub(super) async fn evaluate_logical_operator<G>(
 pub(super) async fn evaluate_physical_operator<G>(
     op: PhysicalOp<Arc<Expr>>,
     engine: Engine<G>,
-    k: Continuation,
+    k: Continuation<Value>,
 ) where
     G: Generator,
 {
