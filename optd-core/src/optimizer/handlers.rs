@@ -4,7 +4,7 @@ use super::{
     memo::{Memoize, MergeResult},
 };
 use crate::{
-    bridge::from_cir::partial_physical_to_value,
+    bridge::{from_cir::partial_physical_to_value, into_cir::value_to_cost},
     cir::{
         Child, Cost, Goal, GroupId, LogicalExpression, LogicalPlan, LogicalProperties,
         OptimizedExpression, PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpression,
@@ -175,7 +175,7 @@ impl<M: Memoize> Optimizer<M> {
                         .launch_rule(
                             "cost",
                             vec![partial_physical_to_value(&plan)],
-                            crate::bridge::into_cir::value_to_cost,
+                            value_to_cost,
                             continuation,
                         )
                         .await

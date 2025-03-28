@@ -4,7 +4,7 @@ use crate::{
         from_cir::{
             partial_logical_to_value, partial_physical_to_value, physical_properties_to_value,
         },
-        into_cir::{value_to_partial_logical, value_to_partial_physical},
+        into_cir::{value_to_cost, value_to_partial_logical, value_to_partial_physical},
     },
     cir::{
         Cost, Goal, GroupId, LogicalExpression, OptimizedExpression, PartialLogicalPlan,
@@ -215,7 +215,7 @@ impl<M: Memoize> Optimizer<M> {
                         .launch_rule(
                             "cost",
                             vec![partial_physical_to_value(&plan)],
-                            crate::bridge::into_cir::value_to_cost,
+                            value_to_cost,
                             cost_continuation,
                         )
                         .await
