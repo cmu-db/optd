@@ -1,7 +1,7 @@
 use super::operator::{evaluate_logical_operator, evaluate_physical_operator};
 use crate::analyzer::hir::{CoreData, Expr, Value};
 use crate::engine::utils::evaluate_sequence;
-use crate::engine::{Continuation, Generator};
+use crate::engine::{EngineContinuation, Generator};
 use crate::{capture, engine::Engine};
 use CoreData::*;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ use std::sync::Arc;
 pub(crate) async fn evaluate_core_expr<G>(
     data: CoreData<Arc<Expr>>,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) where
     G: Generator,
 {
@@ -72,7 +72,7 @@ async fn evaluate_collection<G, F>(
     items: Vec<Arc<Expr>>,
     constructor: F,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) where
     G: Generator,
     F: FnOnce(Vec<Value>) -> CoreData<Value> + Clone + Send + Sync + 'static,
@@ -100,7 +100,7 @@ async fn evaluate_collection<G, F>(
 async fn evaluate_map<G>(
     items: Vec<(Arc<Expr>, Arc<Expr>)>,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) where
     G: Generator,
 {
@@ -139,7 +139,7 @@ async fn evaluate_map<G>(
 /// * `msg` - The message expression to evaluate
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive evaluation results
-async fn evaluate_fail<G>(msg: Arc<Expr>, engine: Engine<G>, k: Continuation<Value>)
+async fn evaluate_fail<G>(msg: Arc<Expr>, engine: Engine<G>, k: EngineContinuation<Value>)
 where
     G: Generator,
 {

@@ -17,7 +17,7 @@ use futures::{
     SinkExt, StreamExt,
     channel::mpsc::{self, Sender},
 };
-use optd_dsl::engine::Continuation;
+use optd_dsl::engine::EngineContinuation;
 use std::sync::Arc;
 
 impl<M: Memoize> Optimizer<M> {
@@ -133,7 +133,7 @@ impl<M: Memoize> Optimizer<M> {
 
                     tokio::spawn(async move {
                         // Create a continuation that processes transformed logical plans
-                        let logical_continuation: Continuation<PartialLogicalPlan> =
+                        let logical_continuation: EngineContinuation<PartialLogicalPlan> =
                             Arc::new(move |transformed_plan| {
                                 let mut result_tx = message_tx_clone.clone();
                                 Box::pin(async move {
@@ -194,7 +194,7 @@ impl<M: Memoize> Optimizer<M> {
 
                 tokio::spawn(async move {
                     // Create a continuation that processes cost values
-                    let cost_continuation: Continuation<Cost> = Arc::new(move |cost| {
+                    let cost_continuation: EngineContinuation<Cost> = Arc::new(move |cost| {
                         let mut result_tx = message_tx_clone.clone();
                         let goal = goal_clone.clone();
                         let expr = expr_clone.clone();
@@ -238,7 +238,7 @@ impl<M: Memoize> Optimizer<M> {
 
                     tokio::spawn(async move {
                         // Create a continuation that processes physical plans
-                        let physical_continuation: Continuation<PartialPhysicalPlan> =
+                        let physical_continuation: EngineContinuation<PartialPhysicalPlan> =
                             Arc::new(move |physical_plan| {
                                 let mut result_tx = message_tx_clone.clone();
                                 let goal = goal_clone.clone();

@@ -19,7 +19,7 @@ use futures::{
         oneshot,
     },
 };
-use optd_dsl::{capture, engine::Continuation};
+use optd_dsl::{capture, engine::EngineContinuation};
 use std::sync::Arc;
 
 impl<M: Memoize> Optimizer<M> {
@@ -154,7 +154,7 @@ impl<M: Memoize> Optimizer<M> {
                 let engine = self.engine.clone();
 
                 // Create a continuation that sends the costed expression
-                let continuation: Continuation<Cost> = Arc::new(move |cost| {
+                let continuation: EngineContinuation<Cost> = Arc::new(move |cost| {
                     let mut message_tx = message_tx.clone();
                     let goal = goal.clone();
                     let expr = expr.clone();

@@ -6,7 +6,7 @@ use crate::analyzer::{
 };
 use crate::{
     capture,
-    engine::{Continuation, Engine, Generator, UnitFuture},
+    engine::{Engine, EngineContinuation, Generator, UnitFuture},
 };
 use Materializable::*;
 use Pattern::*;
@@ -32,7 +32,7 @@ pub(crate) async fn evaluate_pattern_match<G>(
     expr: Arc<Expr>,
     match_arms: Vec<MatchArm>,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) where
     G: Generator,
 {
@@ -69,7 +69,7 @@ fn try_match_arms<G>(
     value: Value,
     match_arms: Vec<MatchArm>,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) -> UnitFuture
 where
     G: Generator,
@@ -127,7 +127,7 @@ fn match_pattern<G>(
     pattern: Pattern,
     ctx: Context,
     r#gen: G,
-    k: Continuation<MatchResult>,
+    k: EngineContinuation<MatchResult>,
 ) -> UnitFuture
 where
     G: Generator,
@@ -233,7 +233,7 @@ async fn match_bind_pattern<G>(
     inner_pattern: Pattern,
     ctx: Context,
     generator: G,
-    k: Continuation<MatchResult>,
+    k: EngineContinuation<MatchResult>,
 ) where
     G: Generator,
 {
@@ -267,7 +267,7 @@ async fn match_array_pattern<G>(
     arr: &[Value],
     ctx: Context,
     generator: G,
-    k: Continuation<MatchResult>,
+    k: EngineContinuation<MatchResult>,
 ) where
     G: Generator,
 {
@@ -335,7 +335,7 @@ async fn match_struct_pattern<G>(
     field_values: &[Value],
     ctx: Context,
     generator: G,
-    k: Continuation<MatchResult>,
+    k: EngineContinuation<MatchResult>,
 ) where
     G: Generator,
 {
@@ -383,7 +383,7 @@ async fn match_materialized_operator<G>(
     operator: Operator<Value>,
     ctx: Context,
     r#gen: G,
-    k: Continuation<MatchResult>,
+    k: EngineContinuation<MatchResult>,
 ) where
     G: Generator,
 {
@@ -470,7 +470,7 @@ async fn match_components<G>(
     values: Vec<Value>,
     ctx: Context,
     generator: G,
-    k: Continuation<Vec<MatchResult>>,
+    k: EngineContinuation<Vec<MatchResult>>,
 ) where
     G: Generator,
 {
@@ -489,7 +489,7 @@ fn match_components_sequentially<G>(
     ctx: Context,
     results: Vec<MatchResult>,
     generator: G,
-    k: Continuation<Vec<MatchResult>>,
+    k: EngineContinuation<Vec<MatchResult>>,
 ) -> UnitFuture
 where
     G: Generator,

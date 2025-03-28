@@ -2,7 +2,7 @@ use super::{binary::eval_binary_op, unary::eval_unary_op};
 use crate::analyzer::hir::{BinOp, CoreData, Expr, FunKind, Identifier, Literal, UnaryOp, Value};
 use crate::{
     capture,
-    engine::{Continuation, Engine, Generator, utils::evaluate_sequence},
+    engine::{EngineContinuation, Engine, Generator, utils::evaluate_sequence},
 };
 use CoreData::*;
 use FunKind::*;
@@ -25,7 +25,7 @@ pub(crate) async fn evaluate_if_then_else<G>(
     then_expr: Arc<Expr>,
     else_expr: Arc<Expr>,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) where
     G: Generator,
 {
@@ -69,7 +69,7 @@ pub(crate) async fn evaluate_let_binding<G>(
     assignee: Arc<Expr>,
     after: Arc<Expr>,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) where
     G: Generator,
 {
@@ -108,7 +108,7 @@ pub(crate) async fn evaluate_binary_expr<G>(
     op: BinOp,
     right: Arc<Expr>,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) where
     G: Generator,
 {
@@ -118,7 +118,7 @@ pub(crate) async fn evaluate_binary_expr<G>(
         right: Arc<Expr>,
         op: BinOp,
         engine: Engine<G>,
-        k: Continuation<Value>,
+        k: EngineContinuation<Value>,
     ) where
         G: Generator,
     {
@@ -164,7 +164,7 @@ pub(crate) async fn evaluate_unary_expr<G>(
     op: UnaryOp,
     expr: Arc<Expr>,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) where
     G: Generator,
 {
@@ -198,7 +198,7 @@ pub(crate) async fn evaluate_function_call<G>(
     fun: Arc<Expr>,
     args: Vec<Arc<Expr>>,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) where
     G: Generator,
 {
@@ -244,7 +244,7 @@ pub(crate) async fn evaluate_closure_call<G>(
     body: Arc<Expr>,
     args: Vec<Arc<Expr>>,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) where
     G: Generator,
 {
@@ -284,7 +284,7 @@ pub(crate) async fn evaluate_rust_udf_call<G>(
     udf: fn(Vec<Value>) -> Value,
     args: Vec<Arc<Expr>>,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) where
     G: Generator,
 {
@@ -313,7 +313,7 @@ pub(crate) async fn evaluate_rust_udf_call<G>(
 /// * `ident` - The identifier to look up
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive the variable value
-pub(crate) async fn evaluate_reference<G>(ident: String, engine: Engine<G>, k: Continuation<Value>)
+pub(crate) async fn evaluate_reference<G>(ident: String, engine: Engine<G>, k: EngineContinuation<Value>)
 where
     G: Generator,
 {

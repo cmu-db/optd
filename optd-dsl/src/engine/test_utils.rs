@@ -2,7 +2,7 @@ use crate::analyzer::hir::{
     CoreData, Expr, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern,
     PhysicalOp, Value,
 };
-use crate::engine::{Continuation, Engine, Generator};
+use crate::engine::{Engine, EngineContinuation, Generator};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -41,7 +41,7 @@ impl MockGenerator {
 }
 
 impl Generator for MockGenerator {
-    async fn yield_group(&self, group_id: GroupId, k: Continuation<Value>) {
+    async fn yield_group(&self, group_id: GroupId, k: EngineContinuation<Value>) {
         let key = format!("{:?}", group_id);
         let values = {
             let mappings = self.group_mappings.lock().unwrap();
@@ -53,7 +53,7 @@ impl Generator for MockGenerator {
         }
     }
 
-    async fn yield_goal(&self, physical_goal: &Goal, k: Continuation<Value>) {
+    async fn yield_goal(&self, physical_goal: &Goal, k: EngineContinuation<Value>) {
         let key = format!(
             "{:?}:{:?}",
             physical_goal.group_id, physical_goal.properties

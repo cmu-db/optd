@@ -1,4 +1,4 @@
-use super::Continuation;
+use super::EngineContinuation;
 use crate::analyzer::hir::{Goal, GroupId, Value};
 
 /// Defines operations for expanding references in the query plan using CPS.
@@ -16,7 +16,7 @@ pub trait Generator: Clone + Send + Sync + 'static {
     /// # Parameters
     /// * `group_id` - The ID of the group to expand
     /// * `k` - The continuation to process each expression in the group
-    async fn yield_group(&self, group_id: GroupId, k: Continuation<Value>);
+    async fn yield_group(&self, group_id: GroupId, k: EngineContinuation<Value>);
 
     /// Expands a physical goal and passes each implementation to the continuation.
     ///
@@ -26,5 +26,5 @@ pub trait Generator: Clone + Send + Sync + 'static {
     /// # Parameters
     /// * `physical_goal` - The goal describing required properties
     /// * `k` - The continuation to process each implementation
-    async fn yield_goal(&self, physical_goal: &Goal, k: Continuation<Value>);
+    async fn yield_goal(&self, physical_goal: &Goal, k: EngineContinuation<Value>);
 }

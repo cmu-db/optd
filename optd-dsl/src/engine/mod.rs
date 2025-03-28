@@ -63,7 +63,7 @@ impl<G: Generator> Engine<G> {
     pub fn evaluate(
         self,
         expr: Arc<Expr>,
-        k: Continuation<Value>,
+        k: EngineContinuation<Value>,
     ) -> impl Future<Output = ()> + Send {
         Box::pin(async move {
             match expr.as_ref() {
@@ -107,7 +107,7 @@ impl<G: Generator> Engine<G> {
         name: &str,
         values: Vec<Value>,
         transform: fn(&Value) -> T,
-        k: Continuation<T>,
+        k: EngineContinuation<T>,
     ) where
         T: 'static,
     {

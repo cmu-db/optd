@@ -1,3 +1,5 @@
+use futures::future::BoxFuture;
+
 use crate::analyzer::hir::{Expr, Value};
 use crate::capture;
 use crate::engine::{Engine, generator::Generator};
@@ -6,11 +8,14 @@ use std::{future::Future, pin::Pin, sync::Arc};
 /// A type alias for a future that completes with no return value.
 pub type UnitFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
+pub type PinnedFuture<T> = BoxFuture<'static, T>;
+
 /// A type alias for continuations used in the rule engine.
 ///
 /// The engine uses continuation-passing-style (CPS) since it requires advanced control flow to
 /// expand (enumerate) expressions within a group.
-pub type Continuation<Input> = Arc<dyn Fn(Input) -> UnitFuture + Send + Sync + 'static>;
+pub type RealContinuation<I, O> = Arc<dyn Fn(I) -> PinnedFuture<O> + Send + Sync + 'static>;
+pub type EngineContinuation<I> = RealContinuation<I, ()>;
 
 /// Evaluates a sequence of expressions and collects their values using continuation passing style.
 ///
@@ -21,7 +26,7 @@ pub type Continuation<Input> = Arc<dyn Fn(Input) -> UnitFuture + Send + Sync + '
 pub(super) fn evaluate_sequence<G>(
     exprs: Vec<Arc<Expr>>,
     engine: Engine<G>,
-    k: Continuation<Vec<Value>>,
+    k: EngineContinuation<Vec<Value>>,
 ) -> UnitFuture
 where
     G: Generator,
@@ -43,7 +48,7 @@ fn evaluate_sequence_internal<G>(
     index: usize,
     values: Vec<Value>,
     engine: Engine<G>,
-    k: Continuation<Vec<Value>>,
+    k: EngineContinuation<Vec<Value>>,
 ) -> UnitFuture
 where
     G: Generator,

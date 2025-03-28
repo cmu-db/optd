@@ -2,7 +2,7 @@ use crate::analyzer::hir::{
     CoreData, Expr, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
 use crate::engine::utils::evaluate_sequence;
-use crate::engine::{Continuation, Generator};
+use crate::engine::{EngineContinuation, Generator};
 use crate::{capture, engine::Engine};
 use CoreData::{Logical, Physical};
 use Materializable::*;
@@ -18,7 +18,7 @@ use std::sync::Arc;
 pub(crate) async fn evaluate_logical_operator<G>(
     op: LogicalOp<Arc<Expr>>,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) where
     G: Generator,
 {
@@ -58,7 +58,7 @@ pub(crate) async fn evaluate_logical_operator<G>(
 pub(crate) async fn evaluate_physical_operator<G>(
     op: PhysicalOp<Arc<Expr>>,
     engine: Engine<G>,
-    k: Continuation<Value>,
+    k: EngineContinuation<Value>,
 ) where
     G: Generator,
 {
@@ -102,7 +102,7 @@ async fn evaluate_operator<G>(
     children_exprs: Vec<Arc<Expr>>,
     tag: String,
     engine: Engine<G>,
-    k: Continuation<Operator<Value>>,
+    k: EngineContinuation<Operator<Value>>,
 ) where
     G: Generator,
 {

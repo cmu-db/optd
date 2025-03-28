@@ -8,7 +8,7 @@ use Child::*;
 use OptimizerMessage::CreateGroup;
 use async_recursion::async_recursion;
 use futures::{SinkExt, future::try_join_all};
-use optd_dsl::engine::Continuation;
+use optd_dsl::engine::EngineContinuation;
 use std::{collections::HashSet, sync::Arc};
 
 /// Result type for logical plan ingestion exposed to clients
@@ -69,7 +69,7 @@ impl<M: Memoize> Optimizer<M> {
                         let expr_clone = expr.clone();
 
                         // Create a continuation for processing derived properties
-                        let properties_continuation: Continuation<LogicalProperties> =
+                        let properties_continuation: EngineContinuation<LogicalProperties> =
                             Arc::new(move |properties| {
                                 let mut message_tx = message_tx.clone();
                                 let expr = expr_clone.clone();

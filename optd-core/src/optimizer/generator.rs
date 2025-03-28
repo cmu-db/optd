@@ -9,7 +9,7 @@ use futures::{
 };
 use optd_dsl::{
     analyzer::hir::{Goal, GroupId, Value},
-    engine::{Continuation, Generator},
+    engine::{EngineContinuation, Generator},
 };
 
 /// Implementation of the Generator trait that connects the engine to the optimizer.
@@ -31,7 +31,7 @@ impl Generator for OptimizerGenerator {
     /// # Parameters
     /// * `group_id` - The ID of the group to expand
     /// * `k` - The continuation to process each expression in the group
-    async fn yield_group(&self, group_id: GroupId, k: Continuation<Value>) {
+    async fn yield_group(&self, group_id: GroupId, k: EngineContinuation<Value>) {
         // Create a channel to receive expressions from the optimizer
         let (tx, mut rx) = mpsc::channel(0);
 
@@ -65,7 +65,7 @@ impl Generator for OptimizerGenerator {
     /// # Parameters
     /// * `physical_goal` - The goal describing required properties
     /// * `k` - The continuation to process each implementation
-    async fn yield_goal(&self, physical_goal: &Goal, k: Continuation<Value>) {
+    async fn yield_goal(&self, physical_goal: &Goal, k: EngineContinuation<Value>) {
         // Create a channel to receive optimized expressions from the optimizer
         let (tx, mut rx) = mpsc::channel(0);
 
