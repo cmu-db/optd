@@ -1,12 +1,16 @@
-use crate::analyzer::{
-    context::Context,
-    hir::{
-        CoreData, Expr, LogicalOp, MatchArm, Materializable, Operator, Pattern, PhysicalOp, Value,
+use crate::{
+    analyzer::{
+        context::Context,
+        hir::{
+            CoreData, Expr, LogicalOp, MatchArm, Materializable, Operator, Pattern, PhysicalOp,
+            Value,
+        },
     },
+    engine::PinnedFuture,
 };
 use crate::{
     capture,
-    engine::{Engine, EngineContinuation, Generator, UnitFuture},
+    engine::{Engine, EngineContinuation, Generator},
 };
 use Materializable::*;
 use Pattern::*;
@@ -70,7 +74,7 @@ fn try_match_arms<G>(
     match_arms: Vec<MatchArm>,
     engine: Engine<G>,
     k: EngineContinuation<Value>,
-) -> UnitFuture
+) -> PinnedFuture<()>
 where
     G: Generator,
 {
@@ -128,7 +132,7 @@ fn match_pattern<G>(
     ctx: Context,
     r#gen: G,
     k: EngineContinuation<MatchResult>,
-) -> UnitFuture
+) -> PinnedFuture<()>
 where
     G: Generator,
 {
@@ -490,7 +494,7 @@ fn match_components_sequentially<G>(
     results: Vec<MatchResult>,
     generator: G,
     k: EngineContinuation<Vec<MatchResult>>,
-) -> UnitFuture
+) -> PinnedFuture<()>
 where
     G: Generator,
 {

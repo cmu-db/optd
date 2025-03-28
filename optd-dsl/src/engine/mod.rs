@@ -156,7 +156,7 @@ impl<G: Generator> Engine<G> {
     async fn process_result<T, F>(
         value: Value,
         transform: F,
-        k: Arc<dyn Fn(T) -> UnitFuture + Send + Sync + 'static>,
+        k: Arc<dyn Fn(T) -> PinnedFuture<()> + Send + Sync + 'static>,
     ) where
         F: FnOnce(&Value) -> T,
     {

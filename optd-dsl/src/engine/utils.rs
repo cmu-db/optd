@@ -3,11 +3,9 @@ use futures::future::BoxFuture;
 use crate::analyzer::hir::{Expr, Value};
 use crate::capture;
 use crate::engine::{Engine, generator::Generator};
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::sync::Arc;
 
-/// A type alias for a future that completes with no return value.
-pub type UnitFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
-
+/// A type alias for a future that completes with return value of type `T`.
 pub type PinnedFuture<T> = BoxFuture<'static, T>;
 
 /// A type alias for continuations used in the rule engine.
@@ -27,7 +25,7 @@ pub(super) fn evaluate_sequence<G>(
     exprs: Vec<Arc<Expr>>,
     engine: Engine<G>,
     k: EngineContinuation<Vec<Value>>,
-) -> UnitFuture
+) -> PinnedFuture<()>
 where
     G: Generator,
 {
@@ -49,7 +47,7 @@ fn evaluate_sequence_internal<G>(
     values: Vec<Value>,
     engine: Engine<G>,
     k: EngineContinuation<Vec<Value>>,
-) -> UnitFuture
+) -> PinnedFuture<()>
 where
     G: Generator,
 {
