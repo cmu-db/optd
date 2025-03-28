@@ -1,25 +1,16 @@
-use super::Continuation;
 use crate::analyzer::hir::{Expr, Value};
 use crate::capture;
 use crate::engine::{Engine, generator::Generator};
 use std::{future::Future, pin::Pin, sync::Arc};
 
-/// A macro that automatically clones variables before they're captured by a closure.
-///
-/// This macro takes a list of variables to clone and a closure expression, cloning the variables in
-/// the list so that the clones can be moved into the closure.
-#[macro_export]
-macro_rules! capture {
-    ([$($var:ident),* $(,)?], $($closure:expr)*) => {
-        {
-            $(let $var = $var.clone();)*
-            $($closure)*
-        }
-    };
-}
+/// A type alias for a future that completes with no return value.
+pub type UnitFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
-/// A future that completes with no return value.
-pub(crate) type UnitFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+/// A type alias for continuations used in the rule engine.
+///
+/// The engine uses continuation-passing-style (CPS) since it requires advanced control flow to
+/// expand (enumerate) expressions within a group.
+pub type Continuation<Input> = Arc<dyn Fn(Input) -> UnitFuture + Send + Sync + 'static>;
 
 /// Evaluates a sequence of expressions and collects their values using continuation passing style.
 ///

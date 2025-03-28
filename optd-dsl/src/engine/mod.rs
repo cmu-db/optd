@@ -2,25 +2,24 @@ use crate::analyzer::{
     context::Context,
     hir::{CoreData, Expr, Literal, Value},
 };
+use eval::core::evaluate_core_expr;
+use eval::expr::{
+    evaluate_binary_expr, evaluate_function_call, evaluate_if_then_else, evaluate_let_binding,
+    evaluate_reference, evaluate_unary_expr,
+};
+use eval::r#match::evaluate_pattern_match;
 use std::sync::Arc;
-use utils::UnitFuture;
 
 mod eval;
 
 mod generator;
 pub use generator::Generator;
 
-pub(crate) mod utils;
+mod utils;
+pub use utils::*;
 
 #[cfg(test)]
-pub(super) mod test_utils;
-
-/// A type alias for continuations used in the rule engine.
-///
-/// The engine uses continuation-passing-style (CPS) since it requires advanced control flow to
-/// expand and iterate over expressions within groups (where each expression requires
-/// plan-dependent state).
-pub type Continuation<Input> = Arc<dyn Fn(Input) -> UnitFuture + Send + Sync + 'static>;
+mod test_utils;
 
 /// The engine for evaluating HIR expressions and applying rules.
 #[derive(Debug, Clone)]
@@ -66,13 +65,6 @@ impl<G: Generator> Engine<G> {
         expr: Arc<Expr>,
         k: Continuation<Value>,
     ) -> impl Future<Output = ()> + Send {
-        use eval::core::evaluate_core_expr;
-        use eval::expr::{
-            evaluate_binary_expr, evaluate_function_call, evaluate_if_then_else,
-            evaluate_let_binding, evaluate_reference, evaluate_unary_expr,
-        };
-        use eval::r#match::evaluate_pattern_match;
-
         Box::pin(async move {
             match expr.as_ref() {
                 Expr::PatternMatch(expr, match_arms) => {
