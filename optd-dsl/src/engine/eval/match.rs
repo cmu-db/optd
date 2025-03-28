@@ -1,30 +1,21 @@
-use super::{Engine, Evaluate, Generator};
-use crate::{
-    capture,
-    engine::{Continuation, UnitFuture},
-};
-use Materializable::*;
-use Pattern::*;
-use optd_dsl::analyzer::{
+use crate::analyzer::{
     context::Context,
     hir::{
         CoreData, Expr, LogicalOp, MatchArm, Materializable, Operator, Pattern, PhysicalOp, Value,
     },
 };
+use crate::{
+    capture,
+    engine::{Continuation, Engine, Generator, UnitFuture},
+};
+use Materializable::*;
+use Pattern::*;
 use std::sync::Arc;
 
 /// A type representing a match result, which is a value and an optional context.
 ///
 /// None means the match failed, Some(context) means it succeeded.
 type MatchResult = (Value, Option<Context>);
-
-/// Specialized continuation type for match results.
-type MatchContinuation = Arc<dyn Fn(MatchResult) -> UnitFuture + Send + Sync + 'static>;
-
-/// Specialized continuation type for sequence match results that takes a vector of all match
-/// results for the sequence.
-type MatchSequenceContinuation =
-    Arc<dyn Fn(Vec<MatchResult>) -> UnitFuture + Send + Sync + 'static>;
 
 /// Evaluates a pattern match expression.
 ///
@@ -37,7 +28,7 @@ type MatchSequenceContinuation =
 /// * `match_arms` - The list of pattern-expression pairs to try.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(super) async fn evaluate_pattern_match<G>(
+pub(crate) async fn evaluate_pattern_match<G>(
     expr: Arc<Expr>,
     match_arms: Vec<MatchArm>,
     engine: Engine<G>,
@@ -50,16 +41,18 @@ pub(super) async fn evaluate_pattern_match<G>(
     }
 
     // First evaluate the expression to match.
-    expr.evaluate(
-        engine.clone(),
-        Arc::new(move |value| {
-            Box::pin(capture!([match_arms, engine, k], async move {
-                // Try to match against each arm in order.
-                try_match_arms(value, match_arms, engine, k).await;
-            }))
-        }),
-    )
-    .await;
+    engine
+        .clone()
+        .evaluate(
+            expr,
+            Arc::new(move |value| {
+                Box::pin(capture!([match_arms, engine, k], async move {
+                    // Try to match against each arm in order.
+                    try_match_arms(value, match_arms, engine, k).await;
+                }))
+            }),
+        )
+        .await;
 }
 
 /// Tries to match a value against a sequence of match arms.
@@ -104,7 +97,7 @@ where
                             // If we got a match, evaluate the arm's expression with the context.
                             Some(context) => {
                                 let engine_with_ctx = engine.with_new_context(context);
-                                first_arm.expr.evaluate(engine_with_ctx, k).await;
+                                engine_with_ctx.evaluate(first_arm.expr, k).await;
                             }
                             // If no match, try the next arm with the matching value and remaining
                             // arms.
@@ -134,7 +127,7 @@ fn match_pattern<G>(
     pattern: Pattern,
     ctx: Context,
     r#gen: G,
-    k: MatchContinuation,
+    k: Continuation<MatchResult>,
 ) -> UnitFuture
 where
     G: Generator,
@@ -240,7 +233,7 @@ async fn match_bind_pattern<G>(
     inner_pattern: Pattern,
     ctx: Context,
     generator: G,
-    k: MatchContinuation,
+    k: Continuation<MatchResult>,
 ) where
     G: Generator,
 {
@@ -274,7 +267,7 @@ async fn match_array_pattern<G>(
     arr: &[Value],
     ctx: Context,
     generator: G,
-    k: MatchContinuation,
+    k: Continuation<MatchResult>,
 ) where
     G: Generator,
 {
@@ -342,7 +335,7 @@ async fn match_struct_pattern<G>(
     field_values: &[Value],
     ctx: Context,
     generator: G,
-    k: MatchContinuation,
+    k: Continuation<MatchResult>,
 ) where
     G: Generator,
 {
@@ -390,7 +383,7 @@ async fn match_materialized_operator<G>(
     operator: Operator<Value>,
     ctx: Context,
     r#gen: G,
-    k: MatchContinuation,
+    k: Continuation<MatchResult>,
 ) where
     G: Generator,
 {
@@ -477,7 +470,7 @@ async fn match_components<G>(
     values: Vec<Value>,
     ctx: Context,
     generator: G,
-    k: MatchSequenceContinuation,
+    k: Continuation<Vec<MatchResult>>,
 ) where
     G: Generator,
 {
@@ -496,7 +489,7 @@ fn match_components_sequentially<G>(
     ctx: Context,
     results: Vec<MatchResult>,
     generator: G,
-    k: MatchSequenceContinuation,
+    k: Continuation<Vec<MatchResult>>,
 ) -> UnitFuture
 where
     G: Generator,
@@ -544,6 +537,13 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::analyzer::{
+        context::Context,
+        hir::{
+            BinOp, CoreData, Expr, FunKind, Goal, GroupId, Literal, LogicalOp, Materializable,
+            Operator, PhysicalOp, Value,
+        },
+    };
     use crate::engine::{
         Engine,
         test_utils::{
@@ -551,13 +551,6 @@ mod tests {
             create_physical_operator, evaluate_and_collect, int, lit_expr, lit_val,
             literal_pattern, match_arm, operator_pattern, pattern_match_expr, ref_expr, string,
             struct_pattern, struct_val, wildcard_pattern,
-        },
-    };
-    use optd_dsl::analyzer::{
-        context::Context,
-        hir::{
-            BinOp, CoreData, Expr, FunKind, Goal, GroupId, Literal, LogicalOp, Materializable,
-            Operator, PhysicalOp, Value,
         },
     };
     use std::sync::Arc;

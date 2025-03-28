@@ -1,13 +1,11 @@
-use super::{Evaluate, binary::eval_binary_op, unary::eval_unary_op};
+use super::{binary::eval_binary_op, unary::eval_unary_op};
+use crate::analyzer::hir::{BinOp, CoreData, Expr, FunKind, Identifier, Literal, UnaryOp, Value};
 use crate::{
     capture,
     engine::{Continuation, Engine, Generator, utils::evaluate_sequence},
 };
 use CoreData::*;
 use FunKind::*;
-use optd_dsl::analyzer::hir::{
-    BinOp, CoreData, Expr, FunKind, Identifier, Literal, UnaryOp, Value,
-};
 use std::sync::Arc;
 
 /// Evaluates an if-then-else expression.
@@ -22,7 +20,7 @@ use std::sync::Arc;
 /// * `else_expr` - The expression to evaluate if condition is false.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(super) async fn evaluate_if_then_else<G>(
+pub(crate) async fn evaluate_if_then_else<G>(
     cond: Arc<Expr>,
     then_expr: Arc<Expr>,
     else_expr: Arc<Expr>,
@@ -32,24 +30,26 @@ pub(super) async fn evaluate_if_then_else<G>(
     G: Generator,
 {
     // First evaluate the condition
-    cond.evaluate(
-        engine.clone(),
-        Arc::new(move |value| {
-            Box::pin(capture!([then_expr, else_expr, engine, k], async move {
-                match value.0 {
-                    Literal(Literal::Bool(b)) => {
-                        if b {
-                            then_expr.evaluate(engine, k).await;
-                        } else {
-                            else_expr.evaluate(engine, k).await;
+    engine
+        .clone()
+        .evaluate(
+            cond,
+            Arc::new(move |value| {
+                Box::pin(capture!([then_expr, else_expr, engine, k], async move {
+                    match value.0 {
+                        Literal(Literal::Bool(b)) => {
+                            if b {
+                                engine.evaluate(then_expr, k).await;
+                            } else {
+                                engine.evaluate(else_expr, k).await;
+                            }
                         }
+                        _ => panic!("Expected boolean in condition"),
                     }
-                    _ => panic!("Expected boolean in condition"),
-                }
-            }))
-        }),
-    )
-    .await;
+                }))
+            }),
+        )
+        .await;
 }
 
 /// Evaluates a let binding expression.
@@ -64,7 +64,7 @@ pub(super) async fn evaluate_if_then_else<G>(
 /// * `after` - The expression to evaluate in the updated context.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(super) async fn evaluate_let_binding<G>(
+pub(crate) async fn evaluate_let_binding<G>(
     ident: String,
     assignee: Arc<Expr>,
     after: Arc<Expr>,
@@ -74,9 +74,10 @@ pub(super) async fn evaluate_let_binding<G>(
     G: Generator,
 {
     // Evaluate the assignee first.
-    assignee
+    engine
+        .clone()
         .evaluate(
-            engine.clone(),
+            assignee,
             Arc::new(move |value| {
                 Box::pin(capture!([ident, after, engine, k], async move {
                     // Create updated context with the new binding.
@@ -84,7 +85,7 @@ pub(super) async fn evaluate_let_binding<G>(
                     new_ctx.bind(ident, value);
 
                     // Evaluate the after expression in the updated context.
-                    after.evaluate(engine.with_new_context(new_ctx), k).await;
+                    engine.with_new_context(new_ctx).evaluate(after, k).await;
                 }))
             }),
         )
@@ -102,7 +103,7 @@ pub(super) async fn evaluate_let_binding<G>(
 /// * `right` - The right operand
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive evaluation results
-pub(super) async fn evaluate_binary_expr<G>(
+pub(crate) async fn evaluate_binary_expr<G>(
     left: Arc<Expr>,
     op: BinOp,
     right: Arc<Expr>,
@@ -121,9 +122,9 @@ pub(super) async fn evaluate_binary_expr<G>(
     ) where
         G: Generator,
     {
-        right
+        engine
             .evaluate(
-                engine,
+                right,
                 Arc::new(move |right_val| {
                     Box::pin(capture!([left_val, op, k], async move {
                         // Apply the binary operation and pass result to continuation.
@@ -136,15 +137,17 @@ pub(super) async fn evaluate_binary_expr<G>(
     }
 
     // First evaluate the left operand.
-    left.evaluate(
-        engine.clone(),
-        Arc::new(move |left_val| {
-            Box::pin(capture!([right, op, engine, k], async move {
-                evaluate_right(left_val, right, op, engine, k).await;
-            }))
-        }),
-    )
-    .await;
+    engine
+        .clone()
+        .evaluate(
+            left,
+            Arc::new(move |left_val| {
+                Box::pin(capture!([right, op, engine, k], async move {
+                    evaluate_right(left_val, right, op, engine, k).await;
+                }))
+            }),
+        )
+        .await;
 }
 
 /// Evaluates a unary expression.
@@ -157,7 +160,7 @@ pub(super) async fn evaluate_binary_expr<G>(
 /// * `expr` - The operand expression.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(super) async fn evaluate_unary_expr<G>(
+pub(crate) async fn evaluate_unary_expr<G>(
     op: UnaryOp,
     expr: Arc<Expr>,
     engine: Engine<G>,
@@ -166,17 +169,18 @@ pub(super) async fn evaluate_unary_expr<G>(
     G: Generator,
 {
     // Evaluate the operand, then apply the unary operation
-    expr.evaluate(
-        engine,
-        Arc::new(move |value| {
-            Box::pin(capture!([op, k], async move {
-                // Apply the unary operation and pass result to continuation
-                let result = eval_unary_op(&op, value);
-                k(result).await;
-            }))
-        }),
-    )
-    .await;
+    engine
+        .evaluate(
+            expr,
+            Arc::new(move |value| {
+                Box::pin(capture!([op, k], async move {
+                    // Apply the unary operation and pass result to continuation
+                    let result = eval_unary_op(&op, value);
+                    k(result).await;
+                }))
+            }),
+        )
+        .await;
 }
 
 /// Evaluates a function call expression.
@@ -190,7 +194,7 @@ pub(super) async fn evaluate_unary_expr<G>(
 /// * `args` - The argument expressions to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(super) async fn evaluate_function_call<G>(
+pub(crate) async fn evaluate_function_call<G>(
     fun: Arc<Expr>,
     args: Vec<Arc<Expr>>,
     engine: Engine<G>,
@@ -199,26 +203,28 @@ pub(super) async fn evaluate_function_call<G>(
     G: Generator,
 {
     // First evaluate the function expression.
-    fun.evaluate(
-        engine.clone(),
-        Arc::new(move |fun_value| {
-            Box::pin(capture!([args, engine, k], async move {
-                match fun_value.0 {
-                    // Handle closure (user-defined function).
-                    Function(Closure(params, body)) => {
-                        evaluate_closure_call(params, body, args, engine, k).await;
+    engine
+        .clone()
+        .evaluate(
+            fun,
+            Arc::new(move |fun_value| {
+                Box::pin(capture!([args, engine, k], async move {
+                    match fun_value.0 {
+                        // Handle closure (user-defined function).
+                        Function(Closure(params, body)) => {
+                            evaluate_closure_call(params, body, args, engine, k).await;
+                        }
+                        // Handle Rust UDF (built-in function).
+                        Function(RustUDF(udf)) => {
+                            evaluate_rust_udf_call(udf, args, engine, k).await;
+                        }
+                        // Value must be a function.
+                        _ => panic!("Expected function value"),
                     }
-                    // Handle Rust UDF (built-in function).
-                    Function(RustUDF(udf)) => {
-                        evaluate_rust_udf_call(udf, args, engine, k).await;
-                    }
-                    // Value must be a function.
-                    _ => panic!("Expected function value"),
-                }
-            }))
-        }),
-    )
-    .await;
+                }))
+            }),
+        )
+        .await;
 }
 
 /// Evaluates a call to a closure (user-defined function).
@@ -233,7 +239,7 @@ pub(super) async fn evaluate_function_call<G>(
 /// * `args` - The argument expressions to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(super) async fn evaluate_closure_call<G>(
+pub(crate) async fn evaluate_closure_call<G>(
     params: Vec<Identifier>,
     body: Arc<Expr>,
     args: Vec<Arc<Expr>>,
@@ -256,7 +262,7 @@ pub(super) async fn evaluate_closure_call<G>(
                 });
 
                 // Evaluate the body in the new context
-                body.evaluate(engine.with_new_context(new_ctx), k).await;
+                engine.with_new_context(new_ctx).evaluate(body, k).await;
             }))
         }),
     )
@@ -274,7 +280,7 @@ pub(super) async fn evaluate_closure_call<G>(
 /// * `args` - The argument expressions to evaluate
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive evaluation results
-pub(super) async fn evaluate_rust_udf_call<G>(
+pub(crate) async fn evaluate_rust_udf_call<G>(
     udf: fn(Vec<Value>) -> Value,
     args: Vec<Arc<Expr>>,
     engine: Engine<G>,
@@ -307,7 +313,7 @@ pub(super) async fn evaluate_rust_udf_call<G>(
 /// * `ident` - The identifier to look up
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive the variable value
-pub(super) async fn evaluate_reference<G>(ident: String, engine: Engine<G>, k: Continuation<Value>)
+pub(crate) async fn evaluate_reference<G>(ident: String, engine: Engine<G>, k: Continuation<Value>)
 where
     G: Generator,
 {
@@ -324,16 +330,16 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::analyzer::{
+        context::Context,
+        hir::{BinOp, CoreData, Expr, FunKind, Literal, Value},
+    };
     use crate::engine::{
         Engine,
         test_utils::{
             MockGenerator, array_val, boolean, evaluate_and_collect, int, lit_expr, lit_val,
             ref_expr, string,
         },
-    };
-    use optd_dsl::analyzer::{
-        context::Context,
-        hir::{BinOp, CoreData, Expr, FunKind, Literal, Value},
     };
     use std::sync::Arc;
 

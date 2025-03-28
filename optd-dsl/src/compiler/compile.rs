@@ -1,3 +1,4 @@
+use crate::analyzer::hir::HIR;
 use crate::lexer::lex::lex;
 use crate::parser::ast::Module;
 use crate::parser::module::parse_module;
@@ -53,10 +54,7 @@ pub fn parse(source: &str, options: &CompileOptions) -> Result<Module, Vec<Compi
 ///
 /// # Returns
 /// * `Result<HIR, Vec<CompileError>>` - The compiled HIR or errors
-pub fn compile(
-    source: &str,
-    options: &CompileOptions,
-) -> Result<crate::analyzer::hir::HIR, Vec<CompileError>> {
+pub fn compile(source: &str, options: &CompileOptions) -> Result<HIR, Vec<CompileError>> {
     // Step 1 & 2: Parse to AST
     let _ast = parse(source, options)?;
 

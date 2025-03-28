@@ -1,16 +1,12 @@
-use super::{Engine, Generator};
-use crate::capture;
-use crate::engine::Continuation;
-use crate::engine::utils::evaluate_sequence;
-use CoreData::{Logical, Physical};
-use Materializable::*;
-use optd_dsl::analyzer::hir::{
+use crate::analyzer::hir::{
     CoreData, Expr, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
+use crate::engine::utils::evaluate_sequence;
+use crate::engine::{Continuation, Generator};
+use crate::{capture, engine::Engine};
+use CoreData::{Logical, Physical};
+use Materializable::*;
 use std::sync::Arc;
-
-/// Specialized continuation type for operator values
-type OperatorContinuation = Continuation<Operator<Value>>;
 
 /// Evaluates a logical operator by generating all possible combinations of its components.
 ///
@@ -19,7 +15,7 @@ type OperatorContinuation = Continuation<Operator<Value>>;
 /// * `op` - The logical operator to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(super) async fn evaluate_logical_operator<G>(
+pub(crate) async fn evaluate_logical_operator<G>(
     op: LogicalOp<Arc<Expr>>,
     engine: Engine<G>,
     k: Continuation<Value>,
@@ -59,7 +55,7 @@ pub(super) async fn evaluate_logical_operator<G>(
 /// * `op` - The physical operator to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(super) async fn evaluate_physical_operator<G>(
+pub(crate) async fn evaluate_physical_operator<G>(
     op: PhysicalOp<Arc<Expr>>,
     engine: Engine<G>,
     k: Continuation<Value>,
@@ -106,7 +102,7 @@ async fn evaluate_operator<G>(
     children_exprs: Vec<Arc<Expr>>,
     tag: String,
     engine: Engine<G>,
-    k: OperatorContinuation,
+    k: Continuation<Operator<Value>>,
 ) where
     G: Generator,
 {
@@ -141,18 +137,18 @@ async fn evaluate_operator<G>(
 
 #[cfg(test)]
 mod tests {
+    use crate::analyzer::{
+        context::Context,
+        hir::{
+            BinOp, CoreData, Expr, Goal, GroupId, Literal, LogicalOp, Materializable, Operator,
+            PhysicalOp, Value,
+        },
+    };
     use crate::engine::{
         Engine,
         test_utils::{
             MockGenerator, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val,
             string,
-        },
-    };
-    use optd_dsl::analyzer::{
-        context::Context,
-        hir::{
-            BinOp, CoreData, Expr, Goal, GroupId, Literal, LogicalOp, Materializable, Operator,
-            PhysicalOp, Value,
         },
     };
     use std::sync::Arc;

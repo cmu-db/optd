@@ -1,9 +1,14 @@
 use super::{Optimizer, OptimizerMessage, memo::Memoize};
-use crate::{cir::*, engine::Continuation, error::Error};
+use crate::{
+    bridge::{from_cir::partial_logical_to_value, into_cir::value_to_logical_properties},
+    cir::*,
+    error::Error,
+};
 use Child::*;
 use OptimizerMessage::CreateGroup;
 use async_recursion::async_recursion;
 use futures::{SinkExt, future::try_join_all};
+use optd_dsl::engine::Continuation;
 use std::{collections::HashSet, sync::Arc};
 
 /// Result type for logical plan ingestion exposed to clients
@@ -77,11 +82,16 @@ impl<M: Memoize> Optimizer<M> {
                                 })
                             });
 
-                        // Launch the derive properties operation with the continuation
+                        // Launch the derive properties operation with the continuation.
                         tokio::spawn(async move {
                             engine
-                                .launch_derive_properties(&expr.into(), properties_continuation)
-                                .await;
+                                .launch_rule(
+                                    "derive",
+                                    vec![partial_logical_to_value(&expr.into())],
+                                    value_to_logical_properties,
+                                    properties_continuation,
+                                )
+                                .await
                         });
 
                         job_id

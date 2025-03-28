@@ -4,13 +4,12 @@ use super::{
     memo::{Memoize, MergeResult},
 };
 use crate::{
-    capture,
+    bridge::{from_cir::partial_physical_to_value, into_cir::value_to_cost},
     cir::{
         Child, Cost, Goal, GroupId, LogicalExpression, LogicalPlan, LogicalProperties,
         OptimizedExpression, PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpression,
         PhysicalPlan, PhysicalProperties,
     },
-    engine::Continuation,
 };
 use OptimizerMessage::*;
 use futures::{
@@ -20,6 +19,7 @@ use futures::{
         oneshot,
     },
 };
+use optd_dsl::{capture, engine::Continuation};
 use std::sync::Arc;
 
 impl<M: Memoize> Optimizer<M> {
@@ -169,9 +169,16 @@ impl<M: Memoize> Optimizer<M> {
                     })
                 });
 
-                // Launch the cost plan operation with the continuation
+                // Launch the cost plan operation with the continuation.
                 tokio::spawn(async move {
-                    engine.launch_cost_plan(&plan, continuation).await;
+                    engine
+                        .launch_rule(
+                            "cost",
+                            vec![partial_physical_to_value(&plan)],
+                            value_to_cost,
+                            continuation,
+                        )
+                        .await
                 });
             }
         }

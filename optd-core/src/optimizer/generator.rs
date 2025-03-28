@@ -1,16 +1,16 @@
 use super::OptimizerMessage;
-use crate::{
-    bridge::{
-        from_cir::{partial_logical_to_value, partial_physical_to_value},
-        into_cir::{hir_goal_to_cir, hir_group_id_to_cir},
-    },
-    engine::{Continuation, Generator},
+use crate::bridge::{
+    from_cir::{partial_logical_to_value, partial_physical_to_value},
+    into_cir::{hir_goal_to_cir, hir_group_id_to_cir},
 };
 use futures::{
     SinkExt, StreamExt,
     channel::mpsc::{self, Sender},
 };
-use optd_dsl::analyzer::hir::{Goal, GroupId, Value};
+use optd_dsl::{
+    analyzer::hir::{Goal, GroupId, Value},
+    engine::{Continuation, Generator},
+};
 
 /// Implementation of the Generator trait that connects the engine to the optimizer.
 ///

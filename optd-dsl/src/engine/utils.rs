@@ -1,29 +1,16 @@
-use super::eval::Evaluate;
+use crate::analyzer::hir::{Expr, Value};
 use crate::capture;
 use crate::engine::{Engine, generator::Generator};
-use optd_dsl::analyzer::hir::{Expr, Value};
 use std::{future::Future, pin::Pin, sync::Arc};
 
-/// A macro that automatically clones variables before they're captured by a closure.
+/// A type alias for a future that completes with no return value.
+pub type UnitFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// A type alias for continuations used in the rule engine.
 ///
-/// This macro takes a list of variables to clone and a closure expression, cloning the variables in
-/// the list so that the clones can be moved into the closure.
-#[macro_export]
-macro_rules! capture {
-    ([$($var:ident),* $(,)?], $($closure:expr)*) => {
-        {
-            $(let $var = $var.clone();)*
-            $($closure)*
-        }
-    };
-}
-
-/// A future that completes with no return value.
-pub(crate) type UnitFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
-
-/// Specialized continuation type for vectors of values.
-pub(crate) type ValueSequenceContinuation =
-    Arc<dyn Fn(Vec<Value>) -> UnitFuture + Send + Sync + 'static>;
+/// The engine uses continuation-passing-style (CPS) since it requires advanced control flow to
+/// expand (enumerate) expressions within a group.
+pub type Continuation<Input> = Arc<dyn Fn(Input) -> UnitFuture + Send + Sync + 'static>;
 
 /// Evaluates a sequence of expressions and collects their values using continuation passing style.
 ///
@@ -34,7 +21,7 @@ pub(crate) type ValueSequenceContinuation =
 pub(super) fn evaluate_sequence<G>(
     exprs: Vec<Arc<Expr>>,
     engine: Engine<G>,
-    k: ValueSequenceContinuation,
+    k: Continuation<Vec<Value>>,
 ) -> UnitFuture
 where
     G: Generator,
@@ -56,7 +43,7 @@ fn evaluate_sequence_internal<G>(
     index: usize,
     values: Vec<Value>,
     engine: Engine<G>,
-    k: ValueSequenceContinuation,
+    k: Continuation<Vec<Value>>,
 ) -> UnitFuture
 where
     G: Generator,
@@ -70,17 +57,19 @@ where
 
         // Evaluate the current expression
         let expr = exprs[index].clone();
-        expr.evaluate(
-            engine.clone(),
-            Arc::new(move |expr_value| {
-                let mut next_values = values.clone();
-                next_values.push(expr_value);
+        engine
+            .clone()
+            .evaluate(
+                expr,
+                Arc::new(move |expr_value| {
+                    let mut next_values = values.clone();
+                    next_values.push(expr_value);
 
-                Box::pin(capture!([exprs, index, engine, k], async move {
-                    evaluate_sequence_internal(exprs, index + 1, next_values, engine, k).await;
-                }))
-            }),
-        )
-        .await;
+                    Box::pin(capture!([exprs, index, engine, k], async move {
+                        evaluate_sequence_internal(exprs, index + 1, next_values, engine, k).await;
+                    }))
+                }),
+            )
+            .await;
     })
 }
