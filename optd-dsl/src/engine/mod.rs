@@ -19,7 +19,7 @@ pub use utils::*;
 mod test_utils;
 
 /// The engine response type, which can be either a return value with a converter callback
-/// or a yield group/goal with a continuation for further processing.
+/// or a yielded group/goal with a continuation for further processing.
 pub enum EngineResponse<O> {
     /// The engine has returned a value, and the final continuation
     /// should be called on it to produce the desired output.
@@ -35,7 +35,7 @@ pub enum EngineResponse<O> {
 /// The engine for evaluating HIR expressions and applying rules.
 #[derive(Debug, Clone)]
 pub struct Engine {
-    /// The original HIR context containing all defined expressions and rules
+    /// The original HIR context containing all defined expressions and rules.
     pub(crate) context: Context,
 }
 
@@ -51,10 +51,10 @@ impl Engine {
     /// while preserving the original expander implementation.
     ///
     /// # Parameters
-    ///  `context` - The new context to use
+    ///  `context` - The new context to use.
     ///
     /// # Returns
-    /// A new engine with the provided context and the existing expander
+    /// A new engine with the provided context and the existing expander.
     pub fn with_new_context(&self, context: Context) -> Self {
         Self { context }
     }
@@ -63,9 +63,9 @@ impl Engine {
     ///
     /// # Parameters
     ///
-    /// * `self` - The evaluation engine (owned)
-    /// * `expr` - The expression to evaluate
-    /// * `k` - The continuation to receive each evaluation result
+    /// * `self` - The evaluation engine (owned).
+    /// * `expr` - The expression to evaluate.
+    /// * `k` - The continuation to receive each evaluation result.
     pub fn evaluate<O>(
         self,
         expr: Arc<Expr>,
@@ -110,6 +110,15 @@ impl Engine {
     }
 
     /// Launches a rule application with the given values and transformation.
+    /// 
+    /// # Parameters
+    /// * `self` - The evaluation engine (owned).
+    /// * `name` - The name of the rule to apply.
+    /// * `values` - The values to pass to the rule.
+    /// * `return_k` - The continuation to receive the result of the rule application.
+    /// 
+    /// # Returns
+    /// The result of the rule application.
     pub async fn launch_rule<O>(
         self,
         name: &str,

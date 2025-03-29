@@ -1,6 +1,4 @@
 //! Converts HIR [`Value`]s into optd's type representations (CIR).
-#![allow(unused)]
-
 use crate::cir::*;
 use Child::*;
 use CoreData::*;

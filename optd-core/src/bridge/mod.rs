@@ -12,5 +12,6 @@
 //!
 //! [`Value`]: optd_dsl::analyzer::hir::Value
 
+#![allow(unused)]
 pub mod from_cir;
 pub mod into_cir;

@@ -55,8 +55,9 @@ impl TestHarness {
             let mappings = self.group_mappings.lock().unwrap();
             mappings.get(&key).cloned().unwrap_or_default()
         };
+
         for value in values {
-            queue.push_back(k(value.clone()).await);
+            queue.push_back(k(value).await);
         }
     }
 
@@ -70,14 +71,13 @@ impl TestHarness {
         T: Send + 'static,
     {
         let key = format!("{:?}:{:?}", goal.group_id, goal.properties);
-
         let values = {
             let mappings = self.goal_mappings.lock().unwrap();
             mappings.get(&key).cloned().unwrap_or_default()
         };
 
         for value in values {
-            queue.push_back(k(value.clone()).await);
+            queue.push_back(k(value).await);
         }
     }
 }
@@ -203,7 +203,6 @@ where
     T: Send + 'static,
 {
     let mut results = Vec::new();
-
     let mut queue = VecDeque::new();
     let response = engine
         .evaluate(
@@ -220,7 +219,6 @@ where
     while let Some(response) = queue.pop_front() {
         match response {
             EngineResponse::Return(value, return_k) => {
-                println!("Here: {:?}", value);
                 results.push(return_k(value).await);
             }
             EngineResponse::YieldGroup(group_id, continue_k) => {

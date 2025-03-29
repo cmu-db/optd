@@ -1,7 +1,5 @@
 //! Converts optd's type representations (CIR) into DSL [`Value`]s (HIR).
 
-#![allow(unused)]
-
 use crate::cir::*;
 use CoreData::*;
 use Literal::*;
