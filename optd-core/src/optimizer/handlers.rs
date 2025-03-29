@@ -3,13 +3,9 @@ use super::{
     ingest::{LogicalIngest, PhysicalIngest},
     memo::{Memoize, MergeResult},
 };
-use crate::{
-    bridge::{from_cir::partial_physical_to_value, into_cir::value_to_cost},
-    cir::{
-        Child, Cost, Goal, GroupId, LogicalExpression, LogicalPlan, LogicalProperties,
-        OptimizedExpression, PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpression,
-        PhysicalPlan, PhysicalProperties,
-    },
+use crate::cir::{
+    Child, Goal, GroupId, LogicalExpression, LogicalPlan, LogicalProperties, OptimizedExpression,
+    PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpression, PhysicalPlan, PhysicalProperties,
 };
 use OptimizerMessage::*;
 use futures::{
@@ -148,9 +144,9 @@ impl<M: Memoize> Optimizer<M> {
             }
 
             // If a new expression was created, cost it using CPS
-            if let Some(expr) = new_expr {
-                let message_tx = self.message_tx.clone();
-                let engine = self.engine.clone();
+            if let Some(_expr) = new_expr {
+                // let message_tx = self.message_tx.clone();
+                // let engine = self.engine.clone();
 
                 // Create a continuation that sends the costed expression
                 // let continuation: Continuation<Cost> = Arc::new(move |cost| {

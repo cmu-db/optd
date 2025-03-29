@@ -6,11 +6,11 @@ use crate::engine::Engine;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use super::{Continuation, EngineResponse, eval};
+use super::{Continuation, EngineResponse};
 
-/// A configurable mock generator for testing the evaluation engine.
+/// A test harness for the evaluation engine.
 #[derive(Clone)]
-pub struct Harness {
+pub struct TestHarness {
     /// Maps group IDs to their materialized values.
     group_mappings: Arc<Mutex<HashMap<String, Vec<Value>>>>,
 
@@ -18,8 +18,8 @@ pub struct Harness {
     goal_mappings: Arc<Mutex<HashMap<String, Vec<Value>>>>,
 }
 
-impl Harness {
-    /// Creates a new empty mock generator.
+impl TestHarness {
+    /// Creates a new test harness.
     pub fn new() -> Self {
         Self {
             group_mappings: Arc::new(Mutex::new(HashMap::new())),
@@ -41,6 +41,7 @@ impl Harness {
         mappings.entry(key).or_default().push(value);
     }
 
+    /// Forks the evaluation at a specific group ID and collect the responses.
     async fn fork_at_group<T>(
         &self,
         group_id: GroupId,
@@ -59,6 +60,7 @@ impl Harness {
         }
     }
 
+    /// Forks the evaluation at a specific goal and collect the responses.
     async fn fork_at_goal<T>(
         &self,
         goal: &Goal,
@@ -190,11 +192,11 @@ pub fn create_physical_operator(tag: &str, data: Vec<Value>, children: Vec<Value
     )))
 }
 
-/// Runs a test by evaluating the expression and collecting all results.
+/// Runs a test by evaluating the expression and collecting all results with a custom continuation.
 pub async fn evaluate_and_collect_with_custom_k<T>(
     expr: Arc<Expr>,
     engine: Engine,
-    harness: Harness,
+    harness: TestHarness,
     return_k: Continuation<Value, T>,
 ) -> Vec<T>
 where
@@ -229,7 +231,6 @@ where
             EngineResponse::YieldGoal(goal, continue_k) => {
                 harness.fork_at_goal(&goal, continue_k, &mut queue).await;
             }
-            EngineResponse::Fail(msg) => todo!(),
         }
     }
 
@@ -237,7 +238,11 @@ where
 }
 
 /// Runs a test by evaluating the expression and collecting all results.
-pub async fn evaluate_and_collect(expr: Arc<Expr>, engine: Engine, harness: Harness) -> Vec<Value> {
+pub async fn evaluate_and_collect(
+    expr: Arc<Expr>,
+    engine: Engine,
+    harness: TestHarness,
+) -> Vec<Value> {
     let return_k: Continuation<Value, Value> = Arc::new(|value| Box::pin(async move { value }));
 
     evaluate_and_collect_with_custom_k(expr, engine, harness, return_k).await

@@ -1,23 +1,14 @@
-use super::{Optimizer, OptimizerMessage, memo::Memoize};
-use crate::{
-    bridge::{
-        from_cir::{
-            partial_logical_to_value, partial_physical_to_value, physical_properties_to_value,
-        },
-        into_cir::{value_to_cost, value_to_partial_logical, value_to_partial_physical},
-    },
-    cir::{
-        Cost, Goal, GroupId, LogicalExpression, OptimizedExpression, PartialLogicalPlan,
-        PartialPhysicalPlan,
-    },
+#![allow(unused)]
+
+use super::{Optimizer, memo::Memoize};
+use crate::cir::{
+    Goal, GroupId, LogicalExpression, OptimizedExpression, PartialLogicalPlan, PartialPhysicalPlan,
 };
-use OptimizerMessage::*;
 use async_recursion::async_recursion;
 use futures::{
     SinkExt, StreamExt,
     channel::mpsc::{self, Sender},
 };
-use std::sync::Arc;
 
 impl<M: Memoize> Optimizer<M> {
     /// Subscribe to logical expressions in a specific group.
@@ -251,8 +242,8 @@ impl<M: Memoize> Optimizer<M> {
                         // Applies an implementation rule to the input logical plan and required
                         // physical properties, passing all possible physical implementations to the
                         // continuation.
-                        let plan_value = partial_logical_to_value(&plan_clone);
-                        let props_value = physical_properties_to_value(&props_clone);
+                        // let plan_value = partial_logical_to_value(&plan_clone);
+                        // let props_value = physical_properties_to_value(&props_clone);
                         // let partial_physical = engine_clone
                         //     .launch_rule(
                         //         &rule_name,

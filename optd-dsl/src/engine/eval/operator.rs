@@ -148,7 +148,7 @@ mod tests {
     use crate::engine::{
         Engine,
         test_utils::{
-            Harness, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val, string,
+            TestHarness, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val, string,
         },
     };
     use std::sync::Arc;
@@ -156,7 +156,7 @@ mod tests {
     /// Test evaluation of a materialized logical operator
     #[tokio::test]
     async fn test_materialized_logical_operator() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -227,7 +227,7 @@ mod tests {
     /// Test evaluation of an unmaterialized logical operator
     #[tokio::test]
     async fn test_unmaterialized_logical_operator() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -255,7 +255,7 @@ mod tests {
     /// Test evaluation of a materialized physical operator
     #[tokio::test]
     async fn test_materialized_physical_operator() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -326,7 +326,7 @@ mod tests {
     /// Test evaluation of an unmaterialized physical operator
     #[tokio::test]
     async fn test_unmaterialized_physical_operator() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -367,7 +367,7 @@ mod tests {
     /// Test evaluation of a logical operator with nested operators as children
     #[tokio::test]
     async fn test_nested_logical_operators() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 

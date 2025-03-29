@@ -350,7 +350,7 @@ mod tests {
     use crate::engine::{
         Engine,
         test_utils::{
-            Harness, array_val, boolean, evaluate_and_collect, int, lit_expr, lit_val, ref_expr,
+            TestHarness, array_val, boolean, evaluate_and_collect, int, lit_expr, lit_val, ref_expr,
             string,
         },
     };
@@ -359,7 +359,7 @@ mod tests {
     /// Test if-then-else expressions with true and false conditions
     #[tokio::test]
     async fn test_if_then_else() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -420,7 +420,7 @@ mod tests {
     /// Test let bindings and variable references
     #[tokio::test]
     async fn test_let_binding() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -445,7 +445,7 @@ mod tests {
     /// Test nested let bindings
     #[tokio::test]
     async fn test_nested_let_bindings() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -476,7 +476,7 @@ mod tests {
     /// Test function calls with user-defined functions (closures)
     #[tokio::test]
     async fn test_function_call_closure() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let mut ctx = Context::default();
 
         // Define a function: fn(x, y) => x + y
@@ -508,7 +508,7 @@ mod tests {
     /// Test function calls with built-in functions (Rust UDFs)
     #[tokio::test]
     async fn test_function_call_rust_udf() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let mut ctx = Context::default();
 
         // Define a Rust UDF that calculates the sum of array elements
@@ -556,7 +556,7 @@ mod tests {
     /// Test complex program with multiple expression types
     #[tokio::test]
     async fn test_complex_program() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let mut ctx = Context::default();
 
         // Define a function to compute factorial: fn(n) => if n <= 1 then 1 else n * factorial(n-1)
@@ -619,7 +619,7 @@ mod tests {
     /// Test variable reference in various contexts
     #[tokio::test]
     async fn test_variable_references() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
 
         // Test that variables from outer scope are visible in inner scope
         let mut ctx = Context::default();

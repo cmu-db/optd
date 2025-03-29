@@ -155,7 +155,8 @@ where
 mod tests {
     use crate::engine::Continuation;
     use crate::engine::test_utils::{
-        Harness, evaluate_and_collect, evaluate_and_collect_with_custom_k, int, lit_expr, string,
+        TestHarness, evaluate_and_collect, evaluate_and_collect_with_custom_k, int, lit_expr,
+        string,
     };
     use crate::{
         analyzer::{
@@ -171,7 +172,7 @@ mod tests {
     async fn test_literal_evaluation() {
         let ctx = Context::default();
         let engine = Engine::new(ctx);
-        let harness = Harness::new();
+        let harness = TestHarness::new();
 
         // Create a literal expression
         let literal_expr = Arc::new(Expr::CoreExpr(CoreData::Literal(int(42))));
@@ -190,7 +191,7 @@ mod tests {
     /// Test evaluation of array expressions
     #[tokio::test]
     async fn test_array_evaluation() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -228,7 +229,7 @@ mod tests {
     /// Test evaluation of tuple expressions
     #[tokio::test]
     async fn test_tuple_evaluation() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -266,7 +267,7 @@ mod tests {
     /// Test evaluation of struct expressions
     #[tokio::test]
     async fn test_struct_evaluation() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -300,7 +301,7 @@ mod tests {
     /// Test evaluation of map expressions
     #[tokio::test]
     async fn test_map_evaluation() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -365,7 +366,7 @@ mod tests {
     /// Test evaluation of function expressions
     #[tokio::test]
     async fn test_function_evaluation() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -390,7 +391,7 @@ mod tests {
     /// Test evaluation of null expressions
     #[tokio::test]
     async fn test_null_evaluation() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -424,7 +425,7 @@ mod tests {
             })
         });
 
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 

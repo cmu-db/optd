@@ -1,6 +1,6 @@
 use crate::analyzer::{
     context::Context,
-    hir::{CoreData, Expr, Goal, GroupId, Literal, Value},
+    hir::{Expr, Goal, GroupId, Value},
 };
 use eval::core::evaluate_core_expr;
 use eval::expr::{
@@ -12,19 +12,24 @@ use std::sync::Arc;
 
 mod eval;
 
-mod generator;
-
 mod utils;
 pub use utils::*;
 
 #[cfg(test)]
 mod test_utils;
 
+/// The engine response type, which can either a return value with a converter callback
+/// or a yield group/goal with a continuation for further processing.
 pub enum EngineResponse<O> {
+    /// The engine has returned a value, and the final continuation
+    /// should be called on it to produce the desired output.
     Return(Value, Continuation<Value, O>),
+    /// The engine has yielded a group ID, and the continuation
+    /// should be called for each value after expanding the group.
     YieldGroup(GroupId, Continuation<Value, EngineResponse<O>>),
+    /// The engine has yielded a goal, and the continuation
+    /// should be called for each value after expanding the goal.
     YieldGoal(Goal, Continuation<Value, EngineResponse<O>>),
-    Fail(String),
 }
 
 /// The engine for evaluating HIR expressions and applying rules.
@@ -120,15 +125,7 @@ impl Engine {
             rule_call,
             Arc::new(move |result| {
                 let return_k = return_k.clone();
-                Box::pin(async move {
-                    match result {
-                        Value(CoreData::Fail(boxed_value)) => match boxed_value.0 {
-                            CoreData::Literal(Literal::String(msg)) => EngineResponse::Fail(msg),
-                            _ => panic!("Expected string message in fail"),
-                        },
-                        value => EngineResponse::Return(value, return_k),
-                    }
-                })
+                Box::pin(async move { EngineResponse::Return(result, return_k) })
             }),
         )
         .await

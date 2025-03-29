@@ -119,7 +119,6 @@ where
 /// * `value` - The value to match against the pattern.
 /// * `pattern` - The pattern to match.
 /// * `ctx` - The current context to extend with bindings.
-/// * `gen` - The generator to resolve references.
 /// * `k` - The continuation to receive the match result.
 fn match_pattern<O>(
     value: Value,
@@ -179,6 +178,7 @@ where
             }
             // Unmaterialized operators.
             (Operator(op_pattern), CoreData::Logical(LogicalOp(UnMaterialized(group_id)))) => {
+                // Yield the group id back to the caller and provide a callback to match expanded value against the pattern.
                 EngineResponse::YieldGroup(
                     *group_id,
                     Arc::new(move |expanded_value| {
@@ -189,6 +189,7 @@ where
                 )
             }
             (Operator(op_pattern), CoreData::Physical(PhysicalOp(UnMaterialized(goal)))) => {
+                // Yield the goal back to the caller and provide a callback to match expanded value against the pattern.
                 EngineResponse::YieldGoal(
                     goal.clone(),
                     Arc::new(move |expanded_value| {
@@ -437,7 +438,6 @@ where
 /// * `patterns` - The patterns to match against.
 /// * `values` - The values to match.
 /// * `ctx` - The current context to extend with bindings.
-/// * `generator` - The generator to resolve references.
 /// * `k` - The continuation to receive the vector of match results.
 async fn match_components<O>(
     patterns: Vec<Pattern>,
@@ -524,14 +524,14 @@ mod tests {
                 Operator, PhysicalOp, Value,
             },
         },
-        engine::test_utils::Harness,
+        engine::test_utils::TestHarness,
     };
     use std::sync::Arc;
 
     /// Test simple pattern matching with literals
     #[tokio::test]
     async fn test_simple_literal_patterns() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -560,7 +560,7 @@ mod tests {
     /// Test binding patterns with nested patterns
     #[tokio::test]
     async fn test_bind_pattern_with_nesting() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -600,7 +600,7 @@ mod tests {
     /// Test array decomposition patterns
     #[tokio::test]
     async fn test_array_decomposition() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
 
         // Create an array value [1, 2, 3, 4, 5]
         let array_expr = Arc::new(Expr::CoreVal(array_val(vec![
@@ -669,7 +669,7 @@ mod tests {
     /// Test struct patterns
     #[tokio::test]
     async fn test_struct_patterns() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -717,7 +717,7 @@ mod tests {
     /// Test complex operator pattern matching
     #[tokio::test]
     async fn test_complex_operator_patterns() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -818,10 +818,10 @@ mod tests {
     /// Test pattern matching with unmaterialized operators (requires group resolution)
     #[tokio::test]
     async fn test_unmaterialized_logical_operator_patterns() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let test_group_id = GroupId(1);
 
-        // Register a logical operator in the mock generator
+        // Register a logical operator in the test harness.
         // This is what will be returned when the UnMaterialized group is expanded
         let materialized_join = create_logical_operator(
             "LogicalJoin",
@@ -925,7 +925,7 @@ mod tests {
     /// Test pattern matching with unmaterialized physical operators (requires goal resolution)
     #[tokio::test]
     async fn test_unmaterialized_physical_operator_patterns() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
 
         // Create a physical goal
         let test_group_id = GroupId(2);
@@ -1058,7 +1058,7 @@ mod tests {
     /// Test multiple pattern matching arms with fallthrough
     #[tokio::test]
     async fn test_multiple_match_arms_with_fallthrough() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let mut ctx = Context::default();
 
         // Add to_string function to convert numbers to strings
@@ -1182,7 +1182,7 @@ mod tests {
     /// Test pattern matching with deeply nested bind patterns
     #[tokio::test]
     async fn test_deeply_nested_bind_patterns() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let mut ctx = Context::default();
 
         // Add to_string function to convert complex values to strings
@@ -1351,7 +1351,7 @@ mod tests {
     /// Test combinatorial explosion with multiple expansion paths
     #[tokio::test]
     async fn test_combinatorial_explosion() {
-        let harness = Harness::new();
+        let harness = TestHarness::new();
         let group_id_1 = GroupId(1);
         let group_id_2 = GroupId(2);
 
