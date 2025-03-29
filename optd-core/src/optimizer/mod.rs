@@ -9,7 +9,6 @@ use futures::{
     SinkExt,
     channel::mpsc::{self, Receiver, Sender},
 };
-use generator::OptimizerGenerator;
 use memo::Memoize;
 use merge_repr::Representative;
 use optd_dsl::analyzer::hir::HIR;
@@ -17,7 +16,6 @@ use optd_dsl::engine::Engine;
 use std::collections::{HashMap, HashSet};
 
 mod egest;
-mod generator;
 mod handlers;
 mod ingest;
 mod memo;
@@ -46,6 +44,7 @@ pub struct OptimizeRequest {
 /// This enum unifies all the message types that flow through the
 /// optimizer, enabling centralized message handling.
 #[derive(Debug)]
+#[allow(unused)]
 enum OptimizerMessage {
     /// Process an optimization request.
     ///
@@ -130,7 +129,7 @@ pub struct Optimizer<M: Memoize> {
     rule_book: RuleBook,
 
     /// The engine for evaluating rules and functions
-    engine: Engine<OptimizerGenerator>,
+    engine: Engine,
 
     //
     // Dependency tracking
@@ -196,13 +195,8 @@ impl<M: Memoize> Optimizer<M> {
         let (message_tx, message_rx) = mpsc::channel(0);
         let (optimize_tx, optimize_rx) = mpsc::channel(0);
 
-        // Create the engine with the optimizer generator
-        let engine = Engine::new(
-            hir.context,
-            OptimizerGenerator {
-                message_tx: message_tx.clone(),
-            },
-        );
+        // Create the engine with the HIR context
+        let engine = Engine::new(hir.context);
 
         // Create the optimizer with initialized channels and state
         let optimizer = Self {

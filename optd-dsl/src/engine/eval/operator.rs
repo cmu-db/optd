@@ -2,7 +2,7 @@ use crate::analyzer::hir::{
     CoreData, Expr, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
 use crate::engine::utils::evaluate_sequence;
-use crate::engine::{Continuation, Generator};
+use crate::engine::{Continuation, EngineResponse};
 use crate::{capture, engine::Engine};
 use CoreData::{Logical, Physical};
 use Materializable::*;
@@ -15,19 +15,18 @@ use std::sync::Arc;
 /// * `op` - The logical operator to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_logical_operator<G>(
+pub(crate) async fn evaluate_logical_operator<O>(
     op: LogicalOp<Arc<Expr>>,
-    engine: Engine<G>,
-    k: Continuation<Value>,
-) where
-    G: Generator,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
 {
     match op.0 {
         // For unmaterialized operators, directly call the continuation with the unmaterialized
         // value.
-        UnMaterialized(group_id) => {
-            k(Value(Logical(LogicalOp(UnMaterialized(group_id))))).await;
-        }
+        UnMaterialized(group_id) => k(Value(Logical(LogicalOp(UnMaterialized(group_id))))).await,
         // For materialized operators, evaluate all parts and construct the result.
         Materialized(op) => {
             evaluate_operator(
@@ -39,11 +38,11 @@ pub(crate) async fn evaluate_logical_operator<G>(
                     Box::pin(capture!([k], async move {
                         // Wrap the constructed operator in the logical operator structure.
                         let result = Value(Logical(LogicalOp(Materialized(constructed_op))));
-                        k(result).await;
+                        k(result).await
                     }))
                 }),
             )
-            .await;
+            .await
         }
     }
 }
@@ -55,17 +54,18 @@ pub(crate) async fn evaluate_logical_operator<G>(
 /// * `op` - The physical operator to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_physical_operator<G>(
+pub(crate) async fn evaluate_physical_operator<O>(
     op: PhysicalOp<Arc<Expr>>,
-    engine: Engine<G>,
-    k: Continuation<Value>,
-) where
-    G: Generator,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
 {
     match op.0 {
         // For unmaterialized operators, continue with the unmaterialized value.
         UnMaterialized(physical_goal) => {
-            k(Value(Physical(PhysicalOp(UnMaterialized(physical_goal))))).await;
+            k(Value(Physical(PhysicalOp(UnMaterialized(physical_goal))))).await
         }
         // For materialized operators, evaluate all parts and construct the result.
         Materialized(op) => {
@@ -76,11 +76,11 @@ pub(crate) async fn evaluate_physical_operator<G>(
                 engine,
                 Arc::new(move |constructed_op| {
                     Box::pin(capture!([k], async move {
-                        k(Value(Physical(PhysicalOp(Materialized(constructed_op))))).await;
+                        k(Value(Physical(PhysicalOp(Materialized(constructed_op))))).await
                     }))
                 }),
             )
-            .await;
+            .await
         }
     }
 }
@@ -97,14 +97,15 @@ pub(crate) async fn evaluate_physical_operator<G>(
 /// * `tag` - The operator type tag.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive the constructed operator.
-async fn evaluate_operator<G>(
+async fn evaluate_operator<O>(
     op_data_exprs: Vec<Arc<Expr>>,
     children_exprs: Vec<Arc<Expr>>,
     tag: String,
-    engine: Engine<G>,
-    k: Continuation<Operator<Value>>,
-) where
-    G: Generator,
+    engine: Engine,
+    k: Continuation<Operator<Value>, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
 {
     // First evaluate all operator data parameters.
     evaluate_sequence(
@@ -124,15 +125,15 @@ async fn evaluate_operator<G>(
                                 data: op_data,
                                 children,
                             };
-                            k(operator).await;
+                            k(operator).await
                         }))
                     }),
                 )
-                .await;
+                .await
             }))
         }),
     )
-    .await;
+    .await
 }
 
 #[cfg(test)]
@@ -147,7 +148,7 @@ mod tests {
     use crate::engine::{
         Engine,
         test_utils::{
-            MockGenerator, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val,
+            TestHarness, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val,
             string,
         },
     };
@@ -156,9 +157,9 @@ mod tests {
     /// Test evaluation of a materialized logical operator
     #[tokio::test]
     async fn test_materialized_logical_operator() {
-        let mock_gen = MockGenerator::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a materialized logical operator expression with nested expressions to evaluate
         let op = LogicalOp(Materializable::Materialized(Operator {
@@ -181,7 +182,7 @@ mod tests {
         let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(op)));
 
         // Evaluate the expression
-        let results = evaluate_and_collect(logical_op_expr, engine).await;
+        let results = evaluate_and_collect(logical_op_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -227,9 +228,9 @@ mod tests {
     /// Test evaluation of an unmaterialized logical operator
     #[tokio::test]
     async fn test_unmaterialized_logical_operator() {
-        let mock_gen = MockGenerator::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create an unmaterialized logical operator with a group ID
         let group_id = GroupId(42);
@@ -239,7 +240,7 @@ mod tests {
         let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(op)));
 
         // Evaluate the expression
-        let results = evaluate_and_collect(logical_op_expr, engine).await;
+        let results = evaluate_and_collect(logical_op_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -255,9 +256,9 @@ mod tests {
     /// Test evaluation of a materialized physical operator
     #[tokio::test]
     async fn test_materialized_physical_operator() {
-        let mock_gen = MockGenerator::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a materialized physical operator expression with nested expressions to evaluate
         let op = PhysicalOp(Materializable::Materialized(Operator {
@@ -280,7 +281,7 @@ mod tests {
         let physical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Physical(op)));
 
         // Evaluate the expression
-        let results = evaluate_and_collect(physical_op_expr, engine).await;
+        let results = evaluate_and_collect(physical_op_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -326,9 +327,9 @@ mod tests {
     /// Test evaluation of an unmaterialized physical operator
     #[tokio::test]
     async fn test_unmaterialized_physical_operator() {
-        let mock_gen = MockGenerator::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create an unmaterialized physical operator with a goal
         let goal = Goal {
@@ -343,7 +344,7 @@ mod tests {
         let physical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Physical(op)));
 
         // Evaluate the expression
-        let results = evaluate_and_collect(physical_op_expr, engine).await;
+        let results = evaluate_and_collect(physical_op_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -367,9 +368,9 @@ mod tests {
     /// Test evaluation of a logical operator with nested operators as children
     #[tokio::test]
     async fn test_nested_logical_operators() {
-        let mock_gen = MockGenerator::new();
+        let harness = TestHarness::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a Join operator with two Scan operators as children
         let scan1 = Arc::new(Expr::CoreVal(create_logical_operator(
@@ -394,7 +395,7 @@ mod tests {
         let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(op)));
 
         // Evaluate the expression
-        let results = evaluate_and_collect(logical_op_expr, engine).await;
+        let results = evaluate_and_collect(logical_op_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);

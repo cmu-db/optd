@@ -1,14 +1,8 @@
-use super::{Optimizer, OptimizerMessage, memo::Memoize};
-use crate::{
-    bridge::{from_cir::partial_logical_to_value, into_cir::value_to_logical_properties},
-    cir::*,
-    error::Error,
-};
+use super::{Optimizer, memo::Memoize};
+use crate::{cir::*, error::Error};
 use Child::*;
-use OptimizerMessage::CreateGroup;
 use async_recursion::async_recursion;
-use futures::{SinkExt, future::try_join_all};
-use optd_dsl::engine::Continuation;
+use futures::future::try_join_all;
 use std::{collections::HashSet, sync::Arc};
 
 /// Result type for logical plan ingestion exposed to clients
@@ -60,41 +54,14 @@ impl<M: Memoize> Optimizer<M> {
             InternalLogicalIngest::NeedsProperties(expressions) => {
                 let pending_dependencies = expressions
                     .into_iter()
-                    .map(|expr| {
-                        let job_id = self.next_dep_id;
+                    .map(|_expr| {
+                        let _job_id = self.next_dep_id;
                         self.next_dep_id += 1;
 
-                        let message_tx = self.message_tx.clone();
-                        let engine = self.engine.clone();
-                        let expr_clone = expr.clone();
-
                         // Create a continuation for processing derived properties
-                        let properties_continuation: Continuation<LogicalProperties> =
-                            Arc::new(move |properties| {
-                                let mut message_tx = message_tx.clone();
-                                let expr = expr_clone.clone();
-
-                                Box::pin(async move {
-                                    message_tx
-                                        .send(CreateGroup(properties, expr, job_id))
-                                        .await
-                                        .expect("Failed to send CreateGroup message");
-                                })
-                            });
-
                         // Launch the derive properties operation with the continuation.
-                        tokio::spawn(async move {
-                            engine
-                                .launch_rule(
-                                    "derive",
-                                    vec![partial_logical_to_value(&expr.into())],
-                                    value_to_logical_properties,
-                                    properties_continuation,
-                                )
-                                .await
-                        });
 
-                        job_id
+                        todo!()
                     })
                     .collect();
 

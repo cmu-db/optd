@@ -1,24 +1,14 @@
-use super::{Optimizer, OptimizerMessage, memo::Memoize};
-use crate::{
-    bridge::{
-        from_cir::{
-            partial_logical_to_value, partial_physical_to_value, physical_properties_to_value,
-        },
-        into_cir::{value_to_cost, value_to_partial_logical, value_to_partial_physical},
-    },
-    cir::{
-        Cost, Goal, GroupId, LogicalExpression, OptimizedExpression, PartialLogicalPlan,
-        PartialPhysicalPlan,
-    },
+#![allow(unused)]
+
+use super::{Optimizer, memo::Memoize};
+use crate::cir::{
+    Goal, GroupId, LogicalExpression, OptimizedExpression, PartialLogicalPlan, PartialPhysicalPlan,
 };
-use OptimizerMessage::*;
 use async_recursion::async_recursion;
 use futures::{
     SinkExt, StreamExt,
     channel::mpsc::{self, Sender},
 };
-use optd_dsl::engine::Continuation;
-use std::sync::Arc;
 
 impl<M: Memoize> Optimizer<M> {
     /// Subscribe to logical expressions in a specific group.
@@ -133,27 +123,8 @@ impl<M: Memoize> Optimizer<M> {
 
                     tokio::spawn(async move {
                         // Create a continuation that processes transformed logical plans
-                        let logical_continuation: Continuation<PartialLogicalPlan> =
-                            Arc::new(move |transformed_plan| {
-                                let mut result_tx = message_tx_clone.clone();
-                                Box::pin(async move {
-                                    result_tx
-                                        .send(NewLogicalPartial(transformed_plan, group_id))
-                                        .await
-                                        .expect("Failed to send transformation result");
-                                })
-                            });
-
                         // Applies the rule to the input plan and passes all possible
-                        // transformations of the plan to the continuation.
-                        engine_clone
-                            .launch_rule(
-                                &rule_name,
-                                vec![partial_logical_to_value(&plan_clone)],
-                                value_to_partial_logical,
-                                logical_continuation,
-                            )
-                            .await
+                        todo!()
                     });
                 }
             }
@@ -192,34 +163,7 @@ impl<M: Memoize> Optimizer<M> {
                 let goal_clone = goal.clone();
                 let expr_clone = expr.clone();
 
-                tokio::spawn(async move {
-                    // Create a continuation that processes cost values
-                    let cost_continuation: Continuation<Cost> = Arc::new(move |cost| {
-                        let mut result_tx = message_tx_clone.clone();
-                        let goal = goal_clone.clone();
-                        let expr = expr_clone.clone();
-
-                        Box::pin(async move {
-                            result_tx
-                                .send(NewOptimizedExpression(
-                                    OptimizedExpression(expr, cost),
-                                    goal,
-                                ))
-                                .await
-                                .expect("Failed to send costed plan");
-                        })
-                    });
-
-                    // Launch the cost plan operation with the continuation.
-                    engine_clone
-                        .launch_rule(
-                            "cost",
-                            vec![partial_physical_to_value(&plan)],
-                            value_to_cost,
-                            cost_continuation,
-                        )
-                        .await
-                });
+                tokio::spawn(async move { todo!() });
             }
         }
 
@@ -238,32 +182,11 @@ impl<M: Memoize> Optimizer<M> {
 
                     tokio::spawn(async move {
                         // Create a continuation that processes physical plans
-                        let physical_continuation: Continuation<PartialPhysicalPlan> =
-                            Arc::new(move |physical_plan| {
-                                let mut result_tx = message_tx_clone.clone();
-                                let goal = goal_clone.clone();
-
-                                Box::pin(async move {
-                                    result_tx
-                                        .send(NewPhysicalPartial(physical_plan, goal))
-                                        .await
-                                        .expect("Failed to send implementation result");
-                                })
-                            });
 
                         // Applies an implementation rule to the input logical plan and required
                         // physical properties, passing all possible physical implementations to the
                         // continuation.
-                        let plan_value = partial_logical_to_value(&plan_clone);
-                        let props_value = physical_properties_to_value(&props_clone);
-                        engine_clone
-                            .launch_rule(
-                                &rule_name,
-                                vec![plan_value, props_value],
-                                value_to_partial_physical,
-                                physical_continuation,
-                            )
-                            .await
+                        todo!()
                     });
                 }
             }

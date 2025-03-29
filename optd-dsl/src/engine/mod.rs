@@ -1,6 +1,6 @@
 use crate::analyzer::{
     context::Context,
-    hir::{CoreData, Expr, Literal, Value},
+    hir::{Expr, Goal, GroupId, Value},
 };
 use eval::core::evaluate_core_expr;
 use eval::expr::{
@@ -12,28 +12,37 @@ use std::sync::Arc;
 
 mod eval;
 
-mod generator;
-pub use generator::Generator;
-
 mod utils;
 pub use utils::*;
 
 #[cfg(test)]
 mod test_utils;
 
-/// The engine for evaluating HIR expressions and applying rules.
-#[derive(Debug, Clone)]
-pub struct Engine<G: Generator> {
-    /// The original HIR context containing all defined expressions and rules
-    pub(crate) context: Context,
-    /// The expander for resolving group references
-    pub(crate) generator: G,
+/// The engine response type, which can be either a return value with a converter callback
+/// or a yielded group/goal with a continuation for further processing.
+pub enum EngineResponse<O> {
+    /// The engine has returned a value, and the final continuation
+    /// should be called on it to produce the desired output.
+    Return(Value, Continuation<Value, O>),
+    /// The engine has yielded a group ID, and the continuation
+    /// should be called for each value after expanding the group.
+    YieldGroup(GroupId, Continuation<Value, EngineResponse<O>>),
+    /// The engine has yielded a goal, and the continuation
+    /// should be called for each value after expanding the goal.
+    YieldGoal(Goal, Continuation<Value, EngineResponse<O>>),
 }
 
-impl<G: Generator> Engine<G> {
+/// The engine for evaluating HIR expressions and applying rules.
+#[derive(Debug, Clone)]
+pub struct Engine {
+    /// The original HIR context containing all defined expressions and rules.
+    pub(crate) context: Context,
+}
+
+impl Engine {
     /// Creates a new engine with the given context and expander.
-    pub fn new(context: Context, generator: G) -> Self {
-        Self { context, generator }
+    pub fn new(context: Context) -> Self {
+        Self { context }
     }
 
     /// Creates a new engine with an updated context but the same expander.
@@ -42,29 +51,29 @@ impl<G: Generator> Engine<G> {
     /// while preserving the original expander implementation.
     ///
     /// # Parameters
-    ///  `context` - The new context to use
+    ///  `context` - The new context to use.
     ///
     /// # Returns
-    /// A new engine with the provided context and the existing expander
+    /// A new engine with the provided context and the existing expander.
     pub fn with_new_context(&self, context: Context) -> Self {
-        Self {
-            context,
-            generator: self.clone().generator,
-        }
+        Self { context }
     }
 
     /// Evaluates an expression and passes results to the provided continuation.
     ///
     /// # Parameters
     ///
-    /// * `self` - The evaluation engine (owned)
-    /// * `expr` - The expression to evaluate
-    /// * `k` - The continuation to receive each evaluation result
-    pub fn evaluate(
+    /// * `self` - The evaluation engine (owned).
+    /// * `expr` - The expression to evaluate.
+    /// * `k` - The continuation to receive each evaluation result.
+    pub fn evaluate<O>(
         self,
         expr: Arc<Expr>,
-        k: Continuation<Value>,
-    ) -> impl Future<Output = ()> + Send {
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> impl Future<Output = EngineResponse<O>> + Send
+    where
+        O: Send + 'static,
+    {
         Box::pin(async move {
             match expr.as_ref() {
                 Expr::PatternMatch(expr, match_arms) => {
@@ -100,26 +109,32 @@ impl<G: Generator> Engine<G> {
         })
     }
 
-    /// Launches a rule application with the given values and transformation, and passes everything
-    /// to the continuation `k`.
-    pub async fn launch_rule<T>(
+    /// Launches a rule application with the given values and transformation.
+    ///
+    /// # Parameters
+    /// * `self` - The evaluation engine (owned).
+    /// * `name` - The name of the rule to apply.
+    /// * `values` - The values to pass to the rule.
+    /// * `return_k` - The continuation to receive the result of the rule application.
+    ///
+    /// # Returns
+    /// The result of the rule application.
+    pub async fn launch_rule<O>(
         self,
         name: &str,
         values: Vec<Value>,
-        transform: fn(&Value) -> T,
-        k: Continuation<T>,
-    ) where
-        T: 'static,
+        return_k: Continuation<Value, O>,
+    ) -> EngineResponse<O>
+    where
+        O: Send + 'static,
     {
         let rule_call = self.create_rule_call(name, values);
 
         self.evaluate(
             rule_call,
             Arc::new(move |result| {
-                let k = k.clone();
-                Box::pin(async move {
-                    Self::process_result(result, transform, k).await;
-                })
+                let return_k = return_k.clone();
+                Box::pin(async move { EngineResponse::Return(result, return_k) })
             }),
         )
         .await
@@ -141,39 +156,5 @@ impl<G: Generator> Engine<G> {
             .collect();
 
         Expr::Call(rule_name_expr.into(), arg_exprs).into()
-    }
-
-    /// Helper function to process values and handle failures
-    ///
-    /// This abstracts the common pattern of handling failures and value transformation
-    /// for all rule application functions.
-    ///
-    /// # Parameters
-    /// * `value` - The value from rule evaluation
-    /// * `transform` - Function to transform value to desired type
-    /// * `context` - Context string for error messages
-    /// * `k` - Continuation to call with transformed value on success
-    async fn process_result<T, F>(
-        value: Value,
-        transform: F,
-        k: Arc<dyn Fn(T) -> UnitFuture + Send + Sync + 'static>,
-    ) where
-        F: FnOnce(&Value) -> T,
-    {
-        match &value.0 {
-            CoreData::Fail(boxed_msg) => {
-                if let CoreData::Literal(Literal::String(error_message)) = &boxed_msg.0 {
-                    eprintln!("Error processing result: {}", error_message);
-                    // Don't call continuation for failed rules
-                } else {
-                    panic!("Fail expression must evaluate to a string message");
-                }
-            }
-            _ => {
-                // Transform and pass to continuation
-                let transformed = transform(&value);
-                k(transformed).await;
-            }
-        }
     }
 }
