@@ -2,7 +2,7 @@ use crate::analyzer::hir::{
     CoreData, Expr, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern,
     PhysicalOp, Value,
 };
-use crate::engine::{Engine, EngineContinuation, Generator};
+use crate::engine::Engine;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -40,35 +40,35 @@ impl MockGenerator {
     }
 }
 
-impl Generator for MockGenerator {
-    async fn yield_group(&self, group_id: GroupId, k: EngineContinuation<Value>) {
-        let key = format!("{:?}", group_id);
-        let values = {
-            let mappings = self.group_mappings.lock().unwrap();
-            mappings.get(&key).cloned().unwrap_or_default()
-        };
+// impl Generator for MockGenerator {
+// async fn yield_group(&self, group_id: GroupId, k: Continuation<Value, O>) {
+//     let key = format!("{:?}", group_id);
+//     let values = {
+//         let mappings = self.group_mappings.lock().unwrap();
+//         mappings.get(&key).cloned().unwrap_or_default()
+//     };
 
-        for value in values {
-            k(value.clone()).await;
-        }
-    }
+//     for value in values {
+//         k(value.clone()).await;
+//     }
+// }
 
-    async fn yield_goal(&self, physical_goal: &Goal, k: EngineContinuation<Value>) {
-        let key = format!(
-            "{:?}:{:?}",
-            physical_goal.group_id, physical_goal.properties
-        );
+// async fn yield_goal(&self, physical_goal: &Goal, k: Continuation<Value, O>) {
+//     let key = format!(
+//         "{:?}:{:?}",
+//         physical_goal.group_id, physical_goal.properties
+//     );
 
-        let values = {
-            let mappings = self.goal_mappings.lock().unwrap();
-            mappings.get(&key).cloned().unwrap_or_default()
-        };
+//     let values = {
+//         let mappings = self.goal_mappings.lock().unwrap();
+//         mappings.get(&key).cloned().unwrap_or_default()
+//     };
 
-        for value in values {
-            k(value.clone()).await;
-        }
-    }
-}
+//     for value in values {
+//         k(value.clone()).await;
+//     }
+// }
+// }
 
 /// Helper to create a literal expression.
 pub fn lit_expr(literal: Literal) -> Arc<Expr> {
@@ -181,10 +181,7 @@ pub fn create_physical_operator(tag: &str, data: Vec<Value>, children: Vec<Value
 }
 
 /// Runs a test by evaluating the expression and collecting all results.
-pub async fn evaluate_and_collect<G>(expr: Arc<Expr>, engine: Engine<G>) -> Vec<Value>
-where
-    G: Generator,
-{
+pub async fn evaluate_and_collect(expr: Arc<Expr>, engine: Engine) -> Vec<Value> {
     let results = Arc::new(Mutex::new(Vec::new()));
     let results_clone = results.clone();
 

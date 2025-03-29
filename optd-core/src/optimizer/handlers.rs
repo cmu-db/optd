@@ -19,8 +19,7 @@ use futures::{
         oneshot,
     },
 };
-use optd_dsl::{capture, engine::EngineContinuation};
-use std::sync::Arc;
+use optd_dsl::capture;
 
 impl<M: Memoize> Optimizer<M> {
     /// This method initiates the optimization process for a logical plan and streams
@@ -154,20 +153,20 @@ impl<M: Memoize> Optimizer<M> {
                 let engine = self.engine.clone();
 
                 // Create a continuation that sends the costed expression
-                let continuation: EngineContinuation<Cost> = Arc::new(move |cost| {
-                    let mut message_tx = message_tx.clone();
-                    let goal = goal.clone();
-                    let expr = expr.clone();
+                // let continuation: Continuation<Cost> = Arc::new(move |cost| {
+                //     let mut message_tx = message_tx.clone();
+                //     let goal = goal.clone();
+                //     let expr = expr.clone();
 
-                    Box::pin(async move {
-                        // Create and send the optimized expression with cost
-                        let optimized_expr = OptimizedExpression(expr, cost);
-                        message_tx
-                            .send(NewOptimizedExpression(optimized_expr, goal))
-                            .await
-                            .expect("Failed to send costed plan");
-                    })
-                });
+                //     Box::pin(async move {
+                //         // Create and send the optimized expression with cost
+                //         let optimized_expr = OptimizedExpression(expr, cost);
+                //         message_tx
+                //             .send(NewOptimizedExpression(optimized_expr, goal))
+                //             .await
+                //             .expect("Failed to send costed plan");
+                //     })
+                // });
 
                 // Launch the cost plan operation with the continuation.
                 tokio::spawn(async move {
@@ -176,7 +175,6 @@ impl<M: Memoize> Optimizer<M> {
                             "cost",
                             vec![partial_physical_to_value(&plan)],
                             value_to_cost,
-                            continuation,
                         )
                         .await
                 });

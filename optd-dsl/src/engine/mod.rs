@@ -1,6 +1,6 @@
 use crate::analyzer::{
     context::Context,
-    hir::{CoreData, Expr, Literal, Value},
+    hir::{CoreData, Expr, GroupId, Literal, Value},
 };
 use eval::core::evaluate_core_expr;
 use eval::expr::{
@@ -13,7 +13,6 @@ use std::sync::Arc;
 mod eval;
 
 mod generator;
-pub use generator::Generator;
 
 mod utils;
 pub use utils::*;
@@ -21,19 +20,24 @@ pub use utils::*;
 #[cfg(test)]
 mod test_utils;
 
-/// The engine for evaluating HIR expressions and applying rules.
-#[derive(Debug, Clone)]
-pub struct Engine<G: Generator> {
-    /// The original HIR context containing all defined expressions and rules
-    pub(crate) context: Context,
-    /// The expander for resolving group references
-    pub(crate) generator: G,
+pub enum EngineResponse<O> {
+    Return(Value, fn(&Value) -> O),
+    YieldGroup(GroupId, Continuation<Value, O>),
+    YieldGoal(GroupId, Continuation<Value, O>),
+    Fail(String),
 }
 
-impl<G: Generator> Engine<G> {
+/// The engine for evaluating HIR expressions and applying rules.
+#[derive(Debug, Clone)]
+pub struct Engine {
+    /// The original HIR context containing all defined expressions and rules
+    pub(crate) context: Context,
+}
+
+impl Engine {
     /// Creates a new engine with the given context and expander.
-    pub fn new(context: Context, generator: G) -> Self {
-        Self { context, generator }
+    pub fn new(context: Context) -> Self {
+        Self { context }
     }
 
     /// Creates a new engine with an updated context but the same expander.
@@ -47,10 +51,7 @@ impl<G: Generator> Engine<G> {
     /// # Returns
     /// A new engine with the provided context and the existing expander
     pub fn with_new_context(&self, context: Context) -> Self {
-        Self {
-            context,
-            generator: self.clone().generator,
-        }
+        Self { context }
     }
 
     /// Evaluates an expression and passes results to the provided continuation.
@@ -60,11 +61,14 @@ impl<G: Generator> Engine<G> {
     /// * `self` - The evaluation engine (owned)
     /// * `expr` - The expression to evaluate
     /// * `k` - The continuation to receive each evaluation result
-    pub fn evaluate(
+    pub fn evaluate<O>(
         self,
         expr: Arc<Expr>,
-        k: EngineContinuation<Value>,
-    ) -> impl Future<Output = ()> + Send {
+        k: Continuation<Value, O>,
+    ) -> impl Future<Output = O> + Send
+    where
+        O: Send + 'static,
+    {
         Box::pin(async move {
             match expr.as_ref() {
                 Expr::PatternMatch(expr, match_arms) => {
@@ -107,19 +111,16 @@ impl<G: Generator> Engine<G> {
         name: &str,
         values: Vec<Value>,
         transform: fn(&Value) -> T,
-        k: EngineContinuation<T>,
-    ) where
-        T: 'static,
+    ) -> Result<T, String>
+    where
+        T: Send + 'static,
     {
         let rule_call = self.create_rule_call(name, values);
 
         self.evaluate(
             rule_call,
             Arc::new(move |result| {
-                let k = k.clone();
-                Box::pin(async move {
-                    Self::process_result(result, transform, k).await;
-                })
+                Box::pin(async move { Self::process_result(result, transform).await })
             }),
         )
         .await
@@ -153,27 +154,19 @@ impl<G: Generator> Engine<G> {
     /// * `transform` - Function to transform value to desired type
     /// * `context` - Context string for error messages
     /// * `k` - Continuation to call with transformed value on success
-    async fn process_result<T, F>(
-        value: Value,
-        transform: F,
-        k: Arc<dyn Fn(T) -> PinnedFuture<()> + Send + Sync + 'static>,
-    ) where
+    async fn process_result<T, F>(value: Value, transform: F) -> Result<T, String>
+    where
         F: FnOnce(&Value) -> T,
     {
-        match &value.0 {
+        match value.0 {
             CoreData::Fail(boxed_msg) => {
-                if let CoreData::Literal(Literal::String(error_message)) = &boxed_msg.0 {
-                    eprintln!("Error processing result: {}", error_message);
-                    // Don't call continuation for failed rules
+                if let CoreData::Literal(Literal::String(error_message)) = boxed_msg.0 {
+                    Err(error_message)
                 } else {
                     panic!("Fail expression must evaluate to a string message");
                 }
             }
-            _ => {
-                // Transform and pass to continuation
-                let transformed = transform(&value);
-                k(transformed).await;
-            }
+            _ => Ok(transform(&value)),
         }
     }
 }

@@ -130,7 +130,7 @@ pub struct Optimizer<M: Memoize> {
     rule_book: RuleBook,
 
     /// The engine for evaluating rules and functions
-    engine: Engine<OptimizerGenerator>,
+    engine: Engine,
 
     //
     // Dependency tracking
@@ -197,12 +197,7 @@ impl<M: Memoize> Optimizer<M> {
         let (optimize_tx, optimize_rx) = mpsc::channel(0);
 
         // Create the engine with the optimizer generator
-        let engine = Engine::new(
-            hir.context,
-            OptimizerGenerator {
-                message_tx: message_tx.clone(),
-            },
-        );
+        let engine = Engine::new(hir.context);
 
         // Create the optimizer with initialized channels and state
         let optimizer = Self {

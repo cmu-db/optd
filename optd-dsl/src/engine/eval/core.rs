@@ -1,7 +1,7 @@
 use super::operator::{evaluate_logical_operator, evaluate_physical_operator};
 use crate::analyzer::hir::{CoreData, Expr, Value};
+use crate::engine::Continuation;
 use crate::engine::utils::evaluate_sequence;
-use crate::engine::{EngineContinuation, Generator};
 use crate::{capture, engine::Engine};
 use CoreData::*;
 use std::sync::Arc;
@@ -16,46 +16,35 @@ use std::sync::Arc;
 /// * `data` - The core expression data to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_core_expr<G>(
+pub(crate) async fn evaluate_core_expr<O>(
     data: CoreData<Arc<Expr>>,
-    engine: Engine<G>,
-    k: EngineContinuation<Value>,
-) where
-    G: Generator,
+    engine: Engine,
+    k: Continuation<Value, O>,
+) -> O
+where
+    O: Send + 'static,
 {
     match data {
         Literal(lit) => {
             // Directly continue with the literal value.
-            k(Value(Literal(lit))).await;
+            k(Value(Literal(lit))).await
         }
-        Array(items) => {
-            evaluate_collection(items, Array, engine, k).await;
-        }
-        Tuple(items) => {
-            evaluate_collection(items, Tuple, engine, k).await;
-        }
+        Array(items) => evaluate_collection(items, Array, engine, k).await,
+        Tuple(items) => evaluate_collection(items, Tuple, engine, k).await,
         Struct(name, items) => {
-            evaluate_collection(items, move |values| Struct(name, values), engine, k).await;
+            evaluate_collection(items, move |values| Struct(name, values), engine, k).await
         }
-        Map(items) => {
-            evaluate_map(items, engine, k).await;
-        }
+        Map(items) => evaluate_map(items, engine, k).await,
         Function(fun_type) => {
             // Directly continue with the function value.
-            k(Value(Function(fun_type))).await;
+            k(Value(Function(fun_type))).await
         }
-        Fail(msg) => {
-            evaluate_fail(*msg, engine, k).await;
-        }
-        Logical(op) => {
-            evaluate_logical_operator(op, engine, k).await;
-        }
-        Physical(op) => {
-            evaluate_physical_operator(op, engine, k).await;
-        }
+        Fail(msg) => evaluate_fail(*msg, engine, k).await,
+        Logical(op) => evaluate_logical_operator(op, engine, k).await,
+        Physical(op) => evaluate_physical_operator(op, engine, k).await,
         Null => {
             // Directly continue with null value.
-            k(Value(Null)).await;
+            k(Value(Null)).await
         }
     }
 }
@@ -68,13 +57,14 @@ pub(crate) async fn evaluate_core_expr<G>(
 /// * `constructor` - Function to construct the appropriate collection type.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-async fn evaluate_collection<G, F>(
+async fn evaluate_collection<F, O>(
     items: Vec<Arc<Expr>>,
     constructor: F,
-    engine: Engine<G>,
-    k: EngineContinuation<Value>,
-) where
-    G: Generator,
+    engine: Engine,
+    k: Continuation<Value, O>,
+) -> O
+where
+    O: Send + 'static,
     F: FnOnce(Vec<Value>) -> CoreData<Value> + Clone + Send + Sync + 'static,
 {
     evaluate_sequence(
@@ -83,7 +73,7 @@ async fn evaluate_collection<G, F>(
         Arc::new(move |values| {
             Box::pin(capture!([constructor, k], async move {
                 let result = Value(constructor(values));
-                k(result).await;
+                k(result).await
             }))
         }),
     )
@@ -97,12 +87,13 @@ async fn evaluate_collection<G, F>(
 /// * `items` - The key-value pairs to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-async fn evaluate_map<G>(
+async fn evaluate_map<O>(
     items: Vec<(Arc<Expr>, Arc<Expr>)>,
-    engine: Engine<G>,
-    k: EngineContinuation<Value>,
-) where
-    G: Generator,
+    engine: Engine,
+    k: Continuation<Value, O>,
+) -> O
+where
+    O: Send + 'static,
 {
     // Extract keys and values.
     let (keys, values): (Vec<Arc<Expr>>, Vec<Arc<Expr>>) = items.into_iter().unzip();
@@ -121,15 +112,15 @@ async fn evaluate_map<G>(
                         Box::pin(capture!([keys_values, k], async move {
                             // Create a map from keys and values.
                             let map_items = keys_values.into_iter().zip(values_values).collect();
-                            k(Value(Map(map_items))).await;
+                            k(Value(Map(map_items))).await
                         }))
                     }),
                 )
-                .await;
+                .await
             }))
         }),
     )
-    .await;
+    .await
 }
 
 /// Evaluates a fail expression.
@@ -139,20 +130,21 @@ async fn evaluate_map<G>(
 /// * `msg` - The message expression to evaluate
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive evaluation results
-async fn evaluate_fail<G>(msg: Arc<Expr>, engine: Engine<G>, k: EngineContinuation<Value>)
+async fn evaluate_fail<O>(msg: Arc<Expr>, engine: Engine, k: Continuation<Value, O>) -> O
 where
-    G: Generator,
+    O: Send + 'static,
 {
     engine
         .evaluate(
             msg,
             Arc::new(move |value| {
-                Box::pin(capture!([k], async move {
-                    k(Value(Fail(value.into()))).await;
-                }))
+                Box::pin(capture!(
+                    [k],
+                    async move { k(Value(Fail(value.into()))).await }
+                ))
             }),
         )
-        .await;
+        .await
 }
 
 #[cfg(test)]
@@ -170,9 +162,8 @@ mod tests {
     /// Test evaluation of literal values
     #[tokio::test]
     async fn test_literal_evaluation() {
-        let mock_gen = MockGenerator::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a literal expression
         let literal_expr = Arc::new(Expr::CoreExpr(CoreData::Literal(int(42))));
@@ -193,7 +184,7 @@ mod tests {
     async fn test_array_evaluation() {
         let mock_gen = MockGenerator::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create an array expression with values to evaluate
         let array_expr = Arc::new(Expr::CoreExpr(CoreData::Array(vec![
@@ -231,7 +222,7 @@ mod tests {
     async fn test_tuple_evaluation() {
         let mock_gen = MockGenerator::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a tuple expression with mixed types
         let tuple_expr = Arc::new(Expr::CoreExpr(CoreData::Tuple(vec![
@@ -269,7 +260,7 @@ mod tests {
     async fn test_struct_evaluation() {
         let mock_gen = MockGenerator::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a struct expression
         let struct_expr = Arc::new(Expr::CoreExpr(CoreData::Struct(
@@ -303,7 +294,7 @@ mod tests {
     async fn test_map_evaluation() {
         let mock_gen = MockGenerator::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a map expression
         let map_expr = Arc::new(Expr::CoreExpr(CoreData::Map(vec![
@@ -368,7 +359,7 @@ mod tests {
     async fn test_function_evaluation() {
         let mock_gen = MockGenerator::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a function expression (just a simple closure)
         let fn_expr = Arc::new(Expr::CoreExpr(CoreData::Function(FunKind::Closure(
@@ -393,7 +384,7 @@ mod tests {
     async fn test_null_evaluation() {
         let mock_gen = MockGenerator::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a null expression
         let null_expr = Arc::new(Expr::CoreExpr(CoreData::Null));
@@ -415,7 +406,7 @@ mod tests {
     async fn test_fail_evaluation() {
         let mock_gen = MockGenerator::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a fail expression with a message
         let fail_expr = Arc::new(Expr::CoreExpr(CoreData::Fail(Box::new(Arc::new(

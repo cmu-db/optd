@@ -6,12 +6,9 @@ use crate::{
             Value,
         },
     },
-    engine::PinnedFuture,
+    engine::{Continuation, PinnedFuture},
 };
-use crate::{
-    capture,
-    engine::{Engine, EngineContinuation, Generator},
-};
+use crate::{capture, engine::Engine};
 use Materializable::*;
 use Pattern::*;
 use std::sync::Arc;
@@ -32,13 +29,14 @@ type MatchResult = (Value, Option<Context>);
 /// * `match_arms` - The list of pattern-expression pairs to try.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_pattern_match<G>(
+pub(crate) async fn evaluate_pattern_match<O>(
     expr: Arc<Expr>,
     match_arms: Vec<MatchArm>,
-    engine: Engine<G>,
-    k: EngineContinuation<Value>,
-) where
-    G: Generator,
+    engine: Engine,
+    k: Continuation<Value, O>,
+) -> O
+where
+    O: Send + 'static,
 {
     if match_arms.is_empty() {
         panic!("Pattern match exhausted: no patterns provided");
@@ -52,11 +50,11 @@ pub(crate) async fn evaluate_pattern_match<G>(
             Arc::new(move |value| {
                 Box::pin(capture!([match_arms, engine, k], async move {
                     // Try to match against each arm in order.
-                    try_match_arms(value, match_arms, engine, k).await;
+                    try_match_arms(value, match_arms, engine, k).await
                 }))
             }),
         )
-        .await;
+        .await
 }
 
 /// Tries to match a value against a sequence of match arms.
@@ -69,14 +67,14 @@ pub(crate) async fn evaluate_pattern_match<G>(
 /// * `match_arms` - The list of pattern-expression pairs to try.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-fn try_match_arms<G>(
+fn try_match_arms<O>(
     value: Value,
     match_arms: Vec<MatchArm>,
-    engine: Engine<G>,
-    k: EngineContinuation<Value>,
-) -> PinnedFuture<()>
+    engine: Engine,
+    k: Continuation<Value, O>,
+) -> PinnedFuture<O>
 where
-    G: Generator,
+    O: Send + 'static,
 {
     Box::pin(async move {
         if match_arms.is_empty() {
@@ -92,7 +90,6 @@ where
             value,
             first_arm.pattern.clone(),
             engine.context.clone(),
-            engine.generator.clone(),
             Arc::new(move |(matched_value, context_opt)| {
                 Box::pin(capture!(
                     [first_arm, remaining_arms, engine, k],
@@ -101,19 +98,17 @@ where
                             // If we got a match, evaluate the arm's expression with the context.
                             Some(context) => {
                                 let engine_with_ctx = engine.with_new_context(context);
-                                engine_with_ctx.evaluate(first_arm.expr, k).await;
+                                engine_with_ctx.evaluate(first_arm.expr, k).await
                             }
                             // If no match, try the next arm with the matching value and remaining
                             // arms.
-                            None => {
-                                try_match_arms(matched_value, remaining_arms, engine, k).await;
-                            }
+                            None => try_match_arms(matched_value, remaining_arms, engine, k).await,
                         }
                     }
                 ))
             }),
         )
-        .await;
+        .await
     })
 }
 
@@ -126,154 +121,142 @@ where
 /// * `ctx` - The current context to extend with bindings.
 /// * `gen` - The generator to resolve references.
 /// * `k` - The continuation to receive the match result.
-fn match_pattern<G>(
+fn match_pattern<O>(
     value: Value,
     pattern: Pattern,
     ctx: Context,
-    r#gen: G,
-    k: EngineContinuation<MatchResult>,
-) -> PinnedFuture<()>
+    k: Continuation<MatchResult, O>,
+) -> PinnedFuture<O>
 where
-    G: Generator,
+    O: Send + 'static,
 {
     Box::pin(async move {
         match (pattern, &value.0) {
             // Simple patterns.
-            (Wildcard, _) => {
-                k((value, Some(ctx))).await;
-            }
+            (Wildcard, _) => k((value, Some(ctx))).await,
             (Literal(pattern_lit), CoreData::Literal(value_lit)) => {
                 let context_opt = (pattern_lit == *value_lit).then_some(ctx);
-                k((value, context_opt)).await;
+                k((value, context_opt)).await
             }
-            (EmptyArray, CoreData::Array(arr)) if arr.is_empty() => {
-                k((value, Some(ctx))).await;
-            }
+            (EmptyArray, CoreData::Array(arr)) if arr.is_empty() => k((value, Some(ctx))).await,
             // Complex patterns.
             (Bind(ident, inner_pattern), _) => {
-                match_bind_pattern(value.clone(), ident, *inner_pattern, ctx, r#gen, k).await;
+                match_bind_pattern(value.clone(), ident, *inner_pattern, ctx, k).await
             }
             (ArrayDecomp(head_pat, tail_pat), CoreData::Array(arr)) => {
                 if arr.is_empty() {
-                    k((value, None)).await;
-                    return;
+                    return k((value, None)).await;
                 }
 
-                match_array_pattern(*head_pat, *tail_pat, arr, ctx, r#gen, k).await;
+                match_array_pattern(*head_pat, *tail_pat, arr, ctx, k).await
             }
             (Struct(pat_name, pat_fields), CoreData::Struct(val_name, val_fields)) => {
                 if pat_name != *val_name || pat_fields.len() != val_fields.len() {
-                    k((value, None)).await;
-                    return;
+                    return k((value, None)).await;
                 }
 
-                match_struct_pattern(pat_name, pat_fields, val_fields, ctx, r#gen, k).await;
+                match_struct_pattern(pat_name, pat_fields, val_fields, ctx, k).await
             }
             (Operator(op_pattern), CoreData::Logical(LogicalOp(Materialized(operator)))) => {
                 if op_pattern.tag != operator.tag
                     || op_pattern.data.len() != operator.data.len()
                     || op_pattern.children.len() != operator.children.len()
                 {
-                    k((value, None)).await;
-                    return;
+                    return k((value, None)).await;
                 }
 
-                match_materialized_operator(true, op_pattern, operator.clone(), ctx, r#gen, k)
-                    .await;
+                match_materialized_operator(true, op_pattern, operator.clone(), ctx, k).await
             }
             (Operator(op_pattern), CoreData::Physical(PhysicalOp(Materialized(operator)))) => {
                 if op_pattern.tag != operator.tag
                     || op_pattern.data.len() != operator.data.len()
                     || op_pattern.children.len() != operator.children.len()
                 {
-                    k((value, None)).await;
-                    return;
+                    return k((value, None)).await;
                 }
 
-                match_materialized_operator(false, op_pattern, operator.clone(), ctx, r#gen, k)
-                    .await;
+                match_materialized_operator(false, op_pattern, operator.clone(), ctx, k).await
             }
             // Unmaterialized operators.
             (Operator(op_pattern), CoreData::Logical(LogicalOp(UnMaterialized(group_id)))) => {
-                r#gen
-                    .clone()
-                    .yield_group(
-                        *group_id,
-                        Arc::new(move |expanded_value| {
-                            Box::pin(capture!([op_pattern, ctx, r#gen, k], async move {
-                                match_pattern(expanded_value, Operator(op_pattern), ctx, r#gen, k)
-                                    .await;
-                            }))
-                        }),
-                    )
-                    .await;
+                // r#gen
+                //     .clone()
+                //     .yield_group(
+                //         *group_id,
+                //         Arc::new(move |expanded_value| {
+                //             Box::pin(capture!([op_pattern, ctx, r#gen, k], async move {
+                //                 match_pattern(expanded_value, Operator(op_pattern), ctx, r#gen, k)
+                //                     .await
+                //             }))
+                //         }),
+                //     )
+                //     .await;
+                todo!("yuchen: YieldGroup")
             }
             (Operator(op_pattern), CoreData::Physical(PhysicalOp(UnMaterialized(goal)))) => {
-                r#gen
-                    .clone()
-                    .yield_goal(
-                        goal,
-                        Arc::new(move |expanded_value| {
-                            Box::pin(capture!([op_pattern, ctx, r#gen, k], async move {
-                                match_pattern(expanded_value, Operator(op_pattern), ctx, r#gen, k)
-                                    .await;
-                            }))
-                        }),
-                    )
-                    .await;
+                // r#gen
+                //     .clone()
+                //     .yield_goal(
+                //         goal,
+                //         Arc::new(move |expanded_value| {
+                //             Box::pin(capture!([op_pattern, ctx, r#gen, k], async move {
+                //                 match_pattern(expanded_value, Operator(op_pattern), ctx, r#gen, k)
+                //                     .await
+                //             }))
+                //         }),
+                //     )
+                //     .await;
+                todo!("yuchen: YieldGoal")
             }
             // No match for other combinations.
-            _ => {
-                k((value, None)).await;
-            }
+            _ => k((value, None)).await,
         }
     })
 }
 
 /// Matches a binding pattern.
-async fn match_bind_pattern<G>(
+async fn match_bind_pattern<O>(
     value: Value,
     ident: String,
     inner_pattern: Pattern,
     ctx: Context,
-    generator: G,
-    k: EngineContinuation<MatchResult>,
-) where
-    G: Generator,
+    k: Continuation<MatchResult, O>,
+) -> O
+where
+    O: Send + 'static,
 {
     // First check if the inner pattern matches without binding.
     match_pattern(
         value,
         inner_pattern,
         ctx.clone(),
-        generator,
         Arc::new(move |(matched_value, ctx_opt)| {
             Box::pin(capture!([ident, k], async move {
                 // Only bind if the inner pattern matched.
                 if let Some(mut ctx) = ctx_opt {
                     // Create a new context with the binding.
                     ctx.bind(ident.clone(), matched_value.clone());
-                    k((matched_value, Some(ctx))).await;
+                    k((matched_value, Some(ctx))).await
                 } else {
                     // Inner pattern didn't match, propagate failure.
-                    k((matched_value, None)).await;
+                    k((matched_value, None)).await
                 }
             }))
         }),
     )
-    .await;
+    .await
 }
 
 /// Matches an array decomposition pattern.
-async fn match_array_pattern<G>(
+async fn match_array_pattern<O>(
     head_pattern: Pattern,
     tail_pattern: Pattern,
     arr: &[Value],
     ctx: Context,
-    generator: G,
-    k: EngineContinuation<MatchResult>,
-) where
-    G: Generator,
+    k: Continuation<MatchResult, O>,
+) -> O
+where
+    O: Send + 'static,
 {
     // Split array into head and tail.
     let head = arr[0].clone();
@@ -289,7 +272,6 @@ async fn match_array_pattern<G>(
         patterns,
         values,
         ctx.clone(),
-        generator,
         Arc::new(move |results| {
             Box::pin(capture!([ctx, k], async move {
                 // Check if all parts matched successfully.
@@ -321,34 +303,33 @@ async fn match_array_pattern<G>(
                         });
 
                     // Return the new array with the combined context.
-                    k((new_array, Some(combined_ctx))).await;
+                    k((new_array, Some(combined_ctx))).await
                 } else {
                     // Return the new array but with None context since match failed.
-                    k((new_array, None)).await;
+                    k((new_array, None)).await
                 }
             }))
         }),
     )
-    .await;
+    .await
 }
 
 /// Matches a struct pattern.
-async fn match_struct_pattern<G>(
+async fn match_struct_pattern<O>(
     pat_name: String,
     field_patterns: Vec<Pattern>,
     field_values: &[Value],
     ctx: Context,
-    generator: G,
-    k: EngineContinuation<MatchResult>,
-) where
-    G: Generator,
+    k: Continuation<MatchResult, O>,
+) -> O
+where
+    O: Send + 'static,
 {
     // Match fields sequentially.
     match_components(
         field_patterns,
         field_values.to_vec(),
         ctx.clone(),
-        generator,
         Arc::new(move |results| {
             Box::pin(capture!([ctx, pat_name, k], async move {
                 // Check if all fields matched successfully.
@@ -369,27 +350,27 @@ async fn match_struct_pattern<G>(
                         });
 
                     // Return the new struct with the combined context.
-                    k((new_struct, Some(combined_ctx))).await;
+                    k((new_struct, Some(combined_ctx))).await
                 } else {
                     // Return the new struct but with None context since match failed.
-                    k((new_struct, None)).await;
+                    k((new_struct, None)).await
                 }
             }))
         }),
     )
-    .await;
+    .await
 }
 
 /// Matches a materialized operator.
-async fn match_materialized_operator<G>(
+async fn match_materialized_operator<O>(
     is_logical: bool,
     op_pattern: Operator<Pattern>,
     operator: Operator<Value>,
     ctx: Context,
-    r#gen: G,
-    k: EngineContinuation<MatchResult>,
-) where
-    G: Generator,
+    k: Continuation<MatchResult, O>,
+) -> O
+where
+    O: Send + 'static,
 {
     // Create all patterns and values to match.
     let data_patterns = op_pattern.data;
@@ -411,7 +392,6 @@ async fn match_materialized_operator<G>(
         all_patterns,
         all_values,
         ctx.clone(),
-        r#gen,
         Arc::new(move |results| {
             Box::pin(capture!([ctx, operator, k], async move {
                 // Check if all components matched successfully.
@@ -448,15 +428,15 @@ async fn match_materialized_operator<G>(
                         });
 
                     // Return the new operator with the combined context.
-                    k((new_value, Some(combined_ctx))).await;
+                    k((new_value, Some(combined_ctx))).await
                 } else {
                     // Return the new operator but with None context since match failed.
-                    k((new_value, None)).await;
+                    k((new_value, None)).await
                 }
             }))
         }),
     )
-    .await;
+    .await
 }
 
 /// Helper function to match multiple components (struct fields, array parts, or operator components)
@@ -469,40 +449,38 @@ async fn match_materialized_operator<G>(
 /// * `ctx` - The current context to extend with bindings.
 /// * `generator` - The generator to resolve references.
 /// * `k` - The continuation to receive the vector of match results.
-async fn match_components<G>(
+async fn match_components<O>(
     patterns: Vec<Pattern>,
     values: Vec<Value>,
     ctx: Context,
-    generator: G,
-    k: EngineContinuation<Vec<MatchResult>>,
-) where
-    G: Generator,
+    k: Continuation<Vec<MatchResult>, O>,
+) -> O
+where
+    O: Send + 'static,
 {
     // Start the sequential matching process with an empty results vector.
-    match_components_sequentially(patterns, values, 0, ctx, Vec::new(), generator, k).await
+    match_components_sequentially(patterns, values, 0, ctx, Vec::new(), k).await
 }
 
 /// Internal helper function to match components sequentially.
 ///
 /// This function will process all components regardless of match success, collecting results for
 /// each component to allow proper reconstruction of arrays/structs.
-fn match_components_sequentially<G>(
+fn match_components_sequentially<O>(
     patterns: Vec<Pattern>,
     values: Vec<Value>,
     index: usize,
     ctx: Context,
     results: Vec<MatchResult>,
-    generator: G,
-    k: EngineContinuation<Vec<MatchResult>>,
-) -> PinnedFuture<()>
+    k: Continuation<Vec<MatchResult>, O>,
+) -> PinnedFuture<O>
 where
-    G: Generator,
+    O: Send + 'static,
 {
     Box::pin(async move {
         // Base case: all components matched.
         if index >= patterns.len() {
-            k(results).await;
-            return;
+            return k(results).await;
         }
 
         // Match current component.
@@ -510,10 +488,9 @@ where
             values[index].clone(),
             patterns[index].clone(),
             ctx.clone(),
-            generator.clone(),
             Arc::new(move |(matched_value, ctx_opt)| {
                 Box::pin(capture!(
-                    [patterns, values, index, results, ctx, generator, k],
+                    [patterns, values, index, results, ctx, k],
                     async move {
                         // Add this result to the results vector, keeping the context as is.
                         // (Some if matched, None if didn't match)
@@ -527,10 +504,9 @@ where
                             index + 1,
                             ctx,
                             updated_results,
-                            generator,
                             k,
                         )
-                        .await;
+                        .await
                     }
                 ))
             }),
@@ -564,7 +540,7 @@ mod tests {
     async fn test_simple_literal_patterns() {
         let mock_gen = MockGenerator::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a match expression: match 42 { 42 => "matched", _ => "not matched" }
         let match_expr = pattern_match_expr(
@@ -593,7 +569,7 @@ mod tests {
     async fn test_bind_pattern_with_nesting() {
         let mock_gen = MockGenerator::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a match expression:
         // match 42 {
@@ -682,7 +658,7 @@ mod tests {
             }))),
         );
 
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Evaluate the expression
         let results = evaluate_and_collect(match_expr, engine).await;
@@ -702,7 +678,7 @@ mod tests {
     async fn test_struct_patterns() {
         let mock_gen = MockGenerator::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a struct value Point { x: 10, y: 20 }
         let struct_expr = Arc::new(Expr::CoreVal(struct_val(
@@ -750,7 +726,7 @@ mod tests {
     async fn test_complex_operator_patterns() {
         let mock_gen = MockGenerator::new();
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a logical operator: LogicalJoin { joinType: "inner", condition: "x = y" } [TableScan("orders"), TableScan("lineitem")]
         let op = Operator {
@@ -933,7 +909,7 @@ mod tests {
         );
 
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Evaluate the expression
         let results = evaluate_and_collect(match_expr, engine).await;
@@ -1059,7 +1035,7 @@ mod tests {
         );
 
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Evaluate the expression
         let results = evaluate_and_collect(match_expr, engine).await;
@@ -1105,7 +1081,7 @@ mod tests {
             }))),
         );
 
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a struct value Point { x: 30, y: 40 }
         let struct_expr = Arc::new(Expr::CoreVal(struct_val(
@@ -1230,7 +1206,7 @@ mod tests {
             }))),
         );
 
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Create a deeply nested operator:
         // Project [col1, col2] (
@@ -1478,7 +1454,7 @@ mod tests {
         );
 
         let ctx = Context::default();
-        let engine = Engine::new(ctx, mock_gen);
+        let engine = Engine::new(ctx);
 
         // Evaluate the expression
         let results = evaluate_and_collect(match_expr, engine).await;

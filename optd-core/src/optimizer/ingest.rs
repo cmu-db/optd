@@ -8,7 +8,6 @@ use Child::*;
 use OptimizerMessage::CreateGroup;
 use async_recursion::async_recursion;
 use futures::{SinkExt, future::try_join_all};
-use optd_dsl::engine::EngineContinuation;
 use std::{collections::HashSet, sync::Arc};
 
 /// Result type for logical plan ingestion exposed to clients
@@ -69,18 +68,18 @@ impl<M: Memoize> Optimizer<M> {
                         let expr_clone = expr.clone();
 
                         // Create a continuation for processing derived properties
-                        let properties_continuation: EngineContinuation<LogicalProperties> =
-                            Arc::new(move |properties| {
-                                let mut message_tx = message_tx.clone();
-                                let expr = expr_clone.clone();
+                        // let properties_continuation: Continuation<LogicalProperties> =
+                        //     Arc::new(move |properties| {
+                        //         let mut message_tx = message_tx.clone();
+                        //         let expr = expr_clone.clone();
 
-                                Box::pin(async move {
-                                    message_tx
-                                        .send(CreateGroup(properties, expr, job_id))
-                                        .await
-                                        .expect("Failed to send CreateGroup message");
-                                })
-                            });
+                        //         Box::pin(async move {
+                        //             message_tx
+                        //                 .send(CreateGroup(properties, expr, job_id))
+                        //                 .await
+                        //                 .expect("Failed to send CreateGroup message");
+                        //         })
+                        //     });
 
                         // Launch the derive properties operation with the continuation.
                         tokio::spawn(async move {
@@ -89,7 +88,6 @@ impl<M: Memoize> Optimizer<M> {
                                     "derive",
                                     vec![partial_logical_to_value(&expr.into())],
                                     value_to_logical_properties,
-                                    properties_continuation,
                                 )
                                 .await
                         });
