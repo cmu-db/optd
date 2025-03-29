@@ -350,8 +350,8 @@ mod tests {
     use crate::engine::{
         Engine,
         test_utils::{
-            TestHarness, array_val, boolean, evaluate_and_collect, int, lit_expr, lit_val, ref_expr,
-            string,
+            TestHarness, array_val, boolean, evaluate_and_collect, int, lit_expr, lit_val,
+            ref_expr, string,
         },
     };
     use std::sync::Arc;

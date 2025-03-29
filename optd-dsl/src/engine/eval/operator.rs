@@ -148,7 +148,8 @@ mod tests {
     use crate::engine::{
         Engine,
         test_utils::{
-            TestHarness, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val, string,
+            TestHarness, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val,
+            string,
         },
     };
     use std::sync::Arc;
