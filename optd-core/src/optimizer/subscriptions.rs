@@ -145,13 +145,13 @@ impl<M: Memoize> Optimizer<M> {
 
                         // Applies the rule to the input plan and passes all possible
                         // transformations of the plan to the continuation.
-                        let partial_logical = engine_clone
-                            .launch_rule(
-                                &rule_name,
-                                vec![partial_logical_to_value(&plan_clone)],
-                                value_to_partial_logical,
-                            )
-                            .await;
+                        // let partial_logical = engine_clone
+                        //     .launch_rule(
+                        //         &rule_name,
+                        //         vec![partial_logical_to_value(&plan_clone)],
+                        //         value_to_partial_logical,
+                        //     )
+                        //     .await;
                     });
                 }
             }
@@ -209,13 +209,13 @@ impl<M: Memoize> Optimizer<M> {
                     // });
 
                     // Launch the cost plan operation with the continuation.
-                    let cost = engine_clone
-                        .launch_rule(
-                            "cost",
-                            vec![partial_physical_to_value(&plan)],
-                            value_to_cost,
-                        )
-                        .await;
+                    // let cost = engine_clone
+                    //     .launch_rule(
+                    //         "cost",
+                    //         vec![partial_physical_to_value(&plan)],
+                    //         value_to_cost,
+                    //     )
+                    //     .await;
                 });
             }
         }
@@ -253,13 +253,13 @@ impl<M: Memoize> Optimizer<M> {
                         // continuation.
                         let plan_value = partial_logical_to_value(&plan_clone);
                         let props_value = physical_properties_to_value(&props_clone);
-                        let partial_physical = engine_clone
-                            .launch_rule(
-                                &rule_name,
-                                vec![plan_value, props_value],
-                                value_to_partial_physical,
-                            )
-                            .await;
+                        // let partial_physical = engine_clone
+                        //     .launch_rule(
+                        //         &rule_name,
+                        //         vec![plan_value, props_value],
+                        //         value_to_partial_physical,
+                        //     )
+                        //     .await;
                     });
                 }
             }

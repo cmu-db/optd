@@ -507,28 +507,31 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::analyzer::{
-        context::Context,
-        hir::{
-            BinOp, CoreData, Expr, FunKind, Goal, GroupId, Literal, LogicalOp, Materializable,
-            Operator, PhysicalOp, Value,
-        },
-    };
     use crate::engine::{
         Engine,
         test_utils::{
-            MockGenerator, array_decomp_pattern, array_val, bind_pattern, create_logical_operator,
+            array_decomp_pattern, array_val, bind_pattern, create_logical_operator,
             create_physical_operator, evaluate_and_collect, int, lit_expr, lit_val,
             literal_pattern, match_arm, operator_pattern, pattern_match_expr, ref_expr, string,
             struct_pattern, struct_val, wildcard_pattern,
         },
+    };
+    use crate::{
+        analyzer::{
+            context::Context,
+            hir::{
+                BinOp, CoreData, Expr, FunKind, Goal, GroupId, Literal, LogicalOp, Materializable,
+                Operator, PhysicalOp, Value,
+            },
+        },
+        engine::test_utils::Harness,
     };
     use std::sync::Arc;
 
     /// Test simple pattern matching with literals
     #[tokio::test]
     async fn test_simple_literal_patterns() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -542,7 +545,7 @@ mod tests {
         );
 
         // Evaluate the expression
-        let results = evaluate_and_collect(match_expr, engine).await;
+        let results = evaluate_and_collect(match_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -557,7 +560,7 @@ mod tests {
     /// Test binding patterns with nested patterns
     #[tokio::test]
     async fn test_bind_pattern_with_nesting() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -582,7 +585,7 @@ mod tests {
         );
 
         // Evaluate the expression
-        let results = evaluate_and_collect(match_expr, engine).await;
+        let results = evaluate_and_collect(match_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -597,7 +600,7 @@ mod tests {
     /// Test array decomposition patterns
     #[tokio::test]
     async fn test_array_decomposition() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
 
         // Create an array value [1, 2, 3, 4, 5]
         let array_expr = Arc::new(Expr::CoreVal(array_val(vec![
@@ -651,7 +654,7 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Evaluate the expression
-        let results = evaluate_and_collect(match_expr, engine).await;
+        let results = evaluate_and_collect(match_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -666,7 +669,7 @@ mod tests {
     /// Test struct patterns
     #[tokio::test]
     async fn test_struct_patterns() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -699,7 +702,7 @@ mod tests {
         );
 
         // Evaluate the expression
-        let results = evaluate_and_collect(match_expr, engine).await;
+        let results = evaluate_and_collect(match_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -714,7 +717,7 @@ mod tests {
     /// Test complex operator pattern matching
     #[tokio::test]
     async fn test_complex_operator_patterns() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -794,7 +797,7 @@ mod tests {
         );
 
         // Evaluate the expression
-        let results = evaluate_and_collect(match_expr, engine).await;
+        let results = evaluate_and_collect(match_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -815,7 +818,7 @@ mod tests {
     /// Test pattern matching with unmaterialized operators (requires group resolution)
     #[tokio::test]
     async fn test_unmaterialized_logical_operator_patterns() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let test_group_id = GroupId(1);
 
         // Register a logical operator in the mock generator
@@ -829,7 +832,7 @@ mod tests {
             ],
         );
 
-        mock_gen.register_group(test_group_id, materialized_join);
+        harness.register_group(test_group_id, materialized_join);
 
         // Create an unmaterialized logical operator
         let unmaterialized_logical_op = Value(CoreData::Logical(LogicalOp(
@@ -902,7 +905,7 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Evaluate the expression
-        let results = evaluate_and_collect(match_expr, engine).await;
+        let results = evaluate_and_collect(match_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -922,7 +925,7 @@ mod tests {
     /// Test pattern matching with unmaterialized physical operators (requires goal resolution)
     #[tokio::test]
     async fn test_unmaterialized_physical_operator_patterns() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
 
         // Create a physical goal
         let test_group_id = GroupId(2);
@@ -942,7 +945,7 @@ mod tests {
             ],
         );
 
-        mock_gen.register_goal(&test_goal, materialized_hash_join);
+        harness.register_goal(&test_goal, materialized_hash_join);
 
         // Create an unmaterialized physical operator with the goal
         let unmaterialized_physical_op = Value(CoreData::Physical(PhysicalOp(
@@ -1028,7 +1031,7 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Evaluate the expression
-        let results = evaluate_and_collect(match_expr, engine).await;
+        let results = evaluate_and_collect(match_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -1055,7 +1058,7 @@ mod tests {
     /// Test multiple pattern matching arms with fallthrough
     #[tokio::test]
     async fn test_multiple_match_arms_with_fallthrough() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let mut ctx = Context::default();
 
         // Add to_string function to convert numbers to strings
@@ -1164,7 +1167,7 @@ mod tests {
         );
 
         // Evaluate the expression
-        let results = evaluate_and_collect(match_expr, engine).await;
+        let results = evaluate_and_collect(match_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -1179,7 +1182,7 @@ mod tests {
     /// Test pattern matching with deeply nested bind patterns
     #[tokio::test]
     async fn test_deeply_nested_bind_patterns() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let mut ctx = Context::default();
 
         // Add to_string function to convert complex values to strings
@@ -1319,7 +1322,7 @@ mod tests {
         );
 
         // Evaluate the expression
-        let results = evaluate_and_collect(match_expr, engine).await;
+        let results = evaluate_and_collect(match_expr, engine, harness).await;
 
         // Check result (this is a complex test of correct binding propagation through deeply nested patterns)
         assert_eq!(results.len(), 1);
@@ -1348,35 +1351,35 @@ mod tests {
     /// Test combinatorial explosion with multiple expansion paths
     #[tokio::test]
     async fn test_combinatorial_explosion() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let group_id_1 = GroupId(1);
         let group_id_2 = GroupId(2);
 
         // Register multiple alternatives for each group to create a combinatorial explosion
         // For group 1, register 3 different possible values
-        mock_gen.register_group(
+        harness.register_group(
             group_id_1,
             create_logical_operator("TableScan", vec![lit_val(string("employees"))], vec![]),
         );
-        mock_gen.register_group(
+        harness.register_group(
             group_id_1,
             create_logical_operator("TableScan", vec![lit_val(string("departments"))], vec![]),
         );
-        mock_gen.register_group(
+        harness.register_group(
             group_id_1,
             create_logical_operator("TableScan", vec![lit_val(string("customers"))], vec![]),
         );
-        mock_gen.register_group(
+        harness.register_group(
             group_id_1,
             create_logical_operator("Filter", vec![lit_val(string("age > 30"))], vec![]),
         );
 
         // For group 2, register 2 different possible values
-        mock_gen.register_group(
+        harness.register_group(
             group_id_2,
             create_logical_operator("Filter", vec![lit_val(string("age > 30"))], vec![]),
         );
-        mock_gen.register_group(
+        harness.register_group(
             group_id_2,
             create_logical_operator("Filter", vec![lit_val(string("salary > 50000"))], vec![]),
         );
@@ -1447,7 +1450,7 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Evaluate the expression
-        let results = evaluate_and_collect(match_expr, engine).await;
+        let results = evaluate_and_collect(match_expr, engine, harness).await;
 
         // We should get 4 × 2 = 8 different results from the combinatorial explosion
         assert_eq!(results.len(), 8);

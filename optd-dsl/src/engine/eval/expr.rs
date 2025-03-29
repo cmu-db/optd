@@ -350,8 +350,8 @@ mod tests {
     use crate::engine::{
         Engine,
         test_utils::{
-            MockGenerator, array_val, boolean, evaluate_and_collect, int, lit_expr, lit_val,
-            ref_expr, string,
+            Harness, array_val, boolean, evaluate_and_collect, int, lit_expr, lit_val, ref_expr,
+            string,
         },
     };
     use std::sync::Arc;
@@ -359,7 +359,7 @@ mod tests {
     /// Test if-then-else expressions with true and false conditions
     #[tokio::test]
     async fn test_if_then_else() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -369,7 +369,8 @@ mod tests {
             lit_expr(string("yes")),
             lit_expr(string("no")),
         ));
-        let true_results = evaluate_and_collect(true_condition, engine.clone()).await;
+        let true_results =
+            evaluate_and_collect(true_condition, engine.clone(), harness.clone()).await;
 
         // if false then "yes" else "no"
         let false_condition = Arc::new(Expr::IfThenElse(
@@ -377,7 +378,8 @@ mod tests {
             lit_expr(string("yes")),
             lit_expr(string("no")),
         ));
-        let false_results = evaluate_and_collect(false_condition, engine.clone()).await;
+        let false_results =
+            evaluate_and_collect(false_condition, engine.clone(), harness.clone()).await;
 
         // Let's create a more complex condition: if x > 10 then x * 2 else x / 2
         let mut ctx = Context::default();
@@ -390,7 +392,7 @@ mod tests {
             Arc::new(Expr::Binary(ref_expr("x"), BinOp::Mul, lit_expr(int(2)))),
         ));
 
-        let complex_results = evaluate_and_collect(complex_condition, engine_with_x).await;
+        let complex_results = evaluate_and_collect(complex_condition, engine_with_x, harness).await;
 
         // Check results
         match &true_results[0].0 {
@@ -418,7 +420,7 @@ mod tests {
     /// Test let bindings and variable references
     #[tokio::test]
     async fn test_let_binding() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -429,7 +431,7 @@ mod tests {
             Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, lit_expr(int(5)))),
         ));
 
-        let results = evaluate_and_collect(let_expr, engine).await;
+        let results = evaluate_and_collect(let_expr, engine, harness).await;
 
         // Check result
         match &results[0].0 {
@@ -443,7 +445,7 @@ mod tests {
     /// Test nested let bindings
     #[tokio::test]
     async fn test_nested_let_bindings() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -460,7 +462,7 @@ mod tests {
             )),
         ));
 
-        let results = evaluate_and_collect(nested_let_expr, engine).await;
+        let results = evaluate_and_collect(nested_let_expr, engine, harness).await;
 
         // Check result
         match &results[0].0 {
@@ -474,7 +476,7 @@ mod tests {
     /// Test function calls with user-defined functions (closures)
     #[tokio::test]
     async fn test_function_call_closure() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let mut ctx = Context::default();
 
         // Define a function: fn(x, y) => x + y
@@ -492,7 +494,7 @@ mod tests {
             vec![lit_expr(int(10)), lit_expr(int(20))],
         ));
 
-        let results = evaluate_and_collect(call_expr, engine).await;
+        let results = evaluate_and_collect(call_expr, engine, harness).await;
 
         // Check result
         match &results[0].0 {
@@ -506,7 +508,7 @@ mod tests {
     /// Test function calls with built-in functions (Rust UDFs)
     #[tokio::test]
     async fn test_function_call_rust_udf() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let mut ctx = Context::default();
 
         // Define a Rust UDF that calculates the sum of array elements
@@ -540,7 +542,7 @@ mod tests {
             ])))],
         ));
 
-        let results = evaluate_and_collect(call_expr, engine).await;
+        let results = evaluate_and_collect(call_expr, engine, harness).await;
 
         // Check result
         match &results[0].0 {
@@ -554,7 +556,7 @@ mod tests {
     /// Test complex program with multiple expression types
     #[tokio::test]
     async fn test_complex_program() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let mut ctx = Context::default();
 
         // Define a function to compute factorial: fn(n) => if n <= 1 then 1 else n * factorial(n-1)
@@ -603,7 +605,7 @@ mod tests {
             )),
         ));
 
-        let results = evaluate_and_collect(program, engine).await;
+        let results = evaluate_and_collect(program, engine, harness).await;
 
         // Check result: factorial(5) / 3 = 120 / 3 = 40
         match &results[0].0 {
@@ -617,7 +619,7 @@ mod tests {
     /// Test variable reference in various contexts
     #[tokio::test]
     async fn test_variable_references() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
 
         // Test that variables from outer scope are visible in inner scope
         let mut ctx = Context::default();
@@ -629,11 +631,11 @@ mod tests {
 
         // Reference to a variable in the current (inner) scope
         let inner_ref = Arc::new(Expr::Ref("inner_var".to_string()));
-        let inner_results = evaluate_and_collect(inner_ref, engine.clone()).await;
+        let inner_results = evaluate_and_collect(inner_ref, engine.clone(), harness.clone()).await;
 
         // Reference to a variable in the outer scope
         let outer_ref = Arc::new(Expr::Ref("outer_var".to_string()));
-        let outer_results = evaluate_and_collect(outer_ref, engine.clone()).await;
+        let outer_results = evaluate_and_collect(outer_ref, engine.clone(), harness).await;
 
         // Check results
         match &inner_results[0].0 {

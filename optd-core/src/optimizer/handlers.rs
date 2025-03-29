@@ -169,15 +169,15 @@ impl<M: Memoize> Optimizer<M> {
                 // });
 
                 // Launch the cost plan operation with the continuation.
-                tokio::spawn(async move {
-                    engine
-                        .launch_rule(
-                            "cost",
-                            vec![partial_physical_to_value(&plan)],
-                            value_to_cost,
-                        )
-                        .await
-                });
+                // tokio::spawn(async move {
+                //     engine
+                //         .launch_rule(
+                //             "cost",
+                //             vec![partial_physical_to_value(&plan)],
+                //             value_to_cost,
+                //         )
+                //         .await
+                // });
             }
         }
     }

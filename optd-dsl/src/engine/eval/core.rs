@@ -153,7 +153,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::test_utils::{MockGenerator, evaluate_and_collect, int, lit_expr, string};
+    use crate::engine::Continuation;
+    use crate::engine::test_utils::{
+        Harness, evaluate_and_collect, evaluate_and_collect_with_custom_k, int, lit_expr, string,
+    };
     use crate::{
         analyzer::{
             context::Context,
@@ -168,10 +171,11 @@ mod tests {
     async fn test_literal_evaluation() {
         let ctx = Context::default();
         let engine = Engine::new(ctx);
+        let harness = Harness::new();
 
         // Create a literal expression
         let literal_expr = Arc::new(Expr::CoreExpr(CoreData::Literal(int(42))));
-        let results = evaluate_and_collect(literal_expr, engine).await;
+        let results = evaluate_and_collect(literal_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -186,7 +190,7 @@ mod tests {
     /// Test evaluation of array expressions
     #[tokio::test]
     async fn test_array_evaluation() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -197,7 +201,7 @@ mod tests {
             lit_expr(int(3)),
         ])));
 
-        let results = evaluate_and_collect(array_expr, engine).await;
+        let results = evaluate_and_collect(array_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -224,7 +228,7 @@ mod tests {
     /// Test evaluation of tuple expressions
     #[tokio::test]
     async fn test_tuple_evaluation() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -235,7 +239,7 @@ mod tests {
             lit_expr(Literal::Bool(true)),
         ])));
 
-        let results = evaluate_and_collect(tuple_expr, engine).await;
+        let results = evaluate_and_collect(tuple_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -262,7 +266,7 @@ mod tests {
     /// Test evaluation of struct expressions
     #[tokio::test]
     async fn test_struct_evaluation() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -272,7 +276,7 @@ mod tests {
             vec![lit_expr(int(10)), lit_expr(int(20))],
         )));
 
-        let results = evaluate_and_collect(struct_expr, engine).await;
+        let results = evaluate_and_collect(struct_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -296,7 +300,7 @@ mod tests {
     /// Test evaluation of map expressions
     #[tokio::test]
     async fn test_map_evaluation() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -307,7 +311,7 @@ mod tests {
             (lit_expr(string("c")), lit_expr(int(3))),
         ])));
 
-        let results = evaluate_and_collect(map_expr, engine).await;
+        let results = evaluate_and_collect(map_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -361,7 +365,7 @@ mod tests {
     /// Test evaluation of function expressions
     #[tokio::test]
     async fn test_function_evaluation() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -371,7 +375,7 @@ mod tests {
             lit_expr(int(42)), // Just returns 42 regardless of argument
         ))));
 
-        let results = evaluate_and_collect(fn_expr, engine).await;
+        let results = evaluate_and_collect(fn_expr, engine, harness).await;
 
         // Check that we got a function value
         assert_eq!(results.len(), 1);
@@ -386,14 +390,14 @@ mod tests {
     /// Test evaluation of null expressions
     #[tokio::test]
     async fn test_null_evaluation() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
         // Create a null expression
         let null_expr = Arc::new(Expr::CoreExpr(CoreData::Null));
 
-        let results = evaluate_and_collect(null_expr, engine).await;
+        let results = evaluate_and_collect(null_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -408,7 +412,19 @@ mod tests {
     /// Test evaluation of fail expressions
     #[tokio::test]
     async fn test_fail_evaluation() {
-        let mock_gen = MockGenerator::new();
+        let return_k: Continuation<Value, Result<Value, String>> = Arc::new(move |value| {
+            Box::pin(async move {
+                match value {
+                    Value(CoreData::Fail(boxed_value)) => match boxed_value.0 {
+                        CoreData::Literal(Literal::String(msg)) => Err(msg),
+                        _ => panic!("Expected string message in fail"),
+                    },
+                    value => Ok(value),
+                }
+            })
+        });
+
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -417,18 +433,12 @@ mod tests {
             Expr::CoreVal(Value(CoreData::Literal(string("error message")))),
         )))));
 
-        let results = evaluate_and_collect(fail_expr, engine).await;
+        let results =
+            evaluate_and_collect_with_custom_k(fail_expr, engine, harness, return_k).await;
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
-            CoreData::Fail(boxed_value) => match &boxed_value.0 {
-                CoreData::Literal(Literal::String(msg)) => {
-                    assert_eq!(msg, "error message");
-                }
-                _ => panic!("Expected string message in fail"),
-            },
-            _ => panic!("Expected fail"),
-        }
+        let error_msg = results[0].as_ref().unwrap_err().as_str();
+        assert_eq!(error_msg, "error message");
     }
 }

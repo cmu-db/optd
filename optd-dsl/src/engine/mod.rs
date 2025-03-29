@@ -21,7 +21,7 @@ pub use utils::*;
 mod test_utils;
 
 pub enum EngineResponse<O> {
-    Return(Value, fn(&Value) -> O),
+    Return(Value, Continuation<Value, O>),
     YieldGroup(GroupId, Continuation<Value, EngineResponse<O>>),
     YieldGoal(Goal, Continuation<Value, EngineResponse<O>>),
     Fail(String),
@@ -109,7 +109,7 @@ impl Engine {
         self,
         name: &str,
         values: Vec<Value>,
-        transform: fn(&Value) -> O,
+        return_k: Continuation<Value, O>,
     ) -> EngineResponse<O>
     where
         O: Send + 'static,
@@ -119,13 +119,14 @@ impl Engine {
         self.evaluate(
             rule_call,
             Arc::new(move |result| {
+                let return_k = return_k.clone();
                 Box::pin(async move {
                     match result {
                         Value(CoreData::Fail(boxed_value)) => match boxed_value.0 {
                             CoreData::Literal(Literal::String(msg)) => EngineResponse::Fail(msg),
                             _ => panic!("Expected string message in fail"),
                         },
-                        value => EngineResponse::Return(value, transform),
+                        value => EngineResponse::Return(value, return_k),
                     }
                 })
             }),
@@ -150,30 +151,4 @@ impl Engine {
 
         Expr::Call(rule_name_expr.into(), arg_exprs).into()
     }
-
-    // /// Helper function to process values and handle failures
-    // ///
-    // /// This abstracts the common pattern of handling failures and value transformation
-    // /// for all rule application functions.
-    // ///
-    // /// # Parameters
-    // /// * `value` - The value from rule evaluation
-    // /// * `transform` - Function to transform value to desired type
-    // /// * `context` - Context string for error messages
-    // /// * `k` - Continuation to call with transformed value on success
-    // async fn process_result<T, F>(value: Value, transform: F) -> T
-    // where
-    //     F: FnOnce(&Value) -> T,
-    // {
-    //     match value.0 {
-    //         CoreData::Fail(boxed_msg) => {
-    //             if let CoreData::Literal(Literal::String(error_message)) = boxed_msg.0 {
-    //                 Err(error_message)
-    //             } else {
-    //                 panic!("Fail expression must evaluate to a string message");
-    //             }
-    //         }
-    //         _ => Ok(transform(&value)),
-    //     }
-    // }
 }

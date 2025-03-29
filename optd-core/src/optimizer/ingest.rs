@@ -82,15 +82,15 @@ impl<M: Memoize> Optimizer<M> {
                         //     });
 
                         // Launch the derive properties operation with the continuation.
-                        tokio::spawn(async move {
-                            engine
-                                .launch_rule(
-                                    "derive",
-                                    vec![partial_logical_to_value(&expr.into())],
-                                    value_to_logical_properties,
-                                )
-                                .await
-                        });
+                        // tokio::spawn(async move {
+                        //     engine
+                        //         .launch_rule(
+                        //             "derive",
+                        //             vec![partial_logical_to_value(&expr.into())],
+                        //             value_to_logical_properties,
+                        //         )
+                        //         .await
+                        // });
 
                         job_id
                     })

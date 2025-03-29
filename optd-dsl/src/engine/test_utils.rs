@@ -3,14 +3,14 @@ use crate::analyzer::hir::{
     PhysicalOp, Value,
 };
 use crate::engine::Engine;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use super::EngineResponse;
+use super::{Continuation, EngineResponse, eval};
 
 /// A configurable mock generator for testing the evaluation engine.
 #[derive(Clone)]
-pub struct MockGenerator {
+pub struct Harness {
     /// Maps group IDs to their materialized values.
     group_mappings: Arc<Mutex<HashMap<String, Vec<Value>>>>,
 
@@ -18,7 +18,7 @@ pub struct MockGenerator {
     goal_mappings: Arc<Mutex<HashMap<String, Vec<Value>>>>,
 }
 
-impl MockGenerator {
+impl Harness {
     /// Creates a new empty mock generator.
     pub fn new() -> Self {
         Self {
@@ -40,37 +40,45 @@ impl MockGenerator {
         let mut mappings = self.goal_mappings.lock().unwrap();
         mappings.entry(key).or_default().push(value);
     }
+
+    async fn fork_at_group<T>(
+        &self,
+        group_id: GroupId,
+        k: Continuation<Value, EngineResponse<T>>,
+        queue: &mut VecDeque<EngineResponse<T>>,
+    ) where
+        T: Send + 'static,
+    {
+        let key = format!("{:?}", group_id);
+        let values = {
+            let mappings = self.group_mappings.lock().unwrap();
+            mappings.get(&key).cloned().unwrap_or_default()
+        };
+        for value in values {
+            queue.push_back(k(value.clone()).await);
+        }
+    }
+
+    async fn fork_at_goal<T>(
+        &self,
+        goal: &Goal,
+        k: Continuation<Value, EngineResponse<T>>,
+        queue: &mut VecDeque<EngineResponse<T>>,
+    ) where
+        T: Send + 'static,
+    {
+        let key = format!("{:?}:{:?}", goal.group_id, goal.properties);
+
+        let values = {
+            let mappings = self.goal_mappings.lock().unwrap();
+            mappings.get(&key).cloned().unwrap_or_default()
+        };
+
+        for value in values {
+            queue.push_back(k(value.clone()).await);
+        }
+    }
 }
-
-// impl Generator for MockGenerator {
-// async fn yield_group(&self, group_id: GroupId, k: Continuation<Value, EngineResponse<O>>) {
-//     let key = format!("{:?}", group_id);
-//     let values = {
-//         let mappings = self.group_mappings.lock().unwrap();
-//         mappings.get(&key).cloned().unwrap_or_default()
-//     };
-
-//     for value in values {
-//         k(value.clone()).await;
-//     }
-// }
-
-// async fn yield_goal(&self, physical_goal: &Goal, k: Continuation<Value, EngineResponse<O>>) {
-//     let key = format!(
-//         "{:?}:{:?}",
-//         physical_goal.group_id, physical_goal.properties
-//     );
-
-//     let values = {
-//         let mappings = self.goal_mappings.lock().unwrap();
-//         mappings.get(&key).cloned().unwrap_or_default()
-//     };
-
-//     for value in values {
-//         k(value.clone()).await;
-//     }
-// }
-// }
 
 /// Helper to create a literal expression.
 pub fn lit_expr(literal: Literal) -> Arc<Expr> {
@@ -182,23 +190,55 @@ pub fn create_physical_operator(tag: &str, data: Vec<Value>, children: Vec<Value
     )))
 }
 
-fn value_to_value(value: &Value) -> Value {
-    value.clone()
-}
-
 /// Runs a test by evaluating the expression and collecting all results.
-pub async fn evaluate_and_collect(expr: Arc<Expr>, engine: Engine) -> Vec<Value> {
-    let results = Arc::new(Mutex::new(Vec::new()));
-    let results_clone = results.clone();
+pub async fn evaluate_and_collect_with_custom_k<T>(
+    expr: Arc<Expr>,
+    engine: Engine,
+    harness: Harness,
+    return_k: Continuation<Value, T>,
+) -> Vec<T>
+where
+    T: Send + 'static,
+{
+    let mut results = Vec::new();
 
+    let mut queue = VecDeque::new();
     let response = engine
         .evaluate(
             expr,
             Arc::new(move |value| {
-                Box::pin(async move { EngineResponse::Return(value, value_to_value) })
+                let return_k = return_k.clone();
+                Box::pin(async move { EngineResponse::Return(value, return_k) })
             }),
         )
         .await;
 
-    Arc::try_unwrap(results).unwrap().into_inner().unwrap()
+    queue.push_back(response);
+
+    while let Some(response) = queue.pop_front() {
+        match response {
+            EngineResponse::Return(value, return_k) => {
+                println!("Here: {:?}", value);
+                results.push(return_k(value).await);
+            }
+            EngineResponse::YieldGroup(group_id, continue_k) => {
+                harness
+                    .fork_at_group(group_id, continue_k, &mut queue)
+                    .await;
+            }
+            EngineResponse::YieldGoal(goal, continue_k) => {
+                harness.fork_at_goal(&goal, continue_k, &mut queue).await;
+            }
+            EngineResponse::Fail(msg) => todo!(),
+        }
+    }
+
+    results
+}
+
+/// Runs a test by evaluating the expression and collecting all results.
+pub async fn evaluate_and_collect(expr: Arc<Expr>, engine: Engine, harness: Harness) -> Vec<Value> {
+    let return_k: Continuation<Value, Value> = Arc::new(|value| Box::pin(async move { value }));
+
+    evaluate_and_collect_with_custom_k(expr, engine, harness, return_k).await
 }

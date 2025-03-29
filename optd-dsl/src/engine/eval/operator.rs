@@ -22,7 +22,6 @@ pub(crate) async fn evaluate_logical_operator<O>(
 ) -> EngineResponse<O>
 where
     O: Send + 'static,
-
 {
     match op.0 {
         // For unmaterialized operators, directly call the continuation with the unmaterialized
@@ -62,7 +61,6 @@ pub(crate) async fn evaluate_physical_operator<O>(
 ) -> EngineResponse<O>
 where
     O: Send + 'static,
-
 {
     match op.0 {
         // For unmaterialized operators, continue with the unmaterialized value.
@@ -108,7 +106,6 @@ async fn evaluate_operator<O>(
 ) -> EngineResponse<O>
 where
     O: Send + 'static,
-
 {
     // First evaluate all operator data parameters.
     evaluate_sequence(
@@ -151,8 +148,7 @@ mod tests {
     use crate::engine::{
         Engine,
         test_utils::{
-            MockGenerator, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val,
-            string,
+            Harness, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val, string,
         },
     };
     use std::sync::Arc;
@@ -160,7 +156,7 @@ mod tests {
     /// Test evaluation of a materialized logical operator
     #[tokio::test]
     async fn test_materialized_logical_operator() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -185,7 +181,7 @@ mod tests {
         let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(op)));
 
         // Evaluate the expression
-        let results = evaluate_and_collect(logical_op_expr, engine).await;
+        let results = evaluate_and_collect(logical_op_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -231,7 +227,7 @@ mod tests {
     /// Test evaluation of an unmaterialized logical operator
     #[tokio::test]
     async fn test_unmaterialized_logical_operator() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -243,7 +239,7 @@ mod tests {
         let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(op)));
 
         // Evaluate the expression
-        let results = evaluate_and_collect(logical_op_expr, engine).await;
+        let results = evaluate_and_collect(logical_op_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -259,7 +255,7 @@ mod tests {
     /// Test evaluation of a materialized physical operator
     #[tokio::test]
     async fn test_materialized_physical_operator() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -284,7 +280,7 @@ mod tests {
         let physical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Physical(op)));
 
         // Evaluate the expression
-        let results = evaluate_and_collect(physical_op_expr, engine).await;
+        let results = evaluate_and_collect(physical_op_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -330,7 +326,7 @@ mod tests {
     /// Test evaluation of an unmaterialized physical operator
     #[tokio::test]
     async fn test_unmaterialized_physical_operator() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -347,7 +343,7 @@ mod tests {
         let physical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Physical(op)));
 
         // Evaluate the expression
-        let results = evaluate_and_collect(physical_op_expr, engine).await;
+        let results = evaluate_and_collect(physical_op_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -371,7 +367,7 @@ mod tests {
     /// Test evaluation of a logical operator with nested operators as children
     #[tokio::test]
     async fn test_nested_logical_operators() {
-        let mock_gen = MockGenerator::new();
+        let harness = Harness::new();
         let ctx = Context::default();
         let engine = Engine::new(ctx);
 
@@ -398,7 +394,7 @@ mod tests {
         let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(op)));
 
         // Evaluate the expression
-        let results = evaluate_and_collect(logical_op_expr, engine).await;
+        let results = evaluate_and_collect(logical_op_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
