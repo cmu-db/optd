@@ -43,7 +43,7 @@ impl MockGenerator {
 }
 
 // impl Generator for MockGenerator {
-// async fn yield_group(&self, group_id: GroupId, k: Continuation<Value, EngineResponse>) {
+// async fn yield_group(&self, group_id: GroupId, k: Continuation<Value, EngineResponse<O>>) {
 //     let key = format!("{:?}", group_id);
 //     let values = {
 //         let mappings = self.group_mappings.lock().unwrap();
@@ -55,7 +55,7 @@ impl MockGenerator {
 //     }
 // }
 
-// async fn yield_goal(&self, physical_goal: &Goal, k: Continuation<Value, EngineResponse>) {
+// async fn yield_goal(&self, physical_goal: &Goal, k: Continuation<Value, EngineResponse<O>>) {
 //     let key = format!(
 //         "{:?}:{:?}",
 //         physical_goal.group_id, physical_goal.properties
@@ -182,6 +182,10 @@ pub fn create_physical_operator(tag: &str, data: Vec<Value>, children: Vec<Value
     )))
 }
 
+fn value_to_value(value: &Value) -> Value {
+    value.clone()
+}
+
 /// Runs a test by evaluating the expression and collecting all results.
 pub async fn evaluate_and_collect(expr: Arc<Expr>, engine: Engine) -> Vec<Value> {
     let results = Arc::new(Mutex::new(Vec::new()));
@@ -190,7 +194,9 @@ pub async fn evaluate_and_collect(expr: Arc<Expr>, engine: Engine) -> Vec<Value>
     let response = engine
         .evaluate(
             expr,
-            Arc::new(move |value| Box::pin(async move { EngineResponse::Return(value) })),
+            Arc::new(move |value| {
+                Box::pin(async move { EngineResponse::Return(value, value_to_value) })
+            }),
         )
         .await;
 

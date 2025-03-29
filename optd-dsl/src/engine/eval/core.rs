@@ -16,12 +16,13 @@ use std::sync::Arc;
 /// * `data` - The core expression data to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_core_expr(
+pub(crate) async fn evaluate_core_expr<O>(
     data: CoreData<Arc<Expr>>,
     engine: Engine,
-    k: Continuation<Value, EngineResponse>,
-) -> EngineResponse
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
 where
+    O: Send + 'static,
 {
     match data {
         Literal(lit) => {
@@ -56,14 +57,15 @@ where
 /// * `constructor` - Function to construct the appropriate collection type.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-async fn evaluate_collection<F>(
+async fn evaluate_collection<F, O>(
     items: Vec<Arc<Expr>>,
     constructor: F,
     engine: Engine,
-    k: Continuation<Value, EngineResponse>,
-) -> EngineResponse
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
 where
     F: FnOnce(Vec<Value>) -> CoreData<Value> + Clone + Send + Sync + 'static,
+    O: Send + 'static,
 {
     evaluate_sequence(
         items,
@@ -85,12 +87,13 @@ where
 /// * `items` - The key-value pairs to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-async fn evaluate_map(
+async fn evaluate_map<O>(
     items: Vec<(Arc<Expr>, Arc<Expr>)>,
     engine: Engine,
-    k: Continuation<Value, EngineResponse>,
-) -> EngineResponse
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
 where
+    O: Send + 'static,
 {
     // Extract keys and values.
     let (keys, values): (Vec<Arc<Expr>>, Vec<Arc<Expr>>) = items.into_iter().unzip();
@@ -127,12 +130,13 @@ where
 /// * `msg` - The message expression to evaluate
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive evaluation results
-async fn evaluate_fail(
+async fn evaluate_fail<O>(
     msg: Arc<Expr>,
     engine: Engine,
-    k: Continuation<Value, EngineResponse>,
-) -> EngineResponse
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
 where
+    O: Send + 'static,
 {
     engine
         .evaluate(

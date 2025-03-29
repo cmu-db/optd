@@ -20,10 +20,10 @@ pub use utils::*;
 #[cfg(test)]
 mod test_utils;
 
-pub enum EngineResponse {
-    Return(Value),
-    YieldGroup(GroupId, Continuation<Value, EngineResponse>),
-    YieldGoal(Goal, Continuation<Value, EngineResponse>),
+pub enum EngineResponse<O> {
+    Return(Value, fn(&Value) -> O),
+    YieldGroup(GroupId, Continuation<Value, EngineResponse<O>>),
+    YieldGoal(Goal, Continuation<Value, EngineResponse<O>>),
     Fail(String),
 }
 
@@ -61,11 +61,14 @@ impl Engine {
     /// * `self` - The evaluation engine (owned)
     /// * `expr` - The expression to evaluate
     /// * `k` - The continuation to receive each evaluation result
-    pub fn evaluate(
+    pub fn evaluate<O>(
         self,
         expr: Arc<Expr>,
-        k: Continuation<Value, EngineResponse>,
-    ) -> impl Future<Output = EngineResponse> + Send {
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> impl Future<Output = EngineResponse<O>> + Send
+    where
+        O: Send + 'static,
+    {
         Box::pin(async move {
             match expr.as_ref() {
                 Expr::PatternMatch(expr, match_arms) => {
@@ -101,14 +104,16 @@ impl Engine {
         })
     }
 
-    /// Launches a rule application with the given values and transformation, and passes everything
-    /// to the continuation `k`.
-    pub async fn launch_rule<T>(
+    /// Launches a rule application with the given values and transformation.
+    pub async fn launch_rule<O>(
         self,
         name: &str,
         values: Vec<Value>,
-        transform: fn(&Value) -> T,
-    ) -> EngineResponse {
+        transform: fn(&Value) -> O,
+    ) -> EngineResponse<O>
+    where
+        O: Send + 'static,
+    {
         let rule_call = self.create_rule_call(name, values);
 
         self.evaluate(
@@ -120,7 +125,7 @@ impl Engine {
                             CoreData::Literal(Literal::String(msg)) => EngineResponse::Fail(msg),
                             _ => panic!("Expected string message in fail"),
                         },
-                        value => EngineResponse::Return(value),
+                        value => EngineResponse::Return(value, transform),
                     }
                 })
             }),

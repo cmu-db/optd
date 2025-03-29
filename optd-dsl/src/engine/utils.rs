@@ -22,11 +22,14 @@ pub type Continuation<I, O> = Arc<dyn Fn(I) -> PinnedFuture<O> + Send + Sync + '
 /// * `exprs` - The expressions to evaluate
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive all evaluated values
-pub(super) fn evaluate_sequence(
+pub(super) fn evaluate_sequence<O>(
     exprs: Vec<Arc<Expr>>,
     engine: Engine,
-    k: Continuation<Vec<Value>, EngineResponse>,
-) -> PinnedFuture<EngineResponse> {
+    k: Continuation<Vec<Value>, EngineResponse<O>>,
+) -> PinnedFuture<EngineResponse<O>>
+where
+    O: Send + 'static,
+{
     let exprs_len = exprs.len();
     evaluate_sequence_internal(exprs, 0, Vec::with_capacity(exprs_len), engine, k)
 }
@@ -39,14 +42,15 @@ pub(super) fn evaluate_sequence(
 /// * `values` - Accumulated expression values
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive all evaluated values
-fn evaluate_sequence_internal(
+fn evaluate_sequence_internal<O>(
     exprs: Vec<Arc<Expr>>,
     index: usize,
     values: Vec<Value>,
     engine: Engine,
-    k: Continuation<Vec<Value>, EngineResponse>,
-) -> PinnedFuture<EngineResponse>
+    k: Continuation<Vec<Value>, EngineResponse<O>>,
+) -> PinnedFuture<EngineResponse<O>>
 where
+    O: Send + 'static,
 {
     Box::pin(async move {
         if index >= exprs.len() {

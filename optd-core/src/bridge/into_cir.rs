@@ -153,7 +153,7 @@ fn convert_values_to_properties_data(values: &[Value]) -> Vec<PropertiesData> {
 /// # Panics
 ///
 /// Panics if the [`Value`] cannot be converted to [`OperatorData`], such as a [`Unit`] literal.
-fn value_to_operator_data(value: &Value) -> OperatorData {
+fn value_to_operator_data(value: &Value) -> EngineResponseperatorData {
     match &value.0 {
         Literal(constant) => match constant {
             Int64(i) => OperatorData::Int64(*i),

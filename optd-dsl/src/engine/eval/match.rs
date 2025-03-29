@@ -29,13 +29,14 @@ type MatchResult = (Value, Option<Context>);
 /// * `match_arms` - The list of pattern-expression pairs to try.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_pattern_match(
+pub(crate) async fn evaluate_pattern_match<O>(
     expr: Arc<Expr>,
     match_arms: Vec<MatchArm>,
     engine: Engine,
-    k: Continuation<Value, EngineResponse>,
-) -> EngineResponse
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
 where
+    O: Send + 'static,
 {
     if match_arms.is_empty() {
         panic!("Pattern match exhausted: no patterns provided");
@@ -66,13 +67,14 @@ where
 /// * `match_arms` - The list of pattern-expression pairs to try.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-fn try_match_arms(
+fn try_match_arms<O>(
     value: Value,
     match_arms: Vec<MatchArm>,
     engine: Engine,
-    k: Continuation<Value, EngineResponse>,
-) -> PinnedFuture<EngineResponse>
+    k: Continuation<Value, EngineResponse<O>>,
+) -> PinnedFuture<EngineResponse<O>>
 where
+    O: Send + 'static,
 {
     Box::pin(async move {
         if match_arms.is_empty() {
@@ -119,12 +121,15 @@ where
 /// * `ctx` - The current context to extend with bindings.
 /// * `gen` - The generator to resolve references.
 /// * `k` - The continuation to receive the match result.
-fn match_pattern(
+fn match_pattern<O>(
     value: Value,
     pattern: Pattern,
     ctx: Context,
-    k: Continuation<MatchResult, EngineResponse>,
-) -> PinnedFuture<EngineResponse> {
+    k: Continuation<MatchResult, EngineResponse<O>>,
+) -> PinnedFuture<EngineResponse<O>>
+where
+    O: Send + 'static,
+{
     Box::pin(async move {
         match (pattern, &value.0) {
             // Simple patterns.
@@ -200,14 +205,15 @@ fn match_pattern(
 }
 
 /// Matches a binding pattern.
-async fn match_bind_pattern(
+async fn match_bind_pattern<O>(
     value: Value,
     ident: String,
     inner_pattern: Pattern,
     ctx: Context,
-    k: Continuation<MatchResult, EngineResponse>,
-) -> EngineResponse
+    k: Continuation<MatchResult, EngineResponse<O>>,
+) -> EngineResponse<O>
 where
+    O: Send + 'static,
 {
     // First check if the inner pattern matches without binding.
     match_pattern(
@@ -232,14 +238,15 @@ where
 }
 
 /// Matches an array decomposition pattern.
-async fn match_array_pattern(
+async fn match_array_pattern<O>(
     head_pattern: Pattern,
     tail_pattern: Pattern,
     arr: &[Value],
     ctx: Context,
-    k: Continuation<MatchResult, EngineResponse>,
-) -> EngineResponse
+    k: Continuation<MatchResult, EngineResponse<O>>,
+) -> EngineResponse<O>
 where
+    O: Send + 'static,
 {
     // Split array into head and tail.
     let head = arr[0].clone();
@@ -298,14 +305,15 @@ where
 }
 
 /// Matches a struct pattern.
-async fn match_struct_pattern(
+async fn match_struct_pattern<O>(
     pat_name: String,
     field_patterns: Vec<Pattern>,
     field_values: &[Value],
     ctx: Context,
-    k: Continuation<MatchResult, EngineResponse>,
-) -> EngineResponse
+    k: Continuation<MatchResult, EngineResponse<O>>,
+) -> EngineResponse<O>
 where
+    O: Send + 'static,
 {
     // Match fields sequentially.
     match_components(
@@ -344,14 +352,15 @@ where
 }
 
 /// Matches a materialized operator.
-async fn match_materialized_operator(
+async fn match_materialized_operator<O>(
     is_logical: bool,
     op_pattern: Operator<Pattern>,
     operator: Operator<Value>,
     ctx: Context,
-    k: Continuation<MatchResult, EngineResponse>,
-) -> EngineResponse
+    k: Continuation<MatchResult, EngineResponse<O>>,
+) -> EngineResponse<O>
 where
+    O: Send + 'static,
 {
     // Create all patterns and values to match.
     let data_patterns = op_pattern.data;
@@ -430,13 +439,14 @@ where
 /// * `ctx` - The current context to extend with bindings.
 /// * `generator` - The generator to resolve references.
 /// * `k` - The continuation to receive the vector of match results.
-async fn match_components(
+async fn match_components<O>(
     patterns: Vec<Pattern>,
     values: Vec<Value>,
     ctx: Context,
-    k: Continuation<Vec<MatchResult>, EngineResponse>,
-) -> EngineResponse
+    k: Continuation<Vec<MatchResult>, EngineResponse<O>>,
+) -> EngineResponse<O>
 where
+    O: Send + 'static,
 {
     // Start the sequential matching process with an empty results vector.
     match_components_sequentially(patterns, values, 0, ctx, Vec::new(), k).await
@@ -446,15 +456,16 @@ where
 ///
 /// This function will process all components regardless of match success, collecting results for
 /// each component to allow proper reconstruction of arrays/structs.
-fn match_components_sequentially(
+fn match_components_sequentially<O>(
     patterns: Vec<Pattern>,
     values: Vec<Value>,
     index: usize,
     ctx: Context,
     results: Vec<MatchResult>,
-    k: Continuation<Vec<MatchResult>, EngineResponse>,
-) -> PinnedFuture<EngineResponse>
+    k: Continuation<Vec<MatchResult>, EngineResponse<O>>,
+) -> PinnedFuture<EngineResponse<O>>
 where
+    O: Send + 'static,
 {
     Box::pin(async move {
         // Base case: all components matched.
