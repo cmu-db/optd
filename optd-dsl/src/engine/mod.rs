@@ -110,13 +110,13 @@ impl Engine {
     }
 
     /// Launches a rule application with the given values and transformation.
-    /// 
+    ///
     /// # Parameters
     /// * `self` - The evaluation engine (owned).
     /// * `name` - The name of the rule to apply.
     /// * `values` - The values to pass to the rule.
     /// * `return_k` - The continuation to receive the result of the rule application.
-    /// 
+    ///
     /// # Returns
     /// The result of the rule application.
     pub async fn launch_rule<O>(
