@@ -16,7 +16,6 @@ use optd_dsl::engine::Engine;
 use std::collections::{HashMap, HashSet};
 
 mod egest;
-mod generator;
 mod handlers;
 mod ingest;
 mod memo;
