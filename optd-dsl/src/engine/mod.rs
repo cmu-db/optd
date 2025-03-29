@@ -1,6 +1,6 @@
 use crate::analyzer::{
     context::Context,
-    hir::{CoreData, Expr, GroupId, Literal, Value},
+    hir::{CoreData, Expr, Goal, GroupId, Literal, Value},
 };
 use eval::core::evaluate_core_expr;
 use eval::expr::{
@@ -20,10 +20,10 @@ pub use utils::*;
 #[cfg(test)]
 mod test_utils;
 
-pub enum EngineResponse<O> {
-    Return(Value, fn(&Value) -> O),
-    YieldGroup(GroupId, Continuation<Value, O>),
-    YieldGoal(GroupId, Continuation<Value, O>),
+pub enum EngineResponse {
+    Return(Value),
+    YieldGroup(GroupId, Continuation<Value, EngineResponse>),
+    YieldGoal(Goal, Continuation<Value, EngineResponse>),
     Fail(String),
 }
 
@@ -61,14 +61,11 @@ impl Engine {
     /// * `self` - The evaluation engine (owned)
     /// * `expr` - The expression to evaluate
     /// * `k` - The continuation to receive each evaluation result
-    pub fn evaluate<O>(
+    pub fn evaluate(
         self,
         expr: Arc<Expr>,
-        k: Continuation<Value, O>,
-    ) -> impl Future<Output = O> + Send
-    where
-        O: Send + 'static,
-    {
+        k: Continuation<Value, EngineResponse>,
+    ) -> impl Future<Output = EngineResponse> + Send {
         Box::pin(async move {
             match expr.as_ref() {
                 Expr::PatternMatch(expr, match_arms) => {
@@ -111,16 +108,21 @@ impl Engine {
         name: &str,
         values: Vec<Value>,
         transform: fn(&Value) -> T,
-    ) -> Result<T, String>
-    where
-        T: Send + 'static,
-    {
+    ) -> EngineResponse {
         let rule_call = self.create_rule_call(name, values);
 
         self.evaluate(
             rule_call,
             Arc::new(move |result| {
-                Box::pin(async move { Self::process_result(result, transform).await })
+                Box::pin(async move {
+                    match result {
+                        Value(CoreData::Fail(boxed_value)) => match boxed_value.0 {
+                            CoreData::Literal(Literal::String(msg)) => EngineResponse::Fail(msg),
+                            _ => panic!("Expected string message in fail"),
+                        },
+                        value => EngineResponse::Return(value),
+                    }
+                })
             }),
         )
         .await
@@ -144,29 +146,29 @@ impl Engine {
         Expr::Call(rule_name_expr.into(), arg_exprs).into()
     }
 
-    /// Helper function to process values and handle failures
-    ///
-    /// This abstracts the common pattern of handling failures and value transformation
-    /// for all rule application functions.
-    ///
-    /// # Parameters
-    /// * `value` - The value from rule evaluation
-    /// * `transform` - Function to transform value to desired type
-    /// * `context` - Context string for error messages
-    /// * `k` - Continuation to call with transformed value on success
-    async fn process_result<T, F>(value: Value, transform: F) -> Result<T, String>
-    where
-        F: FnOnce(&Value) -> T,
-    {
-        match value.0 {
-            CoreData::Fail(boxed_msg) => {
-                if let CoreData::Literal(Literal::String(error_message)) = boxed_msg.0 {
-                    Err(error_message)
-                } else {
-                    panic!("Fail expression must evaluate to a string message");
-                }
-            }
-            _ => Ok(transform(&value)),
-        }
-    }
+    // /// Helper function to process values and handle failures
+    // ///
+    // /// This abstracts the common pattern of handling failures and value transformation
+    // /// for all rule application functions.
+    // ///
+    // /// # Parameters
+    // /// * `value` - The value from rule evaluation
+    // /// * `transform` - Function to transform value to desired type
+    // /// * `context` - Context string for error messages
+    // /// * `k` - Continuation to call with transformed value on success
+    // async fn process_result<T, F>(value: Value, transform: F) -> T
+    // where
+    //     F: FnOnce(&Value) -> T,
+    // {
+    //     match value.0 {
+    //         CoreData::Fail(boxed_msg) => {
+    //             if let CoreData::Literal(Literal::String(error_message)) = boxed_msg.0 {
+    //                 Err(error_message)
+    //             } else {
+    //                 panic!("Fail expression must evaluate to a string message");
+    //             }
+    //         }
+    //         _ => Ok(transform(&value)),
+    //     }
+    // }
 }

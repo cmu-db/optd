@@ -28,7 +28,7 @@ use optd_dsl::analyzer::hir::{Goal, GroupId, Value};
 //     /// # Parameters
 //     /// * `group_id` - The ID of the group to expand
 //     /// * `k` - The continuation to process each expression in the group
-//     async fn yield_group(&self, group_id: GroupId, k: Continuation<Value, O>) {
+//     async fn yield_group(&self, group_id: GroupId, k: Continuation<Value, EngineResponse>) {
 //         // Create a channel to receive expressions from the optimizer
 //         let (tx, mut rx) = mpsc::channel(0);
 
@@ -62,7 +62,7 @@ use optd_dsl::analyzer::hir::{Goal, GroupId, Value};
 //     /// # Parameters
 //     /// * `physical_goal` - The goal describing required properties
 //     /// * `k` - The continuation to process each implementation
-//     async fn yield_goal(&self, physical_goal: &Goal, k: Continuation<Value, O>) {
+//     async fn yield_goal(&self, physical_goal: &Goal, k: Continuation<Value, EngineResponse>) {
 //         // Create a channel to receive optimized expressions from the optimizer
 //         let (tx, mut rx) = mpsc::channel(0);
 

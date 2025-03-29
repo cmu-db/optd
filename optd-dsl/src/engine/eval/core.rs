@@ -1,7 +1,7 @@
 use super::operator::{evaluate_logical_operator, evaluate_physical_operator};
 use crate::analyzer::hir::{CoreData, Expr, Value};
-use crate::engine::Continuation;
 use crate::engine::utils::evaluate_sequence;
+use crate::engine::{Continuation, EngineResponse};
 use crate::{capture, engine::Engine};
 use CoreData::*;
 use std::sync::Arc;
@@ -16,13 +16,12 @@ use std::sync::Arc;
 /// * `data` - The core expression data to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_core_expr<O>(
+pub(crate) async fn evaluate_core_expr(
     data: CoreData<Arc<Expr>>,
     engine: Engine,
-    k: Continuation<Value, O>,
-) -> O
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     match data {
         Literal(lit) => {
@@ -57,14 +56,13 @@ where
 /// * `constructor` - Function to construct the appropriate collection type.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-async fn evaluate_collection<F, O>(
+async fn evaluate_collection<F>(
     items: Vec<Arc<Expr>>,
     constructor: F,
     engine: Engine,
-    k: Continuation<Value, O>,
-) -> O
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
     F: FnOnce(Vec<Value>) -> CoreData<Value> + Clone + Send + Sync + 'static,
 {
     evaluate_sequence(
@@ -87,13 +85,12 @@ where
 /// * `items` - The key-value pairs to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-async fn evaluate_map<O>(
+async fn evaluate_map(
     items: Vec<(Arc<Expr>, Arc<Expr>)>,
     engine: Engine,
-    k: Continuation<Value, O>,
-) -> O
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     // Extract keys and values.
     let (keys, values): (Vec<Arc<Expr>>, Vec<Arc<Expr>>) = items.into_iter().unzip();
@@ -130,9 +127,12 @@ where
 /// * `msg` - The message expression to evaluate
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive evaluation results
-async fn evaluate_fail<O>(msg: Arc<Expr>, engine: Engine, k: Continuation<Value, O>) -> O
+async fn evaluate_fail(
+    msg: Arc<Expr>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     engine
         .evaluate(

@@ -1,6 +1,6 @@
 use super::{binary::eval_binary_op, unary::eval_unary_op};
 use crate::analyzer::hir::{BinOp, CoreData, Expr, FunKind, Identifier, Literal, UnaryOp, Value};
-use crate::engine::Continuation;
+use crate::engine::{Continuation, EngineResponse};
 use crate::{
     capture,
     engine::{Engine, utils::evaluate_sequence},
@@ -21,15 +21,14 @@ use std::sync::Arc;
 /// * `else_expr` - The expression to evaluate if condition is false.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_if_then_else<O>(
+pub(crate) async fn evaluate_if_then_else(
     cond: Arc<Expr>,
     then_expr: Arc<Expr>,
     else_expr: Arc<Expr>,
     engine: Engine,
-    k: Continuation<Value, O>,
-) -> O
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     // First evaluate the condition
     engine
@@ -66,15 +65,14 @@ where
 /// * `after` - The expression to evaluate in the updated context.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_let_binding<O>(
+pub(crate) async fn evaluate_let_binding(
     ident: String,
     assignee: Arc<Expr>,
     after: Arc<Expr>,
     engine: Engine,
-    k: Continuation<Value, O>,
-) -> O
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     // Evaluate the assignee first.
     engine
@@ -106,27 +104,24 @@ where
 /// * `right` - The right operand
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive evaluation results
-pub(crate) async fn evaluate_binary_expr<O>(
+pub(crate) async fn evaluate_binary_expr(
     left: Arc<Expr>,
     op: BinOp,
     right: Arc<Expr>,
     engine: Engine,
-    k: Continuation<Value, O>,
-) -> O
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     // Helper function to evaluate the right operand after the left is evaluated.
-    async fn evaluate_right<O>(
+    async fn evaluate_right(
         left_val: Value,
         right: Arc<Expr>,
         op: BinOp,
         engine: Engine,
-        k: Continuation<Value, O>,
-    ) -> O
-    where
-        O: Send + 'static,
-    {
+        k: Continuation<Value, EngineResponse>,
+    ) -> EngineResponse
+where {
         engine
             .evaluate(
                 right,
@@ -165,14 +160,13 @@ where
 /// * `expr` - The operand expression.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_unary_expr<O>(
+pub(crate) async fn evaluate_unary_expr(
     op: UnaryOp,
     expr: Arc<Expr>,
     engine: Engine,
-    k: Continuation<Value, O>,
-) -> O
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     // Evaluate the operand, then apply the unary operation
     engine
@@ -200,14 +194,13 @@ where
 /// * `args` - The argument expressions to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_function_call<O>(
+pub(crate) async fn evaluate_function_call(
     fun: Arc<Expr>,
     args: Vec<Arc<Expr>>,
     engine: Engine,
-    k: Continuation<Value, O>,
-) -> O
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     // First evaluate the function expression.
     engine
@@ -246,15 +239,14 @@ where
 /// * `args` - The argument expressions to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_closure_call<O>(
+pub(crate) async fn evaluate_closure_call(
     params: Vec<Identifier>,
     body: Arc<Expr>,
     args: Vec<Arc<Expr>>,
     engine: Engine,
-    k: Continuation<Value, O>,
-) -> O
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     evaluate_sequence(
         args,
@@ -288,14 +280,13 @@ where
 /// * `args` - The argument expressions to evaluate
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive evaluation results
-pub(crate) async fn evaluate_rust_udf_call<O>(
+pub(crate) async fn evaluate_rust_udf_call(
     udf: fn(Vec<Value>) -> Value,
     args: Vec<Arc<Expr>>,
     engine: Engine,
-    k: Continuation<Value, O>,
-) -> O
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     evaluate_sequence(
         args,
@@ -322,13 +313,12 @@ where
 /// * `ident` - The identifier to look up
 /// * `engine` - The evaluation engine
 /// * `k` - The continuation to receive the variable value
-pub(crate) async fn evaluate_reference<O>(
+pub(crate) async fn evaluate_reference(
     ident: String,
     engine: Engine,
-    k: Continuation<Value, O>,
-) -> O
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     // Look up the variable in the context.
     let value = engine

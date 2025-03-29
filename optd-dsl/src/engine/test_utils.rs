@@ -6,6 +6,8 @@ use crate::engine::Engine;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use super::EngineResponse;
+
 /// A configurable mock generator for testing the evaluation engine.
 #[derive(Clone)]
 pub struct MockGenerator {
@@ -41,7 +43,7 @@ impl MockGenerator {
 }
 
 // impl Generator for MockGenerator {
-// async fn yield_group(&self, group_id: GroupId, k: Continuation<Value, O>) {
+// async fn yield_group(&self, group_id: GroupId, k: Continuation<Value, EngineResponse>) {
 //     let key = format!("{:?}", group_id);
 //     let values = {
 //         let mappings = self.group_mappings.lock().unwrap();
@@ -53,7 +55,7 @@ impl MockGenerator {
 //     }
 // }
 
-// async fn yield_goal(&self, physical_goal: &Goal, k: Continuation<Value, O>) {
+// async fn yield_goal(&self, physical_goal: &Goal, k: Continuation<Value, EngineResponse>) {
 //     let key = format!(
 //         "{:?}:{:?}",
 //         physical_goal.group_id, physical_goal.properties
@@ -185,16 +187,10 @@ pub async fn evaluate_and_collect(expr: Arc<Expr>, engine: Engine) -> Vec<Value>
     let results = Arc::new(Mutex::new(Vec::new()));
     let results_clone = results.clone();
 
-    engine
+    let response = engine
         .evaluate(
             expr,
-            Arc::new(move |value| {
-                let results = results_clone.clone();
-                Box::pin(async move {
-                    let mut results_guard = results.lock().unwrap();
-                    results_guard.push(value);
-                })
-            }),
+            Arc::new(move |value| Box::pin(async move { EngineResponse::Return(value) })),
         )
         .await;
 

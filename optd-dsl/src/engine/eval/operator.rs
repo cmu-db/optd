@@ -1,8 +1,8 @@
 use crate::analyzer::hir::{
     CoreData, Expr, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
-use crate::engine::Continuation;
 use crate::engine::utils::evaluate_sequence;
+use crate::engine::{Continuation, EngineResponse};
 use crate::{capture, engine::Engine};
 use CoreData::{Logical, Physical};
 use Materializable::*;
@@ -15,13 +15,12 @@ use std::sync::Arc;
 /// * `op` - The logical operator to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_logical_operator<O>(
+pub(crate) async fn evaluate_logical_operator(
     op: LogicalOp<Arc<Expr>>,
     engine: Engine,
-    k: Continuation<Value, O>,
-) -> O
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     match op.0 {
         // For unmaterialized operators, directly call the continuation with the unmaterialized
@@ -54,13 +53,12 @@ where
 /// * `op` - The physical operator to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_physical_operator<O>(
+pub(crate) async fn evaluate_physical_operator(
     op: PhysicalOp<Arc<Expr>>,
     engine: Engine,
-    k: Continuation<Value, O>,
-) -> O
+    k: Continuation<Value, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     match op.0 {
         // For unmaterialized operators, continue with the unmaterialized value.
@@ -97,15 +95,14 @@ where
 /// * `tag` - The operator type tag.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive the constructed operator.
-async fn evaluate_operator<O>(
+async fn evaluate_operator(
     op_data_exprs: Vec<Arc<Expr>>,
     children_exprs: Vec<Arc<Expr>>,
     tag: String,
     engine: Engine,
-    k: Continuation<Operator<Value>, O>,
-) -> O
+    k: Continuation<Operator<Value>, EngineResponse>,
+) -> EngineResponse
 where
-    O: Send + 'static,
 {
     // First evaluate all operator data parameters.
     evaluate_sequence(

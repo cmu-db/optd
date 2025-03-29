@@ -9,7 +9,6 @@ use futures::{
     SinkExt,
     channel::mpsc::{self, Receiver, Sender},
 };
-use generator::OptimizerGenerator;
 use memo::Memoize;
 use merge_repr::Representative;
 use optd_dsl::analyzer::hir::HIR;
