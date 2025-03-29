@@ -6,11 +6,12 @@ use crate::{
             Value,
         },
     },
-    engine::{Continuation, EngineResponse, PinnedFuture},
+    engine::{Continuation, EngineResponse},
 };
 use crate::{capture, engine::Engine};
 use Materializable::*;
 use Pattern::*;
+use futures::future::BoxFuture;
 use std::sync::Arc;
 
 /// A type representing a match result, which is a value and an optional context.
@@ -72,7 +73,7 @@ fn try_match_arms<O>(
     match_arms: Vec<MatchArm>,
     engine: Engine,
     k: Continuation<Value, EngineResponse<O>>,
-) -> PinnedFuture<EngineResponse<O>>
+) -> BoxFuture<'static, EngineResponse<O>>
 where
     O: Send + 'static,
 {
@@ -125,7 +126,7 @@ fn match_pattern<O>(
     pattern: Pattern,
     ctx: Context,
     k: Continuation<MatchResult, EngineResponse<O>>,
-) -> PinnedFuture<EngineResponse<O>>
+) -> BoxFuture<'static, EngineResponse<O>>
 where
     O: Send + 'static,
 {
@@ -463,7 +464,7 @@ fn match_components_sequentially<O>(
     ctx: Context,
     results: Vec<MatchResult>,
     k: Continuation<Vec<MatchResult>, EngineResponse<O>>,
-) -> PinnedFuture<EngineResponse<O>>
+) -> BoxFuture<'static, EngineResponse<O>>
 where
     O: Send + 'static,
 {
