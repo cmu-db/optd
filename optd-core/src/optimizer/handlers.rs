@@ -145,35 +145,9 @@ impl<M: Memoize> Optimizer<M> {
 
             // If a new expression was created, cost it using CPS
             if let Some(_expr) = new_expr {
-                // let message_tx = self.message_tx.clone();
-                // let engine = self.engine.clone();
-
                 // Create a continuation that sends the costed expression
-                // let continuation: Continuation<Cost> = Arc::new(move |cost| {
-                //     let mut message_tx = message_tx.clone();
-                //     let goal = goal.clone();
-                //     let expr = expr.clone();
-
-                //     Box::pin(async move {
-                //         // Create and send the optimized expression with cost
-                //         let optimized_expr = OptimizedExpression(expr, cost);
-                //         message_tx
-                //             .send(NewOptimizedExpression(optimized_expr, goal))
-                //             .await
-                //             .expect("Failed to send costed plan");
-                //     })
-                // });
-
                 // Launch the cost plan operation with the continuation.
-                // tokio::spawn(async move {
-                //     engine
-                //         .launch_rule(
-                //             "cost",
-                //             vec![partial_physical_to_value(&plan)],
-                //             value_to_cost,
-                //         )
-                //         .await
-                // });
+                todo!()
             }
         }
     }
