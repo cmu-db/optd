@@ -187,7 +187,6 @@ fn value_to_properties_data(value: &Value) -> PropertiesData {
         Struct(name, elements) => {
             PropertiesData::Struct(name.clone(), convert_values_to_properties_data(elements))
         }
-        Logical(_) => PropertiesData::Logical(value_to_logical(value)),
         _ => panic!("Cannot convert {:?} to PropertyData content", value.0),
     }
 }

@@ -1,7 +1,5 @@
 use ordered_float::OrderedFloat;
 
-use super::plans::LogicalPlan;
-
 /// Represents logical properties of a logical group.
 ///
 /// Logical properties describe logical characteristics of the data produced by a logical group,
@@ -34,6 +32,4 @@ pub enum PropertiesData {
     Struct(String, Vec<PropertiesData>),
     /// Ordered collection of values.
     Array(Vec<PropertiesData>),
-    /// Embedded plan node for nested plan references.
-    Logical(LogicalPlan),
 }
