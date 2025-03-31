@@ -1,195 +1,205 @@
-#![allow(unused)]
-
-use super::{Optimizer, memo::Memoize};
-use crate::cir::{
-    Goal, GroupId, LogicalExpression, OptimizedExpression, PartialLogicalPlan, PartialPhysicalPlan,
+use super::{
+    Optimizer,
+    jobs::JobKind,
+    tasks::{TaskId, TaskKind},
 };
-use async_recursion::async_recursion;
-use futures::{
-    SinkExt, StreamExt,
-    channel::mpsc::{self, Sender},
+use crate::{
+    cir::{Cost, GoalId, GroupId, LogicalExpressionId, PhysicalExpressionId},
+    error::Error,
+    memo::Memoize,
 };
+use JobKind::*;
+use TaskKind::*;
+use futures::SinkExt;
 
 impl<M: Memoize> Optimizer<M> {
-    /// Subscribe to logical expressions in a specific group.
+    /// Subscribe a task to logical expressions in a specific group.
     ///
-    /// This method:
-    /// - Adds the sender to the group subscribers list to receive future expressions
-    /// - Launches exploration of the group if it hasn't already started
-    /// - Fetches existing expressions from the memo and sends them to the subscriber
-    #[async_recursion]
-    pub(super) async fn subscribe_to_group(
+    /// This method adds a task as a subscriber to a group, ensures there's an exploration
+    /// task for the group, and returns all existing expressions for bootstrapping.
+    ///
+    /// # Parameters
+    /// * `group_id` - The ID of the group to subscribe to.
+    /// * `subscriber_task_id` - The ID of the task that wants to receive notifications.
+    ///
+    /// # Returns
+    /// A vector of existing logical expressions in the group that the subscriber
+    /// can use for initialization.
+    pub(super) async fn subscribe_task_to_group(
         &mut self,
         group_id: GroupId,
-        sender: Sender<LogicalExpression>,
-    ) {
-        // Add the sender to group subscribers list
-        self.group_subscribers
-            .entry(group_id)
-            .or_default()
-            .push(sender.clone());
-
-        // Launch exploration if this group isn't being explored yet
-        if !self.exploring_groups.contains(&group_id) {
-            self.explore_group(group_id).await;
+        subscriber_task_id: TaskId,
+    ) -> Result<Vec<LogicalExpressionId>, Error> {
+        let subscribers = self.group_subscribers.entry(group_id).or_default();
+        if !subscribers.contains(&subscriber_task_id) {
+            subscribers.push(subscriber_task_id);
         }
 
-        // Get and send existing expressions from the memo
-        let expressions = self
-            .memo
-            .get_all_logical_exprs(group_id)
-            .await
-            .expect("Failed to get logical expressions");
+        self.ensure_group_exploration_task(group_id, subscriber_task_id)
+            .await?;
 
-        // Send expressions asynchronously
-        tokio::spawn(async move {
-            for expr in expressions {
-                sender
-                    .clone()
-                    .send(expr)
-                    .await
-                    .expect("Failed to send existing expression");
-            }
-        });
+        self.memo.get_all_logical_exprs(group_id).await
     }
 
-    /// Subscribe to optimized expressions for a specific goal.
+    /// Subscribe a task to optimized expressions for a specific goal.
     ///
-    /// This method:
-    /// - Adds the sender to the goal subscribers list to receive future optimized expressions
-    /// - Launches exploration of the goal if it hasn't already started
-    /// - Fetches the best existing optimized expression and sends it to the subscriber
-    pub(super) async fn subscribe_to_goal(
+    /// This method adds a task as a subscriber to a goal, ensures there's an exploration
+    /// task for the goal, and returns the best existing optimized expression for bootstrapping.
+    ///
+    /// # Parameters
+    /// * `goal_id` - The ID of the goal to subscribe to.
+    /// * `subscriber_task_id` - The ID of the task that wants to receive notifications.
+    ///
+    /// # Returns
+    /// The best optimized expression for the goal if one exists, or None if no
+    /// optimized expression is available yet.
+    pub(super) async fn subscribe_task_to_goal(
         &mut self,
-        goal: Goal,
-        sender: Sender<OptimizedExpression>,
+        goal_id: GoalId,
+        subscriber_task_id: TaskId,
+    ) -> Result<Option<(PhysicalExpressionId, Cost)>, Error> {
+        let subscribers = self.goal_subscribers.entry(goal_id).or_default();
+        if !subscribers.contains(&subscriber_task_id) {
+            subscribers.push(subscriber_task_id);
+        }
+
+        self.ensure_goal_optimize_task(goal_id, subscriber_task_id)
+            .await?;
+
+        self.memo.get_best_optimized_physical_expr(goal_id).await
+    }
+
+    /// Schedules logical expression continuation jobs for group subscribers.
+    ///
+    /// # Parameters
+    /// * `group_id` - The ID of the group that has new expressions.
+    /// * `expression_ids` - A slice of logical expression IDs to continue with.
+    pub(super) fn schedule_logical_continuations(
+        &mut self,
+        group_id: GroupId,
+        expression_ids: &[LogicalExpressionId],
     ) {
-        // Add the sender to goal subscribers list
-        self.goal_subscribers
-            .entry(goal.clone())
-            .or_default()
-            .push(sender.clone());
+        // Skip processing if there are no expressions or subscribers.
+        let Some(subscribers) = self.group_subscribers.get(&group_id) else {
+            return;
+        };
 
-        // Launch exploration if this goal isn't being explored yet
-        if !self.exploring_goals.contains(&goal) {
-            self.explore_goal(goal.clone()).await;
-        }
+        let all_continuation_jobs: Vec<_> = subscribers
+            .iter()
+            .filter_map(|&task_id| {
+                self.tasks.get(&task_id).and_then(|task| {
+                    let continuations = match &task.kind {
+                        TransformExpression(task) => task.continuations.get(&group_id),
+                        ImplementExpression(task) => task.continuations.get(&group_id),
+                        _ => None,
+                    };
+                    continuations.map(|conts| (task_id, conts))
+                })
+            })
+            .flat_map(|(task_id, conts)| {
+                expression_ids.iter().flat_map(move |&expr_id| {
+                    conts
+                        .iter()
+                        .map(move |cont| (task_id, ContinueWithLogical(expr_id, cont.clone())))
+                })
+            })
+            .collect();
 
-        // Get and send the best existing optimized expression if any
-        if let Some(best_expr) = self
-            .memo
-            .get_best_optimized_physical_expr(&goal)
-            .await
-            .expect("Failed to get best expression")
-        {
-            // Send the expression asynchronously
-            tokio::spawn(async move {
-                sender
-                    .clone()
-                    .send(best_expr)
-                    .await
-                    .expect("Failed to send existing optimized expression");
-            });
+        for (task_id, job) in all_continuation_jobs {
+            self.schedule_job(task_id, job);
         }
     }
 
-    /// Explores a logical group by applying transformation rules
+    /// Schedules optimized expression continuation jobs for goal subscribers.
     ///
-    /// This method triggers the application of transformation rules to
-    /// the logical expressions in a group, generating new equivalent
-    /// logical expressions.
-    async fn explore_group(&mut self, group_id: GroupId) {
-        // Mark the group as exploring
-        self.exploring_groups.insert(group_id);
+    /// # Parameters
+    /// * `goal_id` - The ID of the goal that has new best expressions.
+    /// * `expression_id` - The ID of the optimized expression to continue with.
+    /// * `cost` - The cost of the optimized expression.
+    pub(super) fn schedule_optimized_continuations(
+        &mut self,
+        goal_id: GoalId,
+        expression_id: PhysicalExpressionId,
+        cost: Cost,
+    ) {
+        // Skip processing if there are no expressions or subscribers.
+        let Some(subscribers) = self.goal_subscribers.get(&goal_id) else {
+            return;
+        };
 
-        // Subscribe to the group using the sender
-        let (expr_tx, mut expr_rx) = mpsc::channel(0);
-        self.subscribe_to_group(group_id, expr_tx).await;
+        let all_continuation_jobs: Vec<_> = subscribers
+            .iter()
+            .filter_map(|&task_id| {
+                self.tasks.get(&task_id).and_then(|task| match &task.kind {
+                    CostExpression(cost_task) => cost_task
+                        .continuations
+                        .get(&goal_id)
+                        .map(|conts| (task_id, conts)),
+                    _ => None,
+                })
+            })
+            .flat_map(|(task_id, conts)| {
+                conts.iter().map(move |cont| {
+                    (
+                        task_id,
+                        ContinueWithCostedPhysical(expression_id, cost, cont.clone()),
+                    )
+                })
+            })
+            .collect();
 
-        let transformations = self.rule_book.get_transformations().to_vec();
-        let engine = self.engine.clone();
-        let message_tx = self.message_tx.clone();
-
-        // Spawn a task to explore the group
-        tokio::spawn(async move {
-            while let Some(expr) = expr_rx.next().await {
-                let plan: PartialLogicalPlan = expr.into();
-
-                for rule in &transformations {
-                    let rule_name = rule.0.clone();
-                    let engine_clone = engine.clone();
-                    let message_tx_clone = message_tx.clone();
-                    let plan_clone = plan.clone();
-
-                    tokio::spawn(async move {
-                        // Create a continuation that processes transformed logical plans
-                        // Applies the rule to the input plan and passes all possible
-                        todo!()
-                    });
-                }
-            }
-        });
+        // Schedule all collected jobs in batch.
+        for (task_id, job) in all_continuation_jobs {
+            self.schedule_job(task_id, job);
+        }
     }
 
-    /// Explores a goal by applying implementation rules
+    /// Egests and sends optimized plans to optimize plan task subscribers.
     ///
-    /// This method triggers the application of implementation rules to
-    /// logical expressions in the goal's group, generating physical
-    /// implementations for the goal.
-    async fn explore_goal(&mut self, goal: Goal) {
-        self.exploring_goals.insert(goal.clone());
+    /// This method converts the optimized expression to a physical plan and
+    /// sends it to any optimize plan tasks that are waiting for results.
+    ///
+    /// # Parameters
+    /// * `goal_id` - The ID of the goal that has a new best expression.
+    /// * `expression_id` - The ID of the optimized expression to egest as a physical plan.
+    pub(super) async fn egest_to_subscribers(
+        &mut self,
+        goal_id: GoalId,
+        expression_id: PhysicalExpressionId,
+    ) -> Result<(), Error> {
+        // Find all optimize plan tasks that are subscribed to this root goal.
+        let send_channels: Vec<_> = self
+            .goal_subscribers
+            .get(&goal_id)
+            .into_iter()
+            .flatten()
+            .filter_map(|task_id| {
+                self.tasks.get(task_id).and_then(|task| {
+                    if let OptimizePlan(plan_task) = &task.kind {
+                        Some(plan_task.response_tx.clone())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
 
-        // Create a channel for receiving expressions
-        let (expr_tx, mut expr_rx) = mpsc::channel(0);
-        self.subscribe_to_group(goal.0, expr_tx).await;
+        // If we have any optimize plan tasks, egest the plan and send it
+        // without blocking the optimizer.
+        if !send_channels.is_empty() {
+            let physical_plan = self.egest_best_plan(expression_id).await?.unwrap();
 
-        let implementations = self.rule_book.get_implementations().to_vec();
-        let props = goal.1.clone();
-        let engine = self.engine.clone();
-        let message_tx = self.message_tx.clone();
-
-        let physical_exprs = self
-            .memo
-            .get_all_physical_exprs(&goal)
-            .await
-            .expect("Failed to get physical expressions");
-
-        // Spawn a task to cost all existing physical expressions using CPS
-        if !physical_exprs.is_empty() {
-            for expr in physical_exprs {
-                let plan: PartialPhysicalPlan = expr.clone().into();
-                let engine_clone = engine.clone();
-                let message_tx_clone = message_tx.clone();
-                let goal_clone = goal.clone();
-                let expr_clone = expr.clone();
-
-                tokio::spawn(async move { todo!() });
+            for mut response_tx in send_channels {
+                let plan_clone = physical_plan.clone();
+                tokio::spawn(async move {
+                    response_tx
+                        .send(plan_clone)
+                        .await
+                        .expect("Failed to send plan - channel closed.");
+                });
             }
         }
 
-        // Spawn a task to implement the logical expressions
-        tokio::spawn(async move {
-            while let Some(expr) = expr_rx.next().await {
-                let plan: PartialLogicalPlan = expr.into();
-
-                for rule in &implementations {
-                    let rule_name = rule.0.clone();
-                    let engine_clone = engine.clone();
-                    let message_tx_clone = message_tx.clone();
-                    let goal_clone = goal.clone();
-                    let plan_clone = plan.clone();
-                    let props_clone = props.clone();
-
-                    tokio::spawn(async move {
-                        // Create a continuation that processes physical plans
-
-                        // Applies an implementation rule to the input logical plan and required
-                        // physical properties, passing all possible physical implementations to the
-                        // continuation.
-                        todo!()
-                    });
-                }
-            }
-        });
+        Ok(())
     }
 }

@@ -1,340 +1,384 @@
 use super::{
-    OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage,
-    ingest::{LogicalIngest, PhysicalIngest},
-    memo::{Memoize, MergeResult},
+    JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage, TaskId,
+    ingest::LogicalIngest,
+    jobs::JobKind,
+    tasks::{CostExpressionTask, ImplementExpressionTask, TaskKind, TransformExpressionTask},
 };
-use crate::cir::{
-    Child, Goal, GroupId, LogicalExpression, LogicalPlan, LogicalProperties, OptimizedExpression,
-    PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpression, PhysicalPlan, PhysicalProperties,
-};
-use OptimizerMessage::*;
-use futures::{
-    SinkExt, StreamExt,
-    channel::{
-        mpsc::{self, Sender},
-        oneshot,
+use crate::{
+    cir::{
+        Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalExpressionId, LogicalPlan,
+        LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpressionId,
+        PhysicalPlan, PhysicalProperties,
     },
+    error::Error,
+    memo::Memoize,
 };
-use optd_dsl::capture;
+use JobKind::*;
+use LogicalIngest::*;
+use OptimizerMessage::*;
+use TaskKind::*;
+use futures::{
+    SinkExt,
+    channel::{mpsc::Sender, oneshot},
+};
+use optd_dsl::{
+    analyzer::hir::Value,
+    engine::{Continuation, EngineResponse},
+};
 
 impl<M: Memoize> Optimizer<M> {
-    /// This method initiates the optimization process for a logical plan and streams
-    /// results back to the client as they become available.
+    /// This method initiates the optimization process for a logical plan by launching
+    /// an optimization task. It may need dependencies.
+    ///
+    /// # Parameters
+    /// * `plan` - The logical plan to optimize.
+    /// * `response_tx` - Channel to send the resulting physical plan.
+    /// * `task_id` - ID of the task that initiated this request.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_optimize_request(
         &mut self,
-        logical_plan: LogicalPlan,
+        plan: LogicalPlan,
         response_tx: Sender<PhysicalPlan>,
-    ) {
-        match self.try_ingest_logical(&logical_plan.clone().into()).await {
-            LogicalIngest::Success(group_id) => {
-                // Plan was ingested successfully, subscribe to the goal
+        task_id: TaskId,
+    ) -> Result<(), Error> {
+        match self.probe_ingest_logical_plan(&plan.clone().into()).await? {
+            Found(group_id) => {
+                // The goal represents what we want to achieve: optimize the root group
+                // with no specific physical properties required.
                 let goal = Goal(group_id, PhysicalProperties(None));
-                let goal = self.goal_repr.find(&goal);
+                let goal_id = self.memo.get_goal_id(&goal).await?;
 
-                let (expr_tx, mut expr_rx) = mpsc::channel(0);
-                self.subscribe_to_goal(goal, expr_tx).await;
-
-                let mut message_tx = self.message_tx.clone();
-
-                tokio::spawn(async move {
-                    // Forward optimized expressions to the client
-                    while let Some(expr) = expr_rx.next().await {
-                        message_tx
-                            .send(EgestOptimized(expr, response_tx.clone()))
-                            .await
-                            .expect("Failed to send optimized expression");
-                    }
-                });
+                // This ensures the task will be notified when optimized expressions
+                // for this goal are found.
+                self.subscribe_task_to_goal(goal_id, task_id).await?;
             }
-            LogicalIngest::NeedsDependencies(dependencies) => {
+            Missing(logical_exprs) => {
                 // Store the request as a pending message that will be processed
-                // once all dependencies are resolved
+                // once all create task dependencies are resolved.
+                let pending_dependencies = logical_exprs
+                    .iter()
+                    .cloned()
+                    .map(|logical_expr_id| {
+                        self.schedule_job(task_id, DeriveLogicalProperties(logical_expr_id))
+                    })
+                    .collect();
+
                 let pending_message = PendingMessage {
-                    message: OptimizeRequest(OptimizeRequest {
-                        logical_plan,
-                        response_tx,
-                    }),
-                    pending_dependencies: dependencies,
+                    message: OptimizeRequestWrapper(OptimizeRequest { plan, response_tx }, task_id),
+                    pending_dependencies,
                 };
 
                 self.pending_messages.push(pending_message);
             }
         }
-    }
 
-    /// This method handles converting an optimized expression to a complete physical plan
-    /// and sending it to the client through the provided channel.
-    pub(super) async fn process_egest_optimized(
-        &self,
-        expr: OptimizedExpression,
-        mut response_tx: Sender<PhysicalPlan>,
-    ) {
-        let plan = self
-            .egest_best_plan(&expr)
-            .await
-            .expect("Failed to egest plan from memo")
-            .expect("Expression has not been recursively optimized");
-
-        tokio::spawn(async move {
-            response_tx
-                .send(plan)
-                .await
-                .expect("Failed to send physical plan");
-        });
+        Ok(())
     }
 
     /// This method handles new logical plan alternatives discovered through
     /// transformation rule application.
+    ///
+    /// # Parameters
+    /// * `plan` - The partial logical plan to process.
+    /// * `group_id` - ID of the group associated with this plan.
+    /// * `job_id` - ID of the job that generated this plan.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_new_logical_partial(
         &mut self,
         plan: PartialLogicalPlan,
         group_id: GroupId,
-    ) {
-        let group_id = self.group_repr.find(&group_id);
-
-        match self.try_ingest_logical(&plan).await {
-            LogicalIngest::Success(new_group_id) if new_group_id != group_id => {
-                // Perform the merge in the memo and process all results
-                let merge_results = self
-                    .memo
-                    .merge_groups(&group_id, &new_group_id)
-                    .await
-                    .expect("Failed to merge groups");
-
-                for result in merge_results {
-                    self.handle_merge_result(result).await;
-                }
+        job_id: JobId,
+    ) -> Result<(), Error> {
+        let group_id = self.memo.find_repr_group(group_id).await?;
+        match self.probe_ingest_logical_plan(&plan).await? {
+            Found(new_group_id) if new_group_id != group_id => {
+                // Atomically perform the merge in the memo and process all results.
+                let merge_results = self.memo.merge_groups(group_id, new_group_id).await?;
+                self.handle_merge_result(merge_results).await?;
             }
-            LogicalIngest::Success(_) => {
-                // Group already exists, nothing to merge
+            Found(_) => {
+                // Group already exists, nothing to merge or do.
             }
-            LogicalIngest::NeedsDependencies(dependencies) => {
-                // Store as pending message to process after dependencies are resolved
-                self.pending_messages.push(PendingMessage {
-                    message: NewLogicalPartial(plan, group_id),
-                    pending_dependencies: dependencies,
-                });
+            Missing(logical_exprs) => {
+                // Store the request as a pending message that will be processed
+                // once all create task dependencies are resolved.
+                let related_task_id = self.running_jobs[&job_id].0;
+                let pending_dependencies = logical_exprs
+                    .iter()
+                    .cloned()
+                    .map(|logical_expr_id| {
+                        self.schedule_job(related_task_id, DeriveLogicalProperties(logical_expr_id))
+                    })
+                    .collect();
+
+                let pending_message = PendingMessage {
+                    message: NewLogicalPartial(plan, group_id, job_id),
+                    pending_dependencies,
+                };
+
+                self.pending_messages.push(pending_message);
             }
         }
+
+        Ok(())
     }
 
     /// This method handles new physical implementations discovered through
     /// implementation rule application.
+    ///
+    /// # Parameters
+    /// * `plan` - The partial physical plan to process.
+    /// * `goal_id` - ID of the goal associated with this plan.
+    /// * `job_id` - ID of the job that generated this plan.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_new_physical_partial(
         &mut self,
         plan: PartialPhysicalPlan,
-        goal: Goal,
-    ) {
-        let goal = self.goal_repr.find(&goal);
-        let PhysicalIngest {
-            goal: new_goal,
-            new_expr,
-        } = self.try_ingest_physical(&plan).await;
+        goal_id: GoalId,
+        job_id: JobId,
+    ) -> Result<(), Error> {
+        let goal_id = self.memo.find_repr_goal(goal_id).await?;
 
-        if new_goal != goal {
-            // Perform the merge in the memo and process all results
-            let merge_results = self
-                .memo
-                .merge_goals(&goal, &new_goal)
-                .await
-                .expect("Failed to merge goals");
+        let member = self.probe_ingest_physical_plan(&plan).await?;
+        let is_new = self.memo.add_goal_member(goal_id, member).await?;
 
-            for result in merge_results {
-                self.handle_merge_result(result).await;
-            }
-
-            // If a new expression was created, cost it using CPS
-            if let Some(_expr) = new_expr {
-                // Create a continuation that sends the costed expression
-                // Launch the cost plan operation with the continuation.
-                todo!()
+        if is_new {
+            match member {
+                GoalMemberId::PhysicalExpressionId(_expression_id) => {
+                    let _parent_task_id = self.running_jobs[&job_id].0;
+                    // TODO(Alexis): Needs to ensure cost expression task exists and then subs.
+                }
+                GoalMemberId::GoalId(_) => {
+                    // TODO(Alexis); Need to launch a new implement
+                }
             }
         }
+
+        Ok(())
     }
 
     /// This method handles fully optimized physical expressions with cost information.
-    pub(super) async fn process_new_optimized_expr(
+    ///
+    /// When a new optimized expression is found, it's added to the memo. If it becomes
+    /// the new best expression for its goal, continuations are notified and and clients
+    /// receive the corresponding egested plan.
+    ///
+    /// # Parameters
+    /// * `expression_id` - ID of the physical expression to process.
+    /// * `cost` - Cost information for the expression.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
+    pub(super) async fn process_new_costed_physical(
         &mut self,
-        expr: OptimizedExpression,
-        goal: Goal,
-    ) {
-        // Update the expression & goal to use representative goals
-        let goal = self.goal_repr.find(&goal);
-        let expr = self.normalize_optimized_expression(&expr);
-
-        // Add the optimized expression to the memo
+        expression_id: PhysicalExpressionId,
+        cost: Cost,
+    ) -> Result<(), Error> {
+        let expression_id = self.memo.find_repr_physical_expr(expression_id).await?;
         let new_best = self
             .memo
-            .add_optimized_physical_expr(&goal, &expr)
-            .await
-            .expect("Failed to add optimized physical expression");
+            .update_physical_expr_cost(expression_id, cost)
+            .await?;
 
         // If this is the new best expression found so far for this goal,
-        // notify all subscribers
+        // schedule continuation jobs for all subscribers and send to clients.
         if new_best {
-            let subscribers = self
-                .goal_subscribers
-                .get(&goal)
-                .cloned()
-                .unwrap_or_default();
-
-            for mut subscriber in subscribers {
-                tokio::spawn(capture!([expr], async move {
-                    subscriber
-                        .send(expr)
-                        .await
-                        .expect("Failed to send optimized expression");
-                }));
-            }
+            // TODO(Alexis): Needs to send to parents.
+            // self.schedule_optimized_continuations(goal_id, expression_id, cost);
+            // self.egest_to_subscribers(goal_id, expression_id).await?;
         }
+
+        Ok(())
     }
 
     /// This method handles group creation for expressions with derived properties
     /// and updates any pending messages that depend on this group.
+    ///
+    /// # Parameters
+    /// * `expression_id` - ID of the logical expression to create a group for.
+    /// * `properties` - Logical properties associated with the expression.
+    /// * `job_id` - ID of the job that initiated this request.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_create_group(
         &mut self,
-        properties: LogicalProperties,
-        expression: LogicalExpression,
-        job_id: i64,
-    ) {
-        self.memo
-            .create_group(&expression, &properties)
-            .await
-            .expect("Failed to create group");
-
+        expression_id: LogicalExpressionId,
+        properties: &LogicalProperties,
+        job_id: JobId,
+    ) -> Result<(), Error> {
+        self.memo.create_group(expression_id, properties).await?;
         self.resolve_dependencies(job_id).await;
+        Ok(())
     }
 
-    /// Sends existing logical expressions for the group to the subscriber
-    /// and initiates exploration of the group if it hasn't been explored yet.
+    /// Registers a continuation for receiving logical expressions from a group.
+    /// The continuation will receive notifications about both existing and new expressions.
+    ///
+    /// # Parameters
+    /// * `group_id` - ID of the group to subscribe to.
+    /// * `continuation` - Continuation to call when new expressions are found.
+    /// * `job_id` - ID of the job that initiated this request.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_group_subscription(
         &mut self,
         group_id: GroupId,
-        sender: Sender<LogicalExpression>,
-    ) {
-        let group_id = self.group_repr.find(&group_id);
-        self.subscribe_to_group(group_id, sender).await;
+        continuation: Continuation<Value, EngineResponse<OptimizerMessage>>,
+        job_id: JobId,
+    ) -> Result<(), Error> {
+        let related_task_id = self.running_jobs[&job_id].0;
+
+        // Register the continuation and notify the memo about the dependency to ensure the
+        // operation corresponding to the task gets invalidated when the group has new expressions.
+        match &mut self.tasks.get_mut(&related_task_id).unwrap().kind {
+            TransformExpression(TransformExpressionTask {
+                rule,
+                expression_id,
+                continuations,
+                ..
+            }) => {
+                continuations
+                    .entry(group_id)
+                    .or_default()
+                    .push(continuation.clone());
+
+                self.memo
+                    .add_transformation_dependency(*expression_id, rule, group_id)
+                    .await?;
+            }
+            ImplementExpression(ImplementExpressionTask {
+                rule,
+                expression_id,
+                goal_id,
+                continuations,
+                ..
+            }) => {
+                continuations
+                    .entry(group_id)
+                    .or_default()
+                    .push(continuation.clone());
+
+                self.memo
+                    .add_implementation_dependency(*expression_id, *goal_id, rule, group_id)
+                    .await?;
+            }
+            _ => panic!("Task type cannot produce group subscription."),
+        }
+
+        // Subscribe to future expressions and bootstrap with existing ones.
+        let expressions = self
+            .subscribe_task_to_group(group_id, related_task_id)
+            .await?;
+
+        for expression_id in expressions {
+            self.schedule_job(
+                related_task_id,
+                ContinueWithLogical(expression_id, continuation.clone()),
+            );
+        }
+
+        Ok(())
     }
 
-    /// Sends the best existing physical expression for the goal to the subscriber
-    /// and initiates implementation of the goal if it hasn't been launched yet.
+    /// Registers a continuation for receiving optimized physical expressions for a goal.
+    /// The continuation will be notified about the best existing expression and any better ones found.
+    ///
+    /// # Parameters
+    /// * `goal` - The goal to subscribe to.
+    /// * `continuation` - Continuation to call when new optimized expressions are found.
+    /// * `job_id` - ID of the job that initiated this request.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_goal_subscription(
         &mut self,
-        goal: Goal,
-        sender: Sender<OptimizedExpression>,
-    ) {
-        let goal = self.goal_repr.find(&goal);
-        self.subscribe_to_goal(goal, sender).await;
+        goal: &Goal,
+        continuation: Continuation<Value, EngineResponse<OptimizerMessage>>,
+        job_id: JobId,
+    ) -> Result<(), Error> {
+        let related_task_id = self.running_jobs[&job_id].0;
+        let goal_id = self.memo.get_goal_id(goal).await?;
+
+        // Register the continuation and notify the memo about the dependency to ensure the
+        // operation corresponding to the task gets invalidated when the goal has a new optimum.
+        match &mut self.tasks.get_mut(&related_task_id).unwrap().kind {
+            CostExpression(CostExpressionTask {
+                expression_id,
+                continuations,
+                ..
+            }) => {
+                continuations
+                    .entry(goal_id)
+                    .or_default()
+                    .push(continuation.clone());
+
+                self.memo
+                    .add_cost_dependency(*expression_id, goal_id)
+                    .await?;
+            }
+            _ => panic!("Only cost tasks can subscribe to goals."),
+        }
+
+        // Subscribe to future optimized expressions and bootstrap with current best.
+        if let Some((best_expr_id, cost)) = self
+            .subscribe_task_to_goal(goal_id, related_task_id)
+            .await?
+        {
+            self.schedule_job(
+                related_task_id,
+                ContinueWithCostedPhysical(best_expr_id, cost, continuation),
+            );
+        }
+
+        Ok(())
     }
 
     /// Retrieves the logical properties for the given group from the memo
     /// and sends them back to the requestor through the provided oneshot channel.
+    ///
+    /// # Parameters
+    /// * `group_id` - ID of the group to retrieve properties for.
+    /// * `sender` - Channel to send the properties through.
+    ///
+    /// # Returns
+    /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_retrieve_properties(
         &mut self,
         group_id: GroupId,
         sender: oneshot::Sender<LogicalProperties>,
-    ) {
-        let group_id = self.group_repr.find(&group_id);
-        let props = self
-            .memo
-            .get_logical_properties(&group_id)
-            .await
-            .expect("Failed to get logical properties");
+    ) -> Result<(), Error> {
+        let props = self.memo.get_logical_properties(group_id).await?;
 
+        // We don't want to make a job out of this, as it is merely a way to unblock
+        // an existing pending job. We send it to the channel without blocking the
+        // main co-routine.
         tokio::spawn(async move {
             sender
                 .send(props)
-                .expect("Failed to send properties - channel closed");
+                .expect("Failed to send properties - channel closed.");
         });
+
+        Ok(())
     }
 
-    /// Helper method to handle different types of merge results
-    ///
-    /// This method processes the results of group and goal merges, updating
-    /// representatives, subscribers, and exploration status appropriately.
-    async fn handle_merge_result(&mut self, result: MergeResult) {
-        match result {
-            MergeResult::GroupMerge {
-                prev_group_id,
-                new_group_id,
-                expressions,
-            } => {
-                // Update representative tracking
-                self.group_repr.merge(&prev_group_id, &new_group_id);
-
-                // Get subscribers for the previous group
-                let subscribers = self
-                    .group_subscribers
-                    .remove(&prev_group_id)
-                    .unwrap_or_default();
-
-                // Send expressions to all subscribers
-                for expr in &expressions {
-                    for mut subscriber in subscribers.clone() {
-                        tokio::spawn(capture!([expr], async move {
-                            subscriber
-                                .send(expr)
-                                .await
-                                .expect("Failed to send logical expression");
-                        }));
-                    }
-                }
-
-                // Add subscribers to new group
-                self.group_subscribers
-                    .entry(new_group_id)
-                    .or_default()
-                    .extend(subscribers);
-
-                // Inherit exploration status
-                if self.exploring_groups.remove(&prev_group_id) {
-                    self.exploring_groups.insert(new_group_id);
-                }
-            }
-            MergeResult::GoalMerge {
-                prev_goal,
-                new_goal,
-                expression,
-            } => {
-                // Update goal representative
-                self.goal_repr.merge(&prev_goal, &new_goal);
-
-                // Get subscribers for the previous goal
-                let subscribers = self.goal_subscribers.remove(&prev_goal).unwrap_or_default();
-
-                // Send optimized expression if present
-                if let Some(expr) = &expression {
-                    for mut subscriber in subscribers.clone() {
-                        tokio::spawn(capture!([expr], async move {
-                            subscriber
-                                .send(expr)
-                                .await
-                                .expect("Failed to send optimized expression");
-                        }));
-                    }
-                }
-
-                // Add subscribers to new goal
-                self.goal_subscribers
-                    .entry(new_goal.clone())
-                    .or_default()
-                    .extend(subscribers);
-
-                // Inherit exploration status
-                if self.exploring_goals.remove(&prev_goal) {
-                    self.exploring_goals.insert(new_goal);
-                }
-            }
-        }
-    }
-
-    /// Helper method to resolve dependencies after a group creation job completes
+    /// Helper method to resolve dependencies after a group creation job completes.
     ///
     /// This method is called when a group creation job completes. It updates all
     /// pending messages that were waiting for this job and processes any that
     /// are now ready (have no more pending dependencies).
-    async fn resolve_dependencies(&mut self, completed_job_id: i64) {
-        // Update dependencies and collect ready messages
+    ///
+    /// # Parameters
+    /// * `completed_job_id` - ID of the completed job.
+    async fn resolve_dependencies(&mut self, completed_job_id: JobId) {
+        // Update dependencies and collect ready messages.
         let ready_indices: Vec<_> = self
             .pending_messages
             .iter_mut()
@@ -345,50 +389,19 @@ impl<M: Memoize> Optimizer<M> {
             })
             .collect();
 
-        // Process all ready messages (in reverse order to avoid index issues when removing)
+        // Process all ready messages (in reverse order to avoid index issues when removing).
         for i in ready_indices.iter().rev() {
-            // Take ownership of the message
             let pending = self.pending_messages.swap_remove(*i);
 
-            // Re-send the message to be processed
+            // Re-send the message to be processed in a new co-routine to not block the
+            // main co-routine.
             let mut message_tx = self.message_tx.clone();
             tokio::spawn(async move {
                 message_tx
                     .send(pending.message)
                     .await
-                    .expect("Failed to re-send ready message");
+                    .expect("Failed to re-send ready message - channel closed.");
             });
         }
-    }
-
-    /// Helper method to normalize an optimized expression by updating all child goals
-    /// to use their representative goals.
-    ///
-    /// This ensures consistency in the memo by always working with canonical representatives.
-    fn normalize_optimized_expression(&self, expr: &OptimizedExpression) -> OptimizedExpression {
-        let normalized_children = expr
-            .0
-            .children
-            .iter()
-            .map(|child| match child {
-                Child::Singleton(goal) => {
-                    let goal = self.goal_repr.find(goal);
-                    Child::Singleton(goal)
-                }
-                Child::VarLength(goals) => {
-                    let goals = goals.iter().map(|goal| self.goal_repr.find(goal)).collect();
-                    Child::VarLength(goals)
-                }
-            })
-            .collect();
-
-        OptimizedExpression(
-            PhysicalExpression {
-                tag: expr.0.tag.clone(),
-                data: expr.0.data.clone(),
-                children: normalized_children,
-            },
-            expr.1,
-        )
     }
 }
