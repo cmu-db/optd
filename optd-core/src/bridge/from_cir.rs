@@ -65,7 +65,7 @@ pub(crate) fn costed_physical_to_value(plan: PartialPhysicalPlan, cost: Cost) ->
 pub(crate) fn logical_properties_to_value(properties: &LogicalProperties) -> Value {
     match &properties.0 {
         Some(data) => properties_data_to_value(data),
-        None => Value(Null),
+        Option::None => Value(None),
     }
 }
 
@@ -73,7 +73,7 @@ pub(crate) fn logical_properties_to_value(properties: &LogicalProperties) -> Val
 pub(crate) fn physical_properties_to_value(properties: &PhysicalProperties) -> Value {
     match &properties.0 {
         Some(data) => properties_data_to_value(data),
-        None => Value(Null),
+        Option::None => Value(None),
     }
 }
 

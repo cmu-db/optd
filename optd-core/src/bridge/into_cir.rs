@@ -1,4 +1,5 @@
 //! Converts HIR [`Value`]s into optd's type representations (CIR).
+
 use crate::cir::*;
 use Child::*;
 use CoreData::*;
@@ -64,7 +65,7 @@ pub(crate) fn value_to_cost(value: &Value) -> Cost {
 /// Converts an HIR properties [`Value`] into a CIR [`LogicalProperties`].
 pub(crate) fn value_to_logical_properties(properties_value: &Value) -> LogicalProperties {
     match &properties_value.0 {
-        Null => LogicalProperties(None),
+        None => LogicalProperties(Option::None),
         _ => LogicalProperties(Some(value_to_properties_data(properties_value))),
     }
 }
@@ -72,7 +73,7 @@ pub(crate) fn value_to_logical_properties(properties_value: &Value) -> LogicalPr
 /// Convert an HIR properties [`Value`] into a CIR [`PhysicalProperties`].
 fn value_to_physical_properties(properties_value: &Value) -> PhysicalProperties {
     match &properties_value.0 {
-        Null => PhysicalProperties(None),
+        None => PhysicalProperties(Option::None),
         _ => PhysicalProperties(Some(value_to_properties_data(properties_value))),
     }
 }

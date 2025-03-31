@@ -118,8 +118,8 @@ pub enum CoreData<T> {
     Logical(LogicalOp<T>),
     /// Physical query operators
     Physical(PhysicalOp<T>),
-    /// The null value
-    Null,
+    /// The None value
+    None,
 }
 
 /// Expression nodes in the HIR

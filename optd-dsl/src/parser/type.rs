@@ -12,6 +12,31 @@ use crate::{
 
 use super::{ast::Type, utils::delimited_parser};
 
+/// Creates a parser for type expressions.
+///
+/// This parser supports:
+/// - Primitive types: I64, String, Bool, Float64, Unit
+/// - Array types: \[T\]
+/// - Tuple types: (T1, T2, ...)
+/// - Map types: {K : V}
+/// - Function types: T1 -> T2
+/// - User-defined types: TypeName
+/// - Optional types: T?
+///
+/// Syntax examples:
+/// - I64                   - Integer type
+/// - String                - String type
+/// - \[I64\]                 - Array of integers
+/// - {String : I64}        - Map from strings to integers
+/// - (I64, String)         - Tuple with integer and string
+/// - I64 -> String         - Function from integer to string
+/// - I64?                  - Optional integer
+/// - \[String\]?             - Optional array of strings
+/// - I64 -> String?        - Function returning optional string
+/// - (I64 -> String)?      - Optional function
+///
+/// The parser follows standard precedence rules and supports
+/// arbitrary nesting of type expressions.
 pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, Span>> + Clone {
     recursive(|type_parser| {
         let atom = {
@@ -83,7 +108,8 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
             ))
         };
 
-        atom.clone()
+        // Process function types
+        let function_type = atom
             .then(
                 just(Token::SmallArrow)
                     .ignore_then(type_parser)
@@ -95,6 +121,22 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
                     Spanned::new(Type::Closure(param_type, return_type), span)
                 }
                 None => param_type,
+            });
+
+        // Process optional types
+        function_type
+            .then(
+                just(Token::Question)
+                    .repeated()
+                    .at_least(0)
+                    .collect::<Vec<_>>(),
+            )
+            .map_with_span(|(base_type, question_marks), span| {
+                let mut result = base_type;
+                for _ in question_marks {
+                    result = Spanned::new(Type::Optional(result), span.clone());
+                }
+                result
             })
     })
 }
@@ -212,6 +254,63 @@ mod tests {
     }
 
     #[test]
+    fn test_optional_types() {
+        // Basic optional types
+        let result = parse_type("I64?").unwrap();
+        assert!(matches!(*result.value,
+            Type::Optional(inner) if matches!(*inner.value, Type::Int64)
+        ));
+
+        let result = parse_type("String?").unwrap();
+        assert!(matches!(*result.value,
+            Type::Optional(inner) if matches!(*inner.value, Type::String)
+        ));
+
+        // Nested optional types
+        let result = parse_type("I64??").unwrap();
+        assert!(matches!(*result.value,
+            Type::Optional(inner) if matches!(*inner.clone().value,
+                Type::Optional(inner_inner) if matches!(*inner_inner.value, Type::Int64)
+            )
+        ));
+
+        // Complex types with optional
+        let result = parse_type("[I64]?").unwrap();
+        assert!(matches!(*result.value,
+            Type::Optional(inner) if matches!(*inner.clone().value,
+                Type::Array(arr_inner) if matches!(*arr_inner.value, Type::Int64)
+            )
+        ));
+
+        let result = parse_type("(I64, String)?").unwrap();
+        assert!(matches!(*result.value,
+            Type::Optional(inner) if matches!(*inner.value, Type::Tuple(_))
+        ));
+
+        // Function return type is optional
+        let result = parse_type("I64 -> String?").unwrap();
+        assert!(matches!(*result.value,
+            Type::Closure(param, ret)
+            if matches!(*param.value, Type::Int64)
+            && matches!(*ret.value, Type::Optional(_))
+            && matches!(*ret.value.clone(),
+                Type::Optional(inner) if matches!(*inner.value, Type::String))
+        ));
+
+        // Entire function type is optional
+        let result = parse_type("(I64 -> String)?").unwrap();
+        assert!(matches!(*result.value,
+            Type::Optional(inner) if matches!(*inner.value, Type::Closure(_, _))
+        ));
+
+        // Optional map type
+        let result = parse_type("{String : I64}?").unwrap();
+        assert!(matches!(*result.value,
+            Type::Optional(inner) if matches!(*inner.value, Type::Map(_, _))
+        ));
+    }
+
+    #[test]
     fn test_complex_type() {
         // Test mix of Map, Array, Tuple, and Closure
         let insane_type = "{String : [((I64, [{String : Physical}]) -> [(AdtType, LogicalProps, (Bool -> [Scalar]))])]}";
@@ -261,10 +360,9 @@ mod tests {
             }
         }
 
-        // Test an even more complex nested type
-        let even_more_insane =
-            "{String : {I64 : [(Logical -> {String : [((Bool, [Scalar]) -> Physical)]})]}}";
-        assert!(parse_type(even_more_insane).is_ok());
-        assert!(parse_type(even_more_insane).is_ok());
+        // Test an even more insane nested type with optionals
+        let optional_insane =
+            "{String? : {I64 : [(Logical -> {String : [((Bool?, [Scalar]?) -> Physical?)]?}?)]}}?";
+        assert!(parse_type(optional_insane).is_ok());
     }
 }
