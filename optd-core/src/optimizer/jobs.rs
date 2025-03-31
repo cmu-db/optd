@@ -284,7 +284,7 @@ impl<M: Memoize> Optimizer<M> {
             let response = engine
                 .launch_rule(
                     "derive",
-                    vec![partial_logical_to_value(&plan.into())],
+                    vec![partial_logical_to_value(&plan)],
                     Arc::new(move |value| {
                         Box::pin(async move {
                             let properties = value_to_logical_properties(&value);
@@ -295,7 +295,7 @@ impl<M: Memoize> Optimizer<M> {
                 )
                 .await;
 
-            Self::send_engine_response(job_id, message_tx, response)
+            Self::send_engine_response(job_id, message_tx, response).await;
         });
         Ok(())
     }
@@ -333,7 +333,7 @@ impl<M: Memoize> Optimizer<M> {
                 )
                 .await;
 
-            Self::send_engine_response(job_id, message_tx, response)
+            Self::send_engine_response(job_id, message_tx, response).await;
         });
 
         Ok(())
@@ -374,7 +374,7 @@ impl<M: Memoize> Optimizer<M> {
                     }),
                 )
                 .await;
-            Self::send_engine_response(job_id, message_tx, response)
+            Self::send_engine_response(job_id, message_tx, response).await;
         });
 
         Ok(())
@@ -406,7 +406,7 @@ impl<M: Memoize> Optimizer<M> {
                 )
                 .await;
 
-            Self::send_engine_response(job_id, message_tx, response)
+            Self::send_engine_response(job_id, message_tx, response).await;
         });
 
         Ok(())

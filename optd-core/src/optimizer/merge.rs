@@ -57,7 +57,7 @@ impl<M: Memoize> Optimizer<M> {
                     .enumerate()
                     .filter(|(j, _)| *j != i) // Filter out the current goal.
                     .filter_map(|(_, goal_info)| goal_info.best_expr)
-                    .filter(|(_, cost)| current_cost.map_or(true, |current| cost < current))
+                    .filter(|(_, cost)| current_cost.is_none_or(|current| cost < current))
                     .fold(None, |acc, (expr_id, cost)| match acc {
                         None => Some((expr_id, cost)),
                         Some((_, acc_cost)) if cost < acc_cost => Some((expr_id, cost)),
@@ -76,7 +76,7 @@ impl<M: Memoize> Optimizer<M> {
             }
 
             // 2. Handling costing tasks for the merged goals.
-            self.merge_optimization_tasks(&all_exprs_by_goal, goal_merge.new_repr_goal_id)
+            self.merge_optimization_tasks(all_exprs_by_goal, goal_merge.new_repr_goal_id)
                 .await;
 
             // 3. Merge subscribers.
@@ -109,7 +109,7 @@ impl<M: Memoize> Optimizer<M> {
             .collect();
 
         match exploring_tasks.as_slice() {
-            [] => return, // No tasks exist, nothing to do.
+            [] => (), // No tasks exist, nothing to do.
 
             [(task_id, group_id)] => {
                 // Just one task exists - update its index.
@@ -162,7 +162,7 @@ impl<M: Memoize> Optimizer<M> {
             .collect();
 
         match optimization_tasks.as_slice() {
-            [] => return, // No tasks exist, nothing to do.
+            [] => (), // No tasks exist, nothing to do.
 
             [(task_id, goal_id)] => {
                 // Just one task exists - update its index and kind.
