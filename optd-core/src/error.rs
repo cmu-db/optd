@@ -2,6 +2,6 @@
 /// but everyone uses this common Error type for simplicity.
 #[derive(Debug)]
 #[allow(dead_code)]
-pub(crate) enum Error {
+pub enum Error {
     Placeholder,
 }

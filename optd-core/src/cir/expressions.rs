@@ -1,8 +1,9 @@
 use super::{
-    goal::{Cost, Goal},
+    GoalMemberId,
+    goal::Cost,
     group::GroupId,
     operators::{Child, Operator},
-    plans::{PartialLogicalPlan, PartialPhysicalPlan},
+    plans::PartialLogicalPlan,
 };
 use std::sync::Arc;
 
@@ -20,7 +21,7 @@ pub struct LogicalExpressionId(pub i64);
 ///
 /// Physical expressions use [`Goal`]s rather than full plans for their children, representing a
 /// compact form suitable for the memo structure.
-pub type PhysicalExpression = Operator<Goal>;
+pub type PhysicalExpression = Operator<GoalMemberId>;
 
 /// A unique identifier for a physical expression.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
@@ -40,20 +41,6 @@ impl From<LogicalExpression> for PartialLogicalPlan {
             tag: expr.tag,
             data: expr.data,
             children: convert_children::<GroupId, Self>(expr.children),
-        })
-    }
-}
-
-impl From<PhysicalExpression> for PartialPhysicalPlan {
-    /// Converts a physical expression to a partial physical plan.
-    ///
-    /// This creates a materialized partial plan where each child goal ID is converted to an
-    /// unmaterialized partial plan reference.
-    fn from(expr: PhysicalExpression) -> Self {
-        PartialPhysicalPlan::Materialized(Operator {
-            tag: expr.tag,
-            data: expr.data,
-            children: convert_children::<Goal, Self>(expr.children),
         })
     }
 }

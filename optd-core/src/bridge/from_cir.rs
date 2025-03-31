@@ -50,6 +50,16 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
     }
 }
 
+// TODO(Alexis): Once we define statistics, there should be a custom CIR representation.
+/// Converts a [`PartialPhysicalPlan`]  with its cost into a [`Value`].
+pub(crate) fn costed_physical_to_value(plan: PartialPhysicalPlan, cost: Cost) -> Value {
+    let operator = partial_physical_to_value(&plan);
+    Value(Tuple(vec![
+        partial_physical_to_value(&plan),
+        Value(Literal(Float64(cost.0))),
+    ]))
+}
+
 /// Converts [`LogicalProperties`] into a [`Value`].
 #[allow(dead_code)]
 pub(crate) fn logical_properties_to_value(properties: &LogicalProperties) -> Value {
