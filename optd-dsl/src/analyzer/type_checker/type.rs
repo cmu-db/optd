@@ -251,10 +251,7 @@ mod type_registry_tests {
     }
 
     fn create_sum_adt(name: &str, variants: Vec<Adt>) -> Adt {
-        let spanned_variants: Vec<Spanned<Adt>> = variants
-            .into_iter()
-            .map(spanned)
-            .collect();
+        let spanned_variants: Vec<Spanned<Adt>> = variants.into_iter().map(spanned).collect();
 
         Adt::Sum {
             name: spanned(name.to_string()),
