@@ -1,5 +1,5 @@
 use crate::analyzer::hir::{
-    CoreData, Expr, LogicalOp, Materializable, Operator, PhysicalOp, Value,
+    CoreData, Expr, Goal, GroupId, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
 use crate::engine::utils::evaluate_sequence;
 use crate::engine::{Continuation, EngineResponse};
@@ -16,28 +16,32 @@ use std::sync::Arc;
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
 pub(crate) async fn evaluate_logical_operator<O>(
-    op: LogicalOp<Arc<Expr>>,
+    op: Materializable<LogicalOp<Arc<Expr>>, GroupId>,
     engine: Engine,
     k: Continuation<Value, EngineResponse<O>>,
 ) -> EngineResponse<O>
 where
     O: Send + 'static,
 {
-    match op.0 {
+    match op {
         // For unmaterialized operators, directly call the continuation with the unmaterialized
         // value.
-        UnMaterialized(group_id) => k(Value(Logical(LogicalOp(UnMaterialized(group_id))))).await,
+        UnMaterialized(group_id) => {
+            let result = Value(Logical(UnMaterialized(group_id)));
+            k(result).await
+        }
         // For materialized operators, evaluate all parts and construct the result.
-        Materialized(op) => {
+        Materialized(log_op) => {
             evaluate_operator(
-                op.data,
-                op.children,
-                op.tag,
+                log_op.operator.data,
+                log_op.operator.children,
+                log_op.operator.tag,
                 engine,
                 Arc::new(move |constructed_op| {
                     Box::pin(capture!([k], async move {
-                        // Wrap the constructed operator in the logical operator structure.
-                        let result = Value(Logical(LogicalOp(Materialized(constructed_op))));
+                        // Wrap the constructed operator in the logical operator structure
+                        let log_op = LogicalOp::logical(constructed_op);
+                        let result = Value(Logical(Materialized(log_op)));
                         k(result).await
                     }))
                 }),
@@ -55,28 +59,31 @@ where
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
 pub(crate) async fn evaluate_physical_operator<O>(
-    op: PhysicalOp<Arc<Expr>>,
+    op: Materializable<PhysicalOp<Arc<Expr>>, Goal>,
     engine: Engine,
     k: Continuation<Value, EngineResponse<O>>,
 ) -> EngineResponse<O>
 where
     O: Send + 'static,
 {
-    match op.0 {
+    match op {
         // For unmaterialized operators, continue with the unmaterialized value.
         UnMaterialized(physical_goal) => {
-            k(Value(Physical(PhysicalOp(UnMaterialized(physical_goal))))).await
+            let result = Value(Physical(UnMaterialized(physical_goal)));
+            k(result).await
         }
         // For materialized operators, evaluate all parts and construct the result.
-        Materialized(op) => {
+        Materialized(phys_op) => {
             evaluate_operator(
-                op.data,
-                op.children,
-                op.tag,
+                phys_op.operator.data,
+                phys_op.operator.children,
+                phys_op.operator.tag,
                 engine,
                 Arc::new(move |constructed_op| {
                     Box::pin(capture!([k], async move {
-                        k(Value(Physical(PhysicalOp(Materialized(constructed_op))))).await
+                        let phys_op = PhysicalOp::physical(constructed_op);
+                        let result = Value(Physical(Materialized(phys_op)));
+                        k(result).await
                     }))
                 }),
             )
@@ -162,7 +169,7 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create a materialized logical operator expression with nested expressions to evaluate
-        let op = LogicalOp(Materializable::Materialized(Operator {
+        let log_op = LogicalOp::logical(Operator {
             tag: "Join".to_string(),
             data: vec![
                 lit_expr(string("inner")),
@@ -176,10 +183,12 @@ mod tests {
                 Arc::new(Expr::CoreExpr(CoreData::Literal(string("orders")))),
                 Arc::new(Expr::CoreExpr(CoreData::Literal(string("lineitem")))),
             ],
-        }));
+        });
 
         // Create the expression to evaluate
-        let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(op)));
+        let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(
+            Materializable::Materialized(log_op),
+        )));
 
         // Evaluate the expression
         let results = evaluate_and_collect(logical_op_expr, engine, harness).await;
@@ -187,19 +196,19 @@ mod tests {
         // Check result
         assert_eq!(results.len(), 1);
         match &results[0].0 {
-            CoreData::Logical(LogicalOp(Materializable::Materialized(op))) => {
+            CoreData::Logical(Materializable::Materialized(log_op)) => {
                 // Check tag
-                assert_eq!(op.tag, "Join");
+                assert_eq!(log_op.operator.tag, "Join");
 
                 // Check data - should have "inner" and 15
-                assert_eq!(op.data.len(), 2);
-                match &op.data[0].0 {
+                assert_eq!(log_op.operator.data.len(), 2);
+                match &log_op.operator.data[0].0 {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("inner".to_string()));
                     }
                     _ => panic!("Expected string literal"),
                 }
-                match &op.data[1].0 {
+                match &log_op.operator.data[1].0 {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::Int64(15));
                     }
@@ -207,14 +216,14 @@ mod tests {
                 }
 
                 // Check children - should have "orders" and "lineitem"
-                assert_eq!(op.children.len(), 2);
-                match &op.children[0].0 {
+                assert_eq!(log_op.operator.children.len(), 2);
+                match &log_op.operator.children[0].0 {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("orders".to_string()));
                     }
                     _ => panic!("Expected string literal"),
                 }
-                match &op.children[1].0 {
+                match &log_op.operator.children[1].0 {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("lineitem".to_string()));
                     }
@@ -234,10 +243,11 @@ mod tests {
 
         // Create an unmaterialized logical operator with a group ID
         let group_id = GroupId(42);
-        let op = LogicalOp(Materializable::UnMaterialized(group_id));
 
         // Create the expression to evaluate
-        let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(op)));
+        let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(
+            Materializable::UnMaterialized(group_id),
+        )));
 
         // Evaluate the expression
         let results = evaluate_and_collect(logical_op_expr, engine, harness).await;
@@ -245,7 +255,7 @@ mod tests {
         // Check result
         assert_eq!(results.len(), 1);
         match &results[0].0 {
-            CoreData::Logical(LogicalOp(Materializable::UnMaterialized(id))) => {
+            CoreData::Logical(Materializable::UnMaterialized(id)) => {
                 // Check that the group ID is preserved
                 assert_eq!(*id, group_id);
             }
@@ -261,7 +271,7 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create a materialized physical operator expression with nested expressions to evaluate
-        let op = PhysicalOp(Materializable::Materialized(Operator {
+        let phys_op = PhysicalOp::physical(Operator {
             tag: "HashJoin".to_string(),
             data: vec![
                 lit_expr(string("inner")),
@@ -275,10 +285,12 @@ mod tests {
                 Arc::new(Expr::CoreExpr(CoreData::Literal(string("IndexScan")))),
                 Arc::new(Expr::CoreExpr(CoreData::Literal(string("FullScan")))),
             ],
-        }));
+        });
 
         // Create the expression to evaluate
-        let physical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Physical(op)));
+        let physical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Physical(
+            Materializable::Materialized(phys_op),
+        )));
 
         // Evaluate the expression
         let results = evaluate_and_collect(physical_op_expr, engine, harness).await;
@@ -286,19 +298,19 @@ mod tests {
         // Check result
         assert_eq!(results.len(), 1);
         match &results[0].0 {
-            CoreData::Physical(PhysicalOp(Materializable::Materialized(op))) => {
+            CoreData::Physical(Materializable::Materialized(phys_op)) => {
                 // Check tag
-                assert_eq!(op.tag, "HashJoin");
+                assert_eq!(phys_op.operator.tag, "HashJoin");
 
                 // Check data - should have "inner" and 60
-                assert_eq!(op.data.len(), 2);
-                match &op.data[0].0 {
+                assert_eq!(phys_op.operator.data.len(), 2);
+                match &phys_op.operator.data[0].0 {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("inner".to_string()));
                     }
                     _ => panic!("Expected string literal"),
                 }
-                match &op.data[1].0 {
+                match &phys_op.operator.data[1].0 {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::Int64(60));
                     }
@@ -306,14 +318,14 @@ mod tests {
                 }
 
                 // Check children - should have "IndexScan" and "FullScan"
-                assert_eq!(op.children.len(), 2);
-                match &op.children[0].0 {
+                assert_eq!(phys_op.operator.children.len(), 2);
+                match &phys_op.operator.children[0].0 {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("IndexScan".to_string()));
                     }
                     _ => panic!("Expected string literal"),
                 }
-                match &op.children[1].0 {
+                match &phys_op.operator.children[1].0 {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("FullScan".to_string()));
                     }
@@ -338,10 +350,11 @@ mod tests {
                 "sorted".to_string(),
             )))),
         };
-        let op = PhysicalOp(Materializable::UnMaterialized(goal.clone()));
 
         // Create the expression to evaluate
-        let physical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Physical(op)));
+        let physical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Physical(
+            Materializable::UnMaterialized(goal.clone()),
+        )));
 
         // Evaluate the expression
         let results = evaluate_and_collect(physical_op_expr, engine, harness).await;
@@ -349,7 +362,7 @@ mod tests {
         // Check result
         assert_eq!(results.len(), 1);
         match &results[0].0 {
-            CoreData::Physical(PhysicalOp(Materializable::UnMaterialized(result_goal))) => {
+            CoreData::Physical(Materializable::UnMaterialized(result_goal)) => {
                 // Check that the goal is preserved
                 assert_eq!(result_goal.group_id, goal.group_id);
 
@@ -385,14 +398,16 @@ mod tests {
             vec![],
         )));
 
-        let op = LogicalOp(Materializable::Materialized(Operator {
+        let log_op = LogicalOp::logical(Operator {
             tag: "Join".to_string(),
             data: vec![lit_expr(string("inner"))],
             children: vec![scan1, scan2],
-        }));
+        });
 
         // Create the expression to evaluate
-        let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(op)));
+        let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(
+            Materializable::Materialized(log_op),
+        )));
 
         // Evaluate the expression
         let results = evaluate_and_collect(logical_op_expr, engine, harness).await;
@@ -400,13 +415,13 @@ mod tests {
         // Check result
         assert_eq!(results.len(), 1);
         match &results[0].0 {
-            CoreData::Logical(LogicalOp(Materializable::Materialized(op))) => {
+            CoreData::Logical(Materializable::Materialized(log_op)) => {
                 // Check tag
-                assert_eq!(op.tag, "Join");
+                assert_eq!(log_op.operator.tag, "Join");
 
                 // Check data
-                assert_eq!(op.data.len(), 1);
-                match &op.data[0].0 {
+                assert_eq!(log_op.operator.data.len(), 1);
+                match &log_op.operator.data[0].0 {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("inner".to_string()));
                     }
@@ -414,36 +429,36 @@ mod tests {
                 }
 
                 // Check children - should be two logical operators
-                assert_eq!(op.children.len(), 2);
+                assert_eq!(log_op.operator.children.len(), 2);
 
                 // Check first child
-                match &op.children[0].0 {
-                    CoreData::Logical(LogicalOp(Materializable::Materialized(child_op))) => {
-                        assert_eq!(child_op.tag, "Scan");
-                        assert_eq!(child_op.data.len(), 1);
-                        match &child_op.data[0].0 {
+                match &log_op.operator.children[0].0 {
+                    CoreData::Logical(Materializable::Materialized(child_log_op)) => {
+                        assert_eq!(child_log_op.operator.tag, "Scan");
+                        assert_eq!(child_log_op.operator.data.len(), 1);
+                        match &child_log_op.operator.data[0].0 {
                             CoreData::Literal(lit) => {
                                 assert_eq!(lit, &Literal::String("orders".to_string()));
                             }
                             _ => panic!("Expected string literal"),
                         }
                     }
-                    _ => panic!("Expected logical operator as child"),
+                    _ => panic!("Expected materialized logical operator as child"),
                 }
 
                 // Check second child
-                match &op.children[1].0 {
-                    CoreData::Logical(LogicalOp(Materializable::Materialized(child_op))) => {
-                        assert_eq!(child_op.tag, "Scan");
-                        assert_eq!(child_op.data.len(), 1);
-                        match &child_op.data[0].0 {
+                match &log_op.operator.children[1].0 {
+                    CoreData::Logical(Materializable::Materialized(child_log_op)) => {
+                        assert_eq!(child_log_op.operator.tag, "Scan");
+                        assert_eq!(child_log_op.operator.data.len(), 1);
+                        match &child_log_op.operator.data[0].0 {
                             CoreData::Literal(lit) => {
                                 assert_eq!(lit, &Literal::String("lineitem".to_string()));
                             }
                             _ => panic!("Expected string literal"),
                         }
                     }
-                    _ => panic!("Expected logical operator as child"),
+                    _ => panic!("Expected materialized logical operator as child"),
                 }
             }
             _ => panic!("Expected materialized logical operator"),

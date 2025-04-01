@@ -1,12 +1,12 @@
+use super::{Continuation, EngineResponse};
 use crate::analyzer::hir::{
     CoreData, Expr, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern,
     PhysicalOp, Value,
 };
 use crate::engine::Engine;
+use Materializable::*;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-
-use super::{Continuation, EngineResponse};
 
 /// A test harness for the evaluation engine.
 #[derive(Clone)]
@@ -174,9 +174,7 @@ pub fn create_logical_operator(tag: &str, data: Vec<Value>, children: Vec<Value>
         children,
     };
 
-    Value(CoreData::Logical(LogicalOp(Materializable::Materialized(
-        op,
-    ))))
+    Value(CoreData::Logical(Materialized(LogicalOp::logical(op))))
 }
 
 /// Helper to create a simple physical operator value.
@@ -187,9 +185,7 @@ pub fn create_physical_operator(tag: &str, data: Vec<Value>, children: Vec<Value
         children,
     };
 
-    Value(CoreData::Physical(PhysicalOp(
-        Materializable::Materialized(op),
-    )))
+    Value(CoreData::Physical(Materialized(PhysicalOp::physical(op))))
 }
 
 /// Runs a test by evaluating the expression and collecting all results with a custom continuation.

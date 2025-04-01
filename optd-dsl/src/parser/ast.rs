@@ -35,6 +35,8 @@ pub enum Type {
     Tuple(Vec<Spanned<Type>>),
     /// Map/dictionary with key and value types
     Map(Spanned<Type>, Spanned<Type>),
+    /// Optional type (represents a value that might be absent)
+    Optional(Spanned<Type>),
 
     // User defined types
     /// Algebraic Data Type reference by name

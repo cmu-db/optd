@@ -88,14 +88,82 @@ pub struct Operator<T> {
 /// Represents a logical relational algebra operation that can be either
 /// materialized as a concrete operator or referenced by a group ID in the optimizer.
 #[derive(Debug, Clone)]
-pub struct LogicalOp<T>(pub Materializable<Operator<T>, GroupId>);
+pub struct LogicalOp<T> {
+    pub operator: Operator<T>,
+    pub group_id: Option<GroupId>,
+}
+
+impl<T> LogicalOp<T> {
+    /// Creates a new logical operator without a group ID
+    ///
+    /// Used for representing operators that are not yet assigned to a group
+    /// in the optimizer.
+    pub fn logical(operator: Operator<T>) -> Self {
+        Self {
+            operator,
+            group_id: None,
+        }
+    }
+
+    /// Creates a new logical operator with an assigned group ID
+    ///
+    /// Used for representing operators that have been stored in the optimizer
+    /// with a specific group identity.
+    pub fn stored_logical(operator: Operator<T>, group_id: GroupId) -> Self {
+        Self {
+            operator,
+            group_id: Some(group_id),
+        }
+    }
+}
 
 /// Physical operator in the query plan
 ///
 /// Represents an executable implementation of a logical operation with specific
 /// physical properties, either materialized as a concrete operator or as a physical goal.
 #[derive(Debug, Clone)]
-pub struct PhysicalOp<T>(pub Materializable<Operator<T>, Goal>);
+pub struct PhysicalOp<T> {
+    pub operator: Operator<T>,
+    pub goal: Option<Goal>,
+    pub cost: Option<Box<Value>>,
+}
+
+impl<T> PhysicalOp<T> {
+    /// Creates a new physical operator without goal or cost information
+    ///
+    /// Used for representing physical operators that are not yet part of the
+    /// optimization process.
+    pub fn physical(operator: Operator<T>) -> Self {
+        Self {
+            operator,
+            goal: None,
+            cost: None,
+        }
+    }
+
+    /// Creates a new physical operator with goal but without cost information
+    ///
+    /// Used for representing physical operators that have been stored in the optimizer
+    /// with a specific goal but haven't been costed yet.
+    pub fn stored_physical(operator: Operator<T>, goal: Goal) -> Self {
+        Self {
+            operator,
+            goal: Some(goal),
+            cost: None,
+        }
+    }
+
+    /// Creates a new physical operator with both goal and cost information
+    ///
+    /// Used for representing fully optimized physical operators with computed cost.
+    pub fn costed_physical(operator: Operator<T>, goal: Goal, cost: Value) -> Self {
+        Self {
+            operator,
+            goal: Some(goal),
+            cost: Some(cost.into()),
+        }
+    }
+}
 
 /// Core data structures shared across the system
 #[derive(Debug, Clone)]
@@ -115,11 +183,11 @@ pub enum CoreData<T> {
     /// Error representation
     Fail(Box<T>),
     /// Logical query operators
-    Logical(LogicalOp<T>),
+    Logical(Materializable<LogicalOp<T>, GroupId>),
     /// Physical query operators
-    Physical(PhysicalOp<T>),
-    /// The null value
-    Null,
+    Physical(Materializable<PhysicalOp<T>, Goal>),
+    /// The None value
+    None,
 }
 
 /// Expression nodes in the HIR

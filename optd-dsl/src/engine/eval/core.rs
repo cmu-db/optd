@@ -42,9 +42,9 @@ where
         Fail(msg) => evaluate_fail(*msg, engine, k).await,
         Logical(op) => evaluate_logical_operator(op, engine, k).await,
         Physical(op) => evaluate_physical_operator(op, engine, k).await,
-        Null => {
+        None => {
             // Directly continue with null value.
-            k(Value(Null)).await
+            k(Value(None)).await
         }
     }
 }
@@ -396,14 +396,14 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create a null expression
-        let null_expr = Arc::new(Expr::CoreExpr(CoreData::Null));
+        let null_expr = Arc::new(Expr::CoreExpr(CoreData::None));
 
         let results = evaluate_and_collect(null_expr, engine, harness).await;
 
         // Check result
         assert_eq!(results.len(), 1);
         match &results[0].0 {
-            CoreData::Null => {
+            CoreData::None => {
                 // Successfully evaluated to null
             }
             _ => panic!("Expected null"),

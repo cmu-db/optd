@@ -1,4 +1,5 @@
 //! Converts HIR [`Value`]s into optd's type representations (CIR).
+
 use crate::cir::*;
 use Child::*;
 use CoreData::*;
@@ -14,14 +15,17 @@ use std::sync::Arc;
 /// Panics if the [`Value`] is not a [`Logical`] variant.
 pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
     match &value.0 {
-        Logical(logical_op) => match &logical_op.0 {
+        Logical(logical_op) => match logical_op {
             UnMaterialized(group_id) => {
                 PartialLogicalPlan::UnMaterialized(hir_group_id_to_cir(group_id))
             }
-            Materialized(op) => PartialLogicalPlan::Materialized(Operator {
-                tag: op.tag.clone(),
-                data: convert_values_to_operator_data(&op.data),
-                children: convert_values_to_children(&op.children, value_to_partial_logical),
+            Materialized(log_op) => PartialLogicalPlan::Materialized(Operator {
+                tag: log_op.operator.tag.clone(),
+                data: convert_values_to_operator_data(&log_op.operator.data),
+                children: convert_values_to_children(
+                    &log_op.operator.children,
+                    value_to_partial_logical,
+                ),
             }),
         },
         _ => panic!("Expected Logical CoreData variant, found: {:?}", value.0),
@@ -35,14 +39,17 @@ pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
 /// Panics if the [`Value`] is not a [`Physical`] variant.
 pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
     match &value.0 {
-        Physical(physical_op) => match &physical_op.0 {
+        Physical(physical_op) => match physical_op {
             UnMaterialized(hir_goal) => {
                 PartialPhysicalPlan::UnMaterialized(hir_goal_to_cir(hir_goal))
             }
-            Materialized(op) => PartialPhysicalPlan::Materialized(Operator {
-                tag: op.tag.clone(),
-                data: convert_values_to_operator_data(&op.data),
-                children: convert_values_to_children(&op.children, value_to_partial_physical),
+            Materialized(phys_op) => PartialPhysicalPlan::Materialized(Operator {
+                tag: phys_op.operator.tag.clone(),
+                data: convert_values_to_operator_data(&phys_op.operator.data),
+                children: convert_values_to_children(
+                    &phys_op.operator.children,
+                    value_to_partial_physical,
+                ),
             }),
         },
         _ => panic!("Expected Physical CoreData variant, found: {:?}", value.0),
@@ -64,7 +71,7 @@ pub(crate) fn value_to_cost(value: &Value) -> Cost {
 /// Converts an HIR properties [`Value`] into a CIR [`LogicalProperties`].
 pub(crate) fn value_to_logical_properties(properties_value: &Value) -> LogicalProperties {
     match &properties_value.0 {
-        Null => LogicalProperties(None),
+        None => LogicalProperties(Option::None),
         _ => LogicalProperties(Some(value_to_properties_data(properties_value))),
     }
 }
@@ -72,7 +79,7 @@ pub(crate) fn value_to_logical_properties(properties_value: &Value) -> LogicalPr
 /// Convert an HIR properties [`Value`] into a CIR [`PhysicalProperties`].
 fn value_to_physical_properties(properties_value: &Value) -> PhysicalProperties {
     match &properties_value.0 {
-        Null => PhysicalProperties(None),
+        None => PhysicalProperties(Option::None),
         _ => PhysicalProperties(Some(value_to_properties_data(properties_value))),
     }
 }
@@ -102,14 +109,14 @@ pub(crate) fn hir_goal_to_cir(hir_goal: &hir::Goal) -> Goal {
 /// [`Materialized`] variant.
 fn value_to_logical(value: &Value) -> LogicalPlan {
     match &value.0 {
-        Logical(logical_op) => match &logical_op.0 {
+        Logical(logical_op) => match logical_op {
             UnMaterialized(_) => {
                 panic!("Cannot convert UnMaterialized LogicalOperator to LogicalPlan")
             }
-            Materialized(op) => LogicalPlan(Operator {
-                tag: op.tag.clone(),
-                data: convert_values_to_operator_data(&op.data),
-                children: convert_values_to_children(&op.children, value_to_logical),
+            Materialized(log_op) => LogicalPlan(Operator {
+                tag: log_op.operator.tag.clone(),
+                data: convert_values_to_operator_data(&log_op.operator.data),
+                children: convert_values_to_children(&log_op.operator.children, value_to_logical),
             }),
         },
         _ => panic!("Expected Logical CoreData variant, found: {:?}", value.0),

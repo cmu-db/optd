@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-
+use super::{error::LexerError, tokens::Token};
+use crate::utils::{error::CompileError, span::Span};
 use chumsky::{
     Parser, Stream,
     error::Simple,
@@ -7,10 +7,7 @@ use chumsky::{
     text::{TextParser, digits, ident, int},
 };
 use ordered_float::OrderedFloat;
-
-use crate::utils::{error::CompileError, span::Span};
-
-use super::{error::LexerError, tokens::Token};
+use std::collections::HashMap;
 
 /// Lexes a source string into a sequence of tokens with their positions.
 /// Uses Chumsky for lexing and Ariadne for error reporting.
@@ -142,6 +139,7 @@ fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> 
         just(",").to(Token::Comma),
         just(".").to(Token::Dot),
         just(":").to(Token::Colon),
+        just("?").to(Token::Question),
     ));
 
     let comments = just("//")

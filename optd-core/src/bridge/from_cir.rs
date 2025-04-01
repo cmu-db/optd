@@ -14,7 +14,7 @@ pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
     match plan {
         PartialLogicalPlan::UnMaterialized(group_id) => {
             // For unmaterialized logical operators, we create a `Value` with the group ID.
-            Value(Logical(LogicalOp(UnMaterialized(hir::GroupId(group_id.0)))))
+            Value(Logical(UnMaterialized(hir::GroupId(group_id.0))))
         }
         PartialLogicalPlan::Materialized(node) => {
             // For materialized logical operators, we create a `Value` with the operator data.
@@ -24,7 +24,7 @@ pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
                 children: convert_children_to_values(&node.children, partial_logical_to_value),
             };
 
-            Value(Logical(LogicalOp(Materialized(operator))))
+            Value(Logical(Materialized(LogicalOp::logical(operator))))
         }
     }
 }
@@ -35,7 +35,7 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
         PartialPhysicalPlan::UnMaterialized(goal) => {
             // For unmaterialized physical operators, we create a `Value` with the goal
             let hir_goal = cir_goal_to_hir(goal);
-            Value(Physical(PhysicalOp(UnMaterialized(hir_goal))))
+            Value(Physical(UnMaterialized(hir_goal)))
         }
         PartialPhysicalPlan::Materialized(node) => {
             // For materialized physical operators, we create a Value with the operator data
@@ -45,7 +45,7 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
                 children: convert_children_to_values(&node.children, partial_physical_to_value),
             };
 
-            Value(Physical(PhysicalOp(Materialized(operator))))
+            Value(Physical(Materialized(PhysicalOp::physical(operator))))
         }
     }
 }
@@ -65,7 +65,7 @@ pub(crate) fn costed_physical_to_value(plan: PartialPhysicalPlan, cost: Cost) ->
 pub(crate) fn logical_properties_to_value(properties: &LogicalProperties) -> Value {
     match &properties.0 {
         Some(data) => properties_data_to_value(data),
-        None => Value(Null),
+        Option::None => Value(None),
     }
 }
 
@@ -73,7 +73,7 @@ pub(crate) fn logical_properties_to_value(properties: &LogicalProperties) -> Val
 pub(crate) fn physical_properties_to_value(properties: &PhysicalProperties) -> Value {
     match &properties.0 {
         Some(data) => properties_data_to_value(data),
-        None => Value(Null),
+        Option::None => Value(None),
     }
 }
 

@@ -139,6 +139,7 @@ where
                 k((value, context_opt)).await
             }
             (EmptyArray, CoreData::Array(arr)) if arr.is_empty() => k((value, Some(ctx))).await,
+
             // Complex patterns.
             (Bind(ident, inner_pattern), _) => {
                 match_bind_pattern(value.clone(), ident, *inner_pattern, ctx, k).await
@@ -157,28 +158,34 @@ where
 
                 match_struct_pattern(pat_name, pat_fields, val_fields, ctx, k).await
             }
-            (Operator(op_pattern), CoreData::Logical(LogicalOp(Materialized(operator)))) => {
-                if op_pattern.tag != operator.tag
-                    || op_pattern.data.len() != operator.data.len()
-                    || op_pattern.children.len() != operator.children.len()
+
+            // Materialized logical operators
+            (Operator(op_pattern), CoreData::Logical(Materialized(log_op))) => {
+                if op_pattern.tag != log_op.operator.tag
+                    || op_pattern.data.len() != log_op.operator.data.len()
+                    || op_pattern.children.len() != log_op.operator.children.len()
                 {
                     return k((value, None)).await;
                 }
 
-                match_materialized_operator(true, op_pattern, operator.clone(), ctx, k).await
+                match_materialized_operator(true, op_pattern, log_op.operator.clone(), ctx, k).await
             }
-            (Operator(op_pattern), CoreData::Physical(PhysicalOp(Materialized(operator)))) => {
-                if op_pattern.tag != operator.tag
-                    || op_pattern.data.len() != operator.data.len()
-                    || op_pattern.children.len() != operator.children.len()
+
+            // Materialized physical operators
+            (Operator(op_pattern), CoreData::Physical(Materialized(phys_op))) => {
+                if op_pattern.tag != phys_op.operator.tag
+                    || op_pattern.data.len() != phys_op.operator.data.len()
+                    || op_pattern.children.len() != phys_op.operator.children.len()
                 {
                     return k((value, None)).await;
                 }
 
-                match_materialized_operator(false, op_pattern, operator.clone(), ctx, k).await
+                match_materialized_operator(false, op_pattern, phys_op.operator.clone(), ctx, k)
+                    .await
             }
-            // Unmaterialized operators.
-            (Operator(op_pattern), CoreData::Logical(LogicalOp(UnMaterialized(group_id)))) => {
+
+            // Unmaterialized logical operators
+            (Operator(op_pattern), CoreData::Logical(UnMaterialized(group_id))) => {
                 // Yield the group id back to the caller and provide a callback to match expanded value against the pattern.
                 EngineResponse::YieldGroup(
                     *group_id,
@@ -189,7 +196,9 @@ where
                     }),
                 )
             }
-            (Operator(op_pattern), CoreData::Physical(PhysicalOp(UnMaterialized(goal)))) => {
+
+            // Unmaterialized physical operators
+            (Operator(op_pattern), CoreData::Physical(UnMaterialized(goal))) => {
                 // Yield the goal back to the caller and provide a callback to match expanded value against the pattern.
                 EngineResponse::YieldGoal(
                     goal.clone(),
@@ -200,6 +209,7 @@ where
                     }),
                 )
             }
+
             // No match for other combinations.
             _ => k((value, None)).await,
         }
@@ -385,7 +395,7 @@ where
         all_values,
         ctx.clone(),
         Arc::new(move |results| {
-            Box::pin(capture!([ctx, operator, k], async move {
+            Box::pin(capture!([ctx, operator, is_logical, k], async move {
                 // Check if all components matched successfully.
                 let all_matched = results.iter().all(|(_, ctx_opt)| ctx_opt.is_some());
 
@@ -404,9 +414,11 @@ where
 
                 // Create appropriate value type based on original_value.
                 let new_value = if is_logical {
-                    Value(CoreData::Logical(LogicalOp(Materialized(new_op))))
+                    let log_op = LogicalOp::logical(new_op);
+                    Value(CoreData::Logical(Materialized(log_op)))
                 } else {
-                    Value(CoreData::Physical(PhysicalOp(Materialized(new_op))))
+                    let phys_op = PhysicalOp::physical(new_op);
+                    Value(CoreData::Physical(Materialized(phys_op)))
                 };
 
                 if all_matched {
@@ -522,11 +534,12 @@ mod tests {
             context::Context,
             hir::{
                 BinOp, CoreData, Expr, FunKind, Goal, GroupId, Literal, LogicalOp, Materializable,
-                Operator, PhysicalOp, Value,
+                Operator, Value,
             },
         },
         engine::test_utils::TestHarness,
     };
+    use Materializable::*;
     use std::sync::Arc;
 
     /// Test simple pattern matching with literals
@@ -732,9 +745,7 @@ mod tests {
             ],
         };
 
-        let logical_op_value = Value(CoreData::Logical(LogicalOp(Materializable::Materialized(
-            op,
-        ))));
+        let logical_op_value = Value(CoreData::Logical(Materialized(LogicalOp::logical(op))));
         let logical_op_expr = Arc::new(Expr::CoreVal(logical_op_value.clone()));
 
         // Create a match expression:
@@ -836,9 +847,7 @@ mod tests {
         harness.register_group(test_group_id, materialized_join);
 
         // Create an unmaterialized logical operator
-        let unmaterialized_logical_op = Value(CoreData::Logical(LogicalOp(
-            Materializable::UnMaterialized(test_group_id),
-        )));
+        let unmaterialized_logical_op = Value(CoreData::Logical(UnMaterialized(test_group_id)));
 
         let unmaterialized_expr = Arc::new(Expr::CoreVal(unmaterialized_logical_op));
 
@@ -949,9 +958,7 @@ mod tests {
         harness.register_goal(&test_goal, materialized_hash_join);
 
         // Create an unmaterialized physical operator with the goal
-        let unmaterialized_physical_op = Value(CoreData::Physical(PhysicalOp(
-            Materializable::UnMaterialized(test_goal.clone()),
-        )));
+        let unmaterialized_physical_op = Value(CoreData::Physical(UnMaterialized(test_goal)));
 
         let unmaterialized_expr = Arc::new(Expr::CoreVal(unmaterialized_physical_op));
 
@@ -1393,12 +1400,8 @@ mod tests {
                 lit_val(string("left.id = right.id")),
             ],
             vec![
-                Value(CoreData::Logical(LogicalOp(
-                    Materializable::UnMaterialized(group_id_1),
-                ))),
-                Value(CoreData::Logical(LogicalOp(
-                    Materializable::UnMaterialized(group_id_2),
-                ))),
+                Value(CoreData::Logical(UnMaterialized(group_id_1))),
+                Value(CoreData::Logical(UnMaterialized(group_id_2))),
             ],
         );
 

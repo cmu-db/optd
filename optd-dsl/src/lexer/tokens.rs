@@ -19,6 +19,7 @@ pub enum Token {
     Then,
     Else,
     Fail,
+    None,
 
     // Literals
     TermIdent(String),
@@ -62,6 +63,7 @@ pub enum Token {
     Dot,        // .
     Colon,      // :
     UnderScore, // _
+    Question,   // ?
 }
 
 pub const ALL_DELIMITERS: [(Token, Token); 3] = [
@@ -90,6 +92,7 @@ impl std::fmt::Display for Token {
             Token::Then => write!(f, "then"),
             Token::Else => write!(f, "else"),
             Token::Fail => write!(f, "fail"),
+            Token::None => write!(f, "None"),
 
             // Literals
             Token::TermIdent(ident) => write!(f, "{}", ident),
@@ -133,6 +136,7 @@ impl std::fmt::Display for Token {
             Token::Dot => write!(f, "."),
             Token::Colon => write!(f, ":"),
             Token::UnderScore => write!(f, "_"),
+            Token::Question => write!(f, "?"),
         }
     }
 }
