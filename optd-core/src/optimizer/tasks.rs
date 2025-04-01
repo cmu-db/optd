@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use super::{
-    Optimizer, OptimizerMessage,
+    Optimizer, EngineMessageKind,
     jobs::{JobId, JobKind},
 };
 use crate::{
@@ -141,7 +141,7 @@ pub(super) struct ImplementExpressionTask {
 
     /// Continuations for each group that need to be notified when
     /// new logical expressions are created.
-    pub continuations: HashMap<GroupId, Vec<Continuation<Value, EngineResponse<OptimizerMessage>>>>,
+    pub continuations: HashMap<GroupId, Vec<Continuation<Value, EngineResponse<EngineMessageKind>>>>,
 }
 
 impl ImplementExpressionTask {
@@ -174,7 +174,7 @@ pub(super) struct TransformExpressionTask {
 
     /// Continuations for each group that need to be notified when
     /// new logical expressions are created.
-    pub continuations: HashMap<GroupId, Vec<Continuation<Value, EngineResponse<OptimizerMessage>>>>,
+    pub continuations: HashMap<GroupId, Vec<Continuation<Value, EngineResponse<EngineMessageKind>>>>,
 }
 
 impl TransformExpressionTask {
@@ -202,7 +202,7 @@ pub(super) struct CostExpressionTask {
 
     /// Continuations for each goal that need to be notified when
     /// optimized expressions are created.
-    pub continuations: HashMap<GoalId, Vec<Continuation<Value, EngineResponse<OptimizerMessage>>>>,
+    pub continuations: HashMap<GoalId, Vec<Continuation<Value, EngineResponse<EngineMessageKind>>>>,
 }
 
 impl CostExpressionTask {
