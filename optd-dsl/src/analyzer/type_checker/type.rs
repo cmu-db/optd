@@ -176,7 +176,7 @@ impl TypeRegistry {
                     return true;
                 }
 
-                self.subtypes.get(parent_name).map_or(false, |children| {
+                self.subtypes.get(parent_name).is_some_and(|children| {
                     children.iter().any(|subtype_child_name| {
                         self.is_subtype(
                             &Type::Adt(child_name.clone()),
@@ -253,7 +253,7 @@ mod type_registry_tests {
     fn create_sum_adt(name: &str, variants: Vec<Adt>) -> Adt {
         let spanned_variants: Vec<Spanned<Adt>> = variants
             .into_iter()
-            .map(|variant| spanned(variant))
+            .map(spanned)
             .collect();
 
         Adt::Sum {
