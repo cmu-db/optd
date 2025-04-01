@@ -16,7 +16,6 @@ use crate::cir::{
 use crate::error::Error;
 use crate::memo::Memoize;
 use EngineMessageKind::*;
-use JobKind::*;
 use TaskKind::*;
 use futures::SinkExt;
 use futures::channel::mpsc::Sender;
@@ -144,27 +143,27 @@ impl<M: Memoize> Optimizer<M> {
 
             // Dispatch & execute the job in a new co-routine.
             match job.1 {
-                DeriveLogicalProperties(logical_expr_id) => {
+                JobKind::DeriveLogicalProperties(logical_expr_id) => {
                     self.derive_logical_properties(logical_expr_id, job_id)
                         .await?;
                 }
-                StartTransformationRule(rule_name, logical_expr_id, group_id) => {
+                JobKind::StartTransformationRule(rule_name, logical_expr_id, group_id) => {
                     self.execute_transformation_rule(rule_name, logical_expr_id, group_id, job_id)
                         .await?;
                 }
-                StartImplementationRule(rule_name, expression_id, goal_id) => {
+                JobKind::StartImplementationRule(rule_name, expression_id, goal_id) => {
                     self.execute_implementation_rule(rule_name, expression_id, goal_id, job_id)
                         .await?;
                 }
-                StartCostExpression(expression_id) => {
+                JobKind::StartCostExpression(expression_id) => {
                     self.execute_cost_expression(expression_id, job_id).await?;
                 }
-                ContinueWithLogical(logical_expr_id, k) => {
+                JobKind::ContinueWithLogical(logical_expr_id, k) => {
                     self.execute_continue_with_logical(logical_expr_id, k)
                         .await?;
                 }
-                ContinueWithCostedPhysical(expression_id, cost, k) => {
-                    self.execute_continue_with_optimized(expression_id, cost, k)
+                JobKind::ContinueWithCostedPhysical(expression_id, cost, k) => {
+                    self.execute_continue_with_costed(expression_id, cost, k)
                         .await?;
                 }
             }
@@ -437,7 +436,7 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// This materializes the physical expression and passes it along with its cost
     /// to the continuation.
-    async fn execute_continue_with_optimized(
+    async fn execute_continue_with_costed(
         &self,
         physical_expr_id: PhysicalExpressionId,
         cost: Cost,

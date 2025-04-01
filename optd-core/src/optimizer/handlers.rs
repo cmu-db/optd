@@ -14,7 +14,6 @@ use crate::{
     memo::Memoize,
 };
 use EngineMessageKind::*;
-use JobKind::*;
 use LogicalIngest::*;
 use TaskKind::*;
 use futures::{
@@ -61,7 +60,10 @@ impl<M: Memoize> Optimizer<M> {
                     .iter()
                     .cloned()
                     .map(|logical_expr_id| {
-                        self.schedule_job(task_id, DeriveLogicalProperties(logical_expr_id))
+                        self.schedule_job(
+                            task_id,
+                            JobKind::DeriveLogicalProperties(logical_expr_id),
+                        )
                     })
                     .collect();
 
@@ -115,7 +117,10 @@ impl<M: Memoize> Optimizer<M> {
                     .iter()
                     .cloned()
                     .map(|logical_expr_id| {
-                        self.schedule_job(related_task_id, DeriveLogicalProperties(logical_expr_id))
+                        self.schedule_job(
+                            related_task_id,
+                            JobKind::DeriveLogicalProperties(logical_expr_id),
+                        )
                     })
                     .collect();
 
@@ -285,7 +290,10 @@ impl<M: Memoize> Optimizer<M> {
         for expression_id in expressions {
             self.schedule_job(
                 related_task_id,
-                ContinueWithLogical(expression_id, continuation.clone()),
+                JobKind::ContinueWithLogical(
+                    expression_id,
+                    continuation.clone(), // Reuse the same continuation for each existing expression.
+                ),
             );
         }
 
@@ -338,7 +346,7 @@ impl<M: Memoize> Optimizer<M> {
         {
             self.schedule_job(
                 related_task_id,
-                ContinueWithCostedPhysical(best_expr_id, cost, continuation),
+                JobKind::ContinueWithCostedPhysical(best_expr_id, cost, continuation),
             );
         }
 
