@@ -98,9 +98,9 @@ impl<M: Memoize> Optimizer<M> {
             })
             .flat_map(|(task_id, conts)| {
                 expression_ids.iter().flat_map(move |&expr_id| {
-                    conts
-                        .iter()
-                        .map(move |cont| (task_id, ContinueWithLogical(expr_id, cont.clone())))
+                    conts.iter().map(move |cont| {
+                        (task_id, JobKind::ContinueWithLogical(expr_id, cont.clone()))
+                    })
                 })
             })
             .collect();

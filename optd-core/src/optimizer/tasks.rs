@@ -82,6 +82,11 @@ pub(super) enum TaskKind {
 
     /// Task to compute the cost of a physical expression.
     CostExpression(CostExpressionTask),
+
+    ForkLogical(ForkLogicalTask),
+    ContinueWithLogical(ContinueWithLogicalTask),
+    ForkCosted(ForkCostedTask),
+    ContinueWithCosted(ContinueWithCostedTask),
 }
 
 //=============================================================================
@@ -104,7 +109,7 @@ impl OptimizePlanTask {
 }
 
 /// Task data for optimizing a specific goal.
-struct OptimizeGoalTask {
+pub(super) struct OptimizeGoalTask {
     /// The goal to optimize.
     pub goal_id: GoalId,
     pub optimize_plan_out: Vec<TaskId>,
@@ -117,7 +122,7 @@ struct OptimizeGoalTask {
 }
 
 /// Task data for exploring a group.
-struct ExploreGroupTask {
+pub(super) struct ExploreGroupTask {
     /// The group to explore.
     pub group_id: GroupId,
     pub optimize_goal_out: Vec<TaskId>,
@@ -125,7 +130,7 @@ struct ExploreGroupTask {
     pub transform_expr_in: Vec<TaskId>,
 }
 
-struct ForkLogicalTask {
+pub(super) struct ForkLogicalTask {
     pub continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
 
     /// ContinueWithLogical | TransformExpression | ImplementExpression
@@ -135,11 +140,35 @@ struct ForkLogicalTask {
     pub continue_tasks: Vec<TaskId>,
 }
 
-struct ContinueWithLogicalTask {
+impl ForkLogicalTask {
+    pub fn new(
+        continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
+        out: TaskId,
+        explore_group_in: TaskId,
+    ) -> Self {
+        Self {
+            continuation,
+            out,
+            explore_group_in,
+            continue_tasks: Vec::new(),
+        }
+    }
+}
+
+pub(super) struct ContinueWithLogicalTask {
     pub expr_id: LogicalExpressionId,
     pub fork_out: TaskId,
-    /// ForkLogical subtasks
     pub fork_in: Option<TaskId>,
+}
+
+impl ContinueWithLogicalTask {
+    pub fn new(expr_id: LogicalExpressionId, fork_out: TaskId) -> Self {
+        Self {
+            expr_id,
+            fork_out,
+            fork_in: None,
+        }
+    }
 }
 
 /// Task data for transforming a logical expression using a specific rule.
@@ -253,7 +282,7 @@ impl CostExpressionTask {
     }
 }
 
-struct ForkCostedTask {
+pub(super) struct ForkCostedTask {
     pub continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
 
     /// The current upper bound on the allowed cost budget.
@@ -268,10 +297,37 @@ struct ForkCostedTask {
     pub fork_in: Vec<TaskId>,
 }
 
-struct ContinueWithCostedTask {
+impl ForkCostedTask {
+    pub fn new(
+        continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
+        budget: Cost,
+        out: TaskId,
+        optimize_goal_in: TaskId,
+    ) -> Self {
+        Self {
+            continuation,
+            budget,
+            out,
+            optimize_goal_in,
+            fork_in: Vec::new(),
+        }
+    }
+}
+
+pub(super) struct ContinueWithCostedTask {
     pub expr_id: PhysicalExpressionId,
     pub fork_out: TaskId,
     pub fork_in: Option<TaskId>,
+}
+
+impl ContinueWithCostedTask {
+    pub fn new(expr_id: PhysicalExpressionId, fork_out: TaskId) -> Self {
+        Self {
+            expr_id,
+            fork_out,
+            fork_in: None,
+        }
+    }
 }
 
 //=============================================================================
@@ -305,7 +361,7 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         group_id: GroupId,
         parent_task_id: TaskId,
-    ) -> Result<(), Error> {
+    ) -> Result<TaskId, Error> {
         let task_id = match self.group_exploration_task_index.get(&group_id) {
             Some(id) => *id,
             None => {
@@ -315,7 +371,7 @@ impl<M: Memoize> Optimizer<M> {
         };
 
         self.register_parent_child_relationship(parent_task_id, task_id);
-        Ok(())
+        Ok(task_id)
     }
 
     /// Ensures a goal optimization task exists and sets up a parent-child relationship.
@@ -468,6 +524,42 @@ impl<M: Memoize> Optimizer<M> {
         }
 
         Ok(task_id)
+    }
+
+    async fn launch_fork_logical_task(
+        &mut self,
+        continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
+        group_id: GroupId,
+        out: TaskId,
+    ) -> Result<TaskId, Error> {
+        todo!()
+    }
+
+    async fn launch_continue_with_logical_task(
+        &mut self,
+        expr_id: LogicalExpressionId,
+        fork_out: TaskId,
+    ) -> Result<TaskId, Error> {
+        todo!()
+    }
+
+    async fn launch_fork_costed_task(
+        &mut self,
+        continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
+        goal_id: GoalId,
+        budget: Cost,
+        out: TaskId,
+    ) -> Result<TaskId, Error> {
+        todo!()
+    }
+
+    async fn launch_continue_with_costed_task(
+        &mut self,
+        expr_id: PhysicalExpressionId,
+        cost: Cost,
+        fork_out: TaskId,
+    ) -> Result<TaskId, Error> {
+        todo!()
     }
 
     /// Launches a new task to optimize a goal.
