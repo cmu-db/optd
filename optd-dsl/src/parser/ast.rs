@@ -227,6 +227,8 @@ pub enum PostfixOp {
 pub struct Function {
     /// Name of the function with source location
     pub name: Spanned<Identifier>,
+    /// Optional generic type parameters
+    pub type_params: Vec<Spanned<Identifier>>,
     /// Optional receiver for method-style functions (self parameter)
     pub receiver: Option<Spanned<Field>>,
     /// Optional parameters list

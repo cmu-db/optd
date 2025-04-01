@@ -91,6 +91,8 @@ data JoinType =
     | Full
     \ Semi
 
+fn <K, V> map_get(map: {K: V}, key: K): V = None
+
 [rust]
 fn (expr: Scalar) apply_children(f: Scalar -> Scalar) = None
 
