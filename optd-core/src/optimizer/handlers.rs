@@ -315,7 +315,7 @@ impl<M: Memoize> Optimizer<M> {
         // operation corresponding to the task gets invalidated when the goal has a new optimum.
         match &mut self.tasks.get_mut(&related_task_id).unwrap().kind {
             CostExpression(CostExpressionTask {
-                expression_id,
+                expr_id: expression_id,
                 continuations,
                 ..
             }) => {

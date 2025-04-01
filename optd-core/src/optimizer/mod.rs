@@ -50,7 +50,9 @@ pub struct OptimizeRequest {
 /// Each message that includes a JobId represents the result of a completed job,
 /// allowing the optimizer to track which tasks are progressing.
 struct EngineMessage {
+    /// The job ID of the sender.
     pub job_id: JobId,
+    /// The kind of message being sent to the optimizer engine.
     pub kind: EngineMessageKind,
 }
 
@@ -148,6 +150,7 @@ pub struct Optimizer<M: Memoize> {
     cost_expression_task_index: HashMap<PhysicalExpressionId, TaskId>,
 
     // Subscriptions.
+    // TODO(yuchen): Get rid of these when we fully switch to in-out subscription.
     group_subscribers: HashMap<GroupId, Vec<TaskId>>,
     goal_subscribers: HashMap<GoalId, Vec<TaskId>>,
 }

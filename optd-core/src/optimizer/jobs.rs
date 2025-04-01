@@ -215,7 +215,7 @@ impl<M: Memoize> Optimizer<M> {
                         .await?;
                 }
                 CostExpression(task) => {
-                    self.memo.set_cost_clean(task.expression_id).await?;
+                    self.memo.set_cost_clean(task.expr_id).await?;
                 }
                 _ => {} // We don't track status for the other task kinds.
             }

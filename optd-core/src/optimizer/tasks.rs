@@ -1,13 +1,13 @@
 #![allow(dead_code)]
 
 use super::{
-    Optimizer, EngineMessageKind,
+    EngineMessageKind, Optimizer,
     jobs::{JobId, JobKind},
 };
 use crate::{
     cir::{
-        Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpressionId, LogicalPlan,
-        PhysicalExpressionId, PhysicalPlan, PhysicalProperties, TransformationRule,
+        Cost, Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpressionId,
+        LogicalPlan, PhysicalExpressionId, PhysicalPlan, TransformationRule,
     },
     error::Error,
     memo::{Memoize, Status},
@@ -103,24 +103,78 @@ impl OptimizePlanTask {
     }
 }
 
-/// Task data for implementing a group with specific physical properties for a goal.
-pub(super) struct ImplementGroupTask {
-    /// The group to implement.
-    pub group_id: GroupId,
-
-    /// The physical properties to implement for.
-    pub properties: PhysicalProperties,
-
-    /// The goal ID this implementation is for.
+/// Task data for optimizing a specific goal.
+struct OptimizeGoalTask {
+    /// The goal to optimize.
     pub goal_id: GoalId,
+    pub optimize_plan_out: Vec<TaskId>,
+    pub optimize_goal_out: Vec<TaskId>,
+    pub continue_with_out: Vec<TaskId>,
+    pub optimize_goal_in: Vec<TaskId>,
+    pub explore_group_in: TaskId,
+    pub implement_expression_in: Vec<TaskId>,
+    pub cost_expression_in: Vec<TaskId>,
 }
 
-impl ImplementGroupTask {
-    pub fn new(group_id: GroupId, properties: PhysicalProperties, goal_id: GoalId) -> Self {
+/// Task data for exploring a group.
+struct ExploreGroupTask {
+    /// The group to explore.
+    pub group_id: GroupId,
+    pub optimize_goal_out: Vec<TaskId>,
+    pub continue_with_out: Vec<TaskId>,
+    pub transform_expr_in: Vec<TaskId>,
+}
+
+struct ForkLogicalTask {
+    pub continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
+
+    /// ContinueWithLogical | TransformExpression | ImplementExpression
+    /// (memo alexis: I don't think these matter too much for continuations...)
+    pub out: TaskId,
+    pub explore_group_in: TaskId,
+    pub continue_tasks: Vec<TaskId>,
+}
+
+struct ContinueWithLogicalTask {
+    pub expr_id: LogicalExpressionId,
+    pub fork_out: TaskId,
+    /// ForkLogical subtasks
+    pub fork_in: Option<TaskId>,
+}
+
+/// Task data for transforming a logical expression using a specific rule.
+pub(super) struct TransformExpressionTask {
+    /// The transformation rule to apply.
+    pub rule: TransformationRule,
+
+    /// Whether the task has started the transformation rule.
+    pub is_processing: bool,
+
+    /// The logical expression to transform.
+    pub expression_id: LogicalExpressionId,
+
+    pub explore_group_out: TaskId,
+
+    pub fork_in: Option<TaskId>,
+    /// Continuations for each group that need to be notified when
+    /// new logical expressions are created.
+    pub continuations:
+        HashMap<GroupId, Vec<Continuation<Value, EngineResponse<EngineMessageKind>>>>,
+}
+
+impl TransformExpressionTask {
+    pub fn new(
+        rule: TransformationRule,
+        is_processing: bool,
+        expression_id: LogicalExpressionId,
+    ) -> Self {
         Self {
-            group_id,
-            properties,
-            goal_id,
+            rule,
+            is_processing,
+            expression_id,
+            fork_in: None,
+            explore_group_out: TaskId(-1),
+            continuations: HashMap::new(),
         }
     }
 }
@@ -131,17 +185,21 @@ pub(super) struct ImplementExpressionTask {
     pub rule: ImplementationRule,
 
     /// Whether the task has started the implementation rule.
-    pub has_started: bool,
+    pub is_processing: bool,
 
     /// The logical expression to implement.
     pub expression_id: LogicalExpressionId,
 
-    /// The goal ID for this implementation.
+    pub optimize_goal_out: TaskId,
+
     pub goal_id: GoalId,
+
+    pub fork_in: Option<TaskId>,
 
     /// Continuations for each group that need to be notified when
     /// new logical expressions are created.
-    pub continuations: HashMap<GroupId, Vec<Continuation<Value, EngineResponse<EngineMessageKind>>>>,
+    pub continuations:
+        HashMap<GroupId, Vec<Continuation<Value, EngineResponse<EngineMessageKind>>>>,
 }
 
 impl ImplementExpressionTask {
@@ -153,41 +211,12 @@ impl ImplementExpressionTask {
     ) -> Self {
         Self {
             rule,
-            has_started,
+            is_processing: has_started,
             expression_id,
             goal_id,
+            optimize_goal_out: TaskId(-1),
             continuations: HashMap::new(),
-        }
-    }
-}
-
-/// Task data for transforming a logical expression using a specific rule.
-pub(super) struct TransformExpressionTask {
-    /// The transformation rule to apply.
-    pub rule: TransformationRule,
-
-    /// Whether the task has started the transformation rule.
-    pub has_started: bool,
-
-    /// The logical expression to transform.
-    pub expression_id: LogicalExpressionId,
-
-    /// Continuations for each group that need to be notified when
-    /// new logical expressions are created.
-    pub continuations: HashMap<GroupId, Vec<Continuation<Value, EngineResponse<EngineMessageKind>>>>,
-}
-
-impl TransformExpressionTask {
-    pub fn new(
-        rule: TransformationRule,
-        has_started: bool,
-        expression_id: LogicalExpressionId,
-    ) -> Self {
-        Self {
-            rule,
-            has_started,
-            expression_id,
-            continuations: HashMap::new(),
+            fork_in: None,
         }
     }
 }
@@ -195,10 +224,16 @@ impl TransformExpressionTask {
 /// Task data for costing a physical expression.
 pub(super) struct CostExpressionTask {
     /// The physical expression to cost.
-    pub expression_id: PhysicalExpressionId,
+    pub expr_id: PhysicalExpressionId,
 
     /// Whether the task has started the cost estimation.
     pub has_started: bool,
+
+    pub budget: Cost,
+
+    pub optimize_goal_out: Vec<TaskId>,
+
+    pub fork_in: Option<TaskId>,
 
     /// Continuations for each goal that need to be notified when
     /// optimized expressions are created.
@@ -206,13 +241,37 @@ pub(super) struct CostExpressionTask {
 }
 
 impl CostExpressionTask {
-    pub fn new(expression_id: PhysicalExpressionId, has_started: bool) -> Self {
+    pub fn new(expr_id: PhysicalExpressionId, has_started: bool) -> Self {
         Self {
-            expression_id,
+            expr_id,
             has_started,
             continuations: HashMap::new(),
+            budget: Cost(f64::MAX),
+            optimize_goal_out: Vec::new(),
+            fork_in: None,
         }
     }
+}
+
+struct ForkCostedTask {
+    pub continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
+
+    /// The current upper bound on the allowed cost budget.
+    pub budget: Cost,
+
+    /// ContinueWithCosted | CostExpresion
+    /// (memo alexis: I don't think these matter too much for continuations...)
+    pub out: TaskId,
+
+    pub optimize_goal_in: TaskId,
+
+    pub fork_in: Vec<TaskId>,
+}
+
+struct ContinueWithCostedTask {
+    pub expr_id: PhysicalExpressionId,
+    pub fork_out: TaskId,
+    pub fork_in: Option<TaskId>,
 }
 
 //=============================================================================
