@@ -14,7 +14,9 @@ pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
     match plan {
         PartialLogicalPlan::UnMaterialized(group_id) => {
             // For unmaterialized logical operators, we create a `Value` with the group ID.
-            Value(Logical(LogicalOp(UnMaterialized(hir::GroupId(group_id.0)))))
+            Value(Logical(LogicalOp::logical(UnMaterialized(hir::GroupId(
+                group_id.0,
+            )))))
         }
         PartialLogicalPlan::Materialized(node) => {
             // For materialized logical operators, we create a `Value` with the operator data.
@@ -24,7 +26,7 @@ pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
                 children: convert_children_to_values(&node.children, partial_logical_to_value),
             };
 
-            Value(Logical(LogicalOp(Materialized(operator))))
+            Value(Logical(LogicalOp::logical(Materialized(operator))))
         }
     }
 }
@@ -35,7 +37,7 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
         PartialPhysicalPlan::UnMaterialized(goal) => {
             // For unmaterialized physical operators, we create a `Value` with the goal
             let hir_goal = cir_goal_to_hir(goal);
-            Value(Physical(PhysicalOp(UnMaterialized(hir_goal))))
+            Value(Physical(PhysicalOp::physical(UnMaterialized(hir_goal))))
         }
         PartialPhysicalPlan::Materialized(node) => {
             // For materialized physical operators, we create a Value with the operator data
@@ -45,7 +47,7 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
                 children: convert_children_to_values(&node.children, partial_physical_to_value),
             };
 
-            Value(Physical(PhysicalOp(Materialized(operator))))
+            Value(Physical(PhysicalOp::physical(Materialized(operator))))
         }
     }
 }

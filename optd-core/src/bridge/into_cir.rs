@@ -15,7 +15,7 @@ use std::sync::Arc;
 /// Panics if the [`Value`] is not a [`Logical`] variant.
 pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
     match &value.0 {
-        Logical(logical_op) => match &logical_op.0 {
+        Logical(logical_op) => match &logical_op.operator {
             UnMaterialized(group_id) => {
                 PartialLogicalPlan::UnMaterialized(hir_group_id_to_cir(group_id))
             }
@@ -36,7 +36,7 @@ pub(crate) fn value_to_partial_logical(value: &Value) -> PartialLogicalPlan {
 /// Panics if the [`Value`] is not a [`Physical`] variant.
 pub(crate) fn value_to_partial_physical(value: &Value) -> PartialPhysicalPlan {
     match &value.0 {
-        Physical(physical_op) => match &physical_op.0 {
+        Physical(physical_op) => match &physical_op.operator {
             UnMaterialized(hir_goal) => {
                 PartialPhysicalPlan::UnMaterialized(hir_goal_to_cir(hir_goal))
             }
@@ -103,7 +103,7 @@ pub(crate) fn hir_goal_to_cir(hir_goal: &hir::Goal) -> Goal {
 /// [`Materialized`] variant.
 fn value_to_logical(value: &Value) -> LogicalPlan {
     match &value.0 {
-        Logical(logical_op) => match &logical_op.0 {
+        Logical(logical_op) => match &logical_op.operator {
             UnMaterialized(_) => {
                 panic!("Cannot convert UnMaterialized LogicalOperator to LogicalPlan")
             }
