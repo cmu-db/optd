@@ -174,7 +174,7 @@ pub fn create_logical_operator(tag: &str, data: Vec<Value>, children: Vec<Value>
         children,
     };
 
-    Value(CoreData::Logical(LogicalOp::logical(Materialized(op))))
+    Value(CoreData::Logical(Materialized(LogicalOp::logical(op))))
 }
 
 /// Helper to create a simple physical operator value.
@@ -185,7 +185,7 @@ pub fn create_physical_operator(tag: &str, data: Vec<Value>, children: Vec<Value
         children,
     };
 
-    Value(CoreData::Physical(PhysicalOp::physical(Materialized(op))))
+    Value(CoreData::Physical(Materialized(PhysicalOp::physical(op))))
 }
 
 /// Runs a test by evaluating the expression and collecting all results with a custom continuation.
