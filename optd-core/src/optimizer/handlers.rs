@@ -1,8 +1,8 @@
 use super::{
-    EngineMessage, EngineMessageKind, JobId, OptimizeRequest, Optimizer, PendingMessage, TaskId,
     ingest::LogicalIngest,
     jobs::JobKind,
     tasks::{CostExpressionTask, ImplementExpressionTask, TaskKind, TransformExpressionTask},
+    EngineMessage, EngineMessageKind, JobId, OptimizeRequest, Optimizer, PendingMessage, TaskId,
 };
 use crate::{
     cir::{
@@ -13,17 +13,17 @@ use crate::{
     error::Error,
     memo::Memoize,
 };
-use EngineMessageKind::*;
-use LogicalIngest::*;
-use TaskKind::*;
 use futures::{
-    SinkExt,
     channel::{mpsc::Sender, oneshot},
+    SinkExt,
 };
 use optd_dsl::{
     analyzer::hir::Value,
     engine::{Continuation, EngineResponse},
 };
+use EngineMessageKind::*;
+use LogicalIngest::*;
+use TaskKind::*;
 
 impl<M: Memoize> Optimizer<M> {
     /// This method initiates the optimization process for a logical plan by launching
@@ -101,13 +101,12 @@ impl<M: Memoize> Optimizer<M> {
     ) -> Result<(), Error> {
         let group_id = self.memo.find_repr_group(group_id).await?;
         match self.probe_ingest_logical_plan(&plan).await? {
-            Found(new_group_id) if new_group_id != group_id => {
-                // Atomically perform the merge in the memo and process all results.
-                let merge_results = self.memo.merge_groups(group_id, new_group_id).await?;
-                self.handle_merge_result(merge_results).await?;
-            }
-            Found(_) => {
-                // Group already exists, nothing to merge or do.
+            Found(new_group_id) => {
+                if new_group_id != group_id {
+                    // Atomically perform the merge in the memo and process all results.
+                    let merge_results = self.memo.merge_groups(group_id, new_group_id).await?;
+                    self.handle_merge_result(merge_results).await?;
+                }
             }
             Missing(logical_exprs) => {
                 // Store the request as a pending message that will be processed
@@ -159,12 +158,14 @@ impl<M: Memoize> Optimizer<M> {
 
         if is_new {
             match member {
-                GoalMemberId::PhysicalExpressionId(_expression_id) => {
+                GoalMemberId::PhysicalExpressionId(expression_id) => {
                     let _parent_task_id = self.running_jobs[&job_id].0;
-                    // TODO(Alexis): Needs to ensure cost expression task exists and then subs.
+                    // TODO(Alexis): Needs to ensure cost expression task exists and then subscribe.
+                    self.ensure_cost_expression_task(expression_id, parent_task_id).await?;
                 }
-                GoalMemberId::GoalId(_) => {
-                    // TODO(Alexis); Need to launch a new implement
+                GoalMemberId::GoalId(new_goal_id) => {
+                    // TODO(Sarvesh); Need to create a new goal optimization task if it does not exist.
+                    self.ensure_goal_optimize_task(new_goal_id, goal_id).await?;
                 }
             }
         }
