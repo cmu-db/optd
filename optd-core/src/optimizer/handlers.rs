@@ -1,5 +1,5 @@
 use super::{
-    JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage, TaskId,
+    EngineMessage, EngineMessageKind, JobId, OptimizeRequest, Optimizer, PendingMessage, TaskId,
     ingest::LogicalIngest,
     jobs::JobKind,
     tasks::{CostExpressionTask, ImplementExpressionTask, TaskKind, TransformExpressionTask},
@@ -13,9 +13,9 @@ use crate::{
     error::Error,
     memo::Memoize,
 };
+use EngineMessageKind::*;
 use JobKind::*;
 use LogicalIngest::*;
-use OptimizerMessage::*;
 use TaskKind::*;
 use futures::{
     SinkExt,
@@ -66,7 +66,11 @@ impl<M: Memoize> Optimizer<M> {
                     .collect();
 
                 let pending_message = PendingMessage {
-                    message: OptimizeRequestWrapper(OptimizeRequest { plan, response_tx }, task_id),
+                    message: EngineMessage::new(
+                        JobId(-1),
+                        OptimizeRequestWrapper(OptimizeRequest { plan, response_tx }, task_id),
+                    ),
+
                     pending_dependencies,
                 };
 
@@ -116,7 +120,7 @@ impl<M: Memoize> Optimizer<M> {
                     .collect();
 
                 let pending_message = PendingMessage {
-                    message: NewLogicalPartial(plan, group_id, job_id),
+                    message: EngineMessage::new(job_id, NewLogicalPartial(plan, group_id)),
                     pending_dependencies,
                 };
 
@@ -231,7 +235,7 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_group_subscription(
         &mut self,
         group_id: GroupId,
-        continuation: Continuation<Value, EngineResponse<OptimizerMessage>>,
+        continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
         job_id: JobId,
     ) -> Result<(), Error> {
         let related_task_id = self.running_jobs[&job_id].0;
@@ -301,7 +305,7 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_goal_subscription(
         &mut self,
         goal: &Goal,
-        continuation: Continuation<Value, EngineResponse<OptimizerMessage>>,
+        continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
         job_id: JobId,
     ) -> Result<(), Error> {
         let related_task_id = self.running_jobs[&job_id].0;
@@ -338,6 +342,23 @@ impl<M: Memoize> Optimizer<M> {
             );
         }
 
+        Ok(())
+    }
+
+    // TODO(yuchen): resolve dependencies.
+    pub(super) async fn process_new_properties(
+        &mut self,
+        group_id: GroupId,
+        properties: LogicalProperties,
+        job_id: JobId,
+    ) -> Result<(), Error> {
+        // Update the logical properties in the memo.
+        self.memo
+            .set_logical_properties(group_id, properties)
+            .await?;
+
+        // Resolve dependencies for any pending messages that were waiting for this group to be created.
+        self.resolve_dependencies(job_id).await;
         Ok(())
     }
 

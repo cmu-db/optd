@@ -1,6 +1,6 @@
-use super::Task;
 use super::tasks::{ImplementExpressionTask, TaskKind, TransformExpressionTask};
-use super::{Optimizer, OptimizerMessage, tasks::TaskId};
+use super::{EngineMessage, Task};
+use super::{EngineMessageKind, Optimizer, tasks::TaskId};
 use crate::bridge::from_cir::{
     costed_physical_to_value, partial_logical_to_value, partial_physical_to_value,
     physical_properties_to_value,
@@ -15,8 +15,8 @@ use crate::cir::{
 };
 use crate::error::Error;
 use crate::memo::Memoize;
+use EngineMessageKind::*;
 use JobKind::*;
-use OptimizerMessage::*;
 use TaskKind::*;
 use futures::SinkExt;
 use futures::channel::mpsc::Sender;
@@ -72,7 +72,7 @@ pub(super) enum JobKind {
     /// handling the result of a logical expression operation.
     ContinueWithLogical(
         LogicalExpressionId,
-        Continuation<Value, EngineResponse<OptimizerMessage>>,
+        Continuation<Value, EngineResponse<EngineMessageKind>>,
     ),
 
     /// Continues processing with an optimized expression result.
@@ -82,7 +82,7 @@ pub(super) enum JobKind {
     ContinueWithCostedPhysical(
         PhysicalExpressionId,
         Cost,
-        Continuation<Value, EngineResponse<OptimizerMessage>>,
+        Continuation<Value, EngineResponse<EngineMessageKind>>,
     ),
 }
 
@@ -240,19 +240,23 @@ impl<M: Memoize> Optimizer<M> {
 
     pub(super) async fn send_engine_response(
         job_id: JobId,
-        mut message_tx: Sender<OptimizerMessage>,
-        response: EngineResponse<OptimizerMessage>,
+        mut message_tx: Sender<EngineMessage>,
+        response: EngineResponse<EngineMessageKind>,
     ) {
         match response {
-            EngineResponse::Return(value, k) => message_tx.send(k(value).await).await.unwrap(),
-            EngineResponse::YieldGroup(group_id, k) => message_tx
-                .send(SubscribeGroup(hir_group_id_to_cir(&group_id), k, job_id))
-                .await
-                .unwrap(),
-            EngineResponse::YieldGoal(goal, k) => message_tx
-                .send(SubscribeGoal(hir_goal_to_cir(&goal), k, job_id))
-                .await
-                .unwrap(),
+            EngineResponse::Return(value, k) => {
+                let msg = EngineMessage::new(job_id, k(value).await);
+                message_tx.send(msg).await.unwrap();
+            }
+            EngineResponse::YieldGroup(group_id, k) => {
+                let msg =
+                    EngineMessage::new(job_id, SubscribeGroup(hir_group_id_to_cir(&group_id), k));
+                message_tx.send(msg).await.unwrap();
+            }
+            EngineResponse::YieldGoal(goal, k) => {
+                let msg = EngineMessage::new(job_id, SubscribeGoal(hir_goal_to_cir(&goal), k));
+                message_tx.send(msg).await.unwrap();
+            }
         }
     }
 
@@ -289,7 +293,7 @@ impl<M: Memoize> Optimizer<M> {
                         Box::pin(async move {
                             let properties = value_to_logical_properties(&value);
                             // TODO(yuchen): refactor EngineMessage type to include job id in header instead.
-                            CreateGroup(logical_expression_id, properties, JobId(-1))
+                            CreateGroup(logical_expression_id, properties)
                         })
                     }),
                 )
@@ -328,7 +332,7 @@ impl<M: Memoize> Optimizer<M> {
                     Arc::new(move |value| {
                         let plan = value_to_partial_logical(&value);
 
-                        Box::pin(async move { NewLogicalPartial(plan, group_id, JobId(-1)) })
+                        Box::pin(async move { NewLogicalPartial(plan, group_id) })
                     }),
                 )
                 .await;
@@ -370,7 +374,7 @@ impl<M: Memoize> Optimizer<M> {
                     ],
                     Arc::new(move |value| {
                         let plan = value_to_partial_physical(&value);
-                        Box::pin(async move { NewPhysicalPartial(plan, goal_id, JobId(-1)) })
+                        Box::pin(async move { NewPhysicalPartial(plan, goal_id) })
                     }),
                 )
                 .await;
@@ -401,7 +405,7 @@ impl<M: Memoize> Optimizer<M> {
                     vec![partial_physical_to_value(&plan)],
                     Arc::new(move |value| {
                         let cost = value_to_cost(&value);
-                        Box::pin(async move { NewCostedPhysical(expression_id, cost, JobId(-1)) })
+                        Box::pin(async move { NewCostedPhysical(expression_id, cost) })
                     }),
                 )
                 .await;
@@ -418,7 +422,7 @@ impl<M: Memoize> Optimizer<M> {
     async fn execute_continue_with_logical(
         &self,
         expression_id: LogicalExpressionId,
-        k: Continuation<Value, EngineResponse<OptimizerMessage>>,
+        k: Continuation<Value, EngineResponse<EngineMessageKind>>,
     ) -> Result<(), Error> {
         let plan = self.memo.materialize_logical_expr(expression_id).await?;
 
@@ -437,7 +441,7 @@ impl<M: Memoize> Optimizer<M> {
         &self,
         physical_expr_id: PhysicalExpressionId,
         cost: Cost,
-        k: Continuation<Value, EngineResponse<OptimizerMessage>>,
+        k: Continuation<Value, EngineResponse<EngineMessageKind>>,
     ) -> Result<(), Error> {
         let plan = self.egest_partial_plan(physical_expr_id).await?;
         let costed_plan_value = costed_physical_to_value(plan, cost);

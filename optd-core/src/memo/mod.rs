@@ -103,6 +103,20 @@ pub trait Memoize: Send + Sync + 'static {
     /// The properties associated with the group or an error if not found.
     async fn get_logical_properties(&self, group_id: GroupId) -> MemoizeResult<LogicalProperties>;
 
+    /// Sets logical properties for a group ID.
+    ///
+    /// # Parameters
+    /// * `group_id` - ID of the group to set properties for.
+    /// * `props` - The logical properties to associate with the group.
+    ///
+    /// # Returns
+    /// A result indicating success or failure of the operation.
+    async fn set_logical_properties(
+        &self,
+        group_id: GroupId,
+        props: LogicalProperties,
+    ) -> MemoizeResult<()>;
+
     /// Gets all logical expression IDs in a group (only representative IDs).
     ///
     /// # Parameters

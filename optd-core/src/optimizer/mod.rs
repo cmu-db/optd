@@ -4,7 +4,7 @@ use crate::cir::{
 };
 use crate::error::Error;
 use crate::memo::Memoize;
-use OptimizerMessage::*;
+use EngineMessageKind::*;
 use futures::StreamExt;
 use futures::channel::oneshot;
 use futures::{
@@ -49,39 +49,59 @@ pub struct OptimizeRequest {
 ///
 /// Each message that includes a JobId represents the result of a completed job,
 /// allowing the optimizer to track which tasks are progressing.
-enum OptimizerMessage {
-    /// Process an optimization request.
-    OptimizeRequestWrapper(OptimizeRequest, TaskId),
+struct EngineMessage {
+    pub job_id: JobId,
+    pub kind: EngineMessageKind,
+}
 
+impl EngineMessage {
+    /// Create a new engine message with the specified job ID and kind.
+    pub fn new(job_id: JobId, kind: EngineMessageKind) -> Self {
+        Self { job_id, kind }
+    }
+}
+
+/// Messages sent to the optimizer by the DSL engine to change the state of the memo.
+enum EngineMessageKind {
     /// New logical plan alternative for a group from applying transformation rules.
-    NewLogicalPartial(PartialLogicalPlan, GroupId, JobId),
+    /// Access the parent of related task (ExploreGroup) to get the group id.
+    /// Possible sources: StartTransformRule | ContinueWithLogical
+    NewLogicalPartial(PartialLogicalPlan, GroupId),
 
     /// New physical implementation for a goal, awaiting recursive optimization.
-    NewPhysicalPartial(PartialPhysicalPlan, GoalId, JobId),
+    /// Access the parent of related task (OptimizeGoal) to get the goal id.
+    /// Possible sources: StartImplementRuleJob | ContinueWithLogical
+    NewPhysicalPartial(PartialPhysicalPlan, GoalId),
 
     /// Fully optimized physical expression with complete costing.
-    NewCostedPhysical(PhysicalExpressionId, Cost, JobId),
-
-    /// Create a new group with the provided logical properties.
-    CreateGroup(LogicalExpressionId, LogicalProperties, JobId),
+    /// Possible sources: CostExpression  | ContinueWithCostedPhysical
+    NewCostedPhysical(PhysicalExpressionId, Cost),
 
     /// Subscribe to logical expressions in a specific group.
     SubscribeGroup(
         GroupId,
-        Continuation<Value, EngineResponse<OptimizerMessage>>,
-        JobId,
+        Continuation<Value, EngineResponse<EngineMessageKind>>,
     ),
 
     /// Subscribe to costed physical expressions for a goal.
-    SubscribeGoal(
-        Goal,
-        Continuation<Value, EngineResponse<OptimizerMessage>>,
-        JobId,
-    ),
+    // TODO(yuchen): either pass in the budget or as part of the continuation.
+    SubscribeGoal(Goal, Continuation<Value, EngineResponse<EngineMessageKind>>),
 
-    /// Retrieve logical properties for a specific group.
-    #[allow(unused)]
+    /// Retrieve logical properties for a specific partial logical plan.
+    // TODO(yuchen): This should be partial logical plan.
+    #[allow(dead_code)]
     RetrieveProperties(GroupId, oneshot::Sender<LogicalProperties>),
+
+    /// Associate logical properties with a group.
+    /// Note: logical property are on-demand computed.
+    #[allow(dead_code)]
+    NewProperties(GroupId, LogicalProperties),
+
+    // TODO(yuchen): Remove this once we refactor ingestion.
+    /// Process an optimization request.
+    OptimizeRequestWrapper(OptimizeRequest, TaskId),
+    /// Create a new group with the provided logical properties.
+    CreateGroup(LogicalExpressionId, LogicalProperties),
 }
 
 /// A message that is waiting for dependencies before it can be processed.
@@ -89,7 +109,7 @@ enum OptimizerMessage {
 /// Tracks the set of job IDs that must exist before the message can be handled.
 struct PendingMessage {
     /// The message stashed for later processing.
-    message: OptimizerMessage,
+    message: EngineMessage,
 
     /// Set of job IDs whose groups must be created before this message can be processed.
     pending_dependencies: HashSet<JobId>,
@@ -107,8 +127,8 @@ pub struct Optimizer<M: Memoize> {
 
     // Message handling.
     pending_messages: Vec<PendingMessage>,
-    message_tx: Sender<OptimizerMessage>,
-    message_rx: Receiver<OptimizerMessage>,
+    message_tx: Sender<EngineMessage>,
+    message_rx: Receiver<EngineMessage>,
     optimize_rx: Receiver<OptimizeRequest>,
 
     // Task management.
@@ -139,8 +159,8 @@ impl<M: Memoize> Optimizer<M> {
     fn new(
         memo: M,
         hir: HIR,
-        message_tx: Sender<OptimizerMessage>,
-        message_rx: Receiver<OptimizerMessage>,
+        message_tx: Sender<EngineMessage>,
+        message_rx: Receiver<EngineMessage>,
         optimize_rx: Receiver<OptimizeRequest>,
     ) -> Self {
         Self {
@@ -206,49 +226,53 @@ impl<M: Memoize> Optimizer<M> {
                     // in a new coroutine to avoid a deadlock.
                     tokio::spawn(
                         async move {
-                            message_tx.send(OptimizeRequestWrapper(request, task_id))
+                            message_tx.send(EngineMessage::new(JobId(-1), OptimizeRequestWrapper(request, task_id)))
                                 .await
                                 .expect("Failed to forward optimize request");
                         }
                     );
                 },
                 Some(message) = self.message_rx.next() => {
+                    let EngineMessage {
+                        job_id,
+                        kind,
+                    } = message;
                     // Process the next message in the channel.
-                    match message {
+                    match kind {
                         OptimizeRequestWrapper(request, task_id_opt) => {
                             self.process_optimize_request(request.plan, request.response_tx, task_id_opt).await?;
                         }
-                        NewLogicalPartial(plan, group_id, job_id) => {
-                            if self.get_related_task(job_id).is_some() {
+                        NewLogicalPartial(plan, group_id) => {
+                            if self.get_related_task(message.job_id).is_some() {
                                 self.process_new_logical_partial(plan, group_id, job_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
-                        NewPhysicalPartial(plan, goal_id, job_id) => {
+                        NewPhysicalPartial(plan, goal_id) => {
                             if self.get_related_task(job_id).is_some() {
                                 self.process_new_physical_partial(plan, goal_id, job_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
-                        NewCostedPhysical(expression_id, cost, job_id) => {
+                        NewCostedPhysical(expression_id, cost) => {
                             if self.get_related_task(job_id).is_some() {
                                 self.process_new_costed_physical(expression_id, cost).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
-                        CreateGroup( expression_id, properties, job_id) => {
+                        CreateGroup(expression_id, properties) => {
                             if self.get_related_task(job_id).is_some() {
                                 self.process_create_group(expression_id, &properties, job_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
-                        SubscribeGroup(group_id, continuation, job_id) => {
+                        SubscribeGroup(group_id, continuation) => {
                             if self.get_related_task(job_id).is_some() {
                                 self.process_group_subscription(group_id, continuation, job_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
-                        SubscribeGoal(goal, continuation, job_id) => {
+                        SubscribeGoal(goal, continuation) => {
                             if self.get_related_task(job_id).is_some() {
                                 self.process_goal_subscription(&goal, continuation, job_id).await?;
                                 self.complete_job(job_id).await?;
@@ -256,6 +280,12 @@ impl<M: Memoize> Optimizer<M> {
                         }
                         RetrieveProperties(group_id, sender) => {
                             self.process_retrieve_properties(group_id, sender).await?;
+                        }
+                        NewProperties(group_id, properties) => {
+                            if self.get_related_task(job_id).is_some() {
+                                self.process_new_properties(group_id, properties, job_id).await?;
+                                self.complete_job(job_id).await?;
+                            }
                         }
                     };
 
