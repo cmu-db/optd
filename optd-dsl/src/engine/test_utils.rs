@@ -1,7 +1,7 @@
 use super::{Continuation, EngineResponse};
 use crate::analyzer::hir::{
-    CoreData, Expr, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable, Operator, Pattern,
-    PhysicalOp, Value,
+    CoreData, Expr, ExprKind, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable,
+    Operator, Pattern, PhysicalOp, Value,
 };
 use crate::engine::Engine;
 use Materializable::*;
@@ -84,7 +84,7 @@ impl TestHarness {
 
 /// Helper to create a literal expression.
 pub fn lit_expr(literal: Literal) -> Arc<Expr> {
-    Arc::new(Expr::CoreExpr(CoreData::Literal(literal)))
+    Arc::new(Expr::new(ExprKind::CoreExpr(CoreData::Literal(literal))))
 }
 
 /// Helper to create a literal value.
@@ -109,7 +109,7 @@ pub fn boolean(b: bool) -> Literal {
 
 /// Helper to create a reference expression.
 pub fn ref_expr(name: &str) -> Arc<Expr> {
-    Arc::new(Expr::Ref(name.to_string()))
+    Arc::new(Expr::new(ExprKind::Ref(name.to_string())))
 }
 
 /// Helper to create a pattern match arm.
@@ -129,7 +129,7 @@ pub fn struct_val(name: &str, fields: Vec<Value>) -> Value {
 
 /// Helper to create a pattern matching expression.
 pub fn pattern_match_expr(expr: Arc<Expr>, arms: Vec<MatchArm>) -> Arc<Expr> {
-    Arc::new(Expr::PatternMatch(expr, arms))
+    Arc::new(Expr::new(ExprKind::PatternMatch(expr, arms)))
 }
 
 /// Helper to create a bind pattern.

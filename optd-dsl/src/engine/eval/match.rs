@@ -533,12 +533,13 @@ mod tests {
         analyzer::{
             context::Context,
             hir::{
-                BinOp, CoreData, Expr, FunKind, Goal, GroupId, Literal, LogicalOp, Materializable,
-                Operator, Value,
+                BinOp, CoreData, Expr, ExprKind, FunKind, Goal, GroupId, Literal, LogicalOp,
+                Materializable, Operator, Value,
             },
         },
         engine::test_utils::TestHarness,
     };
+    use ExprKind::*;
     use Materializable::*;
     use std::sync::Arc;
 
@@ -588,11 +589,15 @@ mod tests {
             vec![
                 match_arm(
                     bind_pattern("x", literal_pattern(int(42))),
-                    Arc::new(Expr::Let(
+                    Arc::new(Expr::new(Let(
                         "y".to_string(),
-                        Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, lit_expr(int(10)))),
+                        Arc::new(Expr::new(Binary(
+                            ref_expr("x"),
+                            BinOp::Add,
+                            lit_expr(int(10)),
+                        ))),
                         ref_expr("y"),
-                    )),
+                    ))),
                 ),
                 match_arm(wildcard_pattern(), lit_expr(int(0))),
             ],
@@ -617,13 +622,13 @@ mod tests {
         let harness = TestHarness::new();
 
         // Create an array value [1, 2, 3, 4, 5]
-        let array_expr = Arc::new(Expr::CoreVal(array_val(vec![
+        let array_expr = Arc::new(Expr::new(CoreVal(array_val(vec![
             lit_val(int(1)),
             lit_val(int(2)),
             lit_val(int(3)),
             lit_val(int(4)),
             lit_val(int(5)),
-        ])));
+        ]))));
 
         // Create a match expression:
         // match [1, 2, 3, 4, 5] {
@@ -641,11 +646,11 @@ mod tests {
                         bind_pattern("head", literal_pattern(int(1))),
                         bind_pattern("tail", wildcard_pattern()),
                     ),
-                    Arc::new(Expr::Binary(
+                    Arc::new(Expr::new(Binary(
                         ref_expr("head"),
                         BinOp::Add,
-                        Arc::new(Expr::Call(ref_expr("length"), vec![ref_expr("tail")])),
-                    )),
+                        Arc::new(Expr::new(Call(ref_expr("length"), vec![ref_expr("tail")]))),
+                    ))),
                 ),
                 match_arm(wildcard_pattern(), lit_expr(int(0))),
             ],
@@ -688,10 +693,10 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create a struct value Point { x: 10, y: 20 }
-        let struct_expr = Arc::new(Expr::CoreVal(struct_val(
+        let struct_expr = Arc::new(Expr::new(CoreVal(struct_val(
             "Point",
             vec![lit_val(int(10)), lit_val(int(20))],
-        )));
+        ))));
 
         // Create a match expression:
         // match Point { x: 10, y: 20 } {
@@ -709,7 +714,7 @@ mod tests {
                             bind_pattern("y", wildcard_pattern()),
                         ],
                     ),
-                    Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, ref_expr("y"))),
+                    Arc::new(Expr::new(Binary(ref_expr("x"), BinOp::Add, ref_expr("y")))),
                 ),
                 match_arm(wildcard_pattern(), lit_expr(int(0))),
             ],
@@ -746,7 +751,7 @@ mod tests {
         };
 
         let logical_op_value = Value(CoreData::Logical(Materialized(LogicalOp::logical(op))));
-        let logical_op_expr = Arc::new(Expr::CoreVal(logical_op_value.clone()));
+        let logical_op_expr = Arc::new(Expr::new(CoreVal(logical_op_value.clone())));
 
         // Create a match expression:
         // match LogicalJoin { joinType: "inner", condition } [TableScan(left), TableScan(right)] {
@@ -782,27 +787,27 @@ mod tests {
                         ],
                     ),
                     // Create a complex expression to concatenate strings
-                    Arc::new(Expr::Binary(
-                        Arc::new(Expr::Binary(
-                            Arc::new(Expr::Binary(
-                                Arc::new(Expr::Binary(
+                    Arc::new(Expr::new(Binary(
+                        Arc::new(Expr::new(Binary(
+                            Arc::new(Expr::new(Binary(
+                                Arc::new(Expr::new(Binary(
                                     lit_expr(string("Found inner join between ")),
                                     BinOp::Concat,
                                     ref_expr("left"),
-                                )),
+                                ))),
                                 BinOp::Concat,
                                 lit_expr(string(" and ")),
-                            )),
+                            ))),
                             BinOp::Concat,
                             ref_expr("right"),
-                        )),
+                        ))),
                         BinOp::Concat,
-                        Arc::new(Expr::Binary(
+                        Arc::new(Expr::new(Binary(
                             lit_expr(string(" with condition: ")),
                             BinOp::Concat,
                             ref_expr("condition"),
-                        )),
-                    )),
+                        ))),
+                    ))),
                 ),
                 match_arm(wildcard_pattern(), lit_expr(string("No match"))),
             ],
@@ -849,7 +854,7 @@ mod tests {
         // Create an unmaterialized logical operator
         let unmaterialized_logical_op = Value(CoreData::Logical(UnMaterialized(test_group_id)));
 
-        let unmaterialized_expr = Arc::new(Expr::CoreVal(unmaterialized_logical_op));
+        let unmaterialized_expr = Arc::new(Expr::new(CoreVal(unmaterialized_logical_op)));
 
         // Create a match expression:
         // match UnMaterializedLogicalOp(group_id) {
@@ -885,27 +890,27 @@ mod tests {
                         ],
                     ),
                     // Create a complex expression to concatenate strings
-                    Arc::new(Expr::Binary(
-                        Arc::new(Expr::Binary(
-                            Arc::new(Expr::Binary(
-                                Arc::new(Expr::Binary(
+                    Arc::new(Expr::new(Binary(
+                        Arc::new(Expr::new(Binary(
+                            Arc::new(Expr::new(Binary(
+                                Arc::new(Expr::new(Binary(
                                     lit_expr(string("Resolved group: found inner join between ")),
                                     BinOp::Concat,
                                     ref_expr("left"),
-                                )),
+                                ))),
                                 BinOp::Concat,
                                 lit_expr(string(" and ")),
-                            )),
+                            ))),
                             BinOp::Concat,
                             ref_expr("right"),
-                        )),
+                        ))),
                         BinOp::Concat,
-                        Arc::new(Expr::Binary(
+                        Arc::new(Expr::new(Binary(
                             lit_expr(string(" with condition: ")),
                             BinOp::Concat,
                             ref_expr("condition"),
-                        )),
-                    )),
+                        ))),
+                    ))),
                 ),
                 match_arm(wildcard_pattern(), lit_expr(string("No match"))),
             ],
@@ -960,7 +965,7 @@ mod tests {
         // Create an unmaterialized physical operator with the goal
         let unmaterialized_physical_op = Value(CoreData::Physical(UnMaterialized(test_goal)));
 
-        let unmaterialized_expr = Arc::new(Expr::CoreVal(unmaterialized_physical_op));
+        let unmaterialized_expr = Arc::new(Expr::new(CoreVal(unmaterialized_physical_op)));
 
         // Create a match expression to match against the expanded physical operator
         let match_expr = pattern_match_expr(
@@ -987,49 +992,49 @@ mod tests {
                         ],
                     ),
                     // Create formatted result string with binding values
-                    Arc::new(Expr::Let(
+                    Arc::new(Expr::new(Let(
                         "to_string".to_string(),
-                        Arc::new(Expr::CoreVal(Value(CoreData::Function(FunKind::RustUDF(
-                            |args| match &args[0].0 {
+                        Arc::new(Expr::new(CoreVal(Value(CoreData::Function(
+                            FunKind::RustUDF(|args| match &args[0].0 {
                                 CoreData::Literal(lit) => {
                                     Value(CoreData::Literal(string(&format!("{:?}", lit))))
                                 }
                                 _ => Value(CoreData::Literal(string("<non-literal>"))),
-                            },
+                            }),
                         ))))),
-                        Arc::new(Expr::Binary(
+                        Arc::new(Expr::new(Binary(
                             lit_expr(string("Physical plan: ")),
                             BinOp::Concat,
-                            Arc::new(Expr::Binary(
-                                Arc::new(Expr::Call(
+                            Arc::new(Expr::new(Binary(
+                                Arc::new(Expr::new(Call(
                                     ref_expr("to_string"),
                                     vec![ref_expr("join_method")],
-                                )),
+                                ))),
                                 BinOp::Concat,
-                                Arc::new(Expr::Binary(
+                                Arc::new(Expr::new(Binary(
                                     lit_expr(string(" join between ")),
                                     BinOp::Concat,
-                                    Arc::new(Expr::Binary(
+                                    Arc::new(Expr::new(Binary(
                                         ref_expr("left_table"),
                                         BinOp::Concat,
-                                        Arc::new(Expr::Binary(
+                                        Arc::new(Expr::new(Binary(
                                             lit_expr(string(" and ")),
                                             BinOp::Concat,
-                                            Arc::new(Expr::Binary(
+                                            Arc::new(Expr::new(Binary(
                                                 ref_expr("right_table"),
                                                 BinOp::Concat,
-                                                Arc::new(Expr::Binary(
+                                                Arc::new(Expr::new(Binary(
                                                     lit_expr(string(" with condition: ")),
                                                     BinOp::Concat,
                                                     ref_expr("join_condition"),
-                                                )),
-                                            )),
-                                        )),
-                                    )),
-                                )),
-                            )),
-                        )),
-                    )),
+                                                ))),
+                                            ))),
+                                        ))),
+                                    ))),
+                                ))),
+                            ))),
+                        ))),
+                    ))),
                 ),
                 match_arm(wildcard_pattern(), lit_expr(string("No match"))),
             ],
@@ -1085,10 +1090,10 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create a struct value Point { x: 30, y: 40 }
-        let struct_expr = Arc::new(Expr::CoreVal(struct_val(
+        let struct_expr = Arc::new(Expr::new(CoreVal(struct_val(
             "Point",
             vec![lit_val(int(30)), lit_val(int(40))],
-        )));
+        ))));
 
         // Create a match expression with multiple arms and fallthrough:
         // match Point { x: 30, y: 40 } {
@@ -1109,19 +1114,22 @@ mod tests {
                             bind_pattern("y", wildcard_pattern()),
                         ],
                     ),
-                    Arc::new(Expr::Binary(
+                    Arc::new(Expr::new(Binary(
                         lit_expr(string("First arm: ")),
                         BinOp::Concat,
-                        Arc::new(Expr::Binary(
-                            Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("x")])),
+                        Arc::new(Expr::new(Binary(
+                            Arc::new(Expr::new(Call(ref_expr("to_string"), vec![ref_expr("x")]))),
                             BinOp::Concat,
-                            Arc::new(Expr::Binary(
+                            Arc::new(Expr::new(Binary(
                                 lit_expr(string(", ")),
                                 BinOp::Concat,
-                                Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("y")])),
-                            )),
-                        )),
-                    )),
+                                Arc::new(Expr::new(Call(
+                                    ref_expr("to_string"),
+                                    vec![ref_expr("y")],
+                                ))),
+                            ))),
+                        ))),
+                    ))),
                 ),
                 // Second arm - won't match
                 match_arm(
@@ -1132,19 +1140,22 @@ mod tests {
                             bind_pattern("y", wildcard_pattern()),
                         ],
                     ),
-                    Arc::new(Expr::Binary(
+                    Arc::new(Expr::new(Binary(
                         lit_expr(string("Second arm: ")),
                         BinOp::Concat,
-                        Arc::new(Expr::Binary(
-                            Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("x")])),
+                        Arc::new(Expr::new(Binary(
+                            Arc::new(Expr::new(Call(ref_expr("to_string"), vec![ref_expr("x")]))),
                             BinOp::Concat,
-                            Arc::new(Expr::Binary(
+                            Arc::new(Expr::new(Binary(
                                 lit_expr(string(", ")),
                                 BinOp::Concat,
-                                Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("y")])),
-                            )),
-                        )),
-                    )),
+                                Arc::new(Expr::new(Call(
+                                    ref_expr("to_string"),
+                                    vec![ref_expr("y")],
+                                ))),
+                            ))),
+                        ))),
+                    ))),
                 ),
                 // Fallthrough arm - should match
                 match_arm(
@@ -1155,19 +1166,22 @@ mod tests {
                             bind_pattern("y", wildcard_pattern()),
                         ],
                     ),
-                    Arc::new(Expr::Binary(
+                    Arc::new(Expr::new(Binary(
                         lit_expr(string("Fallthrough arm: ")),
                         BinOp::Concat,
-                        Arc::new(Expr::Binary(
-                            Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("x")])),
+                        Arc::new(Expr::new(Binary(
+                            Arc::new(Expr::new(Call(ref_expr("to_string"), vec![ref_expr("x")]))),
                             BinOp::Concat,
-                            Arc::new(Expr::Binary(
+                            Arc::new(Expr::new(Binary(
                                 lit_expr(string(", ")),
                                 BinOp::Concat,
-                                Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("y")])),
-                            )),
-                        )),
-                    )),
+                                Arc::new(Expr::new(Call(
+                                    ref_expr("to_string"),
+                                    vec![ref_expr("y")],
+                                ))),
+                            ))),
+                        ))),
+                    ))),
                 ),
                 // Default arm - won't reach
                 match_arm(wildcard_pattern(), lit_expr(string("Default"))),
@@ -1246,7 +1260,7 @@ mod tests {
             )],
         );
 
-        let nested_op_expr = Arc::new(Expr::CoreVal(nested_op));
+        let nested_op_expr = Arc::new(Expr::new(CoreVal(nested_op)));
 
         // Create a deeply nested pattern match that extracts values at various depths:
         let match_expr = pattern_match_expr(
@@ -1281,49 +1295,52 @@ mod tests {
                         )],
                     ),
                     // Build a SQL-like string with to_string calls
-                    Arc::new(Expr::Binary(
+                    Arc::new(Expr::new(Binary(
                         lit_expr(string("Query: SELECT ")),
                         BinOp::Concat,
-                        Arc::new(Expr::Binary(
-                            Arc::new(Expr::Call(ref_expr("to_string"), vec![ref_expr("cols")])),
+                        Arc::new(Expr::new(Binary(
+                            Arc::new(Expr::new(Call(
+                                ref_expr("to_string"),
+                                vec![ref_expr("cols")],
+                            ))),
                             BinOp::Concat,
-                            Arc::new(Expr::Binary(
+                            Arc::new(Expr::new(Binary(
                                 lit_expr(string(" FROM ")),
                                 BinOp::Concat,
-                                Arc::new(Expr::Binary(
-                                    Arc::new(Expr::Call(
+                                Arc::new(Expr::new(Binary(
+                                    Arc::new(Expr::new(Call(
                                         ref_expr("to_string"),
                                         vec![ref_expr("t1")],
-                                    )),
+                                    ))),
                                     BinOp::Concat,
-                                    Arc::new(Expr::Binary(
+                                    Arc::new(Expr::new(Binary(
                                         lit_expr(string(" JOIN ")),
                                         BinOp::Concat,
-                                        Arc::new(Expr::Binary(
-                                            Arc::new(Expr::Call(
+                                        Arc::new(Expr::new(Binary(
+                                            Arc::new(Expr::new(Call(
                                                 ref_expr("to_string"),
                                                 vec![ref_expr("t2")],
-                                            )),
+                                            ))),
                                             BinOp::Concat,
-                                            Arc::new(Expr::Binary(
+                                            Arc::new(Expr::new(Binary(
                                                 lit_expr(string(" ON ")),
                                                 BinOp::Concat,
-                                                Arc::new(Expr::Binary(
+                                                Arc::new(Expr::new(Binary(
                                                     ref_expr("jcond"),
                                                     BinOp::Concat,
-                                                    Arc::new(Expr::Binary(
+                                                    Arc::new(Expr::new(Binary(
                                                         lit_expr(string(" WHERE ")),
                                                         BinOp::Concat,
                                                         ref_expr("pred"),
-                                                    )),
-                                                )),
-                                            )),
-                                        )),
-                                    )),
-                                )),
-                            )),
-                        )),
-                    )),
+                                                    ))),
+                                                ))),
+                                            ))),
+                                        ))),
+                                    ))),
+                                ))),
+                            ))),
+                        ))),
+                    ))),
                 ),
                 match_arm(wildcard_pattern(), lit_expr(string("No match"))),
             ],
@@ -1405,7 +1422,7 @@ mod tests {
             ],
         );
 
-        let join_expr = Arc::new(Expr::CoreVal(join_op));
+        let join_expr = Arc::new(Expr::new(CoreVal(join_op)));
 
         // Create a pattern match that will match any join with a table scan as first child
         // and extract information from it
@@ -1432,19 +1449,19 @@ mod tests {
                             ),
                         ],
                     ),
-                    Arc::new(Expr::Let(
+                    Arc::new(Expr::new(Let(
                         "result".to_string(),
-                        Arc::new(Expr::Binary(
+                        Arc::new(Expr::new(Binary(
                             ref_expr("table_name"),
                             BinOp::Concat,
-                            Arc::new(Expr::Binary(
+                            Arc::new(Expr::new(Binary(
                                 lit_expr(string(" filtered by ")),
                                 BinOp::Concat,
                                 ref_expr("filter_condition"),
-                            )),
-                        )),
+                            ))),
+                        ))),
                         ref_expr("result"),
-                    )),
+                    ))),
                 ),
                 match_arm(wildcard_pattern(), lit_expr(string("No match"))),
             ],

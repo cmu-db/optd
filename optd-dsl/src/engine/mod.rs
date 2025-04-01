@@ -1,7 +1,8 @@
 use crate::analyzer::{
     context::Context,
-    hir::{Expr, Goal, GroupId, Value},
+    hir::{Expr, ExprKind, Goal, GroupId, Value},
 };
+use ExprKind::*;
 use eval::core::evaluate_core_expr;
 use eval::expr::{
     evaluate_binary_expr, evaluate_function_call, evaluate_if_then_else, evaluate_let_binding,
@@ -75,11 +76,11 @@ impl Engine {
         O: Send + 'static,
     {
         Box::pin(async move {
-            match expr.as_ref() {
-                Expr::PatternMatch(expr, match_arms) => {
-                    evaluate_pattern_match(expr.clone(), match_arms.clone(), self, k).await
+            match &expr.as_ref().kind {
+                PatternMatch(sub_expr, match_arms) => {
+                    evaluate_pattern_match(sub_expr.clone(), match_arms.clone(), self, k).await
                 }
-                Expr::IfThenElse(cond, then_expr, else_expr) => {
+                IfThenElse(cond, then_expr, else_expr) => {
                     evaluate_if_then_else(
                         cond.clone(),
                         then_expr.clone(),
@@ -89,22 +90,18 @@ impl Engine {
                     )
                     .await
                 }
-                Expr::Let(ident, assignee, after) => {
+                Let(ident, assignee, after) => {
                     evaluate_let_binding(ident.clone(), assignee.clone(), after.clone(), self, k)
                         .await
                 }
-                Expr::Binary(left, op, right) => {
+                Binary(left, op, right) => {
                     evaluate_binary_expr(left.clone(), op.clone(), right.clone(), self, k).await
                 }
-                Expr::Unary(op, expr) => {
-                    evaluate_unary_expr(op.clone(), expr.clone(), self, k).await
-                }
-                Expr::Call(fun, args) => {
-                    evaluate_function_call(fun.clone(), args.clone(), self, k).await
-                }
-                Expr::Ref(ident) => evaluate_reference(ident.clone(), self, k).await,
-                Expr::CoreExpr(expr) => evaluate_core_expr(expr.clone(), self, k).await,
-                Expr::CoreVal(val) => k(val.clone()).await,
+                Unary(op, expr) => evaluate_unary_expr(op.clone(), expr.clone(), self, k).await,
+                Call(fun, args) => evaluate_function_call(fun.clone(), args.clone(), self, k).await,
+                Ref(ident) => evaluate_reference(ident.clone(), self, k).await,
+                CoreExpr(expr) => evaluate_core_expr(expr.clone(), self, k).await,
+                CoreVal(val) => k(val.clone()).await,
             }
         })
     }
@@ -149,12 +146,12 @@ impl Engine {
     /// # Returns
     /// A call expression representing the rule invocation
     fn create_rule_call(&self, rule_name: &str, args: Vec<Value>) -> Arc<Expr> {
-        let rule_name_expr = Expr::Ref(rule_name.to_string());
+        let rule_name_expr = Expr::new(Ref(rule_name.to_string())).into();
         let arg_exprs = args
             .into_iter()
-            .map(|arg| Expr::CoreVal(arg).into())
+            .map(|arg| Expr::new(CoreVal(arg)).into())
             .collect();
 
-        Expr::Call(rule_name_expr.into(), arg_exprs).into()
+        Expr::new(Call(rule_name_expr, arg_exprs)).into()
     }
 }

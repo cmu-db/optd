@@ -345,7 +345,7 @@ where
 mod tests {
     use crate::analyzer::{
         context::Context,
-        hir::{BinOp, CoreData, Expr, FunKind, Literal, Value},
+        hir::{BinOp, CoreData, Expr, ExprKind, FunKind, Literal, Value},
     };
     use crate::engine::{
         Engine,
@@ -354,6 +354,7 @@ mod tests {
             ref_expr, string,
         },
     };
+    use ExprKind::*;
     use std::sync::Arc;
 
     /// Test if-then-else expressions with true and false conditions
@@ -364,20 +365,20 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // if true then "yes" else "no"
-        let true_condition = Arc::new(Expr::IfThenElse(
+        let true_condition = Arc::new(Expr::new(IfThenElse(
             lit_expr(boolean(true)),
             lit_expr(string("yes")),
             lit_expr(string("no")),
-        ));
+        )));
         let true_results =
             evaluate_and_collect(true_condition, engine.clone(), harness.clone()).await;
 
         // if false then "yes" else "no"
-        let false_condition = Arc::new(Expr::IfThenElse(
+        let false_condition = Arc::new(Expr::new(IfThenElse(
             lit_expr(boolean(false)),
             lit_expr(string("yes")),
             lit_expr(string("no")),
-        ));
+        )));
         let false_results =
             evaluate_and_collect(false_condition, engine.clone(), harness.clone()).await;
 
@@ -386,11 +387,23 @@ mod tests {
         ctx.bind("x".to_string(), lit_val(int(20)));
         let engine_with_x = Engine::new(ctx);
 
-        let complex_condition = Arc::new(Expr::IfThenElse(
-            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Lt, lit_expr(int(10)))),
-            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Div, lit_expr(int(2)))),
-            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Mul, lit_expr(int(2)))),
-        ));
+        let complex_condition = Arc::new(Expr::new(IfThenElse(
+            Arc::new(Expr::new(Binary(
+                ref_expr("x"),
+                BinOp::Lt,
+                lit_expr(int(10)),
+            ))),
+            Arc::new(Expr::new(Binary(
+                ref_expr("x"),
+                BinOp::Div,
+                lit_expr(int(2)),
+            ))),
+            Arc::new(Expr::new(Binary(
+                ref_expr("x"),
+                BinOp::Mul,
+                lit_expr(int(2)),
+            ))),
+        )));
 
         let complex_results = evaluate_and_collect(complex_condition, engine_with_x, harness).await;
 
@@ -425,11 +438,15 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // let x = 10 in x + 5
-        let let_expr = Arc::new(Expr::Let(
+        let let_expr = Arc::new(Expr::new(Let(
             "x".to_string(),
             lit_expr(int(10)),
-            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, lit_expr(int(5)))),
-        ));
+            Arc::new(Expr::new(Binary(
+                ref_expr("x"),
+                BinOp::Add,
+                lit_expr(int(5)),
+            ))),
+        )));
 
         let results = evaluate_and_collect(let_expr, engine, harness).await;
 
@@ -452,15 +469,19 @@ mod tests {
         // let x = 10 in
         //   let y = x * 2 in
         //     x + y
-        let nested_let_expr = Arc::new(Expr::Let(
+        let nested_let_expr = Arc::new(Expr::new(Let(
             "x".to_string(),
             lit_expr(int(10)),
-            Arc::new(Expr::Let(
+            Arc::new(Expr::new(Let(
                 "y".to_string(),
-                Arc::new(Expr::Binary(ref_expr("x"), BinOp::Mul, lit_expr(int(2)))),
-                Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, ref_expr("y"))),
-            )),
-        ));
+                Arc::new(Expr::new(Binary(
+                    ref_expr("x"),
+                    BinOp::Mul,
+                    lit_expr(int(2)),
+                ))),
+                Arc::new(Expr::new(Binary(ref_expr("x"), BinOp::Add, ref_expr("y")))),
+            ))),
+        )));
 
         let results = evaluate_and_collect(nested_let_expr, engine, harness).await;
 
@@ -482,17 +503,17 @@ mod tests {
         // Define a function: fn(x, y) => x + y
         let add_function = Value(CoreData::Function(FunKind::Closure(
             vec!["x".to_string(), "y".to_string()],
-            Arc::new(Expr::Binary(ref_expr("x"), BinOp::Add, ref_expr("y"))),
+            Arc::new(Expr::new(Binary(ref_expr("x"), BinOp::Add, ref_expr("y")))),
         )));
 
         ctx.bind("add".to_string(), add_function);
         let engine = Engine::new(ctx);
 
         // Call the function: add(10, 20)
-        let call_expr = Arc::new(Expr::Call(
+        let call_expr = Arc::new(Expr::new(Call(
             ref_expr("add"),
             vec![lit_expr(int(10)), lit_expr(int(20))],
-        ));
+        )));
 
         let results = evaluate_and_collect(call_expr, engine, harness).await;
 
@@ -531,16 +552,16 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Call the function: sum([1, 2, 3, 4, 5])
-        let call_expr = Arc::new(Expr::Call(
+        let call_expr = Arc::new(Expr::new(Call(
             ref_expr("sum"),
-            vec![Arc::new(Expr::CoreVal(array_val(vec![
+            vec![Arc::new(Expr::new(CoreVal(array_val(vec![
                 lit_val(int(1)),
                 lit_val(int(2)),
                 lit_val(int(3)),
                 lit_val(int(4)),
                 lit_val(int(5)),
-            ])))],
-        ));
+            ]))))],
+        )));
 
         let results = evaluate_and_collect(call_expr, engine, harness).await;
 
@@ -562,26 +583,26 @@ mod tests {
         // Define a function to compute factorial: fn(n) => if n <= 1 then 1 else n * factorial(n-1)
         let factorial_function = Value(CoreData::Function(FunKind::Closure(
             vec!["n".to_string()],
-            Arc::new(Expr::IfThenElse(
-                Arc::new(Expr::Binary(
+            Arc::new(Expr::new(IfThenElse(
+                Arc::new(Expr::new(Binary(
                     ref_expr("n"),
                     BinOp::Lt,
                     lit_expr(int(2)), // n < 2
-                )),
+                ))),
                 lit_expr(int(1)), // then 1
-                Arc::new(Expr::Binary(
+                Arc::new(Expr::new(Binary(
                     ref_expr("n"),
                     BinOp::Mul,
-                    Arc::new(Expr::Call(
+                    Arc::new(Expr::new(Call(
                         ref_expr("factorial"),
-                        vec![Arc::new(Expr::Binary(
+                        vec![Arc::new(Expr::new(Binary(
                             ref_expr("n"),
                             BinOp::Sub,
                             lit_expr(int(1)),
-                        ))],
-                    )),
-                )), // else n * factorial(n-1)
-            )),
+                        )))],
+                    ))),
+                ))), // else n * factorial(n-1)
+            ))),
         )));
 
         ctx.bind("factorial".to_string(), factorial_function);
@@ -591,19 +612,23 @@ mod tests {
         // 1. Defines variables for different values
         // 2. Calls factorial on one of them
         // 3. Performs some arithmetic on the result
-        let program = Arc::new(Expr::Let(
+        let program = Arc::new(Expr::new(Let(
             "a".to_string(),
             lit_expr(int(5)), // a = 5
-            Arc::new(Expr::Let(
+            Arc::new(Expr::new(Let(
                 "b".to_string(),
                 lit_expr(int(3)), // b = 3
-                Arc::new(Expr::Let(
+                Arc::new(Expr::new(Let(
                     "fact_a".to_string(),
-                    Arc::new(Expr::Call(ref_expr("factorial"), vec![ref_expr("a")])), // fact_a = factorial(a)
-                    Arc::new(Expr::Binary(ref_expr("fact_a"), BinOp::Div, ref_expr("b"))), // fact_a / b
-                )),
-            )),
-        ));
+                    Arc::new(Expr::new(Call(ref_expr("factorial"), vec![ref_expr("a")]))), // fact_a = factorial(a)
+                    Arc::new(Expr::new(Binary(
+                        ref_expr("fact_a"),
+                        BinOp::Div,
+                        ref_expr("b"),
+                    ))), // fact_a / b
+                ))),
+            ))),
+        )));
 
         let results = evaluate_and_collect(program, engine, harness).await;
 
@@ -630,11 +655,11 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Reference to a variable in the current (inner) scope
-        let inner_ref = Arc::new(Expr::Ref("inner_var".to_string()));
+        let inner_ref = Arc::new(Expr::new(Ref("inner_var".to_string())));
         let inner_results = evaluate_and_collect(inner_ref, engine.clone(), harness.clone()).await;
 
         // Reference to a variable in the outer scope
-        let outer_ref = Arc::new(Expr::Ref("outer_var".to_string()));
+        let outer_ref = Arc::new(Expr::new(Ref("outer_var".to_string())));
         let outer_results = evaluate_and_collect(outer_ref, engine.clone(), harness).await;
 
         // Check results
