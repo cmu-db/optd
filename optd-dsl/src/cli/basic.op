@@ -1,9 +1,9 @@
-data LogicalProps(schema_len: )
+data LogicalProps(schema_len: I64)
 
 data Scalar =
-    | ColumnRef(idx: Int64)
+    | ColumnRef(idx: I64)
     | Literal =
-        | IntLiteral(value: Int64)
+        | IntLiteral(value: I64)
         | StringLiteral(value: String)
         | BoolLiteral(value: Bool)
         \ NullLiteral
@@ -92,16 +92,16 @@ data JoinType =
     \ Semi
 
 [rust]
-fn (expr: Scalar) apply_children(f: Scalar => Scalar) = ()
+fn (expr: Scalar) apply_children(f: Scalar -> Scalar) = None
 
-fn (pred: Predicate) remap(map: {I64 : I64)}) =
+fn (pred: Predicate) remap(map: {I64 : I64}) =
     match predicate
         | ColumnRef(idx) -> ColumnRef(map(idx))
         \ _ -> predicate.apply_children(child -> rewrite_column_refs(child, map))
     
 [rule]
-fn (expr: Logical) join_commute = match expr
-    \ Join(left, right, Inner, cond) =>
+fn (expr: Logical) join_commute: Logical? = match expr
+    \ Join(left, right, Inner, cond) ->
         let 
             right_indices = 0.right.schema_len,
             left_indices = 0..left.schema_len,
