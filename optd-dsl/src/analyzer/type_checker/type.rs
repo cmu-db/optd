@@ -127,21 +127,21 @@ impl TypeRegistry {
     pub fn register_adt(&mut self, adt: &Adt) {
         match adt {
             Adt::Product { name, .. } => {
-                let type_name = *name.value.clone();
+                let type_name = name.value.as_ref().clone();
                 self.subtypes.entry(type_name).or_default();
             }
             Adt::Sum { name, variants } => {
-                let enum_name = *name.value.clone();
+                let enum_name = name.value.as_ref().clone();
                 self.subtypes.entry(enum_name.clone()).or_default();
                 for variant in variants {
                     let variant_adt = variant.value.as_ref();
                     self.register_adt(variant_adt);
                     let variant_name = match variant_adt {
-                        Adt::Product { name, .. } => name.value.clone(),
-                        Adt::Sum { name, .. } => name.value.clone(),
+                        Adt::Product { name, .. } => name.value.as_ref(),
+                        Adt::Sum { name, .. } => name.value.as_ref(),
                     };
                     if let Some(children) = self.subtypes.get_mut(&enum_name) {
-                        children.insert(*variant_name);
+                        children.insert(variant_name.clone());
                     }
                 }
             }
