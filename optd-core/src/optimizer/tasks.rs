@@ -339,12 +339,12 @@ impl<M: Memoize> Optimizer<M> {
     // Public API
     //-------------------------------------------------------------------------
 
-    /// Launches a new task to optimize a logical plan into a physical plan.
+    /// Create a new task to optimize a logical plan into a physical plan.
     ///
     /// This method creates and registers a task that will optimize the provided logical
     /// plan into a physical plan. The optimized plan will be sent back through the provided
     /// response channel every time a better plan is found.
-    pub(super) async fn launch_optimize_plan_task(
+    pub(super) async fn create_optimize_plan_task(
         &mut self,
         plan: LogicalPlan,
         response_tx: Sender<PhysicalPlan>,
@@ -365,7 +365,7 @@ impl<M: Memoize> Optimizer<M> {
         let task_id = match self.group_exploration_task_index.get(&group_id) {
             Some(id) => *id,
             None => {
-                self.launch_group_exploration_task(group_id, parent_task_id)
+                self.create_group_exploration_task(group_id, parent_task_id)
                     .await?
             }
         };
@@ -386,7 +386,7 @@ impl<M: Memoize> Optimizer<M> {
         let task_id = match self.goal_optimization_task_index.get(&goal_id) {
             Some(id) => *id,
             None => {
-                self.launch_goal_optimize_task(goal_id, parent_task_id)
+                self.create_goal_optimize_task(goal_id, parent_task_id)
                     .await?
             }
         };
@@ -426,17 +426,17 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     //-------------------------------------------------------------------------
-    // Internal task launching methods
+    // Internal task creation methods
     //-------------------------------------------------------------------------
 
-    /// Launches a task to start applying a transformation rule to a logical expression.
+    /// Creates a task to start applying a transformation rule to a logical expression.
     ///
     /// This task generates alternative logical expressions that are
     /// semantically equivalent to the original. It maintains a set of continuations
     /// that will be notified of the transformation results.
     ///
     /// Only schedules the starting job if the transformation is marked as dirty in the memo.
-    async fn launch_transform_expression_task(
+    async fn create_transform_expression_task(
         &mut self,
         rule: TransformationRule,
         expression_id: LogicalExpressionId,
@@ -462,14 +462,14 @@ impl<M: Memoize> Optimizer<M> {
         Ok(task_id)
     }
 
-    /// Launches a task to start applying an implementation rule to a logical expression.
+    /// Creates a task to start applying an implementation rule to a logical expression.
     ///
     /// This task generates physical implementations from a logical expression
     /// using a specified implementation strategy. It maintains a set of continuations
     /// that will be notified of the implementation results.
     ///
     /// Only schedules the starting job if the implementation is marked as dirty in the memo.
-    async fn launch_implement_expression_task(
+    async fn create_implement_expression_task(
         &mut self,
         rule: ImplementationRule,
         expression_id: LogicalExpressionId,
@@ -495,11 +495,11 @@ impl<M: Memoize> Optimizer<M> {
         Ok(task_id)
     }
 
-    /// Launches a new task to explore all possible transformations for a logical group.
+    /// Creates a new task to explore all possible transformations for a logical group.
     ///
     /// This schedules jobs to apply all available transformation rules to all
     /// logical expressions in the group.
-    async fn launch_group_exploration_task(
+    async fn create_group_exploration_task(
         &mut self,
         group_id: GroupId,
         parent_task_id: TaskId,
@@ -507,13 +507,13 @@ impl<M: Memoize> Optimizer<M> {
         let task_id = self.register_new_task(ExploreGroup(group_id), Some(parent_task_id));
         self.group_exploration_task_index.insert(group_id, task_id);
 
-        // Launch the transformation task for all expression-rule combinations.
+        // Create a transformation task for all expression-rule combinations.
         let transformations = self.rule_book.get_transformations().to_vec();
         let expressions = self.memo.get_all_logical_exprs(group_id).await?;
 
         for expression_id in expressions {
             for rule in &transformations {
-                self.launch_transform_expression_task(
+                self.create_transform_expression_task(
                     rule.clone(),
                     expression_id,
                     group_id,
@@ -526,7 +526,7 @@ impl<M: Memoize> Optimizer<M> {
         Ok(task_id)
     }
 
-    async fn launch_fork_logical_task(
+    async fn create_fork_logical_task(
         &mut self,
         continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
         group_id: GroupId,
@@ -535,7 +535,7 @@ impl<M: Memoize> Optimizer<M> {
         todo!()
     }
 
-    async fn launch_continue_with_logical_task(
+    async fn create_continue_with_logical_task(
         &mut self,
         expr_id: LogicalExpressionId,
         fork_out: TaskId,
@@ -543,7 +543,7 @@ impl<M: Memoize> Optimizer<M> {
         todo!()
     }
 
-    async fn launch_fork_costed_task(
+    async fn create_fork_costed_task(
         &mut self,
         continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
         goal_id: GoalId,
@@ -553,7 +553,7 @@ impl<M: Memoize> Optimizer<M> {
         todo!()
     }
 
-    async fn launch_continue_with_costed_task(
+    async fn create_continue_with_costed_task(
         &mut self,
         expr_id: PhysicalExpressionId,
         cost: Cost,
@@ -562,11 +562,11 @@ impl<M: Memoize> Optimizer<M> {
         todo!()
     }
 
-    /// Launches a new task to optimize a goal.
+    /// Creates a new task to optimize a goal.
     ///
     /// This method creates and manages the tasks needed to optimize a goal by
-    /// ensuring group exploration, launching implementation tasks, and processing goal members.
-    async fn launch_goal_optimize_task(
+    /// ensuring group exploration, creating implementation tasks, and processing goal members.
+    async fn create_goal_optimize_task(
         &mut self,
         goal_id: GoalId,
         parent_task_id: TaskId,
@@ -574,18 +574,18 @@ impl<M: Memoize> Optimizer<M> {
         let task_id = self.register_new_task(OptimizeGoal(goal_id), Some(parent_task_id));
         self.goal_optimization_task_index.insert(goal_id, task_id);
 
-        // Launch implementation tasks for all expression-rule combinations.
+        // Creates implementation tasks for all expression-rule combinations.
         let Goal(group_id, _) = self.memo.materialize_goal(goal_id).await?;
         self.ensure_group_exploration_task(group_id, task_id)
             .await?;
 
-        // Launch implementation tasks for all logical expressions in the group.
+        // Creates implementation tasks for all logical expressions in the group.
         let logical_expressions = self.memo.get_all_logical_exprs(group_id).await?;
         let implementations = self.rule_book.get_implementations().to_vec();
 
         for expr_id in logical_expressions {
             for rule in &implementations {
-                self.launch_implement_expression_task(rule.clone(), expr_id, goal_id, task_id)
+                self.create_implement_expression_task(rule.clone(), expr_id, goal_id, task_id)
                     .await?;
             }
         }

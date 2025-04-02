@@ -222,7 +222,7 @@ impl<M: Memoize> Optimizer<M> {
             tokio::select! {
                 Some(request) = self.optimize_rx.next() => {
                     let OptimizeRequest { plan, response_tx } = request.clone();
-                    let task_id = self.launch_optimize_plan_task(plan, response_tx).await;
+                    let task_id = self.create_optimize_plan_task(plan, response_tx).await;
                     let mut message_tx = self.message_tx.clone();
 
                     // Forward the optimization request to the message processing loop
