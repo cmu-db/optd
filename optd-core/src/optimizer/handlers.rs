@@ -1,8 +1,8 @@
 use super::{
+    EngineMessage, EngineMessageKind, JobId, OptimizeRequest, Optimizer, PendingMessage, TaskId,
     ingest::LogicalIngest,
     jobs::JobKind,
     tasks::{CostExpressionTask, ImplementExpressionTask, TaskKind, TransformExpressionTask},
-    EngineMessage, EngineMessageKind, JobId, OptimizeRequest, Optimizer, PendingMessage, TaskId,
 };
 use crate::{
     cir::{
@@ -13,17 +13,17 @@ use crate::{
     error::Error,
     memo::Memoize,
 };
+use EngineMessageKind::*;
+use LogicalIngest::*;
+use TaskKind::*;
 use futures::{
-    channel::{mpsc::Sender, oneshot},
     SinkExt,
+    channel::{mpsc::Sender, oneshot},
 };
 use optd_dsl::{
     analyzer::hir::Value,
     engine::{Continuation, EngineResponse},
 };
-use EngineMessageKind::*;
-use LogicalIngest::*;
-use TaskKind::*;
 
 impl<M: Memoize> Optimizer<M> {
     /// This method initiates the optimization process for a logical plan by launching
@@ -159,13 +159,15 @@ impl<M: Memoize> Optimizer<M> {
         if is_new {
             match member {
                 GoalMemberId::PhysicalExpressionId(expression_id) => {
-                    let _parent_task_id = self.running_jobs[&job_id].0;
+                    let parent_task_id = self.running_jobs[&job_id].0;
                     // TODO(Alexis): Needs to ensure cost expression task exists and then subscribe.
-                    self.ensure_cost_expression_task(expression_id, parent_task_id).await?;
+                    self.ensure_cost_expression_task(expression_id, parent_task_id)
+                        .await?;
                 }
-                GoalMemberId::GoalId(new_goal_id) => {
+                GoalMemberId::GoalId(_new_goal_id) => {
                     // TODO(Sarvesh); Need to create a new goal optimization task if it does not exist.
-                    self.ensure_goal_optimize_task(new_goal_id, goal_id).await?;
+                    // self.ensure_goal_optimize_task(new_goal_id, goal_id).await?;
+                    todo!()
                 }
             }
         }
