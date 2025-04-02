@@ -161,10 +161,11 @@ mod tests {
     use crate::{
         analyzer::{
             context::Context,
-            hir::{CoreData, Expr, FunKind, Literal, Value},
+            hir::{CoreData, Expr, ExprKind, FunKind, Literal, Value},
         },
         engine::Engine,
     };
+    use ExprKind::*;
     use std::sync::Arc;
 
     /// Test evaluation of literal values
@@ -175,7 +176,7 @@ mod tests {
         let harness = TestHarness::new();
 
         // Create a literal expression
-        let literal_expr = Arc::new(Expr::CoreExpr(CoreData::Literal(int(42))));
+        let literal_expr = Arc::new(Expr::new(CoreExpr(CoreData::Literal(int(42)))));
         let results = evaluate_and_collect(literal_expr, engine, harness).await;
 
         // Check result
@@ -196,11 +197,11 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create an array expression with values to evaluate
-        let array_expr = Arc::new(Expr::CoreExpr(CoreData::Array(vec![
+        let array_expr = Arc::new(Expr::new(CoreExpr(CoreData::Array(vec![
             lit_expr(int(1)),
             lit_expr(int(2)),
             lit_expr(int(3)),
-        ])));
+        ]))));
 
         let results = evaluate_and_collect(array_expr, engine, harness).await;
 
@@ -234,11 +235,11 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create a tuple expression with mixed types
-        let tuple_expr = Arc::new(Expr::CoreExpr(CoreData::Tuple(vec![
+        let tuple_expr = Arc::new(Expr::new(CoreExpr(CoreData::Tuple(vec![
             lit_expr(int(42)),
             lit_expr(string("hello")),
             lit_expr(Literal::Bool(true)),
-        ])));
+        ]))));
 
         let results = evaluate_and_collect(tuple_expr, engine, harness).await;
 
@@ -272,10 +273,10 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create a struct expression
-        let struct_expr = Arc::new(Expr::CoreExpr(CoreData::Struct(
+        let struct_expr = Arc::new(Expr::new(CoreExpr(CoreData::Struct(
             "Point".to_string(),
             vec![lit_expr(int(10)), lit_expr(int(20))],
-        )));
+        ))));
 
         let results = evaluate_and_collect(struct_expr, engine, harness).await;
 
@@ -306,11 +307,11 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create a map expression
-        let map_expr = Arc::new(Expr::CoreExpr(CoreData::Map(vec![
+        let map_expr = Arc::new(Expr::new(CoreExpr(CoreData::Map(vec![
             (lit_expr(string("a")), lit_expr(int(1))),
             (lit_expr(string("b")), lit_expr(int(2))),
             (lit_expr(string("c")), lit_expr(int(3))),
-        ])));
+        ]))));
 
         let results = evaluate_and_collect(map_expr, engine, harness).await;
 
@@ -371,10 +372,10 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create a function expression (just a simple closure)
-        let fn_expr = Arc::new(Expr::CoreExpr(CoreData::Function(FunKind::Closure(
+        let fn_expr = Arc::new(Expr::new(CoreExpr(CoreData::Function(FunKind::Closure(
             vec!["x".to_string()],
             lit_expr(int(42)), // Just returns 42 regardless of argument
-        ))));
+        )))));
 
         let results = evaluate_and_collect(fn_expr, engine, harness).await;
 
@@ -396,7 +397,7 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create a null expression
-        let null_expr = Arc::new(Expr::CoreExpr(CoreData::None));
+        let null_expr = Arc::new(Expr::new(CoreExpr(CoreData::None)));
 
         let results = evaluate_and_collect(null_expr, engine, harness).await;
 
@@ -430,9 +431,9 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create a fail expression with a message
-        let fail_expr = Arc::new(Expr::CoreExpr(CoreData::Fail(Box::new(Arc::new(
-            Expr::CoreVal(Value(CoreData::Literal(string("error message")))),
-        )))));
+        let fail_expr = Arc::new(Expr::new(CoreExpr(CoreData::Fail(Box::new(Arc::new(
+            Expr::new(CoreVal(Value(CoreData::Literal(string("error message"))))),
+        ))))));
 
         let results =
             evaluate_and_collect_with_custom_k(fail_expr, engine, harness, return_k).await;

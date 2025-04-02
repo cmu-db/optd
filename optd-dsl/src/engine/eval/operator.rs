@@ -148,8 +148,8 @@ mod tests {
     use crate::analyzer::{
         context::Context,
         hir::{
-            BinOp, CoreData, Expr, Goal, GroupId, Literal, LogicalOp, Materializable, Operator,
-            PhysicalOp, Value,
+            BinOp, CoreData, Expr, ExprKind, Goal, GroupId, Literal, LogicalOp, Materializable,
+            Operator, PhysicalOp, Value,
         },
     };
     use crate::engine::{
@@ -159,6 +159,7 @@ mod tests {
             string,
         },
     };
+    use ExprKind::*;
     use std::sync::Arc;
 
     /// Test evaluation of a materialized logical operator
@@ -173,22 +174,22 @@ mod tests {
             tag: "Join".to_string(),
             data: vec![
                 lit_expr(string("inner")),
-                Arc::new(Expr::Binary(
+                Arc::new(Expr::new(Binary(
                     lit_expr(int(10)),
                     BinOp::Add,
                     lit_expr(int(5)),
-                )),
+                ))),
             ],
             children: vec![
-                Arc::new(Expr::CoreExpr(CoreData::Literal(string("orders")))),
-                Arc::new(Expr::CoreExpr(CoreData::Literal(string("lineitem")))),
+                Arc::new(Expr::new(CoreExpr(CoreData::Literal(string("orders"))))),
+                Arc::new(Expr::new(CoreExpr(CoreData::Literal(string("lineitem"))))),
             ],
         });
 
         // Create the expression to evaluate
-        let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(
+        let logical_op_expr = Arc::new(Expr::new(CoreExpr(CoreData::Logical(
             Materializable::Materialized(log_op),
-        )));
+        ))));
 
         // Evaluate the expression
         let results = evaluate_and_collect(logical_op_expr, engine, harness).await;
@@ -245,9 +246,9 @@ mod tests {
         let group_id = GroupId(42);
 
         // Create the expression to evaluate
-        let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(
+        let logical_op_expr = Arc::new(Expr::new(CoreExpr(CoreData::Logical(
             Materializable::UnMaterialized(group_id),
-        )));
+        ))));
 
         // Evaluate the expression
         let results = evaluate_and_collect(logical_op_expr, engine, harness).await;
@@ -275,22 +276,22 @@ mod tests {
             tag: "HashJoin".to_string(),
             data: vec![
                 lit_expr(string("inner")),
-                Arc::new(Expr::Binary(
+                Arc::new(Expr::new(Binary(
                     lit_expr(int(20)),
                     BinOp::Mul,
                     lit_expr(int(3)),
-                )),
+                ))),
             ],
             children: vec![
-                Arc::new(Expr::CoreExpr(CoreData::Literal(string("IndexScan")))),
-                Arc::new(Expr::CoreExpr(CoreData::Literal(string("FullScan")))),
+                Arc::new(Expr::new(CoreExpr(CoreData::Literal(string("IndexScan"))))),
+                Arc::new(Expr::new(CoreExpr(CoreData::Literal(string("FullScan"))))),
             ],
         });
 
         // Create the expression to evaluate
-        let physical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Physical(
+        let physical_op_expr = Arc::new(Expr::new(CoreExpr(CoreData::Physical(
             Materializable::Materialized(phys_op),
-        )));
+        ))));
 
         // Evaluate the expression
         let results = evaluate_and_collect(physical_op_expr, engine, harness).await;
@@ -352,9 +353,9 @@ mod tests {
         };
 
         // Create the expression to evaluate
-        let physical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Physical(
+        let physical_op_expr = Arc::new(Expr::new(CoreExpr(CoreData::Physical(
             Materializable::UnMaterialized(goal.clone()),
-        )));
+        ))));
 
         // Evaluate the expression
         let results = evaluate_and_collect(physical_op_expr, engine, harness).await;
@@ -386,17 +387,17 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create a Join operator with two Scan operators as children
-        let scan1 = Arc::new(Expr::CoreVal(create_logical_operator(
+        let scan1 = Arc::new(Expr::new(CoreVal(create_logical_operator(
             "Scan",
             vec![lit_val(string("orders"))],
             vec![],
-        )));
+        ))));
 
-        let scan2 = Arc::new(Expr::CoreVal(create_logical_operator(
+        let scan2 = Arc::new(Expr::new(CoreVal(create_logical_operator(
             "Scan",
             vec![lit_val(string("lineitem"))],
             vec![],
-        )));
+        ))));
 
         let log_op = LogicalOp::logical(Operator {
             tag: "Join".to_string(),
@@ -405,9 +406,9 @@ mod tests {
         });
 
         // Create the expression to evaluate
-        let logical_op_expr = Arc::new(Expr::CoreExpr(CoreData::Logical(
+        let logical_op_expr = Arc::new(Expr::new(CoreExpr(CoreData::Logical(
             Materializable::Materialized(log_op),
-        )));
+        ))));
 
         // Evaluate the expression
         let results = evaluate_and_collect(logical_op_expr, engine, harness).await;

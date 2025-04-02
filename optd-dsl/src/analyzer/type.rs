@@ -3,6 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     ops::{Deref, DerefMut},
 };
+
 pub type Identifier = String;
 
 /// Represents types in the language.

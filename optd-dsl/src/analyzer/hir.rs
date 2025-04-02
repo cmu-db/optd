@@ -15,9 +15,11 @@
 //! unified representation that can be transformed into optimizer-specific
 //! intermediate representations through the bridge modules.
 
-use std::{collections::HashMap, sync::Arc};
-
 use super::context::Context;
+use super::r#type::Type;
+use crate::utils::span::Span;
+use std::fmt::Debug;
+use std::{collections::HashMap, sync::Arc};
 
 /// Unique identifier for variables, functions, types, etc.
 pub type Identifier = String;
@@ -190,25 +192,68 @@ pub enum CoreData<T> {
     None,
 }
 
-/// Expression nodes in the HIR
+/// Metadata that can be attached to expression nodes
+///
+/// This trait allows for different types of metadata to be attached to
+/// expression nodes while maintaining a common interface for access.
+pub trait ExprMetadata: Debug + Clone {}
+
+/// Empty metadata implementation for cases where no additional data is needed
+#[derive(Debug, Clone, Default)]
+pub struct NoMetadata;
+impl ExprMetadata for NoMetadata {}
+
+/// Combined span and type information for an expression
 #[derive(Debug, Clone)]
-pub enum Expr {
+pub struct TypedSpan {
+    /// Source code location.
+    pub span: Span,
+    /// Inferred type.
+    pub ty: Type,
+}
+impl ExprMetadata for TypedSpan {}
+
+/// Expression nodes in the HIR with optional metadata
+///
+/// The M type parameter allows attaching different kinds of metadata to expressions,
+/// such as type information, source spans, or both.
+#[derive(Debug, Clone)]
+pub struct Expr<M: ExprMetadata = NoMetadata> {
+    /// The actual expression node
+    pub kind: ExprKind<M>,
+    /// Optional metadata for the expression
+    pub metadata: M,
+}
+
+impl Expr<NoMetadata> {
+    /// Creates a new expression without metadata
+    pub fn new(kind: ExprKind<NoMetadata>) -> Self {
+        Self {
+            kind,
+            metadata: NoMetadata,
+        }
+    }
+}
+
+/// Expression node kinds without metadata
+#[derive(Debug, Clone)]
+pub enum ExprKind<M: ExprMetadata = NoMetadata> {
     /// Pattern matching expression
-    PatternMatch(Arc<Expr>, Vec<MatchArm>),
+    PatternMatch(Arc<Expr<M>>, Vec<MatchArm<M>>),
     /// Conditional expression
-    IfThenElse(Arc<Expr>, Arc<Expr>, Arc<Expr>),
+    IfThenElse(Arc<Expr<M>>, Arc<Expr<M>>, Arc<Expr<M>>),
     /// Variable binding
-    Let(Identifier, Arc<Expr>, Arc<Expr>),
+    Let(Identifier, Arc<Expr<M>>, Arc<Expr<M>>),
     /// Binary operation
-    Binary(Arc<Expr>, BinOp, Arc<Expr>),
+    Binary(Arc<Expr<M>>, BinOp, Arc<Expr<M>>),
     /// Unary operation
-    Unary(UnaryOp, Arc<Expr>),
+    Unary(UnaryOp, Arc<Expr<M>>),
     /// Function call
-    Call(Arc<Expr>, Vec<Arc<Expr>>),
+    Call(Arc<Expr<M>>, Vec<Arc<Expr<M>>>),
     /// Variable reference
     Ref(Identifier),
     /// Core expression
-    CoreExpr(CoreData<Arc<Expr>>),
+    CoreExpr(CoreData<Arc<Expr<M>>>),
     /// Core value
     CoreVal(Value),
 }
@@ -238,11 +283,11 @@ pub enum Pattern {
 
 /// Match arm combining pattern and expression
 #[derive(Debug, Clone)]
-pub struct MatchArm {
+pub struct MatchArm<M: ExprMetadata = NoMetadata> {
     /// Pattern to match against
     pub pattern: Pattern,
     /// Expression to evaluate if pattern matches
-    pub expr: Arc<Expr>,
+    pub expr: Arc<Expr<M>>,
 }
 
 /// Standard binary operators
@@ -269,7 +314,11 @@ pub enum UnaryOp {
 
 /// Program representation after the analysis phase
 #[derive(Debug)]
-pub struct HIR {
+pub struct HIR<M: ExprMetadata = NoMetadata> {
     pub context: Context,
     pub annotations: HashMap<Identifier, Vec<Annotation>>,
+    pub expressions: Vec<Expr<M>>,
 }
+
+/// Type alias for HIR with both type and source location information
+pub type TypedSpannedHIR = HIR<TypedSpan>;
