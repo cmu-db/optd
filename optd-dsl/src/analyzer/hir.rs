@@ -45,7 +45,7 @@ pub enum FunKind {
 }
 
 /// Group identifier in the optimizer
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Clone, PartialEq, Copy, Eq, Hash)]
 pub struct GroupId(pub i64);
 
 /// Either materialized or unmaterialized data

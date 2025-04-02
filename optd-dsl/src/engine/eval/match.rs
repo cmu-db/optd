@@ -520,14 +520,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::{
-        Engine,
-        test_utils::{
-            array_decomp_pattern, array_val, bind_pattern, create_logical_operator,
-            create_physical_operator, evaluate_and_collect, int, lit_expr, lit_val,
-            literal_pattern, match_arm, operator_pattern, pattern_match_expr, ref_expr, string,
-            struct_pattern, struct_val, wildcard_pattern,
-        },
+    use crate::engine::Engine;
+    use crate::utils::tests::{
+        array_decomp_pattern, array_val, bind_pattern, create_logical_operator,
+        create_physical_operator, evaluate_and_collect, lit_val, literal_pattern, match_arm,
+        operator_pattern, ref_expr, struct_pattern, struct_val,
     };
     use crate::{
         analyzer::{
@@ -537,7 +534,7 @@ mod tests {
                 Materializable, Operator, Value,
             },
         },
-        engine::test_utils::TestHarness,
+        utils::tests::{TestHarness, int, lit_expr, pattern_match_expr, string, wildcard_pattern},
     };
     use ExprKind::*;
     use Materializable::*;

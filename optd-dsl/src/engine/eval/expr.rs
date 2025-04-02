@@ -343,15 +343,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::analyzer::{
-        context::Context,
-        hir::{BinOp, CoreData, Expr, ExprKind, FunKind, Literal, Value},
-    };
-    use crate::engine::{
-        Engine,
-        test_utils::{
-            TestHarness, array_val, boolean, evaluate_and_collect, int, lit_expr, lit_val,
-            ref_expr, string,
+    use crate::engine::Engine;
+    use crate::utils::tests::{array_val, ref_expr};
+    use crate::{
+        analyzer::{
+            context::Context,
+            hir::{BinOp, CoreData, Expr, ExprKind, FunKind, Literal, Value},
+        },
+        utils::tests::{
+            TestHarness, boolean, evaluate_and_collect, int, lit_expr, lit_val, string,
         },
     };
     use ExprKind::*;

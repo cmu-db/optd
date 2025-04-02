@@ -154,7 +154,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::engine::Continuation;
-    use crate::engine::test_utils::{
+    use crate::utils::tests::{
         TestHarness, evaluate_and_collect, evaluate_and_collect_with_custom_k, int, lit_expr,
         string,
     };

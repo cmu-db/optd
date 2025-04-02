@@ -16,9 +16,6 @@ mod eval;
 mod utils;
 pub use utils::*;
 
-#[cfg(test)]
-mod test_utils;
-
 /// The engine response type, which can be either a return value with a converter callback
 /// or a yielded group/goal with a continuation for further processing.
 pub enum EngineResponse<O> {

@@ -81,7 +81,7 @@ pub(crate) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
         // Map concatenation (joins two maps).
         (Map(l), Concat, Map(r)) => {
             let mut result = l.clone();
-            result.extend(r.iter().cloned());
+            result.extend(r.into_iter());
             Value(Map(result))
         }
 

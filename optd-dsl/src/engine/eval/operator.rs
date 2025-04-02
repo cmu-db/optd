@@ -145,16 +145,16 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::analyzer::{
-        context::Context,
-        hir::{
-            BinOp, CoreData, Expr, ExprKind, Goal, GroupId, Literal, LogicalOp, Materializable,
-            Operator, PhysicalOp, Value,
+    use crate::engine::Engine;
+    use crate::{
+        analyzer::{
+            context::Context,
+            hir::{
+                BinOp, CoreData, Expr, ExprKind, Goal, GroupId, Literal, LogicalOp, Materializable,
+                Operator, PhysicalOp, Value,
+            },
         },
-    };
-    use crate::engine::{
-        Engine,
-        test_utils::{
+        utils::tests::{
             TestHarness, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val,
             string,
         },
