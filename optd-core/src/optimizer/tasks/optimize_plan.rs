@@ -35,11 +35,12 @@ impl OptimizePlanTask {
 }
 
 impl<M: Memoize> Optimizer<M> {
-    pub fn create_optimize_plan_task_v2(
+    pub fn create_optimize_plan_task(
         &mut self,
         plan: LogicalPlan,
         response_tx: mpsc::Sender<PhysicalPlan>,
     ) -> TaskId {
+
         // Do ingestion
         // logical_expresison, group_id
         // goal_id = group + empty prop create if not exists

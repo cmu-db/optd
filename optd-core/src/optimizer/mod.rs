@@ -16,7 +16,7 @@ use optd_dsl::analyzer::hir::Value;
 use optd_dsl::analyzer::{context::Context, hir::HIR};
 use optd_dsl::engine::{Continuation, EngineResponse};
 use std::collections::{HashMap, HashSet, VecDeque};
-use tasks_old::{Task, TaskId};
+use tasks::{Task, TaskId};
 
 mod egest;
 mod handlers;
@@ -25,7 +25,7 @@ mod jobs;
 mod merge;
 mod subscriptions;
 mod tasks;
-mod tasks_old;
+mod tasks_deleted;
 
 /// Default maximum number of concurrent jobs to run in the optimizer.
 const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1000;
@@ -154,6 +154,9 @@ pub struct Optimizer<M: Memoize> {
     // TODO(yuchen): Get rid of these when we fully switch to in-out subscription.
     group_subscribers: HashMap<GroupId, Vec<TaskId>>,
     goal_subscribers: HashMap<GoalId, Vec<TaskId>>,
+
+    // Task index
+    task_index: HashMap<TaskId, Task>,
 }
 
 impl<M: Memoize> Optimizer<M> {
@@ -198,6 +201,9 @@ impl<M: Memoize> Optimizer<M> {
             // Subscriptions.
             group_subscribers: HashMap::new(),
             goal_subscribers: HashMap::new(),
+
+            // Task index
+            task_index: HashMap::new(),
         }
     }
 

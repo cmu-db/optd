@@ -2,7 +2,7 @@ use super::{
     EngineMessage, EngineMessageKind, JobId, OptimizeRequest, Optimizer, PendingMessage, TaskId,
     ingest::LogicalIngest,
     jobs::JobKind,
-    tasks_old::{CostExpressionTask, ImplementExpressionTask, TaskKind, TransformExpressionTask},
+    tasks_deleted::{CostExpressionTask, ImplementExpressionTask, TaskKind, TransformExpressionTask},
 };
 use crate::{
     cir::{
