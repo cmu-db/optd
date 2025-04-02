@@ -26,16 +26,13 @@ use UnaryOp::*;
 /// # Panics
 /// Panics when the operation is not defined for the given operand type
 pub(crate) fn eval_unary_op(op: &UnaryOp, expr: Value) -> Value {
-    match (op, &expr.0) {
+    match (op, &expr.data) {
         // Numeric negation for integers
-        (Neg, Literal(Int64(x))) => Value(Literal(Int64(-x))),
-
+        (Neg, Literal(Int64(x))) => Value::new(Literal(Int64(-x))),
         // Numeric negation for floating-point numbers
-        (Neg, Literal(Float64(x))) => Value(Literal(Float64(-x))),
-
+        (Neg, Literal(Float64(x))) => Value::new(Literal(Float64(-x))),
         // Logical NOT for boolean values
-        (Not, Literal(Bool(x))) => Value(Literal(Bool(!x))),
-
+        (Not, Literal(Bool(x))) => Value::new(Literal(Bool(!x))),
         // Any other combination is invalid
         _ => panic!("Invalid unary operation or type mismatch"),
     }
@@ -47,37 +44,37 @@ mod tests {
 
     // Helper function to create integer Value
     fn int(i: i64) -> Value {
-        Value(Literal(Int64(i)))
+        Value::new(Literal(Int64(i)))
     }
 
     // Helper function to create float Value
     fn float(f: f64) -> Value {
-        Value(Literal(Float64(f)))
+        Value::new(Literal(Float64(f)))
     }
 
     // Helper function to create boolean Value
     fn boolean(b: bool) -> Value {
-        Value(Literal(Bool(b)))
+        Value::new(Literal(Bool(b)))
     }
 
     #[test]
     fn test_integer_negation() {
         // Negating a positive integer
-        if let Literal(Int64(result)) = eval_unary_op(&Neg, int(5)).0 {
+        if let Literal(Int64(result)) = eval_unary_op(&Neg, int(5)).data {
             assert_eq!(result, -5);
         } else {
             panic!("Expected Int64");
         }
 
         // Negating a negative integer
-        if let Literal(Int64(result)) = eval_unary_op(&Neg, int(-7)).0 {
+        if let Literal(Int64(result)) = eval_unary_op(&Neg, int(-7)).data {
             assert_eq!(result, 7);
         } else {
             panic!("Expected Int64");
         }
 
         // Negating zero
-        if let Literal(Int64(result)) = eval_unary_op(&Neg, int(0)).0 {
+        if let Literal(Int64(result)) = eval_unary_op(&Neg, int(0)).data {
             assert_eq!(result, 0);
         } else {
             panic!("Expected Int64");
@@ -89,21 +86,21 @@ mod tests {
         use std::f64::consts::PI;
 
         // Negating a positive float
-        if let Literal(Float64(result)) = eval_unary_op(&Neg, float(PI)).0 {
+        if let Literal(Float64(result)) = eval_unary_op(&Neg, float(PI)).data {
             assert_eq!(result, -PI);
         } else {
             panic!("Expected Float64");
         }
 
         // Negating a negative float
-        if let Literal(Float64(result)) = eval_unary_op(&Neg, float(-2.5)).0 {
+        if let Literal(Float64(result)) = eval_unary_op(&Neg, float(-2.5)).data {
             assert_eq!(result, 2.5);
         } else {
             panic!("Expected Float64");
         }
 
         // Negating zero
-        if let Literal(Float64(result)) = eval_unary_op(&Neg, float(0.0)).0 {
+        if let Literal(Float64(result)) = eval_unary_op(&Neg, float(0.0)).data {
             assert_eq!(result, -0.0);
             // Checking sign bit for -0.0
             assert!(result.to_bits() & 0x8000_0000_0000_0000 != 0);
@@ -115,14 +112,14 @@ mod tests {
     #[test]
     fn test_boolean_not() {
         // NOT true
-        if let Literal(Bool(result)) = eval_unary_op(&Not, boolean(true)).0 {
+        if let Literal(Bool(result)) = eval_unary_op(&Not, boolean(true)).data {
             assert!(!result);
         } else {
             panic!("Expected Bool");
         }
 
         // NOT false
-        if let Literal(Bool(result)) = eval_unary_op(&Not, boolean(false)).0 {
+        if let Literal(Bool(result)) = eval_unary_op(&Not, boolean(false)).data {
             assert!(result);
         } else {
             panic!("Expected Bool");

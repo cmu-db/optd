@@ -140,6 +140,8 @@ fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> 
         just(".").to(Token::Dot),
         just(":").to(Token::Colon),
         just("?").to(Token::Question),
+        just("$").to(Token::Dollar),
+        just("#").to(Token::HashTag),
     ));
 
     let comments = just("//")

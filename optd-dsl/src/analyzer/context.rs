@@ -1,5 +1,8 @@
-use super::hir::Identifier;
-use crate::analyzer::hir::Value;
+use super::{
+    hir::{ExprMetadata, Identifier, NoMetadata, TypedSpan},
+    semantic_checker::error::SemanticError,
+};
+use crate::{analyzer::hir::Value, utils::error::CompileError};
 use std::{collections::HashMap, sync::Arc};
 
 /// A stack-based variable binding system that implements lexical scoping.
@@ -11,16 +14,27 @@ use std::{collections::HashMap, sync::Arc};
 ///
 /// The current (innermost) scope is mutable, while all previous scopes
 /// are immutable and stored as Arc for efficient cloning.
-#[derive(Debug, Clone, Default)]
-pub struct Context {
+#[derive(Debug, Clone)]
+pub struct Context<M: ExprMetadata = NoMetadata> {
     /// Previous scopes (outer lexical scopes), stored as immutable Arc references
-    previous_scopes: Vec<Arc<HashMap<Identifier, Value>>>,
+    previous_scopes: Vec<Arc<HashMap<Identifier, Value<M>>>>,
 
     /// Current scope (innermost) that can be directly modified
-    current_scope: HashMap<Identifier, Value>,
+    current_scope: HashMap<Identifier, Value<M>>,
 }
 
-impl Context {
+/// A default implementation for the Context struct, since it cannot be automatically
+/// inferred due to the generic type M.
+impl<M: ExprMetadata> Default for Context<M> {
+    fn default() -> Self {
+        Context {
+            previous_scopes: Vec::default(),
+            current_scope: HashMap::default(),
+        }
+    }
+}
+
+impl<M: ExprMetadata> Context<M> {
     /// Creates a new context with the given initial bindings as the global scope.
     ///
     /// # Arguments
@@ -30,7 +44,7 @@ impl Context {
     /// # Returns
     ///
     /// A new `Context` instance with one scope containing the initial bindings
-    pub fn new(initial_bindings: HashMap<Identifier, Value>) -> Self {
+    pub fn new(initial_bindings: HashMap<Identifier, Value<M>>) -> Self {
         Self {
             previous_scopes: Vec::new(),
             current_scope: initial_bindings,
@@ -59,7 +73,7 @@ impl Context {
     /// # Returns
     ///
     /// Some reference to the value if found, None otherwise
-    pub fn lookup(&self, name: &str) -> Option<&Value> {
+    pub fn lookup(&self, name: &str) -> Option<&Value<M>> {
         // First check the current scope
         if let Some(value) = self.current_scope.get(name) {
             return Some(value);
@@ -84,7 +98,7 @@ impl Context {
     /// # Arguments
     ///
     /// * `other` - The context to merge from (consumed by this operation)
-    pub fn merge(&mut self, other: Context) {
+    pub fn merge(&mut self, other: Context<M>) {
         // Move bindings from other's current scope into our current scope
         for (name, val) in other.current_scope {
             self.current_scope.insert(name, val);
@@ -100,7 +114,38 @@ impl Context {
     ///
     /// * `name` - The name of the variable to bind
     /// * `val` - The value to bind to the variable
-    pub fn bind(&mut self, name: String, val: Value) {
+    pub fn bind(&mut self, name: String, val: Value<M>) {
         self.current_scope.insert(name, val);
+    }
+}
+
+impl Context<TypedSpan> {
+    /// Attempts to bind a variable in the current scope, returning an error if
+    /// the variable is already defined in the current scope.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the variable to bind
+    /// * `val` - The value to bind to the variable
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the binding was successful, or a `CompileError` if
+    /// the variable was already defined in the current scope
+    pub fn try_bind(&mut self, name: String, val: Value<TypedSpan>) -> Result<(), CompileError> {
+        if let Some(existing_val) = self.current_scope.get(&name) {
+            // We found an existing binding, so return an error
+            Err(CompileError::SemanticError(
+                SemanticError::new_duplicate_identifier(
+                    name,
+                    existing_val.metadata.span.clone(),
+                    val.metadata.span,
+                ),
+            ))
+        } else {
+            // No existing binding, so insert the new one
+            self.current_scope.insert(name, val);
+            Ok(())
+        }
     }
 }

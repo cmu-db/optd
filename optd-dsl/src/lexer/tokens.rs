@@ -64,6 +64,8 @@ pub enum Token {
     Colon,      // :
     UnderScore, // _
     Question,   // ?
+    Dollar,     // $
+    HashTag,    // #
 }
 
 pub const ALL_DELIMITERS: [(Token, Token); 3] = [
@@ -137,6 +139,8 @@ impl std::fmt::Display for Token {
             Token::Colon => write!(f, ":"),
             Token::UnderScore => write!(f, "_"),
             Token::Question => write!(f, "?"),
+            Token::Dollar => write!(f, "$"),
+            Token::HashTag => write!(f, "#"),
         }
     }
 }

@@ -198,9 +198,12 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
                     )
                     .map(PostfixOp::Call),
                     just(Token::Unit).map(|_| PostfixOp::Call(vec![])),
+                    just(Token::HashTag)
+                        .ignore_then(select! { Token::TermIdent(name) => name })
+                        .map(PostfixOp::Field),
                     just(Token::Dot)
                         .ignore_then(select! { Token::TermIdent(name) => name })
-                        .map(PostfixOp::Member),
+                        .map(PostfixOp::Method),
                 ))
                 .map_with_span(|op, span| (op, span))
                 .repeated(),
@@ -399,7 +402,7 @@ mod tests {
                             assert_expr_eq(&a.value, &e.value);
                         }
                     }
-                    (PostfixOp::Member(a_member), PostfixOp::Member(e_member)) => {
+                    (PostfixOp::Field(a_member), PostfixOp::Field(e_member)) => {
                         assert_eq!(a_member, e_member);
                     }
                     _ => panic!(
@@ -695,7 +698,7 @@ mod tests {
         }
 
         // Complex map with expressions as keys and values
-        let (result, errors) = parse_expr("{x + 1: y * 2, \"key\": z.field}");
+        let (result, errors) = parse_expr("{x + 1: y * 2, \"key\": z#field}");
         assert!(
             result.is_some(),
             "Expected successful parse for complex map"
@@ -720,13 +723,13 @@ mod tests {
                     panic!("Expected binary multiplication in first value");
                 }
 
-                // Second entry: "key": z.field
+                // Second entry: "key": z#field
                 assert_expr_eq(
                     &entries[1].0.value,
                     &Expr::Literal(Literal::String("key".to_string())),
                 );
 
-                if let Expr::Postfix(expr, PostfixOp::Member(member)) = &*entries[1].1.value {
+                if let Expr::Postfix(expr, PostfixOp::Field(member)) = &*entries[1].1.value {
                     assert_expr_eq(&expr.value, &Expr::Ref("z".to_string()));
                     assert_eq!(member, "field");
                 } else {
@@ -824,7 +827,7 @@ mod tests {
     fn test_nested_expressions() {
         // Test deeply nested expressions with different expression types
         let (result, errors) = parse_expr(
-            "if ({[1 + 2, 3]: 5}.size > 0) then { let x = 42 in x } else fail(\"Empty map\")",
+            "if ({[1 + 2, 3]: 5}#size > 0) then { let x = 42 in x } else fail(\"Empty map\")",
         );
 
         assert!(
@@ -842,7 +845,7 @@ mod tests {
                 // Test condition with member access and binary operation
                 if let Expr::Binary(left, BinOp::Gt, right) = &*condition.value {
                     // Test member access on map expression
-                    if let Expr::Postfix(expr, PostfixOp::Member(member)) = &*left.value {
+                    if let Expr::Postfix(expr, PostfixOp::Field(member)) = &*left.value {
                         assert_eq!(member, "size");
 
                         // Check that expression is a Map
@@ -881,7 +884,7 @@ mod tests {
                             panic!("Expected Map expression");
                         }
                     } else {
-                        panic!("Expected member access in condition");
+                        panic!("Expected field access in condition");
                     }
 
                     assert_expr_eq(&right.value, &Expr::Literal(Literal::Int64(0)));
@@ -1268,11 +1271,11 @@ mod tests {
                     assert_eq!(args2.len(), 1);
                     if let Expr::Postfix(inner3, PostfixOp::Call(args3)) = &*inner2.value {
                         assert_eq!(args3.len(), 1);
-                        if let Expr::Postfix(obj, PostfixOp::Member(method)) = &*inner3.value {
+                        if let Expr::Postfix(obj, PostfixOp::Method(method)) = &*inner3.value {
                             assert_expr_eq(&obj.value, &Expr::Ref("obj".to_string()));
                             assert_eq!(method, "method");
                         } else {
-                            panic!("Expected member access at base");
+                            panic!("Expected method access at base");
                         }
                     } else {
                         panic!("Expected third call");
@@ -1286,15 +1289,15 @@ mod tests {
         }
 
         // Test function call followed by field access
-        let (result, errors) = parse_expr("func().field");
+        let (result, errors) = parse_expr("func()#field");
         assert!(
             result.is_some(),
-            "Expected successful parse for func().field"
+            "Expected successful parse for func()#field"
         );
-        assert!(errors.is_empty(), "Expected no errors for func().field");
+        assert!(errors.is_empty(), "Expected no errors for func()#field");
 
         if let Some(expr) = result {
-            if let Expr::Postfix(inner, PostfixOp::Member(member)) = &*expr.value {
+            if let Expr::Postfix(inner, PostfixOp::Field(member)) = &*expr.value {
                 assert_eq!(member, "field");
                 if let Expr::Postfix(func, PostfixOp::Call(args)) = &*inner.value {
                     assert_eq!(args.len(), 0);
@@ -1303,12 +1306,12 @@ mod tests {
                     panic!("Expected call in function call");
                 }
             } else {
-                panic!("Expected member access");
+                panic!("Expected field access");
             }
         }
 
-        // Test complex chain of operations
-        let (result, errors) = parse_expr("obj.method().field.other_method(arg)");
+        // Test complex chain of operations with mix of field and method
+        let (result, errors) = parse_expr("obj.method()#field.other_method(arg)");
         assert!(
             result.is_some(),
             "Expected successful parse for complex chain"
@@ -1320,47 +1323,47 @@ mod tests {
                 assert_eq!(args.len(), 1);
                 assert_expr_eq(&args[0].value, &Expr::Ref("arg".to_string()));
 
-                if let Expr::Postfix(inner2, PostfixOp::Member(member)) = &*inner1.value {
+                if let Expr::Postfix(inner2, PostfixOp::Method(member)) = &*inner1.value {
                     assert_eq!(member, "other_method");
 
-                    if let Expr::Postfix(inner3, PostfixOp::Member(field)) = &*inner2.value {
+                    if let Expr::Postfix(inner3, PostfixOp::Field(field)) = &*inner2.value {
                         assert_eq!(field, "field");
 
                         if let Expr::Postfix(inner4, PostfixOp::Call(method_args)) = &*inner3.value
                         {
                             assert_eq!(method_args.len(), 0);
 
-                            if let Expr::Postfix(obj, PostfixOp::Member(method)) = &*inner4.value {
+                            if let Expr::Postfix(obj, PostfixOp::Method(method)) = &*inner4.value {
                                 assert_expr_eq(&obj.value, &Expr::Ref("obj".to_string()));
                                 assert_eq!(method, "method");
                             } else {
-                                panic!("Expected member access for initial method");
+                                panic!("Expected method access for initial method");
                             }
                         } else {
                             panic!("Expected call for first method");
                         }
                     } else {
-                        panic!("Expected member access for field");
+                        panic!("Expected field access");
                     }
                 } else {
-                    panic!("Expected member access for final method");
+                    panic!("Expected method access for final method");
                 }
             } else {
                 panic!("Expected call at top level");
             }
         }
 
-        // Test compose operator
+        // Test method reference without call
         let (result, errors) = parse_expr("map(dat).filter");
 
         assert!(
             result.is_some(),
-            "Expected successful parse for compose operator"
+            "Expected successful parse for method reference"
         );
-        assert!(errors.is_empty(), "Expected no errors for compose operator");
+        assert!(errors.is_empty(), "Expected no errors for method reference");
 
         if let Some(expr) = result {
-            if let Expr::Postfix(inner, PostfixOp::Member(name)) = &*expr.value {
+            if let Expr::Postfix(inner, PostfixOp::Method(name)) = &*expr.value {
                 assert_eq!(name, "filter");
 
                 if let Expr::Postfix(func, PostfixOp::Call(args)) = &*inner.value {
@@ -1368,32 +1371,32 @@ mod tests {
                     assert_eq!(args.len(), 1);
                     assert_expr_eq(&args[0].value, &Expr::Ref("dat".to_string()));
                 } else {
-                    panic!("Expected function call before compose operator");
+                    panic!("Expected function call before method reference");
                 }
             } else {
-                panic!("Expected compose operator");
+                panic!("Expected method reference");
             }
         }
 
-        // Test chained compose operators
+        // Test chained method references
         let (result, errors) = parse_expr("transform(input).map.filter.reduce");
         assert!(
             result.is_some(),
-            "Expected successful parse for chained compose operators"
+            "Expected successful parse for chained method references"
         );
         assert!(
             errors.is_empty(),
-            "Expected no errors for chained compose operators"
+            "Expected no errors for chained method references"
         );
 
         if let Some(expr) = result {
-            if let Expr::Postfix(inner1, PostfixOp::Member(name1)) = &*expr.value {
+            if let Expr::Postfix(inner1, PostfixOp::Method(name1)) = &*expr.value {
                 assert_eq!(name1, "reduce");
 
-                if let Expr::Postfix(inner2, PostfixOp::Member(name2)) = &*inner1.value {
+                if let Expr::Postfix(inner2, PostfixOp::Method(name2)) = &*inner1.value {
                     assert_eq!(name2, "filter");
 
-                    if let Expr::Postfix(inner3, PostfixOp::Member(name3)) = &*inner2.value {
+                    if let Expr::Postfix(inner3, PostfixOp::Method(name3)) = &*inner2.value {
                         assert_eq!(name3, "map");
 
                         if let Expr::Postfix(func, PostfixOp::Call(args)) = &*inner3.value {
@@ -1404,13 +1407,57 @@ mod tests {
                             panic!("Expected function call at the beginning of chain");
                         }
                     } else {
-                        panic!("Expected first compose operation in chain");
+                        panic!("Expected first method reference in chain");
                     }
                 } else {
-                    panic!("Expected second compose operation in chain");
+                    panic!("Expected second method reference in chain");
                 }
             } else {
-                panic!("Expected third compose operation in chain");
+                panic!("Expected third method reference in chain");
+            }
+        }
+
+        // Test mixed field access and method references
+        let (result, errors) = parse_expr("person#name.split(\"#\")#length");
+        assert!(
+            result.is_some(),
+            "Expected successful parse for mixed field and method chain"
+        );
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for mixed field and method chain"
+        );
+
+        if let Some(expr) = result {
+            if let Expr::Postfix(inner1, PostfixOp::Field(field_name)) = &*expr.value {
+                assert_eq!(field_name, "length");
+
+                if let Expr::Postfix(inner2, PostfixOp::Call(args)) = &*inner1.value {
+                    assert_eq!(args.len(), 1);
+                    if let Expr::Literal(Literal::String(s)) = &*args[0].value {
+                        assert_eq!(s, "#");
+                    } else {
+                        panic!("Expected string literal argument");
+                    }
+
+                    if let Expr::Postfix(inner3, PostfixOp::Method(method_name)) = &*inner2.value {
+                        assert_eq!(method_name, "split");
+
+                        if let Expr::Postfix(inner4, PostfixOp::Field(field_name)) = &*inner3.value
+                        {
+                            assert_eq!(field_name, "name");
+                            assert_expr_eq(&inner4.value, &Expr::Ref("person".to_string()));
+                        } else {
+                            panic!("Expected field access at beginning of chain");
+                        }
+                    } else {
+                        panic!("Expected method reference in middle of chain");
+                    }
+                } else {
+                    panic!("Expected method call in chain");
+                }
+            } else {
+                panic!("Expected field access at end of chain");
             }
         }
     }

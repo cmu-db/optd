@@ -19,12 +19,12 @@ pub struct ParserError {
 
 impl ParserError {
     /// Creates a new parser error from source code and a Chumsky error.
-    pub fn new(src_code: String, error: Simple<Token, Span>) -> Self {
-        Self { src_code, error }
+    pub fn new(src_code: String, error: Simple<Token, Span>) -> Box<Self> {
+        Self { src_code, error }.into()
     }
 }
 
-impl Diagnose for ParserError {
+impl Diagnose for Box<ParserError> {
     fn report(&self) -> Report<Span> {
         match self.error.reason() {
             SimpleReason::Unclosed { span, delimiter } => {

@@ -1,12 +1,15 @@
 use super::{binary::eval_binary_op, unary::eval_unary_op};
-use crate::analyzer::hir::{BinOp, CoreData, Expr, FunKind, Identifier, Literal, UnaryOp, Value};
+use crate::analyzer::hir::{
+    BinOp, CoreData, Expr, ExprKind, FunKind, Goal, GroupId, Identifier, Literal, LogicalOp,
+    Materializable, PhysicalOp, UdfKind, UnaryOp, Value,
+};
+use crate::analyzer::map::Map;
 use crate::engine::{Continuation, EngineResponse};
 use crate::{
     capture,
     engine::{Engine, utils::evaluate_sequence},
 };
-use CoreData::*;
-use FunKind::*;
+use ExprKind::*;
 use std::sync::Arc;
 
 /// Evaluates an if-then-else expression.
@@ -31,15 +34,14 @@ pub(crate) async fn evaluate_if_then_else<O>(
 where
     O: Send + 'static,
 {
-    // First evaluate the condition
     engine
         .clone()
         .evaluate(
             cond,
             Arc::new(move |value| {
                 Box::pin(capture!([then_expr, else_expr, engine, k], async move {
-                    match value.0 {
-                        Literal(Literal::Bool(b)) => {
+                    match value.data {
+                        CoreData::Literal(Literal::Bool(b)) => {
                             if b {
                                 engine.evaluate(then_expr, k).await
                             } else {
@@ -116,32 +118,6 @@ pub(crate) async fn evaluate_binary_expr<O>(
 where
     O: Send + 'static,
 {
-    // Helper function to evaluate the right operand after the left is evaluated.
-    async fn evaluate_right<O>(
-        left_val: Value,
-        right: Arc<Expr>,
-        op: BinOp,
-        engine: Engine,
-        k: Continuation<Value, EngineResponse<O>>,
-    ) -> EngineResponse<O>
-    where
-        O: Send + 'static,
-    {
-        engine
-            .evaluate(
-                right,
-                Arc::new(move |right_val| {
-                    Box::pin(capture!([left_val, op, k], async move {
-                        // Apply the binary operation and pass result to continuation.
-                        let result = eval_binary_op(left_val, &op, right_val);
-                        k(result).await
-                    }))
-                }),
-            )
-            .await
-    }
-
-    // First evaluate the left operand.
     engine
         .clone()
         .evaluate(
@@ -149,6 +125,30 @@ where
             Arc::new(move |left_val| {
                 Box::pin(capture!([right, op, engine, k], async move {
                     evaluate_right(left_val, right, op, engine, k).await
+                }))
+            }),
+        )
+        .await
+}
+
+/// Helper function to evaluate the right operand after the left is evaluated.
+async fn evaluate_right<O>(
+    left_val: Value,
+    right: Arc<Expr>,
+    op: BinOp,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    engine
+        .evaluate(
+            right,
+            Arc::new(move |right_val| {
+                Box::pin(capture!([left_val, op, k], async move {
+                    let result = eval_binary_op(left_val, &op, right_val);
+                    k(result).await
                 }))
             }),
         )
@@ -174,13 +174,11 @@ pub(crate) async fn evaluate_unary_expr<O>(
 where
     O: Send + 'static,
 {
-    // Evaluate the operand, then apply the unary operation
     engine
         .evaluate(
             expr,
             Arc::new(move |value| {
                 Box::pin(capture!([op, k], async move {
-                    // Apply the unary operation and pass result to continuation
                     let result = eval_unary_op(&op, value);
                     k(result).await
                 }))
@@ -189,19 +187,22 @@ where
         .await
 }
 
-/// Evaluates a function call expression.
+/// Evaluates a call expression.
 ///
-/// First evaluates the function expression, then the arguments, and finally applies the function to
+/// First evaluates the called expression, then the arguments, and finally applies the call to
 /// the arguments, passing results to the continuation.
+///
+/// Extended to support indexing into collections (Array, Tuple, Struct, Map, Logical, Physical)
+/// when the called expression evaluates to one of these types and a single argument is provided.
 ///
 /// # Parameters
 ///
-/// * `fun` - The function expression to evaluate.
+/// * `called` - The called expression to evaluate.
 /// * `args` - The argument expressions to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_function_call<O>(
-    fun: Arc<Expr>,
+pub(crate) async fn evaluate_call<O>(
+    called: Arc<Expr>,
     args: Vec<Arc<Expr>>,
     engine: Engine,
     k: Continuation<Value, EngineResponse<O>>,
@@ -213,20 +214,324 @@ where
     engine
         .clone()
         .evaluate(
-            fun,
-            Arc::new(move |fun_value| {
+            called,
+            Arc::new(move |called_value| {
                 Box::pin(capture!([args, engine, k], async move {
-                    match fun_value.0 {
-                        // Handle closure (user-defined function).
-                        Function(Closure(params, body)) => {
+                    match called_value.data {
+                        // Handle function calls.
+                        CoreData::Function(FunKind::Closure(params, body)) => {
                             evaluate_closure_call(params, body, args, engine, k).await
                         }
-                        // Handle Rust UDF (built-in function).
-                        Function(RustUDF(udf)) => {
+                        CoreData::Function(FunKind::Udf(UdfKind::Linked(udf))) => {
                             evaluate_rust_udf_call(udf, args, engine, k).await
                         }
-                        // Value must be a function.
-                        _ => panic!("Expected function value"),
+
+                        // Handle collection indexing.
+                        CoreData::Array(_) | CoreData::Tuple(_) | CoreData::Struct(_, _) => {
+                            evaluate_indexed_access(called_value, args, engine, k).await
+                        }
+                        CoreData::Map(_) => {
+                            evaluate_map_lookup(called_value, args, engine, k).await
+                        }
+
+                        // Handle operator field accesses.
+                        CoreData::Logical(op) => {
+                            evaluate_logical_operator_access(op, args, engine, k).await
+                        }
+                        CoreData::Physical(op) => {
+                            evaluate_physical_operator_access(op, args, engine, k).await
+                        }
+
+                        // Value must be a function or indexable collection/operator.
+                        _ => panic!(
+                            "Expected function or indexable value, got: {:?}",
+                            called_value
+                        ),
+                    }
+                }))
+            }),
+        )
+        .await
+}
+
+/// Evaluates access to a logical operator.
+///
+/// Handles both materialized and unmaterialized logical operators.
+///
+/// # Parameters
+///
+/// * `op` - The logical operator (materialized or unmaterialized).
+/// * `args` - The argument expressions (should be a single index).
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+fn evaluate_logical_operator_access<O>(
+    op: Materializable<LogicalOp<Value>, GroupId>,
+    args: Vec<Arc<Expr>>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> impl Future<Output = EngineResponse<O>> + Send
+where
+    O: Send + 'static,
+{
+    Box::pin(async move {
+        validate_single_index_arg(&args);
+
+        match op {
+            // For unmaterialized logical operators, yield the group and continue when it's expanded.
+            Materializable::UnMaterialized(group_id) => EngineResponse::YieldGroup(
+                group_id,
+                Arc::new(move |expanded_value| {
+                    Box::pin(capture!([args, engine, k], async move {
+                        evaluate_call(Expr::new(CoreVal(expanded_value)).into(), args, engine, k)
+                            .await
+                    }))
+                }),
+            ),
+            // For materialized logical operators, access the data or children directly.
+            Materializable::Materialized(log_op) => {
+                evaluate_index_on_materialized_operator(
+                    args[0].clone(),
+                    log_op.operator.data,
+                    log_op.operator.children,
+                    engine,
+                    k,
+                )
+                .await
+            }
+        }
+    })
+}
+
+/// Evaluates access to a physical operator.
+///
+/// Handles both materialized and unmaterialized physical operators.
+///
+/// # Parameters
+///
+/// * `op` - The physical operator (materialized or unmaterialized).
+/// * `args` - The argument expressions (should be a single index).
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+fn evaluate_physical_operator_access<O>(
+    op: Materializable<PhysicalOp<Value>, Goal>,
+    args: Vec<Arc<Expr>>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> impl Future<Output = EngineResponse<O>> + Send
+where
+    O: Send + 'static,
+{
+    Box::pin(async move {
+        validate_single_index_arg(&args);
+
+        match op {
+            // For unmaterialized physical operators, yield the goal and continue when it's expanded.
+            Materializable::UnMaterialized(goal) => EngineResponse::YieldGoal(
+                goal,
+                Arc::new(move |expanded_value| {
+                    Box::pin(capture!([args, engine, k], async move {
+                        evaluate_call(Expr::new(CoreVal(expanded_value)).into(), args, engine, k)
+                            .await
+                    }))
+                }),
+            ),
+            // For materialized physical operators, access the data or children directly.
+            Materializable::Materialized(phys_op) => {
+                evaluate_index_on_materialized_operator(
+                    args[0].clone(),
+                    phys_op.operator.data,
+                    phys_op.operator.children,
+                    engine,
+                    k,
+                )
+                .await
+            }
+        }
+    })
+}
+
+/// Validates that exactly one index argument is provided.
+///
+/// # Parameters
+///
+/// * `args` - The argument expressions to validate.
+fn validate_single_index_arg(args: &[Arc<Expr>]) {
+    if args.len() != 1 {
+        panic!("Operator access requires exactly one index argument");
+    }
+}
+
+/// Evaluates an index expression on a materialized operator.
+///
+/// Treats the operator's data and children as a concatenated vector and accesses by index.
+///
+/// # Parameters
+///
+/// * `index_expr` - The index expression to evaluate.
+/// * `data` - The operator's data fields.
+/// * `children` - The operator's children.
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+async fn evaluate_index_on_materialized_operator<O>(
+    index_expr: Arc<Expr>,
+    data: Vec<Value>,
+    children: Vec<Value>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    engine
+        .evaluate(
+            index_expr,
+            Arc::new(move |index_value| {
+                Box::pin(capture!([data, children, k], async move {
+                    let index = extract_index(&index_value);
+                    let result = access_operator_field(index, &data, &children);
+
+                    k(result).await
+                }))
+            }),
+        )
+        .await
+}
+
+/// Extracts an integer index from a value.
+///
+/// # Parameters
+///
+/// * `index_value` - The value containing the index.
+///
+/// # Returns
+///
+/// The extracted integer index.
+fn extract_index(index_value: &Value) -> usize {
+    match &index_value.data {
+        CoreData::Literal(Literal::Int64(i)) => *i as usize,
+        _ => panic!("Index must be an integer, got: {:?}", index_value),
+    }
+}
+
+/// Accesses a field in an operator by index.
+///
+/// Treats data and children as a concatenated vector and accesses by index.
+///
+/// # Parameters
+///
+/// * `index` - The index to access.
+/// * `data` - The operator's data fields.
+/// * `children` - The operator's children.
+///
+/// # Returns
+///
+/// The value at the specified index.
+fn access_operator_field(index: usize, data: &[Value], children: &[Value]) -> Value {
+    let data_len = data.len();
+    let total_len = data_len + children.len();
+
+    if index >= total_len {
+        panic!("index out of bounds: {} >= {}", index, total_len);
+    }
+
+    if index < data_len {
+        data[index].clone()
+    } else {
+        children[index - data_len].clone()
+    }
+}
+
+/// Evaluates indexing into a collection (Array, Tuple, or Struct).
+///
+/// # Parameters
+///
+/// * `collection` - The collection value to index into.
+/// * `args` - The argument expressions (should be a single index).
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+async fn evaluate_indexed_access<O>(
+    collection: Value,
+    args: Vec<Arc<Expr>>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    validate_single_index_arg(&args);
+
+    engine
+        .evaluate(
+            args[0].clone(),
+            Arc::new(move |index_value| {
+                Box::pin(capture!([collection, k], async move {
+                    let index = extract_index(&index_value);
+
+                    let result = match &collection.data {
+                        CoreData::Array(items) => get_indexed_item(items, index),
+                        CoreData::Tuple(items) => get_indexed_item(items, index),
+                        CoreData::Struct(_, fields) => get_indexed_item(fields, index),
+                        _ => panic!("Attempted to index a non-indexable value: {:?}", collection),
+                    };
+
+                    k(result).await
+                }))
+            }),
+        )
+        .await
+}
+
+/// Gets an item from a collection at the specified index.
+///
+/// # Parameters
+///
+/// * `items` - The collection items.
+/// * `index` - The index to access.
+///
+/// # Returns
+///
+/// The value at the specified index.
+fn get_indexed_item(items: &[Value], index: usize) -> Value {
+    if index < items.len() {
+        items[index].clone()
+    } else {
+        panic!("index out of bounds: {} >= {}", index, items.len());
+    }
+}
+
+/// Evaluates a map lookup.
+///
+/// # Parameters
+///
+/// * `map_value` - The map value to look up in.
+/// * `args` - The argument expressions (should be a single key).
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+async fn evaluate_map_lookup<O>(
+    map_value: Value,
+    args: Vec<Arc<Expr>>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    validate_single_index_arg(&args);
+
+    engine
+        .evaluate(
+            args[0].clone(),
+            Arc::new(move |key_value| {
+                Box::pin(capture!([map_value, k], async move {
+                    match &map_value.data {
+                        CoreData::Map(map) => {
+                            let result = map.get(&key_value);
+                            k(result).await
+                        }
+                        _ => panic!(
+                            "Attempted to perform map lookup on non-map value: {:?}",
+                            map_value
+                        ),
                     }
                 }))
             }),
@@ -261,7 +566,7 @@ where
         engine.clone(),
         Arc::new(move |arg_values| {
             Box::pin(capture!([params, body, engine, k], async move {
-                // Create a new context with parameters bound to arguments
+                // Create a new context with parameters bound to arguments.
                 let mut new_ctx = engine.context.clone();
                 new_ctx.push_scope();
 
@@ -269,7 +574,7 @@ where
                     new_ctx.bind(p.clone(), a);
                 });
 
-                // Evaluate the body in the new context
+                // Evaluate the body in the new context.
                 engine.with_new_context(new_ctx).evaluate(body, k).await
             }))
         }),
@@ -313,6 +618,49 @@ where
     .await
 }
 
+/// Evaluates a map expression.
+///
+/// # Parameters
+///
+/// * `items` - The key-value pairs to evaluate.
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+pub(crate) async fn evaluate_map<O>(
+    items: Vec<(Arc<Expr>, Arc<Expr>)>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    // Extract keys and values.
+    let (keys, values): (Vec<Arc<Expr>>, Vec<Arc<Expr>>) = items.into_iter().unzip();
+
+    // First evaluate all key expressions.
+    evaluate_sequence(
+        keys,
+        engine.clone(),
+        Arc::new(move |keys_values| {
+            Box::pin(capture!([values, engine, k], async move {
+                // Then evaluate all value expressions.
+                evaluate_sequence(
+                    values,
+                    engine,
+                    Arc::new(move |values_values| {
+                        Box::pin(capture!([keys_values, k], async move {
+                            // Create a map from keys and values.
+                            let map_items = keys_values.into_iter().zip(values_values).collect();
+                            k(Value::new(CoreData::Map(Map::from_pairs(map_items)))).await
+                        }))
+                    }),
+                )
+                .await
+            }))
+        }),
+    )
+    .await
+}
+
 /// Evaluates a reference to a variable.
 ///
 /// Looks up the variable in the context and passes its value to the continuation.
@@ -330,28 +678,30 @@ pub(crate) async fn evaluate_reference<O>(
 where
     O: Send + 'static,
 {
-    // Look up the variable in the context.
     let value = engine
         .context
         .lookup(&ident)
         .unwrap_or_else(|| panic!("Variable not found: {}", ident))
         .clone();
 
-    // Pass the value to the continuation.
     k(value).await
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::analyzer::{
-        context::Context,
-        hir::{BinOp, CoreData, Expr, ExprKind, FunKind, Literal, Value},
+    use crate::analyzer::hir::{Goal, GroupId, Materializable, UdfKind};
+    use crate::engine::Engine;
+    use crate::utils::tests::{
+        array_val, assert_values_equal, create_logical_operator, create_physical_operator,
+        ref_expr, struct_val,
     };
-    use crate::engine::{
-        Engine,
-        test_utils::{
-            TestHarness, array_val, boolean, evaluate_and_collect, int, lit_expr, lit_val,
-            ref_expr, string,
+    use crate::{
+        analyzer::{
+            context::Context,
+            hir::{BinOp, CoreData, Expr, ExprKind, FunKind, Literal, Value},
+        },
+        utils::tests::{
+            TestHarness, boolean, evaluate_and_collect, int, lit_expr, lit_val, string,
         },
     };
     use ExprKind::*;
@@ -408,21 +758,21 @@ mod tests {
         let complex_results = evaluate_and_collect(complex_condition, engine_with_x, harness).await;
 
         // Check results
-        match &true_results[0].0 {
+        match &true_results[0].data {
             CoreData::Literal(Literal::String(value)) => {
                 assert_eq!(value, "yes"); // true condition should select "yes"
             }
             _ => panic!("Expected string value"),
         }
 
-        match &false_results[0].0 {
+        match &false_results[0].data {
             CoreData::Literal(Literal::String(value)) => {
                 assert_eq!(value, "no"); // false condition should select "no"
             }
             _ => panic!("Expected string value"),
         }
 
-        match &complex_results[0].0 {
+        match &complex_results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 40); // 20 * 2 = 40 (since x > 10)
             }
@@ -451,7 +801,7 @@ mod tests {
         let results = evaluate_and_collect(let_expr, engine, harness).await;
 
         // Check result
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 15); // 10 + 5 = 15
             }
@@ -486,7 +836,7 @@ mod tests {
         let results = evaluate_and_collect(nested_let_expr, engine, harness).await;
 
         // Check result
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 30); // 10 + (10 * 2) = 30
             }
@@ -501,7 +851,7 @@ mod tests {
         let mut ctx = Context::default();
 
         // Define a function: fn(x, y) => x + y
-        let add_function = Value(CoreData::Function(FunKind::Closure(
+        let add_function = Value::new(CoreData::Function(FunKind::Closure(
             vec!["x".to_string(), "y".to_string()],
             Arc::new(Expr::new(Binary(ref_expr("x"), BinOp::Add, ref_expr("y")))),
         )));
@@ -518,7 +868,7 @@ mod tests {
         let results = evaluate_and_collect(call_expr, engine, harness).await;
 
         // Check result
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 30); // 10 + 20 = 30
             }
@@ -533,20 +883,21 @@ mod tests {
         let mut ctx = Context::default();
 
         // Define a Rust UDF that calculates the sum of array elements
-        let sum_function = Value(CoreData::Function(FunKind::RustUDF(|args| {
-            match &args[0].0 {
-                CoreData::Array(elements) => {
-                    let mut sum = 0;
-                    for elem in elements {
-                        if let CoreData::Literal(Literal::Int64(value)) = &elem.0 {
-                            sum += value;
+        let sum_function =
+            Value::new(CoreData::Function(FunKind::Udf(UdfKind::Linked(
+                |args| match &args[0].data {
+                    CoreData::Array(elements) => {
+                        let mut sum = 0;
+                        for elem in elements {
+                            if let CoreData::Literal(Literal::Int64(value)) = &elem.data {
+                                sum += value;
+                            }
                         }
+                        Value::new(CoreData::Literal(Literal::Int64(sum)))
                     }
-                    Value(CoreData::Literal(Literal::Int64(sum)))
-                }
-                _ => panic!("Expected array argument"),
-            }
-        })));
+                    _ => panic!("Expected array argument"),
+                },
+            ))));
 
         ctx.bind("sum".to_string(), sum_function);
         let engine = Engine::new(ctx);
@@ -566,11 +917,187 @@ mod tests {
         let results = evaluate_and_collect(call_expr, engine, harness).await;
 
         // Check result
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 15); // 1 + 2 + 3 + 4 + 5 = 15
             }
             _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test to verify the Map implementation works correctly.
+    #[tokio::test]
+    async fn test_map_creation() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create a map with key-value pairs: { "a": 1, "b": 2, "c": 3 }
+        let map_expr = Arc::new(Expr::new(Map(vec![
+            (lit_expr(string("a")), lit_expr(int(1))),
+            (lit_expr(string("b")), lit_expr(int(2))),
+            (lit_expr(string("c")), lit_expr(int(3))),
+        ])));
+
+        // Evaluate the map expression
+        let results = evaluate_and_collect(map_expr, engine.clone(), harness.clone()).await;
+
+        // Check that we got a Map value
+        assert_eq!(results.len(), 1);
+        match &results[0].data {
+            CoreData::Map(map) => {
+                // Check that map has the correct key-value pairs
+                assert_values_equal(&map.get(&lit_val(string("a"))), &lit_val(int(1)));
+                assert_values_equal(&map.get(&lit_val(string("b"))), &lit_val(int(2)));
+                assert_values_equal(&map.get(&lit_val(string("c"))), &lit_val(int(3)));
+
+                // Check that non-existent key returns None value
+                assert_values_equal(&map.get(&lit_val(string("d"))), &Value::new(CoreData::None));
+            }
+            _ => panic!("Expected Map value"),
+        }
+
+        // Test map with expressions that need evaluation as keys and values
+        // Map: { "x" + "y": 10 + 5, "a" + "b": 20 * 2 }
+        let complex_map_expr = Arc::new(Expr::new(Map(vec![
+            (
+                Arc::new(Expr::new(Binary(
+                    lit_expr(string("x")),
+                    BinOp::Concat,
+                    lit_expr(string("y")),
+                ))),
+                Arc::new(Expr::new(Binary(
+                    lit_expr(int(10)),
+                    BinOp::Add,
+                    lit_expr(int(5)),
+                ))),
+            ),
+            (
+                Arc::new(Expr::new(Binary(
+                    lit_expr(string("a")),
+                    BinOp::Concat,
+                    lit_expr(string("b")),
+                ))),
+                Arc::new(Expr::new(Binary(
+                    lit_expr(int(20)),
+                    BinOp::Mul,
+                    lit_expr(int(2)),
+                ))),
+            ),
+        ])));
+
+        // Evaluate the complex map expression
+        let complex_results = evaluate_and_collect(complex_map_expr, engine, harness).await;
+
+        // Check that we got a Map value with correctly evaluated keys and values
+        assert_eq!(complex_results.len(), 1);
+        match &complex_results[0].data {
+            CoreData::Map(map) => {
+                // Check that map has the correct key-value pairs after evaluation
+                assert_values_equal(&map.get(&lit_val(string("xy"))), &lit_val(int(15)));
+                assert_values_equal(&map.get(&lit_val(string("ab"))), &lit_val(int(40)));
+            }
+            _ => panic!("Expected Map value"),
+        }
+    }
+
+    /// Test map operations with nested maps and lookup
+    #[tokio::test]
+    async fn test_map_nested_and_lookup() {
+        let harness = TestHarness::new();
+        let mut ctx = Context::default();
+
+        // Add a map lookup function
+        ctx.bind(
+            "get".to_string(),
+            Value::new(CoreData::Function(FunKind::Udf(UdfKind::Linked(|args| {
+                if args.len() != 2 {
+                    panic!("get function requires 2 arguments");
+                }
+
+                match &args[0].data {
+                    CoreData::Map(map) => map.get(&args[1]),
+                    _ => panic!("First argument must be a map"),
+                }
+            })))),
+        );
+
+        let engine = Engine::new(ctx);
+
+        // Create a nested map:
+        // {
+        //   "user": {
+        //     "name": "Alice",
+        //     "age": 30,
+        //     "address": {
+        //       "city": "San Francisco",
+        //       "zip": 94105
+        //     }
+        //   },
+        //   "settings": {
+        //     "theme": "dark",
+        //     "notifications": true
+        //   }
+        // }
+
+        // First, create the address map
+        let address_map = Arc::new(Expr::new(Map(vec![
+            (lit_expr(string("city")), lit_expr(string("San Francisco"))),
+            (lit_expr(string("zip")), lit_expr(int(94105))),
+        ])));
+
+        // Then, create the user map with the nested address map
+        let user_map = Arc::new(Expr::new(Map(vec![
+            (lit_expr(string("name")), lit_expr(string("Alice"))),
+            (lit_expr(string("age")), lit_expr(int(30))),
+            (lit_expr(string("address")), address_map),
+        ])));
+
+        // Create the settings map
+        let settings_map = Arc::new(Expr::new(Map(vec![
+            (lit_expr(string("theme")), lit_expr(string("dark"))),
+            (lit_expr(string("notifications")), lit_expr(boolean(true))),
+        ])));
+
+        // Finally, create the top-level map
+        let nested_map_expr = Arc::new(Expr::new(Map(vec![
+            (lit_expr(string("user")), user_map),
+            (lit_expr(string("settings")), settings_map),
+        ])));
+
+        // First, evaluate the nested map to bind it to a variable
+        let program = Arc::new(Expr::new(Let(
+            "data".to_string(),
+            nested_map_expr,
+            // Extract user.address.city using get function
+            Arc::new(Expr::new(Call(
+                ref_expr("get"),
+                vec![
+                    Arc::new(Expr::new(Call(
+                        ref_expr("get"),
+                        vec![
+                            Arc::new(Expr::new(Call(
+                                ref_expr("get"),
+                                vec![ref_expr("data"), lit_expr(string("user"))],
+                            ))),
+                            lit_expr(string("address")),
+                        ],
+                    ))),
+                    lit_expr(string("city")),
+                ],
+            ))),
+        )));
+
+        // Evaluate the program
+        let results = evaluate_and_collect(program, engine, harness).await;
+
+        // Check that we got the correct value from the nested lookup
+        assert_eq!(results.len(), 1);
+        match &results[0].data {
+            CoreData::Literal(Literal::String(value)) => {
+                assert_eq!(value, "San Francisco");
+            }
+            _ => panic!("Expected string value"),
         }
     }
 
@@ -581,7 +1108,7 @@ mod tests {
         let mut ctx = Context::default();
 
         // Define a function to compute factorial: fn(n) => if n <= 1 then 1 else n * factorial(n-1)
-        let factorial_function = Value(CoreData::Function(FunKind::Closure(
+        let factorial_function = Value::new(CoreData::Function(FunKind::Closure(
             vec!["n".to_string()],
             Arc::new(Expr::new(IfThenElse(
                 Arc::new(Expr::new(Binary(
@@ -633,11 +1160,664 @@ mod tests {
         let results = evaluate_and_collect(program, engine, harness).await;
 
         // Check result: factorial(5) / 3 = 120 / 3 = 40
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 40);
             }
             _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test array indexing with call syntax
+    #[tokio::test]
+    async fn test_array_indexing() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create an array [10, 20, 30, 40, 50]
+        let array_expr = Arc::new(Expr::new(CoreVal(array_val(vec![
+            lit_val(int(10)),
+            lit_val(int(20)),
+            lit_val(int(30)),
+            lit_val(int(40)),
+            lit_val(int(50)),
+        ]))));
+
+        // Access array[2] which should be 30
+        let index_expr = Arc::new(Expr::new(Call(array_expr, vec![lit_expr(int(2))])));
+
+        let results = evaluate_and_collect(index_expr, engine, harness).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].data {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::Int64(30));
+            }
+            _ => panic!("Expected integer literal"),
+        }
+    }
+
+    /// Test tuple indexing with call syntax
+    #[tokio::test]
+    async fn test_tuple_indexing() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create a tuple (10, "hello", true)
+        let tuple_expr = Arc::new(Expr::new(CoreVal(Value::new(CoreData::Tuple(vec![
+            lit_val(int(10)),
+            lit_val(string("hello")),
+            lit_val(Literal::Bool(true)),
+        ])))));
+
+        // Access tuple[1] which should be "hello"
+        let index_expr = Arc::new(Expr::new(Call(tuple_expr, vec![lit_expr(int(1))])));
+
+        let results = evaluate_and_collect(index_expr, engine, harness).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].data {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::String("hello".to_string()));
+            }
+            _ => panic!("Expected string literal"),
+        }
+    }
+
+    /// Test struct field access with call syntax
+    #[tokio::test]
+    async fn test_struct_indexing() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create a struct Point { x: 10, y: 20 }
+        let struct_expr = Arc::new(Expr::new(CoreVal(struct_val(
+            "Point",
+            vec![lit_val(int(10)), lit_val(int(20))],
+        ))));
+
+        // Access struct[1] which should be 20 (the y field)
+        let index_expr = Arc::new(Expr::new(Call(struct_expr, vec![lit_expr(int(1))])));
+
+        let results = evaluate_and_collect(index_expr, engine, harness).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].data {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::Int64(20));
+            }
+            _ => panic!("Expected integer literal"),
+        }
+    }
+
+    /// Test map lookup with call syntax
+    #[tokio::test]
+    async fn test_map_lookup() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create a map with key-value pairs: { "a": 1, "b": 2, "c": 3 }
+        // Use a let expression to bind the map and do lookups directly
+        let test_expr = Arc::new(Expr::new(Let(
+            "map".to_string(),
+            Arc::new(Expr::new(Map(vec![
+                (lit_expr(string("a")), lit_expr(int(1))),
+                (lit_expr(string("b")), lit_expr(int(2))),
+                (lit_expr(string("c")), lit_expr(int(3))),
+            ]))),
+            // Create a tuple of map["b"] and map["d"] to test both existing and missing keys
+            Arc::new(Expr::new(CoreExpr(CoreData::Tuple(vec![
+                // map["b"] - should be 2
+                Arc::new(Expr::new(Call(
+                    ref_expr("map"),
+                    vec![lit_expr(string("b"))],
+                ))),
+                // map["d"] - should be None
+                Arc::new(Expr::new(Call(
+                    ref_expr("map"),
+                    vec![lit_expr(string("d"))],
+                ))),
+            ])))),
+        )));
+
+        let results = evaluate_and_collect(test_expr, engine, harness).await;
+
+        // Check result - should be a tuple (2, None)
+        assert_eq!(results.len(), 1);
+        match &results[0].data {
+            CoreData::Tuple(elements) => {
+                assert_eq!(elements.len(), 2);
+
+                // Check first element: map["b"] should be 2
+                match &elements[0].data {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::Int64(2));
+                    }
+                    _ => panic!("Expected integer literal for existing key lookup"),
+                }
+
+                // Check second element: map["d"] should be None
+                match &elements[1].data {
+                    CoreData::None => {}
+                    _ => panic!("Expected None for missing key lookup"),
+                }
+            }
+            _ => panic!("Expected tuple result"),
+        }
+    }
+
+    /// Test complex expressions for both collection and index
+    #[tokio::test]
+    async fn test_complex_collection_and_index() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create a let expression that binds an array and then accesses it
+        // let arr = [10, 20, 30, 40, 50] in
+        // let idx = 2 + 1 in
+        //   arr[idx]  // should be 40
+        let complex_expr = Arc::new(Expr::new(Let(
+            "arr".to_string(),
+            Arc::new(Expr::new(CoreExpr(CoreData::Array(vec![
+                lit_expr(int(10)),
+                lit_expr(int(20)),
+                lit_expr(int(30)),
+                lit_expr(int(40)),
+                lit_expr(int(50)),
+            ])))),
+            Arc::new(Expr::new(Let(
+                "idx".to_string(),
+                Arc::new(Expr::new(Binary(
+                    lit_expr(int(2)),
+                    BinOp::Add,
+                    lit_expr(int(1)),
+                ))),
+                Arc::new(Expr::new(Call(ref_expr("arr"), vec![ref_expr("idx")]))),
+            ))),
+        )));
+
+        let results = evaluate_and_collect(complex_expr, engine, harness).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].data {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::Int64(40));
+            }
+            _ => panic!("Expected integer literal"),
+        }
+    }
+
+    /// Test indexing into a logical operator
+    #[tokio::test]
+    async fn test_logical_operator_indexing() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create a logical operator: LogicalJoin { joinType: "inner", condition: "x = y" } [TableScan("orders"), TableScan("lineitem")]
+        let join_op = create_logical_operator(
+            "LogicalJoin",
+            vec![lit_val(string("inner")), lit_val(string("x = y"))],
+            vec![
+                create_logical_operator("TableScan", vec![lit_val(string("orders"))], vec![]),
+                create_logical_operator("TableScan", vec![lit_val(string("lineitem"))], vec![]),
+            ],
+        );
+
+        let logical_op_expr = Arc::new(Expr::new(CoreVal(join_op)));
+
+        // Access join_type using indexing - should be "inner"
+        let join_type_expr = Arc::new(Expr::new(Call(
+            logical_op_expr.clone(),
+            vec![lit_expr(int(0))],
+        )));
+        let join_type_results =
+            evaluate_and_collect(join_type_expr, engine.clone(), harness.clone()).await;
+
+        // Access condition using indexing - should be "x = y"
+        let condition_expr = Arc::new(Expr::new(Call(
+            logical_op_expr.clone(),
+            vec![lit_expr(int(1))],
+        )));
+        let condition_results =
+            evaluate_and_collect(condition_expr, engine.clone(), harness.clone()).await;
+
+        // Access first child (orders table scan) using indexing
+        let first_child_expr = Arc::new(Expr::new(Call(
+            logical_op_expr.clone(),
+            vec![lit_expr(int(2))],
+        )));
+        let first_child_results =
+            evaluate_and_collect(first_child_expr, engine.clone(), harness.clone()).await;
+
+        // Access second child (lineitem table scan) using indexing
+        let second_child_expr = Arc::new(Expr::new(Call(logical_op_expr, vec![lit_expr(int(3))])));
+        let second_child_results = evaluate_and_collect(second_child_expr, engine, harness).await;
+
+        // Check join_type result
+        assert_eq!(join_type_results.len(), 1);
+        match &join_type_results[0].data {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::String("inner".to_string()));
+            }
+            _ => panic!("Expected string literal for join type"),
+        }
+
+        // Check condition result
+        assert_eq!(condition_results.len(), 1);
+        match &condition_results[0].data {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::String("x = y".to_string()));
+            }
+            _ => panic!("Expected string literal for condition"),
+        }
+
+        // Check first child result (orders table scan)
+        assert_eq!(first_child_results.len(), 1);
+        match &first_child_results[0].data {
+            CoreData::Logical(Materializable::Materialized(log_op)) => {
+                assert_eq!(log_op.operator.tag, "TableScan");
+                assert_eq!(log_op.operator.data.len(), 1);
+                match &log_op.operator.data[0].data {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::String("orders".to_string()));
+                    }
+                    _ => panic!("Expected string literal for table name"),
+                }
+            }
+            _ => panic!("Expected logical operator for first child"),
+        }
+
+        // Check second child result (lineitem table scan)
+        assert_eq!(second_child_results.len(), 1);
+        match &second_child_results[0].data {
+            CoreData::Logical(Materializable::Materialized(log_op)) => {
+                assert_eq!(log_op.operator.tag, "TableScan");
+                assert_eq!(log_op.operator.data.len(), 1);
+                match &log_op.operator.data[0].data {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::String("lineitem".to_string()));
+                    }
+                    _ => panic!("Expected string literal for table name"),
+                }
+            }
+            _ => panic!("Expected logical operator for second child"),
+        }
+    }
+
+    /// Test indexing into a physical operator
+    #[tokio::test]
+    async fn test_physical_operator_indexing() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create a physical operator: HashJoin { method: "hash", condition: "id = id" } [IndexScan("customers"), ParallelScan("orders")]
+        let join_op = create_physical_operator(
+            "HashJoin",
+            vec![lit_val(string("hash")), lit_val(string("id = id"))],
+            vec![
+                create_physical_operator("IndexScan", vec![lit_val(string("customers"))], vec![]),
+                create_physical_operator("ParallelScan", vec![lit_val(string("orders"))], vec![]),
+            ],
+        );
+
+        let physical_op_expr = Arc::new(Expr::new(CoreVal(join_op)));
+
+        // Access join method using indexing - should be "hash"
+        let method_expr = Arc::new(Expr::new(Call(
+            physical_op_expr.clone(),
+            vec![lit_expr(int(0))],
+        )));
+        let method_results =
+            evaluate_and_collect(method_expr, engine.clone(), harness.clone()).await;
+
+        // Access condition using indexing - should be "id = id"
+        let condition_expr = Arc::new(Expr::new(Call(
+            physical_op_expr.clone(),
+            vec![lit_expr(int(1))],
+        )));
+        let condition_results =
+            evaluate_and_collect(condition_expr, engine.clone(), harness.clone()).await;
+
+        // Access first child (customers index scan) using indexing
+        let first_child_expr = Arc::new(Expr::new(Call(
+            physical_op_expr.clone(),
+            vec![lit_expr(int(2))],
+        )));
+        let first_child_results =
+            evaluate_and_collect(first_child_expr, engine.clone(), harness.clone()).await;
+
+        // Access second child (orders parallel scan) using indexing
+        let second_child_expr = Arc::new(Expr::new(Call(physical_op_expr, vec![lit_expr(int(3))])));
+        let second_child_results = evaluate_and_collect(second_child_expr, engine, harness).await;
+
+        // Check join method result
+        assert_eq!(method_results.len(), 1);
+        match &method_results[0].data {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::String("hash".to_string()));
+            }
+            _ => panic!("Expected string literal for join method"),
+        }
+
+        // Check condition result
+        assert_eq!(condition_results.len(), 1);
+        match &condition_results[0].data {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::String("id = id".to_string()));
+            }
+            _ => panic!("Expected string literal for condition"),
+        }
+
+        // Check first child result (customers index scan)
+        assert_eq!(first_child_results.len(), 1);
+        match &first_child_results[0].data {
+            CoreData::Physical(Materializable::Materialized(phys_op)) => {
+                assert_eq!(phys_op.operator.tag, "IndexScan");
+                assert_eq!(phys_op.operator.data.len(), 1);
+                match &phys_op.operator.data[0].data {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::String("customers".to_string()));
+                    }
+                    _ => panic!("Expected string literal for table name"),
+                }
+            }
+            _ => panic!("Expected physical operator for first child"),
+        }
+
+        // Check second child result (orders parallel scan)
+        assert_eq!(second_child_results.len(), 1);
+        match &second_child_results[0].data {
+            CoreData::Physical(Materializable::Materialized(phys_op)) => {
+                assert_eq!(phys_op.operator.tag, "ParallelScan");
+                assert_eq!(phys_op.operator.data.len(), 1);
+                match &phys_op.operator.data[0].data {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::String("orders".to_string()));
+                    }
+                    _ => panic!("Expected string literal for table name"),
+                }
+            }
+            _ => panic!("Expected physical operator for second child"),
+        }
+    }
+
+    /// Test indexing into an unmaterialized logical operator
+    #[tokio::test]
+    async fn test_unmaterialized_logical_operator_indexing() {
+        let harness = TestHarness::new();
+        let test_group_id = GroupId(1);
+
+        // Register a logical operator in the test harness
+        let materialized_join = create_logical_operator(
+            "LogicalJoin",
+            vec![
+                lit_val(string("inner")),
+                lit_val(string("customer.id = order.id")),
+            ],
+            vec![
+                create_logical_operator("TableScan", vec![lit_val(string("customers"))], vec![]),
+                create_logical_operator("TableScan", vec![lit_val(string("orders"))], vec![]),
+            ],
+        );
+
+        harness.register_group(test_group_id, materialized_join);
+
+        // Create an unmaterialized logical operator
+        let unmaterialized_expr = Arc::new(Expr::new(CoreVal(Value::new(CoreData::Logical(
+            Materializable::UnMaterialized(test_group_id),
+        )))));
+
+        // Access join type using indexing - should materialize and return "inner"
+        let join_type_expr = Arc::new(Expr::new(Call(
+            unmaterialized_expr.clone(),
+            vec![lit_expr(int(0))],
+        )));
+
+        // Access condition using indexing - should materialize and return "customer.id = order.id"
+        let condition_expr = Arc::new(Expr::new(Call(
+            unmaterialized_expr.clone(),
+            vec![lit_expr(int(1))],
+        )));
+
+        // Access first child (customers table scan) using indexing
+        let first_child_expr = Arc::new(Expr::new(Call(
+            unmaterialized_expr.clone(),
+            vec![lit_expr(int(2))],
+        )));
+
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Evaluate the expressions
+        let join_type_results =
+            evaluate_and_collect(join_type_expr, engine.clone(), harness.clone()).await;
+        let condition_results =
+            evaluate_and_collect(condition_expr, engine.clone(), harness.clone()).await;
+        let first_child_results = evaluate_and_collect(first_child_expr, engine, harness).await;
+
+        // Check join type result
+        assert_eq!(join_type_results.len(), 1);
+        match &join_type_results[0].data {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::String("inner".to_string()));
+            }
+            _ => panic!("Expected string literal for join type"),
+        }
+
+        // Check condition result
+        assert_eq!(condition_results.len(), 1);
+        match &condition_results[0].data {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::String("customer.id = order.id".to_string()));
+            }
+            _ => panic!("Expected string literal for condition"),
+        }
+
+        // Check first child result (customers table scan)
+        assert_eq!(first_child_results.len(), 1);
+        match &first_child_results[0].data {
+            CoreData::Logical(Materializable::Materialized(log_op)) => {
+                assert_eq!(log_op.operator.tag, "TableScan");
+                assert_eq!(log_op.operator.data.len(), 1);
+                match &log_op.operator.data[0].data {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::String("customers".to_string()));
+                    }
+                    _ => panic!("Expected string literal for table name"),
+                }
+            }
+            _ => panic!("Expected logical operator for first child"),
+        }
+    }
+
+    /// Test indexing into an unmaterialized physical operator
+    #[tokio::test]
+    async fn test_unmaterialized_physical_operator_indexing() {
+        let harness = TestHarness::new();
+
+        // Create a physical goal
+        let test_group_id = GroupId(2);
+        let properties = Box::new(Value::new(CoreData::Literal(string("sorted"))));
+        let test_goal = Goal {
+            group_id: test_group_id,
+            properties,
+        };
+
+        // Register a physical operator to be returned when the goal is expanded
+        let materialized_join = create_physical_operator(
+            "MergeJoin",
+            vec![
+                lit_val(string("merge")),
+                lit_val(string("customer.id = order.id")),
+            ],
+            vec![
+                create_physical_operator("SortedScan", vec![lit_val(string("customers"))], vec![]),
+                create_physical_operator("SortedScan", vec![lit_val(string("orders"))], vec![]),
+            ],
+        );
+
+        harness.register_goal(&test_goal, materialized_join);
+
+        // Create an unmaterialized physical operator
+        let unmaterialized_expr = Arc::new(Expr::new(CoreVal(Value::new(CoreData::Physical(
+            Materializable::UnMaterialized(test_goal),
+        )))));
+
+        // Access join method using indexing - should materialize and return "merge"
+        let method_expr = Arc::new(Expr::new(Call(
+            unmaterialized_expr.clone(),
+            vec![lit_expr(int(0))],
+        )));
+
+        // Access condition using indexing - should materialize and return "customer.id = order.id"
+        let condition_expr = Arc::new(Expr::new(Call(
+            unmaterialized_expr.clone(),
+            vec![lit_expr(int(1))],
+        )));
+
+        // Access first child (customers scan) using indexing
+        let first_child_expr = Arc::new(Expr::new(Call(
+            unmaterialized_expr.clone(),
+            vec![lit_expr(int(2))],
+        )));
+
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Evaluate the expressions
+        let method_results =
+            evaluate_and_collect(method_expr, engine.clone(), harness.clone()).await;
+        let condition_results =
+            evaluate_and_collect(condition_expr, engine.clone(), harness.clone()).await;
+        let first_child_results = evaluate_and_collect(first_child_expr, engine, harness).await;
+
+        // Check join method result
+        assert_eq!(method_results.len(), 1);
+        match &method_results[0].data {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::String("merge".to_string()));
+            }
+            _ => panic!("Expected string literal for join method"),
+        }
+
+        // Check condition result
+        assert_eq!(condition_results.len(), 1);
+        match &condition_results[0].data {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::String("customer.id = order.id".to_string()));
+            }
+            _ => panic!("Expected string literal for condition"),
+        }
+
+        // Check first child result (customers scan)
+        assert_eq!(first_child_results.len(), 1);
+        match &first_child_results[0].data {
+            CoreData::Physical(Materializable::Materialized(phys_op)) => {
+                assert_eq!(phys_op.operator.tag, "SortedScan");
+                assert_eq!(phys_op.operator.data.len(), 1);
+                match &phys_op.operator.data[0].data {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(*lit, Literal::String("customers".to_string()));
+                    }
+                    _ => panic!("Expected string literal for table name"),
+                }
+            }
+            _ => panic!("Expected physical operator for first child"),
+        }
+    }
+
+    /// Test accessing multiple levels of nested operators through indexing
+    #[tokio::test]
+    async fn test_nested_operator_indexing() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create a nested operator:
+        // Project [col1, col2] (
+        //   Filter ("age > 30") (
+        //     Join ("inner", "t1.id = t2.id") (
+        //       TableScan ("customers"),
+        //       TableScan ("orders")
+        //     )
+        //   )
+        // )
+        let nested_op = create_logical_operator(
+            "Project",
+            vec![array_val(vec![
+                lit_val(string("col1")),
+                lit_val(string("col2")),
+            ])],
+            vec![create_logical_operator(
+                "Filter",
+                vec![lit_val(string("age > 30"))],
+                vec![create_logical_operator(
+                    "Join",
+                    vec![lit_val(string("inner")), lit_val(string("t1.id = t2.id"))],
+                    vec![
+                        create_logical_operator(
+                            "TableScan",
+                            vec![lit_val(string("customers"))],
+                            vec![],
+                        ),
+                        create_logical_operator(
+                            "TableScan",
+                            vec![lit_val(string("orders"))],
+                            vec![],
+                        ),
+                    ],
+                )],
+            )],
+        );
+
+        let nested_op_expr = Arc::new(Expr::new(CoreVal(nested_op)));
+
+        // First, access the Filter child of Project (index 1)
+        let filter_expr = Arc::new(Expr::new(Call(nested_op_expr, vec![lit_expr(int(1))])));
+        let filter_results =
+            evaluate_and_collect(filter_expr, engine.clone(), harness.clone()).await;
+
+        // Now, from the Filter, access its Join child (index 1)
+        let filter_value = filter_results[0].clone();
+        let join_expr = Arc::new(Expr::new(Call(
+            Arc::new(Expr::new(CoreVal(filter_value))),
+            vec![lit_expr(int(1))],
+        )));
+        let join_results = evaluate_and_collect(join_expr, engine.clone(), harness.clone()).await;
+
+        // Finally, from the Join, access its first TableScan child (index 2)
+        let join_value = join_results[0].clone();
+        let table_scan_expr = Arc::new(Expr::new(Call(
+            Arc::new(Expr::new(CoreVal(join_value))),
+            vec![lit_expr(int(2))],
+        )));
+        let table_scan_results = evaluate_and_collect(table_scan_expr, engine, harness).await;
+
+        // Verify the final result is the "customers" TableScan
+        assert_eq!(table_scan_results.len(), 1);
+        match &table_scan_results[0].data {
+            CoreData::Logical(Materializable::Materialized(log_op)) => {
+                assert_eq!(log_op.operator.tag, "TableScan");
+                assert_eq!(log_op.operator.data.len(), 1);
+                match &log_op.operator.data[0].data {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(*lit, Literal::String("customers".to_string()));
+                    }
+                    _ => panic!("Expected string literal for table name"),
+                }
+            }
+            _ => panic!("Expected logical operator for table scan"),
         }
     }
 
@@ -663,14 +1843,14 @@ mod tests {
         let outer_results = evaluate_and_collect(outer_ref, engine.clone(), harness).await;
 
         // Check results
-        match &inner_results[0].0 {
+        match &inner_results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 200);
             }
             _ => panic!("Expected integer value"),
         }
 
-        match &outer_results[0].0 {
+        match &outer_results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 100);
             }

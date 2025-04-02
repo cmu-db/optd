@@ -27,7 +27,7 @@ where
         // For unmaterialized operators, directly call the continuation with the unmaterialized
         // value.
         UnMaterialized(group_id) => {
-            let result = Value(Logical(UnMaterialized(group_id)));
+            let result = Value::new(Logical(UnMaterialized(group_id)));
             k(result).await
         }
         // For materialized operators, evaluate all parts and construct the result.
@@ -41,7 +41,7 @@ where
                     Box::pin(capture!([k], async move {
                         // Wrap the constructed operator in the logical operator structure
                         let log_op = LogicalOp::logical(constructed_op);
-                        let result = Value(Logical(Materialized(log_op)));
+                        let result = Value::new(Logical(Materialized(log_op)));
                         k(result).await
                     }))
                 }),
@@ -69,7 +69,7 @@ where
     match op {
         // For unmaterialized operators, continue with the unmaterialized value.
         UnMaterialized(physical_goal) => {
-            let result = Value(Physical(UnMaterialized(physical_goal)));
+            let result = Value::new(Physical(UnMaterialized(physical_goal)));
             k(result).await
         }
         // For materialized operators, evaluate all parts and construct the result.
@@ -82,7 +82,7 @@ where
                 Arc::new(move |constructed_op| {
                     Box::pin(capture!([k], async move {
                         let phys_op = PhysicalOp::physical(constructed_op);
-                        let result = Value(Physical(Materialized(phys_op)));
+                        let result = Value::new(Physical(Materialized(phys_op)));
                         k(result).await
                     }))
                 }),
@@ -145,16 +145,16 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::analyzer::{
-        context::Context,
-        hir::{
-            BinOp, CoreData, Expr, ExprKind, Goal, GroupId, Literal, LogicalOp, Materializable,
-            Operator, PhysicalOp, Value,
+    use crate::engine::Engine;
+    use crate::{
+        analyzer::{
+            context::Context,
+            hir::{
+                BinOp, CoreData, Expr, ExprKind, Goal, GroupId, Literal, LogicalOp, Materializable,
+                Operator, PhysicalOp, Value,
+            },
         },
-    };
-    use crate::engine::{
-        Engine,
-        test_utils::{
+        utils::tests::{
             TestHarness, create_logical_operator, evaluate_and_collect, int, lit_expr, lit_val,
             string,
         },
@@ -196,20 +196,20 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Logical(Materializable::Materialized(log_op)) => {
                 // Check tag
                 assert_eq!(log_op.operator.tag, "Join");
 
                 // Check data - should have "inner" and 15
                 assert_eq!(log_op.operator.data.len(), 2);
-                match &log_op.operator.data[0].0 {
+                match &log_op.operator.data[0].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("inner".to_string()));
                     }
                     _ => panic!("Expected string literal"),
                 }
-                match &log_op.operator.data[1].0 {
+                match &log_op.operator.data[1].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::Int64(15));
                     }
@@ -218,13 +218,13 @@ mod tests {
 
                 // Check children - should have "orders" and "lineitem"
                 assert_eq!(log_op.operator.children.len(), 2);
-                match &log_op.operator.children[0].0 {
+                match &log_op.operator.children[0].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("orders".to_string()));
                     }
                     _ => panic!("Expected string literal"),
                 }
-                match &log_op.operator.children[1].0 {
+                match &log_op.operator.children[1].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("lineitem".to_string()));
                     }
@@ -255,7 +255,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Logical(Materializable::UnMaterialized(id)) => {
                 // Check that the group ID is preserved
                 assert_eq!(*id, group_id);
@@ -298,20 +298,20 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Physical(Materializable::Materialized(phys_op)) => {
                 // Check tag
                 assert_eq!(phys_op.operator.tag, "HashJoin");
 
                 // Check data - should have "inner" and 60
                 assert_eq!(phys_op.operator.data.len(), 2);
-                match &phys_op.operator.data[0].0 {
+                match &phys_op.operator.data[0].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("inner".to_string()));
                     }
                     _ => panic!("Expected string literal"),
                 }
-                match &phys_op.operator.data[1].0 {
+                match &phys_op.operator.data[1].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::Int64(60));
                     }
@@ -320,13 +320,13 @@ mod tests {
 
                 // Check children - should have "IndexScan" and "FullScan"
                 assert_eq!(phys_op.operator.children.len(), 2);
-                match &phys_op.operator.children[0].0 {
+                match &phys_op.operator.children[0].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("IndexScan".to_string()));
                     }
                     _ => panic!("Expected string literal"),
                 }
-                match &phys_op.operator.children[1].0 {
+                match &phys_op.operator.children[1].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("FullScan".to_string()));
                     }
@@ -347,7 +347,7 @@ mod tests {
         // Create an unmaterialized physical operator with a goal
         let goal = Goal {
             group_id: GroupId(42),
-            properties: Box::new(Value(CoreData::Literal(Literal::String(
+            properties: Box::new(Value::new(CoreData::Literal(Literal::String(
                 "sorted".to_string(),
             )))),
         };
@@ -362,13 +362,13 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Physical(Materializable::UnMaterialized(result_goal)) => {
                 // Check that the goal is preserved
                 assert_eq!(result_goal.group_id, goal.group_id);
 
                 // Check properties
-                match &result_goal.properties.0 {
+                match &result_goal.properties.data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("sorted".to_string()));
                     }
@@ -415,14 +415,14 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Logical(Materializable::Materialized(log_op)) => {
                 // Check tag
                 assert_eq!(log_op.operator.tag, "Join");
 
                 // Check data
                 assert_eq!(log_op.operator.data.len(), 1);
-                match &log_op.operator.data[0].0 {
+                match &log_op.operator.data[0].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("inner".to_string()));
                     }
@@ -433,11 +433,11 @@ mod tests {
                 assert_eq!(log_op.operator.children.len(), 2);
 
                 // Check first child
-                match &log_op.operator.children[0].0 {
+                match &log_op.operator.children[0].data {
                     CoreData::Logical(Materializable::Materialized(child_log_op)) => {
                         assert_eq!(child_log_op.operator.tag, "Scan");
                         assert_eq!(child_log_op.operator.data.len(), 1);
-                        match &child_log_op.operator.data[0].0 {
+                        match &child_log_op.operator.data[0].data {
                             CoreData::Literal(lit) => {
                                 assert_eq!(lit, &Literal::String("orders".to_string()));
                             }
@@ -448,11 +448,11 @@ mod tests {
                 }
 
                 // Check second child
-                match &log_op.operator.children[1].0 {
+                match &log_op.operator.children[1].data {
                     CoreData::Logical(Materializable::Materialized(child_log_op)) => {
                         assert_eq!(child_log_op.operator.tag, "Scan");
                         assert_eq!(child_log_op.operator.data.len(), 1);
-                        match &child_log_op.operator.data[0].0 {
+                        match &child_log_op.operator.data[0].data {
                             CoreData::Literal(lit) => {
                                 assert_eq!(lit, &Literal::String("lineitem".to_string()));
                             }

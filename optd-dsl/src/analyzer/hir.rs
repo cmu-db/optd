@@ -16,6 +16,7 @@
 //! intermediate representations through the bridge modules.
 
 use super::context::Context;
+use super::map::Map;
 use super::r#type::Type;
 use crate::utils::span::Span;
 use std::fmt::Debug;
@@ -37,15 +38,43 @@ pub enum Literal {
     Unit,
 }
 
+/// Metadata that can be attached to expression nodes
+///
+/// This trait allows for different types of metadata to be attached to
+/// expression nodes while maintaining a common interface for access.
+pub trait ExprMetadata: Debug + Clone {}
+
+/// Empty metadata implementation for cases where no additional data is needed
+#[derive(Debug, Clone, Default)]
+pub struct NoMetadata;
+impl ExprMetadata for NoMetadata {}
+
+/// Combined span and type information for an expression
+#[derive(Debug, Clone)]
+pub struct TypedSpan {
+    /// Source code location.
+    pub span: Span,
+    /// Inferred type.
+    pub ty: Type,
+}
+impl ExprMetadata for TypedSpan {}
+
+/// User-defined function: either linked or unlinked
+#[derive(Debug, Clone)]
+pub enum UdfKind<M: ExprMetadata> {
+    Linked(fn(Vec<Value<M>>) -> Value<M>),
+    Unlinked(Identifier),
+}
+
 /// Types of functions in the system
 #[derive(Debug, Clone)]
-pub enum FunKind {
-    Closure(Vec<Identifier>, Arc<Expr>),
-    RustUDF(fn(Vec<Value>) -> Value),
+pub enum FunKind<M: ExprMetadata> {
+    Closure(Vec<Identifier>, Arc<Expr<M>>),
+    Udf(UdfKind<M>),
 }
 
 /// Group identifier in the optimizer
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Clone, PartialEq, Copy, Eq, Hash)]
 pub struct GroupId(pub i64);
 
 /// Either materialized or unmaterialized data
@@ -68,7 +97,7 @@ pub struct Goal {
     /// The logical group to implement
     pub group_id: GroupId,
     /// Required physical properties
-    pub properties: Box<Value>,
+    pub properties: Box<Value<NoMetadata>>,
 }
 
 /// Unified operator node structure for all operator types
@@ -124,13 +153,13 @@ impl<T> LogicalOp<T> {
 /// Represents an executable implementation of a logical operation with specific
 /// physical properties, either materialized as a concrete operator or as a physical goal.
 #[derive(Debug, Clone)]
-pub struct PhysicalOp<T> {
+pub struct PhysicalOp<T, M: ExprMetadata = NoMetadata> {
     pub operator: Operator<T>,
     pub goal: Option<Goal>,
-    pub cost: Option<Box<Value>>,
+    pub cost: Option<Box<Value<M>>>,
 }
 
-impl<T> PhysicalOp<T> {
+impl<T, M: ExprMetadata> PhysicalOp<T, M> {
     /// Creates a new physical operator without goal or cost information
     ///
     /// Used for representing physical operators that are not yet part of the
@@ -158,18 +187,47 @@ impl<T> PhysicalOp<T> {
     /// Creates a new physical operator with both goal and cost information
     ///
     /// Used for representing fully optimized physical operators with computed cost.
-    pub fn costed_physical(operator: Operator<T>, goal: Goal, cost: Value) -> Self {
+    pub fn costed_physical(operator: Operator<T>, goal: Goal, cost: Value<M>) -> Self {
         Self {
             operator,
             goal: Some(goal),
-            cost: Some(cost.into()),
+            cost: Some(Box::new(cost)),
+        }
+    }
+}
+
+/// Evaluated expression result
+#[derive(Debug, Clone)]
+pub struct Value<M: ExprMetadata = NoMetadata> {
+    /// Core data structure representing the value
+    pub data: CoreData<Value<M>, M>,
+    /// Optional metadata for the value
+    pub metadata: M,
+}
+
+impl Value {
+    /// Creates a new value from core data without metadata
+    pub fn new(data: CoreData<Value>) -> Self {
+        Self {
+            data,
+            metadata: NoMetadata,
+        }
+    }
+}
+
+impl Value<TypedSpan> {
+    /// Creates a new value from core data with type and span metadata
+    pub fn new_with(data: CoreData<Value<TypedSpan>, TypedSpan>, span: Span, ty: Type) -> Self {
+        Self {
+            data,
+            metadata: TypedSpan { span, ty },
         }
     }
 }
 
 /// Core data structures shared across the system
 #[derive(Debug, Clone)]
-pub enum CoreData<T> {
+pub enum CoreData<T, M: ExprMetadata = NoMetadata> {
     /// Primitive literal values
     Literal(Literal),
     /// Ordered collection of values
@@ -177,41 +235,20 @@ pub enum CoreData<T> {
     /// Fixed collection of possibly heterogeneous values
     Tuple(Vec<T>),
     /// Key-value associations
-    Map(Vec<(T, T)>),
+    Map(Map),
     /// Named structure with fields
     Struct(Identifier, Vec<T>),
     /// Function or closure
-    Function(FunKind),
+    Function(FunKind<M>),
     /// Error representation
     Fail(Box<T>),
     /// Logical query operators
     Logical(Materializable<LogicalOp<T>, GroupId>),
     /// Physical query operators
-    Physical(Materializable<PhysicalOp<T>, Goal>),
+    Physical(Materializable<PhysicalOp<T, M>, Goal>),
     /// The None value
     None,
 }
-
-/// Metadata that can be attached to expression nodes
-///
-/// This trait allows for different types of metadata to be attached to
-/// expression nodes while maintaining a common interface for access.
-pub trait ExprMetadata: Debug + Clone {}
-
-/// Empty metadata implementation for cases where no additional data is needed
-#[derive(Debug, Clone, Default)]
-pub struct NoMetadata;
-impl ExprMetadata for NoMetadata {}
-
-/// Combined span and type information for an expression
-#[derive(Debug, Clone)]
-pub struct TypedSpan {
-    /// Source code location.
-    pub span: Span,
-    /// Inferred type.
-    pub ty: Type,
-}
-impl ExprMetadata for TypedSpan {}
 
 /// Expression nodes in the HIR with optional metadata
 ///
@@ -235,9 +272,12 @@ impl Expr<NoMetadata> {
     }
 }
 
+/// Type alias for map entries to reduce type complexity
+pub type MapEntries<M> = Vec<(Arc<Expr<M>>, Arc<Expr<M>>)>;
+
 /// Expression node kinds without metadata
 #[derive(Debug, Clone)]
-pub enum ExprKind<M: ExprMetadata = NoMetadata> {
+pub enum ExprKind<M: ExprMetadata> {
     /// Pattern matching expression
     PatternMatch(Arc<Expr<M>>, Vec<MatchArm<M>>),
     /// Conditional expression
@@ -250,17 +290,15 @@ pub enum ExprKind<M: ExprMetadata = NoMetadata> {
     Unary(UnaryOp, Arc<Expr<M>>),
     /// Function call
     Call(Arc<Expr<M>>, Vec<Arc<Expr<M>>>),
+    /// Map expression
+    Map(MapEntries<M>),
     /// Variable reference
     Ref(Identifier),
     /// Core expression
-    CoreExpr(CoreData<Arc<Expr<M>>>),
+    CoreExpr(CoreData<Arc<Expr<M>>, M>),
     /// Core value
-    CoreVal(Value),
+    CoreVal(Value<M>),
 }
-
-/// Evaluated expression result
-#[derive(Debug, Clone)]
-pub struct Value(pub CoreData<Value>);
 
 /// Pattern for matching
 #[derive(Debug, Clone)]
@@ -315,10 +353,6 @@ pub enum UnaryOp {
 /// Program representation after the analysis phase
 #[derive(Debug)]
 pub struct HIR<M: ExprMetadata = NoMetadata> {
-    pub context: Context,
+    pub context: Context<M>,
     pub annotations: HashMap<Identifier, Vec<Annotation>>,
-    pub expressions: Vec<Expr<M>>,
 }
-
-/// Type alias for HIR with both type and source location information
-pub type TypedSpannedHIR = HIR<TypedSpan>;
