@@ -16,7 +16,7 @@ use optd_dsl::analyzer::hir::Value;
 use optd_dsl::analyzer::{context::Context, hir::HIR};
 use optd_dsl::engine::{Continuation, EngineResponse};
 use std::collections::{HashMap, HashSet, VecDeque};
-use tasks::{Task, TaskId};
+use tasks_old::{Task, TaskId};
 
 mod egest;
 mod handlers;
@@ -25,6 +25,7 @@ mod jobs;
 mod merge;
 mod subscriptions;
 mod tasks;
+mod tasks_old;
 
 /// Default maximum number of concurrent jobs to run in the optimizer.
 const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1000;
