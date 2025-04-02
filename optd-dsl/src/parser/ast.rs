@@ -35,12 +35,17 @@ pub enum Type {
     Tuple(Vec<Spanned<Type>>),
     /// Map/dictionary with key and value types
     Map(Spanned<Type>, Spanned<Type>),
-    /// Optional type (represents a value that might be absent)
-    Optional(Spanned<Type>),
 
-    // User defined types
-    /// Algebraic Data Type reference by name
-    Adt(Identifier),
+    // Type wrappers
+    /// For types ending with ?
+    Questioned(Spanned<Type>),
+    /// For types ending with *
+    Starred(Spanned<Type>),
+    /// For types ending with $
+    Dollared(Spanned<Type>),
+
+    // The type identified by a name (e.g., ADT, Logical, Physical, generics, etc.)
+    Identifier(Identifier),
 }
 
 /// Represents a field in a record or a parameter in a function
@@ -96,7 +101,7 @@ pub enum Expr {
     Unary(UnaryOp, Spanned<Expr>),
 
     // Function-related
-    /// Postfix operations (function call, member access)
+    /// Postfix operations (function call, member access, member call)
     Postfix(Spanned<Expr>, PostfixOp),
     /// Anonymous function definition
     Closure(Vec<Spanned<Field>>, Spanned<Expr>),
@@ -216,10 +221,12 @@ pub enum UnaryOp {
 /// Represents postfix operations (function call, member access, composition)
 #[derive(Debug, Clone)]
 pub enum PostfixOp {
-    /// Function or method call with arguments
+    /// Function or method call with arguments [?](..)
     Call(Vec<Spanned<Expr>>),
-    /// Member/field access
-    Member(Identifier),
+    /// Struct field access [?]#field
+    Field(Identifier),
+    /// Method access [?].method
+    Method(Identifier),
 }
 
 /// Represents a function definition

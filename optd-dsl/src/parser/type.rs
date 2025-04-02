@@ -1,16 +1,14 @@
+use super::{ast::Type, utils::delimited_parser};
+use crate::{
+    lexer::tokens::Token,
+    utils::span::{Span, Spanned},
+};
 use chumsky::{
     Parser,
     error::Simple,
     prelude::{choice, just, recursive},
     select,
 };
-
-use crate::{
-    lexer::tokens::Token,
-    utils::span::{Span, Spanned},
-};
-
-use super::{ast::Type, utils::delimited_parser};
 
 /// Creates a parser for type expressions.
 ///
@@ -22,18 +20,8 @@ use super::{ast::Type, utils::delimited_parser};
 /// - Function types: T1 -> T2
 /// - User-defined types: TypeName
 /// - Optional types: T?
-///
-/// Syntax examples:
-/// - I64                   - Integer type
-/// - String                - String type
-/// - \[I64\]                 - Array of integers
-/// - {String : I64}        - Map from strings to integers
-/// - (I64, String)         - Tuple with integer and string
-/// - I64 -> String         - Function from integer to string
-/// - I64?                  - Optional integer
-/// - \[String\]?             - Optional array of strings
-/// - I64 -> String?        - Function returning optional string
-/// - (I64 -> String)?      - Optional function
+/// - Starred types: T*
+/// - Dollared types: T$
 ///
 /// The parser follows standard precedence rules and supports
 /// arbitrary nesting of type expressions.
@@ -89,8 +77,8 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
             )
             .map_with_span(Spanned::new);
 
-            let data_type =
-                select! { Token::TypeIdent(name) => Type::Adt(name) }.map_with_span(Spanned::new);
+            let data_type = select! { Token::TypeIdent(name) => Type::Identifier(name) }
+                .map_with_span(Spanned::new);
 
             // Note: cannot apply delimiter recovery, as its recovery
             // would block further successful parses (e.g. tuples).
@@ -123,18 +111,23 @@ pub fn type_parser() -> impl Parser<Token, Spanned<Type>, Error = Simple<Token, 
                 None => param_type,
             });
 
-        // Process optional types
+        // Process optional, starred, and dollared types
         function_type
             .then(
-                just(Token::Question)
+                choice((just(Token::Question), just(Token::Mul), just(Token::Dollar)))
                     .repeated()
                     .at_least(0)
                     .collect::<Vec<_>>(),
             )
-            .map_with_span(|(base_type, question_marks), span| {
+            .map_with_span(|(base_type, modifiers), span| {
                 let mut result = base_type;
-                for _ in question_marks {
-                    result = Spanned::new(Type::Optional(result), span.clone());
+                for modifier in modifiers {
+                    result = match modifier {
+                        Token::Question => Spanned::new(Type::Questioned(result), span.clone()),
+                        Token::Mul => Spanned::new(Type::Starred(result), span.clone()),
+                        Token::Dollar => Spanned::new(Type::Dollared(result), span.clone()),
+                        _ => unreachable!("Invalid type modifier"),
+                    };
                 }
                 result
             })
@@ -258,33 +251,33 @@ mod tests {
         // Basic optional types
         let result = parse_type("I64?").unwrap();
         assert!(matches!(*result.value,
-            Type::Optional(inner) if matches!(*inner.value, Type::Int64)
+            Type::Questioned(inner) if matches!(*inner.value, Type::Int64)
         ));
 
         let result = parse_type("String?").unwrap();
         assert!(matches!(*result.value,
-            Type::Optional(inner) if matches!(*inner.value, Type::String)
+            Type::Questioned(inner) if matches!(*inner.value, Type::String)
         ));
 
         // Nested optional types
         let result = parse_type("I64??").unwrap();
         assert!(matches!(*result.value,
-            Type::Optional(inner) if matches!(*inner.clone().value,
-                Type::Optional(inner_inner) if matches!(*inner_inner.value, Type::Int64)
+            Type::Questioned(inner) if matches!(*inner.clone().value,
+                Type::Questioned(inner_inner) if matches!(*inner_inner.value, Type::Int64)
             )
         ));
 
         // Complex types with optional
         let result = parse_type("[I64]?").unwrap();
         assert!(matches!(*result.value,
-            Type::Optional(inner) if matches!(*inner.clone().value,
+            Type::Questioned(inner) if matches!(*inner.clone().value,
                 Type::Array(arr_inner) if matches!(*arr_inner.value, Type::Int64)
             )
         ));
 
         let result = parse_type("(I64, String)?").unwrap();
         assert!(matches!(*result.value,
-            Type::Optional(inner) if matches!(*inner.value, Type::Tuple(_))
+            Type::Questioned(inner) if matches!(*inner.value, Type::Tuple(_))
         ));
 
         // Function return type is optional
@@ -292,21 +285,156 @@ mod tests {
         assert!(matches!(*result.value,
             Type::Closure(param, ret)
             if matches!(*param.value, Type::Int64)
-            && matches!(*ret.value, Type::Optional(_))
+            && matches!(*ret.value, Type::Questioned(_))
             && matches!(*ret.value.clone(),
-                Type::Optional(inner) if matches!(*inner.value, Type::String))
+                Type::Questioned(inner) if matches!(*inner.value, Type::String))
         ));
 
         // Entire function type is optional
         let result = parse_type("(I64 -> String)?").unwrap();
         assert!(matches!(*result.value,
-            Type::Optional(inner) if matches!(*inner.value, Type::Closure(_, _))
+            Type::Questioned(inner) if matches!(*inner.value, Type::Closure(_, _))
         ));
 
         // Optional map type
         let result = parse_type("{String : I64}?").unwrap();
         assert!(matches!(*result.value,
-            Type::Optional(inner) if matches!(*inner.value, Type::Map(_, _))
+            Type::Questioned(inner) if matches!(*inner.value, Type::Map(_, _))
+        ));
+    }
+
+    #[test]
+    fn test_starred_types() {
+        // Basic starred types
+        let result = parse_type("I64*").unwrap();
+        assert!(matches!(*result.value,
+            Type::Starred(inner) if matches!(*inner.value, Type::Int64)
+        ));
+
+        let result = parse_type("String*").unwrap();
+        assert!(matches!(*result.value,
+            Type::Starred(inner) if matches!(*inner.value, Type::String)
+        ));
+
+        // Nested starred types
+        let result = parse_type("I64**").unwrap();
+        assert!(matches!(*result.value,
+            Type::Starred(inner) if matches!(*inner.clone().value,
+                Type::Starred(inner_inner) if matches!(*inner_inner.value, Type::Int64)
+            )
+        ));
+
+        // Complex types with starred
+        let result = parse_type("[I64]*").unwrap();
+        assert!(matches!(*result.value,
+            Type::Starred(inner) if matches!(*inner.clone().value,
+                Type::Array(arr_inner) if matches!(*arr_inner.value, Type::Int64)
+            )
+        ));
+
+        let result = parse_type("(I64, String)*").unwrap();
+        assert!(matches!(*result.value,
+            Type::Starred(inner) if matches!(*inner.value, Type::Tuple(_))
+        ));
+
+        // Function return type is starred
+        let result = parse_type("I64 -> String*").unwrap();
+        assert!(matches!(*result.value,
+            Type::Closure(param, ret)
+            if matches!(*param.value, Type::Int64)
+            && matches!(*ret.value, Type::Starred(_))
+            && matches!(*ret.value.clone(),
+                Type::Starred(inner) if matches!(*inner.value, Type::String))
+        ));
+
+        // Entire function type is starred
+        let result = parse_type("(I64 -> String)*").unwrap();
+        assert!(matches!(*result.value,
+            Type::Starred(inner) if matches!(*inner.value, Type::Closure(_, _))
+        ));
+    }
+
+    #[test]
+    fn test_dollared_types() {
+        // Basic dollared types
+        let result = parse_type("I64$").unwrap();
+        assert!(matches!(*result.value,
+            Type::Dollared(inner) if matches!(*inner.value, Type::Int64)
+        ));
+
+        let result = parse_type("String$").unwrap();
+        assert!(matches!(*result.value,
+            Type::Dollared(inner) if matches!(*inner.value, Type::String)
+        ));
+
+        // Nested dollared types
+        let result = parse_type("I64$$").unwrap();
+        assert!(matches!(*result.value,
+            Type::Dollared(inner) if matches!(*inner.clone().value,
+                Type::Dollared(inner_inner) if matches!(*inner_inner.value, Type::Int64)
+            )
+        ));
+
+        // Complex types with dollared
+        let result = parse_type("[I64]$").unwrap();
+        assert!(matches!(*result.value,
+            Type::Dollared(inner) if matches!(*inner.clone().value,
+                Type::Array(arr_inner) if matches!(*arr_inner.value, Type::Int64)
+            )
+        ));
+
+        let result = parse_type("(I64, String)$").unwrap();
+        assert!(matches!(*result.value,
+            Type::Dollared(inner) if matches!(*inner.value, Type::Tuple(_))
+        ));
+
+        // Function return type is dollared
+        let result = parse_type("I64 -> String$").unwrap();
+        assert!(matches!(*result.value,
+            Type::Closure(param, ret)
+            if matches!(*param.value, Type::Int64)
+            && matches!(*ret.value, Type::Dollared(_))
+            && matches!(*ret.value.clone(),
+                Type::Dollared(inner) if matches!(*inner.value, Type::String))
+        ));
+
+        // Entire function type is dollared
+        let result = parse_type("(I64 -> String)$").unwrap();
+        assert!(matches!(*result.value,
+            Type::Dollared(inner) if matches!(*inner.value, Type::Closure(_, _))
+        ));
+    }
+
+    #[test]
+    fn test_mixed_modifiers() {
+        // Test combination of modifiers
+        let result = parse_type("I64?*").unwrap();
+        assert!(matches!(*result.value,
+            Type::Starred(inner) if matches!(*inner.clone().value,
+                Type::Questioned(inner_inner) if matches!(*inner_inner.value, Type::Int64)
+            )
+        ));
+
+        let result = parse_type("I64*$").unwrap();
+        assert!(matches!(*result.value,
+            Type::Dollared(inner) if matches!(*inner.clone().value,
+                Type::Starred(inner_inner) if matches!(*inner_inner.value, Type::Int64)
+            )
+        ));
+
+        let result = parse_type("I64$?").unwrap();
+        assert!(matches!(*result.value,
+            Type::Questioned(inner) if matches!(*inner.clone().value,
+                Type::Dollared(inner_inner) if matches!(*inner_inner.value, Type::Int64)
+            )
+        ));
+
+        // Complex mixed type
+        let result = parse_type("(I64 -> String?)*$").unwrap();
+        assert!(matches!(*result.value,
+            Type::Dollared(outer) if matches!(*outer.clone().value,
+                Type::Starred(inner) if matches!(*inner.value, Type::Closure(_, _))
+            )
         ));
     }
 
@@ -334,7 +462,7 @@ mod tests {
                             assert!(matches!(*map_array.value, Type::Map(_, _)));
                             if let Type::Map(map_key, map_val) = &*map_array.value {
                                 assert!(matches!(*map_key.value, Type::String));
-                                assert!(matches!(*map_val.value, Type::Adt(_)));
+                                assert!(matches!(*map_val.value, Type::Identifier(_)));
                             }
                         }
                     }
@@ -344,14 +472,14 @@ mod tests {
                         assert!(matches!(*ret_tuple.value, Type::Tuple(_)));
                         if let Type::Tuple(elements) = &*ret_tuple.value {
                             assert_eq!(elements.len(), 3);
-                            assert!(matches!(*elements[0].value, Type::Adt(_)));
-                            assert!(matches!(*elements[1].value, Type::Adt(_)));
+                            assert!(matches!(*elements[0].value, Type::Identifier(_)));
+                            assert!(matches!(*elements[1].value, Type::Identifier(_)));
                             assert!(matches!(*elements[2].value, Type::Closure(_, _)));
                             if let Type::Closure(bool_param, scalar_arr) = &*elements[2].value {
                                 assert!(matches!(*bool_param.value, Type::Bool));
                                 assert!(matches!(*scalar_arr.value, Type::Array(_)));
                                 if let Type::Array(scalar) = &*scalar_arr.value {
-                                    assert!(matches!(*scalar.value, Type::Adt(_)));
+                                    assert!(matches!(*scalar.value, Type::Identifier(_)));
                                 }
                             }
                         }
@@ -360,9 +488,8 @@ mod tests {
             }
         }
 
-        // Test an even more insane nested type with optionals
-        let optional_insane =
-            "{String? : {I64 : [(Logical -> {String : [((Bool?, [Scalar]?) -> Physical?)]?}?)]}}?";
-        assert!(parse_type(optional_insane).is_ok());
+        // Test an even more insane nested type with optionals, starred, and dollared
+        let complex_type = "{String*? : {I64$ : [(Logical -> {String : [((Bool?, [Scalar]$) -> Physical?*)]?}$)]}}*$?";
+        assert!(parse_type(complex_type).is_ok());
     }
 }

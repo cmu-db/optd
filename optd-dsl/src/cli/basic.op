@@ -93,6 +93,8 @@ data JoinType =
 
 fn <K, V> map_get(map: {K: V}, key: K): V = None
 
+fn empty: V
+
 [rust]
 fn (expr: Scalar) apply_children(f: Scalar -> Scalar) = None
 
@@ -102,10 +104,10 @@ fn (pred: Predicate) remap(map: {I64 : I64}) =
         \ _ -> predicate.apply_children(child -> rewrite_column_refs(child, map))
     
 [rule]
-fn (expr: Logical) join_commute: Logical? = match expr
+fn (expr: Logical*) join_commute: Logical? = match expr
     \ Join(left, right, Inner, cond) ->
         let 
-            right_indices = 0.right.schema_len,
+            right_indices = 0..right.schema_len,
             left_indices = 0..left.schema_len,
             remapping = left_indices.map(i -> (i, i + right_len)) ++ 
                 right_indices.map(i -> (left_len + i, i)).to_map,

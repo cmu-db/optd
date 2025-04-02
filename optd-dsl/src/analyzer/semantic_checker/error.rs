@@ -2,8 +2,30 @@ use ariadne::{Report, Source};
 
 use crate::utils::{error::Diagnose, span::Span};
 
+/// Error types for semantic analysis
 #[derive(Debug)]
-pub struct SemanticError {}
+pub enum SemanticError {
+    /// Error for duplicate ADT names
+    DuplicateAdt {
+        /// Name of the duplicate ADT
+        name: String,
+        /// Span of the first declaration
+        first_span: Span,
+        /// Span of the duplicate declaration
+        duplicate_span: Span,
+    },
+}
+
+impl SemanticError {
+    /// Creates a new error for duplicate ADT names
+    pub fn new_duplicate_adt(name: String, first_span: Span, duplicate_span: Span) -> Self {
+        Self::DuplicateAdt {
+            name,
+            first_span,
+            duplicate_span,
+        }
+    }
+}
 
 impl Diagnose for SemanticError {
     fn report(&self) -> Report<Span> {
