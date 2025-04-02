@@ -2,7 +2,7 @@ use super::{
     EngineMessage, EngineMessageKind, JobId, OptimizeRequest, Optimizer, PendingMessage, TaskId,
     ingest::LogicalIngest,
     jobs::JobKind,
-    tasks::{CostExpressionTask, ImplementExpressionTask, TaskKind, TransformExpressionTask},
+    tasks_old::{CostExpressionTask, ImplementExpressionTask, TaskKind, TransformExpressionTask},
 };
 use crate::{
     cir::{
@@ -164,10 +164,12 @@ impl<M: Memoize> Optimizer<M> {
                     self.ensure_cost_expression_task(expression_id, parent_task_id)
                         .await?;
                 }
-                GoalMemberId::GoalId(_new_goal_id) => {
-                    // TODO(Sarvesh); Need to create a new goal optimization task if it does not exist.
-                    // self.ensure_goal_optimize_task(new_goal_id, goal_id).await?;
-                    todo!()
+                GoalMemberId::GoalId(new_goal_id) => {
+                    let parent_task_id = self.goal_optimization_task_index.get(&goal_id).expect(
+                        "Optimization task for goal of the ingested physical plan not found.",
+                    );
+                    self.ensure_goal_optimize_task(new_goal_id, *parent_task_id)
+                        .await?;
                 }
             }
         }

@@ -1,15 +1,10 @@
-use super::{
-    Optimizer,
-    jobs::JobKind,
-    tasks::{TaskId, TaskKind},
-};
+use super::{Optimizer, jobs::JobKind, tasks_old::TaskId};
 use crate::{
     cir::{Cost, GoalId, GroupId, LogicalExpressionId, PhysicalExpressionId},
     error::Error,
     memo::Memoize,
 };
 use JobKind::*;
-use TaskKind::*;
 use futures::SinkExt;
 
 impl<M: Memoize> Optimizer<M> {
