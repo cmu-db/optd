@@ -15,6 +15,10 @@ pub use cost_expr::*;
 pub use explore_group::*;
 pub use fork_costed::*;
 pub use fork_logical::*;
+pub use implement_expr::*;
+pub use optimize_goal::*;
+pub use optimize_plan::*;
+pub use transform_expr::*;
 
 /// Unique identifier for tasks in the optimization system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
