@@ -24,7 +24,7 @@ pub(super) struct ImplementExpressionTask {
 }
 
 impl<M: Memoize> Optimizer<M> {
-    async fn create_implement_expression_task_v2(
+    async fn create_implement_expression_task(
         &mut self,
         rule: ImplementationRule,
         expression_id: LogicalExpressionId,

@@ -28,7 +28,7 @@ impl<M: Memoize> Optimizer<M> {
     /// that will be notified of the transformation results.
     ///
     /// Only schedules the starting job if the transformation is marked as dirty in the memo.
-    pub(super) async fn create_fork_logical_task_v2(
+    pub(super) async fn create_fork_logical_task(
         &mut self,
         continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
         out: TaskId,
@@ -36,9 +36,9 @@ impl<M: Memoize> Optimizer<M> {
     ) -> Result<TaskId, crate::error::Error> {
         todo!()
 
-        // first: ensure_explore_group_task_v2(group_id, out).await?;
+        // first: ensure_explore_group_task(group_id, out).await?;
         // for all logical expressions in the group:
-        //     create_continue_with_logical_task_v2(
+        //     create_continue_with_logical_task(
         //         expression_id,
         //         task_id
         //     ).await?;

@@ -31,7 +31,7 @@ impl<M: Memoize> Optimizer<M> {
     /// that will be notified of the transformation results.
     ///
     /// Only schedules the starting job if the transformation is marked as dirty in the memo.
-    async fn create_transform_expression_task_v2(
+    async fn create_transform_expression_task(
         &mut self,
         rule: TransformationRule,
         expression_id: LogicalExpressionId,
