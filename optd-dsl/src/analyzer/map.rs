@@ -14,10 +14,10 @@
 //! - Efficient key lookup (O(1) via HashMap)
 //! - Basic map operations (get, concat)
 
+use super::hir::ExprMetadata;
 use super::hir::{
     CoreData, GroupId, Literal, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
-use CoreData::*;
 use std::collections::HashMap;
 use std::hash::Hash;
 
@@ -107,10 +107,10 @@ impl Map {
     }
 
     /// Gets a value by key, returning None (as a Value) if not found
-    pub fn get(&self, key: &Value) -> Value {
+    pub fn get<M: ExprMetadata>(&self, key: &Value<M>) -> Value {
         self.inner
             .get(&value_to_map_key(key))
-            .unwrap_or(&Value(None))
+            .unwrap_or(&Value::new(CoreData::None))
             .clone()
     }
 
@@ -125,24 +125,24 @@ impl Map {
 /// Converts a Value to a MapKey, enforcing valid key types
 /// This performs runtime validation that the key type is supported
 /// and will return an error for invalid key types
-fn value_to_map_key(value: &Value) -> MapKey {
-    match &value.0 {
-        Literal(lit) => match lit {
+fn value_to_map_key<M: ExprMetadata>(value: &Value<M>) -> MapKey {
+    match &value.data {
+        CoreData::Literal(lit) => match lit {
             Literal::Int64(i) => MapKey::Int64(*i),
             Literal::String(s) => MapKey::String(s.clone()),
             Literal::Bool(b) => MapKey::Bool(*b),
             Literal::Unit => MapKey::Unit,
             Literal::Float64(_) => panic!("Invalid map key: Float64"),
         },
-        Tuple(items) => {
+        CoreData::Tuple(items) => {
             let key_items = items.iter().map(value_to_map_key).collect();
             MapKey::Tuple(key_items)
         }
-        Struct(name, fields) => {
+        CoreData::Struct(name, fields) => {
             let key_fields = fields.iter().map(value_to_map_key).collect();
             MapKey::Struct(name.clone(), key_fields)
         }
-        Logical(materializable) => match materializable {
+        CoreData::Logical(materializable) => match materializable {
             Materializable::UnMaterialized(group_id) => {
                 MapKey::Logical(Box::new(LogicalMapKey::UnMaterialized(*group_id)))
             }
@@ -151,7 +151,7 @@ fn value_to_map_key(value: &Value) -> MapKey {
                 MapKey::Logical(Box::new(LogicalMapKey::Materialized(map_op)))
             }
         },
-        Physical(materializable) => match materializable {
+        CoreData::Physical(materializable) => match materializable {
             Materializable::UnMaterialized(goal) => {
                 let properties = value_to_map_key(&goal.properties);
                 let map_goal = GoalMapKey {
@@ -165,11 +165,11 @@ fn value_to_map_key(value: &Value) -> MapKey {
                 MapKey::Physical(Box::new(PhysicalMapKey::Materialized(map_op)))
             }
         },
-        Fail(inner) => {
+        CoreData::Fail(inner) => {
             let inner_key = value_to_map_key(inner);
             MapKey::Fail(Box::new(inner_key))
         }
-        None => MapKey::None,
+        CoreData::None => MapKey::None,
         _ => panic!("Invalid map key: {:?}", value),
     }
 }
@@ -191,8 +191,9 @@ fn value_to_operator_map_key<T>(
 }
 
 /// Converts a LogicalOp to a map key
-fn value_to_logical_map_op(logical_op: &LogicalOp<Value>) -> LogicalMapOpKey {
-    let operator = value_to_operator_map_key(&logical_op.operator, &value_to_map_key);
+fn value_to_logical_map_op<M: ExprMetadata>(logical_op: &LogicalOp<Value<M>>) -> LogicalMapOpKey {
+    let operator =
+        value_to_operator_map_key(&logical_op.operator, &(|v: &Value<M>| value_to_map_key(v)));
 
     LogicalMapOpKey {
         operator,
@@ -201,8 +202,11 @@ fn value_to_logical_map_op(logical_op: &LogicalOp<Value>) -> LogicalMapOpKey {
 }
 
 /// Converts a PhysicalOp to a map key
-fn value_to_physical_map_op(physical_op: &PhysicalOp<Value>) -> PhysicalMapOpKey {
-    let operator = value_to_operator_map_key(&physical_op.operator, &value_to_map_key);
+fn value_to_physical_map_op<M: ExprMetadata>(
+    physical_op: &PhysicalOp<Value<M>, M>,
+) -> PhysicalMapOpKey {
+    let operator =
+        value_to_operator_map_key(&physical_op.operator, &(|v: &Value<M>| value_to_map_key(v)));
 
     let goal = physical_op.goal.as_ref().map(|g| GoalMapKey {
         group_id: g.group_id,
@@ -220,51 +224,50 @@ fn value_to_physical_map_op(physical_op: &PhysicalOp<Value>) -> PhysicalMapOpKey
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::utils::tests::{
         assert_values_equal, create_logical_operator, create_physical_operator,
     };
 
-    use super::*;
-
     // Helper to create Value literals
     fn int_val(i: i64) -> Value {
-        Value(Literal(Literal::Int64(i)))
+        Value::new(CoreData::Literal(Literal::Int64(i)))
     }
 
     fn bool_val(b: bool) -> Value {
-        Value(Literal(Literal::Bool(b)))
+        Value::new(CoreData::Literal(Literal::Bool(b)))
     }
 
     fn string_val(s: &str) -> Value {
-        Value(Literal(Literal::String(s.to_string())))
+        Value::new(CoreData::Literal(Literal::String(s.to_string())))
     }
 
     fn float_val(f: f64) -> Value {
-        Value(Literal(Literal::Float64(f)))
+        Value::new(CoreData::Literal(Literal::Float64(f)))
     }
 
     fn unit_val() -> Value {
-        Value(Literal(Literal::Unit))
+        Value::new(CoreData::Literal(Literal::Unit))
     }
 
     fn tuple_val(items: Vec<Value>) -> Value {
-        Value(Tuple(items))
+        Value::new(CoreData::Tuple(items))
     }
 
     fn struct_val(name: &str, fields: Vec<Value>) -> Value {
-        Value(Struct(name.to_string(), fields))
+        Value::new(CoreData::Struct(name.to_string(), fields))
     }
 
     fn array_val(items: Vec<Value>) -> Value {
-        Value(Array(items))
+        Value::new(CoreData::Array(items))
     }
 
     fn none_val() -> Value {
-        Value(None)
+        Value::new(CoreData::None)
     }
 
     fn fail_val(inner: Value) -> Value {
-        Value(Fail(Box::new(inner)))
+        Value::new(CoreData::Fail(Box::new(inner)))
     }
 
     #[test]

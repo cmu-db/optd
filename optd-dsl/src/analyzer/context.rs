@@ -1,4 +1,4 @@
-use super::hir::Identifier;
+use super::hir::{ExprMetadata, Identifier, NoMetadata};
 use crate::analyzer::hir::Value;
 use std::{collections::HashMap, sync::Arc};
 
@@ -12,15 +12,15 @@ use std::{collections::HashMap, sync::Arc};
 /// The current (innermost) scope is mutable, while all previous scopes
 /// are immutable and stored as Arc for efficient cloning.
 #[derive(Debug, Clone, Default)]
-pub struct Context {
+pub struct Context<M: ExprMetadata = NoMetadata> {
     /// Previous scopes (outer lexical scopes), stored as immutable Arc references
-    previous_scopes: Vec<Arc<HashMap<Identifier, Value>>>,
+    previous_scopes: Vec<Arc<HashMap<Identifier, Value<M>>>>,
 
     /// Current scope (innermost) that can be directly modified
-    current_scope: HashMap<Identifier, Value>,
+    current_scope: HashMap<Identifier, Value<M>>,
 }
 
-impl Context {
+impl<M: ExprMetadata> Context<M> {
     /// Creates a new context with the given initial bindings as the global scope.
     ///
     /// # Arguments
@@ -30,7 +30,7 @@ impl Context {
     /// # Returns
     ///
     /// A new `Context` instance with one scope containing the initial bindings
-    pub fn new(initial_bindings: HashMap<Identifier, Value>) -> Self {
+    pub fn new(initial_bindings: HashMap<Identifier, Value<M>>) -> Self {
         Self {
             previous_scopes: Vec::new(),
             current_scope: initial_bindings,
@@ -59,7 +59,7 @@ impl Context {
     /// # Returns
     ///
     /// Some reference to the value if found, None otherwise
-    pub fn lookup(&self, name: &str) -> Option<&Value> {
+    pub fn lookup(&self, name: &str) -> Option<&Value<M>> {
         // First check the current scope
         if let Some(value) = self.current_scope.get(name) {
             return Some(value);
@@ -84,7 +84,7 @@ impl Context {
     /// # Arguments
     ///
     /// * `other` - The context to merge from (consumed by this operation)
-    pub fn merge(&mut self, other: Context) {
+    pub fn merge(&mut self, other: Context<M>) {
         // Move bindings from other's current scope into our current scope
         for (name, val) in other.current_scope {
             self.current_scope.insert(name, val);
@@ -100,7 +100,7 @@ impl Context {
     ///
     /// * `name` - The name of the variable to bind
     /// * `val` - The value to bind to the variable
-    pub fn bind(&mut self, name: String, val: Value) {
+    pub fn bind(&mut self, name: String, val: Value<M>) {
         self.current_scope.insert(name, val);
     }
 }

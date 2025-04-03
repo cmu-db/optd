@@ -131,7 +131,7 @@ where
     O: Send + 'static,
 {
     Box::pin(async move {
-        match (pattern, &value.0) {
+        match (pattern, &value.data) {
             // Simple patterns.
             (Wildcard, _) => k((value, Some(ctx))).await,
             (Literal(pattern_lit), CoreData::Literal(value_lit)) => {
@@ -263,7 +263,7 @@ where
     // Split array into head and tail.
     let head = arr[0].clone();
     let tail_elements = arr[1..].to_vec();
-    let tail = Value(CoreData::Array(tail_elements));
+    let tail = Value::new(CoreData::Array(tail_elements));
 
     // Create components to match sequentially.
     let patterns = vec![head_pattern, tail_pattern];
@@ -284,13 +284,13 @@ where
                 let tail_value = results[1].0.clone();
 
                 // Extract tail elements.
-                let tail_elements = match &tail_value.0 {
+                let tail_elements = match &tail_value.data {
                     CoreData::Array(elements) => elements.clone(),
                     _ => panic!("Expected Array in tail result"),
                 };
 
                 // Create new array with matched head + tail elements.
-                let new_array = Value(CoreData::Array(
+                let new_array = Value::new(CoreData::Array(
                     std::iter::once(head_value).chain(tail_elements).collect(),
                 ));
 
@@ -339,7 +339,7 @@ where
 
                 // Reconstruct struct with matched field values.
                 let matched_values = results.iter().map(|(v, _)| v.clone()).collect();
-                let new_struct = Value(CoreData::Struct(pat_name, matched_values));
+                let new_struct = Value::new(CoreData::Struct(pat_name, matched_values));
 
                 if all_matched {
                     // Combine contexts by folding over the results, starting with the base context.
@@ -415,10 +415,10 @@ where
                 // Create appropriate value type based on original_value.
                 let new_value = if is_logical {
                     let log_op = LogicalOp::logical(new_op);
-                    Value(CoreData::Logical(Materialized(log_op)))
+                    Value::new(CoreData::Logical(Materialized(log_op)))
                 } else {
                     let phys_op = PhysicalOp::physical(new_op);
-                    Value(CoreData::Physical(Materialized(phys_op)))
+                    Value::new(CoreData::Physical(Materialized(phys_op)))
                 };
 
                 if all_matched {
@@ -561,7 +561,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::String("matched".to_string()));
             }
@@ -605,7 +605,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::Int64(52));
             }
@@ -657,10 +657,10 @@ mod tests {
         let mut ctx = Context::default();
         ctx.bind(
             "length".to_string(),
-            Value(CoreData::Function(FunKind::RustUDF(|args| {
-                match &args[0].0 {
+            Value::new(CoreData::Function(FunKind::RustUDF(|args| {
+                match &args[0].data {
                     CoreData::Array(elements) => {
-                        Value(CoreData::Literal(int(elements.len() as i64)))
+                        Value::new(CoreData::Literal(int(elements.len() as i64)))
                     }
                     _ => panic!("Expected array"),
                 }
@@ -674,7 +674,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::Int64(5));
             }
@@ -722,7 +722,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::Int64(30));
             }
@@ -747,7 +747,7 @@ mod tests {
             ],
         };
 
-        let logical_op_value = Value(CoreData::Logical(Materialized(LogicalOp::logical(op))));
+        let logical_op_value = Value::new(CoreData::Logical(Materialized(LogicalOp::logical(op))));
         let logical_op_expr = Arc::new(Expr::new(CoreVal(logical_op_value.clone())));
 
         // Create a match expression:
@@ -815,7 +815,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(
                     lit,
@@ -849,7 +849,8 @@ mod tests {
         harness.register_group(test_group_id, materialized_join);
 
         // Create an unmaterialized logical operator
-        let unmaterialized_logical_op = Value(CoreData::Logical(UnMaterialized(test_group_id)));
+        let unmaterialized_logical_op =
+            Value::new(CoreData::Logical(UnMaterialized(test_group_id)));
 
         let unmaterialized_expr = Arc::new(Expr::new(CoreVal(unmaterialized_logical_op)));
 
@@ -921,7 +922,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(
                     lit,
@@ -941,7 +942,7 @@ mod tests {
 
         // Create a physical goal
         let test_group_id = GroupId(2);
-        let properties = Box::new(Value(CoreData::Literal(string("sorted"))));
+        let properties = Box::new(Value::new(CoreData::Literal(string("sorted"))));
         let test_goal = Goal {
             group_id: test_group_id,
             properties,
@@ -960,7 +961,7 @@ mod tests {
         harness.register_goal(&test_goal, materialized_hash_join);
 
         // Create an unmaterialized physical operator with the goal
-        let unmaterialized_physical_op = Value(CoreData::Physical(UnMaterialized(test_goal)));
+        let unmaterialized_physical_op = Value::new(CoreData::Physical(UnMaterialized(test_goal)));
 
         let unmaterialized_expr = Arc::new(Expr::new(CoreVal(unmaterialized_physical_op)));
 
@@ -991,12 +992,12 @@ mod tests {
                     // Create formatted result string with binding values
                     Arc::new(Expr::new(Let(
                         "to_string".to_string(),
-                        Arc::new(Expr::new(CoreVal(Value(CoreData::Function(
-                            FunKind::RustUDF(|args| match &args[0].0 {
+                        Arc::new(Expr::new(CoreVal(Value::new(CoreData::Function(
+                            FunKind::RustUDF(|args| match &args[0].data {
                                 CoreData::Literal(lit) => {
-                                    Value(CoreData::Literal(string(&format!("{:?}", lit))))
+                                    Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
                                 }
-                                _ => Value(CoreData::Literal(string("<non-literal>"))),
+                                _ => Value::new(CoreData::Literal(string("<non-literal>"))),
                             }),
                         ))))),
                         Arc::new(Expr::new(Binary(
@@ -1045,7 +1046,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(lit) => {
                 match lit {
                     Literal::String(s) => {
@@ -1074,10 +1075,10 @@ mod tests {
         // Add to_string function to convert numbers to strings
         ctx.bind(
             "to_string".to_string(),
-            Value(CoreData::Function(FunKind::RustUDF(|args| {
-                match &args[0].0 {
+            Value::new(CoreData::Function(FunKind::RustUDF(|args| {
+                match &args[0].data {
                     CoreData::Literal(Literal::Int64(i)) => {
-                        Value(CoreData::Literal(string(&i.to_string())))
+                        Value::new(CoreData::Literal(string(&i.to_string())))
                     }
                     _ => panic!("Expected integer literal"),
                 }
@@ -1190,7 +1191,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::String("Fallthrough arm: 30, 40".to_string()));
             }
@@ -1207,13 +1208,13 @@ mod tests {
         // Add to_string function to convert complex values to strings
         ctx.bind(
             "to_string".to_string(),
-            Value(CoreData::Function(FunKind::RustUDF(|args| {
-                match &args[0].0 {
+            Value::new(CoreData::Function(FunKind::RustUDF(|args| {
+                match &args[0].data {
                     CoreData::Literal(lit) => {
-                        Value(CoreData::Literal(string(&format!("{:?}", lit))))
+                        Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
                     }
-                    CoreData::Array(_) => Value(CoreData::Literal(string("<array>"))),
-                    _ => Value(CoreData::Literal(string("<unknown>"))),
+                    CoreData::Array(_) => Value::new(CoreData::Literal(string("<array>"))),
+                    _ => Value::new(CoreData::Literal(string("<unknown>"))),
                 }
             }))),
         );
@@ -1348,7 +1349,7 @@ mod tests {
 
         // Check result (this is a complex test of correct binding propagation through deeply nested patterns)
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(lit) => {
                 assert!(matches!(lit, Literal::String(_)));
                 let result_str = match lit {
@@ -1414,8 +1415,8 @@ mod tests {
                 lit_val(string("left.id = right.id")),
             ],
             vec![
-                Value(CoreData::Logical(UnMaterialized(group_id_1))),
-                Value(CoreData::Logical(UnMaterialized(group_id_2))),
+                Value::new(CoreData::Logical(UnMaterialized(group_id_1))),
+                Value::new(CoreData::Logical(UnMaterialized(group_id_2))),
             ],
         );
 
@@ -1485,7 +1486,7 @@ mod tests {
         ];
 
         for result in &results {
-            match &result.0 {
+            match &result.data {
                 CoreData::Literal(Literal::String(s)) => {
                     assert!(
                         expected_combinations
@@ -1500,7 +1501,7 @@ mod tests {
         // Ensure we got each combination exactly once (no duplicates)
         let mut result_strings = Vec::new();
         for result in &results {
-            if let CoreData::Literal(Literal::String(s)) = &result.0 {
+            if let CoreData::Literal(Literal::String(s)) = &result.data {
                 result_strings.push(s.clone());
             }
         }

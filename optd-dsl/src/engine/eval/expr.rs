@@ -40,7 +40,7 @@ where
             cond,
             Arc::new(move |value| {
                 Box::pin(capture!([then_expr, else_expr, engine, k], async move {
-                    match value.0 {
+                    match value.data {
                         CoreData::Literal(Literal::Bool(b)) => {
                             if b {
                                 engine.evaluate(then_expr, k).await
@@ -217,7 +217,7 @@ where
             called,
             Arc::new(move |called_value| {
                 Box::pin(capture!([args, engine, k], async move {
-                    match called_value.0 {
+                    match called_value.data {
                         // Handle function calls.
                         CoreData::Function(FunKind::Closure(params, body)) => {
                             evaluate_closure_call(params, body, args, engine, k).await
@@ -407,7 +407,7 @@ where
 ///
 /// The extracted integer index.
 fn extract_index(index_value: &Value) -> usize {
-    match &index_value.0 {
+    match &index_value.data {
         CoreData::Literal(Literal::Int64(i)) => *i as usize,
         _ => panic!("Index must be an integer, got: {:?}", index_value),
     }
@@ -467,7 +467,7 @@ where
                 Box::pin(capture!([collection, k], async move {
                     let index = extract_index(&index_value);
 
-                    let result = match &collection.0 {
+                    let result = match &collection.data {
                         CoreData::Array(items) => get_indexed_item(items, index),
                         CoreData::Tuple(items) => get_indexed_item(items, index),
                         CoreData::Struct(_, fields) => get_indexed_item(fields, index),
@@ -523,7 +523,7 @@ where
             args[0].clone(),
             Arc::new(move |key_value| {
                 Box::pin(capture!([map_value, k], async move {
-                    match &map_value.0 {
+                    match &map_value.data {
                         CoreData::Map(map) => {
                             let result = map.get(&key_value);
                             k(result).await
@@ -650,7 +650,7 @@ where
                         Box::pin(capture!([keys_values, k], async move {
                             // Create a map from keys and values.
                             let map_items = keys_values.into_iter().zip(values_values).collect();
-                            k(Value(CoreData::Map(Map::from_pairs(map_items)))).await
+                            k(Value::new(CoreData::Map(Map::from_pairs(map_items)))).await
                         }))
                     }),
                 )
@@ -758,21 +758,21 @@ mod tests {
         let complex_results = evaluate_and_collect(complex_condition, engine_with_x, harness).await;
 
         // Check results
-        match &true_results[0].0 {
+        match &true_results[0].data {
             CoreData::Literal(Literal::String(value)) => {
                 assert_eq!(value, "yes"); // true condition should select "yes"
             }
             _ => panic!("Expected string value"),
         }
 
-        match &false_results[0].0 {
+        match &false_results[0].data {
             CoreData::Literal(Literal::String(value)) => {
                 assert_eq!(value, "no"); // false condition should select "no"
             }
             _ => panic!("Expected string value"),
         }
 
-        match &complex_results[0].0 {
+        match &complex_results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 40); // 20 * 2 = 40 (since x > 10)
             }
@@ -801,7 +801,7 @@ mod tests {
         let results = evaluate_and_collect(let_expr, engine, harness).await;
 
         // Check result
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 15); // 10 + 5 = 15
             }
@@ -836,7 +836,7 @@ mod tests {
         let results = evaluate_and_collect(nested_let_expr, engine, harness).await;
 
         // Check result
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 30); // 10 + (10 * 2) = 30
             }
@@ -851,7 +851,7 @@ mod tests {
         let mut ctx = Context::default();
 
         // Define a function: fn(x, y) => x + y
-        let add_function = Value(CoreData::Function(FunKind::Closure(
+        let add_function = Value::new(CoreData::Function(FunKind::Closure(
             vec!["x".to_string(), "y".to_string()],
             Arc::new(Expr::new(Binary(ref_expr("x"), BinOp::Add, ref_expr("y")))),
         )));
@@ -868,7 +868,7 @@ mod tests {
         let results = evaluate_and_collect(call_expr, engine, harness).await;
 
         // Check result
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 30); // 10 + 20 = 30
             }
@@ -883,16 +883,16 @@ mod tests {
         let mut ctx = Context::default();
 
         // Define a Rust UDF that calculates the sum of array elements
-        let sum_function = Value(CoreData::Function(FunKind::RustUDF(|args| {
-            match &args[0].0 {
+        let sum_function = Value::new(CoreData::Function(FunKind::RustUDF(|args| {
+            match &args[0].data {
                 CoreData::Array(elements) => {
                     let mut sum = 0;
                     for elem in elements {
-                        if let CoreData::Literal(Literal::Int64(value)) = &elem.0 {
+                        if let CoreData::Literal(Literal::Int64(value)) = &elem.data {
                             sum += value;
                         }
                     }
-                    Value(CoreData::Literal(Literal::Int64(sum)))
+                    Value::new(CoreData::Literal(Literal::Int64(sum)))
                 }
                 _ => panic!("Expected array argument"),
             }
@@ -916,7 +916,7 @@ mod tests {
         let results = evaluate_and_collect(call_expr, engine, harness).await;
 
         // Check result
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 15); // 1 + 2 + 3 + 4 + 5 = 15
             }
@@ -943,7 +943,7 @@ mod tests {
 
         // Check that we got a Map value
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Map(map) => {
                 // Check that map has the correct key-value pairs
                 assert_values_equal(&map.get(&lit_val(string("a"))), &lit_val(int(1)));
@@ -951,7 +951,7 @@ mod tests {
                 assert_values_equal(&map.get(&lit_val(string("c"))), &lit_val(int(3)));
 
                 // Check that non-existent key returns None value
-                assert_values_equal(&map.get(&lit_val(string("d"))), &Value(CoreData::None));
+                assert_values_equal(&map.get(&lit_val(string("d"))), &Value::new(CoreData::None));
             }
             _ => panic!("Expected Map value"),
         }
@@ -990,7 +990,7 @@ mod tests {
 
         // Check that we got a Map value with correctly evaluated keys and values
         assert_eq!(complex_results.len(), 1);
-        match &complex_results[0].0 {
+        match &complex_results[0].data {
             CoreData::Map(map) => {
                 // Check that map has the correct key-value pairs after evaluation
                 assert_values_equal(&map.get(&lit_val(string("xy"))), &lit_val(int(15)));
@@ -1009,12 +1009,12 @@ mod tests {
         // Add a map lookup function
         ctx.bind(
             "get".to_string(),
-            Value(CoreData::Function(FunKind::RustUDF(|args| {
+            Value::new(CoreData::Function(FunKind::RustUDF(|args| {
                 if args.len() != 2 {
                     panic!("get function requires 2 arguments");
                 }
 
-                match &args[0].0 {
+                match &args[0].data {
                     CoreData::Map(map) => map.get(&args[1]),
                     _ => panic!("First argument must be a map"),
                 }
@@ -1092,7 +1092,7 @@ mod tests {
 
         // Check that we got the correct value from the nested lookup
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(Literal::String(value)) => {
                 assert_eq!(value, "San Francisco");
             }
@@ -1107,7 +1107,7 @@ mod tests {
         let mut ctx = Context::default();
 
         // Define a function to compute factorial: fn(n) => if n <= 1 then 1 else n * factorial(n-1)
-        let factorial_function = Value(CoreData::Function(FunKind::Closure(
+        let factorial_function = Value::new(CoreData::Function(FunKind::Closure(
             vec!["n".to_string()],
             Arc::new(Expr::new(IfThenElse(
                 Arc::new(Expr::new(Binary(
@@ -1159,7 +1159,7 @@ mod tests {
         let results = evaluate_and_collect(program, engine, harness).await;
 
         // Check result: factorial(5) / 3 = 120 / 3 = 40
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 40);
             }
@@ -1190,7 +1190,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::Int64(30));
             }
@@ -1206,7 +1206,7 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // Create a tuple (10, "hello", true)
-        let tuple_expr = Arc::new(Expr::new(CoreVal(Value(CoreData::Tuple(vec![
+        let tuple_expr = Arc::new(Expr::new(CoreVal(Value::new(CoreData::Tuple(vec![
             lit_val(int(10)),
             lit_val(string("hello")),
             lit_val(Literal::Bool(true)),
@@ -1219,7 +1219,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::String("hello".to_string()));
             }
@@ -1247,7 +1247,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::Int64(20));
             }
@@ -1290,12 +1290,12 @@ mod tests {
 
         // Check result - should be a tuple (2, None)
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Tuple(elements) => {
                 assert_eq!(elements.len(), 2);
 
                 // Check first element: map["b"] should be 2
-                match &elements[0].0 {
+                match &elements[0].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::Int64(2));
                     }
@@ -1303,7 +1303,7 @@ mod tests {
                 }
 
                 // Check second element: map["d"] should be None
-                match &elements[1].0 {
+                match &elements[1].data {
                     CoreData::None => {}
                     _ => panic!("Expected None for missing key lookup"),
                 }
@@ -1347,7 +1347,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::Int64(40));
             }
@@ -1404,7 +1404,7 @@ mod tests {
 
         // Check join_type result
         assert_eq!(join_type_results.len(), 1);
-        match &join_type_results[0].0 {
+        match &join_type_results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::String("inner".to_string()));
             }
@@ -1413,7 +1413,7 @@ mod tests {
 
         // Check condition result
         assert_eq!(condition_results.len(), 1);
-        match &condition_results[0].0 {
+        match &condition_results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::String("x = y".to_string()));
             }
@@ -1422,11 +1422,11 @@ mod tests {
 
         // Check first child result (orders table scan)
         assert_eq!(first_child_results.len(), 1);
-        match &first_child_results[0].0 {
+        match &first_child_results[0].data {
             CoreData::Logical(Materializable::Materialized(log_op)) => {
                 assert_eq!(log_op.operator.tag, "TableScan");
                 assert_eq!(log_op.operator.data.len(), 1);
-                match &log_op.operator.data[0].0 {
+                match &log_op.operator.data[0].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("orders".to_string()));
                     }
@@ -1438,11 +1438,11 @@ mod tests {
 
         // Check second child result (lineitem table scan)
         assert_eq!(second_child_results.len(), 1);
-        match &second_child_results[0].0 {
+        match &second_child_results[0].data {
             CoreData::Logical(Materializable::Materialized(log_op)) => {
                 assert_eq!(log_op.operator.tag, "TableScan");
                 assert_eq!(log_op.operator.data.len(), 1);
-                match &log_op.operator.data[0].0 {
+                match &log_op.operator.data[0].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("lineitem".to_string()));
                     }
@@ -1502,7 +1502,7 @@ mod tests {
 
         // Check join method result
         assert_eq!(method_results.len(), 1);
-        match &method_results[0].0 {
+        match &method_results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::String("hash".to_string()));
             }
@@ -1511,7 +1511,7 @@ mod tests {
 
         // Check condition result
         assert_eq!(condition_results.len(), 1);
-        match &condition_results[0].0 {
+        match &condition_results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::String("id = id".to_string()));
             }
@@ -1520,11 +1520,11 @@ mod tests {
 
         // Check first child result (customers index scan)
         assert_eq!(first_child_results.len(), 1);
-        match &first_child_results[0].0 {
+        match &first_child_results[0].data {
             CoreData::Physical(Materializable::Materialized(phys_op)) => {
                 assert_eq!(phys_op.operator.tag, "IndexScan");
                 assert_eq!(phys_op.operator.data.len(), 1);
-                match &phys_op.operator.data[0].0 {
+                match &phys_op.operator.data[0].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("customers".to_string()));
                     }
@@ -1536,11 +1536,11 @@ mod tests {
 
         // Check second child result (orders parallel scan)
         assert_eq!(second_child_results.len(), 1);
-        match &second_child_results[0].0 {
+        match &second_child_results[0].data {
             CoreData::Physical(Materializable::Materialized(phys_op)) => {
                 assert_eq!(phys_op.operator.tag, "ParallelScan");
                 assert_eq!(phys_op.operator.data.len(), 1);
-                match &phys_op.operator.data[0].0 {
+                match &phys_op.operator.data[0].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("orders".to_string()));
                     }
@@ -1573,7 +1573,7 @@ mod tests {
         harness.register_group(test_group_id, materialized_join);
 
         // Create an unmaterialized logical operator
-        let unmaterialized_expr = Arc::new(Expr::new(CoreVal(Value(CoreData::Logical(
+        let unmaterialized_expr = Arc::new(Expr::new(CoreVal(Value::new(CoreData::Logical(
             Materializable::UnMaterialized(test_group_id),
         )))));
 
@@ -1607,7 +1607,7 @@ mod tests {
 
         // Check join type result
         assert_eq!(join_type_results.len(), 1);
-        match &join_type_results[0].0 {
+        match &join_type_results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::String("inner".to_string()));
             }
@@ -1616,7 +1616,7 @@ mod tests {
 
         // Check condition result
         assert_eq!(condition_results.len(), 1);
-        match &condition_results[0].0 {
+        match &condition_results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::String("customer.id = order.id".to_string()));
             }
@@ -1625,11 +1625,11 @@ mod tests {
 
         // Check first child result (customers table scan)
         assert_eq!(first_child_results.len(), 1);
-        match &first_child_results[0].0 {
+        match &first_child_results[0].data {
             CoreData::Logical(Materializable::Materialized(log_op)) => {
                 assert_eq!(log_op.operator.tag, "TableScan");
                 assert_eq!(log_op.operator.data.len(), 1);
-                match &log_op.operator.data[0].0 {
+                match &log_op.operator.data[0].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(lit, &Literal::String("customers".to_string()));
                     }
@@ -1647,7 +1647,7 @@ mod tests {
 
         // Create a physical goal
         let test_group_id = GroupId(2);
-        let properties = Box::new(Value(CoreData::Literal(string("sorted"))));
+        let properties = Box::new(Value::new(CoreData::Literal(string("sorted"))));
         let test_goal = Goal {
             group_id: test_group_id,
             properties,
@@ -1669,7 +1669,7 @@ mod tests {
         harness.register_goal(&test_goal, materialized_join);
 
         // Create an unmaterialized physical operator
-        let unmaterialized_expr = Arc::new(Expr::new(CoreVal(Value(CoreData::Physical(
+        let unmaterialized_expr = Arc::new(Expr::new(CoreVal(Value::new(CoreData::Physical(
             Materializable::UnMaterialized(test_goal),
         )))));
 
@@ -1703,7 +1703,7 @@ mod tests {
 
         // Check join method result
         assert_eq!(method_results.len(), 1);
-        match &method_results[0].0 {
+        match &method_results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::String("merge".to_string()));
             }
@@ -1712,7 +1712,7 @@ mod tests {
 
         // Check condition result
         assert_eq!(condition_results.len(), 1);
-        match &condition_results[0].0 {
+        match &condition_results[0].data {
             CoreData::Literal(lit) => {
                 assert_eq!(lit, &Literal::String("customer.id = order.id".to_string()));
             }
@@ -1721,11 +1721,11 @@ mod tests {
 
         // Check first child result (customers scan)
         assert_eq!(first_child_results.len(), 1);
-        match &first_child_results[0].0 {
+        match &first_child_results[0].data {
             CoreData::Physical(Materializable::Materialized(phys_op)) => {
                 assert_eq!(phys_op.operator.tag, "SortedScan");
                 assert_eq!(phys_op.operator.data.len(), 1);
-                match &phys_op.operator.data[0].0 {
+                match &phys_op.operator.data[0].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(*lit, Literal::String("customers".to_string()));
                     }
@@ -1805,11 +1805,11 @@ mod tests {
 
         // Verify the final result is the "customers" TableScan
         assert_eq!(table_scan_results.len(), 1);
-        match &table_scan_results[0].0 {
+        match &table_scan_results[0].data {
             CoreData::Logical(Materializable::Materialized(log_op)) => {
                 assert_eq!(log_op.operator.tag, "TableScan");
                 assert_eq!(log_op.operator.data.len(), 1);
-                match &log_op.operator.data[0].0 {
+                match &log_op.operator.data[0].data {
                     CoreData::Literal(lit) => {
                         assert_eq!(*lit, Literal::String("customers".to_string()));
                     }
@@ -1842,14 +1842,14 @@ mod tests {
         let outer_results = evaluate_and_collect(outer_ref, engine.clone(), harness).await;
 
         // Check results
-        match &inner_results[0].0 {
+        match &inner_results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 200);
             }
             _ => panic!("Expected integer value"),
         }
 
-        match &outer_results[0].0 {
+        match &outer_results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 100);
             }
