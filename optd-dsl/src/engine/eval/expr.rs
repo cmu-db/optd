@@ -1,11 +1,15 @@
 use super::{binary::eval_binary_op, unary::eval_unary_op};
-use crate::analyzer::hir::{BinOp, CoreData, Expr, FunKind, Identifier, Literal, UnaryOp, Value};
+use crate::analyzer::hir::{
+    BinOp, CoreData, Expr, ExprKind, FunKind, Goal, GroupId, Identifier, Literal, LogicalOp,
+    Materializable, PhysicalOp, UnaryOp, Value,
+};
 use crate::analyzer::map::Map;
 use crate::engine::{Continuation, EngineResponse};
 use crate::{
     capture,
     engine::{Engine, utils::evaluate_sequence},
 };
+use ExprKind::*;
 use std::sync::Arc;
 
 /// Evaluates an if-then-else expression.
@@ -115,31 +119,6 @@ pub(crate) async fn evaluate_binary_expr<O>(
 where
     O: Send + 'static,
 {
-    // Helper function to evaluate the right operand after the left is evaluated.
-    async fn evaluate_right<O>(
-        left_val: Value,
-        right: Arc<Expr>,
-        op: BinOp,
-        engine: Engine,
-        k: Continuation<Value, EngineResponse<O>>,
-    ) -> EngineResponse<O>
-    where
-        O: Send + 'static,
-    {
-        engine
-            .evaluate(
-                right,
-                Arc::new(move |right_val| {
-                    Box::pin(capture!([left_val, op, k], async move {
-                        // Apply the binary operation and pass result to continuation.
-                        let result = eval_binary_op(left_val, &op, right_val);
-                        k(result).await
-                    }))
-                }),
-            )
-            .await
-    }
-
     // First evaluate the left operand.
     engine
         .clone()
@@ -148,6 +127,31 @@ where
             Arc::new(move |left_val| {
                 Box::pin(capture!([right, op, engine, k], async move {
                     evaluate_right(left_val, right, op, engine, k).await
+                }))
+            }),
+        )
+        .await
+}
+
+/// Helper function to evaluate the right operand after the left is evaluated.
+async fn evaluate_right<O>(
+    left_val: Value,
+    right: Arc<Expr>,
+    op: BinOp,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    engine
+        .evaluate(
+            right,
+            Arc::new(move |right_val| {
+                Box::pin(capture!([left_val, op, k], async move {
+                    // Apply the binary operation and pass result to continuation.
+                    let result = eval_binary_op(left_val, &op, right_val);
+                    k(result).await
                 }))
             }),
         )
@@ -193,8 +197,8 @@ where
 /// First evaluates the called expression, then the arguments, and finally applies the call to
 /// the arguments, passing results to the continuation.
 ///
-/// Extended to support indexing into collections (Array, Tuple, Struct, Map) when the called
-/// expression evaluates to one of these types and a single argument is provided.
+/// Extended to support indexing into collections (Array, Tuple, Struct, Map, Logical, Physical)
+/// when the called expression evaluates to one of these types and a single argument is provided.
 ///
 /// # Parameters
 ///
@@ -219,25 +223,33 @@ where
             Arc::new(move |called_value| {
                 Box::pin(capture!([args, engine, k], async move {
                     match called_value.0 {
-                        // Handle closure (user-defined function).
+                        // Handle function calls
                         CoreData::Function(FunKind::Closure(params, body)) => {
                             evaluate_closure_call(params, body, args, engine, k).await
                         }
-                        // Handle Rust UDF (built-in function).
                         CoreData::Function(FunKind::RustUDF(udf)) => {
                             evaluate_rust_udf_call(udf, args, engine, k).await
                         }
-                        // Handle indexing into collections (Array, Tuple, Struct).
+
+                        // Handle collection indexing
                         CoreData::Array(_) | CoreData::Tuple(_) | CoreData::Struct(_, _) => {
                             evaluate_indexed_access(called_value, args, engine, k).await
                         }
-                        // Handle Map lookup.
                         CoreData::Map(_) => {
                             evaluate_map_lookup(called_value, args, engine, k).await
                         }
-                        // Value must be a function or indexable collection.
+
+                        // Handle operator field accesses
+                        CoreData::Logical(op) => {
+                            evaluate_logical_operator_access(op, args, engine, k).await
+                        }
+                        CoreData::Physical(op) => {
+                            evaluate_physical_operator_access(op, args, engine, k).await
+                        }
+
+                        // Value must be a function or indexable collection/operator
                         _ => panic!(
-                            "Expected function or indexable collection, got: {:?}",
+                            "Expected function or indexable value, got: {:?}",
                             called_value
                         ),
                     }
@@ -245,6 +257,256 @@ where
             }),
         )
         .await
+}
+
+/// Evaluates access to a logical operator.
+///
+/// Handles both materialized and unmaterialized logical operators.
+///
+/// # Parameters
+///
+/// * `op` - The logical operator (materialized or unmaterialized).
+/// * `args` - The argument expressions (should be a single index).
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+async fn evaluate_logical_operator_access<O>(
+    op: Materializable<LogicalOp<Value>, GroupId>,
+    args: Vec<Arc<Expr>>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    validate_single_index_arg(&args);
+
+    match op {
+        // For unmaterialized logical operators, yield the group and continue when it's expanded.
+        Materializable::UnMaterialized(group_id) => {
+            yield_group_and_continue(group_id, args, engine, k).await
+        }
+        // For materialized logical operators, access the data or children directly.
+        Materializable::Materialized(log_op) => {
+            evaluate_index_on_materialized_operator(
+                args[0].clone(),
+                log_op.operator.data,
+                log_op.operator.children,
+                engine,
+                k,
+            )
+            .await
+        }
+    }
+}
+
+/// Evaluates access to a physical operator.
+///
+/// Handles both materialized and unmaterialized physical operators.
+///
+/// # Parameters
+///
+/// * `op` - The physical operator (materialized or unmaterialized).
+/// * `args` - The argument expressions (should be a single index).
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+async fn evaluate_physical_operator_access<O>(
+    op: Materializable<PhysicalOp<Value>, Goal>,
+    args: Vec<Arc<Expr>>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    validate_single_index_arg(&args);
+
+    match op {
+        // For unmaterialized physical operators, yield the goal and continue when it's expanded
+        Materializable::UnMaterialized(goal) => {
+            yield_goal_and_continue(goal, args, engine, k).await
+        }
+        // For materialized physical operators, access the data or children directly
+        Materializable::Materialized(phys_op) => {
+            evaluate_index_on_materialized_operator(
+                args[0].clone(),
+                phys_op.operator.data,
+                phys_op.operator.children,
+                engine,
+                k,
+            )
+            .await
+        }
+    }
+}
+
+/// Validates that exactly one index argument is provided.
+///
+/// # Parameters
+///
+/// * `args` - The argument expressions to validate.
+fn validate_single_index_arg(args: &[Arc<Expr>]) {
+    if args.len() != 1 {
+        panic!("Operator access requires exactly one index argument");
+    }
+}
+
+/// Yields a group ID to be materialized and continues evaluation once expanded.
+///
+/// # Parameters
+///
+/// * `group_id` - The group ID to yield.
+/// * `args` - The argument expressions for indexed access.
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+fn yield_group_and_continue<O>(
+    group_id: GroupId,
+    args: Vec<Arc<Expr>>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> impl Future<Output = EngineResponse<O>> + Send
+where
+    O: Send + 'static,
+{
+    Box::pin(async move {
+        EngineResponse::YieldGroup(
+            group_id,
+            Arc::new(move |expanded_value| {
+                Box::pin(capture!([args, engine, k], async move {
+                    // Once the group is expanded, perform the indexed access.
+                    evaluate_call(
+                        Arc::new(Expr::new(CoreVal(expanded_value))),
+                        args,
+                        engine,
+                        k,
+                    )
+                    .await
+                }))
+            }),
+        )
+    })
+}
+
+/// Yields a goal to be materialized and continues evaluation once expanded.
+///
+/// # Parameters
+///
+/// * `goal` - The goal to yield.
+/// * `args` - The argument expressions for indexed access.
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+fn yield_goal_and_continue<O>(
+    goal: Goal,
+    args: Vec<Arc<Expr>>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> impl Future<Output = EngineResponse<O>> + Send
+where
+    O: Send + 'static,
+{
+    Box::pin(async move {
+        EngineResponse::YieldGoal(
+            goal,
+            Arc::new(move |expanded_value| {
+                Box::pin(capture!([args, engine, k], async move {
+                    // Once the goal is expanded, perform the indexed access
+                    evaluate_call(
+                        Arc::new(Expr::new(CoreVal(expanded_value))),
+                        args,
+                        engine,
+                        k,
+                    )
+                    .await
+                }))
+            }),
+        )
+    })
+}
+
+/// Evaluates an index expression on a materialized operator.
+///
+/// Treats the operator's data and children as a concatenated vector and accesses by index.
+///
+/// # Parameters
+///
+/// * `index_expr` - The index expression to evaluate.
+/// * `data` - The operator's data fields.
+/// * `children` - The operator's children.
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+async fn evaluate_index_on_materialized_operator<O>(
+    index_expr: Arc<Expr>,
+    data: Vec<Value>,
+    children: Vec<Value>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    // Evaluate the index expression
+    engine
+        .evaluate(
+            index_expr,
+            Arc::new(move |index_value| {
+                Box::pin(capture!([data, children, k], async move {
+                    // Extract the index as an integer
+                    let index = extract_index(&index_value);
+
+                    // Access the concatenated vector of data and children
+                    let result = access_operator_field(index, &data, &children);
+
+                    // Pass the indexed value to the continuation
+                    k(result).await
+                }))
+            }),
+        )
+        .await
+}
+
+/// Extracts an integer index from a value.
+///
+/// # Parameters
+///
+/// * `index_value` - The value containing the index.
+///
+/// # Returns
+///
+/// The extracted integer index.
+fn extract_index(index_value: &Value) -> usize {
+    match &index_value.0 {
+        CoreData::Literal(Literal::Int64(i)) => *i as usize,
+        _ => panic!("Index must be an integer, got: {:?}", index_value),
+    }
+}
+
+/// Accesses a field in an operator by index.
+///
+/// Treats data and children as a concatenated vector and accesses by index.
+///
+/// # Parameters
+///
+/// * `index` - The index to access.
+/// * `data` - The operator's data fields.
+/// * `children` - The operator's children.
+///
+/// # Returns
+///
+/// The value at the specified index.
+fn access_operator_field(index: usize, data: &[Value], children: &[Value]) -> Value {
+    let data_len = data.len();
+    let total_len = data_len + children.len();
+
+    if index >= total_len {
+        panic!("index out of bounds: {} >= {}", index, total_len);
+    }
+
+    if index < data_len {
+        // Access data
+        data[index].clone()
+    } else {
+        // Access children
+        children[index - data_len].clone()
+    }
 }
 
 /// Evaluates indexing into a collection (Array, Tuple, or Struct).
@@ -265,9 +527,7 @@ where
     O: Send + 'static,
 {
     // Check that there's exactly one argument.
-    if args.len() != 1 {
-        panic!("Indexed access requires exactly one index argument");
-    }
+    validate_single_index_arg(&args);
 
     // Evaluate the index expression.
     engine
@@ -276,10 +536,7 @@ where
             Arc::new(move |index_value| {
                 Box::pin(capture!([collection, k], async move {
                     // Extract the index as an integer.
-                    let index = match &index_value.0 {
-                        CoreData::Literal(Literal::Int64(i)) => *i as usize,
-                        _ => panic!("Index must be an integer, got: {:?}", index_value),
-                    };
+                    let index = extract_index(&index_value);
 
                     // Index into the collection based on its type.
                     let result = match &collection.0 {
@@ -289,20 +546,30 @@ where
                         _ => panic!("Attempted to index a non-indexable value: {:?}", collection),
                     };
 
-                    fn get_indexed_item(items: &[Value], index: usize) -> Value {
-                        if index < items.len() {
-                            items[index].clone()
-                        } else {
-                            panic!("index out of bounds: {} >= {}", index, items.len());
-                        }
-                    }
-
                     // Pass the indexed value to the continuation.
                     k(result).await
                 }))
             }),
         )
         .await
+}
+
+/// Gets an item from a collection at the specified index.
+///
+/// # Parameters
+///
+/// * `items` - The collection items.
+/// * `index` - The index to access.
+///
+/// # Returns
+///
+/// The value at the specified index.
+fn get_indexed_item(items: &[Value], index: usize) -> Value {
+    if index < items.len() {
+        items[index].clone()
+    } else {
+        panic!("index out of bounds: {} >= {}", index, items.len());
+    }
 }
 
 /// Evaluates a map lookup.
@@ -323,9 +590,7 @@ where
     O: Send + 'static,
 {
     // Check that there's exactly one argument
-    if args.len() != 1 {
-        panic!("Map lookup requires exactly one key argument");
-    }
+    validate_single_index_arg(&args);
 
     // Evaluate the key expression
     engine
