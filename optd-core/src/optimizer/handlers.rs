@@ -146,13 +146,13 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         plan: PartialPhysicalPlan,
         goal_id: GoalId,
-        job_id: JobId,
+        _task_id: TaskId,
     ) -> Result<(), Error> {
         let goal_id = self.memo.find_repr_goal(goal_id).await?;
 
         let member = self.probe_ingest_physical_plan(&plan).await?;
 
-        self.receive_new_goal_member(member, goal_id, job_id).await?;
+        self.receive_new_goal_member(goal_id, member).await?;
 
         Ok(())
     }

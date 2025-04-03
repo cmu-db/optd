@@ -241,8 +241,8 @@ impl<M: Memoize> Optimizer<M> {
                             }
                         }
                         NewPhysicalPartial(plan, goal_id) => {
-                            if self.get_related_task(job_id).is_some() {
-                                self.process_new_physical_partial(plan, goal_id, job_id).await?;
+                            if let Some(task_id) = self.get_related_task(job_id) {
+                                self.process_new_physical_partial(plan, goal_id, task_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
