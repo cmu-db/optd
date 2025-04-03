@@ -21,7 +21,8 @@ pub enum Type {
 
     // Special types
     Unit,
-    Universe,
+    Universe, // All types are subtypes of Universe
+    Nothing,  // Inherits all types.
     Unknown,
 
     // User types
@@ -141,6 +142,9 @@ impl TypeRegistry {
         match (child, parent) {
             // Universe is the top type - everything is a subtype of Universe
             (_, Type::Universe) => true,
+
+            // Nothing is the bottom type - it is a subtype of everything
+            (Type::Nothing, _) => true,
 
             // Stored and Costed type handling
             (Type::Stored(child_inner), Type::Stored(parent_inner)) => {
@@ -611,6 +615,33 @@ mod type_registry_tests {
         assert!(!registry.is_subtype(&Type::Universe, &Type::Int64));
         assert!(!registry.is_subtype(&Type::Universe, &Type::String));
         assert!(!registry.is_subtype(&Type::Universe, &Type::Array(Box::new(Type::Int64))));
+    }
+
+    #[test]
+    fn test_nothing_as_bottom_type() {
+        let registry = TypeRegistry::default();
+
+        // Nothing is a subtype of all primitive types
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Int64));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::String));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Bool));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Float64));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Unit));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Universe));
+
+        // Nothing is a subtype of complex types
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Array(Box::new(Type::Int64))));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Tuple(vec![Type::Int64, Type::Bool])));
+        assert!(registry.is_subtype(
+            &Type::Nothing,
+            &Type::Closure(Box::new(Type::Int64), Box::new(Type::Bool))
+        ));
+
+        // But no type is a subtype of Nothing (except Nothing itself)
+        assert!(!registry.is_subtype(&Type::Int64, &Type::Nothing));
+        assert!(!registry.is_subtype(&Type::Bool, &Type::Nothing));
+        assert!(!registry.is_subtype(&Type::Universe, &Type::Nothing));
+        assert!(!registry.is_subtype(&Type::Array(Box::new(Type::Int64)), &Type::Nothing));
     }
 
     #[test]
