@@ -23,6 +23,10 @@ impl ContinueWithLogicalTask {
             fork_in: None,
         }
     }
+
+    pub fn add_fork_in(&mut self, task_id: TaskId) {
+        self.fork_in = Some(task_id);
+    }
 }
 
 impl<M: Memoize> Optimizer<M> {

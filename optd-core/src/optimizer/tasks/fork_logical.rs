@@ -49,7 +49,7 @@ impl<M: Memoize> Optimizer<M> {
     /// that will be notified of the transformation results.
     ///
     /// Only schedules the starting job if the transformation is marked as dirty in the memo.
-    pub(super) async fn create_fork_logical_task(
+    pub async fn create_fork_logical_task(
         &mut self,
         group_id: GroupId,
         continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
