@@ -14,7 +14,7 @@ use super::TaskId;
 
 /// Task data for transforming a logical expression using a specific rule.
 #[derive(Debug)]
-pub(super) struct TransformExpressionTask {
+pub struct TransformExpressionTask {
     /// The transformation rule to apply.
     pub rule: TransformationRule,
 

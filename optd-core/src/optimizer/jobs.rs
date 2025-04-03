@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 /// Unique identifier for jobs in the optimization system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct JobId(pub i64);
+pub struct JobId(pub i64);
 
 /// A job represents a discrete unit of work within the optimization process.
 ///
@@ -24,7 +24,7 @@ pub(super) struct JobId(pub i64);
 /// Each variant represents a specific optimization operation that can be
 /// performed asynchronously and independently.
 #[derive(Clone)]
-pub(super) enum Job {
+pub enum Job {
     /// Executes a job associated with a task.
     Task(TaskId),
     /// Derives logical properties for a logical expression.
@@ -107,25 +107,6 @@ impl<M: Memoize> Optimizer<M> {
                     todo!()
                 }
             }
-
-            // JobKind::StartTransformationRule(rule_name, logical_expr_id, group_id) => {
-
-            // }
-            // JobKind::StartImplementationRule(rule_name, expression_id, goal_id) => {
-            //     self.execute_implementation_rule(rule_name, expression_id, goal_id, job_id)
-            //         .await?;
-            // }
-            // JobKind::StartCostExpression(expression_id) => {
-            //     self.execute_cost_expression(expression_id, job_id).await?;
-            // }
-            // JobKind::ContinueWithLogical(logical_expr_id, k) => {
-            //     self.execute_continue_with_logical(logical_expr_id, k)
-            //         .await?;
-            // }
-            // JobKind::ContinueWithCostedPhysical(expression_id, cost, k) => {
-            //     self.execute_continue_with_costed(expression_id, cost, k)
-            //         .await?;
-            // }
         }
 
         Ok(())
@@ -143,9 +124,9 @@ impl<M: Memoize> Optimizer<M> {
     /// # Returns
     /// * `Result<(), Error>` - Success or error during job completion.
     /// TODO(yuchen): The engine should keep track of the root (expr_id, rule) pairs
-    pub(super) async fn complete_job(&mut self, job_id: JobId) -> Result<(), Error> {
+    pub(super) async fn complete_job(&mut self, _job_id: JobId) -> Result<(), Error> {
         // Remove the job from the running jobs.
-        let Job(task_id, _) = self.running_jobs.remove(&job_id).unwrap();
+        // let Job(task_id, _) = self.running_jobs.remove(&job_id).unwrap();
 
         // // Remove the job from the task's uncompleted jobs set.
         // let task = self.tasks.get_mut(&task_id).unwrap();
@@ -231,16 +212,17 @@ impl<M: Memoize> Optimizer<M> {
         let message_tx = self.message_tx.clone();
 
         tokio::spawn(async move {
-            let logical_expression_id = expression_id;
+            let _logical_expr_id = expression_id;
             let response = engine
                 .launch_rule(
                     "derive",
                     vec![partial_logical_to_value(&plan)],
                     Arc::new(move |value| {
                         Box::pin(async move {
-                            let properties = value_to_logical_properties(&value);
+                            let _properties = value_to_logical_properties(&value);
                             // TODO(yuchen): refactor EngineMessage type to include job id in header instead.
-                            CreateGroup(logical_expression_id, properties)
+                            // CreateGroup(logical_expression_id, properties)
+                            todo!()
                         })
                     }),
                 )

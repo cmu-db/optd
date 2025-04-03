@@ -12,7 +12,7 @@ use crate::{
 
 use super::{SourceTaskId, Task, TaskId};
 
-pub(super) struct ForkCostedTask {
+pub struct ForkCostedTask {
     pub continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
 
     /// The current upper bound on the allowed cost budget.
@@ -50,7 +50,7 @@ impl ForkCostedTask {
 }
 
 impl<M: Memoize> Optimizer<M> {
-    pub async fn create_fork_costed_task(
+    pub(crate) async fn create_fork_costed_task(
         &mut self,
         goal_id: GoalId,
         continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,

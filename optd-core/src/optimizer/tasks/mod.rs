@@ -9,16 +9,16 @@ mod optimize_goal;
 mod optimize_plan;
 mod transform_expr;
 
-pub use continue_with_costed::*;
-pub use continue_with_logical::*;
-pub use cost_expr::*;
-pub use explore_group::*;
-pub use fork_costed::*;
-pub use fork_logical::*;
-pub use implement_expr::*;
-pub use optimize_goal::*;
-pub use optimize_plan::*;
-pub use transform_expr::*;
+use continue_with_costed::*;
+use continue_with_logical::*;
+use cost_expr::*;
+use explore_group::*;
+use fork_costed::*;
+use fork_logical::*;
+use implement_expr::*;
+use optimize_goal::*;
+use optimize_plan::*;
+use transform_expr::*;
 
 use crate::memo::Memoize;
 
@@ -26,7 +26,7 @@ use super::Optimizer;
 
 /// Unique identifier for tasks in the optimization system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct TaskId(pub i64);
+pub struct TaskId(pub i64);
 
 #[derive(Debug, Clone, Copy)]
 pub enum SourceTaskId {
@@ -60,7 +60,7 @@ pub enum SourceTaskId {
 /// They represent structured, potentially hierarchical components of the
 /// optimization process.
 #[derive(Debug)]
-pub(super) enum Task {
+pub enum Task {
     /// Top-level task to optimize a logical plan.
     OptimizePlan(OptimizePlanTask),
 
