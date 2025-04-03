@@ -1,3 +1,4 @@
+// TODO(yuchen): Rule ids to avoid expensive clone.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TransformationRule(pub String);
 

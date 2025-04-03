@@ -1,8 +1,6 @@
 use super::{
     EngineMessage, EngineMessageKind, JobId, OptimizeRequest, Optimizer, PendingMessage, TaskId,
     ingest::LogicalIngest,
-    jobs::JobKind,
-    tasks_deleted::{CostExpressionTask, ImplementExpressionTask, TaskKind, TransformExpressionTask},
 };
 use crate::{
     cir::{
@@ -15,7 +13,6 @@ use crate::{
 };
 use EngineMessageKind::*;
 use LogicalIngest::*;
-use TaskKind::*;
 use futures::{
     SinkExt,
     channel::{mpsc::Sender, oneshot},

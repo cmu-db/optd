@@ -1,14 +1,15 @@
 use optd_dsl::{
-    analyzer::hir::{GroupId, Value},
+    analyzer::hir::Value,
     engine::{Continuation, EngineResponse},
 };
 
 use crate::{
+    cir::GroupId,
     memo::Memoize,
     optimizer::{EngineMessageKind, Optimizer},
 };
 
-use super::TaskId;
+use super::{SourceTaskId, Task, TaskId};
 
 pub(super) struct ForkLogicalTask {
     pub continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
@@ -17,7 +18,27 @@ pub(super) struct ForkLogicalTask {
     /// (memo alexis: I don't think these matter too much for continuations...)
     pub out: TaskId,
     pub explore_group_in: TaskId,
-    pub continue_tasks_in: Vec<TaskId>,
+    pub continue_ins: Vec<TaskId>,
+}
+
+impl ForkLogicalTask {
+    /// Creates a new `ForkLogicalTask` and track `out` as a subscriber.
+    pub fn new(
+        continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
+        out: TaskId,
+        explore_group_in: TaskId,
+    ) -> Self {
+        Self {
+            continuation,
+            out,
+            explore_group_in,
+            continue_ins: Vec::new(),
+        }
+    }
+
+    fn add_continue_in(&mut self, task_id: TaskId) {
+        self.continue_ins.push(task_id);
+    }
 }
 
 impl<M: Memoize> Optimizer<M> {
@@ -30,17 +51,36 @@ impl<M: Memoize> Optimizer<M> {
     /// Only schedules the starting job if the transformation is marked as dirty in the memo.
     pub(super) async fn create_fork_logical_task(
         &mut self,
+        group_id: GroupId,
         continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
         out: TaskId,
-        group_id: GroupId,
     ) -> Result<TaskId, crate::error::Error> {
-        todo!()
+        let task_id = self.next_task_id();
+        let (explore_group_in, logical_expr_ids) = self
+            .ensure_explore_group_task(group_id, SourceTaskId::ForkLogical(task_id))
+            .await?;
 
-        // first: ensure_explore_group_task(group_id, out).await?;
-        // for all logical expressions in the group:
-        //     create_continue_with_logical_task(
-        //         expression_id,
-        //         task_id
-        //     ).await?;
+        let mut task = ForkLogicalTask::new(continuation, out, explore_group_in);
+
+        for logical_expr_id in logical_expr_ids {
+            let cont_with_logical_task_id = self
+                .create_continue_with_logical_task(logical_expr_id, task_id)
+                .await?;
+            task.add_continue_in(cont_with_logical_task_id);
+        }
+
+        self.tasks.insert(task_id, Task::ForkLogical(task));
+
+        Ok(task_id)
+    }
+}
+
+impl std::fmt::Debug for ForkLogicalTask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ForkLogicalTask")
+            .field("out", &self.out)
+            .field("explore_group_in", &self.explore_group_in)
+            .field("continue_ins", &self.continue_ins)
+            .finish()
     }
 }
