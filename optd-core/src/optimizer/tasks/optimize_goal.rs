@@ -73,7 +73,6 @@ impl<M: Memoize> Optimizer<M> {
             let task = self.tasks.get_mut(task_id).unwrap();
             let optimize_goal_task = task.as_optimize_goal_mut();
             optimize_goal_task.add_subscriber(out);
-            // TODO(yuchen): consider the cost of the best physical expression from other goal members.
             let best_optimized = self.memo.get_best_optimized_physical_expr(goal_id).await?;
             Ok((*task_id, best_optimized))
         } else {
