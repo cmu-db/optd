@@ -69,6 +69,7 @@ impl<M: Memoize> Optimizer<M> {
         optimize_goal_out: TaskId,
     ) -> Result<TaskId, Error> {
         if let Some(task_id) = self.cost_expression_task_index.get(&physical_expr_id) {
+            // If cost expression task already exists, we register the subscriber and reuse.
             let cost_task = self
                 .tasks
                 .get_mut(task_id)
