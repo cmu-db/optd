@@ -6,7 +6,6 @@ use crate::{
     capture,
     engine::{Engine, utils::evaluate_sequence},
 };
-use FunKind::*;
 use std::sync::Arc;
 
 /// Evaluates an if-then-else expression.
@@ -174,13 +173,13 @@ pub(crate) async fn evaluate_unary_expr<O>(
 where
     O: Send + 'static,
 {
-    // Evaluate the operand, then apply the unary operation
+    // Evaluate the operand, then apply the unary operation.
     engine
         .evaluate(
             expr,
             Arc::new(move |value| {
                 Box::pin(capture!([op, k], async move {
-                    // Apply the unary operation and pass result to continuation
+                    // Apply the unary operation and pass result to continuation.
                     let result = eval_unary_op(&op, value);
                     k(result).await
                 }))
@@ -189,19 +188,22 @@ where
         .await
 }
 
-/// Evaluates a function call expression.
+/// Evaluates a call expression.
 ///
-/// First evaluates the function expression, then the arguments, and finally applies the function to
+/// First evaluates the called expression, then the arguments, and finally applies the call to
 /// the arguments, passing results to the continuation.
+///
+/// Extended to support indexing into collections (Array, Tuple, Struct, Map) when the called
+/// expression evaluates to one of these types and a single argument is provided.
 ///
 /// # Parameters
 ///
-/// * `fun` - The function expression to evaluate.
+/// * `called` - The called expression to evaluate.
 /// * `args` - The argument expressions to evaluate.
 /// * `engine` - The evaluation engine.
 /// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_function_call<O>(
-    fun: Arc<Expr>,
+pub(crate) async fn evaluate_call<O>(
+    called: Arc<Expr>,
     args: Vec<Arc<Expr>>,
     engine: Engine,
     k: Continuation<Value, EngineResponse<O>>,
@@ -213,20 +215,135 @@ where
     engine
         .clone()
         .evaluate(
-            fun,
-            Arc::new(move |fun_value| {
+            called,
+            Arc::new(move |called_value| {
                 Box::pin(capture!([args, engine, k], async move {
-                    match fun_value.0 {
+                    match called_value.0 {
                         // Handle closure (user-defined function).
-                        CoreData::Function(Closure(params, body)) => {
+                        CoreData::Function(FunKind::Closure(params, body)) => {
                             evaluate_closure_call(params, body, args, engine, k).await
                         }
                         // Handle Rust UDF (built-in function).
-                        CoreData::Function(RustUDF(udf)) => {
+                        CoreData::Function(FunKind::RustUDF(udf)) => {
                             evaluate_rust_udf_call(udf, args, engine, k).await
                         }
-                        // Value must be a function.
-                        _ => panic!("Expected function value"),
+                        // Handle indexing into collections (Array, Tuple, Struct).
+                        CoreData::Array(_) | CoreData::Tuple(_) | CoreData::Struct(_, _) => {
+                            evaluate_indexed_access(called_value, args, engine, k).await
+                        }
+                        // Handle Map lookup.
+                        CoreData::Map(_) => {
+                            evaluate_map_lookup(called_value, args, engine, k).await
+                        }
+                        // Value must be a function or indexable collection.
+                        _ => panic!(
+                            "Expected function or indexable collection, got: {:?}",
+                            called_value
+                        ),
+                    }
+                }))
+            }),
+        )
+        .await
+}
+
+/// Evaluates indexing into a collection (Array, Tuple, or Struct).
+///
+/// # Parameters
+///
+/// * `collection` - The collection value to index into.
+/// * `args` - The argument expressions (should be a single index).
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+async fn evaluate_indexed_access<O>(
+    collection: Value,
+    args: Vec<Arc<Expr>>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    // Check that there's exactly one argument.
+    if args.len() != 1 {
+        panic!("Indexed access requires exactly one index argument");
+    }
+
+    // Evaluate the index expression.
+    engine
+        .evaluate(
+            args[0].clone(),
+            Arc::new(move |index_value| {
+                Box::pin(capture!([collection, k], async move {
+                    // Extract the index as an integer.
+                    let index = match &index_value.0 {
+                        CoreData::Literal(Literal::Int64(i)) => *i as usize,
+                        _ => panic!("Index must be an integer, got: {:?}", index_value),
+                    };
+
+                    // Index into the collection based on its type.
+                    let result = match &collection.0 {
+                        CoreData::Array(items) => get_indexed_item(items, index),
+                        CoreData::Tuple(items) => get_indexed_item(items, index),
+                        CoreData::Struct(_, fields) => get_indexed_item(fields, index),
+                        _ => panic!("Attempted to index a non-indexable value: {:?}", collection),
+                    };
+
+                    fn get_indexed_item(items: &[Value], index: usize) -> Value {
+                        if index < items.len() {
+                            items[index].clone()
+                        } else {
+                            panic!("index out of bounds: {} >= {}", index, items.len());
+                        }
+                    }
+
+                    // Pass the indexed value to the continuation.
+                    k(result).await
+                }))
+            }),
+        )
+        .await
+}
+
+/// Evaluates a map lookup.
+///
+/// # Parameters
+///
+/// * `map_value` - The map value to look up in.
+/// * `args` - The argument expressions (should be a single key).
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+async fn evaluate_map_lookup<O>(
+    map_value: Value,
+    args: Vec<Arc<Expr>>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    // Check that there's exactly one argument
+    if args.len() != 1 {
+        panic!("Map lookup requires exactly one key argument");
+    }
+
+    // Evaluate the key expression
+    engine
+        .evaluate(
+            args[0].clone(),
+            Arc::new(move |key_value| {
+                Box::pin(capture!([map_value, k], async move {
+                    // Extract the map
+                    match &map_value.0 {
+                        CoreData::Map(map) => {
+                            // Look up the key in the map, returning None if not found
+                            let result = map.get(&key_value);
+                            k(result).await
+                        }
+                        _ => panic!(
+                            "Attempted to perform map lookup on non-map value: {:?}",
+                            map_value
+                        ),
                     }
                 }))
             }),
@@ -387,7 +504,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::engine::Engine;
-    use crate::utils::tests::{array_val, assert_values_equal, ref_expr};
+    use crate::utils::tests::{array_val, assert_values_equal, ref_expr, struct_val};
     use crate::{
         analyzer::{
             context::Context,
@@ -857,6 +974,194 @@ mod tests {
                 assert_eq!(*value, 40);
             }
             _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test array indexing with call syntax
+    #[tokio::test]
+    async fn test_array_indexing() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create an array [10, 20, 30, 40, 50]
+        let array_expr = Arc::new(Expr::new(CoreVal(array_val(vec![
+            lit_val(int(10)),
+            lit_val(int(20)),
+            lit_val(int(30)),
+            lit_val(int(40)),
+            lit_val(int(50)),
+        ]))));
+
+        // Access array[2] which should be 30
+        let index_expr = Arc::new(Expr::new(Call(array_expr, vec![lit_expr(int(2))])));
+
+        let results = evaluate_and_collect(index_expr, engine, harness).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::Int64(30));
+            }
+            _ => panic!("Expected integer literal"),
+        }
+    }
+
+    /// Test tuple indexing with call syntax
+    #[tokio::test]
+    async fn test_tuple_indexing() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create a tuple (10, "hello", true)
+        let tuple_expr = Arc::new(Expr::new(CoreVal(Value(CoreData::Tuple(vec![
+            lit_val(int(10)),
+            lit_val(string("hello")),
+            lit_val(Literal::Bool(true)),
+        ])))));
+
+        // Access tuple[1] which should be "hello"
+        let index_expr = Arc::new(Expr::new(Call(tuple_expr, vec![lit_expr(int(1))])));
+
+        let results = evaluate_and_collect(index_expr, engine, harness).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::String("hello".to_string()));
+            }
+            _ => panic!("Expected string literal"),
+        }
+    }
+
+    /// Test struct field access with call syntax
+    #[tokio::test]
+    async fn test_struct_indexing() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create a struct Point { x: 10, y: 20 }
+        let struct_expr = Arc::new(Expr::new(CoreVal(struct_val(
+            "Point",
+            vec![lit_val(int(10)), lit_val(int(20))],
+        ))));
+
+        // Access struct[1] which should be 20 (the y field)
+        let index_expr = Arc::new(Expr::new(Call(struct_expr, vec![lit_expr(int(1))])));
+
+        let results = evaluate_and_collect(index_expr, engine, harness).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::Int64(20));
+            }
+            _ => panic!("Expected integer literal"),
+        }
+    }
+
+    /// Test map lookup with call syntax
+    #[tokio::test]
+    async fn test_map_lookup() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create a map with key-value pairs: { "a": 1, "b": 2, "c": 3 }
+        // Use a let expression to bind the map and do lookups directly
+        let test_expr = Arc::new(Expr::new(Let(
+            "map".to_string(),
+            Arc::new(Expr::new(Map(vec![
+                (lit_expr(string("a")), lit_expr(int(1))),
+                (lit_expr(string("b")), lit_expr(int(2))),
+                (lit_expr(string("c")), lit_expr(int(3))),
+            ]))),
+            // Create a tuple of map["b"] and map["d"] to test both existing and missing keys
+            Arc::new(Expr::new(CoreExpr(CoreData::Tuple(vec![
+                // map["b"] - should be 2
+                Arc::new(Expr::new(Call(
+                    ref_expr("map"),
+                    vec![lit_expr(string("b"))],
+                ))),
+                // map["d"] - should be None
+                Arc::new(Expr::new(Call(
+                    ref_expr("map"),
+                    vec![lit_expr(string("d"))],
+                ))),
+            ])))),
+        )));
+
+        let results = evaluate_and_collect(test_expr, engine, harness).await;
+
+        // Check result - should be a tuple (2, None)
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Tuple(elements) => {
+                assert_eq!(elements.len(), 2);
+
+                // Check first element: map["b"] should be 2
+                match &elements[0].0 {
+                    CoreData::Literal(lit) => {
+                        assert_eq!(lit, &Literal::Int64(2));
+                    }
+                    _ => panic!("Expected integer literal for existing key lookup"),
+                }
+
+                // Check second element: map["d"] should be None
+                match &elements[1].0 {
+                    CoreData::None => {}
+                    _ => panic!("Expected None for missing key lookup"),
+                }
+            }
+            _ => panic!("Expected tuple result"),
+        }
+    }
+
+    /// Test complex expressions for both collection and index
+    #[tokio::test]
+    async fn test_complex_collection_and_index() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create a let expression that binds an array and then accesses it
+        // let arr = [10, 20, 30, 40, 50] in
+        // let idx = 2 + 1 in
+        //   arr[idx]  // should be 40
+        let complex_expr = Arc::new(Expr::new(Let(
+            "arr".to_string(),
+            Arc::new(Expr::new(CoreExpr(CoreData::Array(vec![
+                lit_expr(int(10)),
+                lit_expr(int(20)),
+                lit_expr(int(30)),
+                lit_expr(int(40)),
+                lit_expr(int(50)),
+            ])))),
+            Arc::new(Expr::new(Let(
+                "idx".to_string(),
+                Arc::new(Expr::new(Binary(
+                    lit_expr(int(2)),
+                    BinOp::Add,
+                    lit_expr(int(1)),
+                ))),
+                Arc::new(Expr::new(Call(ref_expr("arr"), vec![ref_expr("idx")]))),
+            ))),
+        )));
+
+        let results = evaluate_and_collect(complex_expr, engine, harness).await;
+
+        // Check result
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(lit) => {
+                assert_eq!(lit, &Literal::Int64(40));
+            }
+            _ => panic!("Expected integer literal"),
         }
     }
 
