@@ -11,7 +11,7 @@ use crate::{
 
 use super::{SourceTaskId, Task, TaskId};
 
-pub(super) struct ForkLogicalTask {
+pub struct ForkLogicalTask {
     pub continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
 
     /// ContinueWithLogical | TransformExpression | ImplementExpression

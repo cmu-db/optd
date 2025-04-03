@@ -152,7 +152,6 @@ pub trait Memoize: Send + Sync + 'static {
     async fn create_group(
         &mut self,
         logical_expr_id: LogicalExpressionId,
-        props: &LogicalProperties,
     ) -> MemoizeResult<GroupId>;
 
     /// Merges groups 1 and 2, unifying them under a common representative.

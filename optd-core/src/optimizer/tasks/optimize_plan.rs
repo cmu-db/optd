@@ -10,7 +10,7 @@ use super::TaskId;
 
 /// Task data for optimizing a logical plan.
 #[derive(Debug)]
-pub(super) struct OptimizePlanTask {
+pub struct OptimizePlanTask {
     /// The logical plan to be optimized.
     pub plan: LogicalPlan,
 

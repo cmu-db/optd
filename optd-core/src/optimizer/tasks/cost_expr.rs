@@ -14,7 +14,7 @@ use super::TaskId;
 
 /// Task data for costing a physical expression.
 #[derive(Debug)]
-pub(super) struct CostExpressionTask {
+pub struct CostExpressionTask {
     /// The physical expression to cost.
     pub physical_expr_id: PhysicalExpressionId,
 

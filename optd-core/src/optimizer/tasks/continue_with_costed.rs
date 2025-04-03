@@ -9,7 +9,7 @@ use crate::{
 use super::{Task, TaskId};
 
 #[derive(Debug)]
-pub(super) struct ContinueWithCostedTask {
+pub struct ContinueWithCostedTask {
     pub physical_expr_id: PhysicalExpressionId,
     pub fork_out: TaskId,
     pub fork_in: Option<TaskId>,
@@ -63,7 +63,7 @@ impl<M: Memoize> Optimizer<M> {
         tokio::spawn(async move {
             let response = k(costed_plan_value).await;
 
-            Self::send_engine_response(job_id, message_tx, response);
+            Self::send_engine_response(job_id, message_tx, response).await;
         });
 
         Ok(())

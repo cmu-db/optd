@@ -9,7 +9,7 @@ use super::{SourceTaskId, Task, TaskId};
 
 /// Task data for exploring a group.
 #[derive(Debug)]
-pub(super) struct ExploreGroupTask {
+pub struct ExploreGroupTask {
     /// The group to explore.
     pub group_id: GroupId,
     pub optimize_goal_out: Vec<TaskId>,

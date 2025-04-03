@@ -17,7 +17,7 @@ use super::TaskId;
 
 /// Task data for implementing a logical expression using a specific rule.
 #[derive(Debug)]
-pub(super) struct ImplementExpressionTask {
+pub struct ImplementExpressionTask {
     /// The implementation rule to apply.
     pub rule: ImplementationRule,
 

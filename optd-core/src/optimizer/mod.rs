@@ -1,6 +1,6 @@
 use crate::cir::{
-    Cost, Goal, GoalId, GroupId, LogicalExpressionId, LogicalPlan, LogicalProperties,
-    PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan, RuleBook,
+    Cost, Goal, GoalId, GroupId, LogicalPlan, LogicalProperties, PartialLogicalPlan,
+    PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan, RuleBook,
 };
 use crate::error::Error;
 use crate::memo::Memoize;
@@ -16,7 +16,7 @@ use optd_dsl::analyzer::hir::Value;
 use optd_dsl::analyzer::{context::Context, hir::HIR};
 use optd_dsl::engine::{Continuation, EngineResponse};
 use std::collections::{HashMap, HashSet, VecDeque};
-use tasks::{SourceTaskId, Task, TaskId};
+use tasks::{Task, TaskId};
 
 mod egest;
 mod handlers;
@@ -63,7 +63,7 @@ impl EngineMessage {
 }
 
 /// Messages sent to the optimizer by the DSL engine to change the state of the memo.
-enum EngineMessageKind {
+pub enum EngineMessageKind {
     /// New logical plan alternative for a group from applying transformation rules.
     /// Access the parent of related task (ExploreGroup) to get the group id.
     /// Possible sources: StartTransformRule | ContinueWithLogical
@@ -101,8 +101,6 @@ enum EngineMessageKind {
     // TODO(yuchen): Remove this once we refactor ingestion.
     /// Process an optimization request.
     OptimizeRequestWrapper(OptimizeRequest, TaskId),
-    /// Create a new group with the provided logical properties.
-    CreateGroup(LogicalExpressionId, LogicalProperties),
 }
 
 /// A message that is waiting for dependencies before it can be processed.
@@ -236,7 +234,7 @@ impl<M: Memoize> Optimizer<M> {
                         }
                         NewLogicalPartial(plan, group_id) => {
                             if self.get_related_task(message.job_id).is_some() {
-                                self.process_new_logical_partial(plan, group_id, job_id).await?;
+                                self.process_new_logical_partial(plan, group_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
@@ -249,12 +247,6 @@ impl<M: Memoize> Optimizer<M> {
                         NewCostedPhysical(expression_id, cost) => {
                             if self.get_related_task(job_id).is_some() {
                                 self.process_new_costed_physical(expression_id, cost).await?;
-                                self.complete_job(job_id).await?;
-                            }
-                        }
-                        CreateGroup(expression_id, properties) => {
-                            if self.get_related_task(job_id).is_some() {
-                                self.process_create_group(expression_id, &properties, job_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }

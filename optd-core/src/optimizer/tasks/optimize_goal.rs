@@ -9,7 +9,7 @@ use super::{SourceTaskId, TaskId};
 
 /// Task data for optimizing a specific goal.
 #[derive(Debug)]
-pub(super) struct OptimizeGoalTask {
+pub struct OptimizeGoalTask {
     /// The goal to optimize.
     pub goal_id: GoalId,
     pub optimize_plan_out: Vec<TaskId>,

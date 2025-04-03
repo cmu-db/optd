@@ -9,7 +9,7 @@ use crate::{
 use super::{Task, TaskId};
 
 #[derive(Debug)]
-pub(super) struct ContinueWithLogicalTask {
+pub struct ContinueWithLogicalTask {
     pub logical_expr_id: LogicalExpressionId,
     pub fork_out: TaskId,
     pub fork_in: Option<TaskId>,
@@ -31,7 +31,7 @@ impl ContinueWithLogicalTask {
 
 impl<M: Memoize> Optimizer<M> {
     /// Creates a `ContinueWithLogical` task.
-    pub async fn create_continue_with_logical_task(
+    pub(crate) async fn create_continue_with_logical_task(
         &mut self,
         logical_expr_id: LogicalExpressionId,
         out: TaskId,
@@ -46,7 +46,7 @@ impl<M: Memoize> Optimizer<M> {
     /// Executes a job to continue processing with a logical expression result.
     ///
     /// This materializes the logical expression and passes it to the continuation.
-    pub async fn execute_continue_with_logical(
+    pub(crate) async fn execute_continue_with_logical(
         &self,
         task: &ContinueWithLogicalTask,
         job_id: JobId,
