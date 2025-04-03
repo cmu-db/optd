@@ -106,23 +106,19 @@ impl<M: Memoize> Optimizer<M> {
             }
         }
 
-        // TODO(yuchen): consider the cost of the best physical expression from other goal members.
         let best_costed = self.memo.get_best_optimized_physical_expr(goal_id).await?;
         // Process all goal members: physical expressions and subgoals.
         let goal_members = self.memo.get_all_goal_members(goal_id).await?;
         for member in goal_members {
             match member {
                 GoalMemberId::PhysicalExpressionId(expr_id) => {
-                    // TODO(yuchen) What to do with the cost of this?
-                    // New memo API to direct get cost of an physical expression? (Doable)
                     let task_id = self
                         .ensure_cost_expression_task(expr_id, Cost(f64::MAX), task_id)
                         .await?;
                     task.add_cost_expr_in(task_id);
                 }
                 GoalMemberId::GoalId(ref_goal_id) => {
-                    // TODO(yuchen): include the best costed for this goal member to calculate the overall best.
-                    let (optimize_goal_task_id, _best_costed) = self
+                    let (optimize_goal_task_id, _) = self
                         .ensure_optimize_goal_task(ref_goal_id, SourceTaskId::OptimizeGoal(task_id))
                         .await?;
                     task.add_optimize_goal_in(optimize_goal_task_id);
