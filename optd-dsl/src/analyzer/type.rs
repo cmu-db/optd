@@ -1,8 +1,9 @@
+use super::semantic_checker::error::SemanticError;
 use crate::parser::ast::Adt;
-use std::{
-    collections::{HashMap, HashSet},
-    ops::{Deref, DerefMut},
-};
+use crate::utils::error::CompileError;
+use crate::utils::span::Span;
+use Adt::*;
+use std::collections::{HashMap, HashSet};
 
 pub type Identifier = String;
 
@@ -20,89 +21,24 @@ pub enum Type {
 
     // Special types
     Unit,
-    Universe,
+    Universe, // All types are subtypes of Universe
+    Never,    // Inherits all types.
+    Unknown,
 
-    // Complex types
+    // User types
+    Adt(Identifier),
+    Generic(Identifier),
+
+    // Composite types
     Array(Box<Type>),
     Closure(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
     Map(Box<Type>, Box<Type>),
     Optional(Box<Type>),
 
-    // User-defined types
-    Adt(Identifier),
-}
-
-/// A typed value that carries both a value and its type information.
-///
-/// This generic wrapper allows attaching type information to any value in the compiler pipeline.
-/// It's particularly useful for tracking types through expressions, statements, and other AST nodes
-/// during the type checking phase.
-///
-/// # Type Parameters
-///
-/// * `T` - The type of the wrapped value
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Typed<T> {
-    /// The wrapped value
-    pub value: Box<T>,
-
-    /// The type of the value
-    pub ty: Type,
-}
-
-impl<T> Deref for Typed<T> {
-    /// The wrapped type T
-    type Target = T;
-
-    /// Returns a reference to the wrapped value
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
-}
-
-/// Implements mutable dereferencing for Typed<T>
-impl<T> DerefMut for Typed<T> {
-    /// Returns a mutable reference to the wrapped value
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.value
-    }
-}
-
-impl<T> Typed<T> {
-    /// Creates a new typed value with the given value and type.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - The value to wrap
-    /// * `ty` - The type to associate with the value
-    ///
-    /// # Returns
-    ///
-    /// A new `Typed<T>` instance containing the value and its type
-    pub fn new(value: T, ty: Type) -> Self {
-        Self {
-            value: Box::new(value),
-            ty,
-        }
-    }
-
-    /// Checks if this typed value's type is a subtype of another typed value's type.
-    ///
-    /// This is useful for type checking to ensure type compatibility between
-    /// expressions, assignments, function calls, etc.
-    ///
-    /// # Arguments
-    ///
-    /// * `other` - The other typed value to compare against
-    /// * `registry` - The type registry that defines subtyping relationships
-    ///
-    /// # Returns
-    ///
-    /// `true` if this type is a subtype of the other, `false` otherwise
-    pub fn subtype_of(&self, other: &Self, registry: &TypeRegistry) -> bool {
-        registry.is_subtype(&self.ty, &other.ty)
-    }
+    // For Logical & Physical: memo status
+    Stored(Box<Type>),
+    Costed(Box<Type>),
 }
 
 /// Manages the type hierarchy and subtyping relationships
@@ -113,6 +49,7 @@ impl<T> Typed<T> {
 #[derive(Debug, Clone, Default)]
 pub struct TypeRegistry {
     subtypes: HashMap<Identifier, HashSet<Identifier>>,
+    adt_spans: HashMap<Identifier, Span>, // Track spans for error reporting
 }
 
 impl TypeRegistry {
@@ -125,26 +62,60 @@ impl TypeRegistry {
     /// # Arguments
     ///
     /// * `adt` - The ADT to register
-    pub fn register_adt(&mut self, adt: &Adt) {
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if registration is successful, or a `CompileError` if a duplicate name is found    
+    pub fn register_adt(&mut self, adt: &Adt) -> Result<(), CompileError> {
         match adt {
-            Adt::Product { name, .. } => {
+            Product { name, .. } => {
                 let type_name = name.value.as_ref().clone();
+                // Check for duplicate ADT names.
+                if let Some(existing_span) = self.adt_spans.get(&type_name) {
+                    return Err(SemanticError::new_duplicate_adt(
+                        type_name,
+                        existing_span.clone(),
+                        name.span.clone(),
+                    )
+                    .into());
+                }
+
+                self.adt_spans.insert(type_name.clone(), name.span.clone());
                 self.subtypes.entry(type_name).or_default();
+                Ok(())
             }
-            Adt::Sum { name, variants } => {
+            Sum { name, variants } => {
                 let enum_name = name.value.as_ref().clone();
+
+                // Check for duplicate ADT names.
+                if let Some(existing_span) = self.adt_spans.get(&enum_name) {
+                    return Err(SemanticError::new_duplicate_adt(
+                        enum_name,
+                        existing_span.clone(),
+                        name.clone().span,
+                    )
+                    .into());
+                }
+
+                self.adt_spans.insert(enum_name.clone(), name.clone().span);
                 self.subtypes.entry(enum_name.clone()).or_default();
+
                 for variant in variants {
                     let variant_adt = variant.value.as_ref();
-                    self.register_adt(variant_adt);
+                    // Register each variant.
+                    self.register_adt(variant_adt)?;
+
                     let variant_name = match variant_adt {
-                        Adt::Product { name, .. } => name.value.as_ref(),
-                        Adt::Sum { name, .. } => name.value.as_ref(),
+                        Product { name, .. } => name.value.as_ref(),
+                        Sum { name, .. } => name.value.as_ref(),
                     };
+
+                    // Add variant as a subtype of the enum.
                     if let Some(children) = self.subtypes.get_mut(&enum_name) {
                         children.insert(variant_name.clone());
                     }
                 }
+                Ok(())
             }
         }
     }
@@ -171,7 +142,31 @@ impl TypeRegistry {
         match (child, parent) {
             // Universe is the top type - everything is a subtype of Universe
             (_, Type::Universe) => true,
-            // Check transitive inheritance
+
+            // Never is the bottom type - it is a subtype of everything
+            (Type::Never, _) => true,
+
+            // Stored and Costed type handling
+            (Type::Stored(child_inner), Type::Stored(parent_inner)) => {
+                self.is_subtype(child_inner, parent_inner)
+            }
+            (Type::Costed(child_inner), Type::Costed(parent_inner)) => {
+                self.is_subtype(child_inner, parent_inner)
+            }
+            (Type::Costed(child_inner), Type::Stored(parent_inner)) => {
+                // Costed(A) is a subtype of Stored(A)
+                self.is_subtype(child_inner, parent_inner)
+            }
+            (Type::Costed(child_inner), parent_inner) => {
+                // Costed(A) is a subtype of A
+                self.is_subtype(child_inner, parent_inner)
+            }
+            (Type::Stored(child_inner), parent_inner) => {
+                // Stored(A) is a subtype of A
+                self.is_subtype(child_inner, parent_inner)
+            }
+
+            // Check transitive inheritance for ADTs
             (Type::Adt(child_name), Type::Adt(parent_name)) => {
                 if child_name == parent_name {
                     return true;
@@ -186,10 +181,12 @@ impl TypeRegistry {
                     })
                 })
             }
+
             // Array covariance: Array[T] <: Array[U] if T <: U
             (Type::Array(child_elem), Type::Array(parent_elem)) => {
                 self.is_subtype(child_elem, parent_elem)
             }
+
             // Tuple covariance: (T1, T2, ...) <: (U1, U2, ...) if T1 <: U1, T2 <: U2, ...
             (Type::Tuple(child_types), Type::Tuple(parent_types)) => {
                 if child_types.len() != parent_types.len() {
@@ -200,19 +197,23 @@ impl TypeRegistry {
                     .zip(parent_types.iter())
                     .all(|(c, p)| self.is_subtype(c, p))
             }
+
             // Map covariance: Map[K1, V1] <: Map[K2, V2] if K1 <: K2 and V1 <: V2
             (Type::Map(child_key, child_val), Type::Map(parent_key, parent_val)) => {
                 self.is_subtype(child_key, parent_key) && self.is_subtype(child_val, parent_val)
             }
+
             // Function contravariance on args, covariance on return type:
             // (T1 -> U1) <: (T2 -> U2) if T2 <: T1 and U1 <: U2
             (Type::Closure(child_param, child_ret), Type::Closure(parent_param, parent_ret)) => {
                 self.is_subtype(parent_param, child_param) && self.is_subtype(child_ret, parent_ret)
             }
+
             // Optional type covariance: Optional[T] <: Optional[U] if T <: U
             (Type::Optional(child_ty), Type::Optional(parent_ty)) => {
                 self.is_subtype(child_ty, parent_ty)
             }
+
             _ => false,
         }
     }
@@ -245,19 +246,94 @@ mod type_registry_tests {
             })
             .collect();
 
-        Adt::Product {
+        Product {
             name: spanned(name.to_string()),
             fields: spanned_fields,
         }
     }
 
     fn create_sum_adt(name: &str, variants: Vec<Adt>) -> Adt {
-        let spanned_variants: Vec<Spanned<Adt>> = variants.into_iter().map(spanned).collect();
-
-        Adt::Sum {
+        Sum {
             name: spanned(name.to_string()),
-            variants: spanned_variants,
+            variants: variants.into_iter().map(spanned).collect(),
         }
+    }
+
+    #[test]
+    fn test_stored_and_costed_types() {
+        let registry = TypeRegistry::default();
+
+        // Test Stored type as a subtype of the inner type
+        assert!(registry.is_subtype(&Type::Stored(Box::new(Type::Int64)), &Type::Int64));
+
+        // Test Costed type as a subtype of Stored type
+        assert!(registry.is_subtype(
+            &Type::Costed(Box::new(Type::Int64)),
+            &Type::Stored(Box::new(Type::Int64))
+        ));
+
+        // Test Costed type as a subtype of the inner type (transitivity)
+        assert!(registry.is_subtype(&Type::Costed(Box::new(Type::Int64)), &Type::Int64));
+
+        // Test Stored type covariance
+        let mut adts_registry = TypeRegistry::default();
+        let animal = create_product_adt("Animal", vec![]);
+        let dog = create_product_adt("Dog", vec![]);
+        let animals_enum = create_sum_adt("Animals", vec![animal, dog]);
+        adts_registry.register_adt(&animals_enum).unwrap();
+
+        assert!(adts_registry.is_subtype(
+            &Type::Stored(Box::new(Type::Adt("Dog".to_string()))),
+            &Type::Stored(Box::new(Type::Adt("Animals".to_string())))
+        ));
+
+        // Test Costed type covariance
+        assert!(adts_registry.is_subtype(
+            &Type::Costed(Box::new(Type::Adt("Dog".to_string()))),
+            &Type::Costed(Box::new(Type::Adt("Animals".to_string())))
+        ));
+
+        // Test the inheritance relationship: Costed(Dog) <: Stored(Animals)
+        assert!(adts_registry.is_subtype(
+            &Type::Costed(Box::new(Type::Adt("Dog".to_string()))),
+            &Type::Stored(Box::new(Type::Adt("Animals".to_string())))
+        ));
+
+        // Test nested Stored/Costed types
+        assert!(adts_registry.is_subtype(
+            &Type::Stored(Box::new(Type::Costed(Box::new(Type::Adt(
+                "Dog".to_string()
+            ))))),
+            &Type::Stored(Box::new(Type::Adt("Animals".to_string())))
+        ));
+
+        // Test with Array of Stored/Costed types
+        assert!(adts_registry.is_subtype(
+            &Type::Array(Box::new(Type::Costed(Box::new(Type::Adt(
+                "Dog".to_string()
+            ))))),
+            &Type::Array(Box::new(Type::Stored(Box::new(Type::Adt(
+                "Animals".to_string()
+            )))))
+        ));
+    }
+
+    #[test]
+    fn test_duplicate_adt_detection() {
+        let mut registry = TypeRegistry::default();
+
+        // First registration should succeed
+        let car1 = create_product_adt("Car", vec![]);
+        assert!(registry.register_adt(&car1).is_ok());
+
+        // Second registration with the same name should fail
+        let car2 = Product {
+            name: spanned("Car".to_string()),
+            fields: vec![],
+        };
+
+        let result = registry.register_adt(&car2);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -316,7 +392,7 @@ mod type_registry_tests {
         let vehicle = create_product_adt("Vehicle", vec![]);
         let car = create_product_adt("Car", vec![]);
         let vehicles_enum = create_sum_adt("Vehicles", vec![vehicle, car]);
-        adts_registry.register_adt(&vehicles_enum);
+        adts_registry.register_adt(&vehicles_enum).unwrap();
 
         assert!(adts_registry.is_subtype(
             &Type::Array(Box::new(Type::Adt("Car".to_string()))),
@@ -421,7 +497,7 @@ mod type_registry_tests {
         let animal = create_product_adt("Animal", vec![]);
         let dog = create_product_adt("Dog", vec![]);
         let animals_enum = create_sum_adt("Animals", vec![animal, dog]);
-        adts_registry.register_adt(&animals_enum);
+        adts_registry.register_adt(&animals_enum).unwrap();
 
         // (Animals -> Bool) <: (Dog -> Bool) because Dog <: Animals (contravariance)
         assert!(adts_registry.is_subtype(
@@ -469,7 +545,7 @@ mod type_registry_tests {
         let shapes_enum = create_sum_adt("Shapes", vec![shape, circle, rectangle]);
 
         // Register the ADT
-        registry.register_adt(&shapes_enum);
+        registry.register_adt(&shapes_enum).unwrap();
 
         // Test subtypes relationship
         assert!(registry.is_subtype(
@@ -531,10 +607,41 @@ mod type_registry_tests {
             &Type::Universe
         ));
 
+        // Check that Universe is a supertype of Stored and Costed types
+        assert!(registry.is_subtype(&Type::Stored(Box::new(Type::Int64)), &Type::Universe));
+        assert!(registry.is_subtype(&Type::Costed(Box::new(Type::Int64)), &Type::Universe));
+
         // But Universe is not a subtype of any other type
         assert!(!registry.is_subtype(&Type::Universe, &Type::Int64));
         assert!(!registry.is_subtype(&Type::Universe, &Type::String));
         assert!(!registry.is_subtype(&Type::Universe, &Type::Array(Box::new(Type::Int64))));
+    }
+
+    #[test]
+    fn test_never_as_bottom_type() {
+        let registry = TypeRegistry::default();
+
+        // Never is a subtype of all primitive types
+        assert!(registry.is_subtype(&Type::Never, &Type::Int64));
+        assert!(registry.is_subtype(&Type::Never, &Type::String));
+        assert!(registry.is_subtype(&Type::Never, &Type::Bool));
+        assert!(registry.is_subtype(&Type::Never, &Type::Float64));
+        assert!(registry.is_subtype(&Type::Never, &Type::Unit));
+        assert!(registry.is_subtype(&Type::Never, &Type::Universe));
+
+        // Never is a subtype of complex types
+        assert!(registry.is_subtype(&Type::Never, &Type::Array(Box::new(Type::Int64))));
+        assert!(registry.is_subtype(&Type::Never, &Type::Tuple(vec![Type::Int64, Type::Bool])));
+        assert!(registry.is_subtype(
+            &Type::Never,
+            &Type::Closure(Box::new(Type::Int64), Box::new(Type::Bool))
+        ));
+
+        // But no type is a subtype of Never (except Never itself)
+        assert!(!registry.is_subtype(&Type::Int64, &Type::Never));
+        assert!(!registry.is_subtype(&Type::Bool, &Type::Never));
+        assert!(!registry.is_subtype(&Type::Universe, &Type::Never));
+        assert!(!registry.is_subtype(&Type::Array(Box::new(Type::Int64)), &Type::Never));
     }
 
     #[test]
@@ -573,7 +680,7 @@ mod type_registry_tests {
         let vehicles_enum = create_sum_adt("Vehicles", vec![vehicle, cars_enum, truck]);
 
         // Register the ADT
-        registry.register_adt(&vehicles_enum);
+        registry.register_adt(&vehicles_enum).unwrap();
 
         // Test direct subtyping relationships
         assert!(registry.is_subtype(
@@ -621,99 +728,6 @@ mod type_registry_tests {
         assert!(!registry.is_subtype(
             &Type::Adt("Truck".to_string()),
             &Type::Adt("Cars".to_string())
-        ));
-    }
-
-    #[test]
-    fn test_combined_complex_types() {
-        let mut registry = TypeRegistry::default();
-
-        // Create and register a type hierarchy
-        let animal = create_product_adt("Animal", vec![]);
-        let dog = create_product_adt("Dog", vec![]);
-        let cat = create_product_adt("Cat", vec![]);
-        let animals_enum = create_sum_adt("Animals", vec![animal, dog, cat]);
-        registry.register_adt(&animals_enum);
-
-        // Test array of ADTs
-        assert!(registry.is_subtype(
-            &Type::Array(Box::new(Type::Adt("Dog".to_string()))),
-            &Type::Array(Box::new(Type::Adt("Animals".to_string())))
-        ));
-
-        // Test tuple of ADTs
-        assert!(registry.is_subtype(
-            &Type::Tuple(vec![
-                Type::Adt("Dog".to_string()),
-                Type::Adt("Cat".to_string())
-            ]),
-            &Type::Tuple(vec![
-                Type::Adt("Animals".to_string()),
-                Type::Adt("Animals".to_string())
-            ])
-        ));
-
-        // Test map with ADT keys and values
-        assert!(registry.is_subtype(
-            &Type::Map(
-                Box::new(Type::Adt("Dog".to_string())),
-                Box::new(Type::Adt("Cat".to_string()))
-            ),
-            &Type::Map(
-                Box::new(Type::Adt("Animals".to_string())),
-                Box::new(Type::Adt("Animals".to_string()))
-            )
-        ));
-
-        // Test closures with ADTs
-        assert!(registry.is_subtype(
-            &Type::Closure(
-                Box::new(Type::Adt("Animals".to_string())),
-                Box::new(Type::Adt("Dog".to_string()))
-            ),
-            &Type::Closure(
-                Box::new(Type::Adt("Dog".to_string())),
-                Box::new(Type::Adt("Animals".to_string()))
-            )
-        ));
-
-        // Test deeply nested types
-        assert!(registry.is_subtype(
-            &Type::Map(
-                Box::new(Type::String),
-                Box::new(Type::Array(Box::new(Type::Tuple(vec![
-                    Type::Adt("Dog".to_string()),
-                    Type::Closure(
-                        Box::new(Type::Adt("Animals".to_string())),
-                        Box::new(Type::Adt("Cat".to_string()))
-                    )
-                ]))))
-            ),
-            &Type::Map(
-                Box::new(Type::String),
-                Box::new(Type::Array(Box::new(Type::Tuple(vec![
-                    Type::Adt("Animals".to_string()),
-                    Type::Closure(
-                        Box::new(Type::Adt("Dog".to_string())),
-                        Box::new(Type::Adt("Animals".to_string()))
-                    )
-                ]))))
-            )
-        ));
-
-        // Any complex nested type is a subtype of Universe
-        assert!(registry.is_subtype(
-            &Type::Map(
-                Box::new(Type::String),
-                Box::new(Type::Array(Box::new(Type::Tuple(vec![
-                    Type::Adt("Dog".to_string()),
-                    Type::Closure(
-                        Box::new(Type::Adt("Animals".to_string())),
-                        Box::new(Type::Adt("Cat".to_string()))
-                    )
-                ]))))
-            ),
-            &Type::Universe
         ));
     }
 }

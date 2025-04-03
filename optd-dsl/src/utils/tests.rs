@@ -1,9 +1,8 @@
-use super::{Continuation, EngineResponse};
 use crate::analyzer::hir::{
     CoreData, Expr, ExprKind, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable,
     Operator, Pattern, PhysicalOp, Value,
 };
-use crate::engine::Engine;
+use crate::engine::{Continuation, Engine, EngineResponse};
 use Materializable::*;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -82,6 +81,35 @@ impl TestHarness {
     }
 }
 
+// Helper to compare Values
+pub fn assert_values_equal(v1: &Value, v2: &Value) {
+    match (&v1.data, &v2.data) {
+        (CoreData::Literal(l1), CoreData::Literal(l2)) => match (l1, l2) {
+            (Literal::Int64(i1), Literal::Int64(i2)) => assert_eq!(i1, i2),
+            (Literal::Float64(f1), Literal::Float64(f2)) => assert_eq!(f1, f2),
+            (Literal::String(s1), Literal::String(s2)) => assert_eq!(s1, s2),
+            (Literal::Bool(b1), Literal::Bool(b2)) => assert_eq!(b1, b2),
+            (Literal::Unit, Literal::Unit) => {}
+            _ => panic!("Literals don't match: {:?} vs {:?}", l1, l2),
+        },
+        (CoreData::None, CoreData::None) => {}
+        (CoreData::Tuple(t1), CoreData::Tuple(t2)) => {
+            assert_eq!(t1.len(), t2.len());
+            for (v1, v2) in t1.iter().zip(t2.iter()) {
+                assert_values_equal(v1, v2);
+            }
+        }
+        (CoreData::Struct(n1, f1), CoreData::Struct(n2, f2)) => {
+            assert_eq!(n1, n2);
+            assert_eq!(f1.len(), f2.len());
+            for (v1, v2) in f1.iter().zip(f2.iter()) {
+                assert_values_equal(v1, v2);
+            }
+        }
+        _ => panic!("Values don't match: {:?} vs {:?}", v1.data, v2.data),
+    }
+}
+
 /// Helper to create a literal expression.
 pub fn lit_expr(literal: Literal) -> Arc<Expr> {
     Arc::new(Expr::new(ExprKind::CoreExpr(CoreData::Literal(literal))))
@@ -89,7 +117,7 @@ pub fn lit_expr(literal: Literal) -> Arc<Expr> {
 
 /// Helper to create a literal value.
 pub fn lit_val(literal: Literal) -> Value {
-    Value(CoreData::Literal(literal))
+    Value::new(CoreData::Literal(literal))
 }
 
 /// Helper to create an integer literal.
@@ -119,12 +147,12 @@ pub fn match_arm(pattern: Pattern, expr: Arc<Expr>) -> MatchArm {
 
 /// Helper to create an array value.
 pub fn array_val(items: Vec<Value>) -> Value {
-    Value(CoreData::Array(items))
+    Value::new(CoreData::Array(items))
 }
 
 /// Helper to create a struct value.
 pub fn struct_val(name: &str, fields: Vec<Value>) -> Value {
-    Value(CoreData::Struct(name.to_string(), fields))
+    Value::new(CoreData::Struct(name.to_string(), fields))
 }
 
 /// Helper to create a pattern matching expression.
@@ -174,7 +202,7 @@ pub fn create_logical_operator(tag: &str, data: Vec<Value>, children: Vec<Value>
         children,
     };
 
-    Value(CoreData::Logical(Materialized(LogicalOp::logical(op))))
+    Value::new(CoreData::Logical(Materialized(LogicalOp::logical(op))))
 }
 
 /// Helper to create a simple physical operator value.
@@ -185,7 +213,7 @@ pub fn create_physical_operator(tag: &str, data: Vec<Value>, children: Vec<Value
         children,
     };
 
-    Value(CoreData::Physical(Materialized(PhysicalOp::physical(op))))
+    Value::new(CoreData::Physical(Materialized(PhysicalOp::physical(op))))
 }
 
 /// Runs a test by evaluating the expression and collecting all results with a custom continuation.

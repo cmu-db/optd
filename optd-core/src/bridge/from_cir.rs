@@ -14,7 +14,7 @@ pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
     match plan {
         PartialLogicalPlan::UnMaterialized(group_id) => {
             // For unmaterialized logical operators, we create a `Value` with the group ID.
-            Value(Logical(UnMaterialized(hir::GroupId(group_id.0))))
+            Value::new(Logical(UnMaterialized(hir::GroupId(group_id.0))))
         }
         PartialLogicalPlan::Materialized(node) => {
             // For materialized logical operators, we create a `Value` with the operator data.
@@ -24,7 +24,7 @@ pub(crate) fn partial_logical_to_value(plan: &PartialLogicalPlan) -> Value {
                 children: convert_children_to_values(&node.children, partial_logical_to_value),
             };
 
-            Value(Logical(Materialized(LogicalOp::logical(operator))))
+            Value::new(Logical(Materialized(LogicalOp::logical(operator))))
         }
     }
 }
@@ -35,7 +35,7 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
         PartialPhysicalPlan::UnMaterialized(goal) => {
             // For unmaterialized physical operators, we create a `Value` with the goal
             let hir_goal = cir_goal_to_hir(goal);
-            Value(Physical(UnMaterialized(hir_goal)))
+            Value::new(Physical(UnMaterialized(hir_goal)))
         }
         PartialPhysicalPlan::Materialized(node) => {
             // For materialized physical operators, we create a Value with the operator data
@@ -45,7 +45,7 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
                 children: convert_children_to_values(&node.children, partial_physical_to_value),
             };
 
-            Value(Physical(Materialized(PhysicalOp::physical(operator))))
+            Value::new(Physical(Materialized(PhysicalOp::physical(operator))))
         }
     }
 }
@@ -54,9 +54,9 @@ pub(crate) fn partial_physical_to_value(plan: &PartialPhysicalPlan) -> Value {
 /// Converts a [`PartialPhysicalPlan`]  with its cost into a [`Value`].
 pub(crate) fn costed_physical_to_value(plan: PartialPhysicalPlan, cost: Cost) -> Value {
     let operator = partial_physical_to_value(&plan);
-    Value(Tuple(vec![
+    Value::new(Tuple(vec![
         partial_physical_to_value(&plan),
-        Value(Literal(Float64(cost.0))),
+        Value::new(Literal(Float64(cost.0))),
     ]))
 }
 
@@ -65,7 +65,7 @@ pub(crate) fn costed_physical_to_value(plan: PartialPhysicalPlan, cost: Cost) ->
 pub(crate) fn logical_properties_to_value(properties: &LogicalProperties) -> Value {
     match &properties.0 {
         Some(data) => properties_data_to_value(data),
-        Option::None => Value(None),
+        Option::None => Value::new(None),
     }
 }
 
@@ -73,7 +73,7 @@ pub(crate) fn logical_properties_to_value(properties: &LogicalProperties) -> Val
 pub(crate) fn physical_properties_to_value(properties: &PhysicalProperties) -> Value {
     match &properties.0 {
         Some(data) => properties_data_to_value(data),
-        Option::None => Value(None),
+        Option::None => Value::new(None),
     }
 }
 
@@ -104,7 +104,7 @@ where
         .map(|child| match child {
             Child::Singleton(item) => converter(item),
             Child::VarLength(items) => {
-                Value(Array(items.iter().map(|item| converter(item)).collect()))
+                Value::new(Array(items.iter().map(|item| converter(item)).collect()))
             }
         })
         .collect()
@@ -118,32 +118,34 @@ fn convert_operator_data_to_values(data: &[OperatorData]) -> Vec<Value> {
 /// Converts an [`OperatorData`] into a [`Value`].
 fn operator_data_to_value(data: &OperatorData) -> Value {
     match data {
-        OperatorData::Int64(i) => Value(Literal(Int64(*i))),
-        OperatorData::Float64(f) => Value(Literal(Float64(**f))),
-        OperatorData::String(s) => Value(Literal(String(s.clone()))),
-        OperatorData::Bool(b) => Value(Literal(Bool(*b))),
-        OperatorData::Struct(name, elements) => Value(Struct(
+        OperatorData::Int64(i) => Value::new(Literal(Int64(*i))),
+        OperatorData::Float64(f) => Value::new(Literal(Float64(**f))),
+        OperatorData::String(s) => Value::new(Literal(String(s.clone()))),
+        OperatorData::Bool(b) => Value::new(Literal(Bool(*b))),
+        OperatorData::Struct(name, elements) => Value::new(Struct(
             name.clone(),
             convert_operator_data_to_values(elements),
         )),
-        OperatorData::Array(elements) => Value(Array(convert_operator_data_to_values(elements))),
+        OperatorData::Array(elements) => {
+            Value::new(Array(convert_operator_data_to_values(elements)))
+        }
     }
 }
 
 /// Converts a [`PropertiesData`] into a [`Value`].
 fn properties_data_to_value(data: &PropertiesData) -> Value {
     match data {
-        PropertiesData::Int64(i) => Value(Literal(Int64(*i))),
-        PropertiesData::Float64(f) => Value(Literal(Float64(**f))),
-        PropertiesData::String(s) => Value(Literal(String(s.clone()))),
-        PropertiesData::Bool(b) => Value(Literal(Bool(*b))),
+        PropertiesData::Int64(i) => Value::new(Literal(Int64(*i))),
+        PropertiesData::Float64(f) => Value::new(Literal(Float64(**f))),
+        PropertiesData::String(s) => Value::new(Literal(String(s.clone()))),
+        PropertiesData::Bool(b) => Value::new(Literal(Bool(*b))),
         PropertiesData::Struct(name, elements) => {
             let values = elements.iter().map(properties_data_to_value).collect();
-            Value(Struct(name.clone(), values))
+            Value::new(Struct(name.clone(), values))
         }
         PropertiesData::Array(elements) => {
             let values = elements.iter().map(properties_data_to_value).collect();
-            Value(Array(values))
+            Value::new(Array(values))
         }
     }
 }

@@ -5,7 +5,7 @@ use crate::utils::{error::Diagnose, span::Span};
 #[derive(Debug)]
 pub struct TypeError {}
 
-impl Diagnose for TypeError {
+impl Diagnose for Box<TypeError> {
     fn report(&self) -> Report<Span> {
         todo!()
     }

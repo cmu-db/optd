@@ -27,24 +27,27 @@ where
     match data {
         Literal(lit) => {
             // Directly continue with the literal value.
-            k(Value(Literal(lit))).await
+            k(Value::new(Literal(lit))).await
         }
         Array(items) => evaluate_collection(items, Array, engine, k).await,
         Tuple(items) => evaluate_collection(items, Tuple, engine, k).await,
         Struct(name, items) => {
             evaluate_collection(items, move |values| Struct(name, values), engine, k).await
         }
-        Map(items) => evaluate_map(items, engine, k).await,
+        Map(items) => {
+            // Directly continue with the map value.
+            k(Value::new(Map(items))).await
+        }
         Function(fun_type) => {
             // Directly continue with the function value.
-            k(Value(Function(fun_type))).await
+            k(Value::new(Function(fun_type))).await
         }
         Fail(msg) => evaluate_fail(*msg, engine, k).await,
         Logical(op) => evaluate_logical_operator(op, engine, k).await,
         Physical(op) => evaluate_physical_operator(op, engine, k).await,
         None => {
             // Directly continue with null value.
-            k(Value(None)).await
+            k(Value::new(None)).await
         }
     }
 }
@@ -72,51 +75,8 @@ where
         engine,
         Arc::new(move |values| {
             Box::pin(capture!([constructor, k], async move {
-                let result = Value(constructor(values));
+                let result = Value::new(constructor(values));
                 k(result).await
-            }))
-        }),
-    )
-    .await
-}
-
-/// Evaluates a map expression.
-///
-/// # Parameters
-///
-/// * `items` - The key-value pairs to evaluate.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-async fn evaluate_map<O>(
-    items: Vec<(Arc<Expr>, Arc<Expr>)>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    // Extract keys and values.
-    let (keys, values): (Vec<Arc<Expr>>, Vec<Arc<Expr>>) = items.into_iter().unzip();
-
-    // First evaluate all key expressions.
-    evaluate_sequence(
-        keys,
-        engine.clone(),
-        Arc::new(move |keys_values| {
-            Box::pin(capture!([values, engine, k], async move {
-                // Then evaluate all value expressions.
-                evaluate_sequence(
-                    values,
-                    engine,
-                    Arc::new(move |values_values| {
-                        Box::pin(capture!([keys_values, k], async move {
-                            // Create a map from keys and values.
-                            let map_items = keys_values.into_iter().zip(values_values).collect();
-                            k(Value(Map(map_items))).await
-                        }))
-                    }),
-                )
-                .await
             }))
         }),
     )
@@ -142,10 +102,9 @@ where
         .evaluate(
             msg,
             Arc::new(move |value| {
-                Box::pin(capture!(
-                    [k],
-                    async move { k(Value(Fail(value.into()))).await }
-                ))
+                Box::pin(capture!([k], async move {
+                    k(Value::new(Fail(Box::new(value)))).await
+                }))
             }),
         )
         .await
@@ -154,7 +113,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::engine::Continuation;
-    use crate::engine::test_utils::{
+    use crate::utils::tests::{
         TestHarness, evaluate_and_collect, evaluate_and_collect_with_custom_k, int, lit_expr,
         string,
     };
@@ -181,7 +140,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Literal(Literal::Int64(value)) => {
                 assert_eq!(*value, 42);
             }
@@ -207,18 +166,18 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Array(elements) => {
                 assert_eq!(elements.len(), 3);
-                match &elements[0].0 {
+                match &elements[0].data {
                     CoreData::Literal(Literal::Int64(value)) => assert_eq!(*value, 1),
                     _ => panic!("Expected integer literal"),
                 }
-                match &elements[1].0 {
+                match &elements[1].data {
                     CoreData::Literal(Literal::Int64(value)) => assert_eq!(*value, 2),
                     _ => panic!("Expected integer literal"),
                 }
-                match &elements[2].0 {
+                match &elements[2].data {
                     CoreData::Literal(Literal::Int64(value)) => assert_eq!(*value, 3),
                     _ => panic!("Expected integer literal"),
                 }
@@ -245,18 +204,18 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Tuple(elements) => {
                 assert_eq!(elements.len(), 3);
-                match &elements[0].0 {
+                match &elements[0].data {
                     CoreData::Literal(Literal::Int64(value)) => assert_eq!(*value, 42),
                     _ => panic!("Expected integer literal"),
                 }
-                match &elements[1].0 {
+                match &elements[1].data {
                     CoreData::Literal(Literal::String(value)) => assert_eq!(value, "hello"),
                     _ => panic!("Expected string literal"),
                 }
-                match &elements[2].0 {
+                match &elements[2].data {
                     CoreData::Literal(Literal::Bool(value)) => assert!(*value),
                     _ => panic!("Expected boolean literal"),
                 }
@@ -282,85 +241,20 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Struct(name, fields) => {
                 assert_eq!(name, "Point");
                 assert_eq!(fields.len(), 2);
-                match &fields[0].0 {
+                match &fields[0].data {
                     CoreData::Literal(Literal::Int64(value)) => assert_eq!(*value, 10),
                     _ => panic!("Expected integer literal"),
                 }
-                match &fields[1].0 {
+                match &fields[1].data {
                     CoreData::Literal(Literal::Int64(value)) => assert_eq!(*value, 20),
                     _ => panic!("Expected integer literal"),
                 }
             }
             _ => panic!("Expected struct"),
-        }
-    }
-
-    /// Test evaluation of map expressions
-    #[tokio::test]
-    async fn test_map_evaluation() {
-        let harness = TestHarness::new();
-        let ctx = Context::default();
-        let engine = Engine::new(ctx);
-
-        // Create a map expression
-        let map_expr = Arc::new(Expr::new(CoreExpr(CoreData::Map(vec![
-            (lit_expr(string("a")), lit_expr(int(1))),
-            (lit_expr(string("b")), lit_expr(int(2))),
-            (lit_expr(string("c")), lit_expr(int(3))),
-        ]))));
-
-        let results = evaluate_and_collect(map_expr, engine, harness).await;
-
-        // Check result
-        assert_eq!(results.len(), 1);
-        match &results[0].0 {
-            CoreData::Map(items) => {
-                assert_eq!(items.len(), 3);
-
-                // Find key "a" and check value
-                let a_found = items.iter().any(|(k, v)| {
-                    if let CoreData::Literal(Literal::String(key)) = &k.0 {
-                        if key == "a" {
-                            if let CoreData::Literal(Literal::Int64(val)) = &v.0 {
-                                return *val == 1;
-                            }
-                        }
-                    }
-                    false
-                });
-                assert!(a_found, "Key 'a' with value 1 not found");
-
-                // Find key "b" and check value
-                let b_found = items.iter().any(|(k, v)| {
-                    if let CoreData::Literal(Literal::String(key)) = &k.0 {
-                        if key == "b" {
-                            if let CoreData::Literal(Literal::Int64(val)) = &v.0 {
-                                return *val == 2;
-                            }
-                        }
-                    }
-                    false
-                });
-                assert!(b_found, "Key 'b' with value 2 not found");
-
-                // Find key "c" and check value
-                let c_found = items.iter().any(|(k, v)| {
-                    if let CoreData::Literal(Literal::String(key)) = &k.0 {
-                        if key == "c" {
-                            if let CoreData::Literal(Literal::Int64(val)) = &v.0 {
-                                return *val == 3;
-                            }
-                        }
-                    }
-                    false
-                });
-                assert!(c_found, "Key 'c' with value 3 not found");
-            }
-            _ => panic!("Expected map"),
         }
     }
 
@@ -381,7 +275,7 @@ mod tests {
 
         // Check that we got a function value
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::Function(_) => {
                 // Successfully evaluated to a function
             }
@@ -403,7 +297,7 @@ mod tests {
 
         // Check result
         assert_eq!(results.len(), 1);
-        match &results[0].0 {
+        match &results[0].data {
             CoreData::None => {
                 // Successfully evaluated to null
             }
@@ -416,12 +310,12 @@ mod tests {
     async fn test_fail_evaluation() {
         let return_k: Continuation<Value, Result<Value, String>> = Arc::new(move |value| {
             Box::pin(async move {
-                match value {
-                    Value(CoreData::Fail(boxed_value)) => match boxed_value.0 {
+                match value.data {
+                    CoreData::Fail(boxed_value) => match boxed_value.data {
                         CoreData::Literal(Literal::String(msg)) => Err(msg),
                         _ => panic!("Expected string message in fail"),
                     },
-                    value => Ok(value),
+                    _ => Ok(value),
                 }
             })
         });
@@ -432,7 +326,9 @@ mod tests {
 
         // Create a fail expression with a message
         let fail_expr = Arc::new(Expr::new(CoreExpr(CoreData::Fail(Box::new(Arc::new(
-            Expr::new(CoreVal(Value(CoreData::Literal(string("error message"))))),
+            Expr::new(CoreVal(Value::new(CoreData::Literal(string(
+                "error message",
+            ))))),
         ))))));
 
         let results =

@@ -271,10 +271,12 @@ mod tests {
             let params = func.value.params.as_ref().unwrap();
             assert_eq!(params.len(), 1);
             assert_eq!(*params[0].value.name.value, "x");
-            assert!(matches!(*params[0].clone().value.ty.value, Type::Adt(name) if name == "T"));
+            assert!(
+                matches!(*params[0].clone().value.ty.value, Type::Identifier(name) if name == "T")
+            );
 
             // Check return type
-            assert!(matches!(*func.value.return_type.value, Type::Adt(name) if name == "T"));
+            assert!(matches!(*func.value.return_type.value, Type::Identifier(name) if name == "T"));
 
             // Check body
             assert!(func.value.body.is_some());
@@ -305,19 +307,21 @@ mod tests {
             // Check first parameter (map: {K: V})
             assert_eq!(*params[0].value.name.value, "map");
             if let Type::Map(key_ty, val_ty) = &*params[0].value.ty.value {
-                assert!(matches!(*key_ty.clone().value, Type::Adt(name) if name == "K"));
-                assert!(matches!(*val_ty.clone().value, Type::Adt(name) if name == "V"));
+                assert!(matches!(*key_ty.clone().value, Type::Identifier(name) if name == "K"));
+                assert!(matches!(*val_ty.clone().value, Type::Identifier(name) if name == "V"));
             } else {
                 panic!("Expected Map type for first parameter");
             }
 
             // Check second parameter (key: K)
             assert_eq!(*params[1].value.name.value, "key");
-            assert!(matches!(*params[1].clone().value.ty.value, Type::Adt(name) if name == "K"));
+            assert!(
+                matches!(*params[1].clone().value.ty.value, Type::Identifier(name) if name == "K")
+            );
 
             // Check return type (V?)
-            if let Type::Optional(inner) = &*func.value.return_type.value {
-                assert!(matches!(*inner.clone().value, Type::Adt(name) if name == "V"));
+            if let Type::Questioned(inner) = &*func.value.return_type.value {
+                assert!(matches!(*inner.clone().value, Type::Identifier(name) if name == "V"));
             } else {
                 panic!("Expected Optional return type");
             }
@@ -346,12 +350,16 @@ mod tests {
             let params = func.value.params.as_ref().unwrap();
             assert_eq!(params.len(), 2);
             assert_eq!(*params[0].value.name.value, "a");
-            assert!(matches!(*params[0].clone().value.ty.value, Type::Adt(name) if name == "A"));
+            assert!(
+                matches!(*params[0].clone().value.ty.value, Type::Identifier(name) if name == "A")
+            );
             assert_eq!(*params[1].value.name.value, "b");
-            assert!(matches!(*params[1].clone().value.ty.value, Type::Adt(name) if name == "B"));
+            assert!(
+                matches!(*params[1].clone().value.ty.value, Type::Identifier(name) if name == "B")
+            );
 
             // Check return type
-            assert!(matches!(*func.value.return_type.value, Type::Adt(name) if name == "C"));
+            assert!(matches!(*func.value.return_type.value, Type::Identifier(name) if name == "C"));
 
             // Check body is None
             assert!(func.value.body.is_none());
@@ -408,7 +416,9 @@ mod tests {
             assert!(func.value.receiver.is_some());
             if let Some(receiver) = &func.value.receiver {
                 assert_eq!(*receiver.value.name.value, "self");
-                assert!(matches!(&*receiver.value.ty.value, Type::Adt(name) if name == "Person"));
+                assert!(
+                    matches!(&*receiver.value.ty.value, Type::Identifier(name) if name == "Person")
+                );
             }
 
             // Check params.
@@ -438,7 +448,9 @@ mod tests {
             assert!(func.value.receiver.is_some());
             if let Some(receiver) = &func.value.receiver {
                 assert_eq!(*receiver.value.name.value, "self");
-                assert!(matches!(&*receiver.value.ty.value, Type::Adt(name) if name == "Person"));
+                assert!(
+                    matches!(&*receiver.value.ty.value, Type::Identifier(name) if name == "Person")
+                );
             }
 
             // Check params.
