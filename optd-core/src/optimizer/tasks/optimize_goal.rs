@@ -152,18 +152,21 @@ impl<M: Memoize> Optimizer<M> {
                     } else {
                         Cost(f64::MAX)
                     };
-                    self.ensure_cost_expression_task(expression_id, budget, parent_task_id.clone())
+                    let child_task_id = self.ensure_cost_expression_task(expression_id, budget, parent_task_id.clone())
                         .await?;
+                    // TODO(sarvesh): child task id should be added to the goal task.
                 }
                 GoalMemberId::GoalId(new_goal_id) => {
                     let parent_task_id = self.running_jobs[&job_id].expect(
                         "Optimization task for goal of the ingested physical plan not found.",
                     );
-                    self.ensure_optimize_goal_task(
+                    let child_task_id = self.ensure_optimize_goal_task(
                         new_goal_id,
                         SourceTaskId::ForkCosted(parent_task_id.clone()),
                     )
                     .await?;
+
+                    // TODO(sarvesh): child task id should be added to the goal task.
                 }
             }
         }
