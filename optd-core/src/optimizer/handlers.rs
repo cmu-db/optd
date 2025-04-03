@@ -1,6 +1,6 @@
 use super::{
     EngineMessage, EngineMessageKind, JobId, OptimizeRequest, Optimizer, PendingMessage, Task,
-    TaskId, ingest::LogicalIngest,
+    TaskId, ingest::LogicalIngest, tasks::SourceTaskId,
 };
 use crate::{
     cir::{
@@ -151,25 +151,8 @@ impl<M: Memoize> Optimizer<M> {
         let goal_id = self.memo.find_repr_goal(goal_id).await?;
 
         let member = self.probe_ingest_physical_plan(&plan).await?;
-        let is_new = self.memo.add_goal_member(goal_id, member).await?;
 
-        if is_new {
-            match member {
-                GoalMemberId::PhysicalExpressionId(expression_id) => {
-                    let parent_task_id = self.running_jobs[&job_id].0;
-                    // TODO(Alexis): Needs to ensure cost expression task exists and then subscribe.
-                    self.ensure_cost_expression_task(expression_id, parent_task_id)
-                        .await?;
-                }
-                GoalMemberId::GoalId(new_goal_id) => {
-                    let parent_task_id = self.goal_optimization_task_index.get(&goal_id).expect(
-                        "Optimization task for goal of the ingested physical plan not found.",
-                    );
-                    self.ensure_goal_optimize_task(new_goal_id, *parent_task_id)
-                        .await?;
-                }
-            }
-        }
+        self.receive_new_goal_member(member, goal_id, job_id).await?;
 
         Ok(())
     }

@@ -16,7 +16,7 @@ use optd_dsl::analyzer::hir::Value;
 use optd_dsl::analyzer::{context::Context, hir::HIR};
 use optd_dsl::engine::{Continuation, EngineResponse};
 use std::collections::{HashMap, HashSet, VecDeque};
-use tasks::{Task, TaskId};
+use tasks::{SourceTaskId, Task, TaskId};
 
 mod egest;
 mod handlers;
@@ -186,10 +186,6 @@ impl<M: Memoize> Optimizer<M> {
             group_exploration_task_index: HashMap::new(),
             goal_optimization_task_index: HashMap::new(),
             cost_expression_task_index: HashMap::new(),
-
-            // Subscriptions.
-            group_subscribers: HashMap::new(),
-            goal_subscribers: HashMap::new(),
         }
     }
 
@@ -263,14 +259,14 @@ impl<M: Memoize> Optimizer<M> {
                             }
                         }
                         SubscribeGroup(group_id, continuation) => {
-                            if self.get_related_task(job_id).is_some() {
-                                self.process_group_subscription(group_id, continuation, job_id).await?;
+                            if let Some(task_id) = self.get_related_task(job_id) {
+                                self.process_group_subscription(group_id, continuation, task_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
                         SubscribeGoal(goal, continuation) => {
-                            if self.get_related_task(job_id).is_some() {
-                                self.process_goal_subscription(&goal, continuation, job_id).await?;
+                            if let Some(task_id) = self.get_related_task(job_id) {
+                                self.process_goal_subscription(&goal, continuation, task_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
@@ -297,5 +293,11 @@ impl<M: Memoize> Optimizer<M> {
         let task_id = self.next_task_id;
         self.next_task_id.0 += 1;
         task_id
+    }
+
+    fn get_related_task(&self, job_id: JobId) -> Option<TaskId> {
+        self.running_jobs
+            .get(&job_id)
+            .and_then(|task_id| task_id.clone())
     }
 }

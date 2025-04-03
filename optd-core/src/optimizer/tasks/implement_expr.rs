@@ -40,12 +40,14 @@ impl ImplementExpressionTask {
         rule: ImplementationRule,
         is_processing: bool,
         logical_expr_id: LogicalExpressionId,
+        goal_id: GoalId,
         optimize_goal_out: TaskId,
     ) -> Self {
         Self {
             rule,
             is_processing,
             logical_expr_id,
+            goal_id,
             optimize_goal_out,
             fork_in: None,
         }
@@ -72,7 +74,7 @@ impl<M: Memoize> Optimizer<M> {
             .await?
             == Status::Dirty;
 
-        let task = ImplementExpressionTask::new(rule, is_dirty, logical_expr_id, out);
+        let task = ImplementExpressionTask::new(rule, is_dirty, logical_expr_id, goal_id, out);
         self.tasks.insert(task_id, Task::ImplementExpression(task));
 
         if is_dirty {

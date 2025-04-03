@@ -2,7 +2,7 @@ use crate::{
     cir::{Cost, Goal, GoalId, GoalMemberId, PhysicalExpressionId},
     error::Error,
     memo::Memoize,
-    optimizer::{Optimizer, Task},
+    optimizer::{JobId, Optimizer, Task},
 };
 
 use super::{SourceTaskId, TaskId};
@@ -129,5 +129,44 @@ impl<M: Memoize> Optimizer<M> {
         // self.goal_optimization_task_index.insert(goal_id, task_id);
         self.tasks.insert(task_id, Task::OptimizeGoal(task));
         Ok((task_id, best_costed))
+    }
+
+    pub async fn receive_new_goal_member(
+        &mut self,
+        member_id: GoalMemberId,
+        goal_id: GoalId,
+        job_id: JobId,
+    ) -> Result<(), Error> {
+        let is_new = self.memo.add_goal_member(goal_id, member_id).await?;
+
+        if is_new {
+            match member_id {
+                GoalMemberId::PhysicalExpressionId(expression_id) => {
+                    let parent_task_id = self.running_jobs[&job_id].expect(
+                        "Implementation task for goal of the ingested physical plan not found.",
+                    );
+                    let budget = if let Some(best_costed) =
+                        self.memo.get_best_optimized_physical_expr(goal_id).await?
+                    {
+                        best_costed.1
+                    } else {
+                        Cost(f64::MAX)
+                    };
+                    self.ensure_cost_expression_task(expression_id, budget, parent_task_id.clone())
+                        .await?;
+                }
+                GoalMemberId::GoalId(new_goal_id) => {
+                    let parent_task_id = self.running_jobs[&job_id].expect(
+                        "Optimization task for goal of the ingested physical plan not found.",
+                    );
+                    self.ensure_optimize_goal_task(
+                        new_goal_id,
+                        SourceTaskId::ForkCosted(parent_task_id.clone()),
+                    )
+                    .await?;
+                }
+            }
+        }
+        Ok(())
     }
 }
