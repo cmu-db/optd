@@ -62,7 +62,7 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// This is used when a task needs to cost a physical expression as part of its work.
     /// If a costing task already exists, we reuse it.
-    pub(super) async fn ensure_cost_expression_task(
+    pub async fn ensure_cost_expression_task(
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         budget: Cost,
