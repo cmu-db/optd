@@ -16,6 +16,7 @@
 //! intermediate representations through the bridge modules.
 
 use super::context::Context;
+use super::map::Map;
 use super::r#type::Type;
 use crate::utils::span::Span;
 use std::fmt::Debug;
@@ -177,7 +178,7 @@ pub enum CoreData<T> {
     /// Fixed collection of possibly heterogeneous values
     Tuple(Vec<T>),
     /// Key-value associations
-    Map(Vec<(T, T)>),
+    Map(Map),
     /// Named structure with fields
     Struct(Identifier, Vec<T>),
     /// Function or closure
@@ -235,6 +236,9 @@ impl Expr<NoMetadata> {
     }
 }
 
+/// Type alias for map entries to reduce type complexity
+pub type MapEntries<M> = Vec<(Arc<Expr<M>>, Arc<Expr<M>>)>;
+
 /// Expression node kinds without metadata
 #[derive(Debug, Clone)]
 pub enum ExprKind<M: ExprMetadata = NoMetadata> {
@@ -250,6 +254,8 @@ pub enum ExprKind<M: ExprMetadata = NoMetadata> {
     Unary(UnaryOp, Arc<Expr<M>>),
     /// Function call
     Call(Arc<Expr<M>>, Vec<Arc<Expr<M>>>),
+    /// Map expression
+    Map(MapEntries<M>),
     /// Variable reference
     Ref(Identifier),
     /// Core expression

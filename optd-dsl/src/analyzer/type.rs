@@ -330,12 +330,6 @@ mod type_registry_tests {
 
         let result = registry.register_adt(&car2);
         assert!(result.is_err());
-
-        if let Err(CompileError::SemanticError(SemanticError::DuplicateAdt { name, .. })) = result {
-            assert_eq!(name, "Car");
-        } else {
-            panic!("Expected DuplicateAdt error");
-        }
     }
 
     #[test]

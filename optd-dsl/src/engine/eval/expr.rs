@@ -1,11 +1,11 @@
 use super::{binary::eval_binary_op, unary::eval_unary_op};
 use crate::analyzer::hir::{BinOp, CoreData, Expr, FunKind, Identifier, Literal, UnaryOp, Value};
+use crate::analyzer::map::Map;
 use crate::engine::{Continuation, EngineResponse};
 use crate::{
     capture,
     engine::{Engine, utils::evaluate_sequence},
 };
-use CoreData::*;
 use FunKind::*;
 use std::sync::Arc;
 
@@ -39,7 +39,7 @@ where
             Arc::new(move |value| {
                 Box::pin(capture!([then_expr, else_expr, engine, k], async move {
                     match value.0 {
-                        Literal(Literal::Bool(b)) => {
+                        CoreData::Literal(Literal::Bool(b)) => {
                             if b {
                                 engine.evaluate(then_expr, k).await
                             } else {
@@ -218,11 +218,11 @@ where
                 Box::pin(capture!([args, engine, k], async move {
                     match fun_value.0 {
                         // Handle closure (user-defined function).
-                        Function(Closure(params, body)) => {
+                        CoreData::Function(Closure(params, body)) => {
                             evaluate_closure_call(params, body, args, engine, k).await
                         }
                         // Handle Rust UDF (built-in function).
-                        Function(RustUDF(udf)) => {
+                        CoreData::Function(RustUDF(udf)) => {
                             evaluate_rust_udf_call(udf, args, engine, k).await
                         }
                         // Value must be a function.
@@ -313,6 +313,49 @@ where
     .await
 }
 
+/// Evaluates a map expression.
+///
+/// # Parameters
+///
+/// * `items` - The key-value pairs to evaluate.
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+pub(crate) async fn evaluate_map<O>(
+    items: Vec<(Arc<Expr>, Arc<Expr>)>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    // Extract keys and values.
+    let (keys, values): (Vec<Arc<Expr>>, Vec<Arc<Expr>>) = items.into_iter().unzip();
+
+    // First evaluate all key expressions.
+    evaluate_sequence(
+        keys,
+        engine.clone(),
+        Arc::new(move |keys_values| {
+            Box::pin(capture!([values, engine, k], async move {
+                // Then evaluate all value expressions.
+                evaluate_sequence(
+                    values,
+                    engine,
+                    Arc::new(move |values_values| {
+                        Box::pin(capture!([keys_values, k], async move {
+                            // Create a map from keys and values.
+                            let map_items = keys_values.into_iter().zip(values_values).collect();
+                            k(Value(CoreData::Map(Map::from_pairs(map_items)))).await
+                        }))
+                    }),
+                )
+                .await
+            }))
+        }),
+    )
+    .await
+}
+
 /// Evaluates a reference to a variable.
 ///
 /// Looks up the variable in the context and passes its value to the continuation.
@@ -344,7 +387,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::engine::Engine;
-    use crate::utils::tests::{array_val, ref_expr};
+    use crate::utils::tests::{array_val, assert_values_equal, ref_expr};
     use crate::{
         analyzer::{
             context::Context,
@@ -571,6 +614,182 @@ mod tests {
                 assert_eq!(*value, 15); // 1 + 2 + 3 + 4 + 5 = 15
             }
             _ => panic!("Expected integer value"),
+        }
+    }
+
+    /// Test to verify the Map implementation works correctly.
+    #[tokio::test]
+    async fn test_map_creation() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Create a map with key-value pairs: { "a": 1, "b": 2, "c": 3 }
+        let map_expr = Arc::new(Expr::new(Map(vec![
+            (lit_expr(string("a")), lit_expr(int(1))),
+            (lit_expr(string("b")), lit_expr(int(2))),
+            (lit_expr(string("c")), lit_expr(int(3))),
+        ])));
+
+        // Evaluate the map expression
+        let results = evaluate_and_collect(map_expr, engine.clone(), harness.clone()).await;
+
+        // Check that we got a Map value
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Map(map) => {
+                // Check that map has the correct key-value pairs
+                assert_values_equal(&map.get(&lit_val(string("a"))), &lit_val(int(1)));
+                assert_values_equal(&map.get(&lit_val(string("b"))), &lit_val(int(2)));
+                assert_values_equal(&map.get(&lit_val(string("c"))), &lit_val(int(3)));
+
+                // Check that non-existent key returns None value
+                assert_values_equal(&map.get(&lit_val(string("d"))), &Value(CoreData::None));
+            }
+            _ => panic!("Expected Map value"),
+        }
+
+        // Test map with expressions that need evaluation as keys and values
+        // Map: { "x" + "y": 10 + 5, "a" + "b": 20 * 2 }
+        let complex_map_expr = Arc::new(Expr::new(Map(vec![
+            (
+                Arc::new(Expr::new(Binary(
+                    lit_expr(string("x")),
+                    BinOp::Concat,
+                    lit_expr(string("y")),
+                ))),
+                Arc::new(Expr::new(Binary(
+                    lit_expr(int(10)),
+                    BinOp::Add,
+                    lit_expr(int(5)),
+                ))),
+            ),
+            (
+                Arc::new(Expr::new(Binary(
+                    lit_expr(string("a")),
+                    BinOp::Concat,
+                    lit_expr(string("b")),
+                ))),
+                Arc::new(Expr::new(Binary(
+                    lit_expr(int(20)),
+                    BinOp::Mul,
+                    lit_expr(int(2)),
+                ))),
+            ),
+        ])));
+
+        // Evaluate the complex map expression
+        let complex_results = evaluate_and_collect(complex_map_expr, engine, harness).await;
+
+        // Check that we got a Map value with correctly evaluated keys and values
+        assert_eq!(complex_results.len(), 1);
+        match &complex_results[0].0 {
+            CoreData::Map(map) => {
+                // Check that map has the correct key-value pairs after evaluation
+                assert_values_equal(&map.get(&lit_val(string("xy"))), &lit_val(int(15)));
+                assert_values_equal(&map.get(&lit_val(string("ab"))), &lit_val(int(40)));
+            }
+            _ => panic!("Expected Map value"),
+        }
+    }
+
+    /// Test map operations with nested maps and lookup
+    #[tokio::test]
+    async fn test_map_nested_and_lookup() {
+        let harness = TestHarness::new();
+        let mut ctx = Context::default();
+
+        // Add a map lookup function
+        ctx.bind(
+            "get".to_string(),
+            Value(CoreData::Function(FunKind::RustUDF(|args| {
+                if args.len() != 2 {
+                    panic!("get function requires 2 arguments");
+                }
+
+                match &args[0].0 {
+                    CoreData::Map(map) => map.get(&args[1]),
+                    _ => panic!("First argument must be a map"),
+                }
+            }))),
+        );
+
+        let engine = Engine::new(ctx);
+
+        // Create a nested map:
+        // {
+        //   "user": {
+        //     "name": "Alice",
+        //     "age": 30,
+        //     "address": {
+        //       "city": "San Francisco",
+        //       "zip": 94105
+        //     }
+        //   },
+        //   "settings": {
+        //     "theme": "dark",
+        //     "notifications": true
+        //   }
+        // }
+
+        // First, create the address map
+        let address_map = Arc::new(Expr::new(Map(vec![
+            (lit_expr(string("city")), lit_expr(string("San Francisco"))),
+            (lit_expr(string("zip")), lit_expr(int(94105))),
+        ])));
+
+        // Then, create the user map with the nested address map
+        let user_map = Arc::new(Expr::new(Map(vec![
+            (lit_expr(string("name")), lit_expr(string("Alice"))),
+            (lit_expr(string("age")), lit_expr(int(30))),
+            (lit_expr(string("address")), address_map),
+        ])));
+
+        // Create the settings map
+        let settings_map = Arc::new(Expr::new(Map(vec![
+            (lit_expr(string("theme")), lit_expr(string("dark"))),
+            (lit_expr(string("notifications")), lit_expr(boolean(true))),
+        ])));
+
+        // Finally, create the top-level map
+        let nested_map_expr = Arc::new(Expr::new(Map(vec![
+            (lit_expr(string("user")), user_map),
+            (lit_expr(string("settings")), settings_map),
+        ])));
+
+        // First, evaluate the nested map to bind it to a variable
+        let program = Arc::new(Expr::new(Let(
+            "data".to_string(),
+            nested_map_expr,
+            // Extract user.address.city using get function
+            Arc::new(Expr::new(Call(
+                ref_expr("get"),
+                vec![
+                    Arc::new(Expr::new(Call(
+                        ref_expr("get"),
+                        vec![
+                            Arc::new(Expr::new(Call(
+                                ref_expr("get"),
+                                vec![ref_expr("data"), lit_expr(string("user"))],
+                            ))),
+                            lit_expr(string("address")),
+                        ],
+                    ))),
+                    lit_expr(string("city")),
+                ],
+            ))),
+        )));
+
+        // Evaluate the program
+        let results = evaluate_and_collect(program, engine, harness).await;
+
+        // Check that we got the correct value from the nested lookup
+        assert_eq!(results.len(), 1);
+        match &results[0].0 {
+            CoreData::Literal(Literal::String(value)) => {
+                assert_eq!(value, "San Francisco");
+            }
+            _ => panic!("Expected string value"),
         }
     }
 

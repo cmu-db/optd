@@ -79,10 +79,9 @@ pub(crate) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
         }
 
         // Map concatenation (joins two maps).
-        (Map(l), Concat, Map(r)) => {
-            let mut result = l.clone();
-            result.extend(r.into_iter());
-            Value(Map(result))
+        (Map(mut l), Concat, Map(r)) => {
+            l.concat(r);
+            Value(Map(l))
         }
 
         // Any other combination of value types or operations is not supported.
@@ -96,7 +95,6 @@ mod tests {
     use BinOp::*;
     use CoreData::*;
     use Literal::*;
-    use std::collections::HashMap;
 
     use super::eval_binary_op;
 
@@ -329,32 +327,51 @@ mod tests {
 
     #[test]
     fn test_map_concatenation() {
-        // Create two maps
-        let map1 = Value(Map(vec![(string("a"), int(1)), (string("b"), int(2))]));
+        use crate::analyzer::map::Map;
 
-        let map2 = Value(Map(vec![(string("c"), int(3)), (string("d"), int(4))]));
+        // Create two maps using Map::from_pairs
+        let map1 = Value(Map(Map::from_pairs(vec![
+            (string("a"), int(1)),
+            (string("b"), int(2)),
+        ])));
+        let map2 = Value(Map(Map::from_pairs(vec![
+            (string("c"), int(3)),
+            (string("d"), int(4)),
+        ])));
 
         // Concatenate maps
         if let Map(result) = eval_binary_op(map1, &Concat, map2).0 {
-            assert_eq!(result.len(), 4);
+            // Check each key-value pair is accessible
+            if let Literal(Int64(v)) = result.get(&string("a")).0 {
+                assert_eq!(v, 1);
+            } else {
+                panic!("Expected Int64 for key 'a'");
+            }
 
-            // Convert to a HashMap for easier testing
-            let map: HashMap<std::string::String, _> = result
-                .iter()
-                .map(|(k, v)| {
-                    if let (Literal(String(key)), Literal(Int64(value))) = (&k.0, &v.0) {
-                        (key.clone(), *value)
-                    } else {
-                        panic!("Expected String keys and Int64 values");
-                    }
-                })
-                .collect();
+            if let Literal(Int64(v)) = result.get(&string("b")).0 {
+                assert_eq!(v, 2);
+            } else {
+                panic!("Expected Int64 for key 'b'");
+            }
 
-            // Check elements
-            assert_eq!(map.get("a"), Some(&1));
-            assert_eq!(map.get("b"), Some(&2));
-            assert_eq!(map.get("c"), Some(&3));
-            assert_eq!(map.get("d"), Some(&4));
+            if let Literal(Int64(v)) = result.get(&string("c")).0 {
+                assert_eq!(v, 3);
+            } else {
+                panic!("Expected Int64 for key 'c'");
+            }
+
+            if let Literal(Int64(v)) = result.get(&string("d")).0 {
+                assert_eq!(v, 4);
+            } else {
+                panic!("Expected Int64 for key 'd'");
+            }
+
+            // Check a non-existent key returns None
+            if let None = result.get(&string("z")).0 {
+                // This is the expected behavior
+            } else {
+                panic!("Expected None for non-existent key");
+            }
         } else {
             panic!("Expected Map");
         }

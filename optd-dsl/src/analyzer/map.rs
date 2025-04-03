@@ -91,22 +91,15 @@ pub enum MapKey {
 }
 
 /// Custom Map implementation that enforces key type constraints at runtime
-#[derive(Clone)]
+#[derive(Clone, Debug, Default)]
 pub struct Map {
     inner: HashMap<MapKey, Value>,
 }
 
 impl Map {
-    /// Creates a new empty Map
-    pub fn new() -> Self {
-        Self {
-            inner: HashMap::new(),
-        }
-    }
-
     /// Creates a Map from a collection of key-value pairs
     pub fn from_pairs(pairs: Vec<(Value, Value)>) -> Self {
-        pairs.into_iter().fold(Self::new(), |mut map, (k, v)| {
+        pairs.into_iter().fold(Self::default(), |mut map, (k, v)| {
             let map_key = value_to_map_key(&k);
             map.inner.insert(map_key, v);
             map
@@ -122,10 +115,8 @@ impl Map {
     }
 
     /// Combines two maps, with values from other overriding values from self when keys collide
-    pub fn concat(&self, other: &Map) -> Self {
-        let mut result = self.clone();
-        result.inner.extend(other.inner.clone());
-        result
+    pub fn concat(&mut self, other: Map) {
+        self.inner.extend(other.inner);
     }
 }
 
@@ -278,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_simple_map_operations() {
-        let mut map = Map::new();
+        let mut map = Map::default();
         let map_key1 = value_to_map_key(&int_val(1));
         let map_key2 = value_to_map_key(&int_val(2));
 
@@ -311,29 +302,29 @@ mod tests {
 
     #[test]
     fn test_map_concat() {
-        let mut map1 = Map::new();
+        let mut map1 = Map::default();
         map1.inner
             .insert(value_to_map_key(&int_val(1)), string_val("one"));
         map1.inner
             .insert(value_to_map_key(&int_val(2)), string_val("two"));
 
-        let mut map2 = Map::new();
+        let mut map2 = Map::default();
         map2.inner
             .insert(value_to_map_key(&int_val(2)), string_val("TWO")); // Overwrite key 2
         map2.inner
             .insert(value_to_map_key(&int_val(3)), string_val("three"));
 
-        let combined = map1.concat(&map2);
+        map1.concat(map2);
 
-        assert_values_equal(&combined.get(&int_val(1)), &string_val("one"));
-        assert_values_equal(&combined.get(&int_val(2)), &string_val("TWO")); // Overwritten
-        assert_values_equal(&combined.get(&int_val(3)), &string_val("three"));
-        assert_eq!(combined.inner.len(), 3);
+        assert_values_equal(&map1.get(&int_val(1)), &string_val("one"));
+        assert_values_equal(&map1.get(&int_val(2)), &string_val("TWO")); // Overwritten
+        assert_values_equal(&map1.get(&int_val(3)), &string_val("three"));
+        assert_eq!(map1.inner.len(), 3);
     }
 
     #[test]
     fn test_various_key_types() {
-        let mut map = Map::new();
+        let mut map = Map::default();
 
         // Basic literals
         map.inner
@@ -415,7 +406,7 @@ mod tests {
 
     #[test]
     fn test_empty_map() {
-        let map = Map::new();
+        let map = Map::default();
         assert_eq!(map.inner.len(), 0);
         assert!(map.inner.is_empty());
     }
@@ -439,7 +430,7 @@ mod tests {
             let map_key = value_to_map_key(&value);
 
             // Use the map_key in a map
-            let mut map = Map::new();
+            let mut map = Map::default();
             map.inner.insert(map_key, string_val("value"));
 
             // Verify we can retrieve with the original value
@@ -471,7 +462,7 @@ mod tests {
         let key = value_to_map_key(&nested_value);
 
         // Use it as a key
-        let mut map = Map::new();
+        let mut map = Map::default();
         map.inner.insert(key, string_val("complex"));
 
         // Verify we can retrieve it

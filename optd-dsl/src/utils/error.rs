@@ -44,14 +44,14 @@ pub trait Diagnose {
 #[derive(Debug)]
 pub enum CompileError {
     /// Errors occurring during the lexing/tokenization phase
-    LexerError(LexerError),
+    LexerError(Box<LexerError>),
 
     /// Errors occurring during the parsing/syntax analysis phase
-    ParserError(ParserError),
+    ParserError(Box<ParserError>),
 
     /// Errors occurring during the semantic analysis phase
-    SemanticError(SemanticError),
+    SemanticError(Box<SemanticError>),
 
     /// Errors occurring during the type analysis phase
-    TypeError(TypeError),
+    TypeError(Box<TypeError>),
 }

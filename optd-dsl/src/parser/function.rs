@@ -271,7 +271,9 @@ mod tests {
             let params = func.value.params.as_ref().unwrap();
             assert_eq!(params.len(), 1);
             assert_eq!(*params[0].value.name.value, "x");
-            assert!(matches!(*params[0].clone().value.ty.value, Type::Identifier(name) if name == "T"));
+            assert!(
+                matches!(*params[0].clone().value.ty.value, Type::Identifier(name) if name == "T")
+            );
 
             // Check return type
             assert!(matches!(*func.value.return_type.value, Type::Identifier(name) if name == "T"));
@@ -313,7 +315,9 @@ mod tests {
 
             // Check second parameter (key: K)
             assert_eq!(*params[1].value.name.value, "key");
-            assert!(matches!(*params[1].clone().value.ty.value, Type::Identifier(name) if name == "K"));
+            assert!(
+                matches!(*params[1].clone().value.ty.value, Type::Identifier(name) if name == "K")
+            );
 
             // Check return type (V?)
             if let Type::Questioned(inner) = &*func.value.return_type.value {
@@ -346,9 +350,13 @@ mod tests {
             let params = func.value.params.as_ref().unwrap();
             assert_eq!(params.len(), 2);
             assert_eq!(*params[0].value.name.value, "a");
-            assert!(matches!(*params[0].clone().value.ty.value, Type::Identifier(name) if name == "A"));
+            assert!(
+                matches!(*params[0].clone().value.ty.value, Type::Identifier(name) if name == "A")
+            );
             assert_eq!(*params[1].value.name.value, "b");
-            assert!(matches!(*params[1].clone().value.ty.value, Type::Identifier(name) if name == "B"));
+            assert!(
+                matches!(*params[1].clone().value.ty.value, Type::Identifier(name) if name == "B")
+            );
 
             // Check return type
             assert!(matches!(*func.value.return_type.value, Type::Identifier(name) if name == "C"));
@@ -408,7 +416,9 @@ mod tests {
             assert!(func.value.receiver.is_some());
             if let Some(receiver) = &func.value.receiver {
                 assert_eq!(*receiver.value.name.value, "self");
-                assert!(matches!(&*receiver.value.ty.value, Type::Identifier(name) if name == "Person"));
+                assert!(
+                    matches!(&*receiver.value.ty.value, Type::Identifier(name) if name == "Person")
+                );
             }
 
             // Check params.
@@ -438,7 +448,9 @@ mod tests {
             assert!(func.value.receiver.is_some());
             if let Some(receiver) = &func.value.receiver {
                 assert_eq!(*receiver.value.name.value, "self");
-                assert!(matches!(&*receiver.value.ty.value, Type::Identifier(name) if name == "Person"));
+                assert!(
+                    matches!(&*receiver.value.ty.value, Type::Identifier(name) if name == "Person")
+                );
             }
 
             // Check params.

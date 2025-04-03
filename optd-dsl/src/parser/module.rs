@@ -1,12 +1,11 @@
-use crate::lexer::tokens::Token;
-use crate::utils::error::CompileError;
-use crate::utils::span::Span;
-use chumsky::{Stream, prelude::*};
-
 use super::adt::adt_parser;
 use super::ast::{Item, Module};
 use super::error::ParserError;
 use super::function::function_parser;
+use crate::lexer::tokens::Token;
+use crate::utils::error::CompileError;
+use crate::utils::span::Span;
+use chumsky::{Stream, prelude::*};
 
 /// Parses a vector of tokens into a module AST.
 /// Uses Chumsky for parsing and Ariadne for error reporting.

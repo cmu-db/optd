@@ -34,7 +34,10 @@ where
         Struct(name, items) => {
             evaluate_collection(items, move |values| Struct(name, values), engine, k).await
         }
-        Map(items) => evaluate_map(items, engine, k).await,
+        Map(items) => {
+            // Directly continue with the map value.
+            k(Value(Map(items))).await
+        }
         Function(fun_type) => {
             // Directly continue with the function value.
             k(Value(Function(fun_type))).await
@@ -74,49 +77,6 @@ where
             Box::pin(capture!([constructor, k], async move {
                 let result = Value(constructor(values));
                 k(result).await
-            }))
-        }),
-    )
-    .await
-}
-
-/// Evaluates a map expression.
-///
-/// # Parameters
-///
-/// * `items` - The key-value pairs to evaluate.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-async fn evaluate_map<O>(
-    items: Vec<(Arc<Expr>, Arc<Expr>)>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    // Extract keys and values.
-    let (keys, values): (Vec<Arc<Expr>>, Vec<Arc<Expr>>) = items.into_iter().unzip();
-
-    // First evaluate all key expressions.
-    evaluate_sequence(
-        keys,
-        engine.clone(),
-        Arc::new(move |keys_values| {
-            Box::pin(capture!([values, engine, k], async move {
-                // Then evaluate all value expressions.
-                evaluate_sequence(
-                    values,
-                    engine,
-                    Arc::new(move |values_values| {
-                        Box::pin(capture!([keys_values, k], async move {
-                            // Create a map from keys and values.
-                            let map_items = keys_values.into_iter().zip(values_values).collect();
-                            k(Value(Map(map_items))).await
-                        }))
-                    }),
-                )
-                .await
             }))
         }),
     )
@@ -296,71 +256,6 @@ mod tests {
                 }
             }
             _ => panic!("Expected struct"),
-        }
-    }
-
-    /// Test evaluation of map expressions
-    #[tokio::test]
-    async fn test_map_evaluation() {
-        let harness = TestHarness::new();
-        let ctx = Context::default();
-        let engine = Engine::new(ctx);
-
-        // Create a map expression
-        let map_expr = Arc::new(Expr::new(CoreExpr(CoreData::Map(vec![
-            (lit_expr(string("a")), lit_expr(int(1))),
-            (lit_expr(string("b")), lit_expr(int(2))),
-            (lit_expr(string("c")), lit_expr(int(3))),
-        ]))));
-
-        let results = evaluate_and_collect(map_expr, engine, harness).await;
-
-        // Check result
-        assert_eq!(results.len(), 1);
-        match &results[0].0 {
-            CoreData::Map(items) => {
-                assert_eq!(items.len(), 3);
-
-                // Find key "a" and check value
-                let a_found = items.iter().any(|(k, v)| {
-                    if let CoreData::Literal(Literal::String(key)) = &k.0 {
-                        if key == "a" {
-                            if let CoreData::Literal(Literal::Int64(val)) = &v.0 {
-                                return *val == 1;
-                            }
-                        }
-                    }
-                    false
-                });
-                assert!(a_found, "Key 'a' with value 1 not found");
-
-                // Find key "b" and check value
-                let b_found = items.iter().any(|(k, v)| {
-                    if let CoreData::Literal(Literal::String(key)) = &k.0 {
-                        if key == "b" {
-                            if let CoreData::Literal(Literal::Int64(val)) = &v.0 {
-                                return *val == 2;
-                            }
-                        }
-                    }
-                    false
-                });
-                assert!(b_found, "Key 'b' with value 2 not found");
-
-                // Find key "c" and check value
-                let c_found = items.iter().any(|(k, v)| {
-                    if let CoreData::Literal(Literal::String(key)) = &k.0 {
-                        if key == "c" {
-                            if let CoreData::Literal(Literal::Int64(val)) = &v.0 {
-                                return *val == 3;
-                            }
-                        }
-                    }
-                    false
-                });
-                assert!(c_found, "Key 'c' with value 3 not found");
-            }
-            _ => panic!("Expected map"),
         }
     }
 

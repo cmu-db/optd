@@ -3,12 +3,12 @@ use crate::analyzer::{
     hir::{Expr, ExprKind, Goal, GroupId, Value},
 };
 use ExprKind::*;
-use eval::core::evaluate_core_expr;
 use eval::expr::{
     evaluate_binary_expr, evaluate_function_call, evaluate_if_then_else, evaluate_let_binding,
     evaluate_reference, evaluate_unary_expr,
 };
 use eval::r#match::evaluate_pattern_match;
+use eval::{core::evaluate_core_expr, expr::evaluate_map};
 use std::sync::Arc;
 
 mod eval;
@@ -96,6 +96,7 @@ impl Engine {
                 }
                 Unary(op, expr) => evaluate_unary_expr(op.clone(), expr.clone(), self, k).await,
                 Call(fun, args) => evaluate_function_call(fun.clone(), args.clone(), self, k).await,
+                Map(map) => evaluate_map(map.clone(), self, k).await,
                 Ref(ident) => evaluate_reference(ident.clone(), self, k).await,
                 CoreExpr(expr) => evaluate_core_expr(expr.clone(), self, k).await,
                 CoreVal(val) => k(val.clone()).await,

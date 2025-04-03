@@ -18,16 +18,17 @@ pub enum SemanticError {
 
 impl SemanticError {
     /// Creates a new error for duplicate ADT names
-    pub fn new_duplicate_adt(name: String, first_span: Span, duplicate_span: Span) -> Self {
+    pub fn new_duplicate_adt(name: String, first_span: Span, duplicate_span: Span) -> Box<Self> {
         Self::DuplicateAdt {
             name,
             first_span,
             duplicate_span,
         }
+        .into()
     }
 }
 
-impl Diagnose for SemanticError {
+impl Diagnose for Box<SemanticError> {
     fn report(&self) -> Report<Span> {
         todo!()
     }

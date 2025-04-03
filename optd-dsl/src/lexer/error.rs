@@ -16,12 +16,12 @@ pub struct LexerError {
 
 impl LexerError {
     /// Creates a new lexer error from source code and a Chumsky error.
-    pub fn new(src_code: String, error: Simple<char, Span>) -> Self {
-        Self { src_code, error }
+    pub fn new(src_code: String, error: Simple<char, Span>) -> Box<Self> {
+        Self { src_code, error }.into()
     }
 }
 
-impl Diagnose for LexerError {
+impl Diagnose for Box<LexerError> {
     fn report(&self) -> Report<Span> {
         match self.error.reason() {
             SimpleReason::Custom(msg) => {
