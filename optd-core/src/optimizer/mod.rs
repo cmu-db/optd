@@ -23,9 +23,7 @@ mod handlers;
 mod ingest;
 mod jobs;
 mod merge;
-mod subscriptions;
 mod tasks;
-mod tasks_deleted;
 
 /// Default maximum number of concurrent jobs to run in the optimizer.
 const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1000;
@@ -134,16 +132,16 @@ pub struct Optimizer<M: Memoize> {
     message_rx: Receiver<EngineMessage>,
     optimize_rx: Receiver<OptimizeRequest>,
 
+    // Job management.
+    runnable_jobs: VecDeque<(JobId, Job)>,
+    /// Map of currently running jobs. Some job is associated with a task, some are not.
+    running_jobs: HashMap<JobId, Option<TaskId>>,
+    next_job_id: JobId,
+    max_concurrent_jobs: usize,
+
     // Task management.
     tasks: HashMap<TaskId, Task>,
     next_task_id: TaskId,
-
-    // Job management.
-    pending_jobs: HashMap<JobId, Job>,
-    job_schedule_queue: VecDeque<JobId>,
-    running_jobs: HashMap<JobId, Job>,
-    next_job_id: JobId,
-    max_concurrent_jobs: usize,
 
     // Task indexing.
     group_exploration_task_index: HashMap<GroupId, TaskId>,
@@ -154,9 +152,6 @@ pub struct Optimizer<M: Memoize> {
     // TODO(yuchen): Get rid of these when we fully switch to in-out subscription.
     group_subscribers: HashMap<GroupId, Vec<TaskId>>,
     goal_subscribers: HashMap<GoalId, Vec<TaskId>>,
-
-    // Task index
-    task_index: HashMap<TaskId, Task>,
 }
 
 impl<M: Memoize> Optimizer<M> {
@@ -182,16 +177,15 @@ impl<M: Memoize> Optimizer<M> {
             message_rx,
             optimize_rx,
 
-            // Task management.
-            tasks: HashMap::new(),
-            next_task_id: TaskId(0),
-
             // Job management.
-            pending_jobs: HashMap::new(),
-            job_schedule_queue: VecDeque::new(),
+            runnable_jobs: VecDeque::new(),
             running_jobs: HashMap::new(),
             next_job_id: JobId(0),
             max_concurrent_jobs: DEFAULT_MAX_CONCURRENT_JOBS,
+
+            // Task management.
+            tasks: HashMap::new(),
+            next_task_id: TaskId(0),
 
             // Task indexing.
             group_exploration_task_index: HashMap::new(),
@@ -201,9 +195,6 @@ impl<M: Memoize> Optimizer<M> {
             // Subscriptions.
             group_subscribers: HashMap::new(),
             goal_subscribers: HashMap::new(),
-
-            // Task index
-            task_index: HashMap::new(),
         }
     }
 
@@ -300,10 +291,16 @@ impl<M: Memoize> Optimizer<M> {
                     };
 
                     // Launch pending jobs according to a policy (currently FIFO).
-                    self.launch_pending_jobs().await?;
+                    self.launch_runnable_jobs().await?;
                 },
                 else => break Ok(()),
             }
         }
+    }
+
+    fn next_task_id(&mut self) -> TaskId {
+        let task_id = self.next_task_id;
+        self.next_task_id.0 += 1;
+        task_id
     }
 }

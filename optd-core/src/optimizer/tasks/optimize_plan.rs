@@ -9,6 +9,7 @@ use crate::{
 use super::TaskId;
 
 /// Task data for optimizing a logical plan.
+#[derive(Debug)]
 pub(super) struct OptimizePlanTask {
     /// The logical plan to be optimized.
     pub plan: LogicalPlan,
@@ -35,12 +36,11 @@ impl OptimizePlanTask {
 }
 
 impl<M: Memoize> Optimizer<M> {
-    pub fn create_optimize_plan_task(
+    pub async fn create_optimize_plan_task(
         &mut self,
         plan: LogicalPlan,
         response_tx: mpsc::Sender<PhysicalPlan>,
     ) -> TaskId {
-
         // Do ingestion
         // logical_expresison, group_id
         // goal_id = group + empty prop create if not exists
