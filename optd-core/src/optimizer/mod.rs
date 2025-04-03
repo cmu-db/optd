@@ -147,11 +147,6 @@ pub struct Optimizer<M: Memoize> {
     group_exploration_task_index: HashMap<GroupId, TaskId>,
     goal_optimization_task_index: HashMap<GoalId, TaskId>,
     cost_expression_task_index: HashMap<PhysicalExpressionId, TaskId>,
-
-    // Subscriptions.
-    // TODO(yuchen): Get rid of these when we fully switch to in-out subscription.
-    group_subscribers: HashMap<GroupId, Vec<TaskId>>,
-    goal_subscribers: HashMap<GoalId, Vec<TaskId>>,
 }
 
 impl<M: Memoize> Optimizer<M> {
