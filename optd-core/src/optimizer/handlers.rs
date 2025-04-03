@@ -1,6 +1,6 @@
 use super::{
-    EngineMessage, EngineMessageKind, JobId, OptimizeRequest, Optimizer, PendingMessage, TaskId,
-    ingest::LogicalIngest,
+    EngineMessage, EngineMessageKind, JobId, OptimizeRequest, Optimizer, PendingMessage, Task,
+    TaskId, ingest::LogicalIngest,
 };
 use crate::{
     cir::{
@@ -243,62 +243,37 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         group_id: GroupId,
         continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
-        job_id: JobId,
+        task_id: TaskId,
     ) -> Result<(), Error> {
-        let related_task_id = self.running_jobs[&job_id].0;
-
-        // Register the continuation and notify the memo about the dependency to ensure the
-        // operation corresponding to the task gets invalidated when the group has new expressions.
-        match &mut self.tasks.get_mut(&related_task_id).unwrap().kind {
-            TransformExpression(TransformExpressionTask {
-                rule,
-                expression_id,
-                continuations,
-                ..
-            }) => {
-                continuations
-                    .entry(group_id)
-                    .or_default()
-                    .push(continuation.clone());
-
-                self.memo
-                    .add_transformation_dependency(*expression_id, rule, group_id)
-                    .await?;
-            }
-            ImplementExpression(ImplementExpressionTask {
-                rule,
-                expression_id,
-                goal_id,
-                continuations,
-                ..
-            }) => {
-                continuations
-                    .entry(group_id)
-                    .or_default()
-                    .push(continuation.clone());
-
-                self.memo
-                    .add_implementation_dependency(*expression_id, *goal_id, rule, group_id)
-                    .await?;
-            }
-            _ => panic!("Task type cannot produce group subscription."),
-        }
-
-        // Subscribe to future expressions and bootstrap with existing ones.
-        let expressions = self
-            .subscribe_task_to_group(group_id, related_task_id)
+        let fork_task_id = self
+            .create_fork_logical_task(group_id, continuation, task_id)
             .await?;
 
-        for expression_id in expressions {
-            self.schedule_job(
-                related_task_id,
-                JobKind::ContinueWithLogical(
-                    expression_id,
-                    continuation.clone(), // Reuse the same continuation for each existing expression.
-                ),
-            );
+        match self.tasks.get_mut(&task_id).unwrap() {
+            Task::ImplementExpression(task) => {
+                task.add_fork_in(fork_task_id);
+                self.memo
+                    .add_implementation_dependency(
+                        task.logical_expr_id,
+                        task.goal_id,
+                        &task.rule,
+                        group_id,
+                    )
+                    .await?;
+            }
+            Task::TransformExpression(task) => {
+                task.add_fork_in(fork_task_id);
+                self.memo
+                    .add_transformation_dependency(task.logical_expr_id, &task.rule, group_id);
+            }
+            Task::ContinueWithLogical(task) => {
+                // TODO(yuchen): track dependencies back to the root transform/implement task.
+                task.add_fork_in(fork_task_id);
+            }
+            task => {
+                panic!("Task type cannot produce group subscription: {:?}", task);
+            }
         }
-
         Ok(())
     }
 
@@ -316,40 +291,28 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         goal: &Goal,
         continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
-        job_id: JobId,
+        task_id: TaskId,
     ) -> Result<(), Error> {
-        let related_task_id = self.running_jobs[&job_id].0;
         let goal_id = self.memo.get_goal_id(goal).await?;
 
-        // Register the continuation and notify the memo about the dependency to ensure the
-        // operation corresponding to the task gets invalidated when the goal has a new optimum.
-        match &mut self.tasks.get_mut(&related_task_id).unwrap().kind {
-            CostExpression(CostExpressionTask {
-                expr_id: expression_id,
-                continuations,
-                ..
-            }) => {
-                continuations
-                    .entry(goal_id)
-                    .or_default()
-                    .push(continuation.clone());
+        let fork_task_id = self
+            .create_fork_costed_task(goal_id, continuation, task_id)
+            .await?;
 
+        match self.tasks.get_mut(&task_id).unwrap() {
+            Task::CostExpression(task) => {
+                task.add_fork_in(fork_task_id);
                 self.memo
-                    .add_cost_dependency(*expression_id, goal_id)
+                    .add_cost_dependency(task.physical_expr_id, goal_id)
                     .await?;
             }
-            _ => panic!("Only cost tasks can subscribe to goals."),
-        }
-
-        // Subscribe to future optimized expressions and bootstrap with current best.
-        if let Some((best_expr_id, cost)) = self
-            .subscribe_task_to_goal(goal_id, related_task_id)
-            .await?
-        {
-            self.schedule_job(
-                related_task_id,
-                JobKind::ContinueWithCostedPhysical(best_expr_id, cost, continuation),
-            );
+            Task::ContinueWithCosted(task) => {
+                // TODO(yuchen): track dependencies back to the root cost expression.
+                task.add_fork_in(fork_task_id);
+            }
+            task => {
+                panic!("Task type cannot produce goal subscription: {:?}", task);
+            }
         }
 
         Ok(())

@@ -27,6 +27,8 @@ pub(super) struct ImplementExpressionTask {
     /// The logical expression to implement.
     pub logical_expr_id: LogicalExpressionId,
 
+    pub goal_id: GoalId,
+
     pub optimize_goal_out: TaskId,
 
     pub fork_in: Option<TaskId>,
