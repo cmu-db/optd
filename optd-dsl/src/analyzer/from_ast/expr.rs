@@ -201,11 +201,11 @@ fn convert_if_then_else_expr(
     ))
 }
 
-/// Converts an array expression to an HIR expression kind.
-fn convert_array_expr(
+/// Helper function to convert a list of expressions.
+fn convert_expr_list(
     elements: &[Spanned<ast::Expr>],
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, CompileError> {
+) -> Result<Vec<Arc<Expr<TypedSpan>>>, CompileError> {
     let mut hir_elements = Vec::with_capacity(elements.len());
 
     for elem in elements {
@@ -213,6 +213,15 @@ fn convert_array_expr(
         hir_elements.push(Arc::new(hir_elem));
     }
 
+    Ok(hir_elements)
+}
+
+/// Converts an array expression to an HIR expression kind.
+fn convert_array_expr(
+    elements: &[Spanned<ast::Expr>],
+    generics: &HashSet<Identifier>,
+) -> Result<ExprKind<TypedSpan>, CompileError> {
+    let hir_elements = convert_expr_list(elements, generics)?;
     Ok(CoreExpr(CoreData::Array(hir_elements)))
 }
 
@@ -221,13 +230,7 @@ fn convert_tuple_expr(
     elements: &[Spanned<ast::Expr>],
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, CompileError> {
-    let mut hir_elements = Vec::with_capacity(elements.len());
-
-    for elem in elements {
-        let hir_elem = convert_expr(elem, generics)?;
-        hir_elements.push(Arc::new(hir_elem));
-    }
-
+    let hir_elements = convert_expr_list(elements, generics)?;
     Ok(CoreExpr(CoreData::Tuple(hir_elements)))
 }
 
@@ -239,9 +242,9 @@ fn convert_map_expr(
     let mut hir_entries = Vec::with_capacity(entries.len());
 
     for (key, value) in entries {
-        let hir_key = convert_expr(key, generics)?;
-        let hir_value = convert_expr(value, generics)?;
-        hir_entries.push((Arc::new(hir_key), Arc::new(hir_value)));
+        let key = convert_expr(key, generics)?;
+        let value = convert_expr(value, generics)?;
+        hir_entries.push((Arc::new(key), Arc::new(value)));
     }
 
     Ok(Map(hir_entries))
