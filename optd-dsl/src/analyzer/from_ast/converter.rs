@@ -98,7 +98,7 @@ impl ASTConverter {
         match &func.body {
             Some(body_expr) => {
                 // Process function with body.
-                let body_hir = convert_expr(&body_expr, &generics)?;
+                let body_hir = convert_expr(body_expr, &generics)?;
                 let param_names = params.iter().map(|(name, _)| name.clone()).collect();
 
                 let fn_value = Value::new_with(
@@ -162,7 +162,7 @@ impl ASTConverter {
                 .map(|field| {
                     (
                         (*field.name).clone(),
-                        convert_type(&field.ty.value, &generics),
+                        convert_type(&field.ty.value, generics),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -175,7 +175,11 @@ impl ASTConverter {
     /// Creates a function type from parameter types and return type.
     ///
     /// Handles special cases for empty parameter lists and single parameters.
-    fn create_function_type(&self, params: &[(Identifier, Type)], return_type: &Type) -> Type {
+    pub(super) fn create_function_type(
+        &self,
+        params: &[(Identifier, Type)],
+        return_type: &Type,
+    ) -> Type {
         let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
 
         let param_type = if params.is_empty() {

@@ -3,8 +3,9 @@
 //! This module contains functions for converting AST expression nodes to their
 //! corresponding HIR representations.
 
-use crate::analyzer::hir::{BinOp, CoreData, Expr, ExprKind, Literal, TypedSpan, UnaryOp, Value};
-use crate::analyzer::types::Identifier;
+use crate::analyzer::hir::{
+    BinOp, CoreData, Expr, ExprKind, Identifier, Literal, TypedSpan, UnaryOp, Value,
+};
 use crate::parser::ast;
 use crate::utils::error::CompileError;
 use crate::utils::span::{Span, Spanned};
@@ -38,7 +39,7 @@ pub(super) fn convert_expr(
         ast::Expr::Map(entries) => convert_map(entries, generics)?,
         ast::Expr::Constructor(name, args) => convert_constructor(name, args, generics)?,
         ast::Expr::Closure(_params, _body) => todo!(),
-        ast::Expr::Postfix(_expr, _op) => todo!(),
+        ast::Expr::Postfix(expr, op) => convert_postfix(expr, op, generics)?,
         ast::Expr::Fail(error_expr) => convert_fail(error_expr, generics)?,
     };
 
@@ -59,7 +60,7 @@ fn convert_literal(literal: &ast::Literal, span: &Span) -> ExprKind<TypedSpan> {
 }
 
 /// Converts a reference expression to an HIR expression kind.
-fn convert_ref(ident: &String) -> ExprKind<TypedSpan> {
+fn convert_ref(ident: &Identifier) -> ExprKind<TypedSpan> {
     Ref(ident.clone())
 }
 
@@ -257,6 +258,30 @@ fn convert_constructor(
     let hir_args = convert_expr_list(args, generics)?;
 
     Ok(CoreExpr(CoreData::Struct(name.clone(), hir_args)))
+}
+
+/// Converts a postfix expression to an HIR expression kind.
+fn convert_postfix(
+    expr: &Spanned<ast::Expr>,
+    op: &ast::PostfixOp,
+    generics: &HashSet<Identifier>,
+) -> Result<ExprKind<TypedSpan>, CompileError> {
+    let hir_expr = convert_expr(expr, generics)?;
+
+    match op {
+        ast::PostfixOp::Call(args) => {
+            let hir_args = convert_expr_list(args, generics)?;
+            Ok(Call(hir_expr.into(), hir_args))
+        }
+        ast::PostfixOp::Field(field_name) => Ok(FieldAccess(hir_expr.into(), field_name.clone())),
+        // Desugar into a function call.
+        ast::PostfixOp::Method(method_name) => {
+            todo!(
+                "Desugar method access into function call: {:?}",
+                method_name
+            )
+        }
+    }
 }
 
 /// Converts a fail expression to an HIR expression kind.
