@@ -11,16 +11,18 @@ use super::{Task, TaskId};
 #[derive(Debug)]
 pub struct ContinueWithCostedTask {
     pub physical_expr_id: PhysicalExpressionId,
+    pub cost: Cost,
     pub fork_out: TaskId,
     pub fork_in: Option<TaskId>,
 }
 
 impl ContinueWithCostedTask {
-    pub fn new(physical_expr_id: PhysicalExpressionId, fork_out: TaskId) -> Self {
+    pub fn new(physical_expr_id: PhysicalExpressionId, cost: Cost, fork_out: TaskId) -> Self {
         Self {
             physical_expr_id,
             fork_out,
             fork_in: None,
+            cost,
         }
     }
 
@@ -33,10 +35,11 @@ impl<M: Memoize> Optimizer<M> {
     pub async fn create_continue_with_costed_task(
         &mut self,
         physical_expr_id: PhysicalExpressionId,
+        cost: Cost,
         out: TaskId,
     ) -> Result<TaskId, Error> {
         let task_id = self.next_task_id();
-        let task = ContinueWithCostedTask::new(physical_expr_id, out);
+        let task = ContinueWithCostedTask::new(physical_expr_id, cost, out);
 
         self.tasks.insert(task_id, Task::ContinueWithCosted(task));
         self.schedule_job(Job::Task(task_id));

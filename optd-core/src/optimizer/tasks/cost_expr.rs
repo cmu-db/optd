@@ -91,7 +91,8 @@ impl<M: Memoize> Optimizer<M> {
             if is_dirty {
                 self.schedule_job(Job::Task(task_id));
             }
-            Ok((task_id, None))
+            let cost = self.memo.get_physical_expr_cost(physical_expr_id).await?;
+            Ok((task_id, cost))
         }
     }
 

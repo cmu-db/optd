@@ -63,9 +63,9 @@ impl<M: Memoize> Optimizer<M> {
 
         let mut task = ForkCostedTask::new(continuation, Cost(f64::MAX), out, optimize_goal_in);
 
-        if let Some((physical_expr_id, _cost)) = best_costed {
+        if let Some((physical_expr_id, cost)) = best_costed {
             let cont_with_costed_task_id = self
-                .create_continue_with_costed_task(physical_expr_id, task_id)
+                .create_continue_with_costed_task(physical_expr_id, cost, task_id)
                 .await?;
             task.add_continue_in(cont_with_costed_task_id);
         }
