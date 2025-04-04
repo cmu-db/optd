@@ -105,30 +105,48 @@ impl<M: Memoize> Optimizer<M> {
             }
         }
 
-        let best_costed = self.memo.get_best_optimized_physical_expr(goal_id).await?;
         // Process all goal members: physical expressions and subgoals.
         let goal_members = self.memo.get_all_goal_members(goal_id).await?;
+        let mut best_member_costed = None;
         for member in goal_members {
-            match member {
-                GoalMemberId::PhysicalExpressionId(expr_id) => {
-                    let task_id = self
-                        .ensure_cost_expression_task(expr_id, Cost(f64::MAX), task_id)
+            let member_costed = match member {
+                GoalMemberId::PhysicalExpressionId(physical_expr_id) => {
+                    let (task_id, cost) = self
+                        .ensure_cost_expression_task(physical_expr_id, Cost(f64::MAX), task_id)
                         .await?;
                     task.add_cost_expr_in(task_id);
+                    cost.map(|cost| (physical_expr_id, cost))
                 }
                 GoalMemberId::GoalId(ref_goal_id) => {
-                    let (optimize_goal_task_id, _) = self
+                    let (optimize_goal_task_id, member_costed) = self
                         .ensure_optimize_goal_task(ref_goal_id, SourceTaskId::OptimizeGoal(task_id))
                         .await?;
+
                     task.add_optimize_goal_in(optimize_goal_task_id);
+
+                    member_costed
                 }
+            };
+
+            if cost_is_better(member_costed, best_member_costed) {
+                best_member_costed = member_costed;
             }
         }
 
         // insert into goal task index
-        // self.goal_optimization_task_index.insert(goal_id, task_id);
+        self.goal_optimization_task_index.insert(goal_id, task_id);
         self.tasks.insert(task_id, Task::OptimizeGoal(task));
-        Ok((task_id, best_costed))
+
+        let best_costed_for_goal = self.memo.get_best_optimized_physical_expr(goal_id).await?;
+        if cost_is_better(best_member_costed, best_costed_for_goal) {
+            let (physical_expr_id, cost) = best_member_costed.unwrap();
+            self.memo
+                .update_best_optimized_physical_expr(goal_id, physical_expr_id, cost)
+                .await?;
+            Ok((task_id, best_member_costed))
+        } else {
+            Ok((task_id, best_costed_for_goal))
+        }
     }
 
     pub async fn receive_new_goal_member(
@@ -141,7 +159,7 @@ impl<M: Memoize> Optimizer<M> {
         if is_new {
             let task_id = *self.goal_optimization_task_index.get(&goal_id).unwrap();
 
-            match member_id {
+            let best_member_costed = match member_id {
                 GoalMemberId::PhysicalExpressionId(expression_id) => {
                     let budget = self
                         .memo
@@ -150,23 +168,51 @@ impl<M: Memoize> Optimizer<M> {
                         .map(|(_, cost)| cost)
                         .unwrap_or(Cost(f64::MAX));
 
-                    let cost_member_expr_task_id = self
+                    let (cost_member_expr_task_id, cost) = self
                         .ensure_cost_expression_task(expression_id, budget, task_id)
                         .await?;
 
                     let task = self.tasks.get_mut(&task_id).unwrap().as_optimize_goal_mut();
                     task.add_cost_expr_in(cost_member_expr_task_id);
+
+                    cost.map(|cost| (expression_id, cost))
                 }
                 GoalMemberId::GoalId(new_goal_id) => {
-                    let (optimize_member_goal_task_id, _best_costed) = self
+                    let (optimize_member_goal_task_id, best_member_costed) = self
                         .ensure_optimize_goal_task(new_goal_id, SourceTaskId::OptimizeGoal(task_id))
                         .await?;
 
                     let task = self.tasks.get_mut(&task_id).unwrap().as_optimize_goal_mut();
                     task.add_optimize_goal_in(optimize_member_goal_task_id);
+
+                    best_member_costed
                 }
+            };
+
+            let best_costed_for_goal = self.memo.get_best_optimized_physical_expr(goal_id).await?;
+            if cost_is_better(best_member_costed, best_costed_for_goal) {
+                let (physical_expr_id, cost) = best_member_costed.unwrap();
+                self.memo
+                    .update_best_optimized_physical_expr(goal_id, physical_expr_id, cost)
+                    .await?;
+
+                // TODO: send this up to `outs`.
             }
         }
         Ok(())
+    }
+}
+
+/// Compares two optional costed expressions and determines if the first is better than the second.
+/// TODO(yuchen): impl custom `PartialOrd` on NewType(Option<(PhysicalExpressionId, Cost)>) also works.
+/// It could also be a function of the cost model.
+fn cost_is_better(
+    first: Option<(PhysicalExpressionId, Cost)>,
+    second: Option<(PhysicalExpressionId, Cost)>,
+) -> bool {
+    match (first, second) {
+        (Some((_, first_cost)), Some((_, second_cost))) => first_cost < second_cost,
+        (Some(_), None) => true,
+        _ => false,
     }
 }
