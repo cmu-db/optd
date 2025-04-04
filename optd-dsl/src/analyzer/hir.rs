@@ -223,6 +223,17 @@ impl Value<TypedSpan> {
             metadata: TypedSpan { span, ty },
         }
     }
+
+    /// Creates a new value from core data with unknown type and span metadata
+    pub fn new_unknown(data: CoreData<Value<TypedSpan>, TypedSpan>, span: Span) -> Self {
+        Self {
+            data,
+            metadata: TypedSpan {
+                span,
+                ty: Type::Unknown,
+            },
+        }
+    }
 }
 
 /// Core data structures shared across the system
@@ -278,6 +289,17 @@ impl Expr<TypedSpan> {
         Self {
             kind,
             metadata: TypedSpan { ty, span },
+        }
+    }
+
+    /// Creates a new expression with unknown type and span metadata
+    pub fn new_unknown(kind: ExprKind<TypedSpan>, span: Span) -> Self {
+        Self {
+            kind,
+            metadata: TypedSpan {
+                ty: Type::Unknown,
+                span,
+            },
         }
     }
 }
