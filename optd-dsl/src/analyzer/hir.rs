@@ -304,6 +304,8 @@ pub enum ExprKind<M: ExprMetadata> {
     Map(MapEntries<M>),
     /// Variable reference
     Ref(Identifier),
+    /// Field access (becomes a call after analysis)
+    FieldAccess(Arc<Expr<M>>, Identifier),
     /// Core expression
     CoreExpr(CoreData<Arc<Expr<M>>, M>),
     /// Core value

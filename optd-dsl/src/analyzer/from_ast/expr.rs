@@ -3,8 +3,7 @@
 //! This module contains functions for converting AST expression nodes to their
 //! corresponding HIR representations.
 
-use super::literals;
-use crate::analyzer::hir::{BinOp, CoreData, Expr, ExprKind, TypedSpan, UnaryOp, Value};
+use crate::analyzer::hir::{BinOp, CoreData, Expr, ExprKind, Literal, TypedSpan, UnaryOp, Value};
 use crate::analyzer::types::{Identifier, Type};
 use crate::parser::ast;
 use crate::utils::error::CompileError;
@@ -47,8 +46,17 @@ pub(super) fn convert_expr(
 }
 
 /// Converts a literal expression to an HIR expression.
-fn convert_literal_expr(lit: &ast::Literal, span: Span) -> Result<Expr<TypedSpan>, CompileError> {
-    let (hir_lit, lit_type) = literals::convert_literal(lit);
+fn convert_literal_expr(
+    literal: &ast::Literal,
+    span: Span,
+) -> Result<Expr<TypedSpan>, CompileError> {
+    let (hir_lit, lit_type) = match literal {
+        ast::Literal::Int64(val) => (Literal::Int64(*val), Type::Int64),
+        ast::Literal::String(val) => (Literal::String(val.clone()), Type::String),
+        ast::Literal::Bool(val) => (Literal::Bool(*val), Type::Bool),
+        ast::Literal::Float64(val) => (Literal::Float64(val.0), Type::Float64),
+        ast::Literal::Unit => (Literal::Unit, Type::Unit),
+    };
 
     Ok(Expr::new_with(
         CoreVal(Value::new_with(
