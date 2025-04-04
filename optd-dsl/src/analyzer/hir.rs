@@ -17,7 +17,7 @@
 
 use super::context::Context;
 use super::map::Map;
-use super::r#type::Type;
+use super::types::Type;
 use crate::utils::span::Span;
 use std::fmt::Debug;
 use std::{collections::HashMap, sync::Arc};
@@ -217,7 +217,7 @@ impl Value {
 
 impl Value<TypedSpan> {
     /// Creates a new value from core data with type and span metadata
-    pub fn new_with(data: CoreData<Value<TypedSpan>, TypedSpan>, span: Span, ty: Type) -> Self {
+    pub fn new_with(data: CoreData<Value<TypedSpan>, TypedSpan>, ty: Type, span: Span) -> Self {
         Self {
             data,
             metadata: TypedSpan { span, ty },
@@ -268,6 +268,16 @@ impl Expr<NoMetadata> {
         Self {
             kind,
             metadata: NoMetadata,
+        }
+    }
+}
+
+impl Expr<TypedSpan> {
+    /// Creates a new expression with type and span metadata
+    pub fn new_with(kind: ExprKind<TypedSpan>, ty: Type, span: Span) -> Self {
+        Self {
+            kind,
+            metadata: TypedSpan { ty, span },
         }
     }
 }

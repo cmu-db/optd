@@ -1,11 +1,18 @@
 use super::semantic_checker::error::SemanticError;
-use crate::parser::ast::Adt;
+use crate::parser::ast::{Adt, Field};
 use crate::utils::error::CompileError;
-use crate::utils::span::Span;
+use crate::utils::span::{Span, Spanned};
 use Adt::*;
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+};
 
 pub type Identifier = String;
+
+// Protected type constants
+pub const LOGICAL_TYPE: &str = "Logical";
+pub const PHYSICAL_TYPE: &str = "Physical";
 
 /// Represents types in the language.
 ///
@@ -49,7 +56,8 @@ pub enum Type {
 #[derive(Debug, Clone, Default)]
 pub struct TypeRegistry {
     subtypes: HashMap<Identifier, HashSet<Identifier>>,
-    adt_spans: HashMap<Identifier, Span>, // Track spans for error reporting
+    adt_fields: HashMap<Identifier, Vec<Spanned<Field>>>,
+    adt_spans: HashMap<Identifier, Span>,
 }
 
 impl TypeRegistry {
@@ -68,8 +76,9 @@ impl TypeRegistry {
     /// `Ok(())` if registration is successful, or a `CompileError` if a duplicate name is found    
     pub fn register_adt(&mut self, adt: &Adt) -> Result<(), CompileError> {
         match adt {
-            Product { name, .. } => {
+            Product { name, fields } => {
                 let type_name = name.value.as_ref().clone();
+
                 // Check for duplicate ADT names.
                 if let Some(existing_span) = self.adt_spans.get(&type_name) {
                     return Err(SemanticError::new_duplicate_adt(
@@ -80,8 +89,10 @@ impl TypeRegistry {
                     .into());
                 }
 
+                self.adt_fields.insert(type_name.clone(), fields.to_vec());
                 self.adt_spans.insert(type_name.clone(), name.span.clone());
                 self.subtypes.entry(type_name).or_default();
+
                 Ok(())
             }
             Sum { name, variants } => {
@@ -115,6 +126,7 @@ impl TypeRegistry {
                         children.insert(variant_name.clone());
                     }
                 }
+
                 Ok(())
             }
         }
