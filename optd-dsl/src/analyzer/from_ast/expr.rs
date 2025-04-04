@@ -24,31 +24,29 @@ pub(super) fn convert_expr(
 
     let kind = match &*spanned_expr.value {
         ast::Expr::Error => panic!("AST should no longer contain errors"),
-        ast::Expr::Literal(lit) => convert_literal_expr(lit, &span),
-        ast::Expr::Ref(ident) => convert_ref_expr(ident),
-        ast::Expr::Binary(left, op, right) => {
-            convert_binary_expr(left, op, right, &span, generics)?
-        }
-        ast::Expr::Unary(op, operand) => convert_unary_expr(op, operand, generics)?,
-        ast::Expr::Let(field, init, body) => convert_let_expr(field, init, body, generics)?,
+        ast::Expr::Literal(lit) => convert_literal(lit, &span),
+        ast::Expr::Ref(ident) => convert_ref(ident),
+        ast::Expr::Binary(left, op, right) => convert_binary(left, op, right, &span, generics)?,
+        ast::Expr::Unary(op, operand) => convert_unary(op, operand, generics)?,
+        ast::Expr::Let(field, init, body) => convert_let(field, init, body, generics)?,
         ast::Expr::IfThenElse(condition, then_branch, else_branch) => {
-            convert_if_then_else_expr(condition, then_branch, else_branch, generics)?
+            convert_if_then_else(condition, then_branch, else_branch, generics)?
         }
         ast::Expr::PatternMatch(_scrutinee, _arms) => todo!(),
-        ast::Expr::Array(elements) => convert_array_expr(elements, generics)?,
-        ast::Expr::Tuple(elements) => convert_tuple_expr(elements, generics)?,
-        ast::Expr::Map(entries) => convert_map_expr(entries, generics)?,
-        ast::Expr::Constructor(_name, _args) => todo!(),
+        ast::Expr::Array(elements) => convert_array(elements, generics)?,
+        ast::Expr::Tuple(elements) => convert_tuple(elements, generics)?,
+        ast::Expr::Map(entries) => convert_map(entries, generics)?,
+        ast::Expr::Constructor(name, args) => convert_constructor(name, args, generics)?,
         ast::Expr::Closure(_params, _body) => todo!(),
         ast::Expr::Postfix(_expr, _op) => todo!(),
-        ast::Expr::Fail(error_expr) => convert_fail_expr(error_expr, generics)?,
+        ast::Expr::Fail(error_expr) => convert_fail(error_expr, generics)?,
     };
 
     Ok(Expr::new_unknown(kind, span))
 }
 
 /// Converts a literal expression to an HIR expression kind.
-fn convert_literal_expr(literal: &ast::Literal, span: &Span) -> ExprKind<TypedSpan> {
+fn convert_literal(literal: &ast::Literal, span: &Span) -> ExprKind<TypedSpan> {
     let hir_lit = match literal {
         ast::Literal::Int64(val) => Literal::Int64(*val),
         ast::Literal::String(val) => Literal::String(val.clone()),
@@ -61,12 +59,12 @@ fn convert_literal_expr(literal: &ast::Literal, span: &Span) -> ExprKind<TypedSp
 }
 
 /// Converts a reference expression to an HIR expression kind.
-fn convert_ref_expr(ident: &String) -> ExprKind<TypedSpan> {
+fn convert_ref(ident: &String) -> ExprKind<TypedSpan> {
     Ref(ident.clone())
 }
 
 /// Converts a binary expression to an HIR expression kind.
-fn convert_binary_expr(
+fn convert_binary(
     left: &Spanned<ast::Expr>,
     op: &ast::BinOp,
     right: &Spanned<ast::Expr>,
@@ -154,7 +152,7 @@ fn convert_binary_expr(
 }
 
 /// Converts a unary expression to an HIR expression kind.
-fn convert_unary_expr(
+fn convert_unary(
     op: &ast::UnaryOp,
     operand: &Spanned<ast::Expr>,
     generics: &HashSet<Identifier>,
@@ -170,7 +168,7 @@ fn convert_unary_expr(
 }
 
 /// Converts a let expression to an HIR expression kind.
-fn convert_let_expr(
+fn convert_let(
     field: &Spanned<ast::Field>,
     init: &Spanned<ast::Expr>,
     body: &Spanned<ast::Expr>,
@@ -184,7 +182,7 @@ fn convert_let_expr(
 }
 
 /// Converts an if-then-else expression to an HIR expression kind.
-fn convert_if_then_else_expr(
+fn convert_if_then_else(
     condition: &Spanned<ast::Expr>,
     then_branch: &Spanned<ast::Expr>,
     else_branch: &Spanned<ast::Expr>,
@@ -217,7 +215,7 @@ fn convert_expr_list(
 }
 
 /// Converts an array expression to an HIR expression kind.
-fn convert_array_expr(
+fn convert_array(
     elements: &[Spanned<ast::Expr>],
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, CompileError> {
@@ -226,7 +224,7 @@ fn convert_array_expr(
 }
 
 /// Converts a tuple expression to an HIR expression kind.
-fn convert_tuple_expr(
+fn convert_tuple(
     elements: &[Spanned<ast::Expr>],
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, CompileError> {
@@ -235,7 +233,7 @@ fn convert_tuple_expr(
 }
 
 /// Converts a map expression to an HIR expression kind.
-fn convert_map_expr(
+fn convert_map(
     entries: &[(Spanned<ast::Expr>, Spanned<ast::Expr>)],
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, CompileError> {
@@ -250,8 +248,19 @@ fn convert_map_expr(
     Ok(Map(hir_entries))
 }
 
+/// Converts a constructor expression to an HIR expression kind.
+fn convert_constructor(
+    name: &Identifier,
+    args: &[Spanned<ast::Expr>],
+    generics: &HashSet<Identifier>,
+) -> Result<ExprKind<TypedSpan>, CompileError> {
+    let hir_args = convert_expr_list(args, generics)?;
+
+    Ok(CoreExpr(CoreData::Struct(name.clone(), hir_args)))
+}
+
 /// Converts a fail expression to an HIR expression kind.
-fn convert_fail_expr(
+fn convert_fail(
     error_expr: &Spanned<ast::Expr>,
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, CompileError> {
