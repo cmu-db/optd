@@ -1,6 +1,5 @@
-use ariadne::{Report, Source};
-
 use crate::utils::{error::Diagnose, span::Span};
+use ariadne::{Report, Source};
 
 /// Error types for semantic analysis
 #[derive(Debug)]

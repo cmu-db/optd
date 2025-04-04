@@ -126,7 +126,6 @@ impl TypeRegistry {
                         children.insert(variant_name.clone());
                     }
                 }
-
                 Ok(())
             }
         }
