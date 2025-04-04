@@ -22,7 +22,6 @@ pub(super) fn convert_expr(
 ) -> Result<Expr<TypedSpan>, CompileError> {
     let span = spanned_expr.span.clone();
 
-    // Get the expression kind without wrapping it in Expr yet
     let kind = match &*spanned_expr.value {
         ast::Expr::Error => panic!("AST should no longer contain errors"),
         ast::Expr::Literal(lit) => convert_literal_expr(lit, &span),
@@ -45,7 +44,6 @@ pub(super) fn convert_expr(
         ast::Expr::Fail(error_expr) => convert_fail_expr(error_expr, generics)?,
     };
 
-    // Wrap the expression kind with the span
     Ok(Expr::new_unknown(kind, span))
 }
 
@@ -59,7 +57,6 @@ fn convert_literal_expr(literal: &ast::Literal, span: &Span) -> ExprKind<TypedSp
         ast::Literal::Unit => Literal::Unit,
     };
 
-    // Don't assign types here, as they will be inferred later
     CoreVal(Value::new_unknown(CoreData::Literal(hir_lit), span.clone()))
 }
 
