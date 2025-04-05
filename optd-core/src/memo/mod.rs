@@ -1,14 +1,33 @@
-use crate::{
-    cir::{
-        Cost, Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpression,
-        LogicalExpressionId, LogicalProperties, PhysicalExpression, PhysicalExpressionId,
-        TransformationRule,
-    },
-    error::Error,
+mod merge_repr;
+#[cfg(test)]
+pub mod mock;
+
+use crate::cir::{
+    Cost, Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpression,
+    LogicalExpressionId, LogicalProperties, PhysicalExpression, PhysicalExpressionId,
+    TransformationRule,
 };
 
 /// Type alias for results returned by Memoize trait methods
-pub type MemoizeResult<T> = Result<T, Error>;
+pub type MemoizeResult<T> = Result<T, MemoizeError>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoizeError {
+    /// Error indicating that a group ID was not found in the memo.
+    GroupNotFound(GroupId),
+
+    /// Error indicating that a goal ID was not found in the memo.
+    GoalNotFound(GoalId),
+
+    /// Error indicating that a logical expression ID was not found in the memo.
+    LogicalExprNotFound(LogicalExpressionId),
+
+    /// Error indicating that a physical expression ID was not found in the memo.
+    PhysicalExprNotFound(PhysicalExpressionId),
+
+    /// Error indicating that there is no logical expression in the group.
+    NoLogicalExprInGroup(GroupId),
+}
 
 /// Status of a rule application or costing operation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,7 +120,24 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// # Returns
     /// The properties associated with the group or an error if not found.
-    async fn get_logical_properties(&self, group_id: GroupId) -> MemoizeResult<LogicalProperties>;
+    async fn get_logical_properties(
+        &self,
+        group_id: GroupId,
+    ) -> MemoizeResult<Option<LogicalProperties>>;
+
+    /// Sets logical properties for a group ID.
+    ///
+    /// # Parameters
+    /// * `group_id` - ID of the group to set properties for.
+    /// * `props` - The logical properties to associate with the group.
+    ///
+    /// # Returns
+    /// A result indicating success or failure of the operation.
+    async fn set_logical_properties(
+        &mut self,
+        group_id: GroupId,
+        props: LogicalProperties,
+    ) -> MemoizeResult<()>;
 
     /// Gets all logical expression IDs in a group (only representative IDs).
     ///
@@ -114,6 +150,9 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         group_id: GroupId,
     ) -> MemoizeResult<Vec<LogicalExpressionId>>;
+
+    /// Gets any logical expression ID in a group.
+    async fn get_any_logical_expr(&self, group_id: GroupId) -> MemoizeResult<LogicalExpressionId>;
 
     /// Finds group containing a logical expression ID, if it exists.
     ///
@@ -138,7 +177,6 @@ pub trait Memoize: Send + Sync + 'static {
     async fn create_group(
         &mut self,
         logical_expr_id: LogicalExpressionId,
-        props: &LogicalProperties,
     ) -> MemoizeResult<GroupId>;
 
     /// Merges groups 1 and 2, unifying them under a common representative.
@@ -174,18 +212,6 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         goal_id: GoalId,
     ) -> MemoizeResult<Option<(PhysicalExpressionId, Cost)>>;
-
-    /// Gets all physical expression IDs in a goal (only representative IDs).
-    ///
-    /// # Parameters
-    /// * `goal_id` - ID of the goal to retrieve expressions from.
-    ///
-    /// # Returns
-    /// A vector of physical expression IDs in the specified goal.
-    async fn get_all_physical_exprs(
-        &self,
-        goal_id: GoalId,
-    ) -> MemoizeResult<Vec<PhysicalExpressionId>>;
 
     /// Gets all members of a goal, which can be physical expressions or other goals.
     ///
@@ -223,6 +249,11 @@ pub trait Memoize: Send + Sync + 'static {
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
     ) -> MemoizeResult<bool>;
+
+    async fn get_physical_expr_cost(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoizeResult<Option<Cost>>;
 
     //
     // Rule and costing status operations.

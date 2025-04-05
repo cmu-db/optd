@@ -18,6 +18,16 @@ pub struct Operator<T> {
     pub children: Vec<Child<T>>,
 }
 
+impl<T> Operator<T> {
+    pub fn new(tag: String, data: Vec<OperatorData>, children: Vec<Child<T>>) -> Self {
+        Self {
+            tag,
+            data,
+            children,
+        }
+    }
+}
+
 /// Represents a child node in an operator tree, which can be either a single item (representing a
 /// single child node) or a variable-length collection of items.
 ///
