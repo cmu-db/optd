@@ -79,9 +79,7 @@ impl<M: Memoize> Client<M> {
             physical_plan_tx,
             id_tx,
         };
-        println!("here1");
         self.tx.send(message).await?;
-        println!("here2");
         let id = id_rx.await?;
 
         Ok(QueryInstance {

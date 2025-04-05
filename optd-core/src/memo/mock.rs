@@ -1,5 +1,5 @@
 #![allow(unused)]
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 
 use crate::cir::cost_is_better;
@@ -15,6 +15,7 @@ pub struct MockMemo {
     physical_exprs: HashMap<PhysicalExpressionId, (PhysicalExpression, Option<Cost>)>,
     goals: HashMap<GoalId, GoalState>,
     goal_node_to_id_index: HashMap<Goal, GoalId>,
+    member_subscribers: HashMap<GoalMemberId, HashSet<GoalId>>,
     physical_expr_node_to_id_index: HashMap<PhysicalExpression, PhysicalExpressionId>,
 
     logical_expr_group_index: HashMap<LogicalExpressionId, GroupId>,
@@ -146,19 +147,6 @@ impl Memoize for MockMemo {
         Ok(maybe_best_costed)
     }
 
-    async fn update_best_optimized_physical_expr(
-        &mut self,
-        goal_id: GoalId,
-        physical_expr_id: PhysicalExpressionId,
-        cost: Cost,
-    ) -> MemoizeResult<bool> {
-        let old = self
-            .best_optimized_physical_expr_index
-            .insert(goal_id, (physical_expr_id, cost));
-
-        Ok(cost_is_better(Some((physical_expr_id, cost)), old))
-    }
-
     async fn get_all_goal_members(&self, goal_id: GoalId) -> MemoizeResult<Vec<GoalMemberId>> {
         let goal_state = self
             .goals
@@ -177,7 +165,43 @@ impl Memoize for MockMemo {
             .get_mut(&goal_id)
             .ok_or_else(|| MemoizeError::GoalNotFound(goal_id))?;
 
-        Ok(goal_state.members.insert(member))
+        let is_new = goal_state.members.insert(member);
+        if is_new {
+            // Create a new subscriber for the member (initialize the set if it doesn't exist).
+            self.member_subscribers
+                .entry(member)
+                .or_default()
+                .insert(goal_id);
+
+            let new_member_cost = match member {
+                GoalMemberId::PhysicalExpressionId(physical_expr_id) => self
+                    .get_physical_expr_cost(physical_expr_id)
+                    .await?
+                    .map(|c| (physical_expr_id, c)),
+                GoalMemberId::GoalId(member_goal_id) => {
+                    self.get_best_optimized_physical_expr(member_goal_id)
+                        .await?
+                }
+            };
+
+            let mut subscribers = VecDeque::new();
+            subscribers.push_back(goal_id);
+
+            self.propagate_new_member_cost(new_member_cost, subscribers)
+                .await?;
+        }
+        Ok(is_new)
+    }
+
+    async fn get_physical_expr_cost(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoizeResult<Option<Cost>> {
+        let (_, cost) = self
+            .physical_exprs
+            .get(&physical_expr_id)
+            .ok_or_else(|| MemoizeError::PhysicalExprNotFound(physical_expr_id))?;
+        Ok(*cost)
     }
 
     async fn update_physical_expr_cost(
@@ -193,18 +217,22 @@ impl Memoize for MockMemo {
             .replace(new_cost)
             .map(|old_cost| new_cost < old_cost)
             .unwrap_or(true);
-        Ok(is_better)
-    }
 
-    async fn get_physical_expr_cost(
-        &self,
-        physical_expr_id: PhysicalExpressionId,
-    ) -> MemoizeResult<Option<Cost>> {
-        let (_, maybe_cost) = self
-            .physical_exprs
-            .get(&physical_expr_id)
-            .ok_or_else(|| MemoizeError::PhysicalExprNotFound(physical_expr_id))?;
-        Ok(maybe_cost.clone())
+        if is_better {
+            let mut subscribers = VecDeque::new();
+            // keep propagating the new cost to all subscribers.
+            if let Some(subscriber_goal_ids) = self
+                .member_subscribers
+                .get(&&GoalMemberId::PhysicalExpressionId(physical_expr_id))
+                .map(|goals| goals.iter().cloned())
+            {
+                subscribers.extend(subscriber_goal_ids);
+            }
+            // propagate the new cost to all subscribers.
+            self.propagate_new_member_cost(Some((physical_expr_id, new_cost)), subscribers)
+                .await?;
+        }
+        Ok(is_better)
     }
 
     async fn get_transformation_status(
@@ -411,5 +439,35 @@ impl MockMemo {
         let goal_id = GoalId(self.next_shared_id);
         self.next_shared_id += 1;
         goal_id
+    }
+
+    // TODO(yuchen): make this thing return a list of goal ids that have their best cost updated.
+    async fn propagate_new_member_cost(
+        &mut self,
+        new_member_cost: Option<(PhysicalExpressionId, Cost)>,
+        mut subscribers: VecDeque<GoalId>,
+    ) -> MemoizeResult<()> {
+        while let Some(goal_id) = subscribers.pop_front() {
+            let current_best = self.get_best_optimized_physical_expr(goal_id).await?;
+
+            if cost_is_better(new_member_cost, current_best) {
+                // Update the best cost for the goal.
+                self.best_optimized_physical_expr_index
+                    .insert(goal_id, new_member_cost.unwrap());
+
+                // keep propagating the new cost to all subscribers.
+                if let Some(subscriber_goal_ids) = self
+                    .member_subscribers
+                    .get(&GoalMemberId::GoalId(goal_id))
+                    .map(|goals| goals.iter().cloned().collect::<Vec<_>>())
+                {
+                    for subscriber_goal_id in subscriber_goal_ids {
+                        subscribers.push_back(subscriber_goal_id);
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }
