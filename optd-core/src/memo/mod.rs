@@ -213,13 +213,6 @@ pub trait Memoize: Send + Sync + 'static {
         goal_id: GoalId,
     ) -> MemoizeResult<Option<(PhysicalExpressionId, Cost)>>;
 
-    async fn update_best_optimized_physical_expr(
-        &mut self,
-        goal_id: GoalId,
-        physical_expr_id: PhysicalExpressionId,
-        cost: Cost,
-    ) -> MemoizeResult<bool>;
-
     /// Gets all members of a goal, which can be physical expressions or other goals.
     ///
     /// # Parameters

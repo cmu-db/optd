@@ -322,8 +322,8 @@ mod tests {
 
         // Wait for three secs, should just directly timeout.
         tokio::time::timeout(Duration::from_secs(3), async {
-            let physical_plan = query_instance.recv_best_plan().await.unwrap();
-            println!("Best plan: {:?}", physical_plan);
+            let _physical_plan = query_instance.recv_best_plan().await.unwrap();
+            panic!("Should not receive a plan");
         })
         .await
         .unwrap_err();
@@ -333,7 +333,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_optimizer_with_empty_hir_memoized() -> Result<(), Error> {
         let hir = HIR {
             context: Context::default(),
@@ -495,7 +494,6 @@ mod tests {
             let expected = enforce_sort.clone();
             join_set.spawn(async move {
                 let physical_plan = query_instance.recv_best_plan().await.unwrap();
-                println!("Best plan: {:?}", physical_plan);
 
                 assert_eq!(&physical_plan, expected.as_ref());
             })

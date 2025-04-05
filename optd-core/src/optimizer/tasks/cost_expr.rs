@@ -67,7 +67,7 @@ impl<M: Memoize> Optimizer<M> {
         physical_expr_id: PhysicalExpressionId,
         budget: Cost,
         optimize_goal_out: TaskId,
-    ) -> Result<(TaskId, Option<Cost>), Error> {
+    ) -> Result<TaskId, Error> {
         if let Some(task_id) = self.cost_expression_task_index.get(&physical_expr_id) {
             // If cost expression task already exists, we register the subscriber and reuse.
             let cost_task = self
@@ -76,8 +76,7 @@ impl<M: Memoize> Optimizer<M> {
                 .unwrap()
                 .as_cost_expression_mut();
             cost_task.add_subscriber(optimize_goal_out);
-            let cost = self.memo.get_physical_expr_cost(physical_expr_id).await?;
-            Ok((*task_id, cost))
+            Ok(*task_id)
         } else {
             let task_id = self.next_task_id();
             let is_dirty = self.memo.get_cost_status(physical_expr_id).await? == Status::Dirty;
@@ -91,8 +90,7 @@ impl<M: Memoize> Optimizer<M> {
             if is_dirty {
                 self.schedule_task_job(task_id);
             }
-            let cost = self.memo.get_physical_expr_cost(physical_expr_id).await?;
-            Ok((task_id, cost))
+            Ok(task_id)
         }
     }
 
