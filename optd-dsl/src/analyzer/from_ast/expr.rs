@@ -3,6 +3,8 @@
 //! This module contains functions for converting AST expression nodes to their
 //! corresponding HIR representations.
 
+use super::pattern::convert_match_arms;
+use super::types::{convert_type, create_function_type};
 use crate::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Identifier, Literal, TypedSpan, UnaryOp, Value,
 };
@@ -13,8 +15,6 @@ use crate::utils::span::{Span, Spanned};
 use ExprKind::*;
 use std::collections::HashSet;
 use std::sync::Arc;
-
-use super::types::{convert_type, create_function_type};
 
 /// Converts an AST expression to an HIR expression.
 ///
@@ -37,7 +37,9 @@ pub(super) fn convert_expr(
         ast::Expr::IfThenElse(condition, then_branch, else_branch) => {
             convert_if_then_else(condition, then_branch, else_branch, generics)?
         }
-        ast::Expr::PatternMatch(_scrutinee, _arms) => todo!(),
+        ast::Expr::PatternMatch(scrutinee, arms) => {
+            convert_pattern_match(scrutinee, arms, generics)?
+        }
         ast::Expr::Array(elements) => convert_array(elements, generics)?,
         ast::Expr::Tuple(elements) => convert_tuple(elements, generics)?,
         ast::Expr::Map(entries) => convert_map(entries, generics)?,
@@ -200,6 +202,18 @@ fn convert_let(
     Ok(Let(var_name, hir_init.into(), hir_body.into()))
 }
 
+/// Converts a pattern match expression to an HIR expression kind.
+fn convert_pattern_match(
+    scrutinee: &Spanned<ast::Expr>,
+    arms: &[Spanned<ast::MatchArm>],
+    generics: &HashSet<Identifier>,
+) -> Result<ExprKind<TypedSpan>, CompileError> {
+    let hir_scrutinee = convert_expr(scrutinee, generics)?;
+    let hir_arms = convert_match_arms(arms, generics)?;
+
+    Ok(PatternMatch(hir_scrutinee.into(), hir_arms))
+}
+
 /// Converts an if-then-else expression to an HIR expression kind.
 fn convert_if_then_else(
     condition: &Spanned<ast::Expr>,
@@ -307,6 +321,8 @@ fn convert_postfix(
             Ok(Call(hir_expr.into(), hir_args))
         }
         ast::PostfixOp::Field(field_name) => {
+            // Wait until after type inference to transform this
+            // into a `Call` operation.
             Ok(FieldAccess(hir_expr.into(), (*field_name.value).clone()))
         }
         // Desugar method call (obj.method(args)) into function call (method(obj, args)).

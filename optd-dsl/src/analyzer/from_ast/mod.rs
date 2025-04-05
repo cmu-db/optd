@@ -12,8 +12,9 @@
 //! The main entry point is the `ASTConverter` struct which orchestrates the
 //! conversion process and maintains the necessary state.
 
-pub mod converter;
-pub mod expr;
-pub mod types;
+pub(super) mod converter;
+pub(super) mod expr;
+pub(super) mod pattern;
+pub(super) mod types;
 
 pub use converter::ASTConverter;

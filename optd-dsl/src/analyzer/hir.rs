@@ -353,6 +353,27 @@ impl Pattern<NoMetadata> {
     }
 }
 
+impl Pattern<TypedSpan> {
+    /// Creates a new pattern with type and span metadata
+    pub fn new_with(kind: PatternKind<TypedSpan>, ty: Type, span: Span) -> Self {
+        Self {
+            kind,
+            metadata: TypedSpan { ty, span },
+        }
+    }
+
+    /// Creates a new pattern with unknown type and span metadata
+    pub fn new_unknown(kind: PatternKind<TypedSpan>, span: Span) -> Self {
+        Self {
+            kind,
+            metadata: TypedSpan {
+                ty: Type::Unknown,
+                span,
+            },
+        }
+    }
+}
+
 /// Pattern node kinds without metadata
 #[derive(Debug, Clone)]
 pub enum PatternKind<M: ExprMetadata> {

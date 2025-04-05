@@ -8,15 +8,6 @@ use crate::parser::ast;
 use std::collections::HashSet;
 
 /// Converts an AST type to an HIR type.
-///
-/// # Arguments
-///
-/// * `ast_type` - The AST type to convert
-/// * `generics` - The generics in scope
-///
-/// # Returns
-///
-/// The converted HIR type
 pub(super) fn convert_type(ast_type: &ast::Type, generics: &HashSet<Identifier>) -> Type {
     match ast_type {
         ast::Type::Int64 => Type::Int64,
@@ -62,15 +53,6 @@ pub(super) fn convert_type(ast_type: &ast::Type, generics: &HashSet<Identifier>)
 }
 
 /// Creates a function type from parameter types and return type.
-///
-/// # Arguments
-///
-/// * `params` - A list of parameter names and their types
-/// * `return_type` - The return type of the function
-///
-/// # Returns
-///
-/// The constructed function type
 pub(super) fn create_function_type(params: &[(Identifier, Type)], return_type: &Type) -> Type {
     let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
 
