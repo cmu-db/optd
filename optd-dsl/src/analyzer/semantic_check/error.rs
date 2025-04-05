@@ -139,7 +139,7 @@ impl Diagnose for Box<SemanticError> {
                             .with_note("Functions without parameters are not supported in this language")
                             .finish()
                     },
-                    
+
             InvalidReference { name, span } => {
                 Report::build(ReportKind::Error, span.clone())
                     .with_message(format!("Invalid reference to undefined identifier: '{}'", name))

@@ -19,7 +19,7 @@ pub enum Type {
     Int64,
     /// UTF-8 encoded string
     String,
-            /// Boolean value (true/false)
+    /// Boolean value (true/false)
     Bool,
     /// 64-bit floating point number
     Float64,
