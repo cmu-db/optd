@@ -14,7 +14,7 @@ use jobs::{Job, JobId};
 use optd_dsl::analyzer::hir::Value;
 use optd_dsl::analyzer::{context::Context, hir::HIR};
 use optd_dsl::engine::{Continuation, EngineResponse};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use tasks::{Task, TaskId};
 
 mod client;
@@ -95,19 +95,7 @@ pub enum EngineMessageKind {
 
     /// Associate logical properties with a group.
     /// Note: logical property are on-demand computed.
-    #[allow(dead_code)]
     NewProperties(GroupId, LogicalProperties),
-}
-
-/// A message that is waiting for dependencies before it can be processed.
-///
-/// Tracks the set of job IDs that must exist before the message can be handled.
-struct PendingMessage {
-    /// The message stashed for later processing.
-    message: EngineMessage,
-
-    /// Set of job IDs whose groups must be created before this message can be processed.
-    pending_dependencies: HashSet<JobId>,
 }
 
 /// The central access point to the optimizer.
@@ -121,7 +109,6 @@ pub struct Optimizer<M: Memoize> {
     hir_context: Context,
 
     // Message handling.
-    pending_messages: Vec<PendingMessage>,
     message_tx: mpsc::Sender<EngineMessage>,
     message_rx: mpsc::Receiver<EngineMessage>,
     client_rx: mpsc::Receiver<ClientMessage>,
@@ -134,9 +121,14 @@ pub struct Optimizer<M: Memoize> {
 
     // Job management.
     /// Queue of jobs that are ready to be run.
-    runnable_jobs: VecDeque<(JobId, Job)>,
+    runnable_jobs: HashMap<JobId, Job>,
+    /// Queue of job ids that are runnable.
+    runnable_queue: VecDeque<JobId>,
     /// Map of currently running jobs. Some job is associated with a task, some are not.
-    running_jobs: HashMap<JobId, Option<TaskId>>,
+    running_jobs: HashMap<JobId, Job>,
+
+    pending_derives: HashMap<GroupId, (JobId, Vec<oneshot::Sender<LogicalProperties>>)>,
+
     next_job_id: JobId,
     max_concurrent_jobs: usize,
 
@@ -164,7 +156,6 @@ impl<M: Memoize> Optimizer<M> {
             hir_context: hir.context,
 
             // Message handling.
-            pending_messages: Vec::new(),
             message_tx,
             message_rx,
             client_rx,
@@ -173,8 +164,10 @@ impl<M: Memoize> Optimizer<M> {
             next_query_instance_id: QueryInstanceId(0),
 
             // Job management.
-            runnable_jobs: VecDeque::new(),
+            runnable_jobs: HashMap::new(),
+            runnable_queue: VecDeque::new(),
             running_jobs: HashMap::new(),
+            pending_derives: HashMap::new(),
             next_job_id: JobId(0),
             max_concurrent_jobs: DEFAULT_MAX_CONCURRENT_JOBS,
 
@@ -257,10 +250,8 @@ impl<M: Memoize> Optimizer<M> {
                             self.process_retrieve_properties(group_id, sender).await?;
                         }
                         NewProperties(group_id, properties) => {
-                            if self.get_related_task(job_id).is_some() {
-                                self.process_new_properties(group_id, properties, job_id).await?;
-                                self.complete_job(job_id).await?;
-                            }
+                            self.process_new_properties(group_id, properties).await?;
+                            self.complete_job(job_id).await?;
                         }
                     };
 
@@ -285,9 +276,10 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     fn get_related_task(&self, job_id: JobId) -> Option<TaskId> {
-        self.running_jobs
-            .get(&job_id)
-            .and_then(|task_id| task_id.clone())
+        self.running_jobs.get(&job_id).and_then(|job| match job {
+            Job::Task(task_id) => Some(*task_id),
+            Job::Derive(_) => None,
+        })
     }
 }
 

@@ -7,7 +7,7 @@ use crate::{
     cir::{Cost, PhysicalExpressionId},
     error::Error,
     memo::{Memoize, Status},
-    optimizer::{EngineMessageKind, Job, JobId, Optimizer, Task},
+    optimizer::{EngineMessageKind, JobId, Optimizer, Task},
 };
 
 use super::TaskId;
@@ -89,7 +89,7 @@ impl<M: Memoize> Optimizer<M> {
                 .insert(physical_expr_id, task_id);
 
             if is_dirty {
-                self.schedule_job(Job::Task(task_id));
+                self.schedule_task_job(task_id);
             }
             let cost = self.memo.get_physical_expr_cost(physical_expr_id).await?;
             Ok((task_id, cost))

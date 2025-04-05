@@ -5,7 +5,10 @@ use super::*;
 pub struct MockMemo;
 
 impl Memoize for MockMemo {
-    async fn get_logical_properties(&self, group_id: GroupId) -> MemoizeResult<LogicalProperties> {
+    async fn get_logical_properties(
+        &self,
+        group_id: GroupId,
+    ) -> MemoizeResult<Option<LogicalProperties>> {
         todo!()
     }
 
@@ -21,6 +24,10 @@ impl Memoize for MockMemo {
         &self,
         group_id: GroupId,
     ) -> MemoizeResult<Vec<LogicalExpressionId>> {
+        todo!()
+    }
+
+    async fn get_any_logical_expr(&self, group_id: GroupId) -> MemoizeResult<LogicalExpressionId> {
         todo!()
     }
 

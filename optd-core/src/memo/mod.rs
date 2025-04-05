@@ -105,7 +105,10 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// # Returns
     /// The properties associated with the group or an error if not found.
-    async fn get_logical_properties(&self, group_id: GroupId) -> MemoizeResult<LogicalProperties>;
+    async fn get_logical_properties(
+        &self,
+        group_id: GroupId,
+    ) -> MemoizeResult<Option<LogicalProperties>>;
 
     /// Sets logical properties for a group ID.
     ///
@@ -132,6 +135,9 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         group_id: GroupId,
     ) -> MemoizeResult<Vec<LogicalExpressionId>>;
+
+    /// Gets any logical expression ID in a group.
+    async fn get_any_logical_expr(&self, group_id: GroupId) -> MemoizeResult<LogicalExpressionId>;
 
     /// Finds group containing a logical expression ID, if it exists.
     ///

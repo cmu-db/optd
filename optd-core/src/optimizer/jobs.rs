@@ -2,13 +2,14 @@ use super::{EngineMessage, Task, TaskId};
 use super::{EngineMessageKind, Optimizer};
 use crate::bridge::from_cir::partial_logical_to_value;
 use crate::bridge::into_cir::{hir_goal_to_cir, hir_group_id_to_cir, value_to_logical_properties};
-use crate::cir::{LogicalExpressionId, PartialLogicalPlan};
+use crate::cir::{GroupId, LogicalProperties, PartialLogicalPlan};
 use crate::error::Error;
 use crate::memo::Memoize;
 use EngineMessageKind::*;
 use futures::SinkExt;
-use futures::channel::mpsc::Sender;
+use futures::channel::{mpsc, oneshot};
 use optd_dsl::engine::{Engine, EngineResponse};
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 /// Unique identifier for jobs in the optimization system.
@@ -23,7 +24,6 @@ pub struct JobId(pub i64);
 ///
 /// Each variant represents a specific optimization operation that can be
 /// performed asynchronously and independently.
-#[derive(Clone)]
 pub enum Job {
     /// Executes a job associated with a task.
     Task(TaskId),
@@ -31,7 +31,7 @@ pub enum Job {
     ///
     /// This job computes schema, cardinality estimates, and other
     /// statistical properties of a logical expression.
-    DeriveLogicalProperties(PartialLogicalPlan),
+    Derive(GroupId),
 }
 
 impl<M: Memoize> Optimizer<M> {
@@ -48,11 +48,38 @@ impl<M: Memoize> Optimizer<M> {
     /// * `task_id` - The ID of the task that's launching this job.
     /// # Returns
     /// * The ID of the created job.
-    pub(super) fn schedule_job(&mut self, job: Job) -> JobId {
+    pub(super) fn schedule_task_job(&mut self, task_id: TaskId) -> JobId {
         let job_id = self.next_job_id;
         self.next_job_id.0 += 1;
-        self.runnable_jobs.push_back((job_id, job));
+        self.runnable_jobs.insert(job_id, Job::Task(task_id));
+        self.runnable_queue.push_back(job_id);
         job_id
+    }
+
+    pub(super) fn schedule_derive_job(
+        &mut self,
+        group_id: GroupId,
+        sender: oneshot::Sender<LogicalProperties>,
+    ) -> JobId {
+        let entry = self.pending_derives.entry(group_id);
+        match entry {
+            Entry::Occupied(mut entry) => {
+                let (job_id, senders) = entry.get_mut();
+                senders.push(sender);
+                *job_id
+            }
+            Entry::Vacant(entry) => {
+                let job_id = self.next_job_id;
+                self.next_job_id.0 += 1;
+                self.running_jobs.insert(job_id, Job::Derive(group_id));
+                // Push to the front of the queue to prioritize it,
+                // and therefore the job that depends on it can make more progress sonner.
+                self.runnable_queue.push_front(job_id);
+
+                entry.insert((job_id, vec![sender]));
+                job_id
+            }
+        }
     }
 
     /// Launches all runnable jobs until either the maximum concurrent job limit is
@@ -66,15 +93,16 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn launch_runnable_jobs(&mut self) -> Result<(), Error> {
         // Launch jobs only if we're below the maximum concurrent jobs limit, in FIFO order.
         while self.running_jobs.len() < self.max_concurrent_jobs {
-            let Some((job_id, job)) = self.runnable_jobs.pop_front() else {
+            let Some(job_id) = self.runnable_queue.pop_front() else {
                 // No runnable jobs need to be launched.
                 break;
             };
 
+            let job = self.runnable_jobs.remove(&job_id).unwrap();
+
             match job {
                 Job::Task(task_id) => {
                     // Move the job from pending to running.
-                    self.running_jobs.insert(job_id, Some(task_id));
                     let related_task = self.tasks.get(&task_id).unwrap();
 
                     // Dispatch & execute the job in a new co-routine.
@@ -99,12 +127,8 @@ impl<M: Memoize> Optimizer<M> {
                         }
                     }
                 }
-                // TODO(yuchen): figure out how to deal with jobs that are not associated with tasks.
-                Job::DeriveLogicalProperties(_plan) => {
-                    self.running_jobs.insert(job_id, None);
-                    // self.derive_logical_properties(logical_expr_id, job_id)
-                    //     .await?;
-                    todo!()
+                Job::Derive(group_id) => {
+                    self.derive_logical_properties(group_id, job_id).await?;
                 }
             }
         }
@@ -124,9 +148,9 @@ impl<M: Memoize> Optimizer<M> {
     /// # Returns
     /// * `Result<(), Error>` - Success or error during job completion.
     /// TODO(yuchen): The engine should keep track of the root (expr_id, rule) pairs
-    pub(super) async fn complete_job(&mut self, _job_id: JobId) -> Result<(), Error> {
+    pub(super) async fn complete_job(&mut self, job_id: JobId) -> Result<(), Error> {
         // Remove the job from the running jobs.
-        // let Job(task_id, _) = self.running_jobs.remove(&job_id).unwrap();
+        let _job = self.running_jobs.remove(&job_id).unwrap();
 
         // // Remove the job from the task's uncompleted jobs set.
         // let task = self.tasks.get_mut(&task_id).unwrap();
@@ -168,7 +192,7 @@ impl<M: Memoize> Optimizer<M> {
 
     pub(super) async fn send_engine_response(
         job_id: JobId,
-        mut message_tx: Sender<EngineMessage>,
+        mut message_tx: mpsc::Sender<EngineMessage>,
         response: EngineResponse<EngineMessageKind>,
     ) {
         match response {
@@ -198,31 +222,28 @@ impl<M: Memoize> Optimizer<M> {
     /// for the specified logical expression.
     async fn derive_logical_properties(
         &self,
-        expression_id: LogicalExpressionId,
+        group_id: GroupId,
         job_id: JobId,
     ) -> Result<(), Error> {
-        let engine = Engine::new(self.hir_context.clone());
-
+        let logical_expr_id = self.memo.get_any_logical_expr(group_id).await?;
         let plan: PartialLogicalPlan = self
             .memo
-            .materialize_logical_expr(expression_id)
+            .materialize_logical_expr(logical_expr_id)
             .await?
             .into();
 
+        let engine = Engine::new(self.hir_context.clone());
         let message_tx = self.message_tx.clone();
 
         tokio::spawn(async move {
-            let _logical_expr_id = expression_id;
             let response = engine
                 .launch_rule(
                     "derive",
                     vec![partial_logical_to_value(&plan)],
                     Arc::new(move |value| {
                         Box::pin(async move {
-                            let _properties = value_to_logical_properties(&value);
-                            // TODO(yuchen): refactor EngineMessage type to include job id in header instead.
-                            // CreateGroup(logical_expression_id, properties)
-                            todo!()
+                            let properties = value_to_logical_properties(&value);
+                            EngineMessageKind::NewProperties(group_id, properties)
                         })
                     }),
                 )
