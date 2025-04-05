@@ -61,7 +61,7 @@ impl<M: Memoize> Optimizer<M> {
 
         tokio::spawn(async move {
             let response = k(partial_logical_to_value(&plan.into())).await;
-            Self::send_engine_response(job_id, engine_tx, response)
+            Self::send_engine_response(job_id, engine_tx, response).await;
         });
 
         Ok(())

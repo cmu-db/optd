@@ -159,7 +159,7 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during job completion.
-    /// TODO(yuchen): The engine should keep track of the root (expr_id, rule) pairs
+    // TODO(yuchen): The engine should keep track of the root (expr_id, rule) pairs
     pub(super) async fn complete_job(&mut self, job_id: JobId) -> Result<(), Error> {
         // Remove the job from the running jobs.
         let _job = self.running_jobs.remove(&job_id).unwrap();

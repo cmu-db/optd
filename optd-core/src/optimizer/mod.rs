@@ -199,8 +199,7 @@ impl<M: Memoize> Optimizer<M> {
             optimizer.run().await.expect("Optimizer failure")
         });
 
-        let client = Client::new(client_tx, handle);
-        client
+        Client::new(client_tx, handle)
     }
 
     /// Run the optimizer's main processing loop.
