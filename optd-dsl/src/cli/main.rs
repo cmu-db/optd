@@ -114,7 +114,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Performing semantic analysis...");
             }
 
-            match ast_to_hir(ast) {
+            match ast_to_hir(&source, ast) {
                 Ok((hir, type_registry)) => {
                     if *verbose {
                         println!("✅ Semantic analysis successful!");

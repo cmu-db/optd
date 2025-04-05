@@ -1,7 +1,7 @@
 use super::expr::convert_expr;
 use super::types::{convert_type, create_function_type};
 use crate::analyzer::hir::{Annotation, FunKind, UdfKind};
-use crate::analyzer::semantic_checker::error::SemanticError;
+use crate::analyzer::semantic_checker::error::SemanticErrorKind;
 use crate::analyzer::types::Identifier;
 use crate::analyzer::{
     context::Context,
@@ -9,9 +9,7 @@ use crate::analyzer::{
     types::{Type, TypeRegistry},
 };
 use crate::parser::ast::{Function, Item, Module};
-use crate::utils::error::CompileError;
 use crate::utils::span::Spanned;
-use CompileError::*;
 use FunKind::*;
 use UdfKind::*;
 use std::collections::{HashMap, HashSet};
@@ -39,11 +37,11 @@ impl ASTConverter {
     ///
     /// # Returns
     ///
-    /// The HIR representation and TypeRegistry, or a CompileError if conversion fails.
+    /// The HIR representation and TypeRegistry, or a SemanticErrorKind if conversion fails.
     pub fn convert(
         mut self,
         module: &Module,
-    ) -> Result<(HIR<TypedSpan>, TypeRegistry), CompileError> {
+    ) -> Result<(HIR<TypedSpan>, TypeRegistry), SemanticErrorKind> {
         // Process all module items sequentially.
         for item in &module.items {
             match item {
@@ -71,17 +69,17 @@ impl ASTConverter {
     pub(super) fn process_function(
         &mut self,
         spanned_fn: &Spanned<Function>,
-    ) -> Result<(), CompileError> {
+    ) -> Result<(), SemanticErrorKind> {
         let func = &spanned_fn.value;
         let name = &*func.name.value;
         let fn_span = func.name.span.clone();
 
         // Reject functions without parameters.
         if func.receiver.is_none() && func.params.is_none() {
-            return Err(SemanticError(SemanticError::new_incomplete_function(
+            return Err(SemanticErrorKind::new_incomplete_function(
                 name.clone(),
                 fn_span,
-            )));
+            ));
         }
 
         // Register the function in the context, while checking for duplicates.

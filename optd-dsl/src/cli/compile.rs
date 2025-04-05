@@ -2,6 +2,7 @@ use optd_dsl::{
     analyzer::{
         from_ast::ASTConverter,
         hir::{HIR, TypedSpan},
+        semantic_checker::error::SemanticError,
         types::TypeRegistry,
     },
     lexer::lex::lex,
@@ -51,11 +52,18 @@ pub fn parse(source: &str, options: &CompileOptions) -> Result<Module, Vec<Compi
 /// to a typed High-level Intermediate Representation (HIR).
 ///
 /// # Arguments
+/// * `source` - The source code of the module to convert
 /// * `ast` - The AST module to convert
 ///
 /// # Returns
 /// * `Result<(HIR<TypedSpan>, TypeRegistry), CompileError>` - The compiled HIR with type registry or error
-pub fn ast_to_hir(ast: Module) -> Result<(HIR<TypedSpan>, TypeRegistry), CompileError> {
+pub fn ast_to_hir(
+    source: &str,
+    ast: Module,
+) -> Result<(HIR<TypedSpan>, TypeRegistry), CompileError> {
     let converter = ASTConverter::default();
-    converter.convert(&ast)
+
+    converter.convert(&ast).map_err(|err_kind| {
+        CompileError::SemanticError(SemanticError::new(source.to_string(), err_kind))
+    })
 }

@@ -1,8 +1,8 @@
 use super::{
     hir::{ExprMetadata, Identifier, NoMetadata, TypedSpan},
-    semantic_checker::error::SemanticError,
+    semantic_checker::error::SemanticErrorKind,
 };
-use crate::{analyzer::hir::Value, utils::error::CompileError};
+use crate::analyzer::hir::Value;
 use std::{collections::HashMap, sync::Arc};
 
 /// A stack-based variable binding system that implements lexical scoping.
@@ -130,17 +130,19 @@ impl Context<TypedSpan> {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if the binding was successful, or a `CompileError` if
+    /// `Ok(())` if the binding was successful, or a `SemanticErrorKind` if
     /// the variable was already defined in the current scope
-    pub fn try_bind(&mut self, name: String, val: Value<TypedSpan>) -> Result<(), CompileError> {
+    pub fn try_bind(
+        &mut self,
+        name: String,
+        val: Value<TypedSpan>,
+    ) -> Result<(), SemanticErrorKind> {
         if let Some(existing_val) = self.current_scope.get(&name) {
             // We found an existing binding, so return an error
-            Err(CompileError::SemanticError(
-                SemanticError::new_duplicate_identifier(
-                    name,
-                    existing_val.metadata.span.clone(),
-                    val.metadata.span,
-                ),
+            Err(SemanticErrorKind::new_duplicate_identifier(
+                name,
+                existing_val.metadata.span.clone(),
+                val.metadata.span,
             ))
         } else {
             // No existing binding, so insert the new one
