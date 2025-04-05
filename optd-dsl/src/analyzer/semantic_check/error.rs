@@ -48,6 +48,14 @@ pub enum SemanticErrorKind {
         /// Span of the incomplete function
         span: Span,
     },
+
+    /// Error for invalid, out of scope references
+    InvalidReference {
+        /// Name of the invalid reference
+        name: String,
+        /// Span of the invalid reference
+        span: Span,
+    },
 }
 
 impl SemanticErrorKind {
@@ -73,65 +81,87 @@ impl SemanticErrorKind {
     pub fn new_incomplete_function(name: String, span: Span) -> Self {
         Self::IncompleteFunction { name, span }
     }
+
+    /// Creates a new error for invalid references
+    pub fn new_invalid_reference(name: String, span: Span) -> Self {
+        Self::InvalidReference { name, span }
+    }
 }
 
 impl Diagnose for Box<SemanticError> {
     fn report(&self) -> Report<Span> {
+        use SemanticErrorKind::*;
+
         match &self.kind {
-            SemanticErrorKind::DuplicateAdt { name, first_span, duplicate_span } => {
-                Report::build(ReportKind::Error, duplicate_span.clone())
-                    .with_message(format!("Duplicate ADT definition: '{}'", name))
-                    .with_label(
-                        Label::new(duplicate_span.clone())
-                            .with_message("Duplicate ADT defined here")
-                            .with_color(Color::Magenta)
-                    )
-                    .with_label(
-                        Label::new(first_span.clone())
-                            .with_message("First defined here")
-                            .with_color(Color::Blue)
-                    )
-                    .with_help("Consider using a different name for this ADT or removing one of the definitions")
-                    .finish()
-            },
+            DuplicateAdt { name, first_span, duplicate_span } => {
+                        Report::build(ReportKind::Error, duplicate_span.clone())
+                            .with_message(format!("Duplicate ADT definition: '{}'", name))
+                            .with_label(
+                                Label::new(duplicate_span.clone())
+                                    .with_message("Duplicate ADT defined here")
+                                    .with_color(Color::Magenta)
+                            )
+                            .with_label(
+                                Label::new(first_span.clone())
+                                    .with_message("First defined here")
+                                    .with_color(Color::Blue)
+                            )
+                            .with_help("Consider using a different name for this ADT or removing one of the definitions")
+                            .finish()
+                    },
 
-            SemanticErrorKind::DuplicateIdentifier { name, first_span, duplicate_span } => {
-                Report::build(ReportKind::Error, duplicate_span.clone())
-                    .with_message(format!("Duplicate identifier: '{}'", name))
-                    .with_label(
-                        Label::new(duplicate_span.clone())
-                            .with_message("Duplicate identifier declared here")
-                            .with_color(Color::Magenta)
-                    )
-                    .with_label(
-                        Label::new(first_span.clone())
-                            .with_message("First declared here")
-                            .with_color(Color::Blue)
-                    )
-                    .with_help("Identifiers must be unique within the same scope")
-                    .finish()
-            },
+            DuplicateIdentifier { name, first_span, duplicate_span } => {
+                        Report::build(ReportKind::Error, duplicate_span.clone())
+                            .with_message(format!("Duplicate identifier: '{}'", name))
+                            .with_label(
+                                Label::new(duplicate_span.clone())
+                                    .with_message("Duplicate identifier declared here")
+                                    .with_color(Color::Magenta)
+                            )
+                            .with_label(
+                                Label::new(first_span.clone())
+                                    .with_message("First declared here")
+                                    .with_color(Color::Blue)
+                            )
+                            .with_help("Identifiers must be unique within the same scope")
+                            .finish()
+                    },
 
-            SemanticErrorKind::IncompleteFunction { name, span } => {
+            IncompleteFunction { name, span } => {
+                        Report::build(ReportKind::Error, span.clone())
+                            .with_message(format!("Incomplete function definition: '{}'", name))
+                            .with_label(
+                                Label::new(span.clone())
+                                    .with_message("Function must have at least one parameter")
+                                    .with_color(Color::Magenta)
+                            )
+                            .with_help("Add at least one parameter or a receiver to this function")
+                            .with_note("Functions without parameters are not supported in this language")
+                            .finish()
+                    },
+                    
+            InvalidReference { name, span } => {
                 Report::build(ReportKind::Error, span.clone())
-                    .with_message(format!("Incomplete function definition: '{}'", name))
+                    .with_message(format!("Invalid reference to undefined identifier: '{}'", name))
                     .with_label(
                         Label::new(span.clone())
-                            .with_message("Function must have at least one parameter")
-                            .with_color(Color::Magenta)
+                            .with_message(format!("'{}' is not defined in this scope", name))
+                            .with_color(Color::Red)
                     )
-                    .with_help("Add at least one parameter or a receiver to this function")
-                    .with_note("Functions without parameters are not supported in this language")
+                    .with_help("Make sure the variable is declared before use or check for typos in the name")
                     .finish()
-            }
+            },
         }
     }
 
     fn source(&self) -> (String, Source) {
+        use SemanticErrorKind::*;
+
         let span = match &self.kind {
-            SemanticErrorKind::DuplicateAdt { duplicate_span, .. } => duplicate_span,
-            SemanticErrorKind::DuplicateIdentifier { duplicate_span, .. } => duplicate_span,
-            SemanticErrorKind::IncompleteFunction { span, .. } => span,
+            DuplicateAdt { duplicate_span, .. } => duplicate_span,
+            DuplicateIdentifier { duplicate_span, .. } => duplicate_span,
+            IncompleteFunction { span, .. } => span,
+            InvalidReference { span, .. } => span,
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))

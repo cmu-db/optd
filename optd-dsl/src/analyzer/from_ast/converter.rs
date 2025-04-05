@@ -53,6 +53,9 @@ impl ASTConverter {
             }
         }
 
+        // Push the context scope of the module, as we have processed all functionss.
+        self.context.push_scope();
+
         Ok((
             HIR {
                 context: self.context,
