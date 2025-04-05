@@ -93,15 +93,18 @@ data JoinType =
 
 fn <K, V> map_get(map: {K: V}, key: K): V = None
 
-fn empty(): V
+fn rewrite_column_refs(): V
+
+fn (log: Logical*) schema_len: I64 
+fn <A, B> (a: A) map(lambda: A -> B): B 
 
 [rust]
 fn (expr: Scalar) apply_children(f: Scalar -> Scalar) = None
 
 fn (pred: Predicate) remap(map: {I64 : I64}) =
-    match predicate
+    match pred
         | ColumnRef(idx) -> ColumnRef(map(idx))
-        \ _ -> predicate.apply_children(child -> rewrite_column_refs(child, map))
+        \ _ -> pred.apply_children(child -> rewrite_column_refs(child, map))
     
 [rule]
 fn (expr: Logical*) join_commute: Logical? = match expr
@@ -109,10 +112,10 @@ fn (expr: Logical*) join_commute: Logical? = match expr
         let 
             right_indices = 0..right.schema_len(),
             left_indices = 0..left.schema_len(),
-            remapping = left_indices.map(i -> (i, i + right_len)) ++ 
-                right_indices.map(i -> (left_len + i, i)).to_map(),
+            remapping = left_indices.map(i -> (i, i + right.schema_len())) ++ 
+                right_indices.map(i -> (left.schema_len() + i, i)),
         in
             Project(
                 Join(right, left, Inner, cond.remap(remapping)),
-                right_indices.map(i -> ColumnRef(i)).to_array()
+                right_indices.map(i -> ColumnRef(i))
             )

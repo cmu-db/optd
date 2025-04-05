@@ -16,10 +16,10 @@ use std::{collections::HashMap, sync::Arc};
 /// are immutable and stored as Arc for efficient cloning.
 #[derive(Debug, Clone)]
 pub struct Context<M: ExprMetadata = NoMetadata> {
-    /// Previous scopes (outer lexical scopes), stored as immutable Arc references
+    /// Previous scopes (outer lexical scopes), stored as immutable Arc references.
     previous_scopes: Vec<Arc<HashMap<Identifier, Value<M>>>>,
 
-    /// Current scope (innermost) that can be directly modified
+    /// Current scope (innermost) that can be directly modified.
     current_scope: HashMap<Identifier, Value<M>>,
 }
 
@@ -39,11 +39,11 @@ impl<M: ExprMetadata> Context<M> {
     ///
     /// # Arguments
     ///
-    /// * `initial_bindings` - Initial variable bindings to populate the global scope
+    /// * `initial_bindings` - Initial variable bindings to populate the global scope.
     ///
     /// # Returns
     ///
-    /// A new `Context` instance with one scope containing the initial bindings
+    /// A new `Context` instance with one scope containing the initial bindings.
     pub fn new(initial_bindings: HashMap<Identifier, Value<M>>) -> Self {
         Self {
             previous_scopes: Vec::new(),
@@ -68,18 +68,18 @@ impl<M: ExprMetadata> Context<M> {
     ///
     /// # Arguments
     ///
-    /// * `name` - The name of the variable to look up
+    /// * `name` - The name of the variable to look up.
     ///
     /// # Returns
     ///
-    /// Some reference to the value if found, None otherwise
+    /// Some reference to the value if found, None otherwise.
     pub fn lookup(&self, name: &str) -> Option<&Value<M>> {
-        // First check the current scope
+        // First check the current scope.
         if let Some(value) = self.current_scope.get(name) {
             return Some(value);
         }
 
-        // Then check previous scopes from innermost to outermost
+        // Then check previous scopes from innermost to outermost.
         for scope in self.previous_scopes.iter().rev() {
             if let Some(value) = scope.get(name) {
                 return Some(value);
@@ -97,9 +97,9 @@ impl<M: ExprMetadata> Context<M> {
     ///
     /// # Arguments
     ///
-    /// * `other` - The context to merge from (consumed by this operation)
+    /// * `other` - The context to merge from (consumed by this operation).
     pub fn merge(&mut self, other: Context<M>) {
-        // Move bindings from other's current scope into our current scope
+        // Move bindings from other's current scope into our current scope.
         for (name, val) in other.current_scope {
             self.current_scope.insert(name, val);
         }
@@ -112,10 +112,26 @@ impl<M: ExprMetadata> Context<M> {
     ///
     /// # Arguments
     ///
-    /// * `name` - The name of the variable to bind
-    /// * `val` - The value to bind to the variable
+    /// * `name` - The name of the variable to bind.
+    /// * `val` - The value to bind to the variable.
     pub fn bind(&mut self, name: String, val: Value<M>) {
         self.current_scope.insert(name, val);
+    }
+
+    /// Gets all values from all scopes in the context.
+    ///
+    /// This retrieves values from all lexical scopes, including both the current
+    /// scope and all previous (outer) scopes.
+    ///
+    /// # Returns
+    ///
+    /// A vector containing references to all values in the context.
+    pub fn get_all_values(&self) -> Vec<&Value<M>> {
+        self.previous_scopes
+            .iter()
+            .flat_map(|scope| scope.values())
+            .chain(self.current_scope.values())
+            .collect()
     }
 }
 

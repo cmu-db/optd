@@ -12,7 +12,7 @@
 //! optd compile path/to/file.op --verbose
 //!
 //! # Print intermediate representations:
-//! optd compile path/to/file.op --print-ast --print-hir
+//! optd compile path/to/file.op --print-ast --print-typedspan-hir
 //!
 //! # Get help:
 //! optd --help
@@ -22,12 +22,12 @@
 //! When developing, you can run through cargo:
 //!
 //! ```
-//! cargo run -- compile examples/example.dsl
-//! cargo run -- compile examples/example.dsl --verbose
-//! cargo run -- compile examples/example.dsl --print-ast --print-hir
+//! cargo run -- compile examples/example.opt
+//! cargo run -- compile examples/example.opt --verbose
+//! cargo run -- compile examples/example.opt --print-ast --print-typedspan-hir
 //! ```
 use clap::{Parser, Subcommand};
-use compile::{CompileOptions, ast_to_hir, parse};
+use compile::{CompileOptions, ast_to_hir, check_scopes, parse};
 use optd_dsl::utils::error::{CompileError, Diagnose};
 use std::error::Error;
 use std::fs;
@@ -63,9 +63,9 @@ enum Commands {
         #[arg(long)]
         print_ast: bool,
 
-        /// Print the HIR in a readable format.
+        /// Print the typed-span HIR in a readable format.
         #[arg(long)]
-        print_hir: bool,
+        print_typedspan_hir: bool,
     },
 }
 
@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             input,
             verbose,
             print_ast,
-            print_hir,
+            print_typedspan_hir,
         } => {
             if *verbose {
                 println!("Compiling file: {}", input.display());
@@ -114,13 +114,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Performing semantic analysis...");
             }
 
-            match ast_to_hir(&source, ast) {
-                Ok((hir, type_registry)) => {
+            let (hir, type_registry) = match ast_to_hir(&source, ast) {
+                Ok(result) => {
                     if *verbose {
-                        println!("✅ Semantic analysis successful!");
+                        println!("✅ AST to HIR conversion successful!");
                     }
-                    if *print_hir {
-                        println!("\nHIR Structure:");
+                    result
+                }
+                Err(error) => handle_errors(&[error]),
+            };
+
+            // Step 3: Perform scope checking
+            if *verbose {
+                println!("Performing scope checking...");
+            }
+
+            match check_scopes(&source, &hir) {
+                Ok(_) => {
+                    if *verbose {
+                        println!("✅ Scope checking successful!");
+                    }
+                    if *print_typedspan_hir {
+                        println!("\nTyped-Span HIR Structure:");
                         println!("{:#?}", hir);
                         println!("\nType Registry:");
                         println!("{:#?}", type_registry);
