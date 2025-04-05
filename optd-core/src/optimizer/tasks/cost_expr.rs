@@ -108,7 +108,7 @@ impl<M: Memoize> Optimizer<M> {
         let physical_expr_id = task.physical_expr_id;
         let plan = self.egest_partial_plan(physical_expr_id).await?;
         let engine = Engine::new(self.hir_context.clone());
-        let message_tx = self.message_tx.clone();
+        let engine_tx = self.engine_tx.clone();
         tokio::spawn(async move {
             let response = engine
                 .launch_rule(
@@ -123,7 +123,7 @@ impl<M: Memoize> Optimizer<M> {
                 )
                 .await;
 
-            Self::send_engine_response(job_id, message_tx, response).await;
+            Self::send_engine_response(job_id, engine_tx, response).await;
         });
 
         Ok(())

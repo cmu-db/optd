@@ -2,7 +2,10 @@ use super::{EngineMessage, Task, TaskId};
 use super::{EngineMessageKind, Optimizer};
 use crate::bridge::from_cir::partial_logical_to_value;
 use crate::bridge::into_cir::{hir_goal_to_cir, hir_group_id_to_cir, value_to_logical_properties};
-use crate::cir::{GroupId, LogicalProperties, PartialLogicalPlan};
+use crate::cir::{
+    GoalId, GroupId, ImplementationRule, LogicalExpressionId, LogicalProperties,
+    PartialLogicalPlan, PhysicalExpressionId, TransformationRule,
+};
 use crate::error::Error;
 use crate::memo::Memoize;
 use EngineMessageKind::*;
@@ -15,6 +18,13 @@ use std::sync::Arc;
 /// Unique identifier for jobs in the optimization system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct JobId(pub i64);
+
+#[derive(Debug)]
+pub enum JobRoot {
+    Transform(LogicalExpressionId, TransformationRule, GroupId),
+    Implement(LogicalExpressionId, ImplementationRule, GoalId),
+    Cost(PhysicalExpressionId),
+}
 
 /// A job represents a discrete unit of work within the optimization process.
 ///
@@ -131,6 +141,7 @@ impl<M: Memoize> Optimizer<M> {
                     self.derive_logical_properties(group_id, job_id).await?;
                 }
             }
+            self.running_jobs.insert(job_id, job);
         }
 
         Ok(())
@@ -192,22 +203,22 @@ impl<M: Memoize> Optimizer<M> {
 
     pub(super) async fn send_engine_response(
         job_id: JobId,
-        mut message_tx: mpsc::Sender<EngineMessage>,
+        mut engine_tx: mpsc::Sender<EngineMessage>,
         response: EngineResponse<EngineMessageKind>,
     ) {
         match response {
             EngineResponse::Return(value, k) => {
                 let msg = EngineMessage::new(job_id, k(value).await);
-                message_tx.send(msg).await.unwrap();
+                engine_tx.send(msg).await.unwrap();
             }
             EngineResponse::YieldGroup(group_id, k) => {
                 let msg =
                     EngineMessage::new(job_id, SubscribeGroup(hir_group_id_to_cir(&group_id), k));
-                message_tx.send(msg).await.unwrap();
+                engine_tx.send(msg).await.unwrap();
             }
             EngineResponse::YieldGoal(goal, k) => {
                 let msg = EngineMessage::new(job_id, SubscribeGoal(hir_goal_to_cir(&goal), k));
-                message_tx.send(msg).await.unwrap();
+                engine_tx.send(msg).await.unwrap();
             }
         }
     }
@@ -233,7 +244,7 @@ impl<M: Memoize> Optimizer<M> {
             .into();
 
         let engine = Engine::new(self.hir_context.clone());
-        let message_tx = self.message_tx.clone();
+        let engine_tx = self.engine_tx.clone();
 
         tokio::spawn(async move {
             let response = engine
@@ -249,7 +260,7 @@ impl<M: Memoize> Optimizer<M> {
                 )
                 .await;
 
-            Self::send_engine_response(job_id, message_tx, response).await;
+            Self::send_engine_response(job_id, engine_tx, response).await;
         });
         Ok(())
     }

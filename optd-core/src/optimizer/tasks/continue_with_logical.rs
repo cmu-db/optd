@@ -57,11 +57,11 @@ impl<M: Memoize> Optimizer<M> {
             .memo
             .materialize_logical_expr(task.logical_expr_id)
             .await?;
-        let message_tx = self.message_tx.clone();
+        let engine_tx = self.engine_tx.clone();
 
         tokio::spawn(async move {
             let response = k(partial_logical_to_value(&plan.into())).await;
-            Self::send_engine_response(job_id, message_tx, response)
+            Self::send_engine_response(job_id, engine_tx, response)
         });
 
         Ok(())
