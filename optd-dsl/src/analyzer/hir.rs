@@ -17,7 +17,7 @@
 
 use super::context::Context;
 use super::map::Map;
-use super::r#type::Type;
+use super::types::Type;
 use crate::utils::span::Span;
 use std::fmt::Debug;
 use std::{collections::HashMap, sync::Arc};
@@ -59,11 +59,18 @@ pub struct TypedSpan {
 }
 impl ExprMetadata for TypedSpan {}
 
+/// User-defined function: either linked or unlinked
+#[derive(Debug, Clone)]
+pub enum UdfKind<M: ExprMetadata> {
+    Linked(fn(Vec<Value<M>>) -> Value<M>),
+    Unlinked(Identifier),
+}
+
 /// Types of functions in the system
 #[derive(Debug, Clone)]
 pub enum FunKind<M: ExprMetadata> {
     Closure(Vec<Identifier>, Arc<Expr<M>>),
-    RustUDF(fn(Vec<Value<M>>) -> Value<M>),
+    Udf(UdfKind<M>),
 }
 
 /// Group identifier in the optimizer
@@ -192,13 +199,40 @@ impl<T, M: ExprMetadata> PhysicalOp<T, M> {
 /// Evaluated expression result
 #[derive(Debug, Clone)]
 pub struct Value<M: ExprMetadata = NoMetadata> {
+    /// Core data structure representing the value
     pub data: CoreData<Value<M>, M>,
+    /// Optional metadata for the value
+    pub metadata: M,
 }
 
-impl<M: ExprMetadata> Value<M> {
-    /// Creates a new value from core data
-    pub fn new(data: CoreData<Value<M>, M>) -> Self {
-        Self { data }
+impl Value {
+    /// Creates a new value from core data without metadata
+    pub fn new(data: CoreData<Value>) -> Self {
+        Self {
+            data,
+            metadata: NoMetadata,
+        }
+    }
+}
+
+impl Value<TypedSpan> {
+    /// Creates a new value from core data with type and span metadata
+    pub fn new_with(data: CoreData<Value<TypedSpan>, TypedSpan>, ty: Type, span: Span) -> Self {
+        Self {
+            data,
+            metadata: TypedSpan { span, ty },
+        }
+    }
+
+    /// Creates a new value from core data with unknown type and span metadata
+    pub fn new_unknown(data: CoreData<Value<TypedSpan>, TypedSpan>, span: Span) -> Self {
+        Self {
+            data,
+            metadata: TypedSpan {
+                span,
+                ty: Type::Unknown,
+            },
+        }
     }
 }
 
@@ -249,6 +283,27 @@ impl Expr<NoMetadata> {
     }
 }
 
+impl Expr<TypedSpan> {
+    /// Creates a new expression with type and span metadata
+    pub fn new_with(kind: ExprKind<TypedSpan>, ty: Type, span: Span) -> Self {
+        Self {
+            kind,
+            metadata: TypedSpan { ty, span },
+        }
+    }
+
+    /// Creates a new expression with unknown type and span metadata
+    pub fn new_unknown(kind: ExprKind<TypedSpan>, span: Span) -> Self {
+        Self {
+            kind,
+            metadata: TypedSpan {
+                ty: Type::Unknown,
+                span,
+            },
+        }
+    }
+}
+
 /// Type alias for map entries to reduce type complexity
 pub type MapEntries<M> = Vec<(Arc<Expr<M>>, Arc<Expr<M>>)>;
 
@@ -271,36 +326,78 @@ pub enum ExprKind<M: ExprMetadata> {
     Map(MapEntries<M>),
     /// Variable reference
     Ref(Identifier),
+    /// Field access (becomes a call after analysis)
+    FieldAccess(Arc<Expr<M>>, Identifier),
     /// Core expression
     CoreExpr(CoreData<Arc<Expr<M>>, M>),
     /// Core value
     CoreVal(Value<M>),
 }
 
-/// Pattern for matching
+/// Pattern for matching with optional metadata
 #[derive(Debug, Clone)]
-pub enum Pattern {
+pub struct Pattern<M: ExprMetadata = NoMetadata> {
+    /// The actual pattern node
+    pub kind: PatternKind<M>,
+    /// Optional metadata for the pattern
+    pub metadata: M,
+}
+
+impl Pattern<NoMetadata> {
+    /// Creates a new pattern without metadata
+    pub fn new(kind: PatternKind<NoMetadata>) -> Self {
+        Self {
+            kind,
+            metadata: NoMetadata,
+        }
+    }
+}
+
+impl Pattern<TypedSpan> {
+    /// Creates a new pattern with type and span metadata
+    pub fn new_with(kind: PatternKind<TypedSpan>, ty: Type, span: Span) -> Self {
+        Self {
+            kind,
+            metadata: TypedSpan { ty, span },
+        }
+    }
+
+    /// Creates a new pattern with unknown type and span metadata
+    pub fn new_unknown(kind: PatternKind<TypedSpan>, span: Span) -> Self {
+        Self {
+            kind,
+            metadata: TypedSpan {
+                ty: Type::Unknown,
+                span,
+            },
+        }
+    }
+}
+
+/// Pattern node kinds without metadata
+#[derive(Debug, Clone)]
+pub enum PatternKind<M: ExprMetadata> {
     /// Bind a value to a name
-    Bind(Identifier, Box<Pattern>),
+    Bind(Identifier, Box<Pattern<M>>),
     /// Match a literal value
     Literal(Literal),
     /// Match a struct with a specific name and field patterns
-    Struct(Identifier, Vec<Pattern>),
+    Struct(Identifier, Vec<Pattern<M>>),
     /// Match an operator with specific structure
-    Operator(Operator<Pattern>),
+    Operator(Operator<Pattern<M>>),
     /// Match any value
     Wildcard,
     /// Match an empty array
     EmptyArray,
     /// Match an array with head and tail
-    ArrayDecomp(Box<Pattern>, Box<Pattern>),
+    ArrayDecomp(Box<Pattern<M>>, Box<Pattern<M>>),
 }
 
 /// Match arm combining pattern and expression
 #[derive(Debug, Clone)]
 pub struct MatchArm<M: ExprMetadata = NoMetadata> {
     /// Pattern to match against
-    pub pattern: Pattern,
+    pub pattern: Pattern<M>,
     /// Expression to evaluate if pattern matches
     pub expr: Arc<Expr<M>>,
 }

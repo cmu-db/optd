@@ -1,7 +1,7 @@
 use super::{binary::eval_binary_op, unary::eval_unary_op};
 use crate::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Goal, GroupId, Identifier, Literal, LogicalOp,
-    Materializable, PhysicalOp, UnaryOp, Value,
+    Materializable, PhysicalOp, UdfKind, UnaryOp, Value,
 };
 use crate::analyzer::map::Map;
 use crate::engine::{Continuation, EngineResponse};
@@ -222,7 +222,7 @@ where
                         CoreData::Function(FunKind::Closure(params, body)) => {
                             evaluate_closure_call(params, body, args, engine, k).await
                         }
-                        CoreData::Function(FunKind::RustUDF(udf)) => {
+                        CoreData::Function(FunKind::Udf(UdfKind::Linked(udf))) => {
                             evaluate_rust_udf_call(udf, args, engine, k).await
                         }
 
@@ -689,7 +689,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::analyzer::hir::{Goal, GroupId, Materializable};
+    use crate::analyzer::hir::{Goal, GroupId, Materializable, UdfKind};
     use crate::engine::Engine;
     use crate::utils::tests::{
         array_val, assert_values_equal, create_logical_operator, create_physical_operator,
@@ -883,20 +883,21 @@ mod tests {
         let mut ctx = Context::default();
 
         // Define a Rust UDF that calculates the sum of array elements
-        let sum_function = Value::new(CoreData::Function(FunKind::RustUDF(|args| {
-            match &args[0].data {
-                CoreData::Array(elements) => {
-                    let mut sum = 0;
-                    for elem in elements {
-                        if let CoreData::Literal(Literal::Int64(value)) = &elem.data {
-                            sum += value;
+        let sum_function =
+            Value::new(CoreData::Function(FunKind::Udf(UdfKind::Linked(
+                |args| match &args[0].data {
+                    CoreData::Array(elements) => {
+                        let mut sum = 0;
+                        for elem in elements {
+                            if let CoreData::Literal(Literal::Int64(value)) = &elem.data {
+                                sum += value;
+                            }
                         }
+                        Value::new(CoreData::Literal(Literal::Int64(sum)))
                     }
-                    Value::new(CoreData::Literal(Literal::Int64(sum)))
-                }
-                _ => panic!("Expected array argument"),
-            }
-        })));
+                    _ => panic!("Expected array argument"),
+                },
+            ))));
 
         ctx.bind("sum".to_string(), sum_function);
         let engine = Engine::new(ctx);
@@ -1009,7 +1010,7 @@ mod tests {
         // Add a map lookup function
         ctx.bind(
             "get".to_string(),
-            Value::new(CoreData::Function(FunKind::RustUDF(|args| {
+            Value::new(CoreData::Function(FunKind::Udf(UdfKind::Linked(|args| {
                 if args.len() != 2 {
                     panic!("get function requires 2 arguments");
                 }
@@ -1018,7 +1019,7 @@ mod tests {
                     CoreData::Map(map) => map.get(&args[1]),
                     _ => panic!("First argument must be a map"),
                 }
-            }))),
+            })))),
         );
 
         let engine = Engine::new(ctx);

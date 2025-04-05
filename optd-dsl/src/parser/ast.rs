@@ -224,9 +224,9 @@ pub enum PostfixOp {
     /// Function or method call with arguments [?](..)
     Call(Vec<Spanned<Expr>>),
     /// Struct field access [?]#field
-    Field(Identifier),
-    /// Method access [?].method
-    Method(Identifier),
+    Field(Spanned<Identifier>),
+    /// Method access [?].method(..)
+    Method(Spanned<Identifier>, Vec<Spanned<Expr>>),
 }
 
 /// Represents a function definition

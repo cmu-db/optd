@@ -98,6 +98,7 @@ impl Engine {
                 Call(fun, args) => evaluate_call(fun.clone(), args.clone(), self, k).await,
                 Map(map) => evaluate_map(map.clone(), self, k).await,
                 Ref(ident) => evaluate_reference(ident.clone(), self, k).await,
+                FieldAccess(_, _) => panic!("Field should have been transformed to a call"),
                 CoreExpr(expr) => evaluate_core_expr(expr.clone(), self, k).await,
                 CoreVal(val) => k(val.clone()).await,
             }

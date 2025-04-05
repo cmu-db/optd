@@ -2,15 +2,15 @@ use crate::{
     analyzer::{
         context::Context,
         hir::{
-            CoreData, Expr, LogicalOp, MatchArm, Materializable, Operator, Pattern, PhysicalOp,
-            Value,
+            CoreData, Expr, LogicalOp, MatchArm, Materializable, Operator, Pattern, PatternKind,
+            PhysicalOp, Value,
         },
     },
     engine::{Continuation, EngineResponse},
 };
 use crate::{capture, engine::Engine};
 use Materializable::*;
-use Pattern::*;
+use PatternKind::*;
 use futures::future::BoxFuture;
 use std::sync::Arc;
 
@@ -131,7 +131,7 @@ where
     O: Send + 'static,
 {
     Box::pin(async move {
-        match (pattern, &value.data) {
+        match (pattern.kind, &value.data) {
             // Simple patterns.
             (Wildcard, _) => k((value, Some(ctx))).await,
             (Literal(pattern_lit), CoreData::Literal(value_lit)) => {
@@ -191,7 +191,13 @@ where
                     *group_id,
                     Arc::new(move |expanded_value| {
                         Box::pin(capture!([op_pattern, ctx, k], async move {
-                            match_pattern(expanded_value, Operator(op_pattern), ctx, k).await
+                            match_pattern(
+                                expanded_value,
+                                Pattern::new(Operator(op_pattern)),
+                                ctx,
+                                k,
+                            )
+                            .await
                         }))
                     }),
                 )
@@ -204,7 +210,13 @@ where
                     goal.clone(),
                     Arc::new(move |expanded_value| {
                         Box::pin(capture!([op_pattern, ctx, k], async move {
-                            match_pattern(expanded_value, Operator(op_pattern), ctx, k).await
+                            match_pattern(
+                                expanded_value,
+                                Pattern::new(Operator(op_pattern)),
+                                ctx,
+                                k,
+                            )
+                            .await
                         }))
                     }),
                 )
@@ -520,6 +532,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::analyzer::hir::UdfKind;
     use crate::engine::Engine;
     use crate::utils::tests::{
         array_decomp_pattern, array_val, bind_pattern, create_logical_operator,
@@ -657,14 +670,14 @@ mod tests {
         let mut ctx = Context::default();
         ctx.bind(
             "length".to_string(),
-            Value::new(CoreData::Function(FunKind::RustUDF(|args| {
-                match &args[0].data {
+            Value::new(CoreData::Function(FunKind::Udf(UdfKind::Linked(
+                |args| match &args[0].data {
                     CoreData::Array(elements) => {
                         Value::new(CoreData::Literal(int(elements.len() as i64)))
                     }
                     _ => panic!("Expected array"),
-                }
-            }))),
+                },
+            )))),
         );
 
         let engine = Engine::new(ctx);
@@ -993,12 +1006,12 @@ mod tests {
                     Arc::new(Expr::new(Let(
                         "to_string".to_string(),
                         Arc::new(Expr::new(CoreVal(Value::new(CoreData::Function(
-                            FunKind::RustUDF(|args| match &args[0].data {
+                            FunKind::Udf(UdfKind::Linked(|args| match &args[0].data {
                                 CoreData::Literal(lit) => {
                                     Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
                                 }
                                 _ => Value::new(CoreData::Literal(string("<non-literal>"))),
-                            }),
+                            })),
                         ))))),
                         Arc::new(Expr::new(Binary(
                             lit_expr(string("Physical plan: ")),
@@ -1075,14 +1088,14 @@ mod tests {
         // Add to_string function to convert numbers to strings
         ctx.bind(
             "to_string".to_string(),
-            Value::new(CoreData::Function(FunKind::RustUDF(|args| {
-                match &args[0].data {
+            Value::new(CoreData::Function(FunKind::Udf(UdfKind::Linked(
+                |args| match &args[0].data {
                     CoreData::Literal(Literal::Int64(i)) => {
                         Value::new(CoreData::Literal(string(&i.to_string())))
                     }
                     _ => panic!("Expected integer literal"),
-                }
-            }))),
+                },
+            )))),
         );
 
         let engine = Engine::new(ctx);
@@ -1208,15 +1221,15 @@ mod tests {
         // Add to_string function to convert complex values to strings
         ctx.bind(
             "to_string".to_string(),
-            Value::new(CoreData::Function(FunKind::RustUDF(|args| {
-                match &args[0].data {
+            Value::new(CoreData::Function(FunKind::Udf(UdfKind::Linked(
+                |args| match &args[0].data {
                     CoreData::Literal(lit) => {
                         Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
                     }
                     CoreData::Array(_) => Value::new(CoreData::Literal(string("<array>"))),
                     _ => Value::new(CoreData::Literal(string("<unknown>"))),
-                }
-            }))),
+                },
+            )))),
         );
 
         let engine = Engine::new(ctx);

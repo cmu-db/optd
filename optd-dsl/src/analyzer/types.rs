@@ -1,11 +1,17 @@
-use super::semantic_checker::error::SemanticError;
+use super::{
+    from_ast::types::convert_type, hir::Identifier, semantic_check::error::SemanticErrorKind,
+};
 use crate::parser::ast::Adt;
-use crate::utils::error::CompileError;
 use crate::utils::span::Span;
 use Adt::*;
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+};
 
-pub type Identifier = String;
+// Protected type constants.
+pub const LOGICAL_TYPE: &str = "Logical";
+pub const PHYSICAL_TYPE: &str = "Physical";
 
 /// Represents types in the language.
 ///
@@ -41,6 +47,13 @@ pub enum Type {
     Costed(Box<Type>),
 }
 
+/// Represents a field in an ADT.
+#[derive(Debug, Clone)]
+pub struct AdtField {
+    _name: (Identifier, Span),
+    _ty: (Type, Span),
+}
+
 /// Manages the type hierarchy and subtyping relationships
 ///
 /// The TypeRegistry keeps track of the inheritance relationships between
@@ -49,7 +62,8 @@ pub enum Type {
 #[derive(Debug, Clone, Default)]
 pub struct TypeRegistry {
     subtypes: HashMap<Identifier, HashSet<Identifier>>,
-    adt_spans: HashMap<Identifier, Span>, // Track spans for error reporting
+    adt_fields: HashMap<Identifier, Vec<AdtField>>,
+    adt_spans: HashMap<Identifier, Span>,
 }
 
 impl TypeRegistry {
@@ -65,23 +79,39 @@ impl TypeRegistry {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if registration is successful, or a `CompileError` if a duplicate name is found    
-    pub fn register_adt(&mut self, adt: &Adt) -> Result<(), CompileError> {
+    /// `Ok(())` if registration is successful, or a `SemanticErrorKind` if a duplicate name is found    
+    pub fn register_adt(&mut self, adt: &Adt) -> Result<(), SemanticErrorKind> {
         match adt {
-            Product { name, .. } => {
+            Product { name, fields } => {
                 let type_name = name.value.as_ref().clone();
+
                 // Check for duplicate ADT names.
                 if let Some(existing_span) = self.adt_spans.get(&type_name) {
-                    return Err(SemanticError::new_duplicate_adt(
+                    return Err(SemanticErrorKind::new_duplicate_adt(
                         type_name,
                         existing_span.clone(),
                         name.span.clone(),
-                    )
-                    .into());
+                    ));
                 }
+
+                // Register the ADT fields.
+                self.adt_fields.insert(
+                    type_name.clone(),
+                    fields
+                        .iter()
+                        .map(|field| AdtField {
+                            _name: (*field.name.value.clone(), field.name.span.clone()),
+                            _ty: (
+                                convert_type(field.ty.value.as_ref(), &HashSet::new()),
+                                field.ty.span.clone(),
+                            ),
+                        })
+                        .collect(),
+                );
 
                 self.adt_spans.insert(type_name.clone(), name.span.clone());
                 self.subtypes.entry(type_name).or_default();
+
                 Ok(())
             }
             Sum { name, variants } => {
@@ -89,12 +119,11 @@ impl TypeRegistry {
 
                 // Check for duplicate ADT names.
                 if let Some(existing_span) = self.adt_spans.get(&enum_name) {
-                    return Err(SemanticError::new_duplicate_adt(
+                    return Err(SemanticErrorKind::new_duplicate_adt(
                         enum_name,
                         existing_span.clone(),
                         name.clone().span,
-                    )
-                    .into());
+                    ));
                 }
 
                 self.adt_spans.insert(enum_name.clone(), name.clone().span);

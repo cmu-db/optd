@@ -1,9 +1,10 @@
 use crate::analyzer::hir::{
     CoreData, Expr, ExprKind, Goal, GroupId, Literal, LogicalOp, MatchArm, Materializable,
-    Operator, Pattern, PhysicalOp, Value,
+    Operator, Pattern, PatternKind, PhysicalOp, Value,
 };
 use crate::engine::{Continuation, Engine, EngineResponse};
 use Materializable::*;
+use PatternKind::*;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
@@ -162,36 +163,36 @@ pub fn pattern_match_expr(expr: Arc<Expr>, arms: Vec<MatchArm>) -> Arc<Expr> {
 
 /// Helper to create a bind pattern.
 pub fn bind_pattern(name: &str, inner: Pattern) -> Pattern {
-    Pattern::Bind(name.to_string(), Box::new(inner))
+    Pattern::new(Bind(name.to_string(), Box::new(inner)))
 }
 
 /// Helper to create a wildcard pattern.
 pub fn wildcard_pattern() -> Pattern {
-    Pattern::Wildcard
+    Pattern::new(Wildcard)
 }
 
 /// Helper to create a literal pattern.
 pub fn literal_pattern(lit: Literal) -> Pattern {
-    Pattern::Literal(lit)
+    Pattern::new(Literal(lit))
 }
 
 /// Helper to create a struct pattern.
 pub fn struct_pattern(name: &str, fields: Vec<Pattern>) -> Pattern {
-    Pattern::Struct(name.to_string(), fields)
+    Pattern::new(Struct(name.to_string(), fields))
 }
 
 /// Helper to create an array decomposition pattern.
 pub fn array_decomp_pattern(head: Pattern, tail: Pattern) -> Pattern {
-    Pattern::ArrayDecomp(Box::new(head), Box::new(tail))
+    Pattern::new(ArrayDecomp(Box::new(head), Box::new(tail)))
 }
 
 /// Helper to create an operator pattern.
 pub fn operator_pattern(tag: &str, data: Vec<Pattern>, children: Vec<Pattern>) -> Pattern {
-    Pattern::Operator(Operator {
+    Pattern::new(Operator(Operator {
         tag: tag.to_string(),
         data,
         children,
-    })
+    }))
 }
 
 /// Helper to create a simple logical operator value.

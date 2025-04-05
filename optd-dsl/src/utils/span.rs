@@ -8,7 +8,7 @@
 /// The span system connects AST nodes with their original source locations,
 /// enabling precise error messages during compilation.
 use core::fmt;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 
 /// A location span in source code that tracks the file and character range.
 ///
@@ -53,6 +53,15 @@ impl<T> Spanned<T> {
             value: Box::new(value),
             span,
         }
+    }
+}
+
+impl<T> Deref for Spanned<T> {
+    type Target = T;
+
+    /// Dereferences the spanned value to access the underlying value.
+    fn deref(&self) -> &Self::Target {
+        &self.value
     }
 }
 
