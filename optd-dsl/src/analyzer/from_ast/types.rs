@@ -17,7 +17,7 @@ use std::collections::HashSet;
 /// # Returns
 ///
 /// The converted HIR type
-pub(crate) fn convert_type(ast_type: &ast::Type, generics: &HashSet<Identifier>) -> Type {
+pub(super) fn convert_type(ast_type: &ast::Type, generics: &HashSet<Identifier>) -> Type {
     match ast_type {
         ast::Type::Int64 => Type::Int64,
         ast::Type::String => Type::String,
@@ -59,4 +59,28 @@ pub(crate) fn convert_type(ast_type: &ast::Type, generics: &HashSet<Identifier>)
         ast::Type::Error => panic!("AST should no longer contain errors"),
         ast::Type::Unknown => Type::Unknown,
     }
+}
+
+/// Creates a function type from parameter types and return type.
+///
+/// # Arguments
+///
+/// * `params` - A list of parameter names and their types
+/// * `return_type` - The return type of the function
+///
+/// # Returns
+///
+/// The constructed function type
+pub(super) fn create_function_type(params: &[(Identifier, Type)], return_type: &Type) -> Type {
+    let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
+
+    let param_type = if params.is_empty() {
+        Type::Unit
+    } else if param_types.len() == 1 {
+        param_types[0].clone()
+    } else {
+        Type::Tuple(param_types)
+    };
+
+    Type::Closure(param_type.into(), return_type.clone().into())
 }

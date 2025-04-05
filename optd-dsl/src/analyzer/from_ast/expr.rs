@@ -4,14 +4,17 @@
 //! corresponding HIR representations.
 
 use crate::analyzer::hir::{
-    BinOp, CoreData, Expr, ExprKind, Identifier, Literal, TypedSpan, UnaryOp, Value,
+    BinOp, CoreData, Expr, ExprKind, FunKind, Identifier, Literal, TypedSpan, UnaryOp, Value,
 };
+use crate::analyzer::types::Type;
 use crate::parser::ast;
 use crate::utils::error::CompileError;
 use crate::utils::span::{Span, Spanned};
 use ExprKind::*;
 use std::collections::HashSet;
 use std::sync::Arc;
+
+use super::types::{convert_type, create_function_type};
 
 /// Converts an AST expression to an HIR expression.
 ///
@@ -22,6 +25,7 @@ pub(super) fn convert_expr(
     generics: &HashSet<Identifier>,
 ) -> Result<Expr<TypedSpan>, CompileError> {
     let span = spanned_expr.span.clone();
+    let mut ty = Type::Unknown;
 
     let kind = match &*spanned_expr.value {
         ast::Expr::Error => panic!("AST should no longer contain errors"),
@@ -38,12 +42,26 @@ pub(super) fn convert_expr(
         ast::Expr::Tuple(elements) => convert_tuple(elements, generics)?,
         ast::Expr::Map(entries) => convert_map(entries, generics)?,
         ast::Expr::Constructor(name, args) => convert_constructor(name, args, generics)?,
-        ast::Expr::Closure(_params, _body) => todo!(),
+        ast::Expr::Closure(params, body) => {
+            // We extract the potential type annotations in the closure.
+            let params = params
+                .iter()
+                .map(|field| {
+                    (
+                        (*field.name).clone(),
+                        convert_type(&field.ty.value, generics),
+                    )
+                })
+                .collect::<Vec<_>>();
+
+            ty = create_function_type(&params, &Type::Unknown);
+            convert_closure(&params, body, generics)?
+        }
         ast::Expr::Postfix(expr, op) => convert_postfix(expr, op, generics)?,
         ast::Expr::Fail(error_expr) => convert_fail(error_expr, generics)?,
     };
 
-    Ok(Expr::new_unknown(kind, span))
+    Ok(Expr::new_with(kind, ty, span))
 }
 
 /// Converts a literal expression to an HIR expression kind.
@@ -258,6 +276,21 @@ fn convert_constructor(
     let hir_args = convert_expr_list(args, generics)?;
 
     Ok(CoreExpr(CoreData::Struct(name.clone(), hir_args)))
+}
+
+/// Converts a closure expression to an HIR expression kind.
+fn convert_closure(
+    params: &[(Identifier, Type)],
+    body: &Spanned<ast::Expr>,
+    generics: &HashSet<Identifier>,
+) -> Result<ExprKind<TypedSpan>, CompileError> {
+    let param_names = params.iter().map(|(name, _)| name.clone()).collect();
+    let hir_body = convert_expr(body, generics)?;
+
+    Ok(CoreExpr(CoreData::Function(FunKind::Closure(
+        param_names,
+        hir_body.into(),
+    ))))
 }
 
 /// Converts a postfix expression to an HIR expression kind.

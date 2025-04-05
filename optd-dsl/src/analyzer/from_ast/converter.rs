@@ -1,5 +1,5 @@
 use super::expr::convert_expr;
-use super::types::convert_type;
+use super::types::{convert_type, create_function_type};
 use crate::analyzer::hir::{Annotation, FunKind, UdfKind};
 use crate::analyzer::semantic_checker::error::SemanticError;
 use crate::analyzer::types::Identifier;
@@ -91,9 +91,9 @@ impl ASTConverter {
             .map(|param| (*param.value).clone())
             .collect();
 
-        let params = self.get_parameters(func, &generics);
+        let params = Self::get_parameters(func, &generics);
         let return_type = convert_type(&func.return_type.value, &generics);
-        let fn_type = self.create_function_type(&params, &return_type);
+        let fn_type = create_function_type(&params, &return_type);
 
         match &func.body {
             Some(body_expr) => {
@@ -139,11 +139,7 @@ impl ASTConverter {
     ///
     /// Collects parameter names and types from both the receiver (if present)
     /// and the parameter list.
-    fn get_parameters(
-        &self,
-        func: &Function,
-        generics: &HashSet<Identifier>,
-    ) -> Vec<(Identifier, Type)> {
+    fn get_parameters(func: &Function, generics: &HashSet<Identifier>) -> Vec<(Identifier, Type)> {
         // Start with receiver if it exists.
         let mut param_fields = match &func.receiver {
             Some(receiver) => {
@@ -170,26 +166,5 @@ impl ASTConverter {
         }
 
         param_fields
-    }
-
-    /// Creates a function type from parameter types and return type.
-    ///
-    /// Handles special cases for empty parameter lists and single parameters.
-    pub(super) fn create_function_type(
-        &self,
-        params: &[(Identifier, Type)],
-        return_type: &Type,
-    ) -> Type {
-        let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
-
-        let param_type = if params.is_empty() {
-            Type::Unit
-        } else if param_types.len() == 1 {
-            param_types[0].clone()
-        } else {
-            Type::Tuple(param_types)
-        };
-
-        Type::Closure(param_type.into(), return_type.clone().into())
     }
 }
