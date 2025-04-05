@@ -36,7 +36,7 @@ data Scalar =
         \ Avg(expr: Scalar)
 
 data Logical =
-    | Scan(table_name: String)
+    | Get(table_name: String)
     | Filter(child: Logical, cond: Predicate)
     | Project(child: Logical, exprs: [Scalar])
     | Join(
@@ -53,9 +53,9 @@ data Logical =
 
 data Physical =
     | Scan(table_name: String)
-    | Filter(child: Physical, cond: Predicate)
-    | Project(child: Physical, exprs: [Scalar])
-    | Join =
+    | PhysFilter(child: Physical, cond: Predicate)
+    | PhysProject(child: Physical, exprs: [Scalar])
+    | PhysJoin =
         | HashJoin(
               build_side: Physical,
               probe_side: Physical,
@@ -74,7 +74,7 @@ data Physical =
               typ: String,
               cond: Predicate
           )
-    | Aggregate(
+    | PhysAggregate(
           child: Physical,
           group_by: [Scalar],
           aggregates: [AggregateExpr]
@@ -93,7 +93,7 @@ data JoinType =
 
 fn <K, V> map_get(map: {K: V}, key: K): V = None
 
-fn empty: V
+fn empty(): V
 
 [rust]
 fn (expr: Scalar) apply_children(f: Scalar -> Scalar) = None
