@@ -1,3 +1,7 @@
+mod merge_repr;
+#[cfg(test)]
+pub mod mock;
+
 use crate::{
     cir::{
         Cost, Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpression,

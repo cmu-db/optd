@@ -99,7 +99,7 @@ impl<M: Memoize> Optimizer<M> {
                 let futures = members.iter().map(|member| async move {
                     let plan = match self.process_goal_member(*member).await? {
                         Some(plan) => plan,
-                        None => return Ok(None),
+                        None => return Ok::<_, Error>(None),
                     };
                     Ok(Some(plan.into()))
                 });
@@ -170,7 +170,7 @@ impl<M: Memoize> Optimizer<M> {
                     match member {
                         GoalMemberId::GoalId(goal_id) => {
                             let goal = self.memo.materialize_goal(goal_id).await?;
-                            Ok(PartialPhysicalPlan::UnMaterialized(goal).into())
+                            Ok::<_, Error>(PartialPhysicalPlan::UnMaterialized(goal).into())
                         }
                         GoalMemberId::PhysicalExpressionId(expr_id) => {
                             let expr = self.memo.materialize_physical_expr(expr_id).await?;

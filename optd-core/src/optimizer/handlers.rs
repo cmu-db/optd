@@ -1,17 +1,14 @@
-use super::{EngineMessageKind, JobId, Optimizer, Task, TaskId};
+use super::{EngineMessageKind, JobId, Optimizer, Task, TaskId, client::ClientMessage};
 use crate::{
     cir::{
-        Cost, Goal, GoalId, GroupId, LogicalPlan, LogicalProperties, PartialLogicalPlan,
-        PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan, PhysicalProperties,
+        Cost, Goal, GoalId, GroupId, LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan,
+        PhysicalExpressionId,
     },
     error::Error,
     memo::Memoize,
 };
 
-use futures::{
-    SinkExt,
-    channel::{mpsc::Sender, oneshot},
-};
+use futures::{SinkExt, channel::oneshot};
 use optd_dsl::{
     analyzer::hir::Value,
     engine::{Continuation, EngineResponse},
@@ -28,22 +25,45 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
-    pub(super) async fn process_optimize_request(
+    pub(super) async fn process_client_request(
         &mut self,
-        plan: LogicalPlan,
-        _response_tx: Sender<PhysicalPlan>,
-        _task_id: TaskId,
+        message: ClientMessage,
     ) -> Result<(), Error> {
-        let group_id = self.ingest_logical_plan(&plan.clone().into()).await?;
+        match message {
+            ClientMessage::Init {
+                logical_plan,
+                physical_plan_tx,
+                id_tx,
+            } => {
+                // Creates an OptimizePlanTask and register as a new query instance.
+                let task_id = self
+                    .create_optimize_plan_task(logical_plan, physical_plan_tx)
+                    .await?;
+                let query_instance_id = self.next_query_instance_id();
+                self.query_instances.insert(query_instance_id, task_id);
+                let _ = id_tx.send(query_instance_id);
+            }
+            ClientMessage::Complete { query_instance_id } => {
+                // Remove the OptimizePlanTask from the tasks and clean up subscriptions.
+                let task_id = self.query_instances.remove(&query_instance_id).unwrap();
+                let task = self.tasks.remove(&task_id).unwrap().into_optimize_plan();
+                let optimize_goal_task = self
+                    .tasks
+                    .get_mut(&task.optimize_goal_in)
+                    .unwrap()
+                    .as_optimize_goal_mut();
 
-        // The goal represents what we want to achieve: optimize the root group
-        // with no specific physical properties required.
-        let goal = Goal(group_id, PhysicalProperties(None));
-        let _goal_id = self.memo.get_goal_id(&goal).await?;
+                if let Some(index) = optimize_goal_task
+                    .optimize_plan_out
+                    .iter()
+                    .position(|id| id == &task_id)
+                {
+                    optimize_goal_task.optimize_plan_out.swap_remove(index);
+                }
 
-        // This ensures the task will be notified when optimized expressions
-        // for this goal are found.
-        // self.subscribe_task_to_goal(goal_id, task_id).await?;
+                // TODO(yuchen): if the goal has no other subscribers, we should remove it.
+            }
+        }
         Ok(())
     }
 
