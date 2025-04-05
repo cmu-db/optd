@@ -20,6 +20,7 @@ use std::sync::Arc;
 pub struct JobId(pub i64);
 
 #[derive(Debug)]
+#[allow(unused)]
 pub enum JobRoot {
     Transform(LogicalExpressionId, TransformationRule, GroupId),
     Implement(LogicalExpressionId, ImplementationRule, GoalId),
