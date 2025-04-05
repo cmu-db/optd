@@ -9,6 +9,22 @@ use crate::parser::ast;
 use std::collections::HashSet;
 
 /// Converts an AST type to an HIR type.
+///
+/// This function maps the types from the Abstract Syntax Tree (AST) to their
+/// corresponding High-level Intermediate Representation (HIR) types, handling
+/// primitive types, complex container types, and user-defined types.
+///
+/// # Arguments
+///
+/// * `ast_type` - The AST type to convert
+/// * `generics` - A set of scoped generic type identifiers that are currently in scope.
+///                When encountering an identifier, it first checks if it's in this set
+///                to determine whether it should be treated as a generic type parameter
+///                (Type::Generic) or as a user-defined ADT type (Type::Adt).
+///
+/// # Returns
+///
+/// The equivalent HIR type
 pub(crate) fn convert_type(ast_type: &ast::Type, generics: &HashSet<Identifier>) -> Type {
     match ast_type {
         ast::Type::Int64 => Type::Int64,
