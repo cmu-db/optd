@@ -218,7 +218,7 @@ impl<M: Memoize> Optimizer<M> {
                         job_id,
                         kind,
                     } = message;
-                    let job = self.running_jobs.remove(&job_id).unwrap();
+                    let _job = self.running_jobs.remove(&job_id).unwrap();
                     // Process the next message in the channel.
                     match kind {
                         NewLogicalPartial(plan, group_id) => {
@@ -334,11 +334,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_optimizer_with_empty_hir_memoized() -> Result<(), Error> {
-        let hir = HIR {
-            context: Context::default(),
-            annotations: HashMap::new(),
-        };
-
         let mut memo = MockMemo::default();
 
         let (no_sort_goal_id, sort_goal_id, scan_group_id) = {
@@ -450,6 +445,10 @@ mod tests {
             assert!(is_better);
         }
 
+        let hir = HIR {
+            context: Context::default(),
+            annotations: HashMap::new(),
+        };
         let mut client = Optimizer::launch(memo, hir);
 
         let logical_scan_plan = LogicalPlan(Operator::new(
@@ -466,17 +465,17 @@ mod tests {
 
         let mut join_set = JoinSet::new();
 
-        // {
-        //     let logical_plan = logical_scan_plan.clone();
-        //     let mut query_instance = client.create_query_instance(logical_plan).await.unwrap();
-        //     let expected = physical_scan.clone();
-        //     join_set.spawn(async move {
-        //         let physical_plan = query_instance.recv_best_plan().await.unwrap();
-        //         println!("Best plan: {:?}", physical_plan);
+        {
+            let logical_plan = logical_scan_plan.clone();
+            let mut query_instance = client.create_query_instance(logical_plan).await.unwrap();
+            let expected = physical_scan.clone();
+            join_set.spawn(async move {
+                let physical_plan = query_instance.recv_best_plan().await.unwrap();
+                println!("Best plan: {:?}", physical_plan);
 
-        //         assert_eq!(&physical_plan, expected.as_ref());
-        //     })
-        // };
+                assert_eq!(&physical_plan, expected.as_ref());
+            })
+        };
 
         let enforce_sort = Arc::new(PhysicalPlan(Operator::new(
             "EnforceSort".to_string(),
@@ -484,12 +483,14 @@ mod tests {
             vec![Child::Singleton(physical_scan)],
         )));
 
+        let logical_sort_plan = LogicalPlan(Operator::new(
+            "Sort".to_string(),
+            vec![OperatorData::String("t1".into())],
+            vec![Child::Singleton(Arc::new(logical_scan_plan))],
+        ));
+
         {
-            let logical_plan = LogicalPlan(Operator::new(
-                "Sort".to_string(),
-                vec![OperatorData::String("t1".into())],
-                vec![Child::Singleton(Arc::new(logical_scan_plan))],
-            ));
+            let logical_plan = logical_sort_plan.clone();
             let mut query_instance = client.create_query_instance(logical_plan).await.unwrap();
             let expected = enforce_sort.clone();
             join_set.spawn(async move {
@@ -501,13 +502,44 @@ mod tests {
 
         let _ = join_set.join_all().await;
 
-        // let is_new = memo
-        // .add_goal_member(
-        //     sort_goal_id,
-        //     GoalMemberId::PhysicalExpressionId(physical_expr_id),
-        // )
-        // .await?;
-        // assert!(is_new);
+        let mut memo = client.shutdown().await.unwrap();
+
+        // Add index scan to the memo. We expect the index scan to be the best plan for the logical_sort query.
+        {
+            let is_new = memo
+                .add_goal_member(
+                    sort_goal_id,
+                    GoalMemberId::PhysicalExpressionId(index_scan_expr_id),
+                )
+                .await?;
+            assert!(is_new);
+        }
+
+        let index_scan = Arc::new(PhysicalPlan(Operator::new(
+            "IndexScan".to_string(),
+            vec![
+                OperatorData::String("t1".into()),
+                OperatorData::String("t1v1".into()),
+            ],
+            vec![],
+        )));
+
+        let hir = HIR {
+            context: Context::default(),
+            annotations: HashMap::new(),
+        };
+        let mut client = Optimizer::launch(memo, hir);
+
+        {
+            let logical_plan = logical_sort_plan.clone();
+            let mut query_instance = client.create_query_instance(logical_plan).await.unwrap();
+            let expected = index_scan;
+            tokio::spawn(async move {
+                let physical_plan = query_instance.recv_best_plan().await.unwrap();
+
+                assert_eq!(&physical_plan, expected.as_ref());
+            })
+        };
 
         client.shutdown().await.unwrap();
         Ok(())

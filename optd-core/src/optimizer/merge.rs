@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use super::Optimizer;
 use crate::{
     cir::{GoalId, GroupId},

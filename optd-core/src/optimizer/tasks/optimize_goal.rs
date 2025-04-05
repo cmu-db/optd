@@ -175,7 +175,6 @@ impl<M: Memoize> Optimizer<M> {
                 }
             };
 
-            let best_costed_for_goal = self.memo.get_best_optimized_physical_expr(goal_id).await?;
             // TODO: send this up to `outs`.
         }
         Ok(())
