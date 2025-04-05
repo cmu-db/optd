@@ -78,7 +78,8 @@ impl<M: Memoize> Optimizer<M> {
             Some(group_id) => Ok(group_id),
             None => {
                 // Create a new group for the logical expression.
-                self.memo.create_group(logical_expr_id).await
+                let new_group_id = self.memo.create_group(logical_expr_id).await?;
+                Ok(new_group_id)
             }
         }
     }

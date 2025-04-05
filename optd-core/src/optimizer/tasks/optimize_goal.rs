@@ -1,5 +1,5 @@
 use crate::{
-    cir::{Cost, Goal, GoalId, GoalMemberId, PhysicalExpressionId},
+    cir::{Cost, Goal, GoalId, GoalMemberId, PhysicalExpressionId, cost_is_better},
     error::Error,
     memo::Memoize,
     optimizer::{Optimizer, Task},
@@ -205,19 +205,5 @@ impl<M: Memoize> Optimizer<M> {
             }
         }
         Ok(())
-    }
-}
-
-/// Compares two optional costed expressions and determines if the first is better than the second.
-/// TODO(yuchen): impl custom `PartialOrd` on NewType(Option<(PhysicalExpressionId, Cost)>) also works.
-/// It could also be a function of the cost model.
-fn cost_is_better(
-    first: Option<(PhysicalExpressionId, Cost)>,
-    second: Option<(PhysicalExpressionId, Cost)>,
-) -> bool {
-    match (first, second) {
-        (Some((_, first_cost)), Some((_, second_cost))) => first_cost < second_cost,
-        (Some(_), None) => true,
-        _ => false,
     }
 }

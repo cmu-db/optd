@@ -72,13 +72,16 @@ impl<M: Memoize> Client<M> {
         logical_plan: LogicalPlan,
     ) -> Result<QueryInstance, Error> {
         let (id_tx, id_rx) = oneshot::channel();
-        let (physical_plan_tx, physical_plan_rx) = mpsc::channel(0);
+        // Need this to buffer > 0 so we do not block the optimizer.
+        let (physical_plan_tx, physical_plan_rx) = mpsc::channel(1);
         let message = ClientMessage::Init {
             logical_plan: logical_plan.clone(),
             physical_plan_tx,
             id_tx,
         };
+        println!("here1");
         self.tx.send(message).await?;
+        println!("here2");
         let id = id_rx.await?;
 
         Ok(QueryInstance {
