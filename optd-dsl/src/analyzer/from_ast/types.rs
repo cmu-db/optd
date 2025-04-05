@@ -3,12 +3,13 @@
 //! This module contains functions for converting AST type nodes to their
 //! corresponding HIR type representations.
 
-use crate::analyzer::types::{Identifier, Type};
+use crate::analyzer::hir::Identifier;
+use crate::analyzer::types::Type;
 use crate::parser::ast;
 use std::collections::HashSet;
 
 /// Converts an AST type to an HIR type.
-pub(super) fn convert_type(ast_type: &ast::Type, generics: &HashSet<Identifier>) -> Type {
+pub(crate) fn convert_type(ast_type: &ast::Type, generics: &HashSet<Identifier>) -> Type {
     match ast_type {
         ast::Type::Int64 => Type::Int64,
         ast::Type::String => Type::String,

@@ -1,15 +1,15 @@
-use super::semantic_checker::error::SemanticErrorKind;
-use crate::parser::ast::{Adt, Field};
-use crate::utils::span::{Span, Spanned};
+use super::{
+    from_ast::types::convert_type, hir::Identifier, semantic_checker::error::SemanticErrorKind,
+};
+use crate::parser::ast::Adt;
+use crate::utils::span::Span;
 use Adt::*;
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
 };
 
-pub type Identifier = String;
-
-// Protected type constants
+// Protected type constants.
 pub const LOGICAL_TYPE: &str = "Logical";
 pub const PHYSICAL_TYPE: &str = "Physical";
 
@@ -47,6 +47,13 @@ pub enum Type {
     Costed(Box<Type>),
 }
 
+/// Represents a field in an ADT.
+#[derive(Debug, Clone)]
+pub struct AdtField {
+    _name: (Identifier, Span),
+    _ty: (Type, Span),
+}
+
 /// Manages the type hierarchy and subtyping relationships
 ///
 /// The TypeRegistry keeps track of the inheritance relationships between
@@ -55,7 +62,7 @@ pub enum Type {
 #[derive(Debug, Clone, Default)]
 pub struct TypeRegistry {
     subtypes: HashMap<Identifier, HashSet<Identifier>>,
-    adt_fields: HashMap<Identifier, Vec<Spanned<Field>>>,
+    adt_fields: HashMap<Identifier, Vec<AdtField>>,
     adt_spans: HashMap<Identifier, Span>,
 }
 
@@ -87,7 +94,21 @@ impl TypeRegistry {
                     ));
                 }
 
-                self.adt_fields.insert(type_name.clone(), fields.to_vec());
+                // Register the ADT fields.
+                self.adt_fields.insert(
+                    type_name.clone(),
+                    fields
+                        .iter()
+                        .map(|field| AdtField {
+                            _name: (*field.name.value.clone(), field.name.span.clone()),
+                            _ty: (
+                                convert_type(field.ty.value.as_ref(), &HashSet::new()),
+                                field.ty.span.clone(),
+                            ),
+                        })
+                        .collect(),
+                );
+
                 self.adt_spans.insert(type_name.clone(), name.span.clone());
                 self.subtypes.entry(type_name).or_default();
 

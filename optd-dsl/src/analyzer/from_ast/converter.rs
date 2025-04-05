@@ -1,8 +1,7 @@
 use super::expr::convert_expr;
 use super::types::{convert_type, create_function_type};
-use crate::analyzer::hir::{Annotation, FunKind, UdfKind};
+use crate::analyzer::hir::{Annotation, FunKind, Identifier, UdfKind};
 use crate::analyzer::semantic_checker::error::SemanticErrorKind;
-use crate::analyzer::types::Identifier;
 use crate::analyzer::{
     context::Context,
     hir::{CoreData, HIR, TypedSpan, Value},
