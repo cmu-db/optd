@@ -2,17 +2,32 @@ mod merge_repr;
 #[cfg(test)]
 pub mod mock;
 
-use crate::{
-    cir::{
-        Cost, Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpression,
-        LogicalExpressionId, LogicalProperties, PhysicalExpression, PhysicalExpressionId,
-        TransformationRule,
-    },
-    error::Error,
+use crate::cir::{
+    Cost, Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpression,
+    LogicalExpressionId, LogicalProperties, PhysicalExpression, PhysicalExpressionId,
+    TransformationRule,
 };
 
 /// Type alias for results returned by Memoize trait methods
-pub type MemoizeResult<T> = Result<T, Error>;
+pub type MemoizeResult<T> = Result<T, MemoizeError>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoizeError {
+    /// Error indicating that a group ID was not found in the memo.
+    GroupNotFound(GroupId),
+
+    /// Error indicating that a goal ID was not found in the memo.
+    GoalNotFound(GoalId),
+
+    /// Error indicating that a logical expression ID was not found in the memo.
+    LogicalExprNotFound(LogicalExpressionId),
+
+    /// Error indicating that a physical expression ID was not found in the memo.
+    PhysicalExprNotFound(PhysicalExpressionId),
+
+    /// Error indicating that there is no logical expression in the group.
+    NoLogicalExprInGroup(GroupId),
+}
 
 /// Status of a rule application or costing operation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,7 +134,7 @@ pub trait Memoize: Send + Sync + 'static {
     /// # Returns
     /// A result indicating success or failure of the operation.
     async fn set_logical_properties(
-        &self,
+        &mut self,
         group_id: GroupId,
         props: LogicalProperties,
     ) -> MemoizeResult<()>;
@@ -204,18 +219,6 @@ pub trait Memoize: Send + Sync + 'static {
         physical_expr_id: PhysicalExpressionId,
         cost: Cost,
     ) -> MemoizeResult<bool>;
-
-    /// Gets all physical expression IDs in a goal (only representative IDs).
-    ///
-    /// # Parameters
-    /// * `goal_id` - ID of the goal to retrieve expressions from.
-    ///
-    /// # Returns
-    /// A vector of physical expression IDs in the specified goal.
-    async fn get_all_physical_exprs(
-        &self,
-        goal_id: GoalId,
-    ) -> MemoizeResult<Vec<PhysicalExpressionId>>;
 
     /// Gets all members of a goal, which can be physical expressions or other goals.
     ///

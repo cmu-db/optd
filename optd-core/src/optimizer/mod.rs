@@ -291,23 +291,27 @@ impl<M: Memoize> Optimizer<M> {
 #[cfg(test)]
 mod tests {
 
-    use std::time::Duration;
+    use std::{sync::Arc, time::Duration};
+
+    use tokio::task::JoinSet;
 
     use super::*;
     use crate::{
-        cir::{Operator, OperatorData},
+        cir::{
+            Child, GoalMemberId, LogicalExpression, Operator, OperatorData, PhysicalExpression,
+            PhysicalProperties, PropertiesData,
+        },
         memo::mock::MockMemo,
     };
 
     #[tokio::test]
-    #[ignore]
     async fn test_optimizer_empty_hir() -> Result<(), Error> {
         let hir = HIR {
             context: Context::default(),
             annotations: HashMap::new(),
         };
 
-        let mut client = Optimizer::launch(MockMemo, hir);
+        let mut client = Optimizer::launch(MockMemo::default(), hir);
 
         let logical_plan = LogicalPlan(Operator::new(
             "Scan".to_string(),
@@ -330,31 +334,182 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn test_optimizer_with_hir() -> Result<(), Error> {
+    async fn test_optimizer_with_empty_hir_memoized() -> Result<(), Error> {
         let hir = HIR {
             context: Context::default(),
             annotations: HashMap::new(),
         };
 
-        let mut client = Optimizer::launch(MockMemo, hir);
+        let mut memo = MockMemo::default();
 
-        let logical_plan = LogicalPlan(Operator::new(
+        let (no_sort_goal_id, sort_goal_id, scan_group_id) = {
+            let scan = LogicalExpression::new(
+                "Scan".to_string(),
+                vec![OperatorData::String("t1".into())],
+                vec![],
+            );
+
+            let logical_expr_id = memo.get_logical_expr_id(&scan).await?;
+            let scan_group_id = memo.create_group(logical_expr_id).await?;
+
+            let no_sort_goal_id = memo
+                .get_goal_id(&Goal(scan_group_id, PhysicalProperties(None)))
+                .await?;
+            let properties =
+                PhysicalProperties(Some(PropertiesData::String("order by t1.v1".into())));
+            let sort_goal_id = memo.get_goal_id(&Goal(scan_group_id, properties)).await?;
+            (no_sort_goal_id, sort_goal_id, scan_group_id)
+        };
+
+        let goal_id = {
+            let sort = LogicalExpression::new(
+                "Sort".to_string(),
+                vec![OperatorData::String("t1".into())],
+                vec![Child::Singleton(scan_group_id)],
+            );
+            let logical_expr_id = memo.get_logical_expr_id(&sort).await?;
+            let sort_group_id = memo.create_group(logical_expr_id).await?;
+            let goal_id = memo
+                .get_goal_id(&Goal(sort_group_id, PhysicalProperties(None)))
+                .await?;
+
+            // manually connect the goal to sort_goal_id.
+            let is_new = memo
+                .add_goal_member(goal_id, GoalMemberId::GoalId(sort_goal_id))
+                .await?;
+            assert!(is_new);
+            goal_id
+        };
+
+        {
+            let table_scan = PhysicalExpression::new(
+                "TableScan".to_string(),
+                vec![OperatorData::String("t1".into())],
+                vec![],
+            );
+            let physical_expr_id = memo.get_physical_expr_id(&table_scan).await?;
+            let is_new = memo
+                .add_goal_member(
+                    no_sort_goal_id,
+                    GoalMemberId::PhysicalExpressionId(physical_expr_id),
+                )
+                .await?;
+            assert!(is_new);
+
+            let is_better = memo
+                .update_physical_expr_cost(physical_expr_id, Cost(40.0))
+                .await?;
+            assert!(is_better);
+        }
+
+        let index_scan_expr_id = {
+            let index_scan = PhysicalExpression::new(
+                "IndexScan".to_string(),
+                vec![
+                    OperatorData::String("t1".into()),
+                    OperatorData::String("t1v1".into()),
+                ],
+                vec![],
+            );
+
+            let physical_expr_id = memo.get_physical_expr_id(&index_scan).await?;
+            let is_new = memo
+                .add_goal_member(
+                    no_sort_goal_id,
+                    GoalMemberId::PhysicalExpressionId(physical_expr_id),
+                )
+                .await?;
+            assert!(is_new);
+
+            let is_better = memo
+                .update_physical_expr_cost(physical_expr_id, Cost(50.0))
+                .await?;
+            assert!(is_better);
+            physical_expr_id
+        };
+
+        {
+            let physical_sort = PhysicalExpression::new(
+                "EnforceSort".to_string(),
+                vec![OperatorData::String("order_by t1.v1".into())],
+                vec![Child::Singleton(GoalMemberId::GoalId(no_sort_goal_id))],
+            );
+
+            let physical_expr_id = memo.get_physical_expr_id(&physical_sort).await?;
+            let is_new = memo
+                .add_goal_member(
+                    goal_id,
+                    GoalMemberId::PhysicalExpressionId(physical_expr_id),
+                )
+                .await?;
+            assert!(is_new);
+
+            let is_better = memo
+                .update_physical_expr_cost(physical_expr_id, Cost(60.0))
+                .await?;
+
+            assert!(is_better);
+        }
+
+        let mut client = Optimizer::launch(memo, hir);
+
+        let logical_scan_plan = LogicalPlan(Operator::new(
             "Scan".to_string(),
             vec![OperatorData::String("t1".into())],
             vec![],
         ));
-        let mut query_instance = client.create_query_instance(logical_plan).await?;
 
-        let physical_plan = query_instance.recv_best_plan().await.unwrap();
-        println!("Best plan: {:?}", physical_plan);
-
-        let expected_physical_plan = PhysicalPlan(Operator::new(
+        let physical_scan = Arc::new(PhysicalPlan(Operator::new(
             "TableScan".to_string(),
             vec![OperatorData::String("t1".into())],
             vec![],
-        ));
+        )));
 
-        assert_eq!(physical_plan, expected_physical_plan);
+        let mut join_set = JoinSet::new();
+
+        // {
+        //     let logical_plan = logical_scan_plan.clone();
+        //     let mut query_instance = client.create_query_instance(logical_plan).await.unwrap();
+        //     let expected = physical_scan.clone();
+        //     join_set.spawn(async move {
+        //         let physical_plan = query_instance.recv_best_plan().await.unwrap();
+        //         println!("Best plan: {:?}", physical_plan);
+
+        //         assert_eq!(&physical_plan, expected.as_ref());
+        //     })
+        // };
+
+        let enforce_sort = Arc::new(PhysicalPlan(Operator::new(
+            "EnforceSort".to_string(),
+            vec![OperatorData::String("order_by t1.v1".into())],
+            vec![Child::Singleton(physical_scan)],
+        )));
+
+        {
+            let logical_plan = LogicalPlan(Operator::new(
+                "Sort".to_string(),
+                vec![OperatorData::String("t1".into())],
+                vec![Child::Singleton(Arc::new(logical_scan_plan))],
+            ));
+            let mut query_instance = client.create_query_instance(logical_plan).await.unwrap();
+            let expected = enforce_sort.clone();
+            join_set.spawn(async move {
+                let physical_plan = query_instance.recv_best_plan().await.unwrap();
+                println!("Best plan: {:?}", physical_plan);
+
+                assert_eq!(&physical_plan, expected.as_ref());
+            })
+        };
+
+        let _ = join_set.join_all().await;
+
+        // let is_new = memo
+        // .add_goal_member(
+        //     sort_goal_id,
+        //     GoalMemberId::PhysicalExpressionId(physical_expr_id),
+        // )
+        // .await?;
+        // assert!(is_new);
 
         client.shutdown().await.unwrap();
         Ok(())
