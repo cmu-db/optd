@@ -1,5 +1,5 @@
 use crate::utils::{error::Diagnose, span::Span};
-use ariadne::{Report, Source};
+use ariadne::{Color, Label, Report, ReportKind, Source};
 
 /// Wrapper for semantic analysis errors
 #[derive(Debug)]
@@ -52,11 +52,7 @@ pub enum SemanticErrorKind {
 
 impl SemanticErrorKind {
     /// Creates a new error for duplicate ADT names
-    pub fn new_duplicate_adt(
-        name: String,
-        first_span: Span,
-        duplicate_span: Span,
-    ) -> Self {
+    pub fn new_duplicate_adt(name: String, first_span: Span, duplicate_span: Span) -> Self {
         Self::DuplicateAdt {
             name,
             first_span,
@@ -65,11 +61,7 @@ impl SemanticErrorKind {
     }
 
     /// Creates a new error for duplicate identifier names within the same scope
-    pub fn new_duplicate_identifier(
-        name: String,
-        first_span: Span,
-        duplicate_span: Span,
-    ) -> Self {
+    pub fn new_duplicate_identifier(name: String, first_span: Span, duplicate_span: Span) -> Self {
         Self::DuplicateIdentifier {
             name,
             first_span,
@@ -85,8 +77,6 @@ impl SemanticErrorKind {
 
 impl Diagnose for Box<SemanticError> {
     fn report(&self) -> Report<Span> {
-        use ariadne::{Color, Label, ReportKind};
-        
         match &self.kind {
             SemanticErrorKind::DuplicateAdt { name, first_span, duplicate_span } => {
                 Report::build(ReportKind::Error, duplicate_span.clone())
@@ -101,10 +91,10 @@ impl Diagnose for Box<SemanticError> {
                             .with_message("First defined here")
                             .with_color(Color::Blue)
                     )
-                    .with_help(format!("Consider using a different name for this ADT or removing one of the definitions"))
+                    .with_help("Consider using a different name for this ADT or removing one of the definitions")
                     .finish()
             },
-            
+
             SemanticErrorKind::DuplicateIdentifier { name, first_span, duplicate_span } => {
                 Report::build(ReportKind::Error, duplicate_span.clone())
                     .with_message(format!("Duplicate identifier: '{}'", name))
@@ -121,7 +111,7 @@ impl Diagnose for Box<SemanticError> {
                     .with_help("Identifiers must be unique within the same scope")
                     .finish()
             },
-            
+
             SemanticErrorKind::IncompleteFunction { name, span } => {
                 Report::build(ReportKind::Error, span.clone())
                     .with_message(format!("Incomplete function definition: '{}'", name))
@@ -143,7 +133,7 @@ impl Diagnose for Box<SemanticError> {
             SemanticErrorKind::DuplicateIdentifier { duplicate_span, .. } => duplicate_span,
             SemanticErrorKind::IncompleteFunction { span, .. } => span,
         };
-        
+
         (span.src_file.clone(), Source::from(self.src_code.clone()))
     }
 }

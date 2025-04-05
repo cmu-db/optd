@@ -49,7 +49,7 @@ fn convert_pattern(spanned_pattern: &Spanned<ast::Pattern>) -> Pattern<TypedSpan
         }
 
         ast::Pattern::Constructor(name, args) => {
-            let hir_args = args.iter().map(|arg| convert_pattern(arg)).collect();
+            let hir_args = args.iter().map(convert_pattern).collect();
 
             // Wait until after type inference to transform this into
             // an operator if needed.
