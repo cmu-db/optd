@@ -1,8 +1,13 @@
-use crate::analyzer::hir::HIR;
-use crate::lexer::lex::lex;
-use crate::parser::ast::Module;
-use crate::parser::module::parse_module;
-use crate::utils::error::CompileError;
+use optd_dsl::{
+    analyzer::{
+        from_ast::ASTConverter,
+        hir::{HIR, TypedSpan},
+        types::TypeRegistry,
+    },
+    lexer::lex::lex,
+    parser::{ast::Module, module::parse_module},
+    utils::error::CompileError,
+};
 
 /// Compilation options for the DSL
 pub struct CompileOptions {
@@ -23,17 +28,14 @@ pub struct CompileOptions {
 /// * `Result<Module, Vec<CompileError>>` - The parsed AST or errors
 pub fn parse(source: &str, options: &CompileOptions) -> Result<Module, Vec<CompileError>> {
     let mut errors = Vec::new();
-
     // Step 1: Lexing
     let (tokens_opt, lex_errors) = lex(source, &options.source_path);
     errors.extend(lex_errors);
-
     match tokens_opt {
         Some(tokens) => {
             // Step 2: Parsing
             let (ast_opt, parse_errors) = parse_module(tokens, source, &options.source_path);
             errors.extend(parse_errors);
-
             match ast_opt {
                 Some(ast) if errors.is_empty() => Ok(ast),
                 _ => Err(errors),
@@ -43,21 +45,17 @@ pub fn parse(source: &str, options: &CompileOptions) -> Result<Module, Vec<Compi
     }
 }
 
-/// Compile DSL source code to HIR
+/// Convert AST to typed HIR
 ///
-/// This function performs the full compilation pipeline including lexing,
-/// parsing, and semantic analysis to produce HIR.
+/// This function performs semantic analysis on the AST and converts it
+/// to a typed High-level Intermediate Representation (HIR).
 ///
 /// # Arguments
-/// * `source` - The source code to compile
-/// * `options` - Compilation options including source path
+/// * `ast` - The AST module to convert
 ///
 /// # Returns
-/// * `Result<HIR, Vec<CompileError>>` - The compiled HIR or errors
-pub fn compile(source: &str, options: &CompileOptions) -> Result<HIR, Vec<CompileError>> {
-    // Step 1 & 2: Parse to AST
-    let _ast = parse(source, options)?;
-
-    // Step 3: Semantic analysis to HIR
-    todo!("Implement semantic analysis to convert AST to HIR")
+/// * `Result<(HIR<TypedSpan>, TypeRegistry), CompileError>` - The compiled HIR with type registry or error
+pub fn ast_to_hir(ast: Module) -> Result<(HIR<TypedSpan>, TypeRegistry), CompileError> {
+    let converter = ASTConverter::default();
+    converter.convert(&ast)
 }
