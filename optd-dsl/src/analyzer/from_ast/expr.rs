@@ -273,13 +273,21 @@ fn convert_postfix(
             let hir_args = convert_expr_list(args, generics)?;
             Ok(Call(hir_expr.into(), hir_args))
         }
-        ast::PostfixOp::Field(field_name) => Ok(FieldAccess(hir_expr.into(), field_name.clone())),
-        // Desugar into a function call.
-        ast::PostfixOp::Method(method_name) => {
-            todo!(
-                "Desugar method access into function call: {:?}",
-                method_name
-            )
+        ast::PostfixOp::Field(field_name) => {
+            Ok(FieldAccess(hir_expr.into(), (*field_name.value).clone()))
+        }
+        // Desugar method call (obj.method(args)) into function call (method(obj, args)).
+        ast::PostfixOp::Method(method_name, args) => {
+            let all_args = std::iter::once(hir_expr.into())
+                .chain(convert_expr_list(args, generics)?)
+                .collect();
+
+            let method_fn = Arc::new(Expr::new_unknown(
+                Ref((*method_name.value).clone()),
+                method_name.span.clone(),
+            ));
+
+            Ok(Call(method_fn, all_args))
         }
     }
 }

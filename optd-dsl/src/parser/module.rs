@@ -159,14 +159,14 @@ mod tests {
         fn (expr: Logical) join_commute = match expr
             \ Join(left, right, Inner, cond) ->
                 let 
-                    right_indices = 0..right.schema_len,
-                    left_indices = 0..left.schema_len,
+                    right_indices = 0..right.schema_len(),
+                    left_indices = 0..left.schema_len(),
                     remapping = left_indices.map(i -> (i, i + right_len)) ++ 
-                        right_indices.map(i -> (left_len + i, i)).to_map,
+                        right_indices.map(i -> (left_len + i, i)).to_map(),
                 in
                     Project(
                         Join(right, left, Inner, cond.remap(remapping)),
-                        right_indices.map(i -> ColumnRef(i)).to_array
+                        right_indices.map(i -> ColumnRef(i)).to_array()
                     )
         "#;
 
