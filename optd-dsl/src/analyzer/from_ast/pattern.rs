@@ -82,3 +82,148 @@ fn convert_pattern(spanned_pattern: &Spanned<ast::Pattern>) -> Pattern<TypedSpan
 
     Pattern::new_unknown(kind, span)
 }
+
+#[cfg(test)]
+mod pattern_tests {
+    use super::*;
+    use crate::analyzer::hir::{Literal, PatternKind};
+    use crate::parser::ast;
+    use crate::utils::span::{Span, Spanned};
+    use std::collections::HashSet;
+
+    // Helper functions to create test patterns
+    fn create_test_span() -> Span {
+        Span::new("test".to_string(), 0..1)
+    }
+
+    fn spanned<T>(value: T) -> Spanned<T> {
+        Spanned::new(value, create_test_span())
+    }
+
+    fn create_match_arm(pattern: ast::Pattern, expr: ast::Expr) -> Spanned<ast::MatchArm> {
+        spanned(ast::MatchArm {
+            pattern: spanned(pattern),
+            expr: spanned(expr),
+        })
+    }
+
+    #[test]
+    fn test_convert_match_arms() {
+        // Create a set of match arms
+        let pattern1 = ast::Pattern::Literal(ast::Literal::Int64(1));
+        let expr1 = ast::Expr::Literal(ast::Literal::String("one".to_string()));
+        let arm1 = create_match_arm(pattern1, expr1);
+
+        let pattern2 = ast::Pattern::Wildcard;
+        let expr2 = ast::Expr::Literal(ast::Literal::String("other".to_string()));
+        let arm2 = create_match_arm(pattern2, expr2);
+
+        let arms = vec![arm1, arm2];
+
+        // Convert the match arms
+        let result = convert_match_arms(&arms, &HashSet::new()).unwrap();
+
+        // Check the converted result
+        assert_eq!(result.len(), 2);
+
+        // Check first arm's pattern
+        match &result[0].pattern.kind {
+            PatternKind::Literal(Literal::Int64(val)) => assert_eq!(*val, 1),
+            _ => panic!("Expected Int64 literal pattern"),
+        }
+
+        // Check second arm's pattern
+        match &result[1].pattern.kind {
+            PatternKind::Wildcard => (),
+            _ => panic!("Expected wildcard pattern"),
+        }
+    }
+
+    #[test]
+    fn test_convert_patterns() {
+        // Test literal pattern
+        let int_pattern = spanned(ast::Pattern::Literal(ast::Literal::Int64(42)));
+        let result = convert_pattern(&int_pattern);
+
+        match &result.kind {
+            PatternKind::Literal(Literal::Int64(val)) => assert_eq!(*val, 42),
+            _ => panic!("Expected Int64 literal pattern"),
+        }
+
+        // Test wildcard pattern
+        let wildcard_pattern = spanned(ast::Pattern::Wildcard);
+        let result = convert_pattern(&wildcard_pattern);
+
+        match &result.kind {
+            PatternKind::Wildcard => (),
+            _ => panic!("Expected Wildcard pattern"),
+        }
+
+        // Test binding pattern
+        let inner = spanned(ast::Pattern::Wildcard);
+        let bind_pattern = spanned(ast::Pattern::Bind(spanned("x".to_string()), inner));
+
+        let result = convert_pattern(&bind_pattern);
+
+        match &result.kind {
+            PatternKind::Bind(name, _) => assert_eq!(name, "x"),
+            _ => panic!("Expected Bind pattern"),
+        }
+
+        // Test constructor pattern
+        let constructor_pattern = spanned(ast::Pattern::Constructor(
+            spanned("Point".to_string()),
+            vec![],
+        ));
+
+        let result = convert_pattern(&constructor_pattern);
+
+        match &result.kind {
+            PatternKind::Struct(name, _) => assert_eq!(name, "Point"),
+            _ => panic!("Expected Struct pattern"),
+        }
+
+        // Test array patterns
+        let empty_array_pattern = spanned(ast::Pattern::EmptyArray);
+        let result = convert_pattern(&empty_array_pattern);
+
+        match &result.kind {
+            PatternKind::EmptyArray => (),
+            _ => panic!("Expected EmptyArray pattern"),
+        }
+    }
+
+    #[test]
+    fn test_convert_array_decomp_pattern() {
+        // Create a head::tail pattern
+        let head = spanned(ast::Pattern::Bind(
+            spanned("head".to_string()),
+            spanned(ast::Pattern::Wildcard),
+        ));
+        let tail = spanned(ast::Pattern::Bind(
+            spanned("tail".to_string()),
+            spanned(ast::Pattern::Wildcard),
+        ));
+
+        let array_decomp = spanned(ast::Pattern::ArrayDecomp(head, tail));
+
+        let result = convert_pattern(&array_decomp);
+
+        match &result.kind {
+            PatternKind::ArrayDecomp(head_pattern, tail_pattern) => {
+                // Check head pattern
+                match &head_pattern.kind {
+                    PatternKind::Bind(name, _) => assert_eq!(name, "head"),
+                    _ => panic!("Expected Bind pattern for head"),
+                }
+
+                // Check tail pattern
+                match &tail_pattern.kind {
+                    PatternKind::Bind(name, _) => assert_eq!(name, "tail"),
+                    _ => panic!("Expected Bind pattern for tail"),
+                }
+            }
+            _ => panic!("Expected ArrayDecomp pattern"),
+        }
+    }
+}
