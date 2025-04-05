@@ -334,30 +334,49 @@ pub enum ExprKind<M: ExprMetadata> {
     CoreVal(Value<M>),
 }
 
-/// Pattern for matching
+/// Pattern for matching with optional metadata
 #[derive(Debug, Clone)]
-pub enum Pattern {
+pub struct Pattern<M: ExprMetadata = NoMetadata> {
+    /// The actual pattern node
+    pub kind: PatternKind<M>,
+    /// Optional metadata for the pattern
+    pub metadata: M,
+}
+
+impl Pattern<NoMetadata> {
+    /// Creates a new pattern without metadata
+    pub fn new(kind: PatternKind<NoMetadata>) -> Self {
+        Self {
+            kind,
+            metadata: NoMetadata,
+        }
+    }
+}
+
+/// Pattern node kinds without metadata
+#[derive(Debug, Clone)]
+pub enum PatternKind<M: ExprMetadata> {
     /// Bind a value to a name
-    Bind(Identifier, Box<Pattern>),
+    Bind(Identifier, Box<Pattern<M>>),
     /// Match a literal value
     Literal(Literal),
     /// Match a struct with a specific name and field patterns
-    Struct(Identifier, Vec<Pattern>),
+    Struct(Identifier, Vec<Pattern<M>>),
     /// Match an operator with specific structure
-    Operator(Operator<Pattern>),
+    Operator(Operator<Pattern<M>>),
     /// Match any value
     Wildcard,
     /// Match an empty array
     EmptyArray,
     /// Match an array with head and tail
-    ArrayDecomp(Box<Pattern>, Box<Pattern>),
+    ArrayDecomp(Box<Pattern<M>>, Box<Pattern<M>>),
 }
 
 /// Match arm combining pattern and expression
 #[derive(Debug, Clone)]
 pub struct MatchArm<M: ExprMetadata = NoMetadata> {
     /// Pattern to match against
-    pub pattern: Pattern,
+    pub pattern: Pattern<M>,
     /// Expression to evaluate if pattern matches
     pub expr: Arc<Expr<M>>,
 }

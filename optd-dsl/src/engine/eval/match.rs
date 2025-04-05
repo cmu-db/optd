@@ -2,15 +2,15 @@ use crate::{
     analyzer::{
         context::Context,
         hir::{
-            CoreData, Expr, LogicalOp, MatchArm, Materializable, Operator, Pattern, PhysicalOp,
-            Value,
+            CoreData, Expr, LogicalOp, MatchArm, Materializable, Operator, Pattern, PatternKind,
+            PhysicalOp, Value,
         },
     },
     engine::{Continuation, EngineResponse},
 };
 use crate::{capture, engine::Engine};
 use Materializable::*;
-use Pattern::*;
+use PatternKind::*;
 use futures::future::BoxFuture;
 use std::sync::Arc;
 
@@ -131,7 +131,7 @@ where
     O: Send + 'static,
 {
     Box::pin(async move {
-        match (pattern, &value.data) {
+        match (pattern.kind, &value.data) {
             // Simple patterns.
             (Wildcard, _) => k((value, Some(ctx))).await,
             (Literal(pattern_lit), CoreData::Literal(value_lit)) => {
@@ -191,7 +191,13 @@ where
                     *group_id,
                     Arc::new(move |expanded_value| {
                         Box::pin(capture!([op_pattern, ctx, k], async move {
-                            match_pattern(expanded_value, Operator(op_pattern), ctx, k).await
+                            match_pattern(
+                                expanded_value,
+                                Pattern::new(Operator(op_pattern)),
+                                ctx,
+                                k,
+                            )
+                            .await
                         }))
                     }),
                 )
@@ -204,7 +210,13 @@ where
                     goal.clone(),
                     Arc::new(move |expanded_value| {
                         Box::pin(capture!([op_pattern, ctx, k], async move {
-                            match_pattern(expanded_value, Operator(op_pattern), ctx, k).await
+                            match_pattern(
+                                expanded_value,
+                                Pattern::new(Operator(op_pattern)),
+                                ctx,
+                                k,
+                            )
+                            .await
                         }))
                     }),
                 )
