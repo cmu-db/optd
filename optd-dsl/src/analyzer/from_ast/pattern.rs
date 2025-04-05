@@ -5,7 +5,7 @@
 
 use super::expr::convert_expr;
 use crate::analyzer::hir::{Identifier, Literal, MatchArm, Pattern, PatternKind, TypedSpan};
-use crate::analyzer::semantic_checker::error::SemanticErrorKind;
+use crate::analyzer::semantic_check::error::SemanticErrorKind;
 use crate::parser::ast;
 use crate::utils::span::Spanned;
 use PatternKind::*;

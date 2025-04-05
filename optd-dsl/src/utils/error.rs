@@ -1,6 +1,6 @@
 use super::span::Span;
 use crate::{
-    analyzer::{semantic_checker::error::SemanticError, type_checker::error::TypeError},
+    analyzer::{semantic_check::error::SemanticError, type_check::error::TypeError},
     lexer::error::LexerError,
     parser::error::ParserError,
 };

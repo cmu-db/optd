@@ -8,7 +8,7 @@ use super::types::{convert_type, create_function_type};
 use crate::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Identifier, Literal, TypedSpan, UnaryOp, Value,
 };
-use crate::analyzer::semantic_checker::error::SemanticErrorKind;
+use crate::analyzer::semantic_check::error::SemanticErrorKind;
 use crate::analyzer::types::Type;
 use crate::parser::ast;
 use crate::utils::span::{Span, Spanned};

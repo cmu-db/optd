@@ -1,6 +1,6 @@
 use super::{
     hir::{ExprMetadata, Identifier, NoMetadata, TypedSpan},
-    semantic_checker::error::SemanticErrorKind,
+    semantic_check::error::SemanticErrorKind,
 };
 use crate::analyzer::hir::Value;
 use std::{collections::HashMap, sync::Arc};

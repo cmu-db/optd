@@ -1,5 +1,5 @@
 use super::{
-    from_ast::types::convert_type, hir::Identifier, semantic_checker::error::SemanticErrorKind,
+    from_ast::types::convert_type, hir::Identifier, semantic_check::error::SemanticErrorKind,
 };
 use crate::parser::ast::Adt;
 use crate::utils::span::Span;

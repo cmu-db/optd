@@ -2,7 +2,7 @@ use optd_dsl::{
     analyzer::{
         from_ast::ASTConverter,
         hir::{HIR, TypedSpan},
-        semantic_checker::error::SemanticError,
+        semantic_check::error::SemanticError,
         types::TypeRegistry,
     },
     lexer::lex::lex,
