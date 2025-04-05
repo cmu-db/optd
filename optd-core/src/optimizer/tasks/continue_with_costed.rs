@@ -3,7 +3,7 @@ use crate::{
     cir::{Cost, PhysicalExpressionId},
     error::Error,
     memo::Memoize,
-    optimizer::{Job, JobId, Optimizer},
+    optimizer::{JobId, Optimizer},
 };
 
 use super::{Task, TaskId};
@@ -42,7 +42,7 @@ impl<M: Memoize> Optimizer<M> {
         let task = ContinueWithCostedTask::new(physical_expr_id, cost, out);
 
         self.tasks.insert(task_id, Task::ContinueWithCosted(task));
-        self.schedule_job(Job::Task(task_id));
+        self.schedule_task_job(task_id);
         Ok(task_id)
     }
 

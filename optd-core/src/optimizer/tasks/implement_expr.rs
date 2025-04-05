@@ -10,7 +10,7 @@ use crate::{
     cir::{Goal, GoalId, ImplementationRule, LogicalExpressionId},
     error::Error,
     memo::{Memoize, Status},
-    optimizer::{EngineMessageKind, Job, JobId, Optimizer, Task},
+    optimizer::{EngineMessageKind, JobId, Optimizer, Task},
 };
 
 use super::TaskId;
@@ -78,7 +78,7 @@ impl<M: Memoize> Optimizer<M> {
         self.tasks.insert(task_id, Task::ImplementExpression(task));
 
         if is_dirty {
-            self.schedule_job(Job::Task(task_id));
+            self.schedule_task_job(task_id);
         }
         Ok(task_id)
     }
