@@ -28,7 +28,7 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_client_request(
         &mut self,
         message: ClientMessage,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
         match message {
             ClientMessage::Init {
                 logical_plan,
@@ -42,6 +42,7 @@ impl<M: Memoize> Optimizer<M> {
                 let query_instance_id = self.next_query_instance_id();
                 self.query_instances.insert(query_instance_id, task_id);
                 let _ = id_tx.send(query_instance_id);
+                Ok(false)
             }
             ClientMessage::Complete { query_instance_id } => {
                 // Remove the OptimizePlanTask from the tasks and clean up subscriptions.
@@ -62,9 +63,13 @@ impl<M: Memoize> Optimizer<M> {
                 }
 
                 // TODO(yuchen): if the goal has no other subscribers, we should remove it.
+                Ok(false)
+            }
+            ClientMessage::Shutdown => {
+                // TODO(yuchen): Clean up state.
+                Ok(true)
             }
         }
-        Ok(())
     }
 
     /// This method handles new logical plan alternatives discovered through

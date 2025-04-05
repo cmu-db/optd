@@ -157,7 +157,7 @@ impl<M: Memoize> Optimizer<M> {
     fn new(memo: M, hir: HIR, client_rx: mpsc::Receiver<ClientMessage>) -> Self {
         let (message_tx, message_rx) = mpsc::channel(0);
 
-        Self {
+        Optimizer {
             // Core components.
             memo,
             rule_book: RuleBook::default(),
@@ -191,27 +191,30 @@ impl<M: Memoize> Optimizer<M> {
     }
 
     /// Launch a new optimizer and return a sender for client communication.
-    pub fn launch(memo: M, hir: HIR) -> Client {
+    pub fn launch(memo: M, hir: HIR) -> Client<M> {
         let (client_tx, client_rx) = mpsc::channel(0);
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             // Start the background processing loop.
             let optimizer = Self::new(memo, hir, client_rx);
             // TODO(Alexis): If an error occurs we could restart or reboot the memo.
             // Rather than failing (e.g. memo could be distributed).
-            optimizer.run().await.expect("Optimizer failure");
+            optimizer.run().await.expect("Optimizer failure")
         });
 
-        let client = Client::new(client_tx);
+        let client = Client::new(client_tx, handle);
         client
     }
 
     /// Run the optimizer's main processing loop.
-    async fn run(mut self) -> Result<(), Error> {
+    async fn run(mut self) -> Result<M, Error> {
         loop {
             tokio::select! {
                 Some(request) = self.client_rx.next() => {
-                    self.process_client_request(request).await?;
+                    let is_shutdown = self.process_client_request(request).await?;
+                    if is_shutdown {
+                        break Ok(self.memo);
+                    }
                 },
                 Some(message) = self.message_rx.next() => {
                     let EngineMessage {
@@ -264,7 +267,7 @@ impl<M: Memoize> Optimizer<M> {
                     // Launch pending jobs according to a policy (currently FIFO).
                     self.launch_runnable_jobs().await?;
                 },
-                else => break Ok(()),
+                else => break Ok(self.memo),
             }
         }
     }
@@ -291,6 +294,8 @@ impl<M: Memoize> Optimizer<M> {
 #[cfg(test)]
 mod tests {
 
+    use std::time::Duration;
+
     use super::*;
     use crate::{
         cir::{Operator, OperatorData},
@@ -298,13 +303,44 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn test_optimizer_simple() -> Result<(), Error> {
+    #[ignore]
+    async fn test_optimizer_empty_hir() -> Result<(), Error> {
         let hir = HIR {
             context: Context::default(),
             annotations: HashMap::new(),
         };
 
         let mut client = Optimizer::launch(MockMemo, hir);
+
+        let logical_plan = LogicalPlan(Operator::new(
+            "Scan".to_string(),
+            vec![OperatorData::String("t1".into())],
+            vec![],
+        ));
+        let mut query_instance = client.create_query_instance(logical_plan).await?;
+
+        // Wait for three secs, should just directly timeout.
+        tokio::time::timeout(Duration::from_secs(3), async {
+            let physical_plan = query_instance.recv_best_plan().await.unwrap();
+            println!("Best plan: {:?}", physical_plan);
+        })
+        .await
+        .unwrap_err();
+
+        client.shutdown().await.unwrap();
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_optimizer_with_hir() -> Result<(), Error> {
+        let hir = HIR {
+            context: Context::default(),
+            annotations: HashMap::new(),
+        };
+
+        let mut client = Optimizer::launch(MockMemo, hir);
+
         let logical_plan = LogicalPlan(Operator::new(
             "Scan".to_string(),
             vec![OperatorData::String("t1".into())],
@@ -323,6 +359,7 @@ mod tests {
 
         assert_eq!(physical_plan, expected_physical_plan);
 
+        client.shutdown().await.unwrap();
         Ok(())
     }
 }

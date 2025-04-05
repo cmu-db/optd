@@ -6,6 +6,7 @@ use futures::{
 use crate::{
     cir::{LogicalPlan, PhysicalPlan},
     error::Error,
+    memo::Memoize,
 };
 
 /// Unique identifier for a query instance.
@@ -56,13 +57,14 @@ impl Drop for QueryInstance {
     }
 }
 
-pub struct Client {
+pub struct Client<M: Memoize> {
     tx: mpsc::Sender<ClientMessage>,
+    handle: tokio::task::JoinHandle<M>,
 }
 
-impl Client {
-    pub fn new(tx: mpsc::Sender<ClientMessage>) -> Self {
-        Self { tx }
+impl<M: Memoize> Client<M> {
+    pub fn new(tx: mpsc::Sender<ClientMessage>, handle: tokio::task::JoinHandle<M>) -> Self {
+        Self { tx, handle }
     }
 
     pub async fn create_query_instance(
@@ -86,6 +88,13 @@ impl Client {
             client_tx: self.tx.clone(),
         })
     }
+
+    /// Shutdown the optimizer, returning the memo table.
+    pub async fn shutdown(mut self) -> Result<M, Error> {
+        self.tx.send(ClientMessage::Shutdown).await?;
+        let memo = self.handle.await.map_err(|_| Error::Placeholder)?;
+        Ok(memo)
+    }
 }
 
 pub enum ClientMessage {
@@ -103,4 +112,5 @@ pub enum ClientMessage {
         /// The query instance ID to be completed.
         query_instance_id: QueryInstanceId,
     },
+    Shutdown,
 }
