@@ -62,7 +62,7 @@ impl Memoize for MockMemo {
         let group = self
             .groups
             .get(&group_id)
-            .ok_or_else(|| MemoizeError::GroupNotFound(group_id))?;
+            .ok_or(MemoizeError::GroupNotFound(group_id))?;
 
         Ok(group.properties.clone())
     }
@@ -75,7 +75,7 @@ impl Memoize for MockMemo {
         let group = self
             .groups
             .get_mut(&group_id)
-            .ok_or_else(|| MemoizeError::GroupNotFound(group_id))?;
+            .ok_or(MemoizeError::GroupNotFound(group_id))?;
 
         group.properties = Some(props);
         Ok(())
@@ -88,7 +88,7 @@ impl Memoize for MockMemo {
         let group = self
             .groups
             .get(&group_id)
-            .ok_or_else(|| MemoizeError::GroupNotFound(group_id))?;
+            .ok_or(MemoizeError::GroupNotFound(group_id))?;
 
         Ok(group.logical_exprs.iter().cloned().collect())
     }
@@ -97,14 +97,14 @@ impl Memoize for MockMemo {
         let group = self
             .groups
             .get(&group_id)
-            .ok_or_else(|| MemoizeError::GroupNotFound(group_id))?;
+            .ok_or(MemoizeError::GroupNotFound(group_id))?;
 
         group
             .logical_exprs
             .iter()
             .next()
             .cloned()
-            .ok_or_else(|| MemoizeError::NoLogicalExprInGroup(group_id))
+            .ok_or(MemoizeError::NoLogicalExprInGroup(group_id))
     }
 
     async fn find_logical_expr_group(
@@ -151,7 +151,7 @@ impl Memoize for MockMemo {
         let goal_state = self
             .goals
             .get(&goal_id)
-            .ok_or_else(|| MemoizeError::GoalNotFound(goal_id))?;
+            .ok_or(MemoizeError::GoalNotFound(goal_id))?;
         Ok(goal_state.members.iter().cloned().collect())
     }
 
@@ -163,7 +163,7 @@ impl Memoize for MockMemo {
         let goal_state = self
             .goals
             .get_mut(&goal_id)
-            .ok_or_else(|| MemoizeError::GoalNotFound(goal_id))?;
+            .ok_or(MemoizeError::GoalNotFound(goal_id))?;
 
         let is_new = goal_state.members.insert(member);
         if is_new {
@@ -200,7 +200,7 @@ impl Memoize for MockMemo {
         let (_, cost) = self
             .physical_exprs
             .get(&physical_expr_id)
-            .ok_or_else(|| MemoizeError::PhysicalExprNotFound(physical_expr_id))?;
+            .ok_or(MemoizeError::PhysicalExprNotFound(physical_expr_id))?;
         Ok(*cost)
     }
 
@@ -212,7 +212,7 @@ impl Memoize for MockMemo {
         let (_, cost_mut) = self
             .physical_exprs
             .get_mut(&physical_expr_id)
-            .ok_or_else(|| MemoizeError::PhysicalExprNotFound(physical_expr_id))?;
+            .ok_or(MemoizeError::PhysicalExprNotFound(physical_expr_id))?;
         let is_better = cost_mut
             .replace(new_cost)
             .map(|old_cost| new_cost < old_cost)
@@ -223,7 +223,7 @@ impl Memoize for MockMemo {
             // keep propagating the new cost to all subscribers.
             if let Some(subscriber_goal_ids) = self
                 .member_subscribers
-                .get(&&GoalMemberId::PhysicalExpressionId(physical_expr_id))
+                .get(&GoalMemberId::PhysicalExpressionId(physical_expr_id))
                 .map(|goals| goals.iter().cloned())
             {
                 subscribers.extend(subscriber_goal_ids);
@@ -324,7 +324,7 @@ impl Memoize for MockMemo {
         let goal = self
             .goals
             .get(&goal_id)
-            .ok_or_else(|| MemoizeError::GoalNotFound(goal_id))?
+            .ok_or(MemoizeError::GoalNotFound(goal_id))?
             .goal
             .clone();
         Ok(goal)
@@ -356,7 +356,7 @@ impl Memoize for MockMemo {
         let logical_expr = self
             .logical_exprs
             .get(&logical_expr_id)
-            .ok_or_else(|| MemoizeError::LogicalExprNotFound(logical_expr_id))?
+            .ok_or(MemoizeError::LogicalExprNotFound(logical_expr_id))?
             .clone();
         Ok(logical_expr)
     }
@@ -387,7 +387,7 @@ impl Memoize for MockMemo {
         let physical_expr = self
             .physical_exprs
             .get(&physical_expr_id)
-            .ok_or_else(|| MemoizeError::PhysicalExprNotFound(physical_expr_id))?
+            .ok_or(MemoizeError::PhysicalExprNotFound(physical_expr_id))?
             .0
             .clone();
         Ok(physical_expr)
