@@ -109,8 +109,11 @@ pub struct Optimizer<M: Memoize> {
     hir_context: Context,
 
     // Message handling.
-    message_tx: mpsc::Sender<EngineMessage>,
-    message_rx: mpsc::Receiver<EngineMessage>,
+    /// Sender for sending messages from the engine.
+    engine_tx: mpsc::Sender<EngineMessage>,
+    /// Receiver for receiving messages from the engine.
+    engine_rx: mpsc::Receiver<EngineMessage>,
+    /// Receiver for client messages.
     client_rx: mpsc::Receiver<ClientMessage>,
 
     // Query instance management.
@@ -127,6 +130,7 @@ pub struct Optimizer<M: Memoize> {
     /// Map of currently running jobs. Some job is associated with a task, some are not.
     running_jobs: HashMap<JobId, Job>,
 
+    /// Maps pending derives to a sinle job id and a list of senders that retrieve logical properties.
     pending_derives: HashMap<GroupId, (JobId, Vec<oneshot::Sender<LogicalProperties>>)>,
 
     next_job_id: JobId,
@@ -147,7 +151,7 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// Use `launch` to create and start the optimizer.
     fn new(memo: M, hir: HIR, client_rx: mpsc::Receiver<ClientMessage>) -> Self {
-        let (message_tx, message_rx) = mpsc::channel(0);
+        let (engine_tx, engine_rx) = mpsc::channel(0);
 
         Optimizer {
             // Core components.
@@ -156,8 +160,8 @@ impl<M: Memoize> Optimizer<M> {
             hir_context: hir.context,
 
             // Message handling.
-            message_tx,
-            message_rx,
+            engine_tx,
+            engine_rx,
             client_rx,
 
             query_instances: HashMap::new(),
@@ -209,11 +213,12 @@ impl<M: Memoize> Optimizer<M> {
                         break Ok(self.memo);
                     }
                 },
-                Some(message) = self.message_rx.next() => {
+                Some(message) = self.engine_rx.next() => {
                     let EngineMessage {
                         job_id,
                         kind,
                     } = message;
+                    let job = self.running_jobs.remove(&job_id).unwrap();
                     // Process the next message in the channel.
                     match kind {
                         NewLogicalPartial(plan, group_id) => {

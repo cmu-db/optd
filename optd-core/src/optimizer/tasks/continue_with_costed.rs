@@ -61,12 +61,12 @@ impl<M: Memoize> Optimizer<M> {
         // TODO: need to think through the costed API interaction.
         // get_cost?
         let costed_plan_value = costed_physical_to_value(plan, Cost(f64::MAX));
-        let message_tx = self.message_tx.clone();
+        let engine_tx = self.engine_tx.clone();
 
         tokio::spawn(async move {
             let response = k(costed_plan_value).await;
 
-            Self::send_engine_response(job_id, message_tx, response).await;
+            Self::send_engine_response(job_id, engine_tx, response).await;
         });
 
         Ok(())
