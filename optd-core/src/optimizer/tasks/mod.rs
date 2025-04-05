@@ -215,4 +215,64 @@ impl Task {
             _ => panic!("Expected ContinueWithCosted task"),
         }
     }
+    pub fn into_optimize_goal(self) -> OptimizeGoalTask {
+        match self {
+            Task::OptimizeGoal(task) => task,
+            _ => panic!("Expected OptimizeGoal task"),
+        }
+    }
+    pub fn into_explore_group(self) -> ExploreGroupTask {
+        match self {
+            Task::ExploreGroup(task) => task,
+            _ => panic!("Expected ExploreGroup task"),
+        }
+    }
+    pub fn into_optimize_plan(self) -> OptimizePlanTask {
+        match self {
+            Task::OptimizePlan(task) => task,
+            _ => panic!("Expected OptimizePlan task"),
+        }
+    }
+    pub fn into_implement_expression(self) -> ImplementExpressionTask {
+        match self {
+            Task::ImplementExpression(task) => task,
+            _ => panic!("Expected ImplementExpression task"),
+        }
+    }
+    pub fn into_transform_expression(self) -> TransformExpressionTask {
+        match self {
+            Task::TransformExpression(task) => task,
+            _ => panic!("Expected TransformExpression task"),
+        }
+    }
+    pub fn into_cost_expression(self) -> CostExpressionTask {
+        match self {
+            Task::CostExpression(task) => task,
+            _ => panic!("Expected CostExpression task"),
+        }
+    }
+    pub fn into_fork_logical(self) -> ForkLogicalTask {
+        match self {
+            Task::ForkLogical(task) => task,
+            _ => panic!("Expected ForkLogical task"),
+        }
+    }
+    pub fn into_continue_with_logical(self) -> ContinueWithLogicalTask {
+        match self {
+            Task::ContinueWithLogical(task) => task,
+            _ => panic!("Expected ContinueWithLogical task"),
+        }
+    }
+    pub fn into_fork_costed(self) -> ForkCostedTask {
+        match self {
+            Task::ForkCosted(task) => task,
+            _ => panic!("Expected ForkCosted task"),
+        }
+    }
+    pub fn into_continue_with_costed(self) -> ContinueWithCostedTask {
+        match self {
+            Task::ContinueWithCosted(task) => task,
+            _ => panic!("Expected ContinueWithCosted task"),
+        }
+    }
 }
