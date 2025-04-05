@@ -18,9 +18,9 @@ use std::collections::HashSet;
 ///
 /// * `ast_type` - The AST type to convert
 /// * `generics` - A set of scoped generic type identifiers that are currently in scope.
-///                When encountering an identifier, it first checks if it's in this set
-///                to determine whether it should be treated as a generic type parameter
-///                (Type::Generic) or as a user-defined ADT type (Type::Adt).
+///   When encountering an identifier, it first checks if it's in this set
+///   to determine whether it should be treated as a generic type parameter
+///   (`Type::Generic`) or as a user-defined ADT type (`Type::Adt`).
 ///
 /// # Returns
 ///
