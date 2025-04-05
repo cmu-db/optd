@@ -21,6 +21,7 @@ use crate::{
 /// * `Ok(())` if no scope errors are found.
 pub fn scope_check(hir: &HIR<TypedSpan>) -> Result<(), SemanticErrorKind> {
     use CoreData::*;
+    use FunKind::*;
 
     // Process each function in the HIR context separately.
     // Functions might reference each other, so we need to check them individually.
@@ -28,10 +29,11 @@ pub fn scope_check(hir: &HIR<TypedSpan>) -> Result<(), SemanticErrorKind> {
         .get_all_values()
         .iter()
         .try_for_each(|fun| match &fun.data {
-            Function(FunKind::Closure(args, body)) => {
+            Function(Closure(args, body)) => {
                 let ctx = create_function_scope(hir.context.clone(), args, &fun.metadata.span)?;
                 check_expr(body, ctx)
             }
+            Function(Udf(_)) => Ok(()), // UDFs have no body to check.
             _ => panic!("Expected a function, but got: {:?}", fun.data),
         })
 }
