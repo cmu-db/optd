@@ -184,7 +184,6 @@ impl<M: Memoize> Optimizer<M> {
             group_exploration_task_index: HashMap::new(),
             goal_optimization_task_index: HashMap::new(),
             cost_expression_task_index: HashMap::new(),
-            //
         }
     }
 

@@ -58,9 +58,7 @@ impl<M: Memoize> Optimizer<M> {
         let fork_task = self.tasks.get(&task.fork_out).unwrap().as_fork_costed();
         let k = fork_task.continuation.clone();
         let plan = self.egest_partial_plan(task.physical_expr_id).await?;
-        // TODO: need to think through the costed API interaction.
-        // get_cost?
-        let costed_plan_value = costed_physical_to_value(plan, Cost(f64::MAX));
+        let costed_plan_value = costed_physical_to_value(plan, task.cost);
         let engine_tx = self.engine_tx.clone();
 
         tokio::spawn(async move {
