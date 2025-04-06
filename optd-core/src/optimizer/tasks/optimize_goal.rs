@@ -1,5 +1,7 @@
+use futures::SinkExt;
+
 use crate::{
-    cir::{Cost, Goal, GoalId, GoalMemberId, PhysicalExpressionId},
+    cir::{Cost, Goal, GoalId, GoalMemberId, PhysicalExpressionId, cost_is_better},
     error::Error,
     memo::Memoize,
     optimizer::{Optimizer, Task},
@@ -130,6 +132,7 @@ impl<M: Memoize> Optimizer<M> {
             };
         }
 
+        let best_costed = self.memo.get_best_optimized_physical_expr(goal_id).await?;
         // insert into goal task index
         self.goal_optimization_task_index.insert(goal_id, task_id);
         self.tasks.insert(task_id, Task::OptimizeGoal(task));
@@ -137,5 +140,45 @@ impl<M: Memoize> Optimizer<M> {
         let best_costed_for_goal = self.memo.get_best_optimized_physical_expr(goal_id).await?;
 
         Ok((task_id, best_costed_for_goal))
+    }
+
+    pub async fn receive_new_best_costed(
+        &mut self,
+        goal_id: GoalId,
+        physical_expr_id: PhysicalExpressionId,
+        cost: Cost,
+    ) -> Result<(), Error> {
+        let task_id = *self.goal_optimization_task_index.get(&goal_id).unwrap();
+        let task = self.tasks.get_mut(&task_id).unwrap().as_optimize_goal_mut();
+
+        let best_costed_for_goal = self.memo.get_best_optimized_physical_expr(goal_id).await?;
+        if cost_is_better(Some((physical_expr_id, cost)), best_costed_for_goal) {
+            // send to dependent tasks
+            let cont_outs = task.continue_with_out.clone();
+            let plan_outs = task.optimize_plan_out.clone();
+            let goal_outs = task.optimize_goal_out.clone();
+
+            for out_task in cont_outs.iter() {
+                let continue_with_task = self
+                    .tasks
+                    .get_mut(out_task)
+                    .unwrap()
+                    .as_continue_with_costed_mut();
+                continue_with_task.cost = cost;
+                continue_with_task.physical_expr_id = physical_expr_id;
+            }
+
+            for out_task in plan_outs.iter() {
+                let physical_plan = self.egest_best_plan(physical_expr_id).await?.unwrap();
+                let optimize_plan_task =
+                    self.tasks.get_mut(out_task).unwrap().as_optimize_plan_mut();
+                optimize_plan_task
+                    .physical_plan_tx
+                    .send(physical_plan)
+                    .await?;
+            }
+        }
+
+        Ok(())
     }
 }
