@@ -167,6 +167,8 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
         let brace_expr = just(Token::LBrace)
             .ignore_then(expr.clone())
             .then_ignore(just(Token::RBrace))
+            .map(Expr::Block)
+            .map_with_span(Spanned::new)
             .boxed();
 
         let atom = choice((
@@ -901,12 +903,16 @@ mod tests {
                 }
 
                 // Test then branch with let expression
-                if let Expr::Let(name, value, body) = &*then_branch.value {
-                    assert_eq!(*name.value.name.value, "x");
-                    assert_expr_eq(&value.value, &Expr::Literal(Literal::Int64(42)));
-                    assert_expr_eq(&body.value, &Expr::Ref("x".to_string()));
+                if let Expr::Block(body) = &*then_branch.value {
+                    if let Expr::Let(name, value, body) = &*body.value {
+                        assert_eq!(*name.value.name.value, "x");
+                        assert_expr_eq(&value.value, &Expr::Literal(Literal::Int64(42)));
+                        assert_expr_eq(&body.value, &Expr::Ref("x".to_string()));
+                    } else {
+                        panic!("Expected let expression in then branch");
+                    }
                 } else {
-                    panic!("Expected let expression in then branch");
+                    panic!("Expected block expression in then branch");
                 }
 
                 // Test else branch with fail expression

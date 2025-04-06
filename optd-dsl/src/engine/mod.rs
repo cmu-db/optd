@@ -87,6 +87,13 @@ impl Engine {
                     )
                     .await
                 }
+                NewScope(expr) => {
+                    let mut new_ctx = self.context.clone();
+                    new_ctx.push_scope();
+                    self.with_new_context(new_ctx)
+                        .evaluate(expr.clone(), k)
+                        .await
+                }
                 Let(ident, assignee, after) => {
                     evaluate_let_binding(ident.clone(), assignee.clone(), after.clone(), self, k)
                         .await

@@ -61,6 +61,7 @@ pub(super) fn convert_expr(
         }
         ast::Expr::Postfix(expr, op) => convert_postfix(expr, op, generics)?,
         ast::Expr::Fail(error_expr) => convert_fail(error_expr, generics)?,
+        ast::Expr::Block(block) => convert_block(block, generics)?,
     };
 
     Ok(Expr::new_with(kind, ty, span))
@@ -349,6 +350,16 @@ fn convert_fail(
     let hir_error = convert_expr(error_expr, generics)?;
 
     Ok(CoreExpr(CoreData::Fail(Box::new(Arc::new(hir_error)))))
+}
+
+/// Converts a block expression to an HIR expression kind.
+fn convert_block(
+    block: &Spanned<ast::Expr>,
+    generics: &HashSet<Identifier>,
+) -> Result<ExprKind<TypedSpan>, SemanticErrorKind> {
+    let hir_expr = convert_expr(&block, generics)?;
+
+    Ok(NewScope(hir_expr.into()))
 }
 
 #[cfg(test)]
@@ -837,6 +848,30 @@ mod expr_tests {
                 }
             }
             _ => panic!("Expected PatternMatch expression"),
+        }
+    }
+
+    #[test]
+    fn test_convert_block() {
+        // Create a simple expression inside a block
+        let inner_expr = spanned(ast::Expr::Literal(ast::Literal::Int64(42)));
+        let block_expr = spanned(ast::Expr::Block(inner_expr));
+
+        let result = convert_expr(&block_expr, &HashSet::new()).unwrap();
+
+        // Check that the block is converted to a NewScope expression
+        match &result.kind {
+            ExprKind::NewScope(expr) => {
+                // Verify the inner expression
+                match &expr.kind {
+                    ExprKind::CoreVal(value) => match &value.data {
+                        CoreData::Literal(Literal::Int64(val)) => assert_eq!(*val, 42),
+                        _ => panic!("Expected Int64 literal inside block"),
+                    },
+                    _ => panic!("Expected CoreVal inside block"),
+                }
+            }
+            _ => panic!("Expected NewScope expression"),
         }
     }
 

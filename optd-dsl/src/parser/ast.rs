@@ -87,6 +87,8 @@ pub enum Expr {
     PatternMatch(Spanned<Expr>, Vec<Spanned<MatchArm>>),
     /// Conditional expression (if-then-else)
     IfThenElse(Spanned<Expr>, Spanned<Expr>, Spanned<Expr>),
+    /// Expression block enclosed in braces { }
+    Block(Spanned<Expr>),
 
     // Bindings and constructors
     /// Variable binding (let expressions)
