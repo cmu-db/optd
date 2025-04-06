@@ -1,8 +1,10 @@
-use super::{EngineMessageKind, Optimizer, Task, TaskId, client::ClientMessage};
+use super::{
+    EngineMessageKind, Optimizer, Task, TaskId, client::ClientMessage, tasks::SourceTaskId,
+};
 use crate::{
     cir::{
-        Cost, Goal, GoalId, GroupId, LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan,
-        PhysicalExpressionId,
+        Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalProperties, PartialLogicalPlan,
+        PartialPhysicalPlan, PhysicalExpressionId,
     },
     error::Error,
     memo::Memoize,
@@ -116,8 +118,19 @@ impl<M: Memoize> Optimizer<M> {
         let goal_id = self.memo.find_repr_goal(goal_id).await?;
 
         let member = self.ingest_physical_plan(&plan).await?;
+
         let forward_result = self.memo.add_goal_member(goal_id, member).await?;
 
+        match member {
+            GoalMemberId::PhysicalExpressionId(physical_expr_id) => {
+                self.ensure_cost_expression_task(physical_expr_id, Cost(f64::MAX), _task_id)
+                    .await?;
+            }
+            GoalMemberId::GoalId(ref_goal_id) => {
+                self.ensure_optimize_goal_task(ref_goal_id, SourceTaskId::OptimizeGoal(_task_id))
+                    .await?;
+            }
+        }
         self.handle_forward_result(forward_result).await?;
 
         Ok(())

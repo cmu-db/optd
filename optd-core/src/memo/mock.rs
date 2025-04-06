@@ -159,7 +159,7 @@ impl Memoize for MockMemo {
         &mut self,
         goal_id: GoalId,
         member: GoalMemberId,
-    ) -> MemoizeResult<bool> {
+    ) -> MemoizeResult<ForwardResult> {
         let goal_state = self
             .goals
             .get_mut(&goal_id)
@@ -190,7 +190,7 @@ impl Memoize for MockMemo {
             self.propagate_new_member_cost(new_member_cost, subscribers)
                 .await?;
         }
-        Ok(is_new)
+        todo!()
     }
 
     async fn get_physical_expr_cost(
@@ -208,7 +208,7 @@ impl Memoize for MockMemo {
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
-    ) -> MemoizeResult<bool> {
+    ) -> MemoizeResult<ForwardResult> {
         let (_, cost_mut) = self
             .physical_exprs
             .get_mut(&physical_expr_id)
@@ -232,7 +232,7 @@ impl Memoize for MockMemo {
             self.propagate_new_member_cost(Some((physical_expr_id, new_cost)), subscribers)
                 .await?;
         }
-        Ok(is_better)
+        todo!()
     }
 
     async fn get_transformation_status(
