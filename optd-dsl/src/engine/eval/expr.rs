@@ -97,6 +97,31 @@ where
         .await
 }
 
+/// Evaluates a new scope expression.
+///
+/// Creates a new context, pushes a new scope onto it, and evaluates the expression in that
+/// context.
+///
+/// # Parameters
+/// * `expr` - The expression to evaluate.
+/// * `engine` - The evaluation engine.
+/// * `k` - The continuation to receive evaluation results.
+pub(crate) async fn evaluate_new_scope<O>(
+    expr: Arc<Expr>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    let mut new_ctx = engine.context.clone();
+    new_ctx.push_scope();
+    engine
+        .with_new_context(new_ctx)
+        .evaluate(expr.clone(), k)
+        .await
+}
+
 /// Evaluates a binary expression.
 ///
 /// Evaluates both operands, then applies the binary operation, passing the result to the
@@ -806,6 +831,61 @@ mod tests {
                 assert_eq!(*value, 15); // 10 + 5 = 15
             }
             _ => panic!("Expected integer value"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_new_scope_and_shadowing() {
+        let harness = TestHarness::new();
+        let mut ctx = Context::default();
+
+        // Bind a variable in the outer scope
+        ctx.bind("x".to_string(), lit_val(int(10)));
+        let engine = Engine::new(ctx);
+
+        // Create a test expression that:
+        // 1. Uses NewScope to create a nested scope
+        // 2. Inside the scope, shadows x with a new value
+        // 3. After leaving the scope, uses x which should have its original value
+        let test_expr = Arc::new(Expr::new(Let(
+            "inner_value".to_string(),
+            Arc::new(Expr::new(NewScope(Arc::new(Expr::new(Let(
+                "x".to_string(), // Shadow x in new scope
+                lit_expr(int(20)),
+                ref_expr("x"), // Return the shadowed value
+            )))))),
+            // Create a tuple with both the inner value and the outer value of x
+            Arc::new(Expr::new(CoreExpr(CoreData::Tuple(vec![
+                ref_expr("inner_value"), // Value from inner scope
+                ref_expr("x"),           // Value from outer scope after leaving inner scope
+            ])))),
+        )));
+
+        let results = evaluate_and_collect(test_expr, engine, harness).await;
+
+        // Check results - should be a tuple (20, 10)
+        assert_eq!(results.len(), 1);
+        match &results[0].data {
+            CoreData::Tuple(elements) => {
+                assert_eq!(elements.len(), 2);
+
+                // First element should be from shadowed variable in inner scope
+                match &elements[0].data {
+                    CoreData::Literal(Literal::Int64(value)) => {
+                        assert_eq!(*value, 20);
+                    }
+                    _ => panic!("Expected integer value"),
+                }
+
+                // Second element should be from outer scope after leaving inner scope
+                match &elements[1].data {
+                    CoreData::Literal(Literal::Int64(value)) => {
+                        assert_eq!(*value, 10);
+                    }
+                    _ => panic!("Expected integer value"),
+                }
+            }
+            _ => panic!("Expected tuple result"),
         }
     }
 
