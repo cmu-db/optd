@@ -138,45 +138,4 @@ impl<M: Memoize> Optimizer<M> {
 
         Ok((task_id, best_costed_for_goal))
     }
-
-    pub async fn receive_new_goal_member(
-        &mut self,
-        goal_id: GoalId,
-        member_id: GoalMemberId,
-    ) -> Result<(), Error> {
-        let is_new = self.memo.add_goal_member(goal_id, member_id).await?;
-
-        if is_new {
-            let task_id = *self.goal_optimization_task_index.get(&goal_id).unwrap();
-
-            match member_id {
-                GoalMemberId::PhysicalExpressionId(expression_id) => {
-                    let budget = self
-                        .memo
-                        .get_best_optimized_physical_expr(goal_id)
-                        .await?
-                        .map(|(_, cost)| cost)
-                        .unwrap_or(Cost(f64::MAX));
-
-                    let cost_member_expr_task_id = self
-                        .ensure_cost_expression_task(expression_id, budget, task_id)
-                        .await?;
-
-                    let task = self.tasks.get_mut(&task_id).unwrap().as_optimize_goal_mut();
-                    task.add_cost_expr_in(cost_member_expr_task_id);
-                }
-                GoalMemberId::GoalId(new_goal_id) => {
-                    let (optimize_member_goal_task_id, _) = self
-                        .ensure_optimize_goal_task(new_goal_id, SourceTaskId::OptimizeGoal(task_id))
-                        .await?;
-
-                    let task = self.tasks.get_mut(&task_id).unwrap().as_optimize_goal_mut();
-                    task.add_optimize_goal_in(optimize_member_goal_task_id);
-                }
-            };
-
-            // TODO: send this up to `outs`.
-        }
-        Ok(())
-    }
 }

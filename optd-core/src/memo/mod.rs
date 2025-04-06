@@ -101,6 +101,12 @@ pub struct MergeResult {
     pub dirty_costings: Vec<PhysicalExpressionId>,
 }
 
+pub struct ForwardResult {
+    pub member: GoalMemberId,
+    pub best_costed_for_member: Option<(PhysicalExpressionId, Cost)>,
+    pub goals_forwarded: Vec<GoalId>,
+}
+
 /// Core interface for memo-based query optimization.
 ///
 /// This trait defines the operations needed to store, retrieve, and manipulate
@@ -234,7 +240,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         goal_id: GoalId,
         member: GoalMemberId,
-    ) -> MemoizeResult<bool>;
+    ) -> MemoizeResult<ForwardResult>;
 
     /// Updates the cost of a physical expression ID.
     ///
@@ -248,7 +254,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
-    ) -> MemoizeResult<bool>;
+    ) -> MemoizeResult<ForwardResult>;
 
     async fn get_physical_expr_cost(
         &self,

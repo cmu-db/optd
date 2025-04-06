@@ -116,8 +116,9 @@ impl<M: Memoize> Optimizer<M> {
         let goal_id = self.memo.find_repr_goal(goal_id).await?;
 
         let member = self.ingest_physical_plan(&plan).await?;
+        let forward_result = self.memo.add_goal_member(goal_id, member).await?;
 
-        self.receive_new_goal_member(goal_id, member).await?;
+        self.handle_forward_result(forward_result).await?;
 
         Ok(())
     }
@@ -140,19 +141,12 @@ impl<M: Memoize> Optimizer<M> {
         cost: Cost,
     ) -> Result<(), Error> {
         let expression_id = self.memo.find_repr_physical_expr(expression_id).await?;
-        let new_best = self
+        let result = self
             .memo
             .update_physical_expr_cost(expression_id, cost)
             .await?;
 
-        // If this is the new best expression found so far for this goal,
-        // schedule continuation jobs for all subscribers and send to clients.
-        if new_best {
-            // TODO(Alexis): Needs to send to parents.
-            // self.schedule_optimized_continuations(goal_id, expression_id, cost);
-            // self.egest_to_subscribers(goal_id, expression_id).await?;
-        }
-
+        self.handle_forward_result(result).await?;
         Ok(())
     }
 

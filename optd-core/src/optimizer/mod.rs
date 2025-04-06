@@ -19,6 +19,7 @@ use tasks::{Task, TaskId};
 
 mod client;
 mod egest;
+mod forward;
 mod handlers;
 mod ingest;
 mod jobs;
