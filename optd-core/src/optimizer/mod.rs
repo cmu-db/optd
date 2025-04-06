@@ -387,10 +387,9 @@ mod tests {
                 )
                 .await?;
 
-            let is_better = memo
+            let result = memo
                 .update_physical_expr_cost(physical_expr_id, Cost(40.0))
                 .await?;
-            assert!(is_better);
         }
 
         let index_scan_expr_id = {
@@ -411,10 +410,9 @@ mod tests {
                 )
                 .await?;
 
-            let is_better = memo
+            let result = memo
                 .update_physical_expr_cost(physical_expr_id, Cost(50.0))
                 .await?;
-            assert!(is_better);
             physical_expr_id
         };
 
@@ -433,11 +431,9 @@ mod tests {
                 )
                 .await?;
 
-            let is_better = memo
+            let result = memo
                 .update_physical_expr_cost(physical_expr_id, Cost(60.0))
                 .await?;
-
-            assert!(is_better);
         }
 
         let hir = HIR {

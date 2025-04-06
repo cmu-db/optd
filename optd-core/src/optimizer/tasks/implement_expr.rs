@@ -60,7 +60,7 @@ impl ImplementExpressionTask {
 }
 
 impl<M: Memoize> Optimizer<M> {
-    pub(super) async fn create_implement_expression_task(
+    pub async fn create_implement_expression_task(
         &mut self,
         rule: ImplementationRule,
         logical_expr_id: LogicalExpressionId,
