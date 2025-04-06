@@ -2,10 +2,9 @@ use crate::analyzer::{
     context::Context,
     hir::{Expr, ExprKind, Goal, GroupId, Value},
 };
-use ExprKind::*;
 use eval::expr::{
     evaluate_binary_expr, evaluate_call, evaluate_if_then_else, evaluate_let_binding,
-    evaluate_reference, evaluate_unary_expr,
+    evaluate_new_scope, evaluate_reference, evaluate_unary_expr,
 };
 use eval::r#match::evaluate_pattern_match;
 use eval::{core::evaluate_core_expr, expr::evaluate_map};
@@ -72,6 +71,8 @@ impl Engine {
     where
         O: Send + 'static,
     {
+        use ExprKind::*;
+
         Box::pin(async move {
             match &expr.as_ref().kind {
                 PatternMatch(sub_expr, match_arms) => {
@@ -87,13 +88,7 @@ impl Engine {
                     )
                     .await
                 }
-                NewScope(expr) => {
-                    let mut new_ctx = self.context.clone();
-                    new_ctx.push_scope();
-                    self.with_new_context(new_ctx)
-                        .evaluate(expr.clone(), k)
-                        .await
-                }
+                NewScope(expr) => evaluate_new_scope(expr.clone(), self, k).await,
                 Let(ident, assignee, after) => {
                     evaluate_let_binding(ident.clone(), assignee.clone(), after.clone(), self, k)
                         .await
@@ -152,6 +147,8 @@ impl Engine {
     /// # Returns
     /// A call expression representing the rule invocation
     fn create_rule_call(&self, rule_name: &str, args: Vec<Value>) -> Arc<Expr> {
+        use ExprKind::*;
+
         let rule_name_expr = Expr::new(Ref(rule_name.to_string())).into();
         let arg_exprs = args
             .into_iter()
