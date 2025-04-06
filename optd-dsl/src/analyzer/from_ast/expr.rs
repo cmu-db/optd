@@ -357,7 +357,7 @@ fn convert_block(
     block: &Spanned<ast::Expr>,
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, SemanticErrorKind> {
-    let hir_expr = convert_expr(&block, generics)?;
+    let hir_expr = convert_expr(block, generics)?;
 
     Ok(NewScope(hir_expr.into()))
 }
