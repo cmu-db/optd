@@ -1,7 +1,5 @@
-use futures::SinkExt;
-
 use crate::{
-    cir::{Cost, Goal, GoalId, GoalMemberId, PhysicalExpressionId, cost_is_better},
+    cir::{Cost, Goal, GoalId, GoalMemberId, PhysicalExpressionId},
     error::Error,
     memo::Memoize,
     optimizer::{Optimizer, Task},
@@ -132,7 +130,6 @@ impl<M: Memoize> Optimizer<M> {
             };
         }
 
-        let best_costed = self.memo.get_best_optimized_physical_expr(goal_id).await?;
         // insert into goal task index
         self.goal_optimization_task_index.insert(goal_id, task_id);
         self.tasks.insert(task_id, Task::OptimizeGoal(task));

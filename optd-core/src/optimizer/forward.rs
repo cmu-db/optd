@@ -1,5 +1,4 @@
 use crate::{
-    cir::{Cost, GoalId, PhysicalExpressionId},
     error::Error,
     memo::{ForwardResult, Memoize},
 };

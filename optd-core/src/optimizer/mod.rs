@@ -367,8 +367,7 @@ mod tests {
                 .await?;
 
             // manually connect the goal to sort_goal_id.
-            let result = memo
-                .add_goal_member(goal_id, GoalMemberId::GoalId(sort_goal_id))
+            memo.add_goal_member(goal_id, GoalMemberId::GoalId(sort_goal_id))
                 .await?;
             goal_id
         };
@@ -380,15 +379,13 @@ mod tests {
                 vec![],
             );
             let physical_expr_id = memo.get_physical_expr_id(&table_scan).await?;
-            let result = memo
-                .add_goal_member(
-                    no_sort_goal_id,
-                    GoalMemberId::PhysicalExpressionId(physical_expr_id),
-                )
-                .await?;
+            memo.add_goal_member(
+                no_sort_goal_id,
+                GoalMemberId::PhysicalExpressionId(physical_expr_id),
+            )
+            .await?;
 
-            let result = memo
-                .update_physical_expr_cost(physical_expr_id, Cost(40.0))
+            memo.update_physical_expr_cost(physical_expr_id, Cost(40.0))
                 .await?;
         }
 
@@ -403,15 +400,13 @@ mod tests {
             );
 
             let physical_expr_id = memo.get_physical_expr_id(&index_scan).await?;
-            let result = memo
-                .add_goal_member(
-                    no_sort_goal_id,
-                    GoalMemberId::PhysicalExpressionId(physical_expr_id),
-                )
-                .await?;
+            memo.add_goal_member(
+                no_sort_goal_id,
+                GoalMemberId::PhysicalExpressionId(physical_expr_id),
+            )
+            .await?;
 
-            let result = memo
-                .update_physical_expr_cost(physical_expr_id, Cost(50.0))
+            memo.update_physical_expr_cost(physical_expr_id, Cost(50.0))
                 .await?;
             physical_expr_id
         };
@@ -424,15 +419,13 @@ mod tests {
             );
 
             let physical_expr_id = memo.get_physical_expr_id(&physical_sort).await?;
-            let result = memo
-                .add_goal_member(
-                    goal_id,
-                    GoalMemberId::PhysicalExpressionId(physical_expr_id),
-                )
-                .await?;
+            memo.add_goal_member(
+                goal_id,
+                GoalMemberId::PhysicalExpressionId(physical_expr_id),
+            )
+            .await?;
 
-            let result = memo
-                .update_physical_expr_cost(physical_expr_id, Cost(60.0))
+            memo.update_physical_expr_cost(physical_expr_id, Cost(60.0))
                 .await?;
         }
 
@@ -497,12 +490,11 @@ mod tests {
 
         // Add index scan to the memo. We expect the index scan to be the best plan for the logical_sort query.
         {
-            let result = memo
-                .add_goal_member(
-                    sort_goal_id,
-                    GoalMemberId::PhysicalExpressionId(index_scan_expr_id),
-                )
-                .await?;
+            memo.add_goal_member(
+                sort_goal_id,
+                GoalMemberId::PhysicalExpressionId(index_scan_expr_id),
+            )
+            .await?;
         }
 
         let index_scan = Arc::new(PhysicalPlan(Operator::new(

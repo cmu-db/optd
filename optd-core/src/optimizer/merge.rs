@@ -52,9 +52,7 @@ impl<M: Memoize> Optimizer<M> {
                 let fork_outs = merged_group_task.fork_logical_out.clone();
                 let optimize_goal_outs = merged_group_task.optimize_goal_out.clone();
 
-                let old_exprs = HashSet::<LogicalExpressionId>::from_iter(
-                    group_info.expressions.iter().copied(),
-                );
+                let old_exprs = HashSet::from_iter(group_info.expressions.iter().copied());
 
                 let new_exprs = group_merge
                     .all_exprs
@@ -70,8 +68,7 @@ impl<M: Memoize> Optimizer<M> {
                         };
 
                         // Get the fork task first
-                        let fork_task =
-                            self.tasks.get_mut(fork_out).unwrap().as_fork_logical_mut();
+                        let fork_task = self.tasks.get_mut(fork_out).unwrap().as_fork_logical_mut();
                         // Update the fork task
                         fork_task.add_continue_in(cont_with_logical_task_id);
                     }
@@ -113,12 +110,7 @@ impl<M: Memoize> Optimizer<M> {
             // -> If more than one:
             // --> Take one, and merge all hashsets.
             // --> Update indexes
-
-
         }
-
-
-
 
         // 3. Go to all subscribers and publishers of that consolidated task, and filter
         // out all the tasks that have the same logical expression id (using the repr).
