@@ -1,5 +1,5 @@
-use super::{error::AnalyzerErrorKind, from_ast::types::convert_type, hir::Identifier};
-use crate::parser::ast::Adt;
+use super::{error::AnalyzerErrorKind, hir::Identifier};
+use crate::parser::ast::{Adt, Field};
 use crate::utils::span::Span;
 use Adt::*;
 use std::{
@@ -17,39 +17,32 @@ pub const PHYSICAL_TYPE: &str = "Physical";
 /// (like Array, Tuple, Closure) as well as user-defined types through ADTs.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    // Primitive types
+    // Primitive types.
     Int64,
     String,
     Bool,
     Float64,
 
-    // Special types
+    // Special types.
     Unit,
-    Universe, // All types are subtypes of Universe
+    Universe, // All types are subtypes of Universe.
     Never,    // Inherits all types.
     Unknown,
 
-    // User types
+    // User types.
     Adt(Identifier),
     Generic(Identifier),
 
-    // Composite types
+    // Composite types.
     Array(Box<Type>),
     Closure(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
     Map(Box<Type>, Box<Type>),
     Optional(Box<Type>),
 
-    // For Logical & Physical: memo status
+    // For Logical & Physical: memo status.
     Stored(Box<Type>),
     Costed(Box<Type>),
-}
-
-/// Represents a field in an ADT.
-#[derive(Debug, Clone)]
-pub struct AdtField {
-    pub name: (Identifier, Span),
-    pub ty: (Type, Span),
 }
 
 /// Manages the type hierarchy and subtyping relationships
@@ -59,9 +52,16 @@ pub struct AdtField {
 /// types and check subtyping relationships.
 #[derive(Debug, Clone, Default)]
 pub struct TypeRegistry {
+    /// Maps ADT identifiers to their subtype identifiers.
     pub subtypes: HashMap<Identifier, HashSet<Identifier>>,
-    pub product_fields: HashMap<Identifier, Vec<AdtField>>,
+    /// Maps ADT identifiers to their source spans.
     pub spans: HashMap<Identifier, Span>,
+    /// Maps terminal / product ADT identifiers to their AST fields.
+    ///
+    /// Note: We store the original AST Field elements rather than converting them
+    /// to a more processed form to preserve their source span information. This allows
+    /// for better error reporting during type checking and semantic analysis.
+    pub product_fields: HashMap<Identifier, Vec<Field>>,
 }
 
 impl TypeRegistry {
@@ -95,16 +95,7 @@ impl TypeRegistry {
                 // Register the ADT fields.
                 self.product_fields.insert(
                     type_name.clone(),
-                    fields
-                        .iter()
-                        .map(|field| AdtField {
-                            name: (*field.name.value.clone(), field.name.span.clone()),
-                            ty: (
-                                convert_type(field.ty.value.as_ref(), &HashSet::new()),
-                                field.ty.span.clone(),
-                            ),
-                        })
-                        .collect(),
+                    fields.iter().map(|field| *field.value.clone()).collect(),
                 );
 
                 self.spans.insert(type_name.clone(), name.span.clone());
@@ -183,15 +174,15 @@ impl TypeRegistry {
                 self.is_subtype(child_inner, parent_inner)
             }
             (Costed(child_inner), Stored(parent_inner)) => {
-                // Costed(A) is a subtype of Stored(A)
+                // Costed(A) is a subtype of Stored(A).
                 self.is_subtype(child_inner, parent_inner)
             }
             (Costed(child_inner), parent_inner) => {
-                // Costed(A) is a subtype of A
+                // Costed(A) is a subtype of A.
                 self.is_subtype(child_inner, parent_inner)
             }
             (Stored(child_inner), parent_inner) => {
-                // Stored(A) is a subtype of A
+                // Stored(A) is a subtype of A.
                 self.is_subtype(child_inner, parent_inner)
             }
 

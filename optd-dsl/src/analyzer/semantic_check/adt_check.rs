@@ -1,10 +1,7 @@
 use crate::{
-    analyzer::{
-        error::AnalyzerErrorKind,
-        hir::Identifier,
-        types::{Type, TypeRegistry},
-    },
-    utils::span::Span,
+    analyzer::{error::AnalyzerErrorKind, hir::Identifier, types::TypeRegistry},
+    parser::ast,
+    utils::span::Spanned,
 };
 use std::collections::HashMap;
 
@@ -74,8 +71,9 @@ fn check_product_type_terminates(
     exploration_status: &mut HashMap<String, ExplorationStatus>,
 ) -> Result<bool, AnalyzerErrorKind> {
     let fields = registry.product_fields.get(&adt).unwrap();
+
     for field in fields {
-        if !check_field_type_terminates(&field.ty.0, &field.ty.1, registry, exploration_status)? {
+        if !check_field_type_terminates(&field.ty, registry, exploration_status)? {
             return Ok(false);
         }
     }
@@ -91,6 +89,7 @@ fn check_sum_type_terminates(
     exploration_status: &mut HashMap<String, ExplorationStatus>,
 ) -> Result<bool, AnalyzerErrorKind> {
     let variants = registry.subtypes.get(&sum_type).unwrap();
+
     for variant in variants {
         if can_terminate(variant.clone(), registry, exploration_status)? {
             return Ok(true);
@@ -103,52 +102,49 @@ fn check_sum_type_terminates(
 /// Checks if a type (including complex types like Array, Map, etc.) terminates.
 /// Returns true if type terminates, false if a cycle is detected.
 fn check_field_type_terminates(
-    ty: &Type,
-    span: &Span,
+    ty: &Spanned<ast::Type>,
     registry: &TypeRegistry,
     exploration_status: &mut HashMap<String, ExplorationStatus>,
 ) -> Result<bool, AnalyzerErrorKind> {
-    use Type::*;
+    use ast::Type::*;
 
-    match ty {
-        Adt(name) => {
+    match &*ty.value {
+        Identifier(name) => {
             // Check if the type exists.
             // Only field types may not exist, since we have the guaranteed that all
             // sum types have been added to the registry during the conversion phase.
             if !registry.subtypes.contains_key(name) {
                 return Err(AnalyzerErrorKind::new_undefined_type(
                     name.clone(),
-                    span.clone(),
+                    ty.span.clone(),
                 ));
             }
 
             can_terminate(name.clone(), registry, exploration_status)
         }
 
-        Array(elem_type) => {
-            check_field_type_terminates(elem_type, span, registry, exploration_status)
-        }
+        Array(elem_type) => check_field_type_terminates(elem_type, registry, exploration_status),
 
         Tuple(types) => types.iter().try_fold(true, |acc, t| {
-            Ok(acc && check_field_type_terminates(t, span, registry, exploration_status)?)
+            Ok(acc && check_field_type_terminates(t, registry, exploration_status)?)
         }),
 
         Map(key_type, val_type) => {
-            if !check_field_type_terminates(key_type, span, registry, exploration_status)? {
+            if !check_field_type_terminates(key_type, registry, exploration_status)? {
                 return Ok(false);
             }
-            check_field_type_terminates(val_type, span, registry, exploration_status)
+            check_field_type_terminates(val_type, registry, exploration_status)
         }
 
         Closure(param_type, return_type) => {
-            if !check_field_type_terminates(param_type, span, registry, exploration_status)? {
+            if !check_field_type_terminates(param_type, registry, exploration_status)? {
                 return Ok(false);
             }
-            check_field_type_terminates(return_type, span, registry, exploration_status)
+            check_field_type_terminates(return_type, registry, exploration_status)
         }
 
-        Optional(inner_type) | Stored(inner_type) | Costed(inner_type) => {
-            check_field_type_terminates(inner_type, span, registry, exploration_status)
+        Questioned(inner_type) | Starred(inner_type) | Dollared(inner_type) => {
+            check_field_type_terminates(inner_type, registry, exploration_status)
         }
 
         _ => Ok(true), // Primitive types always terminate
@@ -158,8 +154,9 @@ fn check_field_type_terminates(
 #[cfg(test)]
 mod adt_cycle_tests {
     use crate::analyzer::semantic_check::adt_check::adt_check;
-    use crate::analyzer::types::{AdtField, Type, TypeRegistry};
-    use crate::utils::span::Span;
+    use crate::analyzer::types::TypeRegistry;
+    use crate::parser::ast::{Field, Type};
+    use crate::utils::span::{Span, Spanned};
     use std::collections::{HashMap, HashSet};
 
     fn create_test_span() -> Span {
@@ -169,7 +166,7 @@ mod adt_cycle_tests {
     // Helper to create a TypeRegistry with predefined types for testing
     fn setup_test_registry(
         subtypes: HashMap<String, HashSet<String>>,
-        product_fields: HashMap<String, Vec<AdtField>>,
+        product_fields: HashMap<String, Vec<Field>>,
     ) -> TypeRegistry {
         // Populate spans for all mentioned types
         let mut spans = HashMap::new();
@@ -188,10 +185,10 @@ mod adt_cycle_tests {
     }
 
     // Helper to create an AdtField
-    fn create_field(name: &str, ty: Type) -> AdtField {
-        AdtField {
-            name: (name.to_string(), create_test_span()),
-            ty: (ty, create_test_span()),
+    fn create_field(name: &str, ty: Type) -> Field {
+        Field {
+            name: Spanned::new(name.to_string(), create_test_span()),
+            ty: Spanned::new(ty, create_test_span()),
         }
     }
 
@@ -203,7 +200,7 @@ mod adt_cycle_tests {
             "Node".to_string(),
             vec![
                 create_field("value", Type::Int64),
-                create_field("next", Type::Adt("Node".to_string())),
+                create_field("next", Type::Identifier("Node".to_string())),
             ],
         );
 
@@ -237,7 +234,7 @@ mod adt_cycle_tests {
             "Cons".to_string(),
             vec![
                 create_field("value", Type::Int64),
-                create_field("next", Type::Adt("List".to_string())),
+                create_field("next", Type::Identifier("List".to_string())),
             ],
         );
 
@@ -265,11 +262,17 @@ mod adt_cycle_tests {
         let mut product_fields = HashMap::new();
         product_fields.insert(
             "ConsA".to_string(),
-            vec![create_field("next", Type::Adt("BadList".to_string()))],
+            vec![create_field(
+                "next",
+                Type::Identifier("BadList".to_string()),
+            )],
         );
         product_fields.insert(
             "ConsB".to_string(),
-            vec![create_field("next", Type::Adt("BadList".to_string()))],
+            vec![create_field(
+                "next",
+                Type::Identifier("BadList".to_string()),
+            )],
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
@@ -287,11 +290,11 @@ mod adt_cycle_tests {
         let mut product_fields = HashMap::new();
         product_fields.insert(
             "A".to_string(),
-            vec![create_field("b", Type::Adt("B".to_string()))],
+            vec![create_field("b", Type::Identifier("B".to_string()))],
         );
         product_fields.insert(
             "B".to_string(),
-            vec![create_field("a", Type::Adt("A".to_string()))],
+            vec![create_field("a", Type::Identifier("A".to_string()))],
         );
 
         let mut subtypes = HashMap::new();
@@ -314,7 +317,10 @@ mod adt_cycle_tests {
             "Nested".to_string(),
             vec![create_field(
                 "arr",
-                Type::Array(Box::new(Type::Adt("Nested".to_string()))),
+                Type::Array(Spanned::new(
+                    Type::Identifier("Nested".to_string()),
+                    create_test_span(),
+                )),
             )],
         );
 
@@ -344,8 +350,8 @@ mod adt_cycle_tests {
         product_fields.insert(
             "Rectangle".to_string(),
             vec![
-                create_field("topLeft", Type::Adt("Point".to_string())),
-                create_field("bottomRight", Type::Adt("Point".to_string())),
+                create_field("topLeft", Type::Identifier("Point".to_string())),
+                create_field("bottomRight", Type::Identifier("Point".to_string())),
             ],
         );
 
@@ -422,8 +428,8 @@ mod adt_cycle_tests {
         product_fields.insert(
             "Equals".to_string(),
             vec![
-                create_field("left", Type::Adt("Scalar".to_string())),
-                create_field("right", Type::Adt("Scalar".to_string())),
+                create_field("left", Type::Identifier("Scalar".to_string())),
+                create_field("right", Type::Identifier("Scalar".to_string())),
             ],
         );
 
@@ -431,18 +437,21 @@ mod adt_cycle_tests {
         product_fields.insert(
             "PhysFilter".to_string(),
             vec![
-                create_field("child", Type::Adt("Physical".to_string())),
-                create_field("cond", Type::Adt("Predicate".to_string())),
+                create_field("child", Type::Identifier("Physical".to_string())),
+                create_field("cond", Type::Identifier("Predicate".to_string())),
             ],
         );
 
         product_fields.insert(
             "PhysProject".to_string(),
             vec![
-                create_field("child", Type::Adt("Physical".to_string())),
+                create_field("child", Type::Identifier("Physical".to_string())),
                 create_field(
                     "exprs",
-                    Type::Array(Box::new(Type::Adt("Scalar".to_string()))),
+                    Type::Array(Spanned::new(
+                        Type::Identifier("Scalar".to_string()),
+                        create_test_span(),
+                    )),
                 ),
             ],
         );
@@ -451,30 +460,30 @@ mod adt_cycle_tests {
         product_fields.insert(
             "HashJoin".to_string(),
             vec![
-                create_field("build_side", Type::Adt("Physical".to_string())),
-                create_field("probe_side", Type::Adt("Physical".to_string())),
+                create_field("build_side", Type::Identifier("Physical".to_string())),
+                create_field("probe_side", Type::Identifier("Physical".to_string())),
                 create_field("typ", Type::String),
-                create_field("cond", Type::Adt("Predicate".to_string())),
+                create_field("cond", Type::Identifier("Predicate".to_string())),
             ],
         );
 
         product_fields.insert(
             "MergeJoin".to_string(),
             vec![
-                create_field("left", Type::Adt("Physical".to_string())),
-                create_field("right", Type::Adt("Physical".to_string())),
+                create_field("left", Type::Identifier("Physical".to_string())),
+                create_field("right", Type::Identifier("Physical".to_string())),
                 create_field("typ", Type::String),
-                create_field("cond", Type::Adt("Predicate".to_string())),
+                create_field("cond", Type::Identifier("Predicate".to_string())),
             ],
         );
 
         product_fields.insert(
             "NestedLoopJoin".to_string(),
             vec![
-                create_field("outer", Type::Adt("Physical".to_string())),
-                create_field("inner", Type::Adt("Physical".to_string())),
+                create_field("outer", Type::Identifier("Physical".to_string())),
+                create_field("inner", Type::Identifier("Physical".to_string())),
                 create_field("typ", Type::String),
-                create_field("cond", Type::Adt("Predicate".to_string())),
+                create_field("cond", Type::Identifier("Predicate".to_string())),
             ],
         );
 
@@ -511,11 +520,11 @@ mod adt_cycle_tests {
         let mut product_fields = HashMap::new();
         product_fields.insert(
             "Bla".to_string(),
-            vec![create_field("b", Type::Adt("List".to_string()))],
+            vec![create_field("b", Type::Identifier("List".to_string()))],
         );
         product_fields.insert(
             "Vla".to_string(),
-            vec![create_field("a", Type::Adt("List".to_string()))],
+            vec![create_field("a", Type::Identifier("List".to_string()))],
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
@@ -566,30 +575,33 @@ mod adt_cycle_tests {
         product_fields.insert(
             "BinOp".to_string(),
             vec![
-                create_field("left", Type::Adt("Expr".to_string())),
-                create_field("right", Type::Adt("Expr".to_string())),
+                create_field("left", Type::Identifier("Expr".to_string())),
+                create_field("right", Type::Identifier("Expr".to_string())),
                 create_field("op", Type::String),
             ],
         );
 
         product_fields.insert(
             "Condition".to_string(),
-            vec![create_field("cond", Type::Adt("Predicate".to_string()))],
+            vec![create_field(
+                "cond",
+                Type::Identifier("Predicate".to_string()),
+            )],
         );
 
         product_fields.insert(
             "Equals".to_string(),
             vec![
-                create_field("left", Type::Adt("Expr".to_string())),
-                create_field("right", Type::Adt("Expr".to_string())),
+                create_field("left", Type::Identifier("Expr".to_string())),
+                create_field("right", Type::Identifier("Expr".to_string())),
             ],
         );
 
         product_fields.insert(
             "And".to_string(),
             vec![
-                create_field("left", Type::Adt("Predicate".to_string())),
-                create_field("right", Type::Adt("Predicate".to_string())),
+                create_field("left", Type::Identifier("Predicate".to_string())),
+                create_field("right", Type::Identifier("Predicate".to_string())),
             ],
         );
 
@@ -626,7 +638,7 @@ mod adt_cycle_tests {
         // C references back to A, creating a cycle
         product_fields.insert(
             "C".to_string(),
-            vec![create_field("a", Type::Adt("A".to_string()))],
+            vec![create_field("a", Type::Identifier("A".to_string()))],
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
