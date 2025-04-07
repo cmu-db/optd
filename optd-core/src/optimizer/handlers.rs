@@ -131,7 +131,10 @@ impl<M: Memoize> Optimizer<M> {
                     .await?;
             }
         }
-        self.handle_forward_result(forward_result).await?;
+
+        if let Some(forward_result) = forward_result {
+            self.handle_forward_result(forward_result).await?;
+        }
 
         Ok(())
     }
@@ -159,7 +162,9 @@ impl<M: Memoize> Optimizer<M> {
             .update_physical_expr_cost(expression_id, cost)
             .await?;
 
-        self.handle_forward_result(result).await?;
+        if let Some(result) = result {
+            self.handle_forward_result(result).await?;
+        }
         Ok(())
     }
 

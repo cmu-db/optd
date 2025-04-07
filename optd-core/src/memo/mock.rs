@@ -159,7 +159,7 @@ impl Memoize for MockMemo {
         &mut self,
         goal_id: GoalId,
         member: GoalMemberId,
-    ) -> MemoizeResult<ForwardResult> {
+    ) -> MemoizeResult<Option<ForwardResult>> {
         let goal_state = self
             .goals
             .get_mut(&goal_id)
@@ -187,10 +187,25 @@ impl Memoize for MockMemo {
             let mut subscribers = VecDeque::new();
             subscribers.push_back(goal_id);
 
-            self.propagate_new_member_cost(new_member_cost, subscribers)
+            let Some((physical_expr_id, cost)) = new_member_cost else {
+                return Ok(None);
+            };
+            let mut subscribers = VecDeque::new();
+            subscribers.push_back(goal_id);
+            let mut result = ForwardResult::new(physical_expr_id, cost);
+            // propagate the new cost to all subscribers.
+            self.propagate_new_member_cost(subscribers, &mut result)
                 .await?;
+            if result.goals_forwarded.is_empty() {
+                // No goals were forwarded, so we can return None.
+                Ok(None)
+            } else {
+                // Some goals were forwarded, so we return the result.
+                Ok(Some(result))
+            }
+        } else {
+            Ok(None)
         }
-        todo!()
     }
 
     async fn get_physical_expr_cost(
@@ -208,7 +223,7 @@ impl Memoize for MockMemo {
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
-    ) -> MemoizeResult<ForwardResult> {
+    ) -> MemoizeResult<Option<ForwardResult>> {
         let (_, cost_mut) = self
             .physical_exprs
             .get_mut(&physical_expr_id)
@@ -228,11 +243,21 @@ impl Memoize for MockMemo {
             {
                 subscribers.extend(subscriber_goal_ids);
             }
+
+            let mut result = ForwardResult::new(physical_expr_id, new_cost);
             // propagate the new cost to all subscribers.
-            self.propagate_new_member_cost(Some((physical_expr_id, new_cost)), subscribers)
+            self.propagate_new_member_cost(subscribers, &mut result)
                 .await?;
+            if result.goals_forwarded.is_empty() {
+                // No goals were forwarded, so we can return None.
+                Ok(None)
+            } else {
+                // Some goals were forwarded, so we return the result.
+                Ok(Some(result))
+            }
+        } else {
+            Ok(None)
         }
-        todo!()
     }
 
     async fn get_transformation_status(
@@ -444,16 +469,22 @@ impl MockMemo {
     // TODO(yuchen): make this thing return a list of goal ids that have their best cost updated.
     async fn propagate_new_member_cost(
         &mut self,
-        new_member_cost: Option<(PhysicalExpressionId, Cost)>,
         mut subscribers: VecDeque<GoalId>,
+        result: &mut ForwardResult,
     ) -> MemoizeResult<()> {
         while let Some(goal_id) = subscribers.pop_front() {
             let current_best = self.get_best_optimized_physical_expr(goal_id).await?;
 
-            if cost_is_better(new_member_cost, current_best) {
+            let is_better = current_best
+                .map(|(_, cost)| result.best_cost < cost)
+                .unwrap_or(true);
+
+            if is_better {
                 // Update the best cost for the goal.
                 self.best_optimized_physical_expr_index
-                    .insert(goal_id, new_member_cost.unwrap());
+                    .insert(goal_id, (result.physical_expr_id, result.best_cost));
+
+                result.goals_forwarded.insert(goal_id);
 
                 // keep propagating the new cost to all subscribers.
                 if let Some(subscriber_goal_ids) = self

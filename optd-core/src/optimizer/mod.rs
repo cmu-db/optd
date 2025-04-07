@@ -367,8 +367,10 @@ mod tests {
                 .await?;
 
             // manually connect the goal to sort_goal_id.
-            memo.add_goal_member(goal_id, GoalMemberId::GoalId(sort_goal_id))
+            let result = memo
+                .add_goal_member(goal_id, GoalMemberId::GoalId(sort_goal_id))
                 .await?;
+            assert!(result.is_none());
             goal_id
         };
 
@@ -379,14 +381,24 @@ mod tests {
                 vec![],
             );
             let physical_expr_id = memo.get_physical_expr_id(&table_scan).await?;
-            memo.add_goal_member(
-                no_sort_goal_id,
-                GoalMemberId::PhysicalExpressionId(physical_expr_id),
-            )
-            .await?;
-
-            memo.update_physical_expr_cost(physical_expr_id, Cost(40.0))
+            let forward_result = memo
+                .add_goal_member(
+                    no_sort_goal_id,
+                    GoalMemberId::PhysicalExpressionId(physical_expr_id),
+                )
                 .await?;
+
+            assert!(forward_result.is_none());
+
+            let result = memo
+                .update_physical_expr_cost(physical_expr_id, Cost(40.0))
+                .await?
+                .unwrap();
+
+            assert_eq!(result.best_cost, Cost(40.0));
+            assert_eq!(result.physical_expr_id, physical_expr_id);
+            assert_eq!(result.goals_forwarded.len(), 1);
+            assert!(result.goals_forwarded.contains(&no_sort_goal_id));
         }
 
         let index_scan_expr_id = {

@@ -112,6 +112,16 @@ pub struct ForwardResult {
     pub goals_forwarded: HashSet<GoalId>,
 }
 
+impl ForwardResult {
+    pub fn new(physical_expr_id: PhysicalExpressionId, best_cost: Cost) -> Self {
+        Self {
+            physical_expr_id,
+            best_cost,
+            goals_forwarded: HashSet::new(),
+        }
+    }
+}
+
 /// Core interface for memo-based query optimization.
 ///
 /// This trait defines the operations needed to store, retrieve, and manipulate
@@ -245,7 +255,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         goal_id: GoalId,
         member: GoalMemberId,
-    ) -> MemoizeResult<ForwardResult>;
+    ) -> MemoizeResult<Option<ForwardResult>>;
 
     /// Updates the cost of a physical expression ID.
     ///
@@ -259,7 +269,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
-    ) -> MemoizeResult<ForwardResult>;
+    ) -> MemoizeResult<Option<ForwardResult>>;
 
     async fn get_physical_expr_cost(
         &self,
