@@ -36,7 +36,7 @@ impl ForkLogicalTask {
         }
     }
 
-    fn add_continue_in(&mut self, task_id: TaskId) {
+    pub fn add_continue_in(&mut self, task_id: TaskId) {
         self.continue_ins.push(task_id);
     }
 }

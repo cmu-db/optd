@@ -57,6 +57,9 @@ pub struct MergeGroupResult {
 
     /// ID of the new representative group id.
     pub new_repr_group_id: GroupId,
+
+    /// Union of all expressions in the new group.
+    pub all_exprs: Vec<LogicalExpressionId>,
 }
 
 /// Information about a merged goal, including its ID and expressions
@@ -102,7 +105,6 @@ pub struct MergeResult {
 }
 
 pub struct ForwardResult {
-    pub member: GoalMemberId,
     pub best_costed_for_member: Option<(PhysicalExpressionId, Cost)>,
     pub goals_forwarded: Vec<GoalId>,
 }

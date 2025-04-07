@@ -50,7 +50,7 @@ impl OptimizeGoalTask {
     }
 
     /// Adds an `ImplementExpression` task as a dependency.
-    fn add_implement_expr_in(&mut self, task_id: TaskId) {
+    pub fn add_implement_expr_in(&mut self, task_id: TaskId) {
         self.implement_expression_in.push(task_id);
     }
 
