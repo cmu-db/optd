@@ -16,21 +16,13 @@ use std::collections::HashSet;
 pub fn check_adt_cycles(registry: &TypeRegistry) -> Result<(), SemanticErrorKind> {
     registry.subtypes.keys().try_for_each(|adt_name| {
         // For sum types, we need to check if at least one variant doesn't cause a cycle.
-        if is_sum_type_with_variants(adt_name, registry) {
+        if !registry.product_fields.contains_key(adt_name) {
             check_sum_type(adt_name, registry)
         } else {
             // For product types and empty sum types, check directly for cycles.
             check_product_type(adt_name, registry)
         }
     })
-}
-
-/// Checks if the named type is a sum type with one or more variants.
-fn is_sum_type_with_variants(type_name: &str, registry: &TypeRegistry) -> bool {
-    registry
-        .subtypes
-        .get(type_name)
-        .is_some_and(|variants| !variants.is_empty())
 }
 
 /// Checks a sum type for valid recursion, requiring at least one terminating variant.
