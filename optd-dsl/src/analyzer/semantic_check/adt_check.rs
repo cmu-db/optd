@@ -1,220 +1,163 @@
 use super::error::SemanticErrorKind;
-use crate::analyzer::types::{Type, TypeRegistry};
-use std::collections::HashSet;
+use crate::{
+    analyzer::{
+        hir::Identifier,
+        types::{Type, TypeRegistry},
+    },
+    utils::span::Span,
+};
+use std::collections::HashMap;
 
-/// Performs a cycle check on ADT definitions to prevent non-terminating types.
-///
-/// In a type system, infinite recursive types can lead to non-terminating behavior at runtime.
-/// This check distinguishes between:
-/// - Invalid cycles: Where a type directly or indirectly contains itself with no way to terminate
-///   (e.g. `type Node(next: Node)`).
-/// - Valid recursion: Where a sum type has at least one variant that doesn't reference itself
-///   (e.g. `type List = Nil | Cons(value: Int64, next: List)`).
-///
-/// The algorithm uses depth-first search to detect cycles in the type structure while
-/// applying special handling for sum types that may have valid recursive variants.
-pub fn check_adt_cycles(registry: &TypeRegistry) -> Result<(), SemanticErrorKind> {
-    registry.subtypes.keys().try_for_each(|adt_name| {
-        // For sum types, we need to check if at least one variant doesn't cause a cycle.
-        if !registry.product_fields.contains_key(adt_name) {
-            check_sum_type(adt_name, registry)
-        } else {
-            // For product types and empty sum types, check directly for cycles.
-            check_product_type(adt_name, registry)
-        }
-    })
+/// Exploration status for ADT cycle detection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExplorationStatus {
+    /// Currently exploring this node.
+    Exploring,
+    /// Finished exploring, this type terminates.
+    Terminates,
 }
 
-/// Checks a sum type for valid recursion, requiring at least one terminating variant.
-fn check_sum_type(sum_type: &str, registry: &TypeRegistry) -> Result<(), SemanticErrorKind> {
-    let has_terminating_variant = registry.subtypes[sum_type].iter().any(|variant| {
-        !variant_references_type_recursively(variant, sum_type, registry, &mut HashSet::new())
-    });
+pub fn adt_check(registry: &TypeRegistry) -> Result<(), SemanticErrorKind> {
+    // First, check if types correctly reference each other and do not
+    // create any infinite recursive cycles.
+    let mut exploration_status = HashMap::new();
 
-    if !has_terminating_variant {
-        let span = registry.spans.get(sum_type).cloned().unwrap();
-        return Err(SemanticErrorKind::new_cyclic_adt(
-            sum_type.to_string(),
-            span,
-        ));
+    for adt_name in registry.product_fields.keys() {
+        if !can_terminate(adt_name.clone(), registry, &mut exploration_status)? {
+            let span = registry.spans.get(adt_name).cloned().unwrap();
+            return Err(SemanticErrorKind::new_cyclic_adt(adt_name.clone(), span));
+        }
+
+        // Clear all "Exploring" statuses before checking the next type.
+        exploration_status.retain(|_, status| *status != ExplorationStatus::Exploring);
     }
 
     Ok(())
 }
 
-/// Checks a product type for cycles in its field references.
-fn check_product_type(type_name: &str, registry: &TypeRegistry) -> Result<(), SemanticErrorKind> {
-    let mut visited = HashSet::new();
-    let mut path = Vec::new();
-
-    if contains_cycle(type_name, registry, &mut visited, &mut path) {
-        let span = registry.spans.get(type_name).cloned().unwrap();
-        return Err(SemanticErrorKind::new_cyclic_adt(
-            type_name.to_string(),
-            span,
-        ));
-    }
-
-    Ok(())
-}
-
-/// Performs a depth-first search to detect cycles in an ADT's field references.
-///
-/// This function tracks the current path of ADTs we're examining to detect
-/// both direct self-references and indirect cycles that span multiple types.
-/// A cycle exists if we encounter an ADT that we're already in the process of checking.
-fn contains_cycle(
-    adt_name: &str,
+/// Determines if a type exists and can terminate (no infinite recursion).
+/// Returns true if terminates, false if cycle detected.
+fn can_terminate(
+    adt: Identifier,
     registry: &TypeRegistry,
-    visited: &mut HashSet<String>,
-    path: &mut Vec<String>,
-) -> bool {
-    if visited.contains(adt_name) {
-        path.push(adt_name.to_string());
-        return true;
+    exploration_status: &mut HashMap<String, ExplorationStatus>,
+) -> Result<bool, SemanticErrorKind> {
+    use ExplorationStatus::*;
+
+    match exploration_status.get(&adt) {
+        Some(&Terminates) => return Ok(true),
+        Some(&Exploring) => return Ok(false), // Cycle detected.
+        None => {}
+    }
+    exploration_status.insert(adt.clone(), Exploring);
+
+    let terminates = if registry.product_fields.contains_key(&adt) {
+        // Product type: all fields must terminate.
+        check_product_type_terminates(adt.clone(), registry, exploration_status)?
+    } else {
+        // Sum type: one variant must terminate.
+        check_sum_type_terminates(adt.clone(), registry, exploration_status)?
+    };
+
+    if terminates {
+        exploration_status.insert(adt, Terminates);
     }
 
-    visited.insert(adt_name.to_string());
-    path.push(adt_name.to_string());
-
-    // Use a scope to ensure we remove the current ADT from tracking regardless of return path.
-    let has_cycle = registry.product_fields.get(adt_name).is_some_and(|fields| {
-        fields
-            .iter()
-            .any(|field| type_contains_adt_cycle(&field.ty.0, registry, visited, path))
-    });
-
-    // Backtrack.
-    visited.remove(adt_name);
-    path.pop();
-
-    has_cycle
+    Ok(terminates)
 }
 
-/// Recursively checks if a type contains an ADT reference that forms a cycle.
-///
-/// This function handles complex nested types (arrays, tuples, etc.) by
-/// recursively examining their component types for potential cycles.
-fn type_contains_adt_cycle(
+/// Checks if a product type terminates - all fields must terminate.
+/// Returns true if all fields terminate, false otherwise.
+fn check_product_type_terminates(
+    adt: Identifier,
+    registry: &TypeRegistry,
+    exploration_status: &mut HashMap<String, ExplorationStatus>,
+) -> Result<bool, SemanticErrorKind> {
+    let fields = registry.product_fields.get(&adt).unwrap();
+    for field in fields {
+        if !check_field_type_terminates(&field.ty.0, &field.ty.1, registry, exploration_status)? {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+/// Checks if a sum type terminates - at least one variant must terminate
+/// Returns true if at least one variant terminates, false otherwise.
+fn check_sum_type_terminates(
+    sum_type: Identifier,
+    registry: &TypeRegistry,
+    exploration_status: &mut HashMap<String, ExplorationStatus>,
+) -> Result<bool, SemanticErrorKind> {
+    let variants = registry.subtypes.get(&sum_type).unwrap();
+    for variant in variants {
+        if can_terminate(variant.clone(), registry, exploration_status)? {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+/// Checks if a type (including complex types like Array, Map, etc.) terminates.
+/// Returns true if type terminates, false if a cycle is detected.
+fn check_field_type_terminates(
     ty: &Type,
+    span: &Span,
     registry: &TypeRegistry,
-    visited: &mut HashSet<String>,
-    path: &mut Vec<String>,
-) -> bool {
+    exploration_status: &mut HashMap<String, ExplorationStatus>,
+) -> Result<bool, SemanticErrorKind> {
     use Type::*;
 
     match ty {
-        Adt(name) if registry.subtypes.contains_key(name) => {
-            contains_cycle(name, registry, visited, path)
-        }
-
-        Array(elem_type) => type_contains_adt_cycle(elem_type, registry, visited, path),
-
-        Tuple(types) => types
-            .iter()
-            .any(|t| type_contains_adt_cycle(t, registry, visited, path)),
-
-        Map(key_type, val_type) => {
-            type_contains_adt_cycle(key_type, registry, visited, path)
-                || type_contains_adt_cycle(val_type, registry, visited, path)
-        }
-
-        Closure(param_type, return_type) => {
-            type_contains_adt_cycle(param_type, registry, visited, path)
-                || type_contains_adt_cycle(return_type, registry, visited, path)
-        }
-
-        Optional(inner_type) => type_contains_adt_cycle(inner_type, registry, visited, path),
-
-        Stored(inner_type) | Costed(inner_type) => {
-            type_contains_adt_cycle(inner_type, registry, visited, path)
-        }
-
-        // Primitive types cannot form cycles.
-        _ => false,
-    }
-}
-
-/// Checks if a variant ADT transitively references a target type through its fields.
-///
-/// This function examines if the variant contains any direct or indirect references
-/// to the parent sum type, which would make it non-terminating if used alone.
-fn variant_references_type_recursively(
-    variant: &str,
-    target_type: &str,
-    registry: &TypeRegistry,
-    visited: &mut HashSet<String>,
-) -> bool {
-    if visited.contains(variant) {
-        return false;
-    }
-
-    visited.insert(variant.to_string());
-
-    registry.product_fields.get(variant).is_some_and(|fields| {
-        fields.iter().any(|field| {
-            type_references_target_recursively(&field.ty.0, target_type, registry, visited)
-        })
-    })
-}
-
-/// Determines if a type directly or indirectly references a specific target type.
-///
-/// This function recursively examines complex types to find any references to
-/// the target type, handling nested structures like arrays, tuples, and maps.
-fn type_references_target_recursively(
-    ty: &Type,
-    target_type: &str,
-    registry: &TypeRegistry,
-    visited: &mut HashSet<String>,
-) -> bool {
-    use Type::*;
-
-    match ty {
-        // Direct reference to the target type.
-        Adt(name) if name == target_type => true,
-
-        // For other ADTs, check their fields recursively.
         Adt(name) => {
-            registry.product_fields.contains_key(name)
-                && variant_references_type_recursively(name, target_type, registry, visited)
+            // Check if the type exists.
+            // Only field types may not exist, since we have the guaranteed that all
+            // sum types have been added to the registry during the conversion phase.
+            if !registry.subtypes.contains_key(name) {
+                return Err(SemanticErrorKind::new_undefined_type(
+                    name.clone(),
+                    span.clone(),
+                ));
+            }
+
+            can_terminate(name.clone(), registry, exploration_status)
         }
 
-        // Handle nested types recursively.
         Array(elem_type) => {
-            type_references_target_recursively(elem_type, target_type, registry, visited)
+            check_field_type_terminates(elem_type, span, registry, exploration_status)
         }
 
-        Tuple(types) => types
-            .iter()
-            .any(|t| type_references_target_recursively(t, target_type, registry, visited)),
+        Tuple(types) => types.iter().try_fold(true, |acc, t| {
+            Ok(acc && check_field_type_terminates(t, span, registry, exploration_status)?)
+        }),
 
         Map(key_type, val_type) => {
-            type_references_target_recursively(key_type, target_type, registry, visited)
-                || type_references_target_recursively(val_type, target_type, registry, visited)
+            if !check_field_type_terminates(key_type, span, registry, exploration_status)? {
+                return Ok(false);
+            }
+            check_field_type_terminates(val_type, span, registry, exploration_status)
         }
 
         Closure(param_type, return_type) => {
-            type_references_target_recursively(param_type, target_type, registry, visited)
-                || type_references_target_recursively(return_type, target_type, registry, visited)
+            if !check_field_type_terminates(param_type, span, registry, exploration_status)? {
+                return Ok(false);
+            }
+            check_field_type_terminates(return_type, span, registry, exploration_status)
         }
 
-        Optional(inner_type) => {
-            type_references_target_recursively(inner_type, target_type, registry, visited)
+        Optional(inner_type) | Stored(inner_type) | Costed(inner_type) => {
+            check_field_type_terminates(inner_type, span, registry, exploration_status)
         }
 
-        Stored(inner_type) | Costed(inner_type) => {
-            type_references_target_recursively(inner_type, target_type, registry, visited)
-        }
-
-        // Primitive types don't reference other types.
-        _ => false,
+        _ => Ok(true), // Primitive types always terminate
     }
 }
 
 #[cfg(test)]
 mod adt_cycle_tests {
-    use super::*;
+    use crate::analyzer::semantic_check::adt_check::adt_check;
     use crate::analyzer::types::{AdtField, Type, TypeRegistry};
     use crate::utils::span::Span;
     use std::collections::{HashMap, HashSet};
@@ -268,7 +211,7 @@ mod adt_cycle_tests {
         subtypes.insert("Node".to_string(), HashSet::new());
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = check_adt_cycles(&registry);
+        let result = adt_check(&registry);
 
         assert!(result.is_err());
     }
@@ -299,7 +242,7 @@ mod adt_cycle_tests {
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = check_adt_cycles(&registry);
+        let result = adt_check(&registry);
 
         assert!(result.is_ok());
     }
@@ -330,7 +273,7 @@ mod adt_cycle_tests {
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = check_adt_cycles(&registry);
+        let result = adt_check(&registry);
 
         assert!(result.is_err());
     }
@@ -356,7 +299,7 @@ mod adt_cycle_tests {
         subtypes.insert("B".to_string(), HashSet::new());
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = check_adt_cycles(&registry);
+        let result = adt_check(&registry);
 
         assert!(result.is_err());
     }
@@ -379,7 +322,7 @@ mod adt_cycle_tests {
         subtypes.insert("Nested".to_string(), HashSet::new());
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = check_adt_cycles(&registry);
+        let result = adt_check(&registry);
 
         assert!(result.is_err());
     }
@@ -406,8 +349,12 @@ mod adt_cycle_tests {
             ],
         );
 
-        let registry = setup_test_registry(HashMap::new(), product_fields);
-        let result = check_adt_cycles(&registry);
+        let mut subtypes = HashMap::new();
+        subtypes.insert("Point".to_string(), HashSet::new());
+        subtypes.insert("Rectangle".to_string(), HashSet::new());
+
+        let registry = setup_test_registry(subtypes, product_fields);
+        let result = adt_check(&registry);
 
         assert!(result.is_ok());
     }
@@ -420,10 +367,16 @@ mod adt_cycle_tests {
         //   | Scan(table_name: String)  // Terminating variant
         //   | PhysFilter(child: Physical, cond: Predicate)
         //   | PhysProject(child: Physical, exprs: [Scalar])
-        //   | PhysJoin =
+        //   \ PhysJoin =
         //       | HashJoin(build_side: Physical, probe_side: Physical, typ: String, cond: Predicate)
         //       | MergeJoin(left: Physical, right: Physical, typ: String, cond: Predicate)
         //       \ NestedLoopJoin(outer: Physical, inner: Physical, typ: String, cond: Predicate)
+        //
+        // type Predicate =
+        //   \ Equals(left: Scalar, right: Scalar)  // Terminating variant
+        //
+        // type Scalar =
+        //   \ Literal(value: Int64)  // Terminating variant
 
         // Set up the type hierarchy
         let mut subtypes = HashMap::new();
@@ -526,7 +479,7 @@ mod adt_cycle_tests {
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = check_adt_cycles(&registry);
+        let result = adt_check(&registry);
 
         assert!(result.is_ok()); // Valid because Scan is a terminating variant
     }
@@ -566,7 +519,7 @@ mod adt_cycle_tests {
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = check_adt_cycles(&registry);
+        let result = adt_check(&registry);
 
         assert!(result.is_err()); // Should detect the cycle
     }
@@ -641,61 +594,44 @@ mod adt_cycle_tests {
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = check_adt_cycles(&registry);
+        let result = adt_check(&registry);
 
         assert!(result.is_ok()); // Valid because Literal is a terminating variant for Expr
     }
 
     #[test]
-    fn test_deep_nesting_pattern() {
-        // Test a structure with several levels of nested sum types:
+    fn test_nested_sum_only_recursive() {
+        // Test a structure with nested sum types where all paths lead to recursion:
         //
         // type A =
-        //   | B
-        //   | C =
-        //     | D
-        //     | E =
-        //       | F(a: A)
-        //       | G
+        //   | B =
+        //     | C(a: A)
 
         // Set up type hierarchy
         let mut subtypes = HashMap::new();
 
-        // A has variants B and C
+        // A has B as its only variant
         let mut a_variants = HashSet::new();
         a_variants.insert("B".to_string());
-        a_variants.insert("C".to_string());
         subtypes.insert("A".to_string(), a_variants);
 
-        // C has variants D and E
-        let mut c_variants = HashSet::new();
-        c_variants.insert("D".to_string());
-        c_variants.insert("E".to_string());
-        subtypes.insert("C".to_string(), c_variants);
-
-        // E has variants F and G
-        let mut e_variants = HashSet::new();
-        e_variants.insert("F".to_string());
-        e_variants.insert("G".to_string());
-        subtypes.insert("E".to_string(), e_variants);
+        // B has C as its only variant
+        let mut b_variants = HashSet::new();
+        b_variants.insert("C".to_string());
+        subtypes.insert("B".to_string(), b_variants);
 
         // Set up fields
         let mut product_fields = HashMap::new();
 
-        // Only F has a field, the rest are empty products
-        product_fields.insert("B".to_string(), vec![]);
-        product_fields.insert("D".to_string(), vec![]);
-        product_fields.insert("G".to_string(), vec![]);
-
-        // F references back to A
+        // C references back to A, creating a cycle
         product_fields.insert(
-            "F".to_string(),
+            "C".to_string(),
             vec![create_field("a", Type::Adt("A".to_string()))],
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = check_adt_cycles(&registry);
+        let result = adt_check(&registry);
 
-        assert!(result.is_ok()); // Valid because B, D, G are terminating variants
+        assert!(result.is_err()); // Should detect the cycle and fail
     }
 }

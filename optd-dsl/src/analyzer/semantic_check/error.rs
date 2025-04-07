@@ -64,6 +64,14 @@ pub enum SemanticErrorKind {
         /// Span of the cyclic ADT
         span: Span,
     },
+
+    /// Error for an undefined type
+    UndefinedType {
+        /// Name of the undefined type
+        name: String,
+        /// Span of the undefined type
+        span: Span,
+    },
 }
 
 impl SemanticErrorKind {
@@ -99,6 +107,11 @@ impl SemanticErrorKind {
     pub fn new_cyclic_adt(name: String, span: Span) -> Self {
         Self::CyclicAdt { name, span }
     }
+
+    /// Creates a new error for an undefined type
+    pub fn new_undefined_type(name: String, span: Span) -> Self {
+        Self::UndefinedType { name, span }
+    }
 }
 
 impl Diagnose for Box<SemanticError> {
@@ -106,76 +119,58 @@ impl Diagnose for Box<SemanticError> {
         use SemanticErrorKind::*;
 
         match &self.kind {
-            DuplicateAdt { name, first_span, duplicate_span } => {
-                        Report::build(ReportKind::Error, duplicate_span.clone())
-                            .with_message(format!("Duplicate ADT definition: '{}'", name))
-                            .with_label(
-                                Label::new(duplicate_span.clone())
-                                    .with_message("Duplicate ADT defined here")
-                                    .with_color(Color::Magenta)
-                            )
-                            .with_label(
-                                Label::new(first_span.clone())
-                                    .with_message("First defined here")
-                                    .with_color(Color::Blue)
-                            )
-                            .with_help("Consider using a different name for this ADT or removing one of the definitions")
-                            .finish()
-                    },
-
-            DuplicateIdentifier { name, first_span, duplicate_span } => {
-                        Report::build(ReportKind::Error, duplicate_span.clone())
-                            .with_message(format!("Duplicate identifier: '{}'", name))
-                            .with_label(
-                                Label::new(duplicate_span.clone())
-                                    .with_message("Duplicate identifier declared here")
-                                    .with_color(Color::Magenta)
-                            )
-                            .with_label(
-                                Label::new(first_span.clone())
-                                    .with_message("First declared here")
-                                    .with_color(Color::Blue)
-                            )
-                            .with_help("Identifiers must be unique within the same scope")
-                            .finish()
-                    },
-
-            IncompleteFunction { name, span } => {
-                        Report::build(ReportKind::Error, span.clone())
-                            .with_message(format!("Incomplete function definition: '{}'", name))
-                            .with_label(
-                                Label::new(span.clone())
-                                    .with_message("Function must have at least one parameter")
-                                    .with_color(Color::Magenta)
-                            )
-                            .with_help("Add at least one parameter or a receiver to this function")
-                            .with_note("Functions without parameters are not supported in this language")
-                            .finish()
-                    },
-
-            InvalidReference { name, span } => {
-                Report::build(ReportKind::Error, span.clone())
-                    .with_message(format!("Invalid reference to undefined identifier: '{}'", name))
-                    .with_label(
-                        Label::new(span.clone())
-                            .with_message(format!("'{}' is not defined in this scope", name))
-                            .with_color(Color::Red)
-                    )
-                    .with_help("Make sure the variable is declared before use or check for typos in the name")
-                    .finish()
-            },
-
-            CyclicAdt { name, span } => {
-                Report::build(ReportKind::Error, span.clone())
-                    .with_message(format!("Cyclic ADT definition: '{}'", name))
-                    .with_label(
-                        Label::new(span.clone())
-                            .with_message("Cyclic ADT definition detected")
-                            .with_color(Color::Red)
-                    )
-                    .with_help("Consider refactoring the ADT to remove the cyclic dependency")
-                    .finish()
-            }
+            DuplicateAdt {
+                name,
+                first_span,
+                duplicate_span,
+            } => self.build_duplicate_report(
+                duplicate_span,
+                first_span,
+                &format!("Duplicate ADT definition: '{}'", name),
+                "Duplicate ADT defined here",
+                "First defined here",
+                "Consider using a different name for this ADT or removing one of the definitions",
+            ),
+            DuplicateIdentifier {
+                name,
+                first_span,
+                duplicate_span,
+            } => self.build_duplicate_report(
+                duplicate_span,
+                first_span,
+                &format!("Duplicate identifier: '{}'", name),
+                "Duplicate identifier declared here",
+                "First declared here",
+                "Identifiers must be unique within the same scope",
+            ),
+            IncompleteFunction { name, span } => Report::build(ReportKind::Error, span.clone())
+                .with_message(format!("Incomplete function definition: '{}'", name))
+                .with_label(
+                    Label::new(span.clone())
+                        .with_message("Function must have at least one parameter")
+                        .with_color(Color::Magenta),
+                )
+                .with_help("Add at least one parameter or a receiver to this function")
+                .with_note("Functions without parameters are not supported in this language")
+                .finish(),
+            InvalidReference { name, span } => self.build_single_span_report(
+                span,
+                &format!("Invalid reference to undefined identifier: '{}'", name),
+                &format!("'{}' is not defined in this scope", name),
+                "Make sure the variable is declared before use or check for typos in the name",
+            ),
+            CyclicAdt { name, span } => self.build_single_span_report(
+                span,
+                &format!("Cyclic ADT definition: '{}'", name),
+                "Cyclic ADT definition detected",
+                "Consider refactoring the ADT to remove the cyclic dependency",
+            ),
+            UndefinedType { name, span } => self.build_single_span_report(
+                span,
+                &format!("Undefined type: '{}'", name),
+                "Undefined type reference",
+                "Make sure the type is declared before use",
+            ),
         }
     }
 
@@ -188,8 +183,56 @@ impl Diagnose for Box<SemanticError> {
             IncompleteFunction { span, .. } => span,
             InvalidReference { span, .. } => span,
             CyclicAdt { span, .. } => span,
+            UndefinedType { span, .. } => span,
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))
+    }
+}
+
+impl SemanticError {
+    /// Helper method to build a report for errors with a single span
+    fn build_single_span_report(
+        &self,
+        span: &Span,
+        message: &str,
+        label_msg: &str,
+        help: &str,
+    ) -> Report<Span> {
+        Report::build(ReportKind::Error, span.clone())
+            .with_message(message)
+            .with_label(
+                Label::new(span.clone())
+                    .with_message(label_msg)
+                    .with_color(Color::Red),
+            )
+            .with_help(help)
+            .finish()
+    }
+
+    /// Helper method to build a report for errors with two spans (duplicates)
+    fn build_duplicate_report(
+        &self,
+        current_span: &Span,
+        original_span: &Span,
+        message: &str,
+        current_label: &str,
+        original_label: &str,
+        help: &str,
+    ) -> Report<Span> {
+        Report::build(ReportKind::Error, current_span.clone())
+            .with_message(message)
+            .with_label(
+                Label::new(current_span.clone())
+                    .with_message(current_label)
+                    .with_color(Color::Magenta),
+            )
+            .with_label(
+                Label::new(original_span.clone())
+                    .with_message(original_label)
+                    .with_color(Color::Blue),
+            )
+            .with_help(help)
+            .finish()
     }
 }
