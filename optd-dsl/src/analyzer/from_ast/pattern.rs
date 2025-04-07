@@ -4,8 +4,8 @@
 //! corresponding HIR representations.
 
 use super::expr::convert_expr;
+use crate::analyzer::error::AnalyzerErrorKind;
 use crate::analyzer::hir::{Identifier, Literal, MatchArm, Pattern, PatternKind, TypedSpan};
-use crate::analyzer::semantic_check::error::SemanticErrorKind;
 use crate::parser::ast;
 use crate::utils::span::Spanned;
 use PatternKind::*;
@@ -19,7 +19,7 @@ use std::sync::Arc;
 pub(super) fn convert_match_arms(
     arms: &[Spanned<ast::MatchArm>],
     generics: &HashSet<Identifier>,
-) -> Result<Vec<MatchArm<TypedSpan>>, SemanticErrorKind> {
+) -> Result<Vec<MatchArm<TypedSpan>>, AnalyzerErrorKind> {
     arms.iter()
         .map(|arm| {
             let pattern = convert_pattern(&arm.pattern);

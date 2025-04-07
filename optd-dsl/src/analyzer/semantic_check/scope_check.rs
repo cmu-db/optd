@@ -1,7 +1,7 @@
-use super::error::SemanticErrorKind;
 use crate::{
     analyzer::{
         context::Context,
+        error::AnalyzerErrorKind,
         hir::{CoreData, Expr, ExprKind, FunKind, HIR, Pattern, PatternKind, TypedSpan, Value},
     },
     utils::span::Span,
@@ -19,7 +19,7 @@ use crate::{
 /// # Returns
 ///
 /// * `Ok(())` if no scope errors are found.
-pub fn scope_check(hir: &HIR<TypedSpan>) -> Result<(), SemanticErrorKind> {
+pub fn scope_check(hir: &HIR<TypedSpan>) -> Result<(), AnalyzerErrorKind> {
     use CoreData::*;
     use FunKind::*;
 
@@ -44,7 +44,7 @@ fn create_function_scope(
     base_ctx: Context<TypedSpan>,
     params: &[String],
     span: &Span,
-) -> Result<Context<TypedSpan>, SemanticErrorKind> {
+) -> Result<Context<TypedSpan>, AnalyzerErrorKind> {
     let mut fn_ctx = base_ctx;
     fn_ctx.push_scope();
 
@@ -61,7 +61,7 @@ fn create_function_scope(
 fn check_expr(
     expr: &Expr<TypedSpan>,
     mut ctx: Context<TypedSpan>,
-) -> Result<(), SemanticErrorKind> {
+) -> Result<(), AnalyzerErrorKind> {
     use ExprKind::*;
 
     let span = &expr.metadata.span;
@@ -117,7 +117,7 @@ fn check_expr(
         Ref(name) => {
             // Verify variable references exist.
             if ctx.lookup(name).is_none() {
-                return Err(SemanticErrorKind::new_invalid_reference(
+                return Err(AnalyzerErrorKind::new_invalid_reference(
                     name.to_string(),
                     span.clone(),
                 ));
@@ -157,7 +157,7 @@ fn check_expr(
 fn check_pattern(
     pattern: &Pattern<TypedSpan>,
     ctx: &mut Context<TypedSpan>,
-) -> Result<(), SemanticErrorKind> {
+) -> Result<(), AnalyzerErrorKind> {
     use PatternKind::*;
 
     match &pattern.kind {
@@ -194,11 +194,11 @@ mod scope_check_tests {
     use crate::{
         analyzer::{
             context::Context,
+            error::AnalyzerErrorKind,
             hir::{
                 CoreData, Expr, ExprKind, FunKind, HIR, MatchArm, Pattern, PatternKind, TypedSpan,
                 Value,
             },
-            semantic_check::error::SemanticErrorKind,
             types::Type,
         },
         utils::span::Span,
@@ -220,7 +220,7 @@ mod scope_check_tests {
     fn setup_test_context(
         params: Vec<String>,
         body: Expr<TypedSpan>,
-    ) -> (HIR<TypedSpan>, Result<(), SemanticErrorKind>) {
+    ) -> (HIR<TypedSpan>, Result<(), AnalyzerErrorKind>) {
         let mut context = Context::default();
 
         // Create function value
@@ -260,7 +260,7 @@ mod scope_check_tests {
             Expr::new_unknown(ExprKind::Ref("undefined".to_string()), test_span(5, 13)),
         );
         assert!(
-            matches!(result, Err(SemanticErrorKind::InvalidReference { name, .. }) if name == "undefined")
+            matches!(result, Err(AnalyzerErrorKind::InvalidReference { name, .. }) if name == "undefined")
         );
     }
 
@@ -290,7 +290,7 @@ mod scope_check_tests {
             Expr::new_unknown(ExprKind::Ref("x".to_string()), test_span(5, 6)),
         );
         assert!(
-            matches!(result, Err(SemanticErrorKind::DuplicateIdentifier { name, .. }) if name == "x")
+            matches!(result, Err(AnalyzerErrorKind::DuplicateIdentifier { name, .. }) if name == "x")
         );
     }
 
@@ -321,7 +321,7 @@ mod scope_check_tests {
 
         let (_, result) = setup_test_context(vec!["x".to_string()], outer_let);
         assert!(
-            matches!(result, Err(SemanticErrorKind::DuplicateIdentifier { name, .. }) if name == "y")
+            matches!(result, Err(AnalyzerErrorKind::DuplicateIdentifier { name, .. }) if name == "y")
         );
     }
 
@@ -413,7 +413,7 @@ mod scope_check_tests {
 
         let (_, result) = setup_test_context(vec!["x".to_string()], match_expr);
         assert!(
-            matches!(result, Err(SemanticErrorKind::DuplicateIdentifier { name, .. }) if name == "y")
+            matches!(result, Err(AnalyzerErrorKind::DuplicateIdentifier { name, .. }) if name == "y")
         );
     }
 

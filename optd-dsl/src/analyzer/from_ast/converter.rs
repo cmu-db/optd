@@ -1,7 +1,7 @@
 use super::expr::convert_expr;
 use super::types::{convert_type, create_function_type};
+use crate::analyzer::error::AnalyzerErrorKind;
 use crate::analyzer::hir::{Annotation, FunKind, Identifier, UdfKind};
-use crate::analyzer::semantic_check::error::SemanticErrorKind;
 use crate::analyzer::{
     context::Context,
     hir::{CoreData, HIR, TypedSpan, Value},
@@ -36,11 +36,11 @@ impl ASTConverter {
     ///
     /// # Returns
     ///
-    /// The HIR representation and TypeRegistry, or a SemanticErrorKind if conversion fails.
+    /// The HIR representation and TypeRegistry, or a AnalyzerErrorKind if conversion fails.
     pub fn convert(
         mut self,
         module: &Module,
-    ) -> Result<(HIR<TypedSpan>, TypeRegistry), SemanticErrorKind> {
+    ) -> Result<(HIR<TypedSpan>, TypeRegistry), AnalyzerErrorKind> {
         // Process all module items sequentially.
         for item in &module.items {
             match item {
@@ -71,14 +71,14 @@ impl ASTConverter {
     pub(super) fn process_function(
         &mut self,
         spanned_fn: &Spanned<Function>,
-    ) -> Result<(), SemanticErrorKind> {
+    ) -> Result<(), AnalyzerErrorKind> {
         let func = &spanned_fn.value;
         let name = &*func.name.value;
         let fn_span = func.name.span.clone();
 
         // Reject functions without parameters.
         if func.receiver.is_none() && func.params.is_none() {
-            return Err(SemanticErrorKind::new_incomplete_function(
+            return Err(AnalyzerErrorKind::new_incomplete_function(
                 name.clone(),
                 fn_span,
             ));
@@ -318,7 +318,7 @@ mod converter_tests {
             Err(err) => {
                 // Check that it's the expected error type (incomplete function)
                 match err {
-                    SemanticErrorKind::IncompleteFunction { .. } => (),
+                    AnalyzerErrorKind::IncompleteFunction { .. } => (),
                     _ => panic!("Expected IncompleteFunction error, got: {:?}", err),
                 }
             }

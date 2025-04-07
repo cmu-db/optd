@@ -1,9 +1,5 @@
 use super::span::Span;
-use crate::{
-    analyzer::{semantic_check::error::SemanticError, type_infer::error::TypeError},
-    lexer::error::LexerError,
-    parser::error::ParserError,
-};
+use crate::{analyzer::error::AnalyzerError, lexer::error::LexerError, parser::error::ParserError};
 use ariadne::{Report, Source};
 use enum_dispatch::enum_dispatch;
 use std::io::Write;
@@ -33,10 +29,9 @@ pub trait Diagnose {
 /// Unified error type for all compilation phases
 ///
 /// `CompileError` aggregates errors from all phases of the DSL compilation:
-/// - Lexing (tokenization)
-/// - Parsing (syntax analysis)
-/// - Analysis (semantic analysis)
-/// - Typing (type checking)
+/// - Lexing
+/// - Parsing
+/// - Analysis
 ///
 /// Each error variant implements the `Diagnose` trait to provide consistent
 /// error reporting using Ariadne's rich diagnostic format.
@@ -49,9 +44,6 @@ pub enum CompileError {
     /// Errors occurring during the parsing/syntax analysis phase
     ParserError(Box<ParserError>),
 
-    /// Errors occurring during the semantic analysis phase
-    SemanticError(Box<SemanticError>),
-
-    /// Errors occurring during the type analysis phase
-    TypeError(Box<TypeError>),
+    /// Errors occurring during the analysis phase
+    AnalyzerError(Box<AnalyzerError>),
 }

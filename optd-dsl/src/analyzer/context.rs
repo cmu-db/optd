@@ -1,6 +1,6 @@
 use super::{
+    error::AnalyzerErrorKind,
     hir::{ExprMetadata, Identifier, NoMetadata, TypedSpan},
-    semantic_check::error::SemanticErrorKind,
 };
 use crate::analyzer::hir::Value;
 use std::{collections::HashMap, sync::Arc};
@@ -146,16 +146,16 @@ impl Context<TypedSpan> {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if the binding was successful, or a `SemanticErrorKind` if
+    /// `Ok(())` if the binding was successful, or a `AnalyzerErrorKind` if
     /// the variable was already defined in the current scope
     pub fn try_bind(
         &mut self,
         name: String,
         val: Value<TypedSpan>,
-    ) -> Result<(), SemanticErrorKind> {
+    ) -> Result<(), AnalyzerErrorKind> {
         if let Some(existing_val) = self.current_scope.get(&name) {
             // We found an existing binding, so return an error
-            Err(SemanticErrorKind::new_duplicate_identifier(
+            Err(AnalyzerErrorKind::new_duplicate_identifier(
                 name,
                 existing_val.metadata.span.clone(),
                 val.metadata.span,

@@ -1,25 +1,25 @@
 use crate::utils::{error::Diagnose, span::Span};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 
-/// Wrapper for semantic analysis errors
+/// Wrapper for analysis errors
 #[derive(Debug)]
-pub struct SemanticError {
+pub struct AnalyzerError {
     /// The source code being analyzed
     src_code: String,
-    /// The specific kind of semantic error
-    kind: SemanticErrorKind,
+    /// The specific kind of error
+    kind: AnalyzerErrorKind,
 }
 
-impl SemanticError {
-    /// Creates a new semantic error
-    pub fn new(src_code: String, kind: SemanticErrorKind) -> Box<Self> {
+impl AnalyzerError {
+    /// Creates a new analyzer error
+    pub fn new(src_code: String, kind: AnalyzerErrorKind) -> Box<Self> {
         Box::new(Self { src_code, kind })
     }
 }
 
-/// Specific types of semantic errors
+/// Specific types of analyzer errors
 #[derive(Debug)]
-pub enum SemanticErrorKind {
+pub enum AnalyzerErrorKind {
     /// Error for duplicate ADT names
     DuplicateAdt {
         /// Name of the duplicate ADT
@@ -74,7 +74,7 @@ pub enum SemanticErrorKind {
     },
 }
 
-impl SemanticErrorKind {
+impl AnalyzerErrorKind {
     /// Creates a new error for duplicate ADT names
     pub fn new_duplicate_adt(name: String, first_span: Span, duplicate_span: Span) -> Self {
         Self::DuplicateAdt {
@@ -114,9 +114,9 @@ impl SemanticErrorKind {
     }
 }
 
-impl Diagnose for Box<SemanticError> {
+impl Diagnose for Box<AnalyzerError> {
     fn report(&self) -> Report<Span> {
-        use SemanticErrorKind::*;
+        use AnalyzerErrorKind::*;
 
         match &self.kind {
             DuplicateAdt {
@@ -175,7 +175,7 @@ impl Diagnose for Box<SemanticError> {
     }
 
     fn source(&self) -> (String, Source) {
-        use SemanticErrorKind::*;
+        use AnalyzerErrorKind::*;
 
         let span = match &self.kind {
             DuplicateAdt { duplicate_span, .. } => duplicate_span,
@@ -190,7 +190,7 @@ impl Diagnose for Box<SemanticError> {
     }
 }
 
-impl SemanticError {
+impl AnalyzerError {
     /// Helper method to build a report for errors with a single span
     fn build_single_span_report(
         &self,

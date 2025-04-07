@@ -1,8 +1,9 @@
 use optd_dsl::{
     analyzer::{
+        error::AnalyzerError,
         from_ast::ASTConverter,
         hir::{HIR, TypedSpan},
-        semantic_check::{error::SemanticError, scope_check::scope_check},
+        semantic_check::scope_check::scope_check,
         types::TypeRegistry,
     },
     lexer::lex::lex,
@@ -64,7 +65,7 @@ pub fn ast_to_hir(
     let converter = ASTConverter::default();
 
     converter.convert(&ast).map_err(|err_kind| {
-        CompileError::SemanticError(SemanticError::new(source.to_string(), err_kind))
+        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), err_kind))
     })
 }
 
@@ -81,6 +82,6 @@ pub fn ast_to_hir(
 /// * `Result<(), CompileError>` - Success or scope error
 pub fn check_scopes(source: &str, hir: &HIR<TypedSpan>) -> Result<(), CompileError> {
     scope_check(hir).map_err(|err_kind| {
-        CompileError::SemanticError(SemanticError::new(source.to_string(), err_kind))
+        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), err_kind))
     })
 }

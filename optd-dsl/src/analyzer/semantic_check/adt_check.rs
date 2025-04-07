@@ -1,6 +1,6 @@
-use super::error::SemanticErrorKind;
 use crate::{
     analyzer::{
+        error::AnalyzerErrorKind,
         hir::Identifier,
         types::{Type, TypeRegistry},
     },
@@ -17,7 +17,7 @@ enum ExplorationStatus {
     Terminates,
 }
 
-pub fn adt_check(registry: &TypeRegistry) -> Result<(), SemanticErrorKind> {
+pub fn adt_check(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
     // First, check if types correctly reference each other and do not
     // create any infinite recursive cycles.
     let mut exploration_status = HashMap::new();
@@ -25,7 +25,7 @@ pub fn adt_check(registry: &TypeRegistry) -> Result<(), SemanticErrorKind> {
     for adt_name in registry.product_fields.keys() {
         if !can_terminate(adt_name.clone(), registry, &mut exploration_status)? {
             let span = registry.spans.get(adt_name).cloned().unwrap();
-            return Err(SemanticErrorKind::new_cyclic_adt(adt_name.clone(), span));
+            return Err(AnalyzerErrorKind::new_cyclic_adt(adt_name.clone(), span));
         }
 
         // Clear all "Exploring" statuses before checking the next type.
@@ -41,7 +41,7 @@ fn can_terminate(
     adt: Identifier,
     registry: &TypeRegistry,
     exploration_status: &mut HashMap<String, ExplorationStatus>,
-) -> Result<bool, SemanticErrorKind> {
+) -> Result<bool, AnalyzerErrorKind> {
     use ExplorationStatus::*;
 
     match exploration_status.get(&adt) {
@@ -72,7 +72,7 @@ fn check_product_type_terminates(
     adt: Identifier,
     registry: &TypeRegistry,
     exploration_status: &mut HashMap<String, ExplorationStatus>,
-) -> Result<bool, SemanticErrorKind> {
+) -> Result<bool, AnalyzerErrorKind> {
     let fields = registry.product_fields.get(&adt).unwrap();
     for field in fields {
         if !check_field_type_terminates(&field.ty.0, &field.ty.1, registry, exploration_status)? {
@@ -89,7 +89,7 @@ fn check_sum_type_terminates(
     sum_type: Identifier,
     registry: &TypeRegistry,
     exploration_status: &mut HashMap<String, ExplorationStatus>,
-) -> Result<bool, SemanticErrorKind> {
+) -> Result<bool, AnalyzerErrorKind> {
     let variants = registry.subtypes.get(&sum_type).unwrap();
     for variant in variants {
         if can_terminate(variant.clone(), registry, exploration_status)? {
@@ -107,7 +107,7 @@ fn check_field_type_terminates(
     span: &Span,
     registry: &TypeRegistry,
     exploration_status: &mut HashMap<String, ExplorationStatus>,
-) -> Result<bool, SemanticErrorKind> {
+) -> Result<bool, AnalyzerErrorKind> {
     use Type::*;
 
     match ty {
@@ -116,7 +116,7 @@ fn check_field_type_terminates(
             // Only field types may not exist, since we have the guaranteed that all
             // sum types have been added to the registry during the conversion phase.
             if !registry.subtypes.contains_key(name) {
-                return Err(SemanticErrorKind::new_undefined_type(
+                return Err(AnalyzerErrorKind::new_undefined_type(
                     name.clone(),
                     span.clone(),
                 ));

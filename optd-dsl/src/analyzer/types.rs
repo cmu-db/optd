@@ -1,6 +1,4 @@
-use super::{
-    from_ast::types::convert_type, hir::Identifier, semantic_check::error::SemanticErrorKind,
-};
+use super::{error::AnalyzerErrorKind, from_ast::types::convert_type, hir::Identifier};
 use crate::parser::ast::Adt;
 use crate::utils::span::Span;
 use Adt::*;
@@ -79,15 +77,15 @@ impl TypeRegistry {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if registration is successful, or a `SemanticErrorKind` if a duplicate name is found    
-    pub fn register_adt(&mut self, adt: &Adt) -> Result<(), SemanticErrorKind> {
+    /// `Ok(())` if registration is successful, or a `AnalyzerErrorKind` if a duplicate name is found    
+    pub fn register_adt(&mut self, adt: &Adt) -> Result<(), AnalyzerErrorKind> {
         match adt {
             Product { name, fields } => {
                 let type_name = name.value.as_ref().clone();
 
                 // Check for duplicate ADT names.
                 if let Some(existing_span) = self.spans.get(&type_name) {
-                    return Err(SemanticErrorKind::new_duplicate_adt(
+                    return Err(AnalyzerErrorKind::new_duplicate_adt(
                         type_name,
                         existing_span.clone(),
                         name.span.clone(),
@@ -119,7 +117,7 @@ impl TypeRegistry {
 
                 // Check for duplicate ADT names.
                 if let Some(existing_span) = self.spans.get(&enum_name) {
-                    return Err(SemanticErrorKind::new_duplicate_adt(
+                    return Err(AnalyzerErrorKind::new_duplicate_adt(
                         enum_name,
                         existing_span.clone(),
                         name.clone().span,
