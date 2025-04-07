@@ -29,6 +29,9 @@ pub fn adt_check(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
             &mut exploration_status,
             &mut path,
         )? {
+            println!("Cycle detected in ADT: {:?}", path);
+            println!("Exploration status: {:?}", exploration_status);
+
             let cycle_start_idx = path
                 .iter()
                 .enumerate()
@@ -86,8 +89,8 @@ fn can_terminate(
     use ExplorationStatus::*;
 
     match exploration_status.get(&adt) {
-        Some(&Terminates) => return Ok(true),
-        Some(&Exploring) => return Ok(false),
+        Some(Terminates) => return Ok(true),
+        Some(Exploring) => return Ok(false),
         None => {}
     }
 
