@@ -45,14 +45,18 @@ impl<M: Memoize> Optimizer<M> {
                 let merged_group_task_id = merged_group_task_id.unwrap();
                 let merged_group_task = self
                     .tasks
-                    .get_mut(&merged_group_task_id)
+                    .get_mut(merged_group_task_id)
                     .unwrap()
                     .as_explore_group();
 
                 let fork_outs = merged_group_task.fork_logical_out.clone();
                 let optimize_goal_outs = merged_group_task.optimize_goal_out.clone();
 
-                let old_exprs = HashSet::from_iter(group_info.expressions.iter().copied());
+                let old_exprs = group_info
+                    .expressions
+                    .iter()
+                    .cloned()
+                    .collect::<HashSet<_>>();
 
                 let new_exprs = group_merge
                     .all_exprs
