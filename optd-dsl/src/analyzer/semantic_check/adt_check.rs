@@ -1,7 +1,7 @@
 use crate::{
     analyzer::{error::AnalyzerErrorKind, hir::Identifier, types::TypeRegistry},
     parser::ast,
-    utils::span::Spanned,
+    utils::span::{Span, Spanned},
 };
 use std::collections::HashMap;
 
@@ -27,6 +27,25 @@ pub fn adt_check(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
 
         // Clear all "Exploring" statuses before checking the next type.
         exploration_status.retain(|_, status| *status != ExplorationStatus::Exploring);
+    }
+
+    // Second, check for duplicate fields in product types.
+    for fields in registry.product_fields.values() {
+        let mut field_names: HashMap<_, Span> = HashMap::new();
+
+        for field in fields {
+            let field_name = field.name.value.as_str();
+
+            if let Some(first_span) = field_names.get(field_name) {
+                return Err(AnalyzerErrorKind::new_duplicate_identifier(
+                    field_name.to_string(),
+                    first_span.clone(),
+                    field.name.span.clone(),
+                ));
+            } else {
+                field_names.insert(field_name.to_string(), field.name.span.clone());
+            }
+        }
     }
 
     Ok(())
@@ -113,7 +132,8 @@ fn check_field_type_terminates(
             // Check if the type exists.
             // Only field types may not exist, since we have the guaranteed that all
             // sum types have been added to the registry during the conversion phase.
-            if !registry.subtypes.contains_key(name) {
+            if !registry.subtypes.contains_key(name) && !registry.product_fields.contains_key(name)
+            {
                 return Err(AnalyzerErrorKind::new_undefined_type(
                     name.clone(),
                     ty.span.clone(),
@@ -645,5 +665,86 @@ mod adt_cycle_tests {
         let result = adt_check(&registry);
 
         assert!(result.is_err()); // Should detect the cycle and fail
+    }
+
+    #[test]
+    fn test_duplicate_fields() {
+        // Test a product type with duplicate field names:
+        // type DuplicateField(x: Int64, x: String)
+
+        let mut product_fields = HashMap::new();
+        let fields = vec![
+            create_field("x", Type::Int64),
+            create_field("x", Type::String), // Duplicate field name
+        ];
+
+        product_fields.insert("DuplicateField".to_string(), fields);
+
+        let mut subtypes = HashMap::new();
+        subtypes.insert("DuplicateField".to_string(), HashSet::new());
+
+        let registry = setup_test_registry(subtypes, product_fields);
+        let result = adt_check(&registry);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_undefined_type_reference() {
+        // Test a product type that references an undefined type:
+        // type BadReference(field: UndefinedType)
+
+        let mut product_fields = HashMap::new();
+        product_fields.insert(
+            "BadReference".to_string(),
+            vec![create_field(
+                "field",
+                Type::Identifier("UndefinedType".to_string()),
+            )],
+        );
+
+        let mut subtypes = HashMap::new();
+        subtypes.insert("BadReference".to_string(), HashSet::new());
+
+        let registry = setup_test_registry(subtypes, product_fields);
+        let result = adt_check(&registry);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_complex_type_with_duplicate_nested_fields() {
+        // Test a more complex type with duplicate fields in nested structures
+        // type Complex =
+        //   | VariantA(x: Int64, y: String)
+        //   | VariantB(x: Int64, x: Bool)  // Duplicate field in this variant
+
+        let mut subtypes = HashMap::new();
+        let mut complex_variants = HashSet::new();
+        complex_variants.insert("VariantA".to_string());
+        complex_variants.insert("VariantB".to_string());
+        subtypes.insert("Complex".to_string(), complex_variants);
+
+        let mut product_fields = HashMap::new();
+        product_fields.insert(
+            "VariantA".to_string(),
+            vec![
+                create_field("x", Type::Int64),
+                create_field("y", Type::String),
+            ],
+        );
+
+        product_fields.insert(
+            "VariantB".to_string(),
+            vec![
+                create_field("x", Type::Int64),
+                create_field("x", Type::Bool), // Duplicate field
+            ],
+        );
+
+        let registry = setup_test_registry(subtypes, product_fields);
+        let result = adt_check(&registry);
+
+        assert!(result.is_err());
     }
 }
