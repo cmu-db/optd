@@ -33,7 +33,11 @@ pub(super) fn convert_expr(
         ast::Expr::Ref(ident) => convert_ref(ident),
         ast::Expr::Binary(left, op, right) => convert_binary(left, op, right, &span, generics)?,
         ast::Expr::Unary(op, operand) => convert_unary(op, operand, generics)?,
-        ast::Expr::Let(field, init, body) => convert_let(field, init, body, generics)?,
+        ast::Expr::Let(field, init, body) => {
+            // We extract the potential type annotation.
+            ty = convert_type(&field.ty.value, generics);
+            convert_let(field, init, body, generics)?
+        }
         ast::Expr::IfThenElse(condition, then_branch, else_branch) => {
             convert_if_then_else(condition, then_branch, else_branch, generics)?
         }
@@ -45,7 +49,7 @@ pub(super) fn convert_expr(
         ast::Expr::Map(entries) => convert_map(entries, generics)?,
         ast::Expr::Constructor(name, args) => convert_constructor(name, args, generics)?,
         ast::Expr::Closure(params, body) => {
-            // We extract the potential type annotations in the closure.
+            // We extract the potential type annotations.
             let params = params
                 .iter()
                 .map(|field| {

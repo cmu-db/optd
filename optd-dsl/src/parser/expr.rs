@@ -303,18 +303,18 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
         let let_expr = just(Token::Let)
             .ignore_then(
                 let_binding
+                    .map_with_span(Spanned::new)
                     .separated_by(just(Token::Comma))
                     .allow_trailing(),
             )
             .then_ignore(just(Token::In))
             .then(expr.clone())
-            .map_with_span(|(bindings, body), span| {
-                bindings
-                    .into_iter()
-                    .rev()
-                    .fold(body, |acc_body, (field, value)| {
-                        Spanned::new(Expr::Let(field, value, acc_body), span.clone())
-                    })
+            .map(|(bindings, body)| {
+                bindings.into_iter().rev().fold(body, |acc_body, binding| {
+                    let span = binding.span.clone();
+                    let (field, value) = *binding.value.clone();
+                    Spanned::new(Expr::Let(field, value, acc_body), span)
+                })
             })
             .boxed();
 
