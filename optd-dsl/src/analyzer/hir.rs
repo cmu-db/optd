@@ -427,7 +427,7 @@ pub enum UnaryOp {
 }
 
 /// Program representation after the analysis phase
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct HIR<M: ExprMetadata = NoMetadata> {
     pub context: Context<M>,
     pub annotations: HashMap<Identifier, Vec<Annotation>>,

@@ -1,0 +1,23 @@
+[package]
+name = "optd-datafusion"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+optd-core = { path = "../optd-core" }
+optd-dsl = { path = "../optd-dsl" }
+
+tokio.workspace = true
+async-recursion.workspace = true
+trait-variant.workspace = true
+
+anyhow = "1.0.97"
+async-trait = "0.1.88"
+datafusion = "45"
+iceberg = "0.4.0"
+iceberg-catalog-memory = "0.4.0"
+
+# Fix arrow bug.
+chrono = "0.4.39"
+futures = "0.3.31"

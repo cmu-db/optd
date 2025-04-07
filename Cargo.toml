@@ -1,5 +1,5 @@
 [workspace]
-members = ["optd-core", "optd-dsl"]
+members = ["optd-core", "optd-dsl", "optd-datafusion"]
 resolver = "2"
 
 [workspace.package]
@@ -10,4 +10,4 @@ repository = "https://github.com/cmu-db/optd"
 [workspace.dependencies]
 trait-variant = "0.1.2"
 async-recursion = "1.1.1"
-tokio = { version = "1.43.0", features = ["full"] }
+tokio = { version = "1.44", features = ["rt", "macros"] }
