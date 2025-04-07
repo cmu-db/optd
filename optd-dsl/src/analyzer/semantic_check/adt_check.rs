@@ -6,7 +6,7 @@ use crate::{
 use std::collections::HashMap;
 
 /// Exploration status for ADT cycle detection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ExplorationStatus {
     /// Currently exploring this node.
     Exploring,
@@ -19,10 +19,30 @@ pub fn adt_check(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
     // create any infinite recursive cycles.
     let mut exploration_status = HashMap::new();
 
-    for adt_name in registry.product_fields.keys() {
-        if !can_terminate(adt_name.clone(), registry, &mut exploration_status)? {
-            let span = registry.spans.get(adt_name).cloned().unwrap();
-            return Err(AnalyzerErrorKind::new_cyclic_adt(adt_name.clone(), span));
+    for adt_name in registry.subtypes.keys() {
+        let span = registry.spans.get(adt_name).cloned().unwrap();
+        let mut path = vec![Spanned::new(adt_name.clone(), span)];
+
+        if !can_terminate(
+            adt_name.clone(),
+            registry,
+            &mut exploration_status,
+            &mut path,
+        )? {
+            let cycle_start_idx = path
+                .iter()
+                .enumerate()
+                .take(path.len() - 1)
+                .find_map(|(idx, type_ref)| {
+                    if **type_ref == **path.last().unwrap() {
+                        Some(idx)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+
+            return Err(AnalyzerErrorKind::new_cyclic_adt(&path[cycle_start_idx..]));
         }
 
         // Clear all "Exploring" statuses before checking the next type.
@@ -51,28 +71,34 @@ pub fn adt_check(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
     Ok(())
 }
 
-/// Determines if a type exists and can terminate (no infinite recursion).
-/// Returns true if terminates, false if cycle detected.
+/// Determines if a type terminates (has no infinite recursion).
+///
+/// Returns:
+/// - Ok(true) if the type terminates
+/// - Ok(false) if the type has a cycle
+/// - Err(AnalyzerErrorKind) for other errors like undefined types
 fn can_terminate(
     adt: Identifier,
     registry: &TypeRegistry,
-    exploration_status: &mut HashMap<String, ExplorationStatus>,
+    exploration_status: &mut HashMap<Identifier, ExplorationStatus>,
+    path: &mut Vec<Spanned<Identifier>>,
 ) -> Result<bool, AnalyzerErrorKind> {
     use ExplorationStatus::*;
 
     match exploration_status.get(&adt) {
         Some(&Terminates) => return Ok(true),
-        Some(&Exploring) => return Ok(false), // Cycle detected.
+        Some(&Exploring) => return Ok(false),
         None => {}
     }
+
     exploration_status.insert(adt.clone(), Exploring);
 
     let terminates = if registry.product_fields.contains_key(&adt) {
         // Product type: all fields must terminate.
-        check_product_type_terminates(adt.clone(), registry, exploration_status)?
+        check_product_type_terminates(adt.clone(), registry, exploration_status, path)?
     } else {
         // Sum type: one variant must terminate.
-        check_sum_type_terminates(adt.clone(), registry, exploration_status)?
+        check_sum_type_terminates(adt.clone(), registry, exploration_status, path)?
     };
 
     if terminates {
@@ -83,16 +109,16 @@ fn can_terminate(
 }
 
 /// Checks if a product type terminates - all fields must terminate.
-/// Returns true if all fields terminate, false otherwise.
 fn check_product_type_terminates(
     adt: Identifier,
     registry: &TypeRegistry,
-    exploration_status: &mut HashMap<String, ExplorationStatus>,
+    exploration_status: &mut HashMap<Identifier, ExplorationStatus>,
+    path: &mut Vec<Spanned<Identifier>>,
 ) -> Result<bool, AnalyzerErrorKind> {
     let fields = registry.product_fields.get(&adt).unwrap();
 
     for field in fields {
-        if !check_field_type_terminates(&field.ty, registry, exploration_status)? {
+        if !check_field_type_terminates(&field.ty, registry, exploration_status, path)? {
             return Ok(false);
         }
     }
@@ -101,16 +127,16 @@ fn check_product_type_terminates(
 }
 
 /// Checks if a sum type terminates - at least one variant must terminate
-/// Returns true if at least one variant terminates, false otherwise.
 fn check_sum_type_terminates(
     sum_type: Identifier,
     registry: &TypeRegistry,
-    exploration_status: &mut HashMap<String, ExplorationStatus>,
+    exploration_status: &mut HashMap<Identifier, ExplorationStatus>,
+    path: &mut Vec<Spanned<Identifier>>,
 ) -> Result<bool, AnalyzerErrorKind> {
     let variants = registry.subtypes.get(&sum_type).unwrap();
 
     for variant in variants {
-        if can_terminate(variant.clone(), registry, exploration_status)? {
+        if can_terminate(variant.clone(), registry, exploration_status, path)? {
             return Ok(true);
         }
     }
@@ -119,19 +145,17 @@ fn check_sum_type_terminates(
 }
 
 /// Checks if a type (including complex types like Array, Map, etc.) terminates.
-/// Returns true if type terminates, false if a cycle is detected.
 fn check_field_type_terminates(
     ty: &Spanned<ast::Type>,
     registry: &TypeRegistry,
-    exploration_status: &mut HashMap<String, ExplorationStatus>,
+    exploration_status: &mut HashMap<Identifier, ExplorationStatus>,
+    path: &mut Vec<Spanned<Identifier>>,
 ) -> Result<bool, AnalyzerErrorKind> {
     use ast::Type::*;
 
     match &*ty.value {
         Identifier(name) => {
             // Check if the type exists.
-            // Only field types may not exist, since we have the guaranteed that all
-            // sum types have been added to the registry during the conversion phase.
             if !registry.subtypes.contains_key(name) && !registry.product_fields.contains_key(name)
             {
                 return Err(AnalyzerErrorKind::new_undefined_type(
@@ -140,34 +164,44 @@ fn check_field_type_terminates(
                 ));
             }
 
-            can_terminate(name.clone(), registry, exploration_status)
+            // Add this type to our path.
+            path.push(Spanned::new(name.clone(), ty.span.clone()));
+
+            can_terminate(name.clone(), registry, exploration_status, path)
         }
 
-        Array(elem_type) => check_field_type_terminates(elem_type, registry, exploration_status),
+        Array(elem_type) => {
+            check_field_type_terminates(elem_type, registry, exploration_status, path)
+        }
 
-        Tuple(types) => types.iter().try_fold(true, |acc, t| {
-            Ok(acc && check_field_type_terminates(t, registry, exploration_status)?)
-        }),
+        Tuple(types) => {
+            for t in types {
+                if !check_field_type_terminates(t, registry, exploration_status, path)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
 
         Map(key_type, val_type) => {
-            if !check_field_type_terminates(key_type, registry, exploration_status)? {
+            if !check_field_type_terminates(key_type, registry, exploration_status, path)? {
                 return Ok(false);
             }
-            check_field_type_terminates(val_type, registry, exploration_status)
+            check_field_type_terminates(val_type, registry, exploration_status, path)
         }
 
         Closure(param_type, return_type) => {
-            if !check_field_type_terminates(param_type, registry, exploration_status)? {
+            if !check_field_type_terminates(param_type, registry, exploration_status, path)? {
                 return Ok(false);
             }
-            check_field_type_terminates(return_type, registry, exploration_status)
+            check_field_type_terminates(return_type, registry, exploration_status, path)
         }
 
         Questioned(inner_type) | Starred(inner_type) | Dollared(inner_type) => {
-            check_field_type_terminates(inner_type, registry, exploration_status)
+            check_field_type_terminates(inner_type, registry, exploration_status, path)
         }
 
-        _ => Ok(true), // Primitive types always terminate
+        _ => Ok(true),
     }
 }
 

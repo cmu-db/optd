@@ -1,4 +1,8 @@
-use crate::utils::{error::Diagnose, span::Span};
+use super::hir::Identifier;
+use crate::utils::{
+    error::Diagnose,
+    span::{Span, Spanned},
+};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 
 /// Wrapper for analysis errors
@@ -59,10 +63,8 @@ pub enum AnalyzerErrorKind {
 
     /// Error for cyclic ADT definitions
     CyclicAdt {
-        /// Name of the cyclic ADT
-        name: String,
-        /// Span of the cyclic ADT
-        span: Span,
+        /// The path of the cyclic ADT
+        path: Vec<Spanned<Identifier>>,
     },
 
     /// Error for an undefined type
@@ -104,8 +106,10 @@ impl AnalyzerErrorKind {
     }
 
     /// Creates a new error for cyclic ADT definitions
-    pub fn new_cyclic_adt(name: String, span: Span) -> Self {
-        Self::CyclicAdt { name, span }
+    pub fn new_cyclic_adt(path: &[Spanned<Identifier>]) -> Self {
+        Self::CyclicAdt {
+            path: path.to_vec(),
+        }
     }
 
     /// Creates a new error for an undefined type
@@ -159,12 +163,7 @@ impl Diagnose for Box<AnalyzerError> {
                 &format!("'{}' is not defined in this scope", name),
                 "Make sure the variable is declared before use or check for typos in the name",
             ),
-            CyclicAdt { name, span } => self.build_single_span_report(
-                span,
-                &format!("Cyclic ADT definition: '{}'", name),
-                "Cyclic ADT definition detected",
-                "Consider refactoring the ADT to remove the cyclic dependency",
-            ),
+            CyclicAdt { path } => self.build_cyclic_adt_report(path),
             UndefinedType { name, span } => self.build_single_span_report(
                 span,
                 &format!("Undefined type: '{}'", name),
@@ -182,7 +181,7 @@ impl Diagnose for Box<AnalyzerError> {
             DuplicateIdentifier { duplicate_span, .. } => duplicate_span,
             IncompleteFunction { span, .. } => span,
             InvalidReference { span, .. } => span,
-            CyclicAdt { span, .. } => span,
+            CyclicAdt { path } => &path[0].span, // Use the first span in the cycle path
             UndefinedType { span, .. } => span,
         };
 
@@ -233,6 +232,60 @@ impl AnalyzerError {
                     .with_color(Color::Blue),
             )
             .with_help(help)
+            .finish()
+    }
+
+    /// Helper method to build a report for cyclic ADT definitions
+    fn build_cyclic_adt_report(&self, path: &[Spanned<Identifier>]) -> Report<Span> {
+        let cycle_start = &path[0];
+        let mut report = Report::build(ReportKind::Error, cycle_start.span.clone()).with_message(
+            format!("Cyclic type definition detected: '{}'", cycle_start.value),
+        );
+
+        report = report.with_label(
+            Label::new(cycle_start.span.clone())
+                .with_message(format!("'{}' is defined here", cycle_start.value))
+                .with_order(0)
+                .with_color(Color::Red),
+        );
+
+        // If the cycle has more than one element, add labels for the references.
+        if path.len() > 1 {
+            // Add labels for each intermediate reference in the cycle (if any).
+            // Skip the first element (definition) and the last element (cycle completion).
+            if path.len() > 2 {
+                for (i, type_ref) in path.iter().enumerate().skip(1).take(path.len() - 2) {
+                    report = report.with_label(
+                        Label::new(type_ref.span.clone())
+                            .with_message(format!("references '{}'", type_ref.value))
+                            .with_color(Color::Blue)
+                            .with_order(i as i32),
+                    );
+                }
+            }
+
+            let last_idx = path.len() - 1;
+            report = report.with_label(
+                Label::new(path[last_idx].span.clone())
+                    .with_message(format!(
+                        "cycle completes: references '{}' again",
+                        path[0].value
+                    ))
+                    .with_color(Color::Red)
+                    .with_order(last_idx as i32),
+            );
+        } else {
+            // Self reference.
+            report = report.with_label(
+                Label::new(cycle_start.span.clone())
+                    .with_message("directly references itself")
+                    .with_color(Color::Red),
+            );
+        }
+
+        report
+            .with_help("Break this cycle by introducing a layer of indirection or refactoring the type structure")
+            .with_note("This would cause infinite recursion")
             .finish()
     }
 }
