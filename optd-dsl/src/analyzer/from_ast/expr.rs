@@ -369,6 +369,7 @@ mod expr_tests {
     use crate::parser::ast;
     use crate::utils::span::{Span, Spanned};
     use std::collections::HashSet;
+    use std::f64::consts::PI;
 
     // Helper functions for creating test expressions
     fn create_test_span() -> Span {
@@ -413,14 +414,14 @@ mod expr_tests {
 
         match &result.kind {
             ExprKind::CoreVal(value) => match &value.data {
-                CoreData::Literal(Literal::Bool(val)) => assert_eq!(*val, true),
+                CoreData::Literal(Literal::Bool(val)) => assert!(*val),
                 _ => panic!("Expected Bool literal"),
             },
             _ => panic!("Expected CoreVal"),
         }
 
         // Test float literal
-        let float_val = 3.14;
+        let float_val = PI;
         let float_lit = spanned(ast::Expr::Literal(ast::Literal::Float64(
             ordered_float::OrderedFloat(float_val),
         )));

@@ -256,7 +256,7 @@ mod converter_tests {
     }
 
     fn create_module_with_functions(functions: Vec<Spanned<Function>>) -> Module {
-        let items = functions.into_iter().map(|f| Item::Function(f)).collect();
+        let items = functions.into_iter().map(Item::Function).collect();
 
         Module { items }
     }

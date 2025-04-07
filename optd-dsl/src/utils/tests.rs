@@ -18,6 +18,12 @@ pub struct TestHarness {
     goal_mappings: Arc<Mutex<HashMap<String, Vec<Value>>>>,
 }
 
+impl Default for TestHarness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestHarness {
     /// Creates a new test harness.
     pub fn new() -> Self {

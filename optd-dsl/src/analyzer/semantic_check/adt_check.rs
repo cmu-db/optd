@@ -30,7 +30,7 @@ fn is_sum_type_with_variants(type_name: &str, registry: &TypeRegistry) -> bool {
     registry
         .subtypes
         .get(type_name)
-        .map_or(false, |variants| !variants.is_empty())
+        .is_some_and(|variants| !variants.is_empty())
 }
 
 /// Checks a sum type for valid recursion, requiring at least one terminating variant.
@@ -86,14 +86,11 @@ fn contains_cycle(
     path.push(adt_name.to_string());
 
     // Use a scope to ensure we remove the current ADT from tracking regardless of return path.
-    let has_cycle = registry
-        .product_fields
-        .get(adt_name)
-        .map_or(false, |fields| {
-            fields
-                .iter()
-                .any(|field| type_contains_adt_cycle(&field.ty.0, registry, visited, path))
-        });
+    let has_cycle = registry.product_fields.get(adt_name).is_some_and(|fields| {
+        fields
+            .iter()
+            .any(|field| type_contains_adt_cycle(&field.ty.0, registry, visited, path))
+    });
 
     // Backtrack.
     visited.remove(adt_name);
@@ -162,14 +159,11 @@ fn variant_references_type_recursively(
 
     visited.insert(variant.to_string());
 
-    registry
-        .product_fields
-        .get(variant)
-        .map_or(false, |fields| {
-            fields.iter().any(|field| {
-                type_references_target_recursively(&field.ty.0, target_type, registry, visited)
-            })
+    registry.product_fields.get(variant).is_some_and(|fields| {
+        fields.iter().any(|field| {
+            type_references_target_recursively(&field.ty.0, target_type, registry, visited)
         })
+    })
 }
 
 /// Determines if a type directly or indirectly references a specific target type.

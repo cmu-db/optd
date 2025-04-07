@@ -224,6 +224,8 @@ fn value_to_physical_map_op<M: ExprMetadata>(
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::PI;
+
     use super::*;
     use crate::utils::tests::{
         assert_values_equal, create_logical_operator, create_physical_operator,
@@ -390,7 +392,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Invalid map key: Float64")]
     fn test_float_key_panics() {
-        value_to_map_key(&float_val(3.14));
+        value_to_map_key(&float_val(PI));
     }
 
     #[test]
