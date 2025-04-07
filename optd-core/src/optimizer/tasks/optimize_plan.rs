@@ -1,7 +1,7 @@
 use futures::{SinkExt, channel::mpsc};
 
 use crate::{
-    cir::{Goal, LogicalPlan, PhysicalPlan, PhysicalProperties},
+    cir::{Goal, LogicalPlan, PhysicalExpressionId, PhysicalPlan, PhysicalProperties},
     error::Error,
     memo::Memoize,
     optimizer::{Optimizer, tasks::SourceTaskId},
@@ -37,6 +37,18 @@ impl OptimizePlanTask {
 }
 
 impl<M: Memoize> Optimizer<M> {
+    pub async fn emit_best_physical_plan(
+        &mut self,
+        mut physical_plan_tx: mpsc::Sender<PhysicalPlan>,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> Result<(), Error> {
+        let physical_plan = self.egest_best_plan(physical_expr_id).await?.unwrap();
+        tokio::spawn(async move {
+            physical_plan_tx.send(physical_plan).await.unwrap();
+        });
+        Ok(())
+    }
+
     pub async fn create_optimize_plan_task(
         &mut self,
         logical_plan: LogicalPlan,
@@ -56,12 +68,11 @@ impl<M: Memoize> Optimizer<M> {
             .ensure_optimize_goal_task(goal_id, SourceTaskId::OptimizePlan(task_id))
             .await?;
 
-        let mut task = OptimizePlanTask::new(logical_plan, physical_plan_tx, optimize_goal_in);
+        let task = OptimizePlanTask::new(logical_plan, physical_plan_tx, optimize_goal_in);
 
         if let Some((physical_expr_id, _)) = best_costed {
-            // TODO: return value of egest_best_plan is always `Some(plan)` because we already have it costed.
-            let physical_plan = self.egest_best_plan(physical_expr_id).await?.unwrap();
-            let _ = task.physical_plan_tx.send(physical_plan).await;
+            self.emit_best_physical_plan(task.physical_plan_tx.clone(), physical_expr_id)
+                .await?;
         }
 
         self.tasks.insert(task_id, Task::OptimizePlan(task));

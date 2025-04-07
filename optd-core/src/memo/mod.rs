@@ -2,6 +2,8 @@ mod merge_repr;
 #[cfg(test)]
 pub mod mock;
 
+use std::collections::HashSet;
+
 use crate::cir::{
     Cost, Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpression,
     LogicalExpressionId, LogicalProperties, PhysicalExpression, PhysicalExpressionId,
@@ -105,8 +107,9 @@ pub struct MergeResult {
 }
 
 pub struct ForwardResult {
-    pub best_costed_for_member: Option<(PhysicalExpressionId, Cost)>,
-    pub goals_forwarded: Vec<GoalId>,
+    pub physical_expr_id: PhysicalExpressionId,
+    pub best_cost: Cost,
+    pub goals_forwarded: HashSet<GoalId>,
 }
 
 /// Core interface for memo-based query optimization.
