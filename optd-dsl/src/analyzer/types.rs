@@ -50,8 +50,8 @@ pub enum Type {
 /// Represents a field in an ADT.
 #[derive(Debug, Clone)]
 pub struct AdtField {
-    _name: (Identifier, Span),
-    _ty: (Type, Span),
+    pub name: (Identifier, Span),
+    pub ty: (Type, Span),
 }
 
 /// Manages the type hierarchy and subtyping relationships
@@ -61,9 +61,9 @@ pub struct AdtField {
 /// types and check subtyping relationships.
 #[derive(Debug, Clone, Default)]
 pub struct TypeRegistry {
-    subtypes: HashMap<Identifier, HashSet<Identifier>>,
-    adt_fields: HashMap<Identifier, Vec<AdtField>>,
-    adt_spans: HashMap<Identifier, Span>,
+    pub subtypes: HashMap<Identifier, HashSet<Identifier>>,
+    pub product_fields: HashMap<Identifier, Vec<AdtField>>,
+    pub spans: HashMap<Identifier, Span>,
 }
 
 impl TypeRegistry {
@@ -86,7 +86,7 @@ impl TypeRegistry {
                 let type_name = name.value.as_ref().clone();
 
                 // Check for duplicate ADT names.
-                if let Some(existing_span) = self.adt_spans.get(&type_name) {
+                if let Some(existing_span) = self.spans.get(&type_name) {
                     return Err(SemanticErrorKind::new_duplicate_adt(
                         type_name,
                         existing_span.clone(),
@@ -95,13 +95,13 @@ impl TypeRegistry {
                 }
 
                 // Register the ADT fields.
-                self.adt_fields.insert(
+                self.product_fields.insert(
                     type_name.clone(),
                     fields
                         .iter()
                         .map(|field| AdtField {
-                            _name: (*field.name.value.clone(), field.name.span.clone()),
-                            _ty: (
+                            name: (*field.name.value.clone(), field.name.span.clone()),
+                            ty: (
                                 convert_type(field.ty.value.as_ref(), &HashSet::new()),
                                 field.ty.span.clone(),
                             ),
@@ -109,7 +109,7 @@ impl TypeRegistry {
                         .collect(),
                 );
 
-                self.adt_spans.insert(type_name.clone(), name.span.clone());
+                self.spans.insert(type_name.clone(), name.span.clone());
                 self.subtypes.entry(type_name).or_default();
 
                 Ok(())
@@ -118,7 +118,7 @@ impl TypeRegistry {
                 let enum_name = name.value.as_ref().clone();
 
                 // Check for duplicate ADT names.
-                if let Some(existing_span) = self.adt_spans.get(&enum_name) {
+                if let Some(existing_span) = self.spans.get(&enum_name) {
                     return Err(SemanticErrorKind::new_duplicate_adt(
                         enum_name,
                         existing_span.clone(),
@@ -126,7 +126,7 @@ impl TypeRegistry {
                     ));
                 }
 
-                self.adt_spans.insert(enum_name.clone(), name.clone().span);
+                self.spans.insert(enum_name.clone(), name.clone().span);
                 self.subtypes.entry(enum_name.clone()).or_default();
 
                 for variant in variants {
@@ -164,60 +164,57 @@ impl TypeRegistry {
     ///
     /// `true` if `child` is a subtype of `parent`, `false` otherwise
     pub fn is_subtype(&self, child: &Type, parent: &Type) -> bool {
+        use Type::*;
+
         if child == parent {
             return true;
         }
 
         match (child, parent) {
             // Universe is the top type - everything is a subtype of Universe
-            (_, Type::Universe) => true,
+            (_, Universe) => true,
 
             // Never is the bottom type - it is a subtype of everything
-            (Type::Never, _) => true,
+            (Never, _) => true,
 
             // Stored and Costed type handling
-            (Type::Stored(child_inner), Type::Stored(parent_inner)) => {
+            (Stored(child_inner), Stored(parent_inner)) => {
                 self.is_subtype(child_inner, parent_inner)
             }
-            (Type::Costed(child_inner), Type::Costed(parent_inner)) => {
+            (Costed(child_inner), Costed(parent_inner)) => {
                 self.is_subtype(child_inner, parent_inner)
             }
-            (Type::Costed(child_inner), Type::Stored(parent_inner)) => {
+            (Costed(child_inner), Stored(parent_inner)) => {
                 // Costed(A) is a subtype of Stored(A)
                 self.is_subtype(child_inner, parent_inner)
             }
-            (Type::Costed(child_inner), parent_inner) => {
+            (Costed(child_inner), parent_inner) => {
                 // Costed(A) is a subtype of A
                 self.is_subtype(child_inner, parent_inner)
             }
-            (Type::Stored(child_inner), parent_inner) => {
+            (Stored(child_inner), parent_inner) => {
                 // Stored(A) is a subtype of A
                 self.is_subtype(child_inner, parent_inner)
             }
 
             // Check transitive inheritance for ADTs
-            (Type::Adt(child_name), Type::Adt(parent_name)) => {
+            (Adt(child_name), Adt(parent_name)) => {
                 if child_name == parent_name {
                     return true;
                 }
 
                 self.subtypes.get(parent_name).is_some_and(|children| {
                     children.iter().any(|subtype_child_name| {
-                        self.is_subtype(
-                            &Type::Adt(child_name.clone()),
-                            &Type::Adt(subtype_child_name.clone()),
-                        )
+                        self.is_subtype(&Adt(child_name.clone()), &Adt(subtype_child_name.clone()))
                     })
                 })
             }
 
             // Array covariance: Array[T] <: Array[U] if T <: U
-            (Type::Array(child_elem), Type::Array(parent_elem)) => {
-                self.is_subtype(child_elem, parent_elem)
-            }
+            (Array(child_elem), Array(parent_elem)) => self.is_subtype(child_elem, parent_elem),
 
             // Tuple covariance: (T1, T2, ...) <: (U1, U2, ...) if T1 <: U1, T2 <: U2, ...
-            (Type::Tuple(child_types), Type::Tuple(parent_types)) => {
+            (Tuple(child_types), Tuple(parent_types)) => {
                 if child_types.len() != parent_types.len() {
                     return false;
                 }
@@ -228,20 +225,18 @@ impl TypeRegistry {
             }
 
             // Map covariance: Map[K1, V1] <: Map[K2, V2] if K1 <: K2 and V1 <: V2
-            (Type::Map(child_key, child_val), Type::Map(parent_key, parent_val)) => {
+            (Map(child_key, child_val), Map(parent_key, parent_val)) => {
                 self.is_subtype(child_key, parent_key) && self.is_subtype(child_val, parent_val)
             }
 
             // Function contravariance on args, covariance on return type:
             // (T1 -> U1) <: (T2 -> U2) if T2 <: T1 and U1 <: U2
-            (Type::Closure(child_param, child_ret), Type::Closure(parent_param, parent_ret)) => {
+            (Closure(child_param, child_ret), Closure(parent_param, parent_ret)) => {
                 self.is_subtype(parent_param, child_param) && self.is_subtype(child_ret, parent_ret)
             }
 
             // Optional type covariance: Optional[T] <: Optional[U] if T <: U
-            (Type::Optional(child_ty), Type::Optional(parent_ty)) => {
-                self.is_subtype(child_ty, parent_ty)
-            }
+            (Optional(child_ty), Optional(parent_ty)) => self.is_subtype(child_ty, parent_ty),
 
             _ => false,
         }

@@ -56,6 +56,14 @@ pub enum SemanticErrorKind {
         /// Span of the invalid reference
         span: Span,
     },
+
+    /// Error for cyclic ADT definitions
+    CyclicAdt {
+        /// Name of the cyclic ADT
+        name: String,
+        /// Span of the cyclic ADT
+        span: Span,
+    },
 }
 
 impl SemanticErrorKind {
@@ -85,6 +93,11 @@ impl SemanticErrorKind {
     /// Creates a new error for invalid references
     pub fn new_invalid_reference(name: String, span: Span) -> Self {
         Self::InvalidReference { name, span }
+    }
+
+    /// Creates a new error for cyclic ADT definitions
+    pub fn new_cyclic_adt(name: String, span: Span) -> Self {
+        Self::CyclicAdt { name, span }
     }
 }
 
@@ -151,6 +164,18 @@ impl Diagnose for Box<SemanticError> {
                     .with_help("Make sure the variable is declared before use or check for typos in the name")
                     .finish()
             },
+
+            CyclicAdt { name, span } => {
+                Report::build(ReportKind::Error, span.clone())
+                    .with_message(format!("Cyclic ADT definition: '{}'", name))
+                    .with_label(
+                        Label::new(span.clone())
+                            .with_message("Cyclic ADT definition detected")
+                            .with_color(Color::Red)
+                    )
+                    .with_help("Consider refactoring the ADT to remove the cyclic dependency")
+                    .finish()
+            }
         }
     }
 
@@ -162,6 +187,7 @@ impl Diagnose for Box<SemanticError> {
             DuplicateIdentifier { duplicate_span, .. } => duplicate_span,
             IncompleteFunction { span, .. } => span,
             InvalidReference { span, .. } => span,
+            CyclicAdt { span, .. } => span,
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))
