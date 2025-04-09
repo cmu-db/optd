@@ -1,60 +1,41 @@
+use super::cycle_detect::CycleDetector;
 use crate::{
-    analyzer::{error::AnalyzerErrorKind, hir::Identifier, types::TypeRegistry},
-    parser::ast,
-    utils::span::{Span, Spanned},
+    analyzer::{error::AnalyzerErrorKind, types::TypeRegistry},
+    utils::span::Span,
 };
 use std::collections::HashMap;
 
-/// Exploration status for ADT cycle detection.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ExplorationStatus {
-    /// Currently exploring this node.
-    Exploring,
-    /// Finished exploring, this type terminates.
-    Terminates,
-}
-
+/// Checks that ADTs (Algebraic Data Types) are well-formed
 pub fn adt_check(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
     // First, check if types correctly reference each other and do not
     // create any infinite recursive cycles.
-    let mut explore_status = HashMap::new();
+    let mut detector = CycleDetector::new(registry);
 
     for adt_name in registry.subtypes.keys() {
-        let mut path = vec![];
-
-        if !can_terminate(
-            adt_name,
-            registry,
-            &mut HashMap::default(),
-            &mut explore_status,
-            &mut path,
-        )? {
+        if !detector.can_terminate(adt_name)? {
             // There might be multiple cycles in the path. However, we know that
             // the last element is part of a cycle, as it always corresponds to a field
             // of a product type that was already being explored. Therefore, we need to find
             // the previous occurrence of that element in the path, which indicates
             // the point at which it started being explored.
-            let cycle_start_idx = path
-                .iter()
-                .enumerate()
-                .take(path.len() - 1)
-                .find_map(|(idx, type_ref)| {
-                    if **type_ref == **path.last().unwrap() {
-                        Some(idx)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap();
-
-            return Err(AnalyzerErrorKind::new_cyclic_adt(&path[cycle_start_idx..]));
+            if let Some(cycle_start_idx) = detector.find_cycle_start_index() {
+                return Err(AnalyzerErrorKind::new_cyclic_adt(
+                    &detector.path[cycle_start_idx..],
+                ));
+            }
         }
 
-        // Clear all "Exploring" statuses before checking the next type.
-        explore_status.retain(|_, status| *status == ExplorationStatus::Terminates);
+        detector.reset();
     }
 
     // Second, check for duplicate fields in product types.
+    check_duplicate_fields(registry)?;
+
+    Ok(())
+}
+
+/// Checks for duplicate fields in product types
+fn check_duplicate_fields(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
     for fields in registry.product_fields.values() {
         let mut field_names: HashMap<_, Span> = HashMap::new();
 
@@ -74,224 +55,6 @@ pub fn adt_check(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
     }
 
     Ok(())
-}
-
-/// Determines if a type terminates (has no infinite recursion).
-///
-/// Returns:
-/// - Ok(true) if the type terminates
-/// - Ok(false) if the type has a cycle
-/// - Err(AnalyzerErrorKind) for other errors like undefined types
-fn can_terminate(
-    adt: &Identifier,
-    registry: &TypeRegistry,
-    dependencies: &mut HashMap<Identifier, Vec<Identifier>>,
-    explore_status: &mut HashMap<Identifier, ExplorationStatus>,
-    path: &mut Vec<Spanned<Identifier>>,
-) -> Result<bool, AnalyzerErrorKind> {
-    use ExplorationStatus::*;
-
-    if let Some(status) = explore_status.get(adt).cloned() {
-        match status {
-            Terminates => return Ok(true),
-            Exploring => return Ok(false),
-        }
-    }
-
-    explore_status.insert(adt.clone(), Exploring);
-    // Start exploration in the path.
-    path.push(Spanned::new(
-        adt.clone(),
-        registry.spans.get(adt).cloned().unwrap(),
-    ));
-
-    let terminates = if registry.product_fields.contains_key(adt) {
-        // Product type: all fields must terminate.
-        check_product_type_terminates(adt, registry, dependencies, explore_status, path)?
-    } else {
-        // Sum type: one variant must terminate.
-        check_sum_type_terminates(adt, registry, dependencies, explore_status, path)?
-    };
-
-    if terminates {
-        explore_status.insert(adt.to_string(), Terminates);
-        // Restart the exploration of the previously blocked ADTs, populate
-        // the exploration status map.
-        for dep in dependencies.remove(adt).unwrap_or_default() {
-            explore_status.remove(&dep);
-            let _ = can_terminate(&dep, registry, dependencies, explore_status, path);
-        }
-    }
-
-    Ok(terminates)
-}
-
-/// Checks if a product type terminates - all fields must terminate.
-fn check_product_type_terminates(
-    product_type: &Identifier,
-    registry: &TypeRegistry,
-    dependencies: &mut HashMap<Identifier, Vec<Identifier>>,
-    explore_status: &mut HashMap<Identifier, ExplorationStatus>,
-    path: &mut Vec<Spanned<Identifier>>,
-) -> Result<bool, AnalyzerErrorKind> {
-    let fields = registry.product_fields.get(product_type).unwrap();
-
-    for field in fields {
-        if !check_field_type_terminates(
-            &field.ty,
-            product_type,
-            registry,
-            dependencies,
-            explore_status,
-            path,
-        )? {
-            return Ok(false);
-        }
-    }
-
-    Ok(true)
-}
-
-/// Checks if a sum type terminates - at least one variant must terminate
-fn check_sum_type_terminates(
-    sum_type: &Identifier,
-    registry: &TypeRegistry,
-    dependencies: &mut HashMap<Identifier, Vec<Identifier>>,
-    explore_status: &mut HashMap<Identifier, ExplorationStatus>,
-    path: &mut Vec<Spanned<Identifier>>,
-) -> Result<bool, AnalyzerErrorKind> {
-    let variants = registry.subtypes.get(sum_type).unwrap();
-
-    for variant in variants {
-        if can_terminate(variant, registry, dependencies, explore_status, path)? {
-            return Ok(true);
-        }
-
-        dependencies
-            .entry(variant.clone())
-            .or_default()
-            .push(sum_type.clone());
-    }
-
-    Ok(false)
-}
-
-/// Checks if a type (including complex types like Array, Map, etc.) terminates.
-fn check_field_type_terminates(
-    ty: &Spanned<ast::Type>,
-    product_type: &Identifier,
-    registry: &TypeRegistry,
-    dependencies: &mut HashMap<Identifier, Vec<Identifier>>,
-    explore_status: &mut HashMap<Identifier, ExplorationStatus>,
-    path: &mut Vec<Spanned<Identifier>>,
-) -> Result<bool, AnalyzerErrorKind> {
-    use ast::Type::*;
-
-    match &*ty.value {
-        Identifier(name) => {
-            // Check if the type exists.
-            if !registry.subtypes.contains_key(name) && !registry.product_fields.contains_key(name)
-            {
-                return Err(AnalyzerErrorKind::new_undefined_type(
-                    name.clone(),
-                    ty.span.clone(),
-                ));
-            }
-
-            // Access field in path.
-            path.push(Spanned::new(name.clone(), ty.span.clone()));
-
-            let can_terminate = can_terminate(name, registry, dependencies, explore_status, path)?;
-            if !can_terminate {
-                dependencies
-                    .entry(name.clone())
-                    .or_default()
-                    .push(product_type.clone());
-            }
-
-            Ok(can_terminate)
-        }
-
-        Array(elem_type) => check_field_type_terminates(
-            elem_type,
-            product_type,
-            registry,
-            dependencies,
-            explore_status,
-            path,
-        ),
-
-        Tuple(types) => {
-            for t in types {
-                if !check_field_type_terminates(
-                    t,
-                    product_type,
-                    registry,
-                    dependencies,
-                    explore_status,
-                    path,
-                )? {
-                    return Ok(false);
-                }
-            }
-            Ok(true)
-        }
-
-        Map(key_type, val_type) => {
-            if !check_field_type_terminates(
-                key_type,
-                product_type,
-                registry,
-                dependencies,
-                explore_status,
-                path,
-            )? {
-                return Ok(false);
-            }
-            check_field_type_terminates(
-                val_type,
-                product_type,
-                registry,
-                dependencies,
-                explore_status,
-                path,
-            )
-        }
-
-        Closure(param_type, return_type) => {
-            if !check_field_type_terminates(
-                param_type,
-                product_type,
-                registry,
-                dependencies,
-                explore_status,
-                path,
-            )? {
-                return Ok(false);
-            }
-            check_field_type_terminates(
-                return_type,
-                product_type,
-                registry,
-                dependencies,
-                explore_status,
-                path,
-            )
-        }
-
-        Questioned(inner_type) | Starred(inner_type) | Dollared(inner_type) => {
-            check_field_type_terminates(
-                inner_type,
-                product_type,
-                registry,
-                dependencies,
-                explore_status,
-                path,
-            )
-        }
-
-        _ => Ok(true),
-    }
 }
 
 #[cfg(test)]
