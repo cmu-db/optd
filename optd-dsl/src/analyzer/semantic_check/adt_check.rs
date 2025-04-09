@@ -17,21 +17,23 @@ enum ExplorationStatus {
 pub fn adt_check(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
     // First, check if types correctly reference each other and do not
     // create any infinite recursive cycles.
-    let mut exploration_status = HashMap::new();
+    let mut explore_status = HashMap::new();
 
     for adt_name in registry.subtypes.keys() {
-        let span = registry.spans.get(adt_name).cloned().unwrap();
-        let mut path = vec![Spanned::new(adt_name.clone(), span)];
+        let mut path = vec![];
 
         if !can_terminate(
-            adt_name.clone(),
+            adt_name,
             registry,
-            &mut exploration_status,
+            &mut HashMap::default(),
+            &mut explore_status,
             &mut path,
         )? {
-            println!("Cycle detected in ADT: {:?}", path);
-            println!("Exploration status: {:?}", exploration_status);
-
+            // There might be multiple cycles in the path. However, we know that
+            // the last element is part of a cycle, as it always corresponds to a field
+            // of a product type that was already being explored. Therefore, we need to find
+            // the previous occurrence of that element in the path, which indicates
+            // the point at which it started being explored.
             let cycle_start_idx = path
                 .iter()
                 .enumerate()
@@ -49,7 +51,7 @@ pub fn adt_check(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
         }
 
         // Clear all "Exploring" statuses before checking the next type.
-        exploration_status.retain(|_, status| *status != ExplorationStatus::Exploring);
+        explore_status.retain(|_, status| *status == ExplorationStatus::Terminates);
     }
 
     // Second, check for duplicate fields in product types.
@@ -81,31 +83,44 @@ pub fn adt_check(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
 /// - Ok(false) if the type has a cycle
 /// - Err(AnalyzerErrorKind) for other errors like undefined types
 fn can_terminate(
-    adt: Identifier,
+    adt: &Identifier,
     registry: &TypeRegistry,
-    exploration_status: &mut HashMap<Identifier, ExplorationStatus>,
+    dependencies: &mut HashMap<Identifier, Vec<Identifier>>,
+    explore_status: &mut HashMap<Identifier, ExplorationStatus>,
     path: &mut Vec<Spanned<Identifier>>,
 ) -> Result<bool, AnalyzerErrorKind> {
     use ExplorationStatus::*;
 
-    match exploration_status.get(&adt) {
-        Some(Terminates) => return Ok(true),
-        Some(Exploring) => return Ok(false),
-        None => {}
+    if let Some(status) = explore_status.get(adt).cloned() {
+        match status {
+            Terminates => return Ok(true),
+            Exploring => return Ok(false),
+        }
     }
 
-    exploration_status.insert(adt.clone(), Exploring);
+    explore_status.insert(adt.clone(), Exploring);
+    // Start exploration in the path.
+    path.push(Spanned::new(
+        adt.clone(),
+        registry.spans.get(adt).cloned().unwrap(),
+    ));
 
-    let terminates = if registry.product_fields.contains_key(&adt) {
+    let terminates = if registry.product_fields.contains_key(adt) {
         // Product type: all fields must terminate.
-        check_product_type_terminates(adt.clone(), registry, exploration_status, path)?
+        check_product_type_terminates(adt, registry, dependencies, explore_status, path)?
     } else {
         // Sum type: one variant must terminate.
-        check_sum_type_terminates(adt.clone(), registry, exploration_status, path)?
+        check_sum_type_terminates(adt, registry, dependencies, explore_status, path)?
     };
 
     if terminates {
-        exploration_status.insert(adt, Terminates);
+        explore_status.insert(adt.to_string(), Terminates);
+        // Restart the exploration of the previously blocked ADTs, populate
+        // the exploration status map.
+        for dep in dependencies.remove(adt).unwrap_or_default() {
+            explore_status.remove(&dep);
+            let _ = can_terminate(&dep, registry, dependencies, explore_status, path);
+        }
     }
 
     Ok(terminates)
@@ -113,15 +128,23 @@ fn can_terminate(
 
 /// Checks if a product type terminates - all fields must terminate.
 fn check_product_type_terminates(
-    adt: Identifier,
+    product_type: &Identifier,
     registry: &TypeRegistry,
-    exploration_status: &mut HashMap<Identifier, ExplorationStatus>,
+    dependencies: &mut HashMap<Identifier, Vec<Identifier>>,
+    explore_status: &mut HashMap<Identifier, ExplorationStatus>,
     path: &mut Vec<Spanned<Identifier>>,
 ) -> Result<bool, AnalyzerErrorKind> {
-    let fields = registry.product_fields.get(&adt).unwrap();
+    let fields = registry.product_fields.get(product_type).unwrap();
 
     for field in fields {
-        if !check_field_type_terminates(&field.ty, registry, exploration_status, path)? {
+        if !check_field_type_terminates(
+            &field.ty,
+            product_type,
+            registry,
+            dependencies,
+            explore_status,
+            path,
+        )? {
             return Ok(false);
         }
     }
@@ -131,17 +154,23 @@ fn check_product_type_terminates(
 
 /// Checks if a sum type terminates - at least one variant must terminate
 fn check_sum_type_terminates(
-    sum_type: Identifier,
+    sum_type: &Identifier,
     registry: &TypeRegistry,
-    exploration_status: &mut HashMap<Identifier, ExplorationStatus>,
+    dependencies: &mut HashMap<Identifier, Vec<Identifier>>,
+    explore_status: &mut HashMap<Identifier, ExplorationStatus>,
     path: &mut Vec<Spanned<Identifier>>,
 ) -> Result<bool, AnalyzerErrorKind> {
-    let variants = registry.subtypes.get(&sum_type).unwrap();
+    let variants = registry.subtypes.get(sum_type).unwrap();
 
     for variant in variants {
-        if can_terminate(variant.clone(), registry, exploration_status, path)? {
+        if can_terminate(variant, registry, dependencies, explore_status, path)? {
             return Ok(true);
         }
+
+        dependencies
+            .entry(variant.clone())
+            .or_default()
+            .push(sum_type.clone());
     }
 
     Ok(false)
@@ -150,8 +179,10 @@ fn check_sum_type_terminates(
 /// Checks if a type (including complex types like Array, Map, etc.) terminates.
 fn check_field_type_terminates(
     ty: &Spanned<ast::Type>,
+    product_type: &Identifier,
     registry: &TypeRegistry,
-    exploration_status: &mut HashMap<Identifier, ExplorationStatus>,
+    dependencies: &mut HashMap<Identifier, Vec<Identifier>>,
+    explore_status: &mut HashMap<Identifier, ExplorationStatus>,
     path: &mut Vec<Spanned<Identifier>>,
 ) -> Result<bool, AnalyzerErrorKind> {
     use ast::Type::*;
@@ -167,19 +198,39 @@ fn check_field_type_terminates(
                 ));
             }
 
-            // Add this type to our path.
+            // Access field in path.
             path.push(Spanned::new(name.clone(), ty.span.clone()));
 
-            can_terminate(name.clone(), registry, exploration_status, path)
+            let can_terminate = can_terminate(name, registry, dependencies, explore_status, path)?;
+            if !can_terminate {
+                dependencies
+                    .entry(name.clone())
+                    .or_default()
+                    .push(product_type.clone());
+            }
+
+            Ok(can_terminate)
         }
 
-        Array(elem_type) => {
-            check_field_type_terminates(elem_type, registry, exploration_status, path)
-        }
+        Array(elem_type) => check_field_type_terminates(
+            elem_type,
+            product_type,
+            registry,
+            dependencies,
+            explore_status,
+            path,
+        ),
 
         Tuple(types) => {
             for t in types {
-                if !check_field_type_terminates(t, registry, exploration_status, path)? {
+                if !check_field_type_terminates(
+                    t,
+                    product_type,
+                    registry,
+                    dependencies,
+                    explore_status,
+                    path,
+                )? {
                     return Ok(false);
                 }
             }
@@ -187,21 +238,56 @@ fn check_field_type_terminates(
         }
 
         Map(key_type, val_type) => {
-            if !check_field_type_terminates(key_type, registry, exploration_status, path)? {
+            if !check_field_type_terminates(
+                key_type,
+                product_type,
+                registry,
+                dependencies,
+                explore_status,
+                path,
+            )? {
                 return Ok(false);
             }
-            check_field_type_terminates(val_type, registry, exploration_status, path)
+            check_field_type_terminates(
+                val_type,
+                product_type,
+                registry,
+                dependencies,
+                explore_status,
+                path,
+            )
         }
 
         Closure(param_type, return_type) => {
-            if !check_field_type_terminates(param_type, registry, exploration_status, path)? {
+            if !check_field_type_terminates(
+                param_type,
+                product_type,
+                registry,
+                dependencies,
+                explore_status,
+                path,
+            )? {
                 return Ok(false);
             }
-            check_field_type_terminates(return_type, registry, exploration_status, path)
+            check_field_type_terminates(
+                return_type,
+                product_type,
+                registry,
+                dependencies,
+                explore_status,
+                path,
+            )
         }
 
         Questioned(inner_type) | Starred(inner_type) | Dollared(inner_type) => {
-            check_field_type_terminates(inner_type, registry, exploration_status, path)
+            check_field_type_terminates(
+                inner_type,
+                product_type,
+                registry,
+                dependencies,
+                explore_status,
+                path,
+            )
         }
 
         _ => Ok(true),
@@ -210,11 +296,12 @@ fn check_field_type_terminates(
 
 #[cfg(test)]
 mod adt_cycle_tests {
+    use crate::analyzer::hir::Identifier;
     use crate::analyzer::semantic_check::adt_check::adt_check;
     use crate::analyzer::types::TypeRegistry;
     use crate::parser::ast::{Field, Type};
     use crate::utils::span::{Span, Spanned};
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{BTreeMap, HashMap, HashSet};
 
     fn create_test_span() -> Span {
         Span::new("test".to_string(), 0..1)
@@ -222,8 +309,8 @@ mod adt_cycle_tests {
 
     // Helper to create a TypeRegistry with predefined types for testing
     fn setup_test_registry(
-        subtypes: HashMap<String, HashSet<String>>,
-        product_fields: HashMap<String, Vec<Field>>,
+        subtypes: BTreeMap<Identifier, HashSet<String>>,
+        product_fields: HashMap<Identifier, Vec<Field>>,
     ) -> TypeRegistry {
         // Populate spans for all mentioned types
         let mut spans = HashMap::new();
@@ -261,7 +348,7 @@ mod adt_cycle_tests {
             ],
         );
 
-        let mut subtypes = HashMap::new();
+        let mut subtypes = BTreeMap::new();
         subtypes.insert("Node".to_string(), HashSet::new());
 
         let registry = setup_test_registry(subtypes, product_fields);
@@ -278,7 +365,7 @@ mod adt_cycle_tests {
         //   | Cons(value: Int64, next: List)
 
         // Set up subtypes
-        let mut subtypes = HashMap::new();
+        let mut subtypes = BTreeMap::new();
         let mut list_variants = HashSet::new();
         list_variants.insert("Nil".to_string());
         list_variants.insert("Cons".to_string());
@@ -309,7 +396,7 @@ mod adt_cycle_tests {
         //   | ConsB(next: BadList)
 
         // Set up subtypes
-        let mut subtypes = HashMap::new();
+        let mut subtypes = BTreeMap::new();
         let mut bad_list_variants = HashSet::new();
         bad_list_variants.insert("ConsA".to_string());
         bad_list_variants.insert("ConsB".to_string());
@@ -354,7 +441,7 @@ mod adt_cycle_tests {
             vec![create_field("a", Type::Identifier("A".to_string()))],
         );
 
-        let mut subtypes = HashMap::new();
+        let mut subtypes = BTreeMap::new();
         subtypes.insert("A".to_string(), HashSet::new());
         subtypes.insert("B".to_string(), HashSet::new());
 
@@ -381,7 +468,7 @@ mod adt_cycle_tests {
             )],
         );
 
-        let mut subtypes = HashMap::new();
+        let mut subtypes = BTreeMap::new();
         subtypes.insert("Nested".to_string(), HashSet::new());
 
         let registry = setup_test_registry(subtypes, product_fields);
@@ -412,7 +499,7 @@ mod adt_cycle_tests {
             ],
         );
 
-        let mut subtypes = HashMap::new();
+        let mut subtypes = BTreeMap::new();
         subtypes.insert("Point".to_string(), HashSet::new());
         subtypes.insert("Rectangle".to_string(), HashSet::new());
 
@@ -442,7 +529,7 @@ mod adt_cycle_tests {
         //   \ Literal(value: Int64)  // Terminating variant
 
         // Set up the type hierarchy
-        let mut subtypes = HashMap::new();
+        let mut subtypes = BTreeMap::new();
 
         // Physical has 4 variants
         let mut physical_variants = HashSet::new();
@@ -560,7 +647,7 @@ mod adt_cycle_tests {
         //  \ Vla(a: List)
 
         // Set up type hierarchy
-        let mut subtypes = HashMap::new();
+        let mut subtypes = BTreeMap::new();
 
         // A has List as its only variant
         let mut a_variants = HashSet::new();
@@ -603,8 +690,8 @@ mod adt_cycle_tests {
         //   | Equals(left: Expr, right: Expr)
         //   | And(left: Predicate, right: Predicate)
 
-        // Set up type hierarchy
-        let mut subtypes = HashMap::new();
+        // Set up type h= BTreeMap::new();ierarchy
+        let mut subtypes = BTreeMap::new();
 
         // Expr variants
         let mut expr_variants = HashSet::new();
@@ -677,7 +764,7 @@ mod adt_cycle_tests {
         //     | C(a: A)
 
         // Set up type hierarchy
-        let mut subtypes = HashMap::new();
+        let mut subtypes = BTreeMap::new();
 
         // A has B as its only variant
         let mut a_variants = HashSet::new();
@@ -717,7 +804,7 @@ mod adt_cycle_tests {
 
         product_fields.insert("DuplicateField".to_string(), fields);
 
-        let mut subtypes = HashMap::new();
+        let mut subtypes = BTreeMap::new();
         subtypes.insert("DuplicateField".to_string(), HashSet::new());
 
         let registry = setup_test_registry(subtypes, product_fields);
@@ -740,7 +827,7 @@ mod adt_cycle_tests {
             )],
         );
 
-        let mut subtypes = HashMap::new();
+        let mut subtypes = BTreeMap::new();
         subtypes.insert("BadReference".to_string(), HashSet::new());
 
         let registry = setup_test_registry(subtypes, product_fields);
@@ -756,7 +843,7 @@ mod adt_cycle_tests {
         //   | VariantA(x: Int64, y: String)
         //   | VariantB(x: Int64, x: Bool)  // Duplicate field in this variant
 
-        let mut subtypes = HashMap::new();
+        let mut subtypes = BTreeMap::new();
         let mut complex_variants = HashSet::new();
         complex_variants.insert("VariantA".to_string());
         complex_variants.insert("VariantB".to_string());

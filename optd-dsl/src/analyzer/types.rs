@@ -2,6 +2,7 @@ use super::{error::AnalyzerErrorKind, hir::Identifier};
 use crate::parser::ast::{Adt, Field};
 use crate::utils::span::Span;
 use Adt::*;
+use std::collections::BTreeMap;
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
@@ -53,7 +54,8 @@ pub enum Type {
 #[derive(Debug, Clone, Default)]
 pub struct TypeRegistry {
     /// Maps ADT identifiers to their subtype identifiers.
-    pub subtypes: HashMap<Identifier, HashSet<Identifier>>,
+    /// We use a BTreeMap to ensure determinstic execution.
+    pub subtypes: BTreeMap<Identifier, HashSet<Identifier>>,
     /// Maps ADT identifiers to their source spans.
     pub spans: HashMap<Identifier, Span>,
     /// Maps terminal / product ADT identifiers to their AST fields.

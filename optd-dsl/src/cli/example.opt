@@ -92,6 +92,10 @@ data JoinType =
     | Full
     \ Semi
 
+data A = 
+    | B(a: B)
+    \ C(a: A)
+
 fn <K, V> map_get(map: {K: V}, key: K): V = None
 
 fn rewrite_column_refs(): V
