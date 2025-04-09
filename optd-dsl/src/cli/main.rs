@@ -85,9 +85,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Read the source file.
             let source = read_file(input)?;
+            let source_path = input.to_string_lossy().to_string();
 
             let options = CompileOptions {
-                source_path: input.to_string_lossy().to_string(),
+                source_path: source_path.clone(),
             };
 
             // Step 1: Parse the source to AST.
@@ -143,7 +144,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Performing ADT checking...");
             }
 
-            match adt_check(&source, &type_registry) {
+            match adt_check(&source, &source_path, &type_registry) {
                 Ok(_) => {
                     if *verbose {
                         println!("✅ ADT checking successful!");

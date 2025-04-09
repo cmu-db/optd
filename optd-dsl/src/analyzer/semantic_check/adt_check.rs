@@ -1,12 +1,15 @@
 use super::cycle_detect::CycleDetector;
 use crate::{
-    analyzer::{error::AnalyzerErrorKind, types::TypeRegistry},
+    analyzer::{
+        error::AnalyzerErrorKind,
+        types::{CORE_TYPES, TypeRegistry},
+    },
     utils::span::Span,
 };
 use std::collections::HashMap;
 
-/// Checks that ADTs (Algebraic Data Types) are well-formed
-pub fn adt_check(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
+/// Checks that ADTs (Algebraic Data Types) are well-formed.
+pub fn adt_check(registry: &TypeRegistry, src_path: &str) -> Result<(), AnalyzerErrorKind> {
     // First, check if types correctly reference each other and do not
     // create any infinite recursive cycles.
     let mut detector = CycleDetector::new(registry);
@@ -30,6 +33,16 @@ pub fn adt_check(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
 
     // Second, check for duplicate fields in product types.
     check_duplicate_fields(registry)?;
+
+    // Third, check if the core types are defined.
+    for core_type in CORE_TYPES {
+        if !registry.subtypes.contains_key(core_type) {
+            return Err(AnalyzerErrorKind::MissingCoreType {
+                name: core_type.to_string(),
+                src_path: src_path.to_string(),
+            });
+        }
+    }
 
     Ok(())
 }
@@ -115,7 +128,7 @@ mod adt_cycle_tests {
         subtypes.insert("Node".to_string(), HashSet::new());
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry);
+        let result = adt_check(&registry, "");
 
         assert!(result.is_err());
     }
@@ -146,7 +159,7 @@ mod adt_cycle_tests {
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry);
+        let result = adt_check(&registry, "");
 
         assert!(result.is_ok());
     }
@@ -183,7 +196,7 @@ mod adt_cycle_tests {
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry);
+        let result = adt_check(&registry, "");
 
         assert!(result.is_err());
     }
@@ -209,7 +222,7 @@ mod adt_cycle_tests {
         subtypes.insert("B".to_string(), HashSet::new());
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry);
+        let result = adt_check(&registry, "");
 
         assert!(result.is_err());
     }
@@ -235,7 +248,7 @@ mod adt_cycle_tests {
         subtypes.insert("Nested".to_string(), HashSet::new());
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry);
+        let result = adt_check(&registry, "");
 
         assert!(result.is_err());
     }
@@ -267,7 +280,7 @@ mod adt_cycle_tests {
         subtypes.insert("Rectangle".to_string(), HashSet::new());
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry);
+        let result = adt_check(&registry, "");
 
         assert!(result.is_ok());
     }
@@ -395,7 +408,7 @@ mod adt_cycle_tests {
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry);
+        let result = adt_check(&registry, "");
 
         assert!(result.is_ok()); // Valid because Scan is a terminating variant
     }
@@ -435,7 +448,7 @@ mod adt_cycle_tests {
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry);
+        let result = adt_check(&registry, "");
 
         assert!(result.is_err()); // Should detect the cycle
     }
@@ -513,7 +526,7 @@ mod adt_cycle_tests {
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry);
+        let result = adt_check(&registry, "");
 
         assert!(result.is_ok()); // Valid because Literal is a terminating variant for Expr
     }
@@ -549,7 +562,7 @@ mod adt_cycle_tests {
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry);
+        let result = adt_check(&registry, "");
 
         assert!(result.is_err()); // Should detect the cycle and fail
     }
@@ -571,7 +584,7 @@ mod adt_cycle_tests {
         subtypes.insert("DuplicateField".to_string(), HashSet::new());
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry);
+        let result = adt_check(&registry, "");
 
         assert!(result.is_err());
     }
@@ -594,7 +607,7 @@ mod adt_cycle_tests {
         subtypes.insert("BadReference".to_string(), HashSet::new());
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry);
+        let result = adt_check(&registry, "");
 
         assert!(result.is_err());
     }
@@ -630,7 +643,7 @@ mod adt_cycle_tests {
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry);
+        let result = adt_check(&registry, "");
 
         assert!(result.is_err());
     }

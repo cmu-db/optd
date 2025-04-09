@@ -8,9 +8,13 @@ use std::{
     hash::Hash,
 };
 
-// Protected type constants.
+// Core type constants.
 pub const LOGICAL_TYPE: &str = "Logical";
 pub const PHYSICAL_TYPE: &str = "Physical";
+pub const LOGICAL_PROPS: &str = "LogicalProperties";
+pub const PHYSICAL_PROPS: &str = "PhysicalProperties";
+
+pub const CORE_TYPES: [&str; 4] = [LOGICAL_TYPE, PHYSICAL_TYPE, LOGICAL_PROPS, PHYSICAL_PROPS];
 
 /// Represents types in the language.
 ///

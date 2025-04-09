@@ -74,6 +74,14 @@ pub enum AnalyzerErrorKind {
         /// Span of the undefined type
         span: Span,
     },
+
+    /// Error for a missing core type
+    MissingCoreType {
+        /// Name of the missing core type
+        name: String,
+        /// The source path file of the module
+        src_path: String,
+    },
 }
 
 impl AnalyzerErrorKind {
@@ -115,6 +123,11 @@ impl AnalyzerErrorKind {
     /// Creates a new error for an undefined type
     pub fn new_undefined_type(name: String, span: Span) -> Self {
         Self::UndefinedType { name, span }
+    }
+
+    /// Creates a new error for a missing core type
+    pub fn new_missing_core_type(name: String, src_path: String) -> Self {
+        Self::MissingCoreType { name, src_path }
     }
 }
 
@@ -170,6 +183,9 @@ impl Diagnose for Box<AnalyzerError> {
                 "Undefined type reference",
                 "Make sure the type is declared before use",
             ),
+            MissingCoreType { name, src_path } => {
+                self.build_missing_core_type_report(name, src_path)
+            }
         }
     }
 
@@ -181,8 +197,9 @@ impl Diagnose for Box<AnalyzerError> {
             DuplicateIdentifier { duplicate_span, .. } => duplicate_span,
             IncompleteFunction { span, .. } => span,
             InvalidReference { span, .. } => span,
-            CyclicAdt { path } => &path[0].span, // Use the first span in the cycle path
+            CyclicAdt { path } => &path[0].span,
             UndefinedType { span, .. } => span,
+            MissingCoreType { src_path, .. } => &Span::new(src_path.to_string(), 0..0),
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))
@@ -286,6 +303,22 @@ impl AnalyzerError {
         report
             .with_help("Break this cycle by introducing a layer of indirection or refactoring the type structure")
             .with_note("This would cause infinite recursion")
+            .finish()
+    }
+
+    /// Helper method to build a more informative report for missing core types
+    fn build_missing_core_type_report(&self, name: &str, src_path: &str) -> Report<Span> {
+        // Create a span at the beginning of the file
+        let span = Span::new(src_path.to_string(), 0..0);
+
+        Report::build(ReportKind::Error, span.clone())
+            .with_message(format!("Missing required core type: '{}'", name))
+            .with_label(
+                Label::new(span.clone())
+                    .with_color(Color::Red),
+            )
+            .with_help(format!("Add a definition for the '{}' type in your module", name))
+            .with_note(format!("Core types must be defined for the language to function correctly. '{}' is a fundamental type needed by the compiler.", name))
             .finish()
     }
 }

@@ -74,8 +74,12 @@ pub fn scope_check(source: &str, hir: &HIR<TypedSpan>) -> Result<(), CompileErro
 /// - Checks for circular ADT definitions that would cause infinite recursion
 /// - Checks for duplicate field names within product types
 /// - Verifies that all referenced types exist in the registry
-pub fn adt_check(source: &str, registry: &TypeRegistry) -> Result<(), CompileError> {
-    adt_check::adt_check(registry).map_err(|err_kind| {
+pub fn adt_check(
+    source: &str,
+    source_path: &str,
+    registry: &TypeRegistry,
+) -> Result<(), CompileError> {
+    adt_check::adt_check(registry, source_path).map_err(|err_kind| {
         CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), err_kind))
     })
 }
