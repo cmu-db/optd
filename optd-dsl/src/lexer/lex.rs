@@ -58,6 +58,7 @@ fn lexer() -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char, Span>> 
         ("then", Token::Then),
         ("else", Token::Else),
         ("fail", Token::Fail),
+        ("none", Token::None),
     ]);
 
     let ident = ident().map(move |ident: String| {
