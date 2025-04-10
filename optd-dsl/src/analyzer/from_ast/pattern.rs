@@ -63,7 +63,7 @@ impl ASTConverter {
                 if !self.type_registry.subtypes.contains_key(&*name.value) {
                     return Err(AnalyzerErrorKind::new_undefined_type(
                         &name.value,
-                        &spanned_pattern.span,
+                        &name.span,
                     ));
                 }
 
