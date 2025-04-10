@@ -36,18 +36,19 @@ pub enum AnalyzerErrorKind {
         duplicate_span: Span,
     },
 
-    /// Specifically: no receiver and no arguments, but got accepted by the parser.
+    // Specifically: no receiver and no arguments,
+    // but got accepted by the parser.
     IncompleteFunction {
         name: String,
         span: Span,
     },
 
-    InvalidReference {
+    UndefinedReference {
         name: String,
         span: Span,
     },
 
-    CyclicAdt {
+    CyclicType {
         path: Vec<Spanned<Identifier>>,
     },
 
@@ -104,16 +105,16 @@ impl AnalyzerErrorKind {
         .into()
     }
 
-    pub fn new_invalid_reference(name: &str, span: &Span) -> Box<Self> {
-        Self::InvalidReference {
+    pub fn new_undefined_reference(name: &str, span: &Span) -> Box<Self> {
+        Self::UndefinedReference {
             name: name.to_string(),
             span: span.clone(),
         }
         .into()
     }
 
-    pub fn new_cyclic_adt(path: &[Spanned<Identifier>]) -> Box<Self> {
-        Self::CyclicAdt {
+    pub fn new_cyclic_type(path: &[Spanned<Identifier>]) -> Box<Self> {
+        Self::CyclicType {
             path: path.to_vec(),
         }
         .into()
@@ -194,13 +195,13 @@ impl Diagnose for Box<AnalyzerError> {
                 .with_help("Add at least one parameter or a receiver to this function")
                 .with_note("Functions without parameters are not supported in this language")
                 .finish(),
-            InvalidReference { name, span } => self.build_single_span_report(
+            UndefinedReference { name, span } => self.build_single_span_report(
                 span,
-                &format!("Invalid reference to undefined identifier: '{}'", name),
+                &format!("Undefined reference to: '{}'", name),
                 &format!("'{}' is not defined in this scope", name),
                 "Make sure the variable is declared before use or check for typos in the name",
             ),
-            CyclicAdt { path } => self.build_cyclic_adt_report(path),
+            CyclicType { path } => self.build_cyclic_type_report(path),
             UndefinedType { name, span } => self.build_single_span_report(
                 span,
                 &format!("Undefined type: '{}'", name),
@@ -239,8 +240,8 @@ impl Diagnose for Box<AnalyzerError> {
             DuplicateAdt { duplicate_span, .. } => duplicate_span,
             DuplicateIdentifier { duplicate_span, .. } => duplicate_span,
             IncompleteFunction { span, .. } => span,
-            InvalidReference { span, .. } => span,
-            CyclicAdt { path } => &path[0].span,
+            UndefinedReference { span, .. } => span,
+            CyclicType { path } => &path[0].span,
             UndefinedType { span, .. } => span,
             MissingCoreType { src_path, .. } => &Span::new(src_path.to_string(), 0..0),
             InvalidType { span, .. } => span,
@@ -298,7 +299,7 @@ impl AnalyzerError {
     }
 
     /// Helper method to build a report for cyclic ADT definitions
-    fn build_cyclic_adt_report(&self, path: &[Spanned<Identifier>]) -> Report<Span> {
+    fn build_cyclic_type_report(&self, path: &[Spanned<Identifier>]) -> Report<Span> {
         let cycle_start = &path[0];
         let mut report = Report::build(ReportKind::Error, cycle_start.span.clone()).with_message(
             format!("Cyclic type definition detected: '{}'", cycle_start.value),

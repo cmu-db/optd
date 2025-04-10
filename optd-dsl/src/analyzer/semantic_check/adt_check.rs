@@ -24,7 +24,7 @@ pub fn adt_check(registry: &TypeRegistry, src_path: &str) -> Result<(), Box<Anal
             // the previous occurrence of that element in the path, which indicates
             // the point at which it started being explored.
             if let Some(cycle_start_idx) = detector.find_cycle_start_index() {
-                return Err(AnalyzerErrorKind::new_cyclic_adt(
+                return Err(AnalyzerErrorKind::new_cyclic_type(
                     &detector.path[cycle_start_idx..],
                 ));
             }

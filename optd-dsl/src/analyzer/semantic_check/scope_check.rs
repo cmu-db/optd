@@ -117,7 +117,7 @@ fn check_expr(
         Ref(name) => {
             // Verify variable references exist.
             if ctx.lookup(name).is_none() {
-                return Err(AnalyzerErrorKind::new_invalid_reference(name, span));
+                return Err(AnalyzerErrorKind::new_undefined_reference(name, span));
             }
         }
         FieldAccess(obj, _) => check_expr(obj, ctx)?,
@@ -258,7 +258,7 @@ mod scope_check_tests {
         );
         assert!(matches!(
             result,
-            Err(err) if matches!(*err, AnalyzerErrorKind::InvalidReference { ref name, .. } if name == "undefined")
+            Err(err) if matches!(*err, AnalyzerErrorKind::UndefinedReference { ref name, .. } if name == "undefined")
         ));
     }
 
