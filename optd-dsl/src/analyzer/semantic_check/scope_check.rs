@@ -117,10 +117,7 @@ fn check_expr(
         Ref(name) => {
             // Verify variable references exist.
             if ctx.lookup(name).is_none() {
-                return Err(AnalyzerErrorKind::new_invalid_reference(
-                    name.to_string(),
-                    span.clone(),
-                ));
+                return Err(AnalyzerErrorKind::new_invalid_reference(name, span));
             }
         }
         FieldAccess(obj, _) => check_expr(obj, ctx)?,

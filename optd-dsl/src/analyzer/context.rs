@@ -156,9 +156,9 @@ impl Context<TypedSpan> {
         if let Some(existing_val) = self.current_scope.get(&name) {
             // We found an existing binding, so return an error
             Err(AnalyzerErrorKind::new_duplicate_identifier(
-                name,
-                existing_val.metadata.span.clone(),
-                val.metadata.span,
+                &name,
+                &existing_val.metadata.span,
+                &val.metadata.span,
             ))
         } else {
             // No existing binding, so insert the new one

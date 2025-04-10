@@ -78,10 +78,7 @@ impl ASTConverter {
 
         // Reject functions without parameters.
         if func.receiver.is_none() && func.params.is_none() {
-            return Err(AnalyzerErrorKind::new_incomplete_function(
-                name.clone(),
-                fn_span,
-            ));
+            return Err(AnalyzerErrorKind::new_incomplete_function(name, &fn_span));
         }
 
         // Register the function in the context, while checking for duplicates.
@@ -174,7 +171,7 @@ mod converter_tests {
     use super::*;
     use crate::analyzer::hir::{CoreData, FunKind};
     use crate::analyzer::types::Type;
-    use crate::parser::ast::{self, Function, Item, Module};
+    use crate::parser::ast::{self, Function, Item, Module, Type as AstType};
     use crate::utils::span::{Span, Spanned};
     use std::collections::HashSet;
 
@@ -191,7 +188,7 @@ mod converter_tests {
         // Create a simple function with Int64 parameter and return type
         let field = spanned(ast::Field {
             name: spanned(String::from("param")),
-            ty: spanned(ast::Type::Int64),
+            ty: spanned(AstType::Int64),
         });
 
         let body = if has_body {
@@ -205,7 +202,7 @@ mod converter_tests {
             type_params: Vec::new(),
             receiver: None,
             params: Some(vec![field]),
-            return_type: spanned(ast::Type::Int64),
+            return_type: spanned(AstType::Int64),
             body,
             annotations: Vec::new(),
         })
@@ -231,7 +228,7 @@ mod converter_tests {
             type_params: Vec::new(),
             receiver: None,
             params: None,
-            return_type: spanned(ast::Type::Int64),
+            return_type: spanned(AstType::Int64),
             body: Some(spanned(ast::Expr::Literal(ast::Literal::Int64(42)))),
             annotations: Vec::new(),
         })
@@ -241,7 +238,7 @@ mod converter_tests {
         // Create a method with a receiver parameter
         let receiver = spanned(ast::Field {
             name: spanned(String::from("self")),
-            ty: spanned(ast::Type::Identifier(String::from("MyType"))),
+            ty: spanned(AstType::Identifier(String::from("MyType"))),
         });
 
         spanned(Function {
@@ -249,7 +246,7 @@ mod converter_tests {
             type_params: Vec::new(),
             receiver: Some(receiver),
             params: None,
-            return_type: spanned(ast::Type::Int64),
+            return_type: spanned(AstType::Int64),
             body: Some(spanned(ast::Expr::Literal(ast::Literal::Int64(42)))),
             annotations: Vec::new(),
         })
@@ -397,7 +394,7 @@ mod converter_tests {
         let mut func = (*func_with_receiver.value).clone();
         let field = spanned(ast::Field {
             name: spanned(String::from("extra_param")),
-            ty: spanned(ast::Type::Bool),
+            ty: spanned(AstType::Bool),
         });
         func.params = Some(vec![field]);
         let func = spanned(func);
@@ -434,7 +431,7 @@ mod converter_tests {
         func_val.type_params = vec![spanned(String::from("T")), spanned(String::from("U"))];
 
         // Modify the return type to use a generic
-        func_val.return_type = spanned(ast::Type::Identifier(String::from("T")));
+        func_val.return_type = spanned(AstType::Identifier(String::from("T")));
 
         let func = spanned(func_val);
         let module = create_module_with_functions(vec![func]);

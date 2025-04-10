@@ -92,9 +92,9 @@ impl TypeRegistry {
                 // Check for duplicate ADT names.
                 if let Some(existing_span) = self.spans.get(&type_name) {
                     return Err(AnalyzerErrorKind::new_duplicate_adt(
-                        type_name,
-                        existing_span.clone(),
-                        name.span.clone(),
+                        &type_name,
+                        existing_span,
+                        &name.span,
                     ));
                 }
 
@@ -115,9 +115,9 @@ impl TypeRegistry {
                 // Check for duplicate ADT names.
                 if let Some(existing_span) = self.spans.get(&enum_name) {
                     return Err(AnalyzerErrorKind::new_duplicate_adt(
-                        enum_name,
-                        existing_span.clone(),
-                        name.clone().span,
+                        &enum_name,
+                        existing_span,
+                        &name.span,
                     ));
                 }
 

@@ -2,8 +2,10 @@ use super::cycle_detect::CycleDetector;
 use crate::{
     analyzer::{
         error::AnalyzerErrorKind,
-        types::{CORE_TYPES, TypeRegistry},
+        hir::Identifier,
+        types::{CORE_TYPES, LOGICAL_TYPE, PHYSICAL_TYPE, Type, TypeRegistry},
     },
+    parser::ast::Type as AstType,
     utils::span::Span,
 };
 use std::collections::HashMap;
@@ -31,38 +33,40 @@ pub fn adt_check(registry: &TypeRegistry, src_path: &str) -> Result<(), Analyzer
         detector.reset();
     }
 
-    // Second, check for duplicate fields in product types.
-    check_duplicate_fields(registry)?;
+    // Second, check if the core types are defined, and are root types.
+    validate_core_types(registry, src_path)?;
 
-    // Third, check if the core types are defined.
+    // Finally, check if all fields are valid:
+    // - No costed or stored types.
+    // - Only logical types may contain logical children.
+    // - Only physical types may contain physical children.
+    // In fields:
+    // - Logical types may only appear as [Logical] or Logical.
+    // - Physical types may only appear as [Physical] or Physical.
+    check_product_fields(registry)
+}
+
+/// Validates that core types are defined and are root types (not inherited by any other type).
+fn validate_core_types(registry: &TypeRegistry, src_path: &str) -> Result<(), AnalyzerErrorKind> {
+    // First check if all core types are defined.
     for core_type in CORE_TYPES {
         if !registry.subtypes.contains_key(core_type) {
-            return Err(AnalyzerErrorKind::MissingCoreType {
-                name: core_type.to_string(),
-                src_path: src_path.to_string(),
-            });
+            return Err(AnalyzerErrorKind::new_missing_core_type(
+                core_type, src_path,
+            ));
         }
     }
 
-    Ok(())
-}
-
-/// Checks for duplicate fields in product types
-fn check_duplicate_fields(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
-    for fields in registry.product_fields.values() {
-        let mut field_names: HashMap<_, Span> = HashMap::new();
-
-        for field in fields {
-            let field_name = field.name.value.as_str();
-
-            if let Some(first_span) = field_names.get(field_name) {
-                return Err(AnalyzerErrorKind::new_duplicate_identifier(
-                    field_name.to_string(),
-                    first_span.clone(),
-                    field.name.span.clone(),
+    // Then check that no core type is a child of another type.
+    for (parent, children) in registry.subtypes.iter() {
+        for core_type in CORE_TYPES {
+            if children.contains(core_type) {
+                return Err(AnalyzerErrorKind::new_invalid_inheritance(
+                    parent,
+                    registry.spans.get(parent).unwrap(),
+                    core_type,
+                    registry.spans.get(core_type).unwrap(),
                 ));
-            } else {
-                field_names.insert(field_name.to_string(), field.name.span.clone());
             }
         }
     }
@@ -70,12 +74,123 @@ fn check_duplicate_fields(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKi
     Ok(())
 }
 
+fn check_product_fields(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
+    for (adt_name, fields) in &registry.product_fields {
+        let mut field_names: HashMap<_, Span> = HashMap::new();
+
+        for field in fields {
+            let field_name = field.name.value.as_str();
+
+            if let Some(first_span) = field_names.get(field_name) {
+                return Err(AnalyzerErrorKind::new_duplicate_identifier(
+                    field_name,
+                    first_span,
+                    &field.name.span,
+                ));
+            } else {
+                field_names.insert(field_name.to_string(), field.name.span.clone());
+            }
+
+            check_type(
+                &field.ty.value,
+                &field.ty.span,
+                registry,
+                is_logical(adt_name, registry),
+                is_physical(adt_name, registry),
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn is_logical(ty: &Identifier, registry: &TypeRegistry) -> bool {
+    registry.is_subtype(&Type::Adt(ty.clone()), &Type::Adt(LOGICAL_TYPE.to_string()))
+}
+
+fn is_physical(ty: &Identifier, registry: &TypeRegistry) -> bool {
+    registry.is_subtype(
+        &Type::Adt(ty.clone()),
+        &Type::Adt(PHYSICAL_TYPE.to_string()),
+    )
+}
+
+fn valid_core_type(
+    ty: &Identifier,
+    span: &Span,
+    registry: &TypeRegistry,
+    allows_logical: bool,
+    allows_physical: bool,
+) -> Result<(), AnalyzerErrorKind> {
+    // Check if the type is logical but not allowed to be logical,
+    // or is physical but not allowed to be physical.
+    let invalid_logical = is_logical(ty, registry) && !allows_logical;
+    let invalid_physical = is_physical(ty, registry) && !allows_physical;
+
+    if invalid_logical || invalid_physical {
+        return Err(AnalyzerErrorKind::new_invalid_type(span));
+    }
+
+    Ok(())
+}
+
+fn check_type(
+    ty: &AstType,
+    span: &Span,
+    registry: &TypeRegistry,
+    allows_logical: bool,
+    allows_physical: bool,
+) -> Result<(), AnalyzerErrorKind> {
+    use AstType::*;
+
+    match ty {
+        Identifier(name) => valid_core_type(name, span, registry, allows_logical, allows_physical),
+
+        Array(elem_type) => match &*elem_type.value {
+            Identifier(name) => {
+                valid_core_type(name, span, registry, allows_logical, allows_physical)
+            }
+            _ => check_type(&elem_type.value, &elem_type.span, registry, false, false),
+        },
+
+        Tuple(types) => types
+            .iter()
+            .try_for_each(|elem| check_type(&elem.value, &elem.span, registry, false, false)),
+
+        Map(key_type, val_type) => {
+            check_type(&key_type.value, &key_type.span, registry, false, false)?;
+            check_type(&val_type.value, &val_type.span, registry, false, false)
+        }
+
+        Closure(param_type, ret_type) => {
+            check_type(&param_type.value, &param_type.span, registry, false, false)?;
+            check_type(&ret_type.value, &ret_type.span, registry, false, false)
+        }
+
+        Questioned(inner_type) => {
+            check_type(&inner_type.value, &inner_type.span, registry, false, false)
+        }
+
+        Dollared(_) => {
+            return Err(AnalyzerErrorKind::new_invalid_type(span));
+        }
+
+        Starred(_) => {
+            return Err(AnalyzerErrorKind::new_invalid_type(span));
+        }
+
+        _ => Ok(()), // Primitive types don't contain logical or physical.
+    }
+}
+
 #[cfg(test)]
-mod adt_cycle_tests {
+mod adt_validation_tests {
     use crate::analyzer::hir::Identifier;
     use crate::analyzer::semantic_check::adt_check::adt_check;
-    use crate::analyzer::types::TypeRegistry;
-    use crate::parser::ast::{Field, Type};
+    use crate::analyzer::types::{
+        LOGICAL_PROPS, LOGICAL_TYPE, PHYSICAL_PROPS, PHYSICAL_TYPE, TypeRegistry,
+    };
+    use crate::parser::ast::{Field, Type as AstType};
     use crate::utils::span::{Span, Spanned};
     use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -105,30 +220,48 @@ mod adt_cycle_tests {
     }
 
     // Helper to create an AdtField
-    fn create_field(name: &str, ty: Type) -> Field {
+    fn create_field(name: &str, ty: AstType) -> Field {
         Field {
             name: Spanned::new(name.to_string(), create_test_span()),
             ty: Spanned::new(ty, create_test_span()),
         }
     }
 
+    // Helper to create a registry with all core types defined
+    fn create_core_registry() -> (
+        BTreeMap<Identifier, HashSet<String>>,
+        HashMap<Identifier, Vec<Field>>,
+    ) {
+        let mut subtypes = BTreeMap::new();
+
+        // Define the core types
+        subtypes.insert(LOGICAL_TYPE.to_string(), HashSet::new());
+        subtypes.insert(PHYSICAL_TYPE.to_string(), HashSet::new());
+        subtypes.insert(LOGICAL_PROPS.to_string(), HashSet::new());
+        subtypes.insert(PHYSICAL_PROPS.to_string(), HashSet::new());
+
+        let product_fields = HashMap::new();
+
+        (subtypes, product_fields)
+    }
+
     #[test]
     fn test_direct_recursion_in_product() {
         // Test a direct recursive product type: type Node(value: Int64, next: Node)
-        let mut product_fields = HashMap::new();
+        let (mut subtypes, mut product_fields) = create_core_registry();
+
+        subtypes.insert("Node".to_string(), HashSet::new());
+
         product_fields.insert(
             "Node".to_string(),
             vec![
-                create_field("value", Type::Int64),
-                create_field("next", Type::Identifier("Node".to_string())),
+                create_field("value", AstType::Int64),
+                create_field("next", AstType::Identifier("Node".to_string())),
             ],
         );
 
-        let mut subtypes = BTreeMap::new();
-        subtypes.insert("Node".to_string(), HashSet::new());
-
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry, "");
+        let result = adt_check(&registry, "test.opt");
 
         assert!(result.is_err());
     }
@@ -138,28 +271,27 @@ mod adt_cycle_tests {
         // Test a valid recursive sum type with a base case:
         // type List =
         //   | Nil
-        //   | Cons(value: Int64, next: List)
+        //   \ Cons(value: Int64, next: List)
+        let (mut subtypes, mut product_fields) = create_core_registry();
 
         // Set up subtypes
-        let mut subtypes = BTreeMap::new();
         let mut list_variants = HashSet::new();
         list_variants.insert("Nil".to_string());
         list_variants.insert("Cons".to_string());
         subtypes.insert("List".to_string(), list_variants);
 
         // Set up fields
-        let mut product_fields = HashMap::new();
         product_fields.insert("Nil".to_string(), vec![]);
         product_fields.insert(
             "Cons".to_string(),
             vec![
-                create_field("value", Type::Int64),
-                create_field("next", Type::Identifier("List".to_string())),
+                create_field("value", AstType::Int64),
+                create_field("next", AstType::Identifier("List".to_string())),
             ],
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry, "");
+        let result = adt_check(&registry, "test.opt");
 
         assert!(result.is_ok());
     }
@@ -169,34 +301,33 @@ mod adt_cycle_tests {
         // Test an invalid recursive sum type without a base case:
         // type BadList =
         //   | ConsA(next: BadList)
-        //   | ConsB(next: BadList)
+        //   \ ConsB(next: BadList)
+        let (mut subtypes, mut product_fields) = create_core_registry();
 
         // Set up subtypes
-        let mut subtypes = BTreeMap::new();
         let mut bad_list_variants = HashSet::new();
         bad_list_variants.insert("ConsA".to_string());
         bad_list_variants.insert("ConsB".to_string());
         subtypes.insert("BadList".to_string(), bad_list_variants);
 
         // Set up fields
-        let mut product_fields = HashMap::new();
         product_fields.insert(
             "ConsA".to_string(),
             vec![create_field(
                 "next",
-                Type::Identifier("BadList".to_string()),
+                AstType::Identifier("BadList".to_string()),
             )],
         );
         product_fields.insert(
             "ConsB".to_string(),
             vec![create_field(
                 "next",
-                Type::Identifier("BadList".to_string()),
+                AstType::Identifier("BadList".to_string()),
             )],
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry, "");
+        let result = adt_check(&registry, "test.opt");
 
         assert!(result.is_err());
     }
@@ -206,23 +337,22 @@ mod adt_cycle_tests {
         // Test indirect recursion:
         // type A(b: B)
         // type B(a: A)
+        let (mut subtypes, mut product_fields) = create_core_registry();
 
-        let mut product_fields = HashMap::new();
-        product_fields.insert(
-            "A".to_string(),
-            vec![create_field("b", Type::Identifier("B".to_string()))],
-        );
-        product_fields.insert(
-            "B".to_string(),
-            vec![create_field("a", Type::Identifier("A".to_string()))],
-        );
-
-        let mut subtypes = BTreeMap::new();
         subtypes.insert("A".to_string(), HashSet::new());
         subtypes.insert("B".to_string(), HashSet::new());
 
+        product_fields.insert(
+            "A".to_string(),
+            vec![create_field("b", AstType::Identifier("B".to_string()))],
+        );
+        product_fields.insert(
+            "B".to_string(),
+            vec![create_field("a", AstType::Identifier("A".to_string()))],
+        );
+
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry, "");
+        let result = adt_check(&registry, "test.opt");
 
         assert!(result.is_err());
     }
@@ -231,24 +361,23 @@ mod adt_cycle_tests {
     fn test_nested_type_recursion() {
         // Test recursion in nested types:
         // type Nested(arr: Array[Nested])
+        let (mut subtypes, mut product_fields) = create_core_registry();
 
-        let mut product_fields = HashMap::new();
+        subtypes.insert("Nested".to_string(), HashSet::new());
+
         product_fields.insert(
             "Nested".to_string(),
             vec![create_field(
                 "arr",
-                Type::Array(Spanned::new(
-                    Type::Identifier("Nested".to_string()),
+                AstType::Array(Spanned::new(
+                    AstType::Identifier("Nested".to_string()),
                     create_test_span(),
                 )),
             )],
         );
 
-        let mut subtypes = BTreeMap::new();
-        subtypes.insert("Nested".to_string(), HashSet::new());
-
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry, "");
+        let result = adt_check(&registry, "test.opt");
 
         assert!(result.is_err());
     }
@@ -258,159 +387,30 @@ mod adt_cycle_tests {
         // Test non-recursive types:
         // type Point(x: Int64, y: Int64)
         // type Rectangle(topLeft: Point, bottomRight: Point)
+        let (mut subtypes, mut product_fields) = create_core_registry();
 
-        let mut product_fields = HashMap::new();
+        subtypes.insert("Point".to_string(), HashSet::new());
+        subtypes.insert("Rectangle".to_string(), HashSet::new());
+
         product_fields.insert(
             "Point".to_string(),
             vec![
-                create_field("x", Type::Int64),
-                create_field("y", Type::Int64),
+                create_field("x", AstType::Int64),
+                create_field("y", AstType::Int64),
             ],
         );
         product_fields.insert(
             "Rectangle".to_string(),
             vec![
-                create_field("topLeft", Type::Identifier("Point".to_string())),
-                create_field("bottomRight", Type::Identifier("Point".to_string())),
+                create_field("topLeft", AstType::Identifier("Point".to_string())),
+                create_field("bottomRight", AstType::Identifier("Point".to_string())),
             ],
         );
 
-        let mut subtypes = BTreeMap::new();
-        subtypes.insert("Point".to_string(), HashSet::new());
-        subtypes.insert("Rectangle".to_string(), HashSet::new());
-
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry, "");
+        let result = adt_check(&registry, "test.opt");
 
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_multi_level_nested_adt() {
-        // This test replicates a complex multi-level ADT structure similar to:
-        //
-        // type Physical =
-        //   | Scan(table_name: String)  // Terminating variant
-        //   | PhysFilter(child: Physical, cond: Predicate)
-        //   | PhysProject(child: Physical, exprs: [Scalar])
-        //   \ PhysJoin =
-        //       | HashJoin(build_side: Physical, probe_side: Physical, typ: String, cond: Predicate)
-        //       | MergeJoin(left: Physical, right: Physical, typ: String, cond: Predicate)
-        //       \ NestedLoopJoin(outer: Physical, inner: Physical, typ: String, cond: Predicate)
-        //
-        // type Predicate =
-        //   \ Equals(left: Scalar, right: Scalar)  // Terminating variant
-        //
-        // type Scalar =
-        //   \ Literal(value: Int64)  // Terminating variant
-
-        // Set up the type hierarchy
-        let mut subtypes = BTreeMap::new();
-
-        // Physical has 4 variants
-        let mut physical_variants = HashSet::new();
-        physical_variants.insert("Scan".to_string());
-        physical_variants.insert("PhysFilter".to_string());
-        physical_variants.insert("PhysProject".to_string());
-        physical_variants.insert("PhysJoin".to_string());
-        subtypes.insert("Physical".to_string(), physical_variants);
-
-        // PhysJoin has 3 variants
-        let mut phys_join_variants = HashSet::new();
-        phys_join_variants.insert("HashJoin".to_string());
-        phys_join_variants.insert("MergeJoin".to_string());
-        phys_join_variants.insert("NestedLoopJoin".to_string());
-        subtypes.insert("PhysJoin".to_string(), phys_join_variants);
-
-        // Set up basic types for Predicate and Scalar
-        let mut predicate_variants = HashSet::new();
-        predicate_variants.insert("Equals".to_string());
-        subtypes.insert("Predicate".to_string(), predicate_variants);
-
-        let mut scalar_variants = HashSet::new();
-        scalar_variants.insert("Literal".to_string());
-        subtypes.insert("Scalar".to_string(), scalar_variants);
-
-        // Set up the field definitions
-        let mut product_fields = HashMap::new();
-
-        // Terminating variants
-        product_fields.insert(
-            "Scan".to_string(),
-            vec![create_field("table_name", Type::String)],
-        );
-
-        product_fields.insert(
-            "Literal".to_string(),
-            vec![create_field("value", Type::Int64)],
-        );
-
-        product_fields.insert(
-            "Equals".to_string(),
-            vec![
-                create_field("left", Type::Identifier("Scalar".to_string())),
-                create_field("right", Type::Identifier("Scalar".to_string())),
-            ],
-        );
-
-        // Recursive variants
-        product_fields.insert(
-            "PhysFilter".to_string(),
-            vec![
-                create_field("child", Type::Identifier("Physical".to_string())),
-                create_field("cond", Type::Identifier("Predicate".to_string())),
-            ],
-        );
-
-        product_fields.insert(
-            "PhysProject".to_string(),
-            vec![
-                create_field("child", Type::Identifier("Physical".to_string())),
-                create_field(
-                    "exprs",
-                    Type::Array(Spanned::new(
-                        Type::Identifier("Scalar".to_string()),
-                        create_test_span(),
-                    )),
-                ),
-            ],
-        );
-
-        // PhysJoin variants
-        product_fields.insert(
-            "HashJoin".to_string(),
-            vec![
-                create_field("build_side", Type::Identifier("Physical".to_string())),
-                create_field("probe_side", Type::Identifier("Physical".to_string())),
-                create_field("typ", Type::String),
-                create_field("cond", Type::Identifier("Predicate".to_string())),
-            ],
-        );
-
-        product_fields.insert(
-            "MergeJoin".to_string(),
-            vec![
-                create_field("left", Type::Identifier("Physical".to_string())),
-                create_field("right", Type::Identifier("Physical".to_string())),
-                create_field("typ", Type::String),
-                create_field("cond", Type::Identifier("Predicate".to_string())),
-            ],
-        );
-
-        product_fields.insert(
-            "NestedLoopJoin".to_string(),
-            vec![
-                create_field("outer", Type::Identifier("Physical".to_string())),
-                create_field("inner", Type::Identifier("Physical".to_string())),
-                create_field("typ", Type::String),
-                create_field("cond", Type::Identifier("Predicate".to_string())),
-            ],
-        );
-
-        let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry, "");
-
-        assert!(result.is_ok()); // Valid because Scan is a terminating variant
     }
 
     #[test]
@@ -418,12 +418,10 @@ mod adt_cycle_tests {
         // This test represents the structure:
         //
         // type A =
-        //  \ List =
-        //  | Bla(b: List)
-        //  \ Vla(a: List)
-
-        // Set up type hierarchy
-        let mut subtypes = BTreeMap::new();
+        //    \ List =
+        //      | Bla(b: List)
+        //      \ Vla(a: List)
+        let (mut subtypes, mut product_fields) = create_core_registry();
 
         // A has List as its only variant
         let mut a_variants = HashSet::new();
@@ -437,18 +435,17 @@ mod adt_cycle_tests {
         subtypes.insert("List".to_string(), list_variants);
 
         // Set up fields
-        let mut product_fields = HashMap::new();
         product_fields.insert(
             "Bla".to_string(),
-            vec![create_field("b", Type::Identifier("List".to_string()))],
+            vec![create_field("b", AstType::Identifier("List".to_string()))],
         );
         product_fields.insert(
             "Vla".to_string(),
-            vec![create_field("a", Type::Identifier("List".to_string()))],
+            vec![create_field("a", AstType::Identifier("List".to_string()))],
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry, "");
+        let result = adt_check(&registry, "test.opt");
 
         assert!(result.is_err()); // Should detect the cycle
     }
@@ -460,14 +457,12 @@ mod adt_cycle_tests {
         // type Expr =
         //   | Literal(value: Int64)
         //   | BinOp(left: Expr, right: Expr, op: String)
-        //   | Condition(cond: Predicate)
+        //   \ Condition(cond: Predicate)
         //
         // type Predicate =
         //   | Equals(left: Expr, right: Expr)
-        //   | And(left: Predicate, right: Predicate)
-
-        // Set up type h= BTreeMap::new();ierarchy
-        let mut subtypes = BTreeMap::new();
+        //   \ And(left: Predicate, right: Predicate)
+        let (mut subtypes, mut product_fields) = create_core_registry();
 
         // Expr variants
         let mut expr_variants = HashSet::new();
@@ -483,21 +478,19 @@ mod adt_cycle_tests {
         subtypes.insert("Predicate".to_string(), predicate_variants);
 
         // Set up fields
-        let mut product_fields = HashMap::new();
-
         // Terminating variant for Expr
         product_fields.insert(
             "Literal".to_string(),
-            vec![create_field("value", Type::Int64)],
+            vec![create_field("value", AstType::Int64)],
         );
 
         // Recursive variants
         product_fields.insert(
             "BinOp".to_string(),
             vec![
-                create_field("left", Type::Identifier("Expr".to_string())),
-                create_field("right", Type::Identifier("Expr".to_string())),
-                create_field("op", Type::String),
+                create_field("left", AstType::Identifier("Expr".to_string())),
+                create_field("right", AstType::Identifier("Expr".to_string())),
+                create_field("op", AstType::String),
             ],
         );
 
@@ -505,28 +498,28 @@ mod adt_cycle_tests {
             "Condition".to_string(),
             vec![create_field(
                 "cond",
-                Type::Identifier("Predicate".to_string()),
+                AstType::Identifier("Predicate".to_string()),
             )],
         );
 
         product_fields.insert(
             "Equals".to_string(),
             vec![
-                create_field("left", Type::Identifier("Expr".to_string())),
-                create_field("right", Type::Identifier("Expr".to_string())),
+                create_field("left", AstType::Identifier("Expr".to_string())),
+                create_field("right", AstType::Identifier("Expr".to_string())),
             ],
         );
 
         product_fields.insert(
             "And".to_string(),
             vec![
-                create_field("left", Type::Identifier("Predicate".to_string())),
-                create_field("right", Type::Identifier("Predicate".to_string())),
+                create_field("left", AstType::Identifier("Predicate".to_string())),
+                create_field("right", AstType::Identifier("Predicate".to_string())),
             ],
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry, "");
+        let result = adt_check(&registry, "test.opt");
 
         assert!(result.is_ok()); // Valid because Literal is a terminating variant for Expr
     }
@@ -536,11 +529,9 @@ mod adt_cycle_tests {
         // Test a structure with nested sum types where all paths lead to recursion:
         //
         // type A =
-        //   | B =
-        //     | C(a: A)
-
-        // Set up type hierarchy
-        let mut subtypes = BTreeMap::new();
+        //   \ B =
+        //     \ C(a: A)
+        let (mut subtypes, mut product_fields) = create_core_registry();
 
         // A has B as its only variant
         let mut a_variants = HashSet::new();
@@ -552,17 +543,14 @@ mod adt_cycle_tests {
         b_variants.insert("C".to_string());
         subtypes.insert("B".to_string(), b_variants);
 
-        // Set up fields
-        let mut product_fields = HashMap::new();
-
         // C references back to A, creating a cycle
         product_fields.insert(
             "C".to_string(),
-            vec![create_field("a", Type::Identifier("A".to_string()))],
+            vec![create_field("a", AstType::Identifier("A".to_string()))],
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry, "");
+        let result = adt_check(&registry, "test.opt");
 
         assert!(result.is_err()); // Should detect the cycle and fail
     }
@@ -571,20 +559,19 @@ mod adt_cycle_tests {
     fn test_duplicate_fields() {
         // Test a product type with duplicate field names:
         // type DuplicateField(x: Int64, x: String)
+        let (mut subtypes, mut product_fields) = create_core_registry();
 
-        let mut product_fields = HashMap::new();
+        subtypes.insert("DuplicateField".to_string(), HashSet::new());
+
         let fields = vec![
-            create_field("x", Type::Int64),
-            create_field("x", Type::String), // Duplicate field name
+            create_field("x", AstType::Int64),
+            create_field("x", AstType::String), // Duplicate field name
         ];
 
         product_fields.insert("DuplicateField".to_string(), fields);
 
-        let mut subtypes = BTreeMap::new();
-        subtypes.insert("DuplicateField".to_string(), HashSet::new());
-
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry, "");
+        let result = adt_check(&registry, "test.opt");
 
         assert!(result.is_err());
     }
@@ -593,21 +580,20 @@ mod adt_cycle_tests {
     fn test_undefined_type_reference() {
         // Test a product type that references an undefined type:
         // type BadReference(field: UndefinedType)
+        let (mut subtypes, mut product_fields) = create_core_registry();
 
-        let mut product_fields = HashMap::new();
+        subtypes.insert("BadReference".to_string(), HashSet::new());
+
         product_fields.insert(
             "BadReference".to_string(),
             vec![create_field(
                 "field",
-                Type::Identifier("UndefinedType".to_string()),
+                AstType::Identifier("UndefinedType".to_string()),
             )],
         );
 
-        let mut subtypes = BTreeMap::new();
-        subtypes.insert("BadReference".to_string(), HashSet::new());
-
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry, "");
+        let result = adt_check(&registry, "test.opt");
 
         assert!(result.is_err());
     }
@@ -617,34 +603,283 @@ mod adt_cycle_tests {
         // Test a more complex type with duplicate fields in nested structures
         // type Complex =
         //   | VariantA(x: Int64, y: String)
-        //   | VariantB(x: Int64, x: Bool)  // Duplicate field in this variant
+        //   \ VariantB(x: Int64, x: Bool)  // Duplicate field in this variant
+        let (mut subtypes, mut product_fields) = create_core_registry();
 
-        let mut subtypes = BTreeMap::new();
         let mut complex_variants = HashSet::new();
         complex_variants.insert("VariantA".to_string());
         complex_variants.insert("VariantB".to_string());
         subtypes.insert("Complex".to_string(), complex_variants);
 
-        let mut product_fields = HashMap::new();
         product_fields.insert(
             "VariantA".to_string(),
             vec![
-                create_field("x", Type::Int64),
-                create_field("y", Type::String),
+                create_field("x", AstType::Int64),
+                create_field("y", AstType::String),
             ],
         );
 
         product_fields.insert(
             "VariantB".to_string(),
             vec![
-                create_field("x", Type::Int64),
-                create_field("x", Type::Bool), // Duplicate field
+                create_field("x", AstType::Int64),
+                create_field("x", AstType::Bool), // Duplicate field
             ],
         );
 
         let registry = setup_test_registry(subtypes, product_fields);
-        let result = adt_check(&registry, "");
+        let result = adt_check(&registry, "test.opt");
 
+        assert!(result.is_err());
+    }
+
+    // New tests for core types and type validation
+
+    #[test]
+    fn test_missing_core_types() {
+        // Create a registry with no types
+        let subtypes = BTreeMap::new();
+        let product_fields = HashMap::new();
+
+        let registry = setup_test_registry(subtypes, product_fields);
+        let result = adt_check(&registry, "test.opt");
+
+        // Should fail because core types are missing
+        assert!(result.is_err());
+
+        // Create a registry with only some core types
+        let mut subtypes = BTreeMap::new();
+        subtypes.insert(LOGICAL_TYPE.to_string(), HashSet::new());
+        subtypes.insert(PHYSICAL_TYPE.to_string(), HashSet::new());
+        // Missing LOGICAL_PROPS and PHYSICAL_PROPS
+
+        let registry = setup_test_registry(subtypes, HashMap::new());
+        let result = adt_check(&registry, "test.opt");
+
+        // Should fail because some core types are missing
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_inheritance_of_core_types() {
+        // Create a registry where a type tries to inherit from a core type
+        let mut subtypes = BTreeMap::new();
+
+        // Define the core types
+        subtypes.insert(LOGICAL_TYPE.to_string(), HashSet::new());
+        subtypes.insert(PHYSICAL_TYPE.to_string(), HashSet::new());
+        subtypes.insert(LOGICAL_PROPS.to_string(), HashSet::new());
+        subtypes.insert(PHYSICAL_PROPS.to_string(), HashSet::new());
+
+        // Create a type that tries to have LOGICAL_TYPE as a child (invalid)
+        let mut invalid_parent_variants = HashSet::new();
+        invalid_parent_variants.insert(LOGICAL_TYPE.to_string());
+        subtypes.insert("InvalidParent".to_string(), invalid_parent_variants);
+
+        let registry = setup_test_registry(subtypes, HashMap::new());
+        let result = adt_check(&registry, "test.opt");
+
+        // Should fail because a type is trying to inherit from a core type
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_logical_and_physical_field_types() {
+        let (mut subtypes, mut product_fields) = create_core_registry();
+
+        // Create types inheriting from Logical
+        let mut logical_subtypes = HashSet::new();
+        logical_subtypes.insert("LogicalOperator".to_string());
+        logical_subtypes.insert("LogicalChild".to_string());
+        subtypes.insert(LOGICAL_TYPE.to_string(), logical_subtypes);
+
+        // Create types inheriting from Physical
+        let mut physical_subtypes = HashSet::new();
+        physical_subtypes.insert("PhysicalOperator".to_string());
+        physical_subtypes.insert("PhysicalChild".to_string());
+        subtypes.insert(PHYSICAL_TYPE.to_string(), physical_subtypes);
+
+        // Add empty subtypes entries for leaf types
+        subtypes.insert("LogicalOperator".to_string(), HashSet::new());
+        subtypes.insert("LogicalChild".to_string(), HashSet::new());
+        subtypes.insert("PhysicalOperator".to_string(), HashSet::new());
+        subtypes.insert("PhysicalChild".to_string(), HashSet::new());
+
+        // Valid: Logical operator with a different logical type field
+        product_fields.insert(
+            "LogicalOperator".to_string(),
+            vec![create_field(
+                "child",
+                AstType::Identifier("LogicalChild".to_string()),
+            )],
+        );
+
+        // Add fields for LogicalChild
+        product_fields.insert(
+            "LogicalChild".to_string(),
+            vec![create_field("value", AstType::Int64)],
+        );
+
+        // Valid: Physical operator with a different physical type field
+        product_fields.insert(
+            "PhysicalOperator".to_string(),
+            vec![create_field(
+                "child",
+                AstType::Identifier("PhysicalChild".to_string()),
+            )],
+        );
+
+        // Add fields for PhysicalChild
+        product_fields.insert(
+            "PhysicalChild".to_string(),
+            vec![create_field("value", AstType::Int64)],
+        );
+
+        let registry = setup_test_registry(subtypes, product_fields);
+        let result = adt_check(&registry, "test.opt");
+
+        // Should pass because types are used correctly
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_invalid_logical_in_non_logical_parent() {
+        let (mut subtypes, mut product_fields) = create_core_registry();
+
+        // Add a regular type (not inheriting from Logical or Physical)
+        subtypes.insert("RegularType".to_string(), HashSet::new());
+
+        // Invalid: Regular type with logical field
+        product_fields.insert(
+            "RegularType".to_string(),
+            vec![create_field(
+                "child",
+                AstType::Identifier(LOGICAL_TYPE.to_string()),
+            )],
+        );
+
+        let registry = setup_test_registry(subtypes, product_fields);
+        let result = adt_check(&registry, "test.opt");
+
+        // Should fail because a regular type cannot contain a logical field
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_physical_in_non_physical_parent() {
+        let (mut subtypes, mut product_fields) = create_core_registry();
+
+        // Add a regular type (not inheriting from Logical or Physical)
+        subtypes.insert("RegularType".to_string(), HashSet::new());
+
+        // Invalid: Regular type with physical field
+        product_fields.insert(
+            "RegularType".to_string(),
+            vec![create_field(
+                "child",
+                AstType::Identifier(PHYSICAL_TYPE.to_string()),
+            )],
+        );
+
+        let registry = setup_test_registry(subtypes, product_fields);
+        let result = adt_check(&registry, "test.opt");
+
+        // Should fail because a regular type cannot contain a physical field
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_array_of_logical_and_physical() {
+        let (mut subtypes, mut product_fields) = create_core_registry();
+
+        // Create types inheriting from Logical and Physical
+        let mut logical_subtypes = HashSet::new();
+        logical_subtypes.insert("LogicalOperator".to_string());
+        logical_subtypes.insert("OtherLogical".to_string());
+        subtypes.insert(LOGICAL_TYPE.to_string(), logical_subtypes);
+
+        let mut physical_subtypes = HashSet::new();
+        physical_subtypes.insert("PhysicalOperator".to_string());
+        physical_subtypes.insert("OtherPhysical".to_string());
+        subtypes.insert(PHYSICAL_TYPE.to_string(), physical_subtypes);
+
+        // Add empty subtypes entries for leaf types
+        subtypes.insert("LogicalOperator".to_string(), HashSet::new());
+        subtypes.insert("OtherLogical".to_string(), HashSet::new());
+        subtypes.insert("PhysicalOperator".to_string(), HashSet::new());
+        subtypes.insert("OtherPhysical".to_string(), HashSet::new());
+
+        // Valid: Array of Logical in Logical type
+        product_fields.insert(
+            "LogicalOperator".to_string(),
+            vec![create_field(
+                "children",
+                AstType::Array(Spanned::new(
+                    AstType::Identifier("OtherLogical".to_string()),
+                    create_test_span(),
+                )),
+            )],
+        );
+
+        // Give OtherLogical a primitive field
+        product_fields.insert(
+            "OtherLogical".to_string(),
+            vec![create_field("value", AstType::Int64)],
+        );
+
+        // Valid: Array of Physical in Physical type
+        product_fields.insert(
+            "PhysicalOperator".to_string(),
+            vec![create_field(
+                "children",
+                AstType::Array(Spanned::new(
+                    AstType::Identifier("OtherPhysical".to_string()),
+                    create_test_span(),
+                )),
+            )],
+        );
+
+        // Give OtherPhysical a primitive field
+        product_fields.insert(
+            "OtherPhysical".to_string(),
+            vec![create_field("value", AstType::Int64)],
+        );
+
+        let registry = setup_test_registry(subtypes, product_fields);
+        let result = adt_check(&registry, "test.opt");
+
+        // Should pass because arrays of Logical/Physical are valid
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_nested_array_of_logical_invalid() {
+        let (mut subtypes, mut product_fields) = create_core_registry();
+
+        // Create a type inheriting from Logical
+        let mut logical_subtypes = HashSet::new();
+        logical_subtypes.insert("LogicalOperator".to_string());
+        subtypes.insert(LOGICAL_TYPE.to_string(), logical_subtypes);
+
+        // Invalid: Nested array of Logical
+        product_fields.insert(
+            "LogicalOperator".to_string(),
+            vec![create_field(
+                "badField",
+                AstType::Array(Spanned::new(
+                    AstType::Array(Spanned::new(
+                        AstType::Identifier(LOGICAL_TYPE.to_string()),
+                        create_test_span(),
+                    )),
+                    create_test_span(),
+                )),
+            )],
+        );
+
+        let registry = setup_test_registry(subtypes, product_fields);
+        let result = adt_check(&registry, "test.opt");
+
+        // Should fail because nested arrays of Logical are invalid
         assert!(result.is_err());
     }
 }

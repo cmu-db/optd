@@ -24,110 +24,122 @@ impl AnalyzerError {
 /// Specific types of analyzer errors
 #[derive(Debug)]
 pub enum AnalyzerErrorKind {
-    /// Error for duplicate ADT names
     DuplicateAdt {
-        /// Name of the duplicate ADT
         name: String,
-        /// Span of the first declaration
         first_span: Span,
-        /// Span of the duplicate declaration
         duplicate_span: Span,
     },
 
-    /// Error for duplicate identifier in the same scope
     DuplicateIdentifier {
-        /// Name of the duplicate identifier
         name: String,
-        /// Span of the first declaration
         first_span: Span,
-        /// Span of the duplicate declaration
         duplicate_span: Span,
     },
 
-    /// Error for an incomplete function
     /// Specifically: no receiver and no arguments, but got accepted by the parser
     IncompleteFunction {
-        /// Name of the incomplete function
         name: String,
-        /// Span of the incomplete function
         span: Span,
     },
 
-    /// Error for invalid, out of scope references
     InvalidReference {
-        /// Name of the invalid reference
         name: String,
-        /// Span of the invalid reference
         span: Span,
     },
 
-    /// Error for cyclic ADT definitions
     CyclicAdt {
-        /// The path of the cyclic ADT
         path: Vec<Spanned<Identifier>>,
     },
 
-    /// Error for an undefined type
     UndefinedType {
-        /// Name of the undefined type
         name: String,
-        /// Span of the undefined type
         span: Span,
     },
 
-    /// Error for a missing core type
     MissingCoreType {
-        /// Name of the missing core type
         name: String,
-        /// The source path file of the module
         src_path: String,
+    },
+
+    InvalidType {
+        span: Span,
+    },
+
+    InvalidInheritance {
+        parent_name: String,
+        parent_span: Span,
+        child_name: String,
+        child_span: Span,
     },
 }
 
 impl AnalyzerErrorKind {
-    /// Creates a new error for duplicate ADT names
-    pub fn new_duplicate_adt(name: String, first_span: Span, duplicate_span: Span) -> Self {
+    pub fn new_duplicate_adt(name: &str, first_span: &Span, duplicate_span: &Span) -> Self {
         Self::DuplicateAdt {
-            name,
-            first_span,
-            duplicate_span,
+            name: name.to_string(),
+            first_span: first_span.clone(),
+            duplicate_span: duplicate_span.clone(),
         }
     }
 
-    /// Creates a new error for duplicate identifier names within the same scope
-    pub fn new_duplicate_identifier(name: String, first_span: Span, duplicate_span: Span) -> Self {
+    pub fn new_duplicate_identifier(name: &str, first_span: &Span, duplicate_span: &Span) -> Self {
         Self::DuplicateIdentifier {
-            name,
-            first_span,
-            duplicate_span,
+            name: name.to_string(),
+            first_span: first_span.clone(),
+            duplicate_span: duplicate_span.clone(),
         }
     }
 
-    /// Creates a new error for incomplete functions
-    pub fn new_incomplete_function(name: String, span: Span) -> Self {
-        Self::IncompleteFunction { name, span }
+    pub fn new_incomplete_function(name: &str, span: &Span) -> Self {
+        Self::IncompleteFunction {
+            name: name.to_string(),
+            span: span.clone(),
+        }
     }
 
-    /// Creates a new error for invalid references
-    pub fn new_invalid_reference(name: String, span: Span) -> Self {
-        Self::InvalidReference { name, span }
+    pub fn new_invalid_reference(name: &str, span: &Span) -> Self {
+        Self::InvalidReference {
+            name: name.to_string(),
+            span: span.clone(),
+        }
     }
 
-    /// Creates a new error for cyclic ADT definitions
     pub fn new_cyclic_adt(path: &[Spanned<Identifier>]) -> Self {
         Self::CyclicAdt {
             path: path.to_vec(),
         }
     }
 
-    /// Creates a new error for an undefined type
-    pub fn new_undefined_type(name: String, span: Span) -> Self {
-        Self::UndefinedType { name, span }
+    pub fn new_undefined_type(name: &str, span: &Span) -> Self {
+        Self::UndefinedType {
+            name: name.to_string(),
+            span: span.clone(),
+        }
     }
 
-    /// Creates a new error for a missing core type
-    pub fn new_missing_core_type(name: String, src_path: String) -> Self {
-        Self::MissingCoreType { name, src_path }
+    pub fn new_missing_core_type(name: &str, src_path: &str) -> Self {
+        Self::MissingCoreType {
+            name: name.to_string(),
+            src_path: src_path.to_string(),
+        }
+    }
+
+    pub fn new_invalid_type(span: &Span) -> Self {
+        Self::InvalidType { span: span.clone() }
+    }
+
+    pub fn new_invalid_inheritance(
+        parent_name: &str,
+        parent_span: &Span,
+        child_name: &str,
+        child_span: &Span,
+    ) -> Self {
+        Self::InvalidInheritance {
+            parent_name: parent_name.to_string(),
+            parent_span: parent_span.clone(),
+            child_name: child_name.to_string(),
+            child_span: child_span.clone(),
+        }
     }
 }
 
@@ -186,6 +198,25 @@ impl Diagnose for Box<AnalyzerError> {
             MissingCoreType { name, src_path } => {
                 self.build_missing_core_type_report(name, src_path)
             }
+            InvalidType { span } => self.build_single_span_report(
+                span,
+                "Invalid type usage",
+                "Type cannot be used in this context",
+                "This type is not allowed in this specific location - check the language restrictions for this context",
+            ),
+            InvalidInheritance {
+                parent_name,
+                parent_span,
+                child_name,
+                child_span,
+            } => self.build_duplicate_report(
+                child_span,
+                parent_span,
+                &format!("Invalid inheritance: '{}' cannot inherit from '{}'", child_name, parent_name),
+                "Invalid inheritance reference",
+                "Parent type defined here",
+                "Check the inheritance hierarchy and ensure that the parent type is valid",
+            ),
         }
     }
 
@@ -200,6 +231,8 @@ impl Diagnose for Box<AnalyzerError> {
             CyclicAdt { path } => &path[0].span,
             UndefinedType { span, .. } => span,
             MissingCoreType { src_path, .. } => &Span::new(src_path.to_string(), 0..0),
+            InvalidType { span, .. } => span,
+            InvalidInheritance { child_span, .. } => child_span,
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))

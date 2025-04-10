@@ -5,7 +5,7 @@
 
 use crate::analyzer::hir::Identifier;
 use crate::analyzer::types::Type;
-use crate::parser::ast;
+use crate::parser::ast::Type as AstType;
 use std::collections::HashSet;
 
 /// Converts an AST type to an HIR type.
@@ -25,47 +25,47 @@ use std::collections::HashSet;
 /// # Returns
 ///
 /// The equivalent HIR type
-pub(crate) fn convert_type(ast_type: &ast::Type, generics: &HashSet<Identifier>) -> Type {
+pub(crate) fn convert_type(ast_type: &AstType, generics: &HashSet<Identifier>) -> Type {
     match ast_type {
-        ast::Type::Int64 => Type::Int64,
-        ast::Type::String => Type::String,
-        ast::Type::Bool => Type::Bool,
-        ast::Type::Float64 => Type::Float64,
-        ast::Type::Unit => Type::Unit,
-        ast::Type::Array(elem_type) => Type::Array(convert_type(&elem_type.value, generics).into()),
-        ast::Type::Closure(param_type, return_type) => Type::Closure(
+        AstType::Int64 => Type::Int64,
+        AstType::String => Type::String,
+        AstType::Bool => Type::Bool,
+        AstType::Float64 => Type::Float64,
+        AstType::Unit => Type::Unit,
+        AstType::Array(elem_type) => Type::Array(convert_type(&elem_type.value, generics).into()),
+        AstType::Closure(param_type, return_type) => Type::Closure(
             Box::new(convert_type(&param_type.value, generics)),
             Box::new(convert_type(&return_type.value, generics)),
         ),
-        ast::Type::Tuple(types) => {
+        AstType::Tuple(types) => {
             let hir_types = types
                 .iter()
                 .map(|t| convert_type(&t.value, generics))
                 .collect();
             Type::Tuple(hir_types)
         }
-        ast::Type::Map(key_type, value_type) => Type::Map(
+        AstType::Map(key_type, value_type) => Type::Map(
             convert_type(&key_type.value, generics).into(),
             convert_type(&value_type.value, generics).into(),
         ),
-        ast::Type::Questioned(inner_type) => {
+        AstType::Questioned(inner_type) => {
             Type::Optional(convert_type(&inner_type.value, generics).into())
         }
-        ast::Type::Starred(inner_type) => {
+        AstType::Starred(inner_type) => {
             Type::Stored(convert_type(&inner_type.value, generics).into())
         }
-        ast::Type::Dollared(inner_type) => {
+        AstType::Dollared(inner_type) => {
             Type::Costed(convert_type(&inner_type.value, generics).into())
         }
-        ast::Type::Identifier(name) => {
+        AstType::Identifier(name) => {
             if generics.contains(name) {
                 Type::Generic(name.clone())
             } else {
                 Type::Adt(name.clone())
             }
         }
-        ast::Type::Error => panic!("AST should no longer contain errors"),
-        ast::Type::Unknown => Type::Unknown,
+        AstType::Error => panic!("AST should no longer contain errors"),
+        AstType::Unknown => Type::Unknown,
     }
 }
 
@@ -88,7 +88,6 @@ pub(super) fn create_function_type(params: &[(Identifier, Type)], return_type: &
 mod types_tests {
     use super::*;
     use crate::analyzer::types::Type;
-    use crate::parser::ast;
     use crate::utils::span::{Span, Spanned};
     use std::collections::HashSet;
 
@@ -105,12 +104,12 @@ mod types_tests {
     fn test_convert_primitive_types() {
         // Test each primitive type
         let test_cases = vec![
-            (ast::Type::Int64, Type::Int64),
-            (ast::Type::String, Type::String),
-            (ast::Type::Bool, Type::Bool),
-            (ast::Type::Float64, Type::Float64),
-            (ast::Type::Unit, Type::Unit),
-            (ast::Type::Unknown, Type::Unknown),
+            (AstType::Int64, Type::Int64),
+            (AstType::String, Type::String),
+            (AstType::Bool, Type::Bool),
+            (AstType::Float64, Type::Float64),
+            (AstType::Unit, Type::Unit),
+            (AstType::Unknown, Type::Unknown),
         ];
 
         let generics = HashSet::new();
@@ -126,7 +125,7 @@ mod types_tests {
         let generics = HashSet::new();
 
         // Test array type
-        let array_type = ast::Type::Array(spanned(ast::Type::Int64));
+        let array_type = AstType::Array(spanned(AstType::Int64));
         let result = convert_type(&array_type, &generics);
         match result {
             Type::Array(elem_type) => assert_eq!(*elem_type, Type::Int64),
@@ -134,9 +133,9 @@ mod types_tests {
         }
 
         // Test closure type
-        let param_type = spanned(ast::Type::Int64);
-        let return_type = spanned(ast::Type::Bool);
-        let closure_type = ast::Type::Closure(param_type, return_type);
+        let param_type = spanned(AstType::Int64);
+        let return_type = spanned(AstType::Bool);
+        let closure_type = AstType::Closure(param_type, return_type);
         let result = convert_type(&closure_type, &generics);
         match result {
             Type::Closure(param, ret) => {
@@ -147,9 +146,9 @@ mod types_tests {
         }
 
         // Test map type
-        let key_type = spanned(ast::Type::String);
-        let value_type = spanned(ast::Type::Int64);
-        let map_type = ast::Type::Map(key_type, value_type);
+        let key_type = spanned(AstType::String);
+        let value_type = spanned(AstType::Int64);
+        let map_type = AstType::Map(key_type, value_type);
         let result = convert_type(&map_type, &generics);
         match result {
             Type::Map(key, value) => {
@@ -165,8 +164,8 @@ mod types_tests {
         let generics = HashSet::new();
 
         // Test questioned type (Optional)
-        let inner_type = spanned(ast::Type::Int64);
-        let questioned_type = ast::Type::Questioned(inner_type);
+        let inner_type = spanned(AstType::Int64);
+        let questioned_type = AstType::Questioned(inner_type);
         let result = convert_type(&questioned_type, &generics);
         match result {
             Type::Optional(inner) => assert_eq!(*inner, Type::Int64),
@@ -174,8 +173,8 @@ mod types_tests {
         }
 
         // Test starred type (Stored)
-        let inner_type = spanned(ast::Type::Int64);
-        let starred_type = ast::Type::Starred(inner_type);
+        let inner_type = spanned(AstType::Int64);
+        let starred_type = AstType::Starred(inner_type);
         let result = convert_type(&starred_type, &generics);
         match result {
             Type::Stored(inner) => assert_eq!(*inner, Type::Int64),
@@ -183,8 +182,8 @@ mod types_tests {
         }
 
         // Test dollared type (Costed)
-        let inner_type = spanned(ast::Type::Int64);
-        let dollared_type = ast::Type::Dollared(inner_type);
+        let inner_type = spanned(AstType::Int64);
+        let dollared_type = AstType::Dollared(inner_type);
         let result = convert_type(&dollared_type, &generics);
         match result {
             Type::Costed(inner) => assert_eq!(*inner, Type::Int64),
@@ -195,7 +194,7 @@ mod types_tests {
     #[test]
     fn test_convert_identifier_types() {
         // Test regular ADT identifier
-        let adt_type = ast::Type::Identifier("MyType".to_string());
+        let adt_type = AstType::Identifier("MyType".to_string());
         let generics = HashSet::new();
         let result = convert_type(&adt_type, &generics);
         match result {
@@ -204,7 +203,7 @@ mod types_tests {
         }
 
         // Test generic identifier
-        let generic_type = ast::Type::Identifier("T".to_string());
+        let generic_type = AstType::Identifier("T".to_string());
         let mut generics = HashSet::new();
         generics.insert("T".to_string());
         let result = convert_type(&generic_type, &generics);

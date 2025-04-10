@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::{error::AnalyzerErrorKind, hir::Identifier, types::TypeRegistry},
-    parser::ast,
+    parser::ast::Type as AstType,
     utils::span::Spanned,
 };
 
@@ -50,6 +50,7 @@ impl<'a> CycleDetector<'a> {
         }
 
         self.explore_status.insert(adt.clone(), Exploring);
+
         // Start exploration in the path.
         self.path.push(Spanned::new(
             adt.clone(),
@@ -119,10 +120,10 @@ impl<'a> CycleDetector<'a> {
     /// Checks if a type (including complex types like Array, Map, etc.) terminates.
     fn check_field_type_terminates(
         &mut self,
-        ty: &Spanned<ast::Type>,
+        ty: &Spanned<AstType>,
         product_type: &Identifier,
     ) -> Result<bool, AnalyzerErrorKind> {
-        use ast::Type::*;
+        use AstType::*;
 
         match &*ty.value {
             Identifier(name) => {
@@ -130,10 +131,7 @@ impl<'a> CycleDetector<'a> {
                 if !self.registry.subtypes.contains_key(name)
                     && !self.registry.product_fields.contains_key(name)
                 {
-                    return Err(AnalyzerErrorKind::new_undefined_type(
-                        name.clone(),
-                        ty.span.clone(),
-                    ));
+                    return Err(AnalyzerErrorKind::new_undefined_type(name, &ty.span));
                 }
 
                 // Access field in path.
