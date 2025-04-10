@@ -152,7 +152,7 @@ impl Context<TypedSpan> {
         &mut self,
         name: String,
         val: Value<TypedSpan>,
-    ) -> Result<(), AnalyzerErrorKind> {
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
         if let Some(existing_val) = self.current_scope.get(&name) {
             // We found an existing binding, so return an error
             Err(AnalyzerErrorKind::new_duplicate_identifier(

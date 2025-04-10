@@ -40,7 +40,7 @@ impl ASTConverter {
     pub fn convert(
         mut self,
         module: &Module,
-    ) -> Result<(HIR<TypedSpan>, TypeRegistry), AnalyzerErrorKind> {
+    ) -> Result<(HIR<TypedSpan>, TypeRegistry), Box<AnalyzerErrorKind>> {
         // Process all module items sequentially.
         for item in &module.items {
             match item {
@@ -71,7 +71,7 @@ impl ASTConverter {
     pub(super) fn process_function(
         &mut self,
         spanned_fn: &Spanned<Function>,
-    ) -> Result<(), AnalyzerErrorKind> {
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
         let func = &spanned_fn.value;
         let name = &*func.name.value;
         let fn_span = func.name.span.clone();
@@ -312,13 +312,10 @@ mod converter_tests {
         // Verify result is an Error
         assert!(result.is_err());
         match result {
-            Err(err) => {
-                // Check that it's the expected error type (incomplete function)
-                match err {
-                    AnalyzerErrorKind::IncompleteFunction { .. } => (),
-                    _ => panic!("Expected IncompleteFunction error, got: {:?}", err),
-                }
-            }
+            Err(err) => match *err {
+                AnalyzerErrorKind::IncompleteFunction { .. } => (),
+                _ => panic!("Expected IncompleteFunction error, got: {:?}", err),
+            },
             _ => panic!("Expected error"),
         }
     }

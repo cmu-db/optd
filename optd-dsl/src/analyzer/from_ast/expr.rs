@@ -23,7 +23,7 @@ use std::sync::Arc;
 pub(super) fn convert_expr(
     spanned_expr: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
-) -> Result<Expr<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<Expr<TypedSpan>, Box<AnalyzerErrorKind>> {
     let span = spanned_expr.span.clone();
     let mut ty = Type::Unknown;
 
@@ -94,7 +94,7 @@ fn convert_binary(
     right: &Spanned<AstExpr>,
     span: &Span,
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
     match op {
         AstBinOp::Add
         | AstBinOp::Sub
@@ -180,7 +180,7 @@ fn convert_unary(
     op: &ast::UnaryOp,
     operand: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
     let hir_operand = convert_expr(operand, generics)?;
 
     let hir_op = match op {
@@ -197,7 +197,7 @@ fn convert_let(
     init: &Spanned<AstExpr>,
     body: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
     let hir_init = convert_expr(init, generics)?;
     let hir_body = convert_expr(body, generics)?;
     let var_name = (*field.name).clone();
@@ -210,7 +210,7 @@ fn convert_pattern_match(
     scrutinee: &Spanned<AstExpr>,
     arms: &[Spanned<ast::MatchArm>],
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
     let hir_scrutinee = convert_expr(scrutinee, generics)?;
     let hir_arms = convert_match_arms(arms, generics)?;
 
@@ -223,7 +223,7 @@ fn convert_if_then_else(
     then_branch: &Spanned<AstExpr>,
     else_branch: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
     let hir_condition = convert_expr(condition, generics)?;
     let hir_then = convert_expr(then_branch, generics)?;
     let hir_else = convert_expr(else_branch, generics)?;
@@ -239,7 +239,7 @@ fn convert_if_then_else(
 fn convert_expr_list(
     elements: &[Spanned<AstExpr>],
     generics: &HashSet<Identifier>,
-) -> Result<Vec<Arc<Expr<TypedSpan>>>, AnalyzerErrorKind> {
+) -> Result<Vec<Arc<Expr<TypedSpan>>>, Box<AnalyzerErrorKind>> {
     let mut hir_elements = Vec::with_capacity(elements.len());
 
     for elem in elements {
@@ -254,7 +254,7 @@ fn convert_expr_list(
 fn convert_array(
     elements: &[Spanned<AstExpr>],
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
     let hir_elements = convert_expr_list(elements, generics)?;
     Ok(CoreExpr(CoreData::Array(hir_elements)))
 }
@@ -263,7 +263,7 @@ fn convert_array(
 fn convert_tuple(
     elements: &[Spanned<AstExpr>],
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
     let hir_elements = convert_expr_list(elements, generics)?;
     Ok(CoreExpr(CoreData::Tuple(hir_elements)))
 }
@@ -272,7 +272,7 @@ fn convert_tuple(
 fn convert_map(
     entries: &[(Spanned<AstExpr>, Spanned<AstExpr>)],
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
     let mut hir_entries = Vec::with_capacity(entries.len());
 
     for (key, value) in entries {
@@ -289,7 +289,7 @@ fn convert_constructor(
     name: &Identifier,
     args: &[Spanned<AstExpr>],
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
     let hir_args = convert_expr_list(args, generics)?;
 
     Ok(CoreExpr(CoreData::Struct(name.clone(), hir_args)))
@@ -300,7 +300,7 @@ fn convert_closure(
     params: &[(Identifier, Type)],
     body: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
     let param_names = params.iter().map(|(name, _)| name.clone()).collect();
     let hir_body = convert_expr(body, generics)?;
 
@@ -315,7 +315,7 @@ fn convert_postfix(
     expr: &Spanned<AstExpr>,
     op: &ast::PostfixOp,
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
     let hir_expr = convert_expr(expr, generics)?;
 
     match op {
@@ -348,7 +348,7 @@ fn convert_postfix(
 fn convert_fail(
     error_expr: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
     let hir_error = convert_expr(error_expr, generics)?;
 
     Ok(CoreExpr(CoreData::Fail(Box::new(Arc::new(hir_error)))))
@@ -358,7 +358,7 @@ fn convert_fail(
 fn convert_block(
     block: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
-) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
     let hir_expr = convert_expr(block, generics)?;
 
     Ok(NewScope(hir_expr.into()))

@@ -36,7 +36,7 @@ pub enum AnalyzerErrorKind {
         duplicate_span: Span,
     },
 
-    /// Specifically: no receiver and no arguments, but got accepted by the parser
+    /// Specifically: no receiver and no arguments, but got accepted by the parser.
     IncompleteFunction {
         name: String,
         span: Span,
@@ -74,58 +74,69 @@ pub enum AnalyzerErrorKind {
 }
 
 impl AnalyzerErrorKind {
-    pub fn new_duplicate_adt(name: &str, first_span: &Span, duplicate_span: &Span) -> Self {
+    pub fn new_duplicate_adt(name: &str, first_span: &Span, duplicate_span: &Span) -> Box<Self> {
         Self::DuplicateAdt {
             name: name.to_string(),
             first_span: first_span.clone(),
             duplicate_span: duplicate_span.clone(),
         }
+        .into()
     }
 
-    pub fn new_duplicate_identifier(name: &str, first_span: &Span, duplicate_span: &Span) -> Self {
+    pub fn new_duplicate_identifier(
+        name: &str,
+        first_span: &Span,
+        duplicate_span: &Span,
+    ) -> Box<Self> {
         Self::DuplicateIdentifier {
             name: name.to_string(),
             first_span: first_span.clone(),
             duplicate_span: duplicate_span.clone(),
         }
+        .into()
     }
 
-    pub fn new_incomplete_function(name: &str, span: &Span) -> Self {
+    pub fn new_incomplete_function(name: &str, span: &Span) -> Box<Self> {
         Self::IncompleteFunction {
             name: name.to_string(),
             span: span.clone(),
         }
+        .into()
     }
 
-    pub fn new_invalid_reference(name: &str, span: &Span) -> Self {
+    pub fn new_invalid_reference(name: &str, span: &Span) -> Box<Self> {
         Self::InvalidReference {
             name: name.to_string(),
             span: span.clone(),
         }
+        .into()
     }
 
-    pub fn new_cyclic_adt(path: &[Spanned<Identifier>]) -> Self {
+    pub fn new_cyclic_adt(path: &[Spanned<Identifier>]) -> Box<Self> {
         Self::CyclicAdt {
             path: path.to_vec(),
         }
+        .into()
     }
 
-    pub fn new_undefined_type(name: &str, span: &Span) -> Self {
+    pub fn new_undefined_type(name: &str, span: &Span) -> Box<Self> {
         Self::UndefinedType {
             name: name.to_string(),
             span: span.clone(),
         }
+        .into()
     }
 
-    pub fn new_missing_core_type(name: &str, src_path: &str) -> Self {
+    pub fn new_missing_core_type(name: &str, src_path: &str) -> Box<Self> {
         Self::MissingCoreType {
             name: name.to_string(),
             src_path: src_path.to_string(),
         }
+        .into()
     }
 
-    pub fn new_invalid_type(span: &Span) -> Self {
-        Self::InvalidType { span: span.clone() }
+    pub fn new_invalid_type(span: &Span) -> Box<Self> {
+        Self::InvalidType { span: span.clone() }.into()
     }
 
     pub fn new_invalid_inheritance(
@@ -133,13 +144,14 @@ impl AnalyzerErrorKind {
         parent_span: &Span,
         child_name: &str,
         child_span: &Span,
-    ) -> Self {
+    ) -> Box<Self> {
         Self::InvalidInheritance {
             parent_name: parent_name.to_string(),
             parent_span: parent_span.clone(),
             child_name: child_name.to_string(),
             child_span: child_span.clone(),
         }
+        .into()
     }
 }
 

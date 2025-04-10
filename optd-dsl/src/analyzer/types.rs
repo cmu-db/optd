@@ -84,7 +84,7 @@ impl TypeRegistry {
     /// # Returns
     ///
     /// `Ok(())` if registration is successful, or a `AnalyzerErrorKind` if a duplicate name is found    
-    pub fn register_adt(&mut self, adt: &Adt) -> Result<(), AnalyzerErrorKind> {
+    pub fn register_adt(&mut self, adt: &Adt) -> Result<(), Box<AnalyzerErrorKind>> {
         match adt {
             Product { name, fields } => {
                 let type_name = name.value.as_ref().clone();

@@ -19,7 +19,7 @@ use crate::{
 /// # Returns
 ///
 /// * `Ok(())` if no scope errors are found.
-pub fn scope_check(hir: &HIR<TypedSpan>) -> Result<(), AnalyzerErrorKind> {
+pub fn scope_check(hir: &HIR<TypedSpan>) -> Result<(), Box<AnalyzerErrorKind>> {
     use CoreData::*;
     use FunKind::*;
 
@@ -44,7 +44,7 @@ fn create_function_scope(
     base_ctx: Context<TypedSpan>,
     params: &[String],
     span: &Span,
-) -> Result<Context<TypedSpan>, AnalyzerErrorKind> {
+) -> Result<Context<TypedSpan>, Box<AnalyzerErrorKind>> {
     let mut fn_ctx = base_ctx;
     fn_ctx.push_scope();
 
@@ -61,7 +61,7 @@ fn create_function_scope(
 fn check_expr(
     expr: &Expr<TypedSpan>,
     mut ctx: Context<TypedSpan>,
-) -> Result<(), AnalyzerErrorKind> {
+) -> Result<(), Box<AnalyzerErrorKind>> {
     use ExprKind::*;
 
     let span = &expr.metadata.span;
@@ -154,7 +154,7 @@ fn check_expr(
 fn check_pattern(
     pattern: &Pattern<TypedSpan>,
     ctx: &mut Context<TypedSpan>,
-) -> Result<(), AnalyzerErrorKind> {
+) -> Result<(), Box<AnalyzerErrorKind>> {
     use PatternKind::*;
 
     match &pattern.kind {
@@ -217,7 +217,7 @@ mod scope_check_tests {
     fn setup_test_context(
         params: Vec<String>,
         body: Expr<TypedSpan>,
-    ) -> (HIR<TypedSpan>, Result<(), AnalyzerErrorKind>) {
+    ) -> (HIR<TypedSpan>, Result<(), Box<AnalyzerErrorKind>>) {
         let mut context = Context::default();
 
         // Create function value
@@ -256,9 +256,10 @@ mod scope_check_tests {
             vec!["x".to_string()],
             Expr::new_unknown(ExprKind::Ref("undefined".to_string()), test_span(5, 13)),
         );
-        assert!(
-            matches!(result, Err(AnalyzerErrorKind::InvalidReference { name, .. }) if name == "undefined")
-        );
+        assert!(matches!(
+            result,
+            Err(err) if matches!(*err, AnalyzerErrorKind::InvalidReference { ref name, .. } if name == "undefined")
+        ));
     }
 
     #[test]
@@ -286,9 +287,10 @@ mod scope_check_tests {
             vec!["x".to_string(), "x".to_string()],
             Expr::new_unknown(ExprKind::Ref("x".to_string()), test_span(5, 6)),
         );
-        assert!(
-            matches!(result, Err(AnalyzerErrorKind::DuplicateIdentifier { name, .. }) if name == "x")
-        );
+        assert!(matches!(
+            result,
+            Err(err) if matches!(*err, AnalyzerErrorKind::DuplicateIdentifier { ref name, .. } if name == "x")
+        ));
     }
 
     #[test]
@@ -317,9 +319,10 @@ mod scope_check_tests {
         );
 
         let (_, result) = setup_test_context(vec!["x".to_string()], outer_let);
-        assert!(
-            matches!(result, Err(AnalyzerErrorKind::DuplicateIdentifier { name, .. }) if name == "y")
-        );
+        assert!(matches!(
+            result,
+            Err(err) if matches!(*err, AnalyzerErrorKind::DuplicateIdentifier { ref name, .. } if name == "y")
+        ));
     }
 
     #[test]
@@ -409,9 +412,10 @@ mod scope_check_tests {
         );
 
         let (_, result) = setup_test_context(vec!["x".to_string()], match_expr);
-        assert!(
-            matches!(result, Err(AnalyzerErrorKind::DuplicateIdentifier { name, .. }) if name == "y")
-        );
+        assert!(matches!(
+            result,
+            Err(err) if matches!(*err, AnalyzerErrorKind::DuplicateIdentifier { ref name, .. } if name == "y")
+        ));
     }
 
     #[test]

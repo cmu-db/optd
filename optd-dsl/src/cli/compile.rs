@@ -54,7 +54,7 @@ pub fn ast_to_hir(
     let converter = ASTConverter::default();
 
     converter.convert(&ast).map_err(|err_kind| {
-        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), err_kind))
+        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })
 }
 
@@ -64,7 +64,7 @@ pub fn ast_to_hir(
 /// and all bindings follow proper scoping rules.
 pub fn scope_check(source: &str, hir: &HIR<TypedSpan>) -> Result<(), CompileError> {
     scope_check::scope_check(hir).map_err(|err_kind| {
-        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), err_kind))
+        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })
 }
 
@@ -80,6 +80,6 @@ pub fn adt_check(
     registry: &TypeRegistry,
 ) -> Result<(), CompileError> {
     adt_check::adt_check(registry, source_path).map_err(|err_kind| {
-        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), err_kind))
+        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })
 }

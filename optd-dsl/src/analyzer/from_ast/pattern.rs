@@ -19,7 +19,7 @@ use std::sync::Arc;
 pub(super) fn convert_match_arms(
     arms: &[Spanned<ast::MatchArm>],
     generics: &HashSet<Identifier>,
-) -> Result<Vec<MatchArm<TypedSpan>>, AnalyzerErrorKind> {
+) -> Result<Vec<MatchArm<TypedSpan>>, Box<AnalyzerErrorKind>> {
     arms.iter()
         .map(|arm| {
             let pattern = convert_pattern(&arm.pattern);

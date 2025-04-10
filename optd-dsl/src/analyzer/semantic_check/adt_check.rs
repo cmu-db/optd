@@ -11,7 +11,7 @@ use crate::{
 use std::collections::HashMap;
 
 /// Checks that ADTs (Algebraic Data Types) are well-formed.
-pub fn adt_check(registry: &TypeRegistry, src_path: &str) -> Result<(), AnalyzerErrorKind> {
+pub fn adt_check(registry: &TypeRegistry, src_path: &str) -> Result<(), Box<AnalyzerErrorKind>> {
     // First, check if types correctly reference each other and do not
     // create any infinite recursive cycles.
     let mut detector = CycleDetector::new(registry);
@@ -47,7 +47,10 @@ pub fn adt_check(registry: &TypeRegistry, src_path: &str) -> Result<(), Analyzer
 }
 
 /// Validates that core types are defined and are root types (not inherited by any other type).
-fn validate_core_types(registry: &TypeRegistry, src_path: &str) -> Result<(), AnalyzerErrorKind> {
+fn validate_core_types(
+    registry: &TypeRegistry,
+    src_path: &str,
+) -> Result<(), Box<AnalyzerErrorKind>> {
     // First check if all core types are defined.
     for core_type in CORE_TYPES {
         if !registry.subtypes.contains_key(core_type) {
@@ -74,7 +77,7 @@ fn validate_core_types(registry: &TypeRegistry, src_path: &str) -> Result<(), An
     Ok(())
 }
 
-fn check_product_fields(registry: &TypeRegistry) -> Result<(), AnalyzerErrorKind> {
+fn check_product_fields(registry: &TypeRegistry) -> Result<(), Box<AnalyzerErrorKind>> {
     for (adt_name, fields) in &registry.product_fields {
         let mut field_names: HashMap<_, Span> = HashMap::new();
 
@@ -121,7 +124,7 @@ fn valid_core_type(
     registry: &TypeRegistry,
     allows_logical: bool,
     allows_physical: bool,
-) -> Result<(), AnalyzerErrorKind> {
+) -> Result<(), Box<AnalyzerErrorKind>> {
     // Check if the type is logical but not allowed to be logical,
     // or is physical but not allowed to be physical.
     let invalid_logical = is_logical(ty, registry) && !allows_logical;
@@ -140,7 +143,7 @@ fn check_type(
     registry: &TypeRegistry,
     allows_logical: bool,
     allows_physical: bool,
-) -> Result<(), AnalyzerErrorKind> {
+) -> Result<(), Box<AnalyzerErrorKind>> {
     use AstType::*;
 
     match ty {
@@ -171,13 +174,9 @@ fn check_type(
             check_type(&inner_type.value, &inner_type.span, registry, false, false)
         }
 
-        Dollared(_) => {
-            return Err(AnalyzerErrorKind::new_invalid_type(span));
-        }
+        Dollared(_) => Err(AnalyzerErrorKind::new_invalid_type(span)),
 
-        Starred(_) => {
-            return Err(AnalyzerErrorKind::new_invalid_type(span));
-        }
+        Starred(_) => Err(AnalyzerErrorKind::new_invalid_type(span)),
 
         _ => Ok(()), // Primitive types don't contain logical or physical.
     }

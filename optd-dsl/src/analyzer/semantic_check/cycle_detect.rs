@@ -39,7 +39,10 @@ impl<'a> CycleDetector<'a> {
     /// - Ok(true) if the type terminates.
     /// - Ok(false) if the type has a cycle.
     /// - Err(AnalyzerErrorKind) for other errors like undefined types.
-    pub(super) fn can_terminate(&mut self, adt: &Identifier) -> Result<bool, AnalyzerErrorKind> {
+    pub(super) fn can_terminate(
+        &mut self,
+        adt: &Identifier,
+    ) -> Result<bool, Box<AnalyzerErrorKind>> {
         use ExplorationStatus::*;
 
         if let Some(status) = self.explore_status.get(adt).cloned() {
@@ -84,7 +87,7 @@ impl<'a> CycleDetector<'a> {
     fn check_product_type_terminates(
         &mut self,
         product_type: &Identifier,
-    ) -> Result<bool, AnalyzerErrorKind> {
+    ) -> Result<bool, Box<AnalyzerErrorKind>> {
         let fields = self.registry.product_fields.get(product_type).unwrap();
 
         for field in fields {
@@ -100,7 +103,7 @@ impl<'a> CycleDetector<'a> {
     fn check_sum_type_terminates(
         &mut self,
         sum_type: &Identifier,
-    ) -> Result<bool, AnalyzerErrorKind> {
+    ) -> Result<bool, Box<AnalyzerErrorKind>> {
         let variants = self.registry.subtypes.get(sum_type).unwrap();
 
         for variant in variants {
@@ -122,7 +125,7 @@ impl<'a> CycleDetector<'a> {
         &mut self,
         ty: &Spanned<AstType>,
         product_type: &Identifier,
-    ) -> Result<bool, AnalyzerErrorKind> {
+    ) -> Result<bool, Box<AnalyzerErrorKind>> {
         use AstType::*;
 
         match &*ty.value {
