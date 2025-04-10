@@ -10,7 +10,7 @@ use crate::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Identifier, Literal, TypedSpan, UnaryOp, Value,
 };
 use crate::analyzer::types::Type;
-use crate::parser::ast;
+use crate::parser::ast::{self, BinOp as AstBinOp, Expr as AstExpr};
 use crate::utils::span::{Span, Spanned};
 use ExprKind::*;
 use std::collections::HashSet;
@@ -21,34 +21,32 @@ use std::sync::Arc;
 /// This function is the main dispatcher for expression conversion, routing
 /// the conversion to specialized functions based on the expression kind.
 pub(super) fn convert_expr(
-    spanned_expr: &Spanned<ast::Expr>,
+    spanned_expr: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
 ) -> Result<Expr<TypedSpan>, AnalyzerErrorKind> {
     let span = spanned_expr.span.clone();
     let mut ty = Type::Unknown;
 
     let kind = match &*spanned_expr.value {
-        ast::Expr::Error => panic!("AST should no longer contain errors"),
-        ast::Expr::Literal(lit) => convert_literal(lit, &span),
-        ast::Expr::Ref(ident) => convert_ref(ident),
-        ast::Expr::Binary(left, op, right) => convert_binary(left, op, right, &span, generics)?,
-        ast::Expr::Unary(op, operand) => convert_unary(op, operand, generics)?,
-        ast::Expr::Let(field, init, body) => {
+        AstExpr::Error => panic!("AST should no longer contain errors"),
+        AstExpr::Literal(lit) => convert_literal(lit, &span),
+        AstExpr::Ref(ident) => convert_ref(ident),
+        AstExpr::Binary(left, op, right) => convert_binary(left, op, right, &span, generics)?,
+        AstExpr::Unary(op, operand) => convert_unary(op, operand, generics)?,
+        AstExpr::Let(field, init, body) => {
             // We extract the potential type annotation.
             ty = convert_type(&field.ty.value, generics);
             convert_let(field, init, body, generics)?
         }
-        ast::Expr::IfThenElse(condition, then_branch, else_branch) => {
+        AstExpr::IfThenElse(condition, then_branch, else_branch) => {
             convert_if_then_else(condition, then_branch, else_branch, generics)?
         }
-        ast::Expr::PatternMatch(scrutinee, arms) => {
-            convert_pattern_match(scrutinee, arms, generics)?
-        }
-        ast::Expr::Array(elements) => convert_array(elements, generics)?,
-        ast::Expr::Tuple(elements) => convert_tuple(elements, generics)?,
-        ast::Expr::Map(entries) => convert_map(entries, generics)?,
-        ast::Expr::Constructor(name, args) => convert_constructor(name, args, generics)?,
-        ast::Expr::Closure(params, body) => {
+        AstExpr::PatternMatch(scrutinee, arms) => convert_pattern_match(scrutinee, arms, generics)?,
+        AstExpr::Array(elements) => convert_array(elements, generics)?,
+        AstExpr::Tuple(elements) => convert_tuple(elements, generics)?,
+        AstExpr::Map(entries) => convert_map(entries, generics)?,
+        AstExpr::Constructor(name, args) => convert_constructor(name, args, generics)?,
+        AstExpr::Closure(params, body) => {
             // We extract the potential type annotations.
             let params = params
                 .iter()
@@ -63,9 +61,9 @@ pub(super) fn convert_expr(
             ty = create_function_type(&params, &Type::Unknown);
             convert_closure(&params, body, generics)?
         }
-        ast::Expr::Postfix(expr, op) => convert_postfix(expr, op, generics)?,
-        ast::Expr::Fail(error_expr) => convert_fail(error_expr, generics)?,
-        ast::Expr::Block(block) => convert_block(block, generics)?,
+        AstExpr::Postfix(expr, op) => convert_postfix(expr, op, generics)?,
+        AstExpr::Fail(error_expr) => convert_fail(error_expr, generics)?,
+        AstExpr::Block(block) => convert_block(block, generics)?,
     };
 
     Ok(Expr::new_with(kind, ty, span))
@@ -91,36 +89,36 @@ fn convert_ref(ident: &Identifier) -> ExprKind<TypedSpan> {
 
 /// Converts a binary expression to an HIR expression kind.
 fn convert_binary(
-    left: &Spanned<ast::Expr>,
-    op: &ast::BinOp,
-    right: &Spanned<ast::Expr>,
+    left: &Spanned<AstExpr>,
+    op: &AstBinOp,
+    right: &Spanned<AstExpr>,
     span: &Span,
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
     match op {
-        ast::BinOp::Add
-        | ast::BinOp::Sub
-        | ast::BinOp::Mul
-        | ast::BinOp::Div
-        | ast::BinOp::Lt
-        | ast::BinOp::Eq
-        | ast::BinOp::And
-        | ast::BinOp::Or
-        | ast::BinOp::Range
-        | ast::BinOp::Concat => {
+        AstBinOp::Add
+        | AstBinOp::Sub
+        | AstBinOp::Mul
+        | AstBinOp::Div
+        | AstBinOp::Lt
+        | AstBinOp::Eq
+        | AstBinOp::And
+        | AstBinOp::Or
+        | AstBinOp::Range
+        | AstBinOp::Concat => {
             let hir_left = convert_expr(left, generics)?;
             let hir_right = convert_expr(right, generics)?;
             let hir_op = match op {
-                ast::BinOp::Add => BinOp::Add,
-                ast::BinOp::Sub => BinOp::Sub,
-                ast::BinOp::Mul => BinOp::Mul,
-                ast::BinOp::Div => BinOp::Div,
-                ast::BinOp::Lt => BinOp::Lt,
-                ast::BinOp::Eq => BinOp::Eq,
-                ast::BinOp::And => BinOp::And,
-                ast::BinOp::Or => BinOp::Or,
-                ast::BinOp::Range => BinOp::Range,
-                ast::BinOp::Concat => BinOp::Concat,
+                AstBinOp::Add => BinOp::Add,
+                AstBinOp::Sub => BinOp::Sub,
+                AstBinOp::Mul => BinOp::Mul,
+                AstBinOp::Div => BinOp::Div,
+                AstBinOp::Lt => BinOp::Lt,
+                AstBinOp::Eq => BinOp::Eq,
+                AstBinOp::And => BinOp::And,
+                AstBinOp::Or => BinOp::Or,
+                AstBinOp::Range => BinOp::Range,
+                AstBinOp::Concat => BinOp::Concat,
                 _ => unreachable!(),
             };
 
@@ -128,7 +126,7 @@ fn convert_binary(
         }
 
         // Desugar not equal (!= becomes !(a == b)).
-        ast::BinOp::Neq => {
+        AstBinOp::Neq => {
             let hir_left = convert_expr(left, generics)?;
             let hir_right = convert_expr(right, generics)?;
 
@@ -141,7 +139,7 @@ fn convert_binary(
         }
 
         // Desugar greater than (> becomes b < a by swapping operands).
-        ast::BinOp::Gt => {
+        AstBinOp::Gt => {
             let hir_left = convert_expr(right, generics)?;
             let hir_right = convert_expr(left, generics)?;
 
@@ -149,7 +147,7 @@ fn convert_binary(
         }
 
         // Desugar greater than or equal (>= becomes !(a < b)).
-        ast::BinOp::Ge => {
+        AstBinOp::Ge => {
             let hir_left = convert_expr(left, generics)?;
             let hir_right = convert_expr(right, generics)?;
 
@@ -162,7 +160,7 @@ fn convert_binary(
         }
 
         // Desugar less than or equal (<= becomes a < b || a == b).
-        ast::BinOp::Le => {
+        AstBinOp::Le => {
             let hir_left = Arc::new(convert_expr(left, generics)?);
             let hir_right = Arc::new(convert_expr(right, generics)?);
 
@@ -180,7 +178,7 @@ fn convert_binary(
 /// Converts a unary expression to an HIR expression kind.
 fn convert_unary(
     op: &ast::UnaryOp,
-    operand: &Spanned<ast::Expr>,
+    operand: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
     let hir_operand = convert_expr(operand, generics)?;
@@ -196,8 +194,8 @@ fn convert_unary(
 /// Converts a let expression to an HIR expression kind.
 fn convert_let(
     field: &Spanned<ast::Field>,
-    init: &Spanned<ast::Expr>,
-    body: &Spanned<ast::Expr>,
+    init: &Spanned<AstExpr>,
+    body: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
     let hir_init = convert_expr(init, generics)?;
@@ -209,7 +207,7 @@ fn convert_let(
 
 /// Converts a pattern match expression to an HIR expression kind.
 fn convert_pattern_match(
-    scrutinee: &Spanned<ast::Expr>,
+    scrutinee: &Spanned<AstExpr>,
     arms: &[Spanned<ast::MatchArm>],
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
@@ -221,9 +219,9 @@ fn convert_pattern_match(
 
 /// Converts an if-then-else expression to an HIR expression kind.
 fn convert_if_then_else(
-    condition: &Spanned<ast::Expr>,
-    then_branch: &Spanned<ast::Expr>,
-    else_branch: &Spanned<ast::Expr>,
+    condition: &Spanned<AstExpr>,
+    then_branch: &Spanned<AstExpr>,
+    else_branch: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
     let hir_condition = convert_expr(condition, generics)?;
@@ -239,7 +237,7 @@ fn convert_if_then_else(
 
 /// Helper function to convert a list of expressions.
 fn convert_expr_list(
-    elements: &[Spanned<ast::Expr>],
+    elements: &[Spanned<AstExpr>],
     generics: &HashSet<Identifier>,
 ) -> Result<Vec<Arc<Expr<TypedSpan>>>, AnalyzerErrorKind> {
     let mut hir_elements = Vec::with_capacity(elements.len());
@@ -254,7 +252,7 @@ fn convert_expr_list(
 
 /// Converts an array expression to an HIR expression kind.
 fn convert_array(
-    elements: &[Spanned<ast::Expr>],
+    elements: &[Spanned<AstExpr>],
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
     let hir_elements = convert_expr_list(elements, generics)?;
@@ -263,7 +261,7 @@ fn convert_array(
 
 /// Converts a tuple expression to an HIR expression kind.
 fn convert_tuple(
-    elements: &[Spanned<ast::Expr>],
+    elements: &[Spanned<AstExpr>],
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
     let hir_elements = convert_expr_list(elements, generics)?;
@@ -272,7 +270,7 @@ fn convert_tuple(
 
 /// Converts a map expression to an HIR expression kind.
 fn convert_map(
-    entries: &[(Spanned<ast::Expr>, Spanned<ast::Expr>)],
+    entries: &[(Spanned<AstExpr>, Spanned<AstExpr>)],
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
     let mut hir_entries = Vec::with_capacity(entries.len());
@@ -289,7 +287,7 @@ fn convert_map(
 /// Converts a constructor expression to an HIR expression kind.
 fn convert_constructor(
     name: &Identifier,
-    args: &[Spanned<ast::Expr>],
+    args: &[Spanned<AstExpr>],
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
     let hir_args = convert_expr_list(args, generics)?;
@@ -300,7 +298,7 @@ fn convert_constructor(
 /// Converts a closure expression to an HIR expression kind.
 fn convert_closure(
     params: &[(Identifier, Type)],
-    body: &Spanned<ast::Expr>,
+    body: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
     let param_names = params.iter().map(|(name, _)| name.clone()).collect();
@@ -314,7 +312,7 @@ fn convert_closure(
 
 /// Converts a postfix expression to an HIR expression kind.
 fn convert_postfix(
-    expr: &Spanned<ast::Expr>,
+    expr: &Spanned<AstExpr>,
     op: &ast::PostfixOp,
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
@@ -348,7 +346,7 @@ fn convert_postfix(
 
 /// Converts a fail expression to an HIR expression kind.
 fn convert_fail(
-    error_expr: &Spanned<ast::Expr>,
+    error_expr: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
     let hir_error = convert_expr(error_expr, generics)?;
@@ -358,7 +356,7 @@ fn convert_fail(
 
 /// Converts a block expression to an HIR expression kind.
 fn convert_block(
-    block: &Spanned<ast::Expr>,
+    block: &Spanned<AstExpr>,
     generics: &HashSet<Identifier>,
 ) -> Result<ExprKind<TypedSpan>, AnalyzerErrorKind> {
     let hir_expr = convert_expr(block, generics)?;
@@ -387,7 +385,7 @@ mod expr_tests {
     #[test]
     fn test_convert_literal() {
         // Test integer literal
-        let int_lit = spanned(ast::Expr::Literal(ast::Literal::Int64(42)));
+        let int_lit = spanned(AstExpr::Literal(ast::Literal::Int64(42)));
         let result = convert_expr(&int_lit, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -399,9 +397,7 @@ mod expr_tests {
         }
 
         // Test string literal
-        let str_lit = spanned(ast::Expr::Literal(ast::Literal::String(
-            "hello".to_string(),
-        )));
+        let str_lit = spanned(AstExpr::Literal(ast::Literal::String("hello".to_string())));
         let result = convert_expr(&str_lit, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -413,7 +409,7 @@ mod expr_tests {
         }
 
         // Test boolean literal
-        let bool_lit = spanned(ast::Expr::Literal(ast::Literal::Bool(true)));
+        let bool_lit = spanned(AstExpr::Literal(ast::Literal::Bool(true)));
         let result = convert_expr(&bool_lit, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -426,7 +422,7 @@ mod expr_tests {
 
         // Test float literal
         let float_val = PI;
-        let float_lit = spanned(ast::Expr::Literal(ast::Literal::Float64(
+        let float_lit = spanned(AstExpr::Literal(ast::Literal::Float64(
             ordered_float::OrderedFloat(float_val),
         )));
         let result = convert_expr(&float_lit, &HashSet::new()).unwrap();
@@ -440,7 +436,7 @@ mod expr_tests {
         }
 
         // Test unit literal
-        let unit_lit = spanned(ast::Expr::Literal(ast::Literal::Unit));
+        let unit_lit = spanned(AstExpr::Literal(ast::Literal::Unit));
         let result = convert_expr(&unit_lit, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -454,7 +450,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_reference() {
-        let ref_expr = spanned(ast::Expr::Ref("variable".to_string()));
+        let ref_expr = spanned(AstExpr::Ref("variable".to_string()));
         let result = convert_expr(&ref_expr, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -466,10 +462,10 @@ mod expr_tests {
     #[test]
     fn test_convert_binary_operators() {
         // Helper to create binary operator tests
-        let test_binary_op = |op: ast::BinOp, expected_op: BinOp| {
-            let left = spanned(ast::Expr::Literal(ast::Literal::Int64(1)));
-            let right = spanned(ast::Expr::Literal(ast::Literal::Int64(2)));
-            let bin_expr = spanned(ast::Expr::Binary(left, op, right));
+        let test_binary_op = |op: AstBinOp, expected_op: BinOp| {
+            let left = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
+            let right = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+            let bin_expr = spanned(AstExpr::Binary(left, op, right));
 
             let result = convert_expr(&bin_expr, &HashSet::new()).unwrap();
 
@@ -480,24 +476,24 @@ mod expr_tests {
         };
 
         // Test standard binary operators
-        test_binary_op(ast::BinOp::Add, BinOp::Add);
-        test_binary_op(ast::BinOp::Sub, BinOp::Sub);
-        test_binary_op(ast::BinOp::Mul, BinOp::Mul);
-        test_binary_op(ast::BinOp::Div, BinOp::Div);
-        test_binary_op(ast::BinOp::Lt, BinOp::Lt);
-        test_binary_op(ast::BinOp::Eq, BinOp::Eq);
-        test_binary_op(ast::BinOp::And, BinOp::And);
-        test_binary_op(ast::BinOp::Or, BinOp::Or);
-        test_binary_op(ast::BinOp::Range, BinOp::Range);
-        test_binary_op(ast::BinOp::Concat, BinOp::Concat);
+        test_binary_op(AstBinOp::Add, BinOp::Add);
+        test_binary_op(AstBinOp::Sub, BinOp::Sub);
+        test_binary_op(AstBinOp::Mul, BinOp::Mul);
+        test_binary_op(AstBinOp::Div, BinOp::Div);
+        test_binary_op(AstBinOp::Lt, BinOp::Lt);
+        test_binary_op(AstBinOp::Eq, BinOp::Eq);
+        test_binary_op(AstBinOp::And, BinOp::And);
+        test_binary_op(AstBinOp::Or, BinOp::Or);
+        test_binary_op(AstBinOp::Range, BinOp::Range);
+        test_binary_op(AstBinOp::Concat, BinOp::Concat);
     }
 
     #[test]
     fn test_desugared_binary_operators() {
         // Test != (not equal) desugaring to !(left == right)
-        let left = spanned(ast::Expr::Literal(ast::Literal::Int64(1)));
-        let right = spanned(ast::Expr::Literal(ast::Literal::Int64(2)));
-        let neq_expr = spanned(ast::Expr::Binary(left, ast::BinOp::Neq, right));
+        let left = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
+        let right = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+        let neq_expr = spanned(AstExpr::Binary(left, AstBinOp::Neq, right));
 
         let result = convert_expr(&neq_expr, &HashSet::new()).unwrap();
 
@@ -507,9 +503,9 @@ mod expr_tests {
         }
 
         // Test > (greater than) desugaring to right < left (swapped operands)
-        let left = spanned(ast::Expr::Literal(ast::Literal::Int64(1)));
-        let right = spanned(ast::Expr::Literal(ast::Literal::Int64(2)));
-        let gt_expr = spanned(ast::Expr::Binary(left, ast::BinOp::Gt, right));
+        let left = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
+        let right = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+        let gt_expr = spanned(AstExpr::Binary(left, AstBinOp::Gt, right));
 
         let result = convert_expr(&gt_expr, &HashSet::new()).unwrap();
 
@@ -530,9 +526,9 @@ mod expr_tests {
         }
 
         // Test >= (greater than or equal) desugaring to !(left < right)
-        let left = spanned(ast::Expr::Literal(ast::Literal::Int64(1)));
-        let right = spanned(ast::Expr::Literal(ast::Literal::Int64(2)));
-        let ge_expr = spanned(ast::Expr::Binary(left, ast::BinOp::Ge, right));
+        let left = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
+        let right = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+        let ge_expr = spanned(AstExpr::Binary(left, AstBinOp::Ge, right));
 
         let result = convert_expr(&ge_expr, &HashSet::new()).unwrap();
 
@@ -542,9 +538,9 @@ mod expr_tests {
         }
 
         // Test <= (less than or equal) desugaring to left < right || left == right
-        let left = spanned(ast::Expr::Literal(ast::Literal::Int64(1)));
-        let right = spanned(ast::Expr::Literal(ast::Literal::Int64(2)));
-        let le_expr = spanned(ast::Expr::Binary(left, ast::BinOp::Le, right));
+        let left = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
+        let right = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+        let le_expr = spanned(AstExpr::Binary(left, AstBinOp::Le, right));
 
         let result = convert_expr(&le_expr, &HashSet::new()).unwrap();
 
@@ -557,8 +553,8 @@ mod expr_tests {
     #[test]
     fn test_convert_unary_operators() {
         // Test negation
-        let operand = spanned(ast::Expr::Literal(ast::Literal::Int64(42)));
-        let neg_expr = spanned(ast::Expr::Unary(ast::UnaryOp::Neg, operand));
+        let operand = spanned(AstExpr::Literal(ast::Literal::Int64(42)));
+        let neg_expr = spanned(AstExpr::Unary(ast::UnaryOp::Neg, operand));
 
         let result = convert_expr(&neg_expr, &HashSet::new()).unwrap();
 
@@ -568,8 +564,8 @@ mod expr_tests {
         }
 
         // Test logical not
-        let operand = spanned(ast::Expr::Literal(ast::Literal::Bool(true)));
-        let not_expr = spanned(ast::Expr::Unary(ast::UnaryOp::Not, operand));
+        let operand = spanned(AstExpr::Literal(ast::Literal::Bool(true)));
+        let not_expr = spanned(AstExpr::Unary(ast::UnaryOp::Not, operand));
 
         let result = convert_expr(&not_expr, &HashSet::new()).unwrap();
 
@@ -587,10 +583,10 @@ mod expr_tests {
             ty: spanned(ast::Type::Int64),
         });
 
-        let init = spanned(ast::Expr::Literal(ast::Literal::Int64(42)));
-        let body = spanned(ast::Expr::Ref(var_name.clone()));
+        let init = spanned(AstExpr::Literal(ast::Literal::Int64(42)));
+        let body = spanned(AstExpr::Ref(var_name.clone()));
 
-        let let_expr = spanned(ast::Expr::Let(field, init, body));
+        let let_expr = spanned(AstExpr::Let(field, init, body));
         let result = convert_expr(&let_expr, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -601,11 +597,11 @@ mod expr_tests {
 
     #[test]
     fn test_convert_if_then_else() {
-        let condition = spanned(ast::Expr::Literal(ast::Literal::Bool(true)));
-        let then_branch = spanned(ast::Expr::Literal(ast::Literal::Int64(1)));
-        let else_branch = spanned(ast::Expr::Literal(ast::Literal::Int64(2)));
+        let condition = spanned(AstExpr::Literal(ast::Literal::Bool(true)));
+        let then_branch = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
+        let else_branch = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
 
-        let if_expr = spanned(ast::Expr::IfThenElse(condition, then_branch, else_branch));
+        let if_expr = spanned(AstExpr::IfThenElse(condition, then_branch, else_branch));
         let result = convert_expr(&if_expr, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -616,11 +612,11 @@ mod expr_tests {
 
     #[test]
     fn test_convert_array() {
-        let elem1 = spanned(ast::Expr::Literal(ast::Literal::Int64(1)));
-        let elem2 = spanned(ast::Expr::Literal(ast::Literal::Int64(2)));
-        let elem3 = spanned(ast::Expr::Literal(ast::Literal::Int64(3)));
+        let elem1 = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
+        let elem2 = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+        let elem3 = spanned(AstExpr::Literal(ast::Literal::Int64(3)));
 
-        let array_expr = spanned(ast::Expr::Array(vec![elem1, elem2, elem3]));
+        let array_expr = spanned(AstExpr::Array(vec![elem1, elem2, elem3]));
         let result = convert_expr(&array_expr, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -633,11 +629,11 @@ mod expr_tests {
 
     #[test]
     fn test_convert_tuple() {
-        let elem1 = spanned(ast::Expr::Literal(ast::Literal::Int64(1)));
-        let elem2 = spanned(ast::Expr::Literal(ast::Literal::Bool(true)));
-        let elem3 = spanned(ast::Expr::Literal(ast::Literal::String("test".to_string())));
+        let elem1 = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
+        let elem2 = spanned(AstExpr::Literal(ast::Literal::Bool(true)));
+        let elem3 = spanned(AstExpr::Literal(ast::Literal::String("test".to_string())));
 
-        let tuple_expr = spanned(ast::Expr::Tuple(vec![elem1, elem2, elem3]));
+        let tuple_expr = spanned(AstExpr::Tuple(vec![elem1, elem2, elem3]));
         let result = convert_expr(&tuple_expr, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -650,13 +646,13 @@ mod expr_tests {
 
     #[test]
     fn test_convert_map() {
-        let key1 = spanned(ast::Expr::Literal(ast::Literal::String("key1".to_string())));
-        let val1 = spanned(ast::Expr::Literal(ast::Literal::Int64(1)));
+        let key1 = spanned(AstExpr::Literal(ast::Literal::String("key1".to_string())));
+        let val1 = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
 
-        let key2 = spanned(ast::Expr::Literal(ast::Literal::String("key2".to_string())));
-        let val2 = spanned(ast::Expr::Literal(ast::Literal::Int64(2)));
+        let key2 = spanned(AstExpr::Literal(ast::Literal::String("key2".to_string())));
+        let val2 = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
 
-        let map_expr = spanned(ast::Expr::Map(vec![(key1, val1), (key2, val2)]));
+        let map_expr = spanned(AstExpr::Map(vec![(key1, val1), (key2, val2)]));
         let result = convert_expr(&map_expr, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -669,13 +665,10 @@ mod expr_tests {
 
     #[test]
     fn test_convert_constructor() {
-        let arg1 = spanned(ast::Expr::Literal(ast::Literal::Int64(1)));
-        let arg2 = spanned(ast::Expr::Literal(ast::Literal::String("test".to_string())));
+        let arg1 = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
+        let arg2 = spanned(AstExpr::Literal(ast::Literal::String("test".to_string())));
 
-        let constructor_expr = spanned(ast::Expr::Constructor(
-            "Point".to_string(),
-            vec![arg1, arg2],
-        ));
+        let constructor_expr = spanned(AstExpr::Constructor("Point".to_string(), vec![arg1, arg2]));
         let result = convert_expr(&constructor_expr, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -694,8 +687,8 @@ mod expr_tests {
             ty: spanned(ast::Type::Int64),
         });
 
-        let body = spanned(ast::Expr::Ref("x".to_string()));
-        let closure_expr = spanned(ast::Expr::Closure(vec![param], body));
+        let body = spanned(AstExpr::Ref("x".to_string()));
+        let closure_expr = spanned(AstExpr::Closure(vec![param], body));
         let result = convert_expr(&closure_expr, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -709,11 +702,11 @@ mod expr_tests {
 
     #[test]
     fn test_convert_function_call() {
-        let func = spanned(ast::Expr::Ref("add".to_string()));
-        let arg1 = spanned(ast::Expr::Literal(ast::Literal::Int64(1)));
-        let arg2 = spanned(ast::Expr::Literal(ast::Literal::Int64(2)));
+        let func = spanned(AstExpr::Ref("add".to_string()));
+        let arg1 = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
+        let arg2 = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
 
-        let call_expr = spanned(ast::Expr::Postfix(
+        let call_expr = spanned(AstExpr::Postfix(
             func,
             ast::PostfixOp::Call(vec![arg1, arg2]),
         ));
@@ -729,10 +722,10 @@ mod expr_tests {
 
     #[test]
     fn test_convert_field_access() {
-        let obj = spanned(ast::Expr::Ref("point".to_string()));
+        let obj = spanned(AstExpr::Ref("point".to_string()));
         let field_name = spanned("x".to_string());
 
-        let field_access_expr = spanned(ast::Expr::Postfix(obj, ast::PostfixOp::Field(field_name)));
+        let field_access_expr = spanned(AstExpr::Postfix(obj, ast::PostfixOp::Field(field_name)));
         let result = convert_expr(&field_access_expr, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -750,11 +743,11 @@ mod expr_tests {
 
     #[test]
     fn test_convert_method_call() {
-        let obj = spanned(ast::Expr::Ref("list".to_string()));
+        let obj = spanned(AstExpr::Ref("list".to_string()));
         let method_name = spanned("add".to_string());
-        let arg = spanned(ast::Expr::Literal(ast::Literal::Int64(42)));
+        let arg = spanned(AstExpr::Literal(ast::Literal::Int64(42)));
 
-        let method_call_expr = spanned(ast::Expr::Postfix(
+        let method_call_expr = spanned(AstExpr::Postfix(
             obj,
             ast::PostfixOp::Method(method_name, vec![arg]),
         ));
@@ -784,10 +777,8 @@ mod expr_tests {
 
     #[test]
     fn test_convert_fail() {
-        let error_expr = spanned(ast::Expr::Literal(ast::Literal::String(
-            "error".to_string(),
-        )));
-        let fail_expr = spanned(ast::Expr::Fail(error_expr));
+        let error_expr = spanned(AstExpr::Literal(ast::Literal::String("error".to_string())));
+        let fail_expr = spanned(AstExpr::Fail(error_expr));
         let result = convert_expr(&fail_expr, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -805,11 +796,11 @@ mod expr_tests {
     #[test]
     fn test_convert_pattern_match() {
         // Create a simple pattern match expression
-        let scrutinee = spanned(ast::Expr::Ref("value".to_string()));
+        let scrutinee = spanned(AstExpr::Ref("value".to_string()));
 
         // Pattern 1: literal pattern
         let pattern1 = spanned(ast::Pattern::Literal(ast::Literal::Int64(0)));
-        let expr1 = spanned(ast::Expr::Literal(ast::Literal::String("zero".to_string())));
+        let expr1 = spanned(AstExpr::Literal(ast::Literal::String("zero".to_string())));
         let arm1 = spanned(ast::MatchArm {
             pattern: pattern1,
             expr: expr1,
@@ -820,13 +811,13 @@ mod expr_tests {
             spanned("n".to_string()),
             spanned(ast::Pattern::Wildcard),
         ));
-        let expr2 = spanned(ast::Expr::Ref("n".to_string()));
+        let expr2 = spanned(AstExpr::Ref("n".to_string()));
         let arm2 = spanned(ast::MatchArm {
             pattern: pattern2,
             expr: expr2,
         });
 
-        let match_expr = spanned(ast::Expr::PatternMatch(scrutinee, vec![arm1, arm2]));
+        let match_expr = spanned(AstExpr::PatternMatch(scrutinee, vec![arm1, arm2]));
         let result = convert_expr(&match_expr, &HashSet::new()).unwrap();
 
         match &result.kind {
@@ -859,8 +850,8 @@ mod expr_tests {
     #[test]
     fn test_convert_block() {
         // Create a simple expression inside a block
-        let inner_expr = spanned(ast::Expr::Literal(ast::Literal::Int64(42)));
-        let block_expr = spanned(ast::Expr::Block(inner_expr));
+        let inner_expr = spanned(AstExpr::Literal(ast::Literal::Int64(42)));
+        let block_expr = spanned(AstExpr::Block(inner_expr));
 
         let result = convert_expr(&block_expr, &HashSet::new()).unwrap();
 
@@ -887,7 +878,7 @@ mod expr_tests {
 
         // Create a simple expression with that span
         let expr = Spanned::new(
-            ast::Expr::Literal(ast::Literal::Int64(42)),
+            AstExpr::Literal(ast::Literal::Int64(42)),
             custom_span.clone(),
         );
 
