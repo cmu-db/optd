@@ -6,7 +6,6 @@ use crate::error::Error;
 use crate::memo::Memoize;
 use OptimizerMessage::*;
 use futures::StreamExt;
-use futures::channel::oneshot;
 use futures::{
     SinkExt,
     channel::mpsc::{self, Receiver, Sender},
@@ -49,6 +48,7 @@ pub struct OptimizeRequest {
 ///
 /// Each message that includes a JobId represents the result of a completed job,
 /// allowing the optimizer to track which tasks are progressing.
+#[derive(Clone)]
 enum OptimizerMessage {
     /// Process an optimization request.
     OptimizeRequestWrapper(OptimizeRequest, TaskId),
@@ -81,7 +81,7 @@ enum OptimizerMessage {
 
     /// Retrieve logical properties for a specific group.
     #[allow(unused)]
-    RetrieveProperties(GroupId, oneshot::Sender<LogicalProperties>),
+    RetrieveProperties(GroupId, Sender<LogicalProperties>),
 }
 
 /// A message that is waiting for dependencies before it can be processed.
