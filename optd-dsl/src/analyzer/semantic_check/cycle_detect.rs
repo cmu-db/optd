@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-
 use crate::{
     analyzer::{error::AnalyzerErrorKind, hir::Identifier, types::TypeRegistry},
     parser::ast::Type as AstType,
     utils::span::Spanned,
 };
+use std::collections::HashMap;
 
 /// Exploration status for ADT cycle detection.
 #[derive(Debug, Clone, PartialEq, Eq)]
