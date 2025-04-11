@@ -88,6 +88,12 @@ impl TestHarness {
     }
 }
 
+impl Default for TestHarness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // Helper to compare Values
 pub fn assert_values_equal(v1: &Value, v2: &Value) {
     match (&v1.data, &v2.data) {

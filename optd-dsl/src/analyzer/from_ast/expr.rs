@@ -447,8 +447,8 @@ mod expr_tests {
         }
 
         // Test float literal
-        let float_val = PI;
-        let float_lit = spanned(AstExpr::Literal(ast::Literal::Float64(
+        let float_val = std::f64::consts::PI;
+        let float_lit = spanned(ast::Expr::Literal(ast::Literal::Float64(
             ordered_float::OrderedFloat(float_val),
         )));
         let result = converter
