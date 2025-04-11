@@ -985,6 +985,77 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_return_expression_breaks_control_flow() {
+        let harness = TestHarness::new();
+        let mut ctx = Context::default();
+
+        // Define a function:
+        // fn test_return(x) => {
+        //   let result = if x < 10 {
+        //     return "too small";
+        //   } else {
+        //     "big enough"
+        //   };
+        //   return "result is: " + result;
+        // }
+        let test_return_function = Value::new(CoreData::Function(FunKind::Closure(
+            vec!["x".to_string()],
+            Arc::new(Expr::new(Let(
+                "result".to_string(),
+                Arc::new(Expr::new(IfThenElse(
+                    Arc::new(Expr::new(Binary(
+                        ref_expr("x"),
+                        BinOp::Lt,
+                        lit_expr(int(10)),
+                    ))),
+                    Arc::new(Expr::new(Return(lit_expr(string("too small"))))),
+                    lit_expr(string("big enough")),
+                ))),
+                // This part should never execute when x < 10
+                Arc::new(Expr::new(Binary(
+                    lit_expr(string("result is: ")),
+                    BinOp::Concat,
+                    ref_expr("result"),
+                ))),
+            ))),
+        )));
+
+        ctx.bind("test_return".to_string(), test_return_function);
+        let engine = Engine::new(ctx);
+
+        // Call with x = 5, should return "too small" directly, skipping the string concatenation
+        let small_call = Arc::new(Expr::new(Call(
+            ref_expr("test_return"),
+            vec![lit_expr(int(5))],
+        )));
+        let small_result = evaluate_and_collect(small_call, engine.clone(), harness.clone()).await;
+
+        // Call with x = 15, should proceed normally
+        let big_call = Arc::new(Expr::new(Call(
+            ref_expr("test_return"),
+            vec![lit_expr(int(15))],
+        )));
+        let big_result = evaluate_and_collect(big_call, engine, harness).await;
+
+        // Check results
+        assert_eq!(small_result.len(), 1);
+        match &small_result[0].data {
+            CoreData::Literal(Literal::String(value)) => {
+                assert_eq!(value, "too small");
+            }
+            _ => panic!("Expected string value"),
+        }
+
+        assert_eq!(big_result.len(), 1);
+        match &big_result[0].data {
+            CoreData::Literal(Literal::String(value)) => {
+                assert_eq!(value, "result is: big enough");
+            }
+            _ => panic!("Expected string value"),
+        }
+    }
+
     /// Test nested let bindings
     #[tokio::test]
     async fn test_nested_let_bindings() {
