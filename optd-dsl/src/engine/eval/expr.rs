@@ -1,3 +1,4 @@
+use super::binary::{evaluate_and, evaluate_or};
 use super::{binary::eval_binary_op, unary::eval_unary_op};
 use crate::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Goal, GroupId, Identifier, Literal, LogicalOp,
@@ -124,8 +125,8 @@ where
 
 /// Evaluates a binary expression.
 ///
-/// Evaluates both operands, then applies the binary operation, passing the result to the
-/// continuation.
+/// Handles different binary operations, with special cases for logical operators to enable
+/// short-circuit evaluation.
 ///
 /// # Parameters
 /// * `left` - The left operand
@@ -143,17 +144,25 @@ pub(crate) async fn evaluate_binary_expr<O>(
 where
     O: Send + 'static,
 {
-    engine
-        .clone()
-        .evaluate(
-            left,
-            Arc::new(move |left_val| {
-                Box::pin(capture!([right, op, engine, k], async move {
-                    evaluate_right(left_val, right, op, engine, k).await
-                }))
-            }),
-        )
-        .await
+    match op {
+        // Special case for logical operators that implement short-circuit evaluation.
+        BinOp::And => evaluate_and(left, right, engine, k).await,
+        BinOp::Or => evaluate_or(left, right, engine, k).await,
+        // For all other operators, use the generic non-short-circuit evaluation.
+        _ => {
+            engine
+                .clone()
+                .evaluate(
+                    left,
+                    Arc::new(move |left_val| {
+                        Box::pin(capture!([right, op, engine, k], async move {
+                            evaluate_right(left_val, right, op, engine, k).await
+                        }))
+                    }),
+                )
+                .await
+        }
+    }
 }
 
 /// Helper function to evaluate the right operand after the left is evaluated.
@@ -235,7 +244,6 @@ pub(crate) async fn evaluate_call<O>(
 where
     O: Send + 'static,
 {
-    // First evaluate the function expression.
     engine
         .clone()
         .evaluate(
@@ -658,10 +666,8 @@ pub(crate) async fn evaluate_map<O>(
 where
     O: Send + 'static,
 {
-    // Extract keys and values.
     let (keys, values): (Vec<Arc<Expr>>, Vec<Arc<Expr>>) = items.into_iter().unzip();
 
-    // First evaluate all key expressions.
     evaluate_sequence(
         keys,
         engine.clone(),
@@ -886,6 +892,144 @@ mod tests {
                 }
             }
             _ => panic!("Expected tuple result"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_binary_logical() {
+        let harness = TestHarness::new();
+        let ctx = Context::default();
+        let engine = Engine::new(ctx);
+
+        // Test direct binary expression evaluation for AND operator
+        // true && true = true
+        let true_and_true = Arc::new(Expr::new(Binary(
+            lit_expr(boolean(true)),
+            BinOp::And,
+            lit_expr(boolean(true)),
+        )));
+        let true_and_true_result =
+            evaluate_and_collect(true_and_true, engine.clone(), harness.clone()).await;
+
+        // true && false = false
+        let true_and_false = Arc::new(Expr::new(Binary(
+            lit_expr(boolean(true)),
+            BinOp::And,
+            lit_expr(boolean(false)),
+        )));
+        let true_and_false_result =
+            evaluate_and_collect(true_and_false, engine.clone(), harness.clone()).await;
+
+        // false && true = false
+        let false_and_true = Arc::new(Expr::new(Binary(
+            lit_expr(boolean(false)),
+            BinOp::And,
+            lit_expr(boolean(true)),
+        )));
+        let false_and_true_result =
+            evaluate_and_collect(false_and_true, engine.clone(), harness.clone()).await;
+
+        // false && false = false
+        let false_and_false = Arc::new(Expr::new(Binary(
+            lit_expr(boolean(false)),
+            BinOp::And,
+            lit_expr(boolean(false)),
+        )));
+        let false_and_false_result =
+            evaluate_and_collect(false_and_false, engine.clone(), harness.clone()).await;
+
+        // Test direct binary expression evaluation for OR operator
+        // true || true = true
+        let true_or_true = Arc::new(Expr::new(Binary(
+            lit_expr(boolean(true)),
+            BinOp::Or,
+            lit_expr(boolean(true)),
+        )));
+        let true_or_true_result =
+            evaluate_and_collect(true_or_true, engine.clone(), harness.clone()).await;
+
+        // true || false = true
+        let true_or_false = Arc::new(Expr::new(Binary(
+            lit_expr(boolean(true)),
+            BinOp::Or,
+            lit_expr(boolean(false)),
+        )));
+        let true_or_false_result =
+            evaluate_and_collect(true_or_false, engine.clone(), harness.clone()).await;
+
+        // false || true = true
+        let false_or_true = Arc::new(Expr::new(Binary(
+            lit_expr(boolean(false)),
+            BinOp::Or,
+            lit_expr(boolean(true)),
+        )));
+        let false_or_true_result =
+            evaluate_and_collect(false_or_true, engine.clone(), harness.clone()).await;
+
+        // false || false = false
+        let false_or_false = Arc::new(Expr::new(Binary(
+            lit_expr(boolean(false)),
+            BinOp::Or,
+            lit_expr(boolean(false)),
+        )));
+        let false_or_false_result = evaluate_and_collect(false_or_false, engine, harness).await;
+
+        // Verify all AND results
+        match &true_and_true_result[0].data {
+            CoreData::Literal(Literal::Bool(value)) => {
+                assert_eq!(*value, true, "true && true should be true");
+            }
+            _ => panic!("Expected boolean value from true && true"),
+        }
+
+        match &true_and_false_result[0].data {
+            CoreData::Literal(Literal::Bool(value)) => {
+                assert_eq!(*value, false, "true && false should be false");
+            }
+            _ => panic!("Expected boolean value from true && false"),
+        }
+
+        match &false_and_true_result[0].data {
+            CoreData::Literal(Literal::Bool(value)) => {
+                assert_eq!(*value, false, "false && true should be false");
+            }
+            _ => panic!("Expected boolean value from false && true"),
+        }
+
+        match &false_and_false_result[0].data {
+            CoreData::Literal(Literal::Bool(value)) => {
+                assert_eq!(*value, false, "false && false should be false");
+            }
+            _ => panic!("Expected boolean value from false && false"),
+        }
+
+        // Verify all OR results
+        match &true_or_true_result[0].data {
+            CoreData::Literal(Literal::Bool(value)) => {
+                assert_eq!(*value, true, "true || true should be true");
+            }
+            _ => panic!("Expected boolean value from true || true"),
+        }
+
+        match &true_or_false_result[0].data {
+            CoreData::Literal(Literal::Bool(value)) => {
+                assert_eq!(*value, true, "true || false should be true");
+            }
+            _ => panic!("Expected boolean value from true || false"),
+        }
+
+        match &false_or_true_result[0].data {
+            CoreData::Literal(Literal::Bool(value)) => {
+                assert_eq!(*value, true, "false || true should be true");
+            }
+            _ => panic!("Expected boolean value from false || true"),
+        }
+
+        match &false_or_false_result[0].data {
+            CoreData::Literal(Literal::Bool(value)) => {
+                assert_eq!(*value, false, "false || false should be false");
+            }
+            _ => panic!("Expected boolean value from false || false"),
         }
     }
 
