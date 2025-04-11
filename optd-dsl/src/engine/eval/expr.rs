@@ -997,7 +997,7 @@ mod tests {
         //   } else {
         //     "big enough"
         //   };
-        //   return "result is: " + result;
+        //   "result is: " + result;
         // }
         let test_return_function = Value::new(CoreData::Function(FunKind::Closure(
             vec!["x".to_string()],
