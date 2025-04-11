@@ -76,12 +76,12 @@ jobs:
           submodules: true
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
-      - name: Install nightly for -Zminimal-versions
+      - name: Install nightly for -Z direct-minimal-versions
         uses: dtolnay/rust-toolchain@nightly
       - name: rustup default stable
         run: rustup default stable
-      - name: cargo update -Zminimal-versions
-        run: cargo +nightly update -Zminimal-versions
+      - name: cargo update -Z direct-minimal-versions
+        run: cargo +nightly update -Z direct-minimal-versions
       - name: cargo test
         run: cargo test --locked --all-features --all-targets
   os-check:

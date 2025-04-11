@@ -1,8 +1,11 @@
 pub mod analyzer;
+pub mod catalog;
 pub mod engine;
 pub mod lexer;
 pub mod parser;
 pub mod utils;
+
+pub use catalog::Catalog;
 
 /// A macro that automatically clones variables before they're captured by a closure.
 ///
