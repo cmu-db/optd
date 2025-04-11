@@ -1,13 +1,14 @@
 [package]
 name = "optd-core"
-version.workspace = true
-edition.workspace = true
-repository.workspace = true
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/cmu-db/optd"
 
 [dependencies]
-tokio.workspace = true
-async-recursion.workspace = true
-trait-variant.workspace = true
-futures = "0.3"
-optd-dsl = {path="../optd-dsl"}
+optd-dsl = { path = "../optd-dsl" }
+
+async-recursion = "1.1.1"
+futures = "0.3.31"
 ordered-float = "5.0.0"
+tokio = { version = "1.44.2", features = ["macros", "rt"] }
+trait-variant = "0.1.2"
