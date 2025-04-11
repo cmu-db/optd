@@ -382,7 +382,6 @@ mod expr_tests {
     use crate::parser::ast;
     use crate::utils::span::{Span, Spanned};
     use std::collections::HashSet;
-    use std::f64::consts::PI;
 
     // Helper functions for creating test expressions
     fn create_test_span() -> Span {
@@ -447,8 +446,8 @@ mod expr_tests {
         }
 
         // Test float literal
-        let float_val = PI;
-        let float_lit = spanned(AstExpr::Literal(ast::Literal::Float64(
+        let float_val = std::f64::consts::PI;
+        let float_lit = spanned(ast::Expr::Literal(ast::Literal::Float64(
             ordered_float::OrderedFloat(float_val),
         )));
         let result = converter
@@ -791,7 +790,7 @@ mod expr_tests {
             converter
                 .type_registry
                 .register_adt(&adt)
-                .expect(&format!("Failed to register {} type", ty));
+                .unwrap_or_else(|_| panic!("Failed to register {} type", ty));
         }
 
         // Create nested constructor expressions
@@ -856,7 +855,7 @@ mod expr_tests {
             converter
                 .type_registry
                 .register_adt(&adt)
-                .expect(&format!("Failed to register {} type", ty));
+                .unwrap_or_else(|_| panic!("Failed to register {} type", ty));
         }
 
         // Create a constructor inside a let expression

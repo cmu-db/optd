@@ -330,7 +330,7 @@ mod pattern_tests {
             converter
                 .type_registry
                 .register_adt(&adt)
-                .expect(&format!("Failed to register {} type", ty));
+                .unwrap_or_else(|_| panic!("Failed to register {} type", ty));
         }
 
         // Test simple constructor pattern
