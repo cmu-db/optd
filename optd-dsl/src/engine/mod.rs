@@ -2,7 +2,7 @@ use crate::analyzer::{
     context::Context,
     hir::{Expr, ExprKind, Goal, GroupId, Value},
 };
-use std::{collections::VecDeque, sync::Arc};
+use std::sync::Arc;
 
 mod eval;
 
@@ -28,8 +28,8 @@ pub enum EngineResponse<O> {
 pub struct Engine<O: Clone + Send + 'static> {
     /// The original HIR context containing all defined expressions and rules.
     pub(crate) context: Context,
-    /// The function return stack, used to manage early return continuations.
-    pub(crate) return_stack: VecDeque<Continuation<Value, EngineResponse<O>>>,
+    /// The continuation to return from the current function scope.
+    pub(crate) fun_return: Option<Continuation<Value, EngineResponse<O>>>,
 }
 
 impl<O: Clone + Send + 'static> Engine<O> {
@@ -37,21 +37,23 @@ impl<O: Clone + Send + 'static> Engine<O> {
     pub fn new(context: Context) -> Self {
         Self {
             context,
-            return_stack: VecDeque::new(),
+            fun_return: None,
         }
     }
 
     /// Creates a new engine with an updated context.
-    ///
-    /// # Parameters
-    ///  `context` - The new context to use.
-    ///
-    /// # Returns
-    /// A new engine with the provided context.
-    pub fn with_new_context(&self, context: Context) -> Self {
+    pub fn with_new_context(self, context: Context) -> Self {
         Self {
             context,
-            return_stack: self.return_stack.clone(),
+            fun_return: self.fun_return,
+        }
+    }
+
+    /// Creates a new engine with an updated function return continuation.
+    pub fn with_new_return(self, fun_return: Continuation<Value, EngineResponse<O>>) -> Self {
+        Self {
+            context: self.context,
+            fun_return: Some(fun_return),
         }
     }
 

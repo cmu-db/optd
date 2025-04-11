@@ -531,34 +531,35 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// * `args` - The argument expressions to evaluate.
     /// * `k` - The continuation to receive evaluation results.
     pub(crate) async fn evaluate_closure_call(
-        mut self,
+        self,
         params: Vec<Identifier>,
         body: Arc<Expr>,
         args: Vec<Arc<Expr>>,
         k: Continuation<Value, EngineResponse<O>>,
     ) -> EngineResponse<O> {
-        // Push the continuation onto the function return stack.
-        self.return_stack.push_back(k.clone());
-        let engine = self.clone();
+        // Snapshot the continuation to the upper function.
+        let engine = self.with_new_return(k.clone());
 
-        self.evaluate_sequence(
-            args,
-            Arc::new(move |arg_values| {
-                Box::pin(capture!([params, engine, body, k], async move {
-                    // Create a new context with parameters bound to arguments.
-                    let mut new_ctx = engine.context.clone();
-                    new_ctx.push_scope();
+        engine
+            .clone()
+            .evaluate_sequence(
+                args,
+                Arc::new(move |arg_values| {
+                    Box::pin(capture!([params, engine, body, k], async move {
+                        // Create a new context with parameters bound to arguments.
+                        let mut new_ctx = engine.context.clone();
+                        new_ctx.push_scope();
 
-                    params.iter().zip(arg_values).for_each(|(p, a)| {
-                        new_ctx.bind(p.clone(), a);
-                    });
+                        params.iter().zip(arg_values).for_each(|(p, a)| {
+                            new_ctx.bind(p.clone(), a);
+                        });
 
-                    // Evaluate the body in the new context.
-                    engine.with_new_context(new_ctx).evaluate(body, k).await
-                }))
-            }),
-        )
-        .await
+                        // Evaluate the body in the new context.
+                        engine.with_new_context(new_ctx).evaluate(body, k).await
+                    }))
+                }),
+            )
+            .await
     }
 
     /// Evaluates a call to a Rust UDF.
@@ -660,13 +661,9 @@ impl<O: Clone + Send + 'static> Engine<O> {
     /// # Parameters
     ///
     /// * `expr` - The expression to evaluate and return.
-    pub(crate) async fn evaluate_return(mut self, expr: Arc<Expr>) -> EngineResponse<O> {
-        let return_k = self
-            .return_stack
-            .pop_back()
-            .expect("Return stack is empty");
-
-        self.evaluate(expr.clone(), return_k).await
+    pub(crate) async fn evaluate_return(self, expr: Arc<Expr>) -> EngineResponse<O> {
+        let return_k = self.fun_return.clone().unwrap();
+        self.evaluate(expr, return_k).await
     }
 }
 

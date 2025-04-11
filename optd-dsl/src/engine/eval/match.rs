@@ -280,7 +280,7 @@ where
     let patterns = vec![head_pattern, tail_pattern];
     let values = vec![head, tail];
 
-    // Use match_components to process all components
+    // Use match_components to process all components.
     match_components(
         patterns,
         values,
