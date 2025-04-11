@@ -47,7 +47,7 @@ impl<'a> CycleDetector<'a> {
 
         if let Some(status) = self.explore_status.get(adt).cloned() {
             match status {
-                Terminates => return Ok(true),
+                Terminated => return Ok(true),
                 Exploring => return Ok(false),
             }
         }
@@ -69,7 +69,7 @@ impl<'a> CycleDetector<'a> {
         };
 
         if terminates {
-            self.explore_status.insert(adt.to_string(), Terminates);
+            self.explore_status.insert(adt.to_string(), Terminated);
             // Restart the exploration of the previously blocked ADTs, populate
             // the exploration status map.
             if let Some(deps) = self.dependencies.remove(adt) {
@@ -188,7 +188,7 @@ impl<'a> CycleDetector<'a> {
     pub(super) fn reset(&mut self) {
         self.path.clear();
         self.explore_status
-            .retain(|_, status| *status == ExplorationStatus::Terminates);
+            .retain(|_, status| *status == ExplorationStatus::Terminated);
         self.dependencies.clear();
     }
 
