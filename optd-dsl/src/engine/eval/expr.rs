@@ -1,4 +1,3 @@
-use super::binary::{evaluate_and, evaluate_or};
 use super::{binary::eval_binary_op, unary::eval_unary_op};
 use crate::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Goal, GroupId, Identifier, Literal, LogicalOp,
@@ -6,41 +5,35 @@ use crate::analyzer::hir::{
 };
 use crate::analyzer::map::Map;
 use crate::engine::{Continuation, EngineResponse};
-use crate::{
-    capture,
-    engine::{Engine, utils::evaluate_sequence},
-};
+use crate::{capture, engine::Engine};
 use ExprKind::*;
 use std::sync::Arc;
 
-/// Evaluates an if-then-else expression.
-///
-/// First evaluates the condition, then either the 'then' branch if the condition is true, or the
-/// 'else' branch if the condition is false, passing results to the continuation.
-///
-/// # Parameters
-///
-/// * `cond` - The condition expression.
-/// * `then_expr` - The expression to evaluate if condition is true.
-/// * `else_expr` - The expression to evaluate if condition is false.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_if_then_else<O>(
-    cond: Arc<Expr>,
-    then_expr: Arc<Expr>,
-    else_expr: Arc<Expr>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    engine
-        .clone()
-        .evaluate(
+impl<O: Clone + Send + 'static> Engine<O> {
+    /// Evaluates an if-then-else expression.
+    ///
+    /// First evaluates the condition, then either the 'then' branch if the condition is true, or the
+    /// 'else' branch if the condition is false, passing results to the continuation.
+    ///
+    /// # Parameters
+    ///
+    /// * `cond` - The condition expression.
+    /// * `then_expr` - The expression to evaluate if condition is true.
+    /// * `else_expr` - The expression to evaluate if condition is false.
+    /// * `k` - The continuation to receive evaluation results.
+    pub(crate) async fn evaluate_if_then_else(
+        self,
+        cond: Arc<Expr>,
+        then_expr: Arc<Expr>,
+        else_expr: Arc<Expr>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        let engine = self.clone();
+
+        self.evaluate(
             cond,
             Arc::new(move |value| {
-                Box::pin(capture!([then_expr, else_expr, engine, k], async move {
+                Box::pin(capture!([then_expr, engine, else_expr, k], async move {
                     match value.data {
                         CoreData::Literal(Literal::Bool(b)) => {
                             if b {
@@ -55,37 +48,32 @@ where
             }),
         )
         .await
-}
+    }
 
-/// Evaluates a let binding expression.
-///
-/// Binds the result of evaluating the assignee to the identifier in the context, then evaluates the
-/// 'after' expression in the updated context, passing results to the continuation.
-///
-/// # Parameters
-///
-/// * `ident` - The identifier to bind the value to.
-/// * `assignee` - The expression to evaluate and bind.
-/// * `after` - The expression to evaluate in the updated context.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_let_binding<O>(
-    ident: String,
-    assignee: Arc<Expr>,
-    after: Arc<Expr>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    // Evaluate the assignee first.
-    engine
-        .clone()
-        .evaluate(
+    /// Evaluates a let binding expression.
+    ///
+    /// Binds the result of evaluating the assignee to the identifier in the context, then evaluates the
+    /// 'after' expression in the updated context, passing results to the continuation.
+    ///
+    /// # Parameters
+    ///
+    /// * `ident` - The identifier to bind the value to.
+    /// * `assignee` - The expression to evaluate and bind.
+    /// * `after` - The expression to evaluate in the updated context.
+    /// * `k` - The continuation to receive evaluation results.
+    pub(crate) async fn evaluate_let_binding(
+        self,
+        ident: String,
+        assignee: Arc<Expr>,
+        after: Arc<Expr>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        let engine = self.clone();
+
+        self.evaluate(
             assignee,
             Arc::new(move |value| {
-                Box::pin(capture!([ident, after, engine, k], async move {
+                Box::pin(capture!([ident, engine, after, k], async move {
                     // Create updated context with the new binding.
                     let mut new_ctx = engine.context.clone();
                     new_ctx.bind(ident, value);
@@ -96,88 +84,74 @@ where
             }),
         )
         .await
-}
+    }
 
-/// Evaluates a new scope expression.
-///
-/// Creates a new context, pushes a new scope onto it, and evaluates the expression in that
-/// context.
-///
-/// # Parameters
-/// * `expr` - The expression to evaluate.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_new_scope<O>(
-    expr: Arc<Expr>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    let mut new_ctx = engine.context.clone();
-    new_ctx.push_scope();
-    engine
-        .with_new_context(new_ctx)
-        .evaluate(expr.clone(), k)
-        .await
-}
+    /// Evaluates a new scope expression.
+    ///
+    /// Creates a new context, pushes a new scope onto it, and evaluates the expression in that
+    /// context.
+    ///
+    /// # Parameters
+    /// * `expr` - The expression to evaluate.
+    /// * `k` - The continuation to receive evaluation results.
+    pub(crate) async fn evaluate_new_scope(
+        self,
+        expr: Arc<Expr>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        let mut new_ctx = self.context.clone();
+        new_ctx.push_scope();
+        self.with_new_context(new_ctx)
+            .evaluate(expr.clone(), k)
+            .await
+    }
 
-/// Evaluates a binary expression.
-///
-/// Handles different binary operations, with special cases for logical operators to enable
-/// short-circuit evaluation.
-///
-/// # Parameters
-/// * `left` - The left operand
-/// * `op` - The binary operator
-/// * `right` - The right operand
-/// * `engine` - The evaluation engine
-/// * `k` - The continuation to receive evaluation results
-pub(crate) async fn evaluate_binary_expr<O>(
-    left: Arc<Expr>,
-    op: BinOp,
-    right: Arc<Expr>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    match op {
-        // Special case for logical operators that implement short-circuit evaluation.
-        BinOp::And => evaluate_and(left, right, engine, k).await,
-        BinOp::Or => evaluate_or(left, right, engine, k).await,
-        // For all other operators, use the generic non-short-circuit evaluation.
-        _ => {
-            engine
-                .clone()
-                .evaluate(
+    /// Evaluates a binary expression.
+    ///
+    /// Handles different binary operations, with special cases for logical operators to enable
+    /// short-circuit evaluation.
+    ///
+    /// # Parameters
+    /// * `left` - The left operand
+    /// * `op` - The binary operator
+    /// * `right` - The right operand
+    /// * `k` - The continuation to receive evaluation results
+    pub(crate) async fn evaluate_binary_expr(
+        self,
+        left: Arc<Expr>,
+        op: BinOp,
+        right: Arc<Expr>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        match op {
+            // Special case for logical operators that implement short-circuit evaluation.
+            BinOp::And => self.evaluate_and(left, right, k).await,
+            BinOp::Or => self.evaluate_or(left, right, k).await,
+            // For all other operators, use the generic non-short-circuit evaluation.
+            _ => {
+                let engine = self.clone();
+                self.evaluate(
                     left,
                     Arc::new(move |left_val| {
                         Box::pin(capture!([right, op, engine, k], async move {
-                            evaluate_right(left_val, right, op, engine, k).await
+                            engine.evaluate_right(left_val, right, op, k).await
                         }))
                     }),
                 )
                 .await
+            }
         }
     }
-}
 
-/// Helper function to evaluate the right operand after the left is evaluated.
-async fn evaluate_right<O>(
-    left_val: Value,
-    right: Arc<Expr>,
-    op: BinOp,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    engine
-        .evaluate(
+    /// Helper function to evaluate the right operand after the left is evaluated.
+    async fn evaluate_right(
+        self,
+        left_val: Value,
+        right: Arc<Expr>,
+        op: BinOp,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        self.evaluate(
             right,
             Arc::new(move |right_val| {
                 Box::pin(capture!([left_val, op, k], async move {
@@ -187,29 +161,24 @@ where
             }),
         )
         .await
-}
+    }
 
-/// Evaluates a unary expression.
-///
-/// Evaluates the operand, then applies the unary operation, passing the result to the continuation.
-///
-/// # Parameters
-///
-/// * `op` - The unary operator.
-/// * `expr` - The operand expression.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_unary_expr<O>(
-    op: UnaryOp,
-    expr: Arc<Expr>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    engine
-        .evaluate(
+    /// Evaluates a unary expression.
+    ///
+    /// Evaluates the operand, then applies the unary operation, passing the result to the continuation.
+    ///
+    /// # Parameters
+    ///
+    /// * `op` - The unary operator.
+    /// * `expr` - The operand expression.
+    /// * `k` - The continuation to receive evaluation results.
+    pub(crate) async fn evaluate_unary_expr(
+        self,
+        op: UnaryOp,
+        expr: Arc<Expr>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        self.evaluate(
             expr,
             Arc::new(move |value| {
                 Box::pin(capture!([op, k], async move {
@@ -219,60 +188,54 @@ where
             }),
         )
         .await
-}
+    }
 
-/// Evaluates a call expression.
-///
-/// First evaluates the called expression, then the arguments, and finally applies the call to
-/// the arguments, passing results to the continuation.
-///
-/// Extended to support indexing into collections (Array, Tuple, Struct, Map, Logical, Physical)
-/// when the called expression evaluates to one of these types and a single argument is provided.
-///
-/// # Parameters
-///
-/// * `called` - The called expression to evaluate.
-/// * `args` - The argument expressions to evaluate.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_call<O>(
-    called: Arc<Expr>,
-    args: Vec<Arc<Expr>>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    engine
-        .clone()
-        .evaluate(
+    /// Evaluates a call expression.
+    ///
+    /// First evaluates the called expression, then the arguments, and finally applies the call to
+    /// the arguments, passing results to the continuation.
+    ///
+    /// Extended to support indexing into collections (Array, Tuple, Struct, Map, Logical, Physical)
+    /// when the called expression evaluates to one of these types and a single argument is provided.
+    ///
+    /// # Parameters
+    ///
+    /// * `called` - The called expression to evaluate.
+    /// * `args` - The argument expressions to evaluate.
+    /// * `k` - The continuation to receive evaluation results.
+    pub(crate) async fn evaluate_call(
+        self,
+        called: Arc<Expr>,
+        args: Vec<Arc<Expr>>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        let engine = self.clone();
+
+        self.evaluate(
             called,
             Arc::new(move |called_value| {
                 Box::pin(capture!([args, engine, k], async move {
                     match called_value.data {
                         // Handle function calls.
                         CoreData::Function(FunKind::Closure(params, body)) => {
-                            evaluate_closure_call(params, body, args, engine, k).await
+                            engine.evaluate_closure_call(params, body, args, k).await
                         }
                         CoreData::Function(FunKind::Udf(UdfKind::Linked(udf))) => {
-                            evaluate_rust_udf_call(udf, args, engine, k).await
+                            engine.evaluate_rust_udf_call(udf, args, k).await
                         }
 
                         // Handle collection indexing.
                         CoreData::Array(_) | CoreData::Tuple(_) | CoreData::Struct(_, _) => {
-                            evaluate_indexed_access(called_value, args, engine, k).await
+                            engine.evaluate_indexed_access(called_value, args, k).await
                         }
-                        CoreData::Map(_) => {
-                            evaluate_map_lookup(called_value, args, engine, k).await
-                        }
+                        CoreData::Map(_) => engine.evaluate_map_lookup(called_value, args, k).await,
 
                         // Handle operator field accesses.
                         CoreData::Logical(op) => {
-                            evaluate_logical_operator_access(op, args, engine, k).await
+                            engine.evaluate_logical_operator_access(op, args, k).await
                         }
                         CoreData::Physical(op) => {
-                            evaluate_physical_operator_access(op, args, engine, k).await
+                            engine.evaluate_physical_operator_access(op, args, k).await
                         }
 
                         // Value must be a function or indexable collection/operator.
@@ -285,226 +248,215 @@ where
             }),
         )
         .await
-}
-
-/// Evaluates access to a logical operator.
-///
-/// Handles both materialized and unmaterialized logical operators.
-///
-/// # Parameters
-///
-/// * `op` - The logical operator (materialized or unmaterialized).
-/// * `args` - The argument expressions (should be a single index).
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-fn evaluate_logical_operator_access<O>(
-    op: Materializable<LogicalOp<Value>, GroupId>,
-    args: Vec<Arc<Expr>>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> impl Future<Output = EngineResponse<O>> + Send
-where
-    O: Send + 'static,
-{
-    Box::pin(async move {
-        validate_single_index_arg(&args);
-
-        match op {
-            // For unmaterialized logical operators, yield the group and continue when it's expanded.
-            Materializable::UnMaterialized(group_id) => EngineResponse::YieldGroup(
-                group_id,
-                Arc::new(move |expanded_value| {
-                    Box::pin(capture!([args, engine, k], async move {
-                        evaluate_call(Expr::new(CoreVal(expanded_value)).into(), args, engine, k)
-                            .await
-                    }))
-                }),
-            ),
-            // For materialized logical operators, access the data or children directly.
-            Materializable::Materialized(log_op) => {
-                evaluate_index_on_materialized_operator(
-                    args[0].clone(),
-                    log_op.operator.data,
-                    log_op.operator.children,
-                    engine,
-                    k,
-                )
-                .await
-            }
-        }
-    })
-}
-
-/// Evaluates access to a physical operator.
-///
-/// Handles both materialized and unmaterialized physical operators.
-///
-/// # Parameters
-///
-/// * `op` - The physical operator (materialized or unmaterialized).
-/// * `args` - The argument expressions (should be a single index).
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-fn evaluate_physical_operator_access<O>(
-    op: Materializable<PhysicalOp<Value>, Goal>,
-    args: Vec<Arc<Expr>>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> impl Future<Output = EngineResponse<O>> + Send
-where
-    O: Send + 'static,
-{
-    Box::pin(async move {
-        validate_single_index_arg(&args);
-
-        match op {
-            // For unmaterialized physical operators, yield the goal and continue when it's expanded.
-            Materializable::UnMaterialized(goal) => EngineResponse::YieldGoal(
-                goal,
-                Arc::new(move |expanded_value| {
-                    Box::pin(capture!([args, engine, k], async move {
-                        evaluate_call(Expr::new(CoreVal(expanded_value)).into(), args, engine, k)
-                            .await
-                    }))
-                }),
-            ),
-            // For materialized physical operators, access the data or children directly.
-            Materializable::Materialized(phys_op) => {
-                evaluate_index_on_materialized_operator(
-                    args[0].clone(),
-                    phys_op.operator.data,
-                    phys_op.operator.children,
-                    engine,
-                    k,
-                )
-                .await
-            }
-        }
-    })
-}
-
-/// Validates that exactly one index argument is provided.
-///
-/// # Parameters
-///
-/// * `args` - The argument expressions to validate.
-fn validate_single_index_arg(args: &[Arc<Expr>]) {
-    if args.len() != 1 {
-        panic!("Operator access requires exactly one index argument");
     }
-}
 
-/// Evaluates an index expression on a materialized operator.
-///
-/// Treats the operator's data and children as a concatenated vector and accesses by index.
-///
-/// # Parameters
-///
-/// * `index_expr` - The index expression to evaluate.
-/// * `data` - The operator's data fields.
-/// * `children` - The operator's children.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-async fn evaluate_index_on_materialized_operator<O>(
-    index_expr: Arc<Expr>,
-    data: Vec<Value>,
-    children: Vec<Value>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    engine
-        .evaluate(
+    /// Evaluates access to a logical operator.
+    ///
+    /// Handles both materialized and unmaterialized logical operators.
+    ///
+    /// # Parameters
+    ///
+    /// * `op` - The logical operator (materialized or unmaterialized).
+    /// * `args` - The argument expressions (should be a single index).
+    /// * `k` - The continuation to receive evaluation results.
+    fn evaluate_logical_operator_access(
+        self,
+        op: Materializable<LogicalOp<Value>, GroupId>,
+        args: Vec<Arc<Expr>>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> impl Future<Output = EngineResponse<O>> + Send {
+        Box::pin(async move {
+            self.validate_single_index_arg(&args);
+
+            match op {
+                // For unmaterialized logical operators, yield the group and continue when it's expanded.
+                Materializable::UnMaterialized(group_id) => EngineResponse::YieldGroup(
+                    group_id,
+                    Arc::new(move |expanded_value| {
+                        let engine = self.clone();
+                        Box::pin(capture!([args, k], async move {
+                            engine
+                                .evaluate_call(Expr::new(CoreVal(expanded_value)).into(), args, k)
+                                .await
+                        }))
+                    }),
+                ),
+                // For materialized logical operators, access the data or children directly.
+                Materializable::Materialized(log_op) => {
+                    self.evaluate_index_on_materialized_operator(
+                        args[0].clone(),
+                        log_op.operator.data,
+                        log_op.operator.children,
+                        k,
+                    )
+                    .await
+                }
+            }
+        })
+    }
+
+    /// Evaluates access to a physical operator.
+    ///
+    /// Handles both materialized and unmaterialized physical operators.
+    ///
+    /// # Parameters
+    ///
+    /// * `op` - The physical operator (materialized or unmaterialized).
+    /// * `args` - The argument expressions (should be a single index).
+    /// * `k` - The continuation to receive evaluation results.
+    fn evaluate_physical_operator_access(
+        self,
+        op: Materializable<PhysicalOp<Value>, Goal>,
+        args: Vec<Arc<Expr>>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> impl Future<Output = EngineResponse<O>> + Send {
+        Box::pin(async move {
+            self.validate_single_index_arg(&args);
+
+            match op {
+                // For unmaterialized physical operators, yield the goal and continue when it's expanded.
+                Materializable::UnMaterialized(goal) => EngineResponse::YieldGoal(
+                    goal,
+                    Arc::new(move |expanded_value| {
+                        let engine = self.clone();
+                        Box::pin(capture!([args, k], async move {
+                            engine
+                                .evaluate_call(Expr::new(CoreVal(expanded_value)).into(), args, k)
+                                .await
+                        }))
+                    }),
+                ),
+                // For materialized physical operators, access the data or children directly.
+                Materializable::Materialized(phys_op) => {
+                    self.evaluate_index_on_materialized_operator(
+                        args[0].clone(),
+                        phys_op.operator.data,
+                        phys_op.operator.children,
+                        k,
+                    )
+                    .await
+                }
+            }
+        })
+    }
+
+    /// Validates that exactly one index argument is provided.
+    ///
+    /// # Parameters
+    ///
+    /// * `args` - The argument expressions to validate.
+    fn validate_single_index_arg(&self, args: &[Arc<Expr>]) {
+        if args.len() != 1 {
+            panic!("Operator access requires exactly one index argument");
+        }
+    }
+
+    /// Evaluates an index expression on a materialized operator.
+    ///
+    /// Treats the operator's data and children as a concatenated vector and accesses by index.
+    ///
+    /// # Parameters
+    ///
+    /// * `index_expr` - The index expression to evaluate.
+    /// * `data` - The operator's data fields.
+    /// * `children` - The operator's children.
+    /// * `k` - The continuation to receive evaluation results.
+    async fn evaluate_index_on_materialized_operator(
+        self,
+        index_expr: Arc<Expr>,
+        data: Vec<Value>,
+        children: Vec<Value>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        let engine = self.clone();
+
+        self.evaluate(
             index_expr,
             Arc::new(move |index_value| {
-                Box::pin(capture!([data, children, k], async move {
-                    let index = extract_index(&index_value);
-                    let result = access_operator_field(index, &data, &children);
+                Box::pin(capture!([data, engine, children, k], async move {
+                    let index = engine.extract_index(&index_value);
+                    let result = engine.access_operator_field(index, &data, &children);
 
                     k(result).await
                 }))
             }),
         )
         .await
-}
-
-/// Extracts an integer index from a value.
-///
-/// # Parameters
-///
-/// * `index_value` - The value containing the index.
-///
-/// # Returns
-///
-/// The extracted integer index.
-fn extract_index(index_value: &Value) -> usize {
-    match &index_value.data {
-        CoreData::Literal(Literal::Int64(i)) => *i as usize,
-        _ => panic!("Index must be an integer, got: {:?}", index_value),
-    }
-}
-
-/// Accesses a field in an operator by index.
-///
-/// Treats data and children as a concatenated vector and accesses by index.
-///
-/// # Parameters
-///
-/// * `index` - The index to access.
-/// * `data` - The operator's data fields.
-/// * `children` - The operator's children.
-///
-/// # Returns
-///
-/// The value at the specified index.
-fn access_operator_field(index: usize, data: &[Value], children: &[Value]) -> Value {
-    let data_len = data.len();
-    let total_len = data_len + children.len();
-
-    if index >= total_len {
-        panic!("index out of bounds: {} >= {}", index, total_len);
     }
 
-    if index < data_len {
-        data[index].clone()
-    } else {
-        children[index - data_len].clone()
+    /// Extracts an integer index from a value.
+    ///
+    /// # Parameters
+    ///
+    /// * `index_value` - The value containing the index.
+    ///
+    /// # Returns
+    ///
+    /// The extracted integer index.
+    fn extract_index(&self, index_value: &Value) -> usize {
+        match &index_value.data {
+            CoreData::Literal(Literal::Int64(i)) => *i as usize,
+            _ => panic!("Index must be an integer, got: {:?}", index_value),
+        }
     }
-}
 
-/// Evaluates indexing into a collection (Array, Tuple, or Struct).
-///
-/// # Parameters
-///
-/// * `collection` - The collection value to index into.
-/// * `args` - The argument expressions (should be a single index).
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-async fn evaluate_indexed_access<O>(
-    collection: Value,
-    args: Vec<Arc<Expr>>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    validate_single_index_arg(&args);
+    /// Accesses a field in an operator by index.
+    ///
+    /// Treats data and children as a concatenated vector and accesses by index.
+    ///
+    /// # Parameters
+    ///
+    /// * `index` - The index to access.
+    /// * `data` - The operator's data fields.
+    /// * `children` - The operator's children.
+    ///
+    /// # Returns
+    ///
+    /// The value at the specified index.
+    fn access_operator_field(&self, index: usize, data: &[Value], children: &[Value]) -> Value {
+        let data_len = data.len();
+        let total_len = data_len + children.len();
 
-    engine
-        .evaluate(
+        if index >= total_len {
+            panic!("index out of bounds: {} >= {}", index, total_len);
+        }
+
+        if index < data_len {
+            data[index].clone()
+        } else {
+            children[index - data_len].clone()
+        }
+    }
+
+    /// Evaluates indexing into a collection (Array, Tuple, or Struct).
+    ///
+    /// # Parameters
+    ///
+    /// * `collection` - The collection value to index into.
+    /// * `args` - The argument expressions (should be a single index).
+    /// * `k` - The continuation to receive evaluation results.
+    async fn evaluate_indexed_access(
+        self,
+        collection: Value,
+        args: Vec<Arc<Expr>>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        self.validate_single_index_arg(&args);
+        let engine = self.clone();
+
+        self.evaluate(
             args[0].clone(),
             Arc::new(move |index_value| {
-                Box::pin(capture!([collection, k], async move {
-                    let index = extract_index(&index_value);
+                Box::pin(capture!([collection, engine, k], async move {
+                    let index = engine.extract_index(&index_value);
 
                     let result = match &collection.data {
-                        CoreData::Array(items) => get_indexed_item(items, index),
-                        CoreData::Tuple(items) => get_indexed_item(items, index),
-                        CoreData::Struct(_, fields) => get_indexed_item(fields, index),
-                        _ => panic!("Attempted to index a non-indexable value: {:?}", collection),
+                        CoreData::Array(items) => engine.get_indexed_item(items, index),
+                        CoreData::Tuple(items) => engine.get_indexed_item(items, index),
+                        CoreData::Struct(_, fields) => engine.get_indexed_item(fields, index),
+                        _ => {
+                            panic!("Attempted to index a non-indexable value: {:?}", collection)
+                        }
                     };
 
                     k(result).await
@@ -512,47 +464,42 @@ where
             }),
         )
         .await
-}
-
-/// Gets an item from a collection at the specified index.
-///
-/// # Parameters
-///
-/// * `items` - The collection items.
-/// * `index` - The index to access.
-///
-/// # Returns
-///
-/// The value at the specified index.
-fn get_indexed_item(items: &[Value], index: usize) -> Value {
-    if index < items.len() {
-        items[index].clone()
-    } else {
-        panic!("index out of bounds: {} >= {}", index, items.len());
     }
-}
 
-/// Evaluates a map lookup.
-///
-/// # Parameters
-///
-/// * `map_value` - The map value to look up in.
-/// * `args` - The argument expressions (should be a single key).
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-async fn evaluate_map_lookup<O>(
-    map_value: Value,
-    args: Vec<Arc<Expr>>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    validate_single_index_arg(&args);
+    /// Gets an item from a collection at the specified index.
+    ///
+    /// # Parameters
+    ///
+    /// * `items` - The collection items.
+    /// * `index` - The index to access.
+    ///
+    /// # Returns
+    ///
+    /// The value at the specified index.
+    fn get_indexed_item(&self, items: &[Value], index: usize) -> Value {
+        if index < items.len() {
+            items[index].clone()
+        } else {
+            panic!("index out of bounds: {} >= {}", index, items.len());
+        }
+    }
 
-    engine
-        .evaluate(
+    /// Evaluates a map lookup.
+    ///
+    /// # Parameters
+    ///
+    /// * `map_value` - The map value to look up in.
+    /// * `args` - The argument expressions (should be a single key).
+    /// * `k` - The continuation to receive evaluation results.
+    async fn evaluate_map_lookup(
+        self,
+        map_value: Value,
+        args: Vec<Arc<Expr>>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        self.validate_single_index_arg(&args);
+
+        self.evaluate(
             args[0].clone(),
             Arc::new(move |key_value| {
                 Box::pin(capture!([map_value, k], async move {
@@ -570,152 +517,157 @@ where
             }),
         )
         .await
-}
+    }
 
-/// Evaluates a call to a closure (user-defined function).
-///
-/// Evaluates the arguments, binds them to the parameters in a new context, then evaluates the
-/// function body in that context, passing results to the continuation.
-///
-/// # Parameters
-///
-/// * `params` - The parameter names of the closure.
-/// * `body` - The body expression of the closure.
-/// * `args` - The argument expressions to evaluate.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_closure_call<O>(
-    params: Vec<Identifier>,
-    body: Arc<Expr>,
-    args: Vec<Arc<Expr>>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    evaluate_sequence(
-        args,
-        engine.clone(),
-        Arc::new(move |arg_values| {
-            Box::pin(capture!([params, body, engine, k], async move {
-                // Create a new context with parameters bound to arguments.
-                let mut new_ctx = engine.context.clone();
-                new_ctx.push_scope();
+    /// Evaluates a call to a closure.
+    ///
+    /// Evaluates the arguments, binds them to the parameters in a new context, then evaluates the
+    /// function body in that context, passing results to the continuation.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The parameter names of the closure.
+    /// * `body` - The body expression of the closure.
+    /// * `args` - The argument expressions to evaluate.
+    /// * `k` - The continuation to receive evaluation results.
+    pub(crate) async fn evaluate_closure_call(
+        mut self,
+        params: Vec<Identifier>,
+        body: Arc<Expr>,
+        args: Vec<Arc<Expr>>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        // Push the continuation onto the function return stack.
+        self.return_stack.push_back(k.clone());
+        let engine = self.clone();
 
-                params.iter().zip(arg_values).for_each(|(p, a)| {
-                    new_ctx.bind(p.clone(), a);
-                });
+        self.evaluate_sequence(
+            args,
+            Arc::new(move |arg_values| {
+                Box::pin(capture!([params, engine, body, k], async move {
+                    // Create a new context with parameters bound to arguments.
+                    let mut new_ctx = engine.context.clone();
+                    new_ctx.push_scope();
 
-                // Evaluate the body in the new context.
-                engine.with_new_context(new_ctx).evaluate(body, k).await
-            }))
-        }),
-    )
-    .await
-}
+                    params.iter().zip(arg_values).for_each(|(p, a)| {
+                        new_ctx.bind(p.clone(), a);
+                    });
 
-/// Evaluates a call to a Rust UDF (built-in function).
-///
-/// Evaluates the arguments, then calls the Rust function with those arguments, passing the result
-/// to the continuation.
-///
-/// # Parameters
-///
-/// * `udf` - The Rust function to call
-/// * `args` - The argument expressions to evaluate
-/// * `engine` - The evaluation engine
-/// * `k` - The continuation to receive evaluation results
-pub(crate) async fn evaluate_rust_udf_call<O>(
-    udf: fn(Vec<Value>) -> Value,
-    args: Vec<Arc<Expr>>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    evaluate_sequence(
-        args,
-        engine,
-        Arc::new(move |arg_values| {
-            Box::pin(capture!([udf, k], async move {
-                // Call the UDF with the argument values.
-                let result = udf(arg_values);
+                    // Evaluate the body in the new context.
+                    engine.with_new_context(new_ctx).evaluate(body, k).await
+                }))
+            }),
+        )
+        .await
+    }
 
-                // Pass the result to the continuation.
-                k(result).await
-            }))
-        }),
-    )
-    .await
-}
+    /// Evaluates a call to a Rust UDF.
+    ///
+    /// Evaluates the arguments, then calls the Rust function with those arguments, passing the result
+    /// to the continuation.
+    ///
+    /// # Parameters
+    ///
+    /// * `udf` - The Rust function to call
+    /// * `args` - The argument expressions to evaluate
+    /// * `k` - The continuation to receive evaluation results
+    pub(crate) async fn evaluate_rust_udf_call(
+        self,
+        udf: fn(Vec<Value>) -> Value,
+        args: Vec<Arc<Expr>>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        self.evaluate_sequence(
+            args,
+            Arc::new(move |arg_values| {
+                Box::pin(capture!([udf, k], async move {
+                    // Call the UDF with the argument values.
+                    let result = udf(arg_values);
 
-/// Evaluates a map expression.
-///
-/// # Parameters
-///
-/// * `items` - The key-value pairs to evaluate.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_map<O>(
-    items: Vec<(Arc<Expr>, Arc<Expr>)>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    let (keys, values): (Vec<Arc<Expr>>, Vec<Arc<Expr>>) = items.into_iter().unzip();
+                    // Pass the result to the continuation.
+                    k(result).await
+                }))
+            }),
+        )
+        .await
+    }
 
-    evaluate_sequence(
-        keys,
-        engine.clone(),
-        Arc::new(move |keys_values| {
-            Box::pin(capture!([values, engine, k], async move {
-                // Then evaluate all value expressions.
-                evaluate_sequence(
-                    values,
-                    engine,
-                    Arc::new(move |values_values| {
-                        Box::pin(capture!([keys_values, k], async move {
-                            // Create a map from keys and values.
-                            let map_items = keys_values.into_iter().zip(values_values).collect();
-                            k(Value::new(CoreData::Map(Map::from_pairs(map_items)))).await
-                        }))
-                    }),
-                )
-                .await
-            }))
-        }),
-    )
-    .await
-}
+    /// Evaluates a map expression.
+    ///
+    /// # Parameters
+    ///
+    /// * `items` - The key-value pairs to evaluate.
+    /// * `k` - The continuation to receive evaluation results.
+    pub(crate) async fn evaluate_map(
+        self,
+        items: Vec<(Arc<Expr>, Arc<Expr>)>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        let (keys, values): (Vec<Arc<Expr>>, Vec<Arc<Expr>>) = items.into_iter().unzip();
+        let engine = self.clone();
 
-/// Evaluates a reference to a variable.
-///
-/// Looks up the variable in the context and passes its value to the continuation.
-///
-/// # Parameters
-///
-/// * `ident` - The identifier to look up
-/// * `engine` - The evaluation engine
-/// * `k` - The continuation to receive the variable value
-pub(crate) async fn evaluate_reference<O>(
-    ident: String,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    let value = engine
-        .context
-        .lookup(&ident)
-        .unwrap_or_else(|| panic!("Variable not found: {}", ident))
-        .clone();
+        self.evaluate_sequence(
+            keys,
+            Arc::new(move |keys_values| {
+                Box::pin(capture!([values, engine, k], async move {
+                    // Then evaluate all value expressions.
+                    engine
+                        .evaluate_sequence(
+                            values,
+                            Arc::new(move |values_values| {
+                                Box::pin(capture!([keys_values, k], async move {
+                                    // Create a map from keys and values.
+                                    let map_items =
+                                        keys_values.into_iter().zip(values_values).collect();
+                                    k(Value::new(CoreData::Map(Map::from_pairs(map_items)))).await
+                                }))
+                            }),
+                        )
+                        .await
+                }))
+            }),
+        )
+        .await
+    }
 
-    k(value).await
+    /// Evaluates a reference to a variable.
+    ///
+    /// Looks up the variable in the context and passes its value to the continuation.
+    ///
+    /// # Parameters
+    ///
+    /// * `ident` - The identifier to look up
+    /// * `k` - The continuation to receive the variable value
+    pub(crate) async fn evaluate_reference(
+        self,
+        ident: String,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        let value = self
+            .context
+            .lookup(&ident)
+            .unwrap_or_else(|| panic!("Variable not found: {}", ident))
+            .clone();
+
+        k(value).await
+    }
+
+    /// Evaluates a return expression.
+    ///
+    /// Pops the most recent continuation from the function return stack and uses it to
+    /// evaluate the return expression. This implements early returns from functions.
+    ///
+    /// # Parameters
+    ///
+    /// * `expr` - The expression to evaluate and return.
+    pub(crate) async fn evaluate_return(mut self, expr: Arc<Expr>) -> EngineResponse<O> {
+        let return_k = self
+            .return_stack
+            .pop_back()
+            .expect("Return stack is empty");
+
+        self.evaluate(expr.clone(), return_k).await
+    }
 }
 
 #[cfg(test)]

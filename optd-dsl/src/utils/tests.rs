@@ -220,12 +220,12 @@ pub fn create_physical_operator(tag: &str, data: Vec<Value>, children: Vec<Value
 /// Runs a test by evaluating the expression and collecting all results with a custom continuation.
 pub async fn evaluate_and_collect_with_custom_k<T>(
     expr: Arc<Expr>,
-    engine: Engine,
+    engine: Engine<T>,
     harness: TestHarness,
     return_k: Continuation<Value, T>,
 ) -> Vec<T>
 where
-    T: Send + 'static,
+    T: Clone + Send + 'static,
 {
     let mut results = Vec::new();
     let mut queue = VecDeque::new();
@@ -263,7 +263,7 @@ where
 /// Runs a test by evaluating the expression and collecting all results.
 pub async fn evaluate_and_collect(
     expr: Arc<Expr>,
-    engine: Engine,
+    engine: Engine<Value>,
     harness: TestHarness,
 ) -> Vec<Value> {
     let return_k: Continuation<Value, Value> = Arc::new(|value| Box::pin(async move { value }));

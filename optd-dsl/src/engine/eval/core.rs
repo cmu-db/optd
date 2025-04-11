@@ -1,105 +1,90 @@
-use super::operator::{evaluate_logical_operator, evaluate_physical_operator};
 use crate::analyzer::hir::{CoreData, Expr, Value};
-use crate::engine::utils::evaluate_sequence;
 use crate::engine::{Continuation, EngineResponse};
 use crate::{capture, engine::Engine};
 use CoreData::*;
 use std::sync::Arc;
 
-/// Evaluates a core expression by generating all possible evaluation paths.
-///
-/// This function dispatches to specialized handlers based on the expression type, passing all
-/// possible values the expression could evaluate to the continuation.
-///
-/// # Parameters
-///
-/// * `data` - The core expression data to evaluate.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_core_expr<O>(
-    data: CoreData<Arc<Expr>>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    match data {
-        Literal(lit) => {
-            // Directly continue with the literal value.
-            k(Value::new(Literal(lit))).await
-        }
-        Array(items) => evaluate_collection(items, Array, engine, k).await,
-        Tuple(items) => evaluate_collection(items, Tuple, engine, k).await,
-        Struct(name, items) => {
-            evaluate_collection(items, move |values| Struct(name, values), engine, k).await
-        }
-        Map(items) => {
-            // Directly continue with the map value.
-            k(Value::new(Map(items))).await
-        }
-        Function(fun_type) => {
-            // Directly continue with the function value.
-            k(Value::new(Function(fun_type))).await
-        }
-        Fail(msg) => evaluate_fail(*msg, engine, k).await,
-        Logical(op) => evaluate_logical_operator(op, engine, k).await,
-        Physical(op) => evaluate_physical_operator(op, engine, k).await,
-        None => {
-            // Directly continue with null value.
-            k(Value::new(None)).await
+impl<O: Clone + Send + 'static> Engine<O> {
+    /// Evaluates a core expression.
+    ///
+    /// # Parameters
+    ///
+    /// * `data` - The core expression data to evaluate.
+    /// * `k` - The continuation to receive evaluation results.
+    pub(crate) async fn evaluate_core_expr(
+        self,
+        data: CoreData<Arc<Expr>>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        match data {
+            Literal(lit) => {
+                // Directly continue with the literal value.
+                k(Value::new(Literal(lit))).await
+            }
+            Array(items) => self.evaluate_collection(items, Array, k).await,
+            Tuple(items) => self.evaluate_collection(items, Tuple, k).await,
+            Struct(name, items) => {
+                self.evaluate_collection(items, move |values| Struct(name, values), k)
+                    .await
+            }
+            Map(items) => {
+                // Directly continue with the map value.
+                k(Value::new(Map(items))).await
+            }
+            Function(fun_type) => {
+                // Directly continue with the function value.
+                k(Value::new(Function(fun_type))).await
+            }
+            Fail(msg) => self.evaluate_fail(*msg, k).await,
+            Logical(op) => self.evaluate_logical_operator(op, k).await,
+            Physical(op) => self.evaluate_physical_operator(op, k).await,
+            None => {
+                // Directly continue with null value.
+                k(Value::new(None)).await
+            }
         }
     }
-}
 
-/// Evaluates a collection expression (Array, Tuple, or Struct).
-///
-/// # Parameters
-///
-/// * `items` - The collection items to evaluate.
-/// * `constructor` - Function to construct the appropriate collection type.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-async fn evaluate_collection<F, O>(
-    items: Vec<Arc<Expr>>,
-    constructor: F,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    F: FnOnce(Vec<Value>) -> CoreData<Value> + Clone + Send + Sync + 'static,
-    O: Send + 'static,
-{
-    evaluate_sequence(
-        items,
-        engine,
-        Arc::new(move |values| {
-            Box::pin(capture!([constructor, k], async move {
-                let result = Value::new(constructor(values));
-                k(result).await
-            }))
-        }),
-    )
-    .await
-}
+    /// Evaluates a collection expression (Array, Tuple, or Struct).
+    ///
+    /// # Parameters
+    ///
+    /// * `items` - The collection items to evaluate.
+    /// * `constructor` - Function to construct the appropriate collection type.
+    /// * `k` - The continuation to receive evaluation results.
+    async fn evaluate_collection<F>(
+        self,
+        items: Vec<Arc<Expr>>,
+        constructor: F,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O>
+    where
+        F: FnOnce(Vec<Value>) -> CoreData<Value> + Clone + Send + Sync + 'static,
+    {
+        self.evaluate_sequence(
+            items,
+            Arc::new(move |values| {
+                Box::pin(capture!([constructor, k], async move {
+                    let result = Value::new(constructor(values));
+                    k(result).await
+                }))
+            }),
+        )
+        .await
+    }
 
-/// Evaluates a fail expression.
-///
-/// # Parameters
-///
-/// * `msg` - The message expression to evaluate
-/// * `engine` - The evaluation engine
-/// * `k` - The continuation to receive evaluation results
-async fn evaluate_fail<O>(
-    msg: Arc<Expr>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    engine
-        .evaluate(
+    /// Evaluates a fail expression.
+    ///
+    /// # Parameters
+    ///
+    /// * `msg` - The message expression to evaluate
+    /// * `k` - The continuation to receive evaluation results
+    async fn evaluate_fail(
+        self,
+        msg: Arc<Expr>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        self.evaluate(
             msg,
             Arc::new(move |value| {
                 Box::pin(capture!([k], async move {
@@ -108,6 +93,7 @@ where
             }),
         )
         .await
+    }
 }
 
 #[cfg(test)]

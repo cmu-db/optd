@@ -123,6 +123,7 @@ fn check_expr(
                 ));
             }
         }
+        Return(expr) => check_expr(expr, ctx)?,
         FieldAccess(obj, _) => check_expr(obj, ctx)?,
         CoreExpr(core_data) => match core_data {
             CoreData::Array(exprs) | CoreData::Tuple(exprs) | CoreData::Struct(_, exprs) => {

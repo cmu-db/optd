@@ -1,146 +1,132 @@
 use crate::analyzer::hir::{
     CoreData, Expr, Goal, GroupId, LogicalOp, Materializable, Operator, PhysicalOp, Value,
 };
-use crate::engine::utils::evaluate_sequence;
 use crate::engine::{Continuation, EngineResponse};
 use crate::{capture, engine::Engine};
 use CoreData::{Logical, Physical};
 use Materializable::*;
 use std::sync::Arc;
 
-/// Evaluates a logical operator by generating all possible combinations of its components.
-///
-/// # Parameters
-///
-/// * `op` - The logical operator to evaluate.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_logical_operator<O>(
-    op: Materializable<LogicalOp<Arc<Expr>>, GroupId>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    match op {
-        // For unmaterialized operators, directly call the continuation with the unmaterialized
-        // value.
-        UnMaterialized(group_id) => {
-            let result = Value::new(Logical(UnMaterialized(group_id)));
-            k(result).await
-        }
-        // For materialized operators, evaluate all parts and construct the result.
-        Materialized(log_op) => {
-            evaluate_operator(
-                log_op.operator.data,
-                log_op.operator.children,
-                log_op.operator.tag,
-                engine,
-                Arc::new(move |constructed_op| {
-                    Box::pin(capture!([k], async move {
-                        // Wrap the constructed operator in the logical operator structure
-                        let log_op = LogicalOp::logical(constructed_op);
-                        let result = Value::new(Logical(Materialized(log_op)));
-                        k(result).await
-                    }))
-                }),
-            )
-            .await
-        }
-    }
-}
-
-/// Evaluates a physical operator by generating all possible combinations of its components.
-///
-/// # Parameters
-///
-/// * `op` - The physical operator to evaluate.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_physical_operator<O>(
-    op: Materializable<PhysicalOp<Arc<Expr>>, Goal>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    match op {
-        // For unmaterialized operators, continue with the unmaterialized value.
-        UnMaterialized(physical_goal) => {
-            let result = Value::new(Physical(UnMaterialized(physical_goal)));
-            k(result).await
-        }
-        // For materialized operators, evaluate all parts and construct the result.
-        Materialized(phys_op) => {
-            evaluate_operator(
-                phys_op.operator.data,
-                phys_op.operator.children,
-                phys_op.operator.tag,
-                engine,
-                Arc::new(move |constructed_op| {
-                    Box::pin(capture!([k], async move {
-                        let phys_op = PhysicalOp::physical(constructed_op);
-                        let result = Value::new(Physical(Materialized(phys_op)));
-                        k(result).await
-                    }))
-                }),
-            )
-            .await
-        }
-    }
-}
-
-/// Evaluates all components of an operator and constructs the final operator value.
-///
-/// Evaluates both operator data parameters and children expressions, combining them to form
-/// complete operator instances.
-///
-/// # Parameters
-///
-/// * `op_data_exprs` - The operator parameter expressions to evaluate.
-/// * `children_exprs` - The child operator expressions to evaluate.
-/// * `tag` - The operator type tag.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive the constructed operator.
-async fn evaluate_operator<O>(
-    op_data_exprs: Vec<Arc<Expr>>,
-    children_exprs: Vec<Arc<Expr>>,
-    tag: String,
-    engine: Engine,
-    k: Continuation<Operator<Value>, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    // First evaluate all operator data parameters.
-    evaluate_sequence(
-        op_data_exprs,
-        engine.clone(),
-        Arc::new(move |op_data| {
-            Box::pin(capture!([children_exprs, tag, engine, k], async move {
-                // Then evaluate all children expressions.
-                evaluate_sequence(
-                    children_exprs,
-                    engine,
-                    Arc::new(move |children| {
-                        Box::pin(capture!([tag, op_data, k], async move {
-                            // Construct the complete operator and pass to continuation.
-                            let operator = Operator {
-                                tag,
-                                data: op_data,
-                                children,
-                            };
-                            k(operator).await
+impl<O: Clone + Send + 'static> Engine<O> {
+    /// Evaluates a logical operator by generating all possible combinations of its components.
+    ///
+    /// # Parameters
+    ///
+    /// * `op` - The logical operator to evaluate.
+    /// * `k` - The continuation to receive evaluation results.
+    pub(crate) async fn evaluate_logical_operator(
+        self,
+        op: Materializable<LogicalOp<Arc<Expr>>, GroupId>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        match op {
+            // For unmaterialized operators, directly call the continuation.
+            UnMaterialized(group_id) => {
+                let result = Value::new(Logical(UnMaterialized(group_id)));
+                k(result).await
+            }
+            // For materialized operators, evaluate all parts and construct the result.
+            Materialized(log_op) => {
+                self.evaluate_operator(
+                    log_op.operator.data,
+                    log_op.operator.children,
+                    log_op.operator.tag,
+                    Arc::new(move |constructed_op| {
+                        Box::pin(capture!([k], async move {
+                            // Wrap the constructed operator in the logical operator structure
+                            let log_op = LogicalOp::logical(constructed_op);
+                            let result = Value::new(Logical(Materialized(log_op)));
+                            k(result).await
                         }))
                     }),
                 )
                 .await
-            }))
-        }),
-    )
-    .await
+            }
+        }
+    }
+
+    /// Evaluates a physical operator by generating all possible combinations of its components.
+    ///
+    /// # Parameters
+    ///
+    /// * `op` - The physical operator to evaluate.
+    /// * `k` - The continuation to receive evaluation results.
+    pub(crate) async fn evaluate_physical_operator(
+        self,
+        op: Materializable<PhysicalOp<Arc<Expr>>, Goal>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        match op {
+            // For unmaterialized operators, continue with the unmaterialized value.
+            UnMaterialized(physical_goal) => {
+                let result = Value::new(Physical(UnMaterialized(physical_goal)));
+                k(result).await
+            }
+            // For materialized operators, evaluate all parts and construct the result.
+            Materialized(phys_op) => {
+                self.evaluate_operator(
+                    phys_op.operator.data,
+                    phys_op.operator.children,
+                    phys_op.operator.tag,
+                    Arc::new(move |constructed_op| {
+                        Box::pin(capture!([k], async move {
+                            let phys_op = PhysicalOp::physical(constructed_op);
+                            let result = Value::new(Physical(Materialized(phys_op)));
+                            k(result).await
+                        }))
+                    }),
+                )
+                .await
+            }
+        }
+    }
+
+    /// Evaluates all components of an operator and constructs the final operator value.
+    ///
+    /// Evaluates both operator data parameters and children expressions, combining them to form
+    /// complete operator instances.
+    ///
+    /// # Parameters
+    ///
+    /// * `op_data_exprs` - The operator parameter expressions to evaluate.
+    /// * `children_exprs` - The child operator expressions to evaluate.
+    /// * `tag` - The operator type tag.
+    /// * `k` - The continuation to receive the constructed operator.
+    async fn evaluate_operator(
+        self,
+        op_data_exprs: Vec<Arc<Expr>>,
+        children_exprs: Vec<Arc<Expr>>,
+        tag: String,
+        k: Continuation<Operator<Value>, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        let engine = self.clone();
+
+        // First evaluate all operator data parameters.
+        self.evaluate_sequence(
+            op_data_exprs,
+            Arc::new(move |op_data| {
+                Box::pin(capture!([children_exprs, engine, tag, k], async move {
+                    // Then evaluate all children expressions.
+                    engine
+                        .evaluate_sequence(
+                            children_exprs,
+                            Arc::new(move |children| {
+                                Box::pin(capture!([tag, op_data, k], async move {
+                                    let operator = Operator {
+                                        tag,
+                                        data: op_data,
+                                        children,
+                                    };
+                                    k(operator).await
+                                }))
+                            }),
+                        )
+                        .await
+                }))
+            }),
+        )
+        .await
+    }
 }
 
 #[cfg(test)]

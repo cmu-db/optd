@@ -19,98 +19,97 @@ use std::sync::Arc;
 /// None means the match failed, Some(context) means it succeeded.
 type MatchResult = (Value, Option<Context>);
 
-/// Evaluates a pattern match expression.
-///
-/// First evaluates the expression to match, then tries each match arm in order until a pattern
-/// matches, passing results to the continuation.
-///
-/// # Parameters
-///
-/// * `expr` - The expression to match against patterns.
-/// * `match_arms` - The list of pattern-expression pairs to try.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-pub(crate) async fn evaluate_pattern_match<O>(
-    expr: Arc<Expr>,
-    match_arms: Vec<MatchArm>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    if match_arms.is_empty() {
-        panic!("Pattern match exhausted: no patterns provided");
-    }
+impl<O: Clone + Send + 'static> Engine<O> {
+    /// Evaluates a pattern match expression.
+    ///
+    /// First evaluates the expression to match, then tries each match arm in order until a pattern
+    /// matches, passing results to the continuation.
+    ///
+    /// # Parameters
+    ///
+    /// * `expr` - The expression to match against patterns.
+    /// * `match_arms` - The list of pattern-expression pairs to try.
+    /// * `k` - The continuation to receive evaluation results.
+    pub(crate) async fn evaluate_pattern_match(
+        self,
+        expr: Arc<Expr>,
+        match_arms: Vec<MatchArm>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        let engine = self.clone();
 
-    // First evaluate the expression to match.
-    engine
-        .clone()
-        .evaluate(
+        if match_arms.is_empty() {
+            panic!("Pattern match exhausted: no patterns provided");
+        }
+
+        // First evaluate the expression to match.
+        self.evaluate(
             expr,
             Arc::new(move |value| {
                 Box::pin(capture!([match_arms, engine, k], async move {
                     // Try to match against each arm in order.
-                    try_match_arms(value, match_arms, engine, k).await
+                    engine.try_match_arms(value, match_arms, k).await
                 }))
             }),
         )
         .await
-}
+    }
 
-/// Tries to match a value against a sequence of match arms.
-///
-/// Attempts to match the value against each arm's pattern in order.
-/// Evaluates the expression of the first matching arm, or panics if no arm matches.
-///
-/// # Parameters
-/// * `value` - The value to match against patterns.
-/// * `match_arms` - The list of pattern-expression pairs to try.
-/// * `engine` - The evaluation engine.
-/// * `k` - The continuation to receive evaluation results.
-fn try_match_arms<O>(
-    value: Value,
-    match_arms: Vec<MatchArm>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> BoxFuture<'static, EngineResponse<O>>
-where
-    O: Send + 'static,
-{
-    Box::pin(async move {
-        if match_arms.is_empty() {
-            panic!("Pattern match exhausted: no matching pattern found");
-        }
+    /// Tries to match a value against a sequence of match arms.
+    ///
+    /// Attempts to match the value against each arm's pattern in order.
+    /// Evaluates the expression of the first matching arm, or panics if no arm matches.
+    ///
+    /// # Parameters
+    /// * `value` - The value to match against patterns.
+    /// * `match_arms` - The list of pattern-expression pairs to try.
+    /// * `k` - The continuation to receive evaluation results.
+    fn try_match_arms(
+        self,
+        value: Value,
+        match_arms: Vec<MatchArm>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> BoxFuture<'static, EngineResponse<O>> {
+        Box::pin(async move {
+            let engine = self.clone();
 
-        // Take the first arm and the remaining arms
-        let first_arm = match_arms[0].clone();
-        let remaining_arms = match_arms[1..].to_vec();
+            if match_arms.is_empty() {
+                panic!("Pattern match exhausted: no matching pattern found");
+            }
 
-        // Try to match the value against the arm's pattern
-        match_pattern(
-            value,
-            first_arm.pattern.clone(),
-            engine.context.clone(),
-            Arc::new(move |(matched_value, context_opt)| {
-                Box::pin(capture!(
-                    [first_arm, remaining_arms, engine, k],
-                    async move {
-                        match context_opt {
-                            // If we got a match, evaluate the arm's expression with the context.
-                            Some(context) => {
-                                let engine_with_ctx = engine.with_new_context(context);
-                                engine_with_ctx.evaluate(first_arm.expr, k).await
+            // Take the first arm and the remaining arms.
+            let first_arm = match_arms[0].clone();
+            let remaining_arms = match_arms[1..].to_vec();
+
+            // Try to match the value against the arm's pattern.
+            match_pattern(
+                value,
+                first_arm.pattern.clone(),
+                self.context,
+                Arc::new(move |(matched_value, context_opt)| {
+                    Box::pin(capture!(
+                        [first_arm, remaining_arms, engine, k],
+                        async move {
+                            match context_opt {
+                                // If we got a match, evaluate the arm's expression with the context.
+                                Some(context) => {
+                                    let engine_with_ctx = engine.with_new_context(context);
+                                    engine_with_ctx.evaluate(first_arm.expr, k).await
+                                }
+                                // If no match, try the next arm with the matching value.
+                                None => {
+                                    engine
+                                        .try_match_arms(matched_value, remaining_arms, k)
+                                        .await
+                                }
                             }
-                            // If no match, try the next arm with the matching value and remaining
-                            // arms.
-                            None => try_match_arms(matched_value, remaining_arms, engine, k).await,
                         }
-                    }
-                ))
-            }),
-        )
-        .await
-    })
+                    ))
+                }),
+            )
+            .await
+        })
+    }
 }
 
 /// Attempts to match a value against a pattern.
@@ -128,7 +127,7 @@ fn match_pattern<O>(
     k: Continuation<MatchResult, EngineResponse<O>>,
 ) -> BoxFuture<'static, EngineResponse<O>>
 where
-    O: Send + 'static,
+    O: Clone + Send + 'static,
 {
     Box::pin(async move {
         match (pattern.kind, &value.data) {
@@ -237,7 +236,7 @@ async fn match_bind_pattern<O>(
     k: Continuation<MatchResult, EngineResponse<O>>,
 ) -> EngineResponse<O>
 where
-    O: Send + 'static,
+    O: Clone + Send + 'static,
 {
     // First check if the inner pattern matches without binding.
     match_pattern(
@@ -270,7 +269,7 @@ async fn match_array_pattern<O>(
     k: Continuation<MatchResult, EngineResponse<O>>,
 ) -> EngineResponse<O>
 where
-    O: Send + 'static,
+    O: Clone + Send + 'static,
 {
     // Split array into head and tail.
     let head = arr[0].clone();
@@ -337,7 +336,7 @@ async fn match_struct_pattern<O>(
     k: Continuation<MatchResult, EngineResponse<O>>,
 ) -> EngineResponse<O>
 where
-    O: Send + 'static,
+    O: Clone + Send + 'static,
 {
     // Match fields sequentially.
     match_components(
@@ -384,7 +383,7 @@ async fn match_materialized_operator<O>(
     k: Continuation<MatchResult, EngineResponse<O>>,
 ) -> EngineResponse<O>
 where
-    O: Send + 'static,
+    O: Clone + Send + 'static,
 {
     // Create all patterns and values to match.
     let data_patterns = op_pattern.data;
@@ -471,7 +470,7 @@ async fn match_components<O>(
     k: Continuation<Vec<MatchResult>, EngineResponse<O>>,
 ) -> EngineResponse<O>
 where
-    O: Send + 'static,
+    O: Clone + Send + 'static,
 {
     // Start the sequential matching process with an empty results vector.
     match_components_sequentially(patterns, values, 0, ctx, Vec::new(), k).await
@@ -490,7 +489,7 @@ fn match_components_sequentially<O>(
     k: Continuation<Vec<MatchResult>, EngineResponse<O>>,
 ) -> BoxFuture<'static, EngineResponse<O>>
 where
-    O: Send + 'static,
+    O: Clone + Send + 'static,
 {
     Box::pin(async move {
         // Base case: all components matched.

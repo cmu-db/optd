@@ -2,13 +2,7 @@ use crate::analyzer::{
     context::Context,
     hir::{Expr, ExprKind, Goal, GroupId, Value},
 };
-use eval::expr::{
-    evaluate_binary_expr, evaluate_call, evaluate_if_then_else, evaluate_let_binding,
-    evaluate_new_scope, evaluate_reference, evaluate_unary_expr,
-};
-use eval::r#match::evaluate_pattern_match;
-use eval::{core::evaluate_core_expr, expr::evaluate_map};
-use std::sync::Arc;
+use std::{collections::VecDeque, sync::Arc};
 
 mod eval;
 
@@ -30,30 +24,35 @@ pub enum EngineResponse<O> {
 }
 
 /// The engine for evaluating HIR expressions and applying rules.
-#[derive(Debug, Clone)]
-pub struct Engine {
+#[derive(Clone)]
+pub struct Engine<O: Clone + Send + 'static> {
     /// The original HIR context containing all defined expressions and rules.
     pub(crate) context: Context,
+    /// The function return stack, used to manage early return continuations.
+    pub(crate) return_stack: VecDeque<Continuation<Value, EngineResponse<O>>>,
 }
 
-impl Engine {
+impl<O: Clone + Send + 'static> Engine<O> {
     /// Creates a new engine with the given context and expander.
     pub fn new(context: Context) -> Self {
-        Self { context }
+        Self {
+            context,
+            return_stack: VecDeque::new(),
+        }
     }
 
-    /// Creates a new engine with an updated context but the same expander.
-    ///
-    /// This is useful when you need to create a new engine with modifications to the context
-    /// while preserving the original expander implementation.
+    /// Creates a new engine with an updated context.
     ///
     /// # Parameters
     ///  `context` - The new context to use.
     ///
     /// # Returns
-    /// A new engine with the provided context and the existing expander.
+    /// A new engine with the provided context.
     pub fn with_new_context(&self, context: Context) -> Self {
-        Self { context }
+        Self {
+            context,
+            return_stack: self.return_stack.clone(),
+        }
     }
 
     /// Evaluates an expression and passes results to the provided continuation.
@@ -63,45 +62,44 @@ impl Engine {
     /// * `self` - The evaluation engine (owned).
     /// * `expr` - The expression to evaluate.
     /// * `k` - The continuation to receive each evaluation result.
-    pub fn evaluate<O>(
+    pub fn evaluate(
         self,
         expr: Arc<Expr>,
         k: Continuation<Value, EngineResponse<O>>,
-    ) -> impl Future<Output = EngineResponse<O>> + Send
-    where
-        O: Send + 'static,
-    {
+    ) -> impl Future<Output = EngineResponse<O>> + Send {
         use ExprKind::*;
 
         Box::pin(async move {
             match &expr.as_ref().kind {
                 PatternMatch(sub_expr, match_arms) => {
-                    evaluate_pattern_match(sub_expr.clone(), match_arms.clone(), self, k).await
+                    self.evaluate_pattern_match(sub_expr.clone(), match_arms.clone(), k)
+                        .await
                 }
                 IfThenElse(cond, then_expr, else_expr) => {
-                    evaluate_if_then_else(
+                    self.evaluate_if_then_else(
                         cond.clone(),
                         then_expr.clone(),
                         else_expr.clone(),
-                        self,
                         k,
                     )
                     .await
                 }
-                NewScope(expr) => evaluate_new_scope(expr.clone(), self, k).await,
+                NewScope(expr) => self.evaluate_new_scope(expr.clone(), k).await,
                 Let(ident, assignee, after) => {
-                    evaluate_let_binding(ident.clone(), assignee.clone(), after.clone(), self, k)
+                    self.evaluate_let_binding(ident.clone(), assignee.clone(), after.clone(), k)
                         .await
                 }
                 Binary(left, op, right) => {
-                    evaluate_binary_expr(left.clone(), op.clone(), right.clone(), self, k).await
+                    self.evaluate_binary_expr(left.clone(), op.clone(), right.clone(), k)
+                        .await
                 }
-                Unary(op, expr) => evaluate_unary_expr(op.clone(), expr.clone(), self, k).await,
-                Call(fun, args) => evaluate_call(fun.clone(), args.clone(), self, k).await,
-                Map(map) => evaluate_map(map.clone(), self, k).await,
-                Ref(ident) => evaluate_reference(ident.clone(), self, k).await,
+                Unary(op, expr) => self.evaluate_unary_expr(op.clone(), expr.clone(), k).await,
+                Call(fun, args) => self.evaluate_call(fun.clone(), args.clone(), k).await,
+                Map(map) => self.evaluate_map(map.clone(), k).await,
+                Ref(ident) => self.evaluate_reference(ident.clone(), k).await,
+                Return(expr) => self.evaluate_return(expr.clone()).await,
                 FieldAccess(_, _) => panic!("Field should have been transformed to a call"),
-                CoreExpr(expr) => evaluate_core_expr(expr.clone(), self, k).await,
+                CoreExpr(expr) => self.evaluate_core_expr(expr.clone(), k).await,
                 CoreVal(val) => k(val.clone()).await,
             }
         })
@@ -117,15 +115,12 @@ impl Engine {
     ///
     /// # Returns
     /// The result of the rule application.
-    pub async fn launch_rule<O>(
+    pub async fn launch_rule(
         self,
         name: &str,
         values: Vec<Value>,
         return_k: Continuation<Value, O>,
-    ) -> EngineResponse<O>
-    where
-        O: Send + 'static,
-    {
+    ) -> EngineResponse<O> {
         let rule_call = self.create_rule_call(name, values);
 
         self.evaluate(
