@@ -33,27 +33,27 @@ impl<O: Clone + Send + 'static> Engine<O> {
         k: Continuation<Vec<Value>, EngineResponse<O>>,
     ) -> BoxFuture<'static, EngineResponse<O>> {
         Box::pin(async move {
+            let engine = self.clone();
+
             if index >= exprs.len() {
                 return k(values).await;
             }
 
             let expr = exprs[index].clone();
-            self.clone()
-                .evaluate(
-                    expr,
-                    Arc::new(move |expr_value| {
-                        let mut next_values = values.clone();
-                        next_values.push(expr_value);
-                        let engine = self.clone();
+            self.evaluate(
+                expr,
+                Arc::new(move |expr_value| {
+                    let mut next_values = values.clone();
+                    next_values.push(expr_value);
 
-                        Box::pin(capture!([exprs, index, k], async move {
-                            engine
-                                .evaluate_sequence_internal(exprs, index + 1, next_values, k)
-                                .await
-                        }))
-                    }),
-                )
-                .await
+                    Box::pin(capture!([exprs, engine, index, k], async move {
+                        engine
+                            .evaluate_sequence_internal(exprs, index + 1, next_values, k)
+                            .await
+                    }))
+                }),
+            )
+            .await
         })
     }
 }

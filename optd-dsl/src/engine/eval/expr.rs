@@ -519,17 +519,6 @@ impl<O: Clone + Send + 'static> Engine<O> {
         .await
     }
 
-    /// Evaluates a call to a closure.
-    ///
-    /// Evaluates the arguments, binds them to the parameters in a new context, then evaluates the
-    /// function body in that context, passing results to the continuation.
-    ///
-    /// # Parameters
-    ///
-    /// * `params` - The parameter names of the closure.
-    /// * `body` - The body expression of the closure.
-    /// * `args` - The argument expressions to evaluate.
-    /// * `k` - The continuation to receive evaluation results.
     pub(crate) async fn evaluate_closure_call(
         self,
         params: Vec<Identifier>,
@@ -537,25 +526,39 @@ impl<O: Clone + Send + 'static> Engine<O> {
         args: Vec<Arc<Expr>>,
         k: Continuation<Value, EngineResponse<O>>,
     ) -> EngineResponse<O> {
-        // Snapshot the continuation to the upper function.
-        let engine = self.with_new_return(k.clone());
+        let engine = self.clone();
 
         engine
             .clone()
             .evaluate_sequence(
                 args,
                 Arc::new(move |arg_values| {
-                    Box::pin(capture!([params, engine, body, k], async move {
-                        // Create a new context with parameters bound to arguments.
+                    Box::pin(capture!([params, body, engine, k], async move {
+                        // Create context with bound parameters.
                         let mut new_ctx = engine.context.clone();
                         new_ctx.push_scope();
-
                         params.iter().zip(arg_values).for_each(|(p, a)| {
                             new_ctx.bind(p.clone(), a);
                         });
 
-                        // Evaluate the body in the new context.
-                        engine.with_new_context(new_ctx).evaluate(body, k).await
+                        // Create return continuation.
+                        // We verify the return value is a failure and if so,
+                        // we propagate it to the caller.
+                        let return_k = Arc::new(capture!([k, engine], move |value: Value| {
+                            if let CoreData::Fail(_) = &value.data {
+                                if let Some(return_k) = &engine.fun_return {
+                                    return return_k(value);
+                                }
+                            }
+                            k(value)
+                        }));
+
+                        // Execute function body with appropriate continuations.
+                        engine
+                            .with_new_return(return_k)
+                            .with_new_context(new_ctx)
+                            .evaluate(body, k)
+                            .await
                     }))
                 }),
             )
