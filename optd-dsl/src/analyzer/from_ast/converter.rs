@@ -1,7 +1,5 @@
-use super::expr::convert_expr;
-use super::types::{convert_type, create_function_type};
+use crate::analyzer::error::AnalyzerErrorKind;
 use crate::analyzer::hir::{Annotation, FunKind, Identifier, UdfKind};
-use crate::analyzer::semantic_check::error::SemanticErrorKind;
 use crate::analyzer::{
     context::Context,
     hir::{CoreData, HIR, TypedSpan, Value},
@@ -36,20 +34,23 @@ impl ASTConverter {
     ///
     /// # Returns
     ///
-    /// The HIR representation and TypeRegistry, or a SemanticErrorKind if conversion fails.
+    /// The HIR representation and TypeRegistry, or an AnalyzerErrorKind if conversion fails.
     pub fn convert(
         mut self,
         module: &Module,
-    ) -> Result<(HIR<TypedSpan>, TypeRegistry), SemanticErrorKind> {
-        // Process all module items sequentially.
+    ) -> Result<(HIR<TypedSpan>, TypeRegistry), Box<AnalyzerErrorKind>> {
+        // First pass: Process all ADTs to register types.
         for item in &module.items {
-            match item {
-                Item::Adt(spanned_adt) => {
-                    self.type_registry.register_adt(&spanned_adt.value)?;
-                }
-                Item::Function(spanned_fn) => {
-                    self.process_function(spanned_fn)?;
-                }
+            if let Item::Adt(spanned_adt) = item {
+                self.type_registry.register_adt(&spanned_adt.value)?;
+            }
+        }
+
+        // Second pass: Process all functions, using the type registry to verify
+        // for invalid type annotations & constructions.
+        for item in &module.items {
+            if let Item::Function(spanned_fn) = item {
+                self.process_function(spanned_fn)?;
             }
         }
 
@@ -71,17 +72,14 @@ impl ASTConverter {
     pub(super) fn process_function(
         &mut self,
         spanned_fn: &Spanned<Function>,
-    ) -> Result<(), SemanticErrorKind> {
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
         let func = &spanned_fn.value;
         let name = &*func.name.value;
         let fn_span = func.name.span.clone();
 
         // Reject functions without parameters.
         if func.receiver.is_none() && func.params.is_none() {
-            return Err(SemanticErrorKind::new_incomplete_function(
-                name.clone(),
-                fn_span,
-            ));
+            return Err(AnalyzerErrorKind::new_incomplete_function(name, &fn_span));
         }
 
         // Register the function in the context, while checking for duplicates.
@@ -91,14 +89,14 @@ impl ASTConverter {
             .map(|param| (*param.value).clone())
             .collect();
 
-        let params = Self::get_parameters(func, &generics);
-        let return_type = convert_type(&func.return_type.value, &generics);
-        let fn_type = create_function_type(&params, &return_type);
+        let params = self.get_parameters(func, &generics)?;
+        let return_type = self.convert_type(&func.return_type, &generics)?;
+        let fn_type = Self::create_function_type(&params, &return_type);
 
         match &func.body {
             Some(body_expr) => {
                 // Process function with body.
-                let body_hir = convert_expr(body_expr, &generics)?;
+                let body_hir = self.convert_expr(body_expr, &generics)?;
                 let param_names = params.iter().map(|(name, _)| name.clone()).collect();
 
                 let fn_value = Value::new_with(
@@ -139,13 +137,17 @@ impl ASTConverter {
     ///
     /// Collects parameter names and types from both the receiver (if present)
     /// and the parameter list.
-    fn get_parameters(func: &Function, generics: &HashSet<Identifier>) -> Vec<(Identifier, Type)> {
+    fn get_parameters(
+        &self,
+        func: &Function,
+        generics: &HashSet<Identifier>,
+    ) -> Result<Vec<(Identifier, Type)>, Box<AnalyzerErrorKind>> {
         // Start with receiver if it exists.
         let mut param_fields = match &func.receiver {
             Some(receiver) => {
                 vec![(
                     (*receiver.name).clone(),
-                    convert_type(&receiver.ty.value, generics),
+                    self.convert_type(&receiver.ty, generics)?,
                 )]
             }
             None => vec![],
@@ -153,19 +155,20 @@ impl ASTConverter {
 
         // Add regular parameters if they exist.
         if let Some(params) = &func.params {
-            let regular_params = params
-                .iter()
-                .map(|field| {
-                    (
-                        (*field.name).clone(),
-                        convert_type(&field.ty.value, generics),
-                    )
-                })
-                .collect::<Vec<_>>();
-            param_fields.extend(regular_params);
+            param_fields.extend(
+                params
+                    .iter()
+                    .map(|field| {
+                        Ok((
+                            (*field.name).clone(),
+                            self.convert_type(&field.ty, generics)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, Box<AnalyzerErrorKind>>>()?,
+            );
         }
 
-        param_fields
+        Ok(param_fields)
     }
 }
 
@@ -174,9 +177,8 @@ mod converter_tests {
     use super::*;
     use crate::analyzer::hir::{CoreData, FunKind};
     use crate::analyzer::types::Type;
-    use crate::parser::ast::{self, Function, Item, Module};
+    use crate::parser::ast::{self, Adt, Function, Item, Module, Type as AstType};
     use crate::utils::span::{Span, Spanned};
-    use std::collections::HashSet;
 
     // Helper functions to create test items
     fn create_test_span() -> Span {
@@ -187,11 +189,18 @@ mod converter_tests {
         Spanned::new(value, create_test_span())
     }
 
+    fn create_test_adt(name: &str) -> Adt {
+        Adt::Product {
+            name: spanned(name.to_string()),
+            fields: vec![],
+        }
+    }
+
     fn create_simple_function(name: &str, has_body: bool) -> Spanned<Function> {
         // Create a simple function with Int64 parameter and return type
         let field = spanned(ast::Field {
             name: spanned(String::from("param")),
-            ty: spanned(ast::Type::Int64),
+            ty: spanned(AstType::Int64),
         });
 
         let body = if has_body {
@@ -205,7 +214,7 @@ mod converter_tests {
             type_params: Vec::new(),
             receiver: None,
             params: Some(vec![field]),
-            return_type: spanned(ast::Type::Int64),
+            return_type: spanned(AstType::Int64),
             body,
             annotations: Vec::new(),
         })
@@ -231,7 +240,7 @@ mod converter_tests {
             type_params: Vec::new(),
             receiver: None,
             params: None,
-            return_type: spanned(ast::Type::Int64),
+            return_type: spanned(AstType::Int64),
             body: Some(spanned(ast::Expr::Literal(ast::Literal::Int64(42)))),
             annotations: Vec::new(),
         })
@@ -241,7 +250,7 @@ mod converter_tests {
         // Create a method with a receiver parameter
         let receiver = spanned(ast::Field {
             name: spanned(String::from("self")),
-            ty: spanned(ast::Type::Identifier(String::from("MyType"))),
+            ty: spanned(AstType::Identifier(String::from("MyType"))),
         });
 
         spanned(Function {
@@ -249,16 +258,28 @@ mod converter_tests {
             type_params: Vec::new(),
             receiver: Some(receiver),
             params: None,
-            return_type: spanned(ast::Type::Int64),
+            return_type: spanned(AstType::Int64),
             body: Some(spanned(ast::Expr::Literal(ast::Literal::Int64(42)))),
             annotations: Vec::new(),
         })
     }
 
     fn create_module_with_functions(functions: Vec<Spanned<Function>>) -> Module {
-        let items = functions.into_iter().map(|f| Item::Function(f)).collect();
+        let items = functions.into_iter().map(Item::Function).collect();
 
         Module { items }
+    }
+
+    fn create_module_with_adts_and_functions(
+        adts: Vec<Adt>,
+        functions: Vec<Spanned<Function>>,
+    ) -> Module {
+        let adt_items = adts.into_iter().map(|adt| Item::Adt(spanned(adt)));
+        let function_items = functions.into_iter().map(Item::Function);
+
+        Module {
+            items: adt_items.chain(function_items).collect(),
+        }
     }
 
     #[test]
@@ -315,13 +336,10 @@ mod converter_tests {
         // Verify result is an Error
         assert!(result.is_err());
         match result {
-            Err(err) => {
-                // Check that it's the expected error type (incomplete function)
-                match err {
-                    SemanticErrorKind::IncompleteFunction { .. } => (),
-                    _ => panic!("Expected IncompleteFunction error, got: {:?}", err),
-                }
-            }
+            Err(err) => match *err {
+                AnalyzerErrorKind::IncompleteFunction { .. } => (),
+                _ => panic!("Expected IncompleteFunction error, got: {:?}", err),
+            },
             _ => panic!("Expected error"),
         }
     }
@@ -330,7 +348,12 @@ mod converter_tests {
     fn test_process_method_with_receiver() {
         // Create a method with a receiver
         let method = create_method_with_receiver("test_method");
-        let module = create_module_with_functions(vec![method]);
+
+        // Add the MyType ADT to the module
+        let my_type_adt = create_test_adt("MyType");
+
+        // Create a module with both the ADT and the method
+        let module = create_module_with_adts_and_functions(vec![my_type_adt], vec![method]);
 
         // Create and run the converter
         let converter = ASTConverter::default();
@@ -379,37 +402,6 @@ mod converter_tests {
     }
 
     #[test]
-    fn test_get_parameters() {
-        // Test with just regular parameters
-        let func_with_params = create_simple_function("func_params", true);
-        let params = ASTConverter::get_parameters(&func_with_params.value, &HashSet::new());
-        assert_eq!(params.len(), 1);
-        assert_eq!(params[0].0, "param");
-        assert_eq!(params[0].1, Type::Int64);
-
-        // Test with receiver and no regular parameters
-        let func_with_receiver = create_method_with_receiver("func_receiver");
-        let params = ASTConverter::get_parameters(&func_with_receiver.value, &HashSet::new());
-        assert_eq!(params.len(), 1);
-        assert_eq!(params[0].0, "self");
-
-        // Create a function with both receiver and regular parameters
-        let mut func = (*func_with_receiver.value).clone();
-        let field = spanned(ast::Field {
-            name: spanned(String::from("extra_param")),
-            ty: spanned(ast::Type::Bool),
-        });
-        func.params = Some(vec![field]);
-        let func = spanned(func);
-
-        let params = ASTConverter::get_parameters(&func.value, &HashSet::new());
-        assert_eq!(params.len(), 2);
-        assert_eq!(params[0].0, "self");
-        assert_eq!(params[1].0, "extra_param");
-        assert_eq!(params[1].1, Type::Bool);
-    }
-
-    #[test]
     fn test_duplicate_function_name() {
         // Create two functions with the same name
         let func1 = create_simple_function("duplicate", true);
@@ -434,7 +426,7 @@ mod converter_tests {
         func_val.type_params = vec![spanned(String::from("T")), spanned(String::from("U"))];
 
         // Modify the return type to use a generic
-        func_val.return_type = spanned(ast::Type::Identifier(String::from("T")));
+        func_val.return_type = spanned(AstType::Identifier(String::from("T")));
 
         let func = spanned(func_val);
         let module = create_module_with_functions(vec![func]);

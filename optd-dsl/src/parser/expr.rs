@@ -46,6 +46,10 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
                 .boxed()
         };
 
+        let none = just(Token::None)
+            .map(|_| Expr::None)
+            .map_with_span(Spanned::new);
+
         let reference =
             select! { Token::TermIdent(name) => Expr::Ref(name) }.map_with_span(Spanned::new);
 
@@ -104,6 +108,7 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
             .boxed();
 
         let constructor = select! { Token::TypeIdent(name) => name }
+            .map_with_span(Spanned::new)
             .then(
                 delimited_parser(
                     expr.clone()
@@ -176,6 +181,7 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
             brace_expr,
             paren_expr,
             literal,
+            none,
             reference,
             array,
             tuple,
@@ -303,18 +309,18 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
         let let_expr = just(Token::Let)
             .ignore_then(
                 let_binding
+                    .map_with_span(Spanned::new)
                     .separated_by(just(Token::Comma))
                     .allow_trailing(),
             )
             .then_ignore(just(Token::In))
             .then(expr.clone())
-            .map_with_span(|(bindings, body), span| {
-                bindings
-                    .into_iter()
-                    .rev()
-                    .fold(body, |acc_body, (field, value)| {
-                        Spanned::new(Expr::Let(field, value, acc_body), span.clone())
-                    })
+            .map(|(bindings, body)| {
+                bindings.into_iter().rev().fold(body, |acc_body, binding| {
+                    let span = binding.span.clone();
+                    let (field, value) = *binding.value.clone();
+                    Spanned::new(Expr::Let(field, value, acc_body), span)
+                })
             })
             .boxed();
 
@@ -470,6 +476,22 @@ mod tests {
         assert!(result.is_some(), "Expected successful parse for unit");
         assert!(errors.is_empty(), "Expected no errors for unit");
         assert_expr_eq(&result.unwrap().value, &Expr::Literal(Literal::Unit));
+    }
+
+    #[test]
+    fn test_none() {
+        let (result, errors) = parse_expr("none");
+        assert!(result.is_some(), "Expected successful parse for none");
+        assert!(errors.is_empty(), "Expected no errors for none");
+
+        if let Some(expr) = result {
+            assert!(
+                matches!(*expr.value, Expr::None),
+                "Expected None expression"
+            );
+        } else {
+            panic!("Failed to parse none expression");
+        }
     }
 
     #[test]

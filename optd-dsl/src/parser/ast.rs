@@ -94,7 +94,7 @@ pub enum Expr {
     /// Variable binding (let expressions)
     Let(Spanned<Field>, Spanned<Expr>, Spanned<Expr>),
     /// Constructor for user-defined types
-    Constructor(Identifier, Vec<Spanned<Expr>>),
+    Constructor(Spanned<Identifier>, Vec<Spanned<Expr>>),
 
     // Operations
     /// Binary operation (e.g., addition, comparison)
@@ -115,6 +115,8 @@ pub enum Expr {
     Literal(Literal),
     /// Error propagation or exception raising
     Fail(Spanned<Expr>),
+    /// None literal (similar to null)
+    None,
 
     // Collections
     /// Array literal
