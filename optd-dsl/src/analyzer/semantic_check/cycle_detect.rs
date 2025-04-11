@@ -12,7 +12,7 @@ enum ExplorationStatus {
     /// Currently exploring this node.
     Exploring,
     /// Finished exploring, this type terminates.
-    Terminates,
+    Terminated,
 }
 
 /// Contains the state needed for ADT cycle detection.
