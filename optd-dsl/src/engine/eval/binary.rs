@@ -8,7 +8,75 @@
 //! - Logical operations on boolean values (AND, OR).
 //! - Collection operations (concatenation, range creation).
 
+use crate::analyzer::hir::Expr;
 use crate::analyzer::hir::{BinOp, CoreData, Literal, Value};
+use crate::capture;
+use crate::engine::{Continuation, Engine, EngineResponse};
+use std::sync::Arc;
+
+/// Short-circuit evaluation for logical AND operator.
+///
+/// Evaluates the left operand first. If it's false, immediately returns false without
+/// evaluating the right operand. If the left operand is true, evaluates the right operand
+/// and returns its result.
+///
+/// # Parameters
+///
+/// * `left` - The left operand
+/// * `right` - The right operand
+/// * `engine` - The evaluation engine
+/// * `k` - The continuation to receive evaluation results
+pub(crate) async fn evaluate_and<O>(
+    left: Arc<Expr>,
+    right: Arc<Expr>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    // For AND:
+    // - Short-circuit when left is false (return false)
+    // - Continue when left is true (evaluate right and return its value)
+    evaluate_logical_op(
+        left, right, engine, k, false, // short_circuit_value = false
+        true,  // continue_condition = true
+        "&&",  // op_name
+    )
+    .await
+}
+
+/// Short-circuit evaluation for logical OR operator.
+///
+/// Evaluates the left operand first. If it's true, immediately returns true without
+/// evaluating the right operand. If the left operand is false, evaluates the right operand
+/// and returns its result.
+///
+/// # Parameters
+///
+/// * `left` - The left operand
+/// * `right` - The right operand
+/// * `engine` - The evaluation engine
+/// * `k` - The continuation to receive evaluation results
+pub(crate) async fn evaluate_or<O>(
+    left: Arc<Expr>,
+    right: Arc<Expr>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    // For OR:
+    // - Short-circuit when left is true (return true)
+    // - Continue when left is false (evaluate right and return its value)
+    evaluate_logical_op(
+        left, right, engine, k, true,  // short_circuit_value = true
+        false, // continue_condition = false
+        "||",  // op_name
+    )
+    .await
+}
 
 /// Evaluates a binary operation between two values.
 ///
@@ -54,10 +122,8 @@ pub(crate) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
                 _ => panic!("Invalid float operation"), // Other operations not supported
             })),
 
-            // Boolean operations (logical, comparison).
+            // Boolean operations (comparison only - logical ops handled separately).
             (Bool(l), op, Bool(r)) => Value::new(Literal(match op {
-                And => Bool(l && r),                      // Logical AND
-                Or => Bool(l || r),                       // Logical OR
                 Eq => Bool(l == r),                       // Boolean equality comparison
                 _ => panic!("Invalid boolean operation"), // Other operations not supported
             })),
@@ -89,6 +155,80 @@ pub(crate) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
         // Any other combination of value types or operations is not supported.
         expr => panic!("Invalid binary operation: {:?}", expr),
     }
+}
+
+/// Helper function to implement short-circuit evaluation for logical operators.
+///
+/// This generic implementation handles both AND and OR with proper short-circuiting:
+/// - For AND: if left is false, short-circuit to false.
+/// - For OR: if left is true, short-circuit to true.
+async fn evaluate_logical_op<O>(
+    left: Arc<Expr>,
+    right: Arc<Expr>,
+    engine: Engine,
+    k: Continuation<Value, EngineResponse<O>>,
+    short_circuit_value: bool,
+    continue_condition: bool,
+    op_name: &'static str,
+) -> EngineResponse<O>
+where
+    O: Send + 'static,
+{
+    engine
+        .clone()
+        .evaluate(
+            left,
+            Arc::new(move |left_val| {
+                Box::pin(capture!(
+                    [
+                        right,
+                        engine,
+                        k,
+                        short_circuit_value,
+                        continue_condition,
+                        op_name
+                    ],
+                    async move {
+                        match left_val.data {
+                            // Check if the left operand triggers short-circuit.
+                            CoreData::Literal(Literal::Bool(b)) => {
+                                if b == continue_condition {
+                                    engine
+                                        .evaluate(
+                                            right,
+                                            Arc::new(move |right_val| {
+                                                Box::pin(capture!([k, op_name], async move {
+                                                    match right_val.data {
+                                                        CoreData::Literal(Literal::Bool(b)) => {
+                                                            k(Value::new(CoreData::Literal(
+                                                                Literal::Bool(b),
+                                                            )))
+                                                            .await
+                                                        }
+                                                        _ => panic!(
+                                                            "Expected boolean in {} operation",
+                                                            op_name
+                                                        ),
+                                                    }
+                                                }))
+                                            }),
+                                        )
+                                        .await
+                                } else {
+                                    // Short-circuit.
+                                    k(Value::new(CoreData::Literal(Literal::Bool(
+                                        short_circuit_value,
+                                    ))))
+                                    .await
+                                }
+                            }
+                            _ => panic!("Expected boolean in {} operation", op_name),
+                        }
+                    }
+                ))
+            }),
+        )
+        .await
 }
 
 #[cfg(test)]
@@ -241,37 +381,16 @@ mod tests {
 
     #[test]
     fn test_boolean_operations() {
-        // AND - true case
-        if let Literal(Bool(result)) = eval_binary_op(boolean(true), &And, boolean(true)).data {
-            assert!(result);
-        } else {
-            panic!("Expected Bool");
-        }
-
-        // AND - false case
-        if let Literal(Bool(result)) = eval_binary_op(boolean(true), &And, boolean(false)).data {
-            assert!(!result);
-        } else {
-            panic!("Expected Bool");
-        }
-
-        // OR - true case
-        if let Literal(Bool(result)) = eval_binary_op(boolean(false), &Or, boolean(true)).data {
-            assert!(result);
-        } else {
-            panic!("Expected Bool");
-        }
-
-        // OR - false case
-        if let Literal(Bool(result)) = eval_binary_op(boolean(false), &Or, boolean(false)).data {
-            assert!(!result);
-        } else {
-            panic!("Expected Bool");
-        }
-
-        // Equality
+        // Test boolean equality - true case
         if let Literal(Bool(result)) = eval_binary_op(boolean(true), &Eq, boolean(true)).data {
             assert!(result);
+        } else {
+            panic!("Expected Bool");
+        }
+
+        // Test boolean equality - false case
+        if let Literal(Bool(result)) = eval_binary_op(boolean(true), &Eq, boolean(false)).data {
+            assert!(!result);
         } else {
             panic!("Expected Bool");
         }
