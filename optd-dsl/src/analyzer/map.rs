@@ -224,8 +224,6 @@ fn value_to_physical_map_op<M: ExprMetadata>(
 
 #[cfg(test)]
 mod tests {
-    use std::f64::consts::PI;
-
     use super::*;
     use crate::utils::tests::{
         assert_values_equal, create_logical_operator, create_physical_operator,

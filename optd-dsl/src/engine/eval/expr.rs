@@ -977,28 +977,28 @@ mod tests {
         // Verify all AND results
         match &true_and_true_result[0].data {
             CoreData::Literal(Literal::Bool(value)) => {
-                assert_eq!(*value, true, "true && true should be true");
+                assert!(*value, "true && true should be true");
             }
             _ => panic!("Expected boolean value from true && true"),
         }
 
         match &true_and_false_result[0].data {
             CoreData::Literal(Literal::Bool(value)) => {
-                assert_eq!(*value, false, "true && false should be false");
+                assert!(!(*value), "true && false should be false");
             }
             _ => panic!("Expected boolean value from true && false"),
         }
 
         match &false_and_true_result[0].data {
             CoreData::Literal(Literal::Bool(value)) => {
-                assert_eq!(*value, false, "false && true should be false");
+                assert!(!(*value), "false && true should be false");
             }
             _ => panic!("Expected boolean value from false && true"),
         }
 
         match &false_and_false_result[0].data {
             CoreData::Literal(Literal::Bool(value)) => {
-                assert_eq!(*value, false, "false && false should be false");
+                assert!(!(*value), "false && false should be false");
             }
             _ => panic!("Expected boolean value from false && false"),
         }
@@ -1006,28 +1006,28 @@ mod tests {
         // Verify all OR results
         match &true_or_true_result[0].data {
             CoreData::Literal(Literal::Bool(value)) => {
-                assert_eq!(*value, true, "true || true should be true");
+                assert!(*value, "true || true should be true");
             }
             _ => panic!("Expected boolean value from true || true"),
         }
 
         match &true_or_false_result[0].data {
             CoreData::Literal(Literal::Bool(value)) => {
-                assert_eq!(*value, true, "true || false should be true");
+                assert!(*value, "true || false should be true");
             }
             _ => panic!("Expected boolean value from true || false"),
         }
 
         match &false_or_true_result[0].data {
             CoreData::Literal(Literal::Bool(value)) => {
-                assert_eq!(*value, true, "false || true should be true");
+                assert!(*value, "false || true should be true");
             }
             _ => panic!("Expected boolean value from false || true"),
         }
 
         match &false_or_false_result[0].data {
             CoreData::Literal(Literal::Bool(value)) => {
-                assert_eq!(*value, false, "false || false should be false");
+                assert!(!(*value), "false || false should be false");
             }
             _ => panic!("Expected boolean value from false || false"),
         }

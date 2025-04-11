@@ -9,19 +9,13 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 /// A test harness for the evaluation engine.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TestHarness {
     /// Maps group IDs to their materialized values.
     group_mappings: Arc<Mutex<HashMap<String, Vec<Value>>>>,
 
     /// Maps goals to their implementations.
     goal_mappings: Arc<Mutex<HashMap<String, Vec<Value>>>>,
-}
-
-impl Default for TestHarness {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl TestHarness {
@@ -85,12 +79,6 @@ impl TestHarness {
         for value in values {
             queue.push_back(k(value).await);
         }
-    }
-}
-
-impl Default for TestHarness {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
