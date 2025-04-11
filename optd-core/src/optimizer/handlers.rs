@@ -1,26 +1,16 @@
 use super::{
-    JobId, OptimizeRequest, Optimizer, OptimizerMessage, PendingMessage, TaskId,
-    ingest::LogicalIngest,
-    jobs::JobKind,
-    tasks::{CostExpressionTask, ImplementExpressionTask, TaskKind, TransformExpressionTask},
+    EngineMessageKind, Optimizer, Task, TaskId, client::ClientMessage, tasks::SourceTaskId,
 };
 use crate::{
     cir::{
-        Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalExpressionId, LogicalPlan,
-        LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpressionId,
-        PhysicalPlan, PhysicalProperties,
+        Cost, Goal, GoalId, GoalMemberId, GroupId, LogicalProperties, PartialLogicalPlan,
+        PartialPhysicalPlan, PhysicalExpressionId,
     },
     error::Error,
     memo::Memoize,
 };
-use JobKind::*;
-use LogicalIngest::*;
-use OptimizerMessage::*;
-use TaskKind::*;
-use futures::{
-    SinkExt,
-    channel::{mpsc::Sender, oneshot},
-};
+
+use futures::channel::oneshot;
 use optd_dsl::{
     analyzer::hir::Value,
     engine::{Continuation, EngineResponse},
@@ -37,44 +27,51 @@ impl<M: Memoize> Optimizer<M> {
     ///
     /// # Returns
     /// * `Result<(), Error>` - Success or error during processing.
-    pub(super) async fn process_optimize_request(
+    pub(super) async fn process_client_request(
         &mut self,
-        plan: LogicalPlan,
-        response_tx: Sender<PhysicalPlan>,
-        task_id: TaskId,
-    ) -> Result<(), Error> {
-        match self.probe_ingest_logical_plan(&plan.clone().into()).await? {
-            Found(group_id) => {
-                // The goal represents what we want to achieve: optimize the root group
-                // with no specific physical properties required.
-                let goal = Goal(group_id, PhysicalProperties(None));
-                let goal_id = self.memo.get_goal_id(&goal).await?;
-
-                // This ensures the task will be notified when optimized expressions
-                // for this goal are found.
-                self.subscribe_task_to_goal(goal_id, task_id).await?;
+        message: ClientMessage,
+    ) -> Result<bool, Error> {
+        match message {
+            ClientMessage::Init {
+                logical_plan,
+                physical_plan_tx,
+                id_tx,
+            } => {
+                // Creates an OptimizePlanTask and register as a new query instance.
+                let task_id = self
+                    .create_optimize_plan_task(logical_plan, physical_plan_tx)
+                    .await?;
+                let query_instance_id = self.next_query_instance_id();
+                self.query_instances.insert(query_instance_id, task_id);
+                let _ = id_tx.send(query_instance_id);
+                Ok(false)
             }
-            Missing(logical_exprs) => {
-                // Store the request as a pending message that will be processed
-                // once all create task dependencies are resolved.
-                let pending_dependencies = logical_exprs
+            ClientMessage::Complete { query_instance_id } => {
+                // Remove the OptimizePlanTask from the tasks and clean up subscriptions.
+                let task_id = self.query_instances.remove(&query_instance_id).unwrap();
+                let task = self.tasks.remove(&task_id).unwrap().into_optimize_plan();
+                let optimize_goal_task = self
+                    .tasks
+                    .get_mut(&task.optimize_goal_in)
+                    .unwrap()
+                    .as_optimize_goal_mut();
+
+                if let Some(index) = optimize_goal_task
+                    .optimize_plan_out
                     .iter()
-                    .cloned()
-                    .map(|logical_expr_id| {
-                        self.schedule_job(task_id, DeriveLogicalProperties(logical_expr_id))
-                    })
-                    .collect();
+                    .position(|id| id == &task_id)
+                {
+                    optimize_goal_task.optimize_plan_out.swap_remove(index);
+                }
 
-                let pending_message = PendingMessage {
-                    message: OptimizeRequestWrapper(OptimizeRequest { plan, response_tx }, task_id),
-                    pending_dependencies,
-                };
-
-                self.pending_messages.push(pending_message);
+                // TODO(yuchen): if the goal has no other subscribers, we should remove it.
+                Ok(false)
+            }
+            ClientMessage::Shutdown => {
+                // TODO(yuchen): Clean up state.
+                Ok(true)
             }
         }
-
-        Ok(())
     }
 
     /// This method handles new logical plan alternatives discovered through
@@ -91,39 +88,12 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         plan: PartialLogicalPlan,
         group_id: GroupId,
-        job_id: JobId,
     ) -> Result<(), Error> {
-        let group_id = self.memo.find_repr_group(group_id).await?;
-        match self.probe_ingest_logical_plan(&plan).await? {
-            Found(new_group_id) if new_group_id != group_id => {
-                // Atomically perform the merge in the memo and process all results.
-                let merge_results = self.memo.merge_groups(group_id, new_group_id).await?;
-                self.handle_merge_result(merge_results).await?;
-            }
-            Found(_) => {
-                // Group already exists, nothing to merge or do.
-            }
-            Missing(logical_exprs) => {
-                // Store the request as a pending message that will be processed
-                // once all create task dependencies are resolved.
-                let related_task_id = self.running_jobs[&job_id].0;
-                let pending_dependencies = logical_exprs
-                    .iter()
-                    .cloned()
-                    .map(|logical_expr_id| {
-                        self.schedule_job(related_task_id, DeriveLogicalProperties(logical_expr_id))
-                    })
-                    .collect();
-
-                let pending_message = PendingMessage {
-                    message: NewLogicalPartial(plan, group_id, job_id),
-                    pending_dependencies,
-                };
-
-                self.pending_messages.push(pending_message);
-            }
+        let new_group_id = self.ingest_logical_plan(&plan).await?;
+        // Atomically perform the merge in the memo and process all results.
+        if let Some(merge_results) = self.memo.merge_groups(group_id, new_group_id).await? {
+            self.handle_merge_result(merge_results).await?;
         }
-
         Ok(())
     }
 
@@ -141,23 +111,27 @@ impl<M: Memoize> Optimizer<M> {
         &mut self,
         plan: PartialPhysicalPlan,
         goal_id: GoalId,
-        job_id: JobId,
+        _task_id: TaskId,
     ) -> Result<(), Error> {
         let goal_id = self.memo.find_repr_goal(goal_id).await?;
 
-        let member = self.probe_ingest_physical_plan(&plan).await?;
-        let is_new = self.memo.add_goal_member(goal_id, member).await?;
+        let member = self.ingest_physical_plan(&plan).await?;
 
-        if is_new {
-            match member {
-                GoalMemberId::PhysicalExpressionId(_expression_id) => {
-                    let _parent_task_id = self.running_jobs[&job_id].0;
-                    // TODO(Alexis): Needs to ensure cost expression task exists and then subs.
-                }
-                GoalMemberId::GoalId(_) => {
-                    // TODO(Alexis); Need to launch a new implement
-                }
+        let forward_result = self.memo.add_goal_member(goal_id, member).await?;
+
+        match member {
+            GoalMemberId::PhysicalExpressionId(physical_expr_id) => {
+                self.ensure_cost_expression_task(physical_expr_id, Cost(f64::MAX), _task_id)
+                    .await?;
             }
+            GoalMemberId::GoalId(ref_goal_id) => {
+                self.ensure_optimize_goal_task(ref_goal_id, SourceTaskId::OptimizeGoal(_task_id))
+                    .await?;
+            }
+        }
+
+        if let Some(forward_result) = forward_result {
+            self.handle_forward_result(forward_result).await?;
         }
 
         Ok(())
@@ -177,44 +151,17 @@ impl<M: Memoize> Optimizer<M> {
     /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_new_costed_physical(
         &mut self,
-        expression_id: PhysicalExpressionId,
+        physical_expr_id: PhysicalExpressionId,
         cost: Cost,
     ) -> Result<(), Error> {
-        let expression_id = self.memo.find_repr_physical_expr(expression_id).await?;
-        let new_best = self
+        let result = self
             .memo
-            .update_physical_expr_cost(expression_id, cost)
+            .update_physical_expr_cost(physical_expr_id, cost)
             .await?;
 
-        // If this is the new best expression found so far for this goal,
-        // schedule continuation jobs for all subscribers and send to clients.
-        if new_best {
-            // TODO(Alexis): Needs to send to parents.
-            // self.schedule_optimized_continuations(goal_id, expression_id, cost);
-            // self.egest_to_subscribers(goal_id, expression_id).await?;
+        if let Some(result) = result {
+            self.handle_forward_result(result).await?;
         }
-
-        Ok(())
-    }
-
-    /// This method handles group creation for expressions with derived properties
-    /// and updates any pending messages that depend on this group.
-    ///
-    /// # Parameters
-    /// * `expression_id` - ID of the logical expression to create a group for.
-    /// * `properties` - Logical properties associated with the expression.
-    /// * `job_id` - ID of the job that initiated this request.
-    ///
-    /// # Returns
-    /// * `Result<(), Error>` - Success or error during processing.
-    pub(super) async fn process_create_group(
-        &mut self,
-        expression_id: LogicalExpressionId,
-        properties: &LogicalProperties,
-        job_id: JobId,
-    ) -> Result<(), Error> {
-        self.memo.create_group(expression_id, properties).await?;
-        self.resolve_dependencies(job_id).await;
         Ok(())
     }
 
@@ -231,60 +178,39 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_group_subscription(
         &mut self,
         group_id: GroupId,
-        continuation: Continuation<Value, EngineResponse<OptimizerMessage>>,
-        job_id: JobId,
+        continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
+        task_id: TaskId,
     ) -> Result<(), Error> {
-        let related_task_id = self.running_jobs[&job_id].0;
-
-        // Register the continuation and notify the memo about the dependency to ensure the
-        // operation corresponding to the task gets invalidated when the group has new expressions.
-        match &mut self.tasks.get_mut(&related_task_id).unwrap().kind {
-            TransformExpression(TransformExpressionTask {
-                rule,
-                expression_id,
-                continuations,
-                ..
-            }) => {
-                continuations
-                    .entry(group_id)
-                    .or_default()
-                    .push(continuation.clone());
-
-                self.memo
-                    .add_transformation_dependency(*expression_id, rule, group_id)
-                    .await?;
-            }
-            ImplementExpression(ImplementExpressionTask {
-                rule,
-                expression_id,
-                goal_id,
-                continuations,
-                ..
-            }) => {
-                continuations
-                    .entry(group_id)
-                    .or_default()
-                    .push(continuation.clone());
-
-                self.memo
-                    .add_implementation_dependency(*expression_id, *goal_id, rule, group_id)
-                    .await?;
-            }
-            _ => panic!("Task type cannot produce group subscription."),
-        }
-
-        // Subscribe to future expressions and bootstrap with existing ones.
-        let expressions = self
-            .subscribe_task_to_group(group_id, related_task_id)
+        let fork_task_id = self
+            .create_fork_logical_task(group_id, continuation, task_id)
             .await?;
 
-        for expression_id in expressions {
-            self.schedule_job(
-                related_task_id,
-                ContinueWithLogical(expression_id, continuation.clone()),
-            );
+        match self.tasks.get_mut(&task_id).unwrap() {
+            Task::ImplementExpression(task) => {
+                task.add_fork_in(fork_task_id);
+                self.memo
+                    .add_implementation_dependency(
+                        task.logical_expr_id,
+                        task.goal_id,
+                        &task.rule,
+                        group_id,
+                    )
+                    .await?;
+            }
+            Task::TransformExpression(task) => {
+                task.add_fork_in(fork_task_id);
+                self.memo
+                    .add_transformation_dependency(task.logical_expr_id, &task.rule, group_id)
+                    .await?;
+            }
+            Task::ContinueWithLogical(task) => {
+                // TODO(yuchen): track dependencies back to the root transform/implement task.
+                task.add_fork_in(fork_task_id);
+            }
+            task => {
+                panic!("Task type cannot produce group subscription: {:?}", task);
+            }
         }
-
         Ok(())
     }
 
@@ -301,43 +227,52 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_goal_subscription(
         &mut self,
         goal: &Goal,
-        continuation: Continuation<Value, EngineResponse<OptimizerMessage>>,
-        job_id: JobId,
+        continuation: Continuation<Value, EngineResponse<EngineMessageKind>>,
+        task_id: TaskId,
     ) -> Result<(), Error> {
-        let related_task_id = self.running_jobs[&job_id].0;
         let goal_id = self.memo.get_goal_id(goal).await?;
 
-        // Register the continuation and notify the memo about the dependency to ensure the
-        // operation corresponding to the task gets invalidated when the goal has a new optimum.
-        match &mut self.tasks.get_mut(&related_task_id).unwrap().kind {
-            CostExpression(CostExpressionTask {
-                expression_id,
-                continuations,
-                ..
-            }) => {
-                continuations
-                    .entry(goal_id)
-                    .or_default()
-                    .push(continuation.clone());
+        let fork_task_id = self
+            .create_fork_costed_task(goal_id, continuation, task_id)
+            .await?;
 
+        match self.tasks.get_mut(&task_id).unwrap() {
+            Task::CostExpression(task) => {
+                task.add_fork_in(fork_task_id);
                 self.memo
-                    .add_cost_dependency(*expression_id, goal_id)
+                    .add_cost_dependency(task.physical_expr_id, goal_id)
                     .await?;
             }
-            _ => panic!("Only cost tasks can subscribe to goals."),
+            Task::ContinueWithCosted(task) => {
+                // TODO(yuchen): track dependencies back to the root cost expression.
+                task.add_fork_in(fork_task_id);
+            }
+            task => {
+                panic!("Task type cannot produce goal subscription: {:?}", task);
+            }
         }
 
-        // Subscribe to future optimized expressions and bootstrap with current best.
-        if let Some((best_expr_id, cost)) = self
-            .subscribe_task_to_goal(goal_id, related_task_id)
-            .await?
-        {
-            self.schedule_job(
-                related_task_id,
-                ContinueWithCostedPhysical(best_expr_id, cost, continuation),
-            );
-        }
+        Ok(())
+    }
 
+    // TODO(yuchen): resolve dependencies.
+    pub(super) async fn process_new_properties(
+        &mut self,
+        group_id: GroupId,
+        properties: LogicalProperties,
+    ) -> Result<(), Error> {
+        // Update the logical properties in the memo.
+        self.memo
+            .set_logical_properties(group_id, properties.clone())
+            .await?;
+
+        let (_, senders) = self.pending_derives.remove(&group_id).unwrap();
+
+        tokio::spawn(async move {
+            for sender in senders {
+                let _ = sender.send(properties.clone());
+            }
+        });
         Ok(())
     }
 
@@ -355,53 +290,20 @@ impl<M: Memoize> Optimizer<M> {
         group_id: GroupId,
         sender: oneshot::Sender<LogicalProperties>,
     ) -> Result<(), Error> {
-        let props = self.memo.get_logical_properties(group_id).await?;
-
-        // We don't want to make a job out of this, as it is merely a way to unblock
-        // an existing pending job. We send it to the channel without blocking the
-        // main co-routine.
-        tokio::spawn(async move {
-            sender
-                .send(props)
-                .expect("Failed to send properties - channel closed.");
-        });
+        if let Some(props) = self.memo.get_logical_properties(group_id).await? {
+            // We don't want to make a job out of this, as it is merely a way to unblock
+            // an existing pending job. We send it to the channel without blocking the
+            // main co-routine.
+            tokio::spawn(async move {
+                sender
+                    .send(props)
+                    .expect("Failed to send properties - channel closed.");
+            });
+        } else {
+            // Schedule a job to retrieve the properties.
+            self.schedule_derive_job(group_id, sender);
+        }
 
         Ok(())
-    }
-
-    /// Helper method to resolve dependencies after a group creation job completes.
-    ///
-    /// This method is called when a group creation job completes. It updates all
-    /// pending messages that were waiting for this job and processes any that
-    /// are now ready (have no more pending dependencies).
-    ///
-    /// # Parameters
-    /// * `completed_job_id` - ID of the completed job.
-    async fn resolve_dependencies(&mut self, completed_job_id: JobId) {
-        // Update dependencies and collect ready messages.
-        let ready_indices: Vec<_> = self
-            .pending_messages
-            .iter_mut()
-            .enumerate()
-            .filter_map(|(i, pending)| {
-                pending.pending_dependencies.remove(&completed_job_id);
-                pending.pending_dependencies.is_empty().then_some(i)
-            })
-            .collect();
-
-        // Process all ready messages (in reverse order to avoid index issues when removing).
-        for i in ready_indices.iter().rev() {
-            let pending = self.pending_messages.swap_remove(*i);
-
-            // Re-send the message to be processed in a new co-routine to not block the
-            // main co-routine.
-            let mut message_tx = self.message_tx.clone();
-            tokio::spawn(async move {
-                message_tx
-                    .send(pending.message)
-                    .await
-                    .expect("Failed to re-send ready message - channel closed.");
-            });
-        }
     }
 }
