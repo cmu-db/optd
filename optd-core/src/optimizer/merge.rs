@@ -6,7 +6,7 @@ use super::Optimizer;
 use crate::{
     cir::{GoalId, GroupId, ImplementationRule, LogicalExpressionId},
     error::Error,
-    memo::{Memoize, MergeResult, MergedGoalInfo, MergedGroupInfo},
+    memo::{Memoize, MergeResult, MergedGoalInfo},
     optimizer::tasks::TaskId,
 };
 
@@ -35,8 +35,7 @@ impl<M: Memoize> Optimizer<M> {
                 continue;
             }
 
-            for group_info in &group_merge.merged_groups {
-                let merged_group_id = group_info.group_id;
+            for (merged_group_id, expressions) in &group_merge.merged_groups {
                 let merged_group_task_id = self.group_exploration_task_index.get(&merged_group_id);
                 if merged_group_task_id.is_none() {
                     // TODO(Sarvesh): we ignore this merged group, as it is not running and hence, has no subscribers
@@ -52,11 +51,7 @@ impl<M: Memoize> Optimizer<M> {
                 let fork_outs = merged_group_task.fork_logical_out.clone();
                 let optimize_goal_outs = merged_group_task.optimize_goal_out.clone();
 
-                let old_exprs = group_info
-                    .expressions
-                    .iter()
-                    .cloned()
-                    .collect::<HashSet<_>>();
+                let old_exprs = expressions.iter().cloned().collect::<HashSet<_>>();
 
                 let new_exprs = group_merge
                     .all_exprs
@@ -173,7 +168,7 @@ impl<M: Memoize> Optimizer<M> {
     /// * `new_repr_group_id` - The new representative group ID.
     async fn merge_exploration_tasks(
         &mut self,
-        _all_exprs_by_group: &[MergedGroupInfo],
+        _all_exprs_by_group: &[(GroupId, Vec<LogicalExpressionId>)],
         _new_repr_group_id: GroupId,
     ) {
         // // Collect all task IDs associated with the merged groups.

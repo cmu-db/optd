@@ -1,32 +1,83 @@
-#![allow(unused)]
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::hash::Hash;
-
-use crate::cir::cost_is_better;
 
 use super::Memoize;
+use super::merge_repr::Representative;
 use super::*;
 
+/// An in-memory implementation of the memo table.
 #[derive(Default)]
-pub struct MockMemo {
+pub struct MemoryMemo {
+    /// Group id to state.
     groups: HashMap<GroupId, GroupState>,
+
+    /// Logical expression id to node.
     logical_exprs: HashMap<LogicalExpressionId, LogicalExpression>,
+    /// Logical expression node to id.
     logical_expr_node_to_id_index: HashMap<LogicalExpression, LogicalExpressionId>,
+    /// A mapping from logical expression id to group id.
+    logical_expr_group_index: HashMap<LogicalExpressionId, GroupId>,
+
+    /// Physical expression id to node.
     physical_exprs: HashMap<PhysicalExpressionId, (PhysicalExpression, Option<Cost>)>,
-    goals: HashMap<GoalId, GoalState>,
-    goal_node_to_id_index: HashMap<Goal, GoalId>,
-    member_subscribers: HashMap<GoalMemberId, HashSet<GoalId>>,
+    /// Physical expression node to id.
     physical_expr_node_to_id_index: HashMap<PhysicalExpression, PhysicalExpressionId>,
 
-    logical_expr_group_index: HashMap<LogicalExpressionId, GroupId>,
+    /// Goal id to state.
+    goals: HashMap<GoalId, GoalState>,
+    /// Goal node to id.
+    goal_node_to_id_index: HashMap<Goal, GoalId>,
+
+    /// A mapping from goal member to the set of goal ids that depend on it.
+    member_subscribers: HashMap<GoalMemberId, HashSet<GoalId>>,
+
+    /// best optimized physical expression for each goal id.
     best_optimized_physical_expr_index: HashMap<GoalId, (PhysicalExpressionId, Cost)>,
 
+    /// The shared next unique id to be used for goals, groups, logical expressions, and physical expressions.
     next_shared_id: i64,
+
+    repr_group: Representative<GroupId>,
+    repr_goal: Representative<GoalId>,
+    repr_logical_expr: Representative<LogicalExpressionId>,
+    repr_physical_expr: Representative<PhysicalExpressionId>,
+
+    transform_dependency: HashMap<LogicalExpressionId, HashMap<TransformationRule, RuleDependency>>,
+    implement_dependency:
+        HashMap<LogicalExpressionId, HashMap<(GoalId, ImplementationRule), RuleDependency>>,
+    cost_dependency: HashMap<PhysicalExpressionId, CostDependency>,
 }
 
+struct RuleDependency {
+    group_ids: HashSet<GroupId>,
+    status: Status,
+}
+
+impl RuleDependency {
+    fn new(status: Status) -> Self {
+        let group_ids = HashSet::new();
+        Self { group_ids, status }
+    }
+}
+
+struct CostDependency {
+    goal_ids: HashSet<GoalId>,
+    status: Status,
+}
+
+impl CostDependency {
+    fn new(status: Status) -> Self {
+        let goal_ids = HashSet::new();
+        Self { goal_ids, status }
+    }
+}
+
+/// State of a group in the memo structure.
 struct GroupState {
+    /// The logical properties of the group, might be `None` if it hasn't been derived yet.
     properties: Option<LogicalProperties>,
     logical_exprs: HashSet<LogicalExpressionId>,
+    goals: HashSet<GoalId>,
 }
 
 impl GroupState {
@@ -36,11 +87,13 @@ impl GroupState {
         Self {
             properties: None,
             logical_exprs,
+            goals: HashSet::new(),
         }
     }
 }
 
 struct GoalState {
+    /// The set of members that are part of this goal.
     goal: Goal,
     members: HashSet<GoalMemberId>,
 }
@@ -54,11 +107,12 @@ impl GoalState {
     }
 }
 
-impl Memoize for MockMemo {
+impl Memoize for MemoryMemo {
     async fn get_logical_properties(
         &self,
         group_id: GroupId,
     ) -> MemoizeResult<Option<LogicalProperties>> {
+        let group_id = self.find_repr_group(group_id).await?;
         let group = self
             .groups
             .get(&group_id)
@@ -72,6 +126,7 @@ impl Memoize for MockMemo {
         group_id: GroupId,
         props: LogicalProperties,
     ) -> MemoizeResult<()> {
+        let group_id = self.find_repr_group(group_id).await?;
         let group = self
             .groups
             .get_mut(&group_id)
@@ -85,6 +140,7 @@ impl Memoize for MockMemo {
         &self,
         group_id: GroupId,
     ) -> MemoizeResult<Vec<LogicalExpressionId>> {
+        let group_id = self.find_repr_group(group_id).await?;
         let group = self
             .groups
             .get(&group_id)
@@ -94,6 +150,7 @@ impl Memoize for MockMemo {
     }
 
     async fn get_any_logical_expr(&self, group_id: GroupId) -> MemoizeResult<LogicalExpressionId> {
+        let group_id = self.find_repr_group(group_id).await?;
         let group = self
             .groups
             .get(&group_id)
@@ -111,6 +168,7 @@ impl Memoize for MockMemo {
         &self,
         logical_expr_id: LogicalExpressionId,
     ) -> MemoizeResult<Option<GroupId>> {
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
         let maybe_group_id = self.logical_expr_group_index.get(&logical_expr_id).cloned();
         Ok(maybe_group_id)
     }
@@ -132,14 +190,54 @@ impl Memoize for MockMemo {
         &mut self,
         group_id_1: GroupId,
         group_id_2: GroupId,
-    ) -> MemoizeResult<MergeResult> {
-        todo!()
+    ) -> MemoizeResult<Option<MergeResult>> {
+        // our strategy is to always merge group 2 into group 1.
+        let group_id_1 = self.find_repr_group(group_id_1).await?;
+        let group_id_2 = self.find_repr_group(group_id_2).await?;
+
+        if group_id_1 == group_id_2 {
+            return Ok(None);
+        }
+        let mut result = MergeResult::default();
+
+        let group_2_state = self.groups.remove(&group_id_2).unwrap();
+        let group_2_exprs = group_2_state.logical_exprs.iter().cloned().collect();
+        // let goal_2_goals = group_2_state.goals.iter().cloned().collect();
+
+        let group1_state = self.groups.get_mut(&group_id_1).unwrap();
+        let group1_exprs = group1_state.logical_exprs.iter().cloned().collect();
+        // let group_1_goals = group1_state.goals.iter().cloned().collect();
+
+        for logical_expr_id in group_2_state.logical_exprs {
+            // Update the logical expression to point to the new group id.
+            let old_group_id = self
+                .logical_expr_group_index
+                .insert(logical_expr_id, group_id_1);
+            assert!(old_group_id.is_some());
+            group1_state.logical_exprs.insert(logical_expr_id);
+        }
+        let mut merge_group_result = MergeGroupResult::new(group_id_1);
+        merge_group_result
+            .merged_groups
+            .insert(group_id_1, group1_exprs);
+        merge_group_result
+            .merged_groups
+            .insert(group_id_2, group_2_exprs);
+
+        self.repr_group.merge(&group_id_2, &group_id_1);
+
+        result.group_merges.push(merge_group_result);
+
+        // TODO(yuchen): one-level memo goal merges.
+
+        Ok(Some(result))
     }
 
     async fn get_best_optimized_physical_expr(
         &self,
         goal_id: GoalId,
     ) -> MemoizeResult<Option<(PhysicalExpressionId, Cost)>> {
+        let goal_id = self.find_repr_goal(goal_id).await?;
         let maybe_best_costed = self
             .best_optimized_physical_expr_index
             .get(&goal_id)
@@ -148,10 +246,8 @@ impl Memoize for MockMemo {
     }
 
     async fn get_all_goal_members(&self, goal_id: GoalId) -> MemoizeResult<Vec<GoalMemberId>> {
-        let goal_state = self
-            .goals
-            .get(&goal_id)
-            .ok_or(MemoizeError::GoalNotFound(goal_id))?;
+        let goal_id = self.find_repr_goal(goal_id).await?;
+        let goal_state = self.goals.get(&goal_id).unwrap();
         Ok(goal_state.members.iter().cloned().collect())
     }
 
@@ -160,10 +256,9 @@ impl Memoize for MockMemo {
         goal_id: GoalId,
         member: GoalMemberId,
     ) -> MemoizeResult<Option<ForwardResult>> {
-        let goal_state = self
-            .goals
-            .get_mut(&goal_id)
-            .ok_or(MemoizeError::GoalNotFound(goal_id))?;
+        let goal_id = self.find_repr_goal(goal_id).await?;
+        let member = self.find_repr_goal_member(member).await?;
+        let goal_state = self.goals.get_mut(&goal_id).unwrap();
 
         let is_new = goal_state.members.insert(member);
         if is_new {
@@ -212,11 +307,12 @@ impl Memoize for MockMemo {
         &self,
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoizeResult<Option<Cost>> {
-        let (_, cost) = self
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
+        let (_, maybe_cost) = self
             .physical_exprs
             .get(&physical_expr_id)
             .ok_or(MemoizeError::PhysicalExprNotFound(physical_expr_id))?;
-        Ok(*cost)
+        Ok(*maybe_cost)
     }
 
     async fn update_physical_expr_cost(
@@ -224,6 +320,7 @@ impl Memoize for MockMemo {
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
     ) -> MemoizeResult<Option<ForwardResult>> {
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
         let (_, cost_mut) = self
             .physical_exprs
             .get_mut(&physical_expr_id)
@@ -265,7 +362,14 @@ impl Memoize for MockMemo {
         logical_expr_id: LogicalExpressionId,
         rule: &TransformationRule,
     ) -> MemoizeResult<Status> {
-        todo!()
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
+        let status = self
+            .transform_dependency
+            .get(&logical_expr_id)
+            .and_then(|status_map| status_map.get(rule))
+            .map(|dep| dep.status.clone())
+            .unwrap_or(Status::Dirty);
+        Ok(status)
     }
 
     async fn set_transformation_clean(
@@ -273,7 +377,21 @@ impl Memoize for MockMemo {
         logical_expr_id: LogicalExpressionId,
         rule: &TransformationRule,
     ) -> MemoizeResult<()> {
-        todo!()
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
+        let status_map = self
+            .transform_dependency
+            .entry(logical_expr_id)
+            .or_default();
+        match status_map.entry(rule.clone()) {
+            Entry::Occupied(occupied_entry) => {
+                let dep = occupied_entry.into_mut();
+                dep.status = Status::Clean;
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(RuleDependency::new(Status::Clean));
+            }
+        }
+        Ok(())
     }
 
     async fn get_implementation_status(
@@ -282,7 +400,15 @@ impl Memoize for MockMemo {
         goal_id: GoalId,
         rule: &ImplementationRule,
     ) -> MemoizeResult<Status> {
-        todo!()
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
+        let goal_id = self.find_repr_goal(goal_id).await?;
+        let status = self
+            .implement_dependency
+            .get(&logical_expr_id)
+            .and_then(|status_map| status_map.get(&(goal_id, rule.clone())))
+            .map(|dep| dep.status.clone())
+            .unwrap_or(Status::Dirty);
+        Ok(status)
     }
 
     async fn set_implementation_clean(
@@ -291,20 +417,54 @@ impl Memoize for MockMemo {
         goal_id: GoalId,
         rule: &ImplementationRule,
     ) -> MemoizeResult<()> {
-        todo!()
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
+        let status_map = self
+            .implement_dependency
+            .entry(logical_expr_id)
+            .or_default();
+        match status_map.entry((goal_id, rule.clone())) {
+            Entry::Occupied(occupied_entry) => {
+                let dep = occupied_entry.into_mut();
+                dep.status = Status::Clean;
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(RuleDependency::new(Status::Clean));
+            }
+        }
+        Ok(())
     }
 
     async fn get_cost_status(
         &self,
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoizeResult<Status> {
-        Ok(Status::Clean)
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
+        let status = self
+            .cost_dependency
+            .get(&physical_expr_id)
+            .map(|dep| dep.status.clone())
+            .unwrap_or(Status::Dirty);
+        Ok(status)
     }
 
     async fn set_cost_clean(
         &mut self,
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoizeResult<()> {
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
+
+        let entry = self.cost_dependency.entry(physical_expr_id);
+
+        match entry {
+            Entry::Occupied(occupied) => {
+                let dep = occupied.into_mut();
+                dep.status = Status::Clean;
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(CostDependency::new(Status::Clean));
+            }
+        }
+
         Ok(())
     }
 
@@ -314,6 +474,25 @@ impl Memoize for MockMemo {
         rule: &TransformationRule,
         group_id: GroupId,
     ) -> MemoizeResult<()> {
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
+        let group_id = self.find_repr_group(group_id).await?;
+        let status_map = self
+            .transform_dependency
+            .entry(logical_expr_id)
+            .or_default();
+
+        match status_map.entry(rule.clone()) {
+            Entry::Occupied(occupied_entry) => {
+                let dep = occupied_entry.into_mut();
+                dep.group_ids.insert(group_id);
+            }
+            Entry::Vacant(vacant) => {
+                let mut dep = RuleDependency::new(Status::Dirty);
+                dep.group_ids.insert(group_id);
+                vacant.insert(dep);
+            }
+        }
+
         Ok(())
     }
 
@@ -324,6 +503,27 @@ impl Memoize for MockMemo {
         rule: &ImplementationRule,
         group_id: GroupId,
     ) -> MemoizeResult<()> {
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
+        let group_id = self.find_repr_group(group_id).await?;
+        let goal_id = self.find_repr_goal(goal_id).await?;
+
+        let status_map = self
+            .implement_dependency
+            .entry(logical_expr_id)
+            .or_default();
+
+        match status_map.entry((goal_id, rule.clone())) {
+            Entry::Occupied(occupied) => {
+                let dep = occupied.into_mut();
+                dep.group_ids.insert(group_id);
+            }
+            Entry::Vacant(vacant) => {
+                let mut dep = RuleDependency::new(Status::Dirty);
+                dep.group_ids.insert(group_id);
+                vacant.insert(dep);
+            }
+        }
+
         Ok(())
     }
 
@@ -332,6 +532,21 @@ impl Memoize for MockMemo {
         physical_expr_id: PhysicalExpressionId,
         goal_id: GoalId,
     ) -> MemoizeResult<()> {
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
+        let goal_id = self.find_repr_goal(goal_id).await?;
+
+        match self.cost_dependency.entry(physical_expr_id) {
+            Entry::Occupied(occupied) => {
+                let dep = occupied.into_mut();
+                dep.goal_ids.insert(goal_id);
+            }
+            Entry::Vacant(vacant) => {
+                let mut dep = CostDependency::new(Status::Dirty);
+                dep.goal_ids.insert(goal_id);
+                vacant.insert(dep);
+            }
+        }
+
         Ok(())
     }
 
@@ -342,17 +557,19 @@ impl Memoize for MockMemo {
         let goal_id = self.next_goal_id();
         self.goal_node_to_id_index.insert(goal.clone(), goal_id);
         self.goals.insert(goal_id, GoalState::new(goal.clone()));
+
+        let Goal(group_id, _) = goal;
+        self.groups.get_mut(group_id).unwrap().goals.insert(goal_id);
         Ok(goal_id)
     }
 
     async fn materialize_goal(&self, goal_id: GoalId) -> MemoizeResult<Goal> {
-        let goal = self
+        let state = self
             .goals
             .get(&goal_id)
-            .ok_or(MemoizeError::GoalNotFound(goal_id))?
-            .goal
-            .clone();
-        Ok(goal)
+            .ok_or(MemoizeError::GoalNotFound(goal_id))?;
+
+        Ok(state.goal.clone())
     }
 
     async fn get_logical_expr_id(
@@ -378,12 +595,12 @@ impl Memoize for MockMemo {
         &self,
         logical_expr_id: LogicalExpressionId,
     ) -> MemoizeResult<LogicalExpression> {
+        let logical_expr_id = self.find_repr_logical_expr(logical_expr_id).await?;
         let logical_expr = self
             .logical_exprs
             .get(&logical_expr_id)
-            .ok_or(MemoizeError::LogicalExprNotFound(logical_expr_id))?
-            .clone();
-        Ok(logical_expr)
+            .ok_or(MemoizeError::LogicalExprNotFound(logical_expr_id))?;
+        Ok(logical_expr.clone())
     }
 
     async fn get_physical_expr_id(
@@ -409,64 +626,71 @@ impl Memoize for MockMemo {
         &self,
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoizeResult<PhysicalExpression> {
-        let physical_expr = self
+        let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
+        let (physical_expr, _) = self
             .physical_exprs
             .get(&physical_expr_id)
-            .ok_or(MemoizeError::PhysicalExprNotFound(physical_expr_id))?
-            .0
-            .clone();
-        Ok(physical_expr)
+            .ok_or(MemoizeError::PhysicalExprNotFound(physical_expr_id))?;
+        Ok(physical_expr.clone())
     }
 
     async fn find_repr_group(&self, group_id: GroupId) -> MemoizeResult<GroupId> {
-        Ok(group_id)
+        let repr_group_id = self.repr_group.find(&group_id);
+        Ok(repr_group_id)
     }
 
     async fn find_repr_goal(&self, goal_id: GoalId) -> MemoizeResult<GoalId> {
-        Ok(goal_id)
+        let repr_goal_id = self.repr_goal.find(&goal_id);
+        Ok(repr_goal_id)
     }
 
     async fn find_repr_logical_expr(
         &self,
         logical_expr_id: LogicalExpressionId,
     ) -> MemoizeResult<LogicalExpressionId> {
-        Ok(logical_expr_id)
+        let repr_expr_id = self.repr_logical_expr.find(&logical_expr_id);
+        Ok(repr_expr_id)
     }
 
     async fn find_repr_physical_expr(
         &self,
         physical_expr_id: PhysicalExpressionId,
     ) -> MemoizeResult<PhysicalExpressionId> {
-        Ok(physical_expr_id)
+        let repr_expr_id = self.repr_physical_expr.find(&physical_expr_id);
+        Ok(repr_expr_id)
     }
 }
 
-impl MockMemo {
+impl MemoryMemo {
+    /// Generates a new group id.
     fn next_group_id(&mut self) -> GroupId {
         let group_id = GroupId(self.next_shared_id);
         self.next_shared_id += 1;
         group_id
     }
 
+    /// Generates a new physical expression id.
     fn next_physical_expr_id(&mut self) -> PhysicalExpressionId {
         let physical_expr_id = PhysicalExpressionId(self.next_shared_id);
         self.next_shared_id += 1;
         physical_expr_id
     }
 
+    /// Generates a new logical expression id.
     fn next_logical_expr_id(&mut self) -> LogicalExpressionId {
         let logical_expr_id = LogicalExpressionId(self.next_shared_id);
         self.next_shared_id += 1;
         logical_expr_id
     }
 
+    /// Generates a new goal id.
     fn next_goal_id(&mut self) -> GoalId {
         let goal_id = GoalId(self.next_shared_id);
         self.next_shared_id += 1;
         goal_id
     }
 
-    // TODO(yuchen): make this thing return a list of goal ids that have their best cost updated.
+    /// Propagates the new costed member physical expression to all subscribers.
     async fn propagate_new_member_cost(
         &mut self,
         mut subscribers: VecDeque<GoalId>,
@@ -500,5 +724,21 @@ impl MockMemo {
         }
 
         Ok(())
+    }
+
+    /// Find the representative of a goal member.
+    ///
+    /// This reduces down to finding representative physical expr or goal id.
+    async fn find_repr_goal_member(&self, member: GoalMemberId) -> MemoizeResult<GoalMemberId> {
+        match member {
+            GoalMemberId::PhysicalExpressionId(physical_expr_id) => {
+                let physical_expr_id = self.find_repr_physical_expr(physical_expr_id).await?;
+                Ok(GoalMemberId::PhysicalExpressionId(physical_expr_id))
+            }
+            GoalMemberId::GoalId(goal_id) => {
+                let goal_id = self.find_repr_goal(goal_id).await?;
+                Ok(GoalMemberId::GoalId(goal_id))
+            }
+        }
     }
 }

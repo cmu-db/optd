@@ -89,11 +89,9 @@ impl<M: Memoize> Optimizer<M> {
         plan: PartialLogicalPlan,
         group_id: GroupId,
     ) -> Result<(), Error> {
-        let group_id = self.memo.find_repr_group(group_id).await?;
         let new_group_id = self.ingest_logical_plan(&plan).await?;
-        if new_group_id != group_id {
-            // Atomically perform the merge in the memo and process all results.
-            let merge_results = self.memo.merge_groups(group_id, new_group_id).await?;
+        // Atomically perform the merge in the memo and process all results.
+        if let Some(merge_results) = self.memo.merge_groups(group_id, new_group_id).await? {
             self.handle_merge_result(merge_results).await?;
         }
         Ok(())
@@ -153,13 +151,12 @@ impl<M: Memoize> Optimizer<M> {
     /// * `Result<(), Error>` - Success or error during processing.
     pub(super) async fn process_new_costed_physical(
         &mut self,
-        expression_id: PhysicalExpressionId,
+        physical_expr_id: PhysicalExpressionId,
         cost: Cost,
     ) -> Result<(), Error> {
-        let expression_id = self.memo.find_repr_physical_expr(expression_id).await?;
         let result = self
             .memo
-            .update_physical_expr_cost(expression_id, cost)
+            .update_physical_expr_cost(physical_expr_id, cost)
             .await?;
 
         if let Some(result) = result {

@@ -1,8 +1,8 @@
-mod merge_repr;
 #[cfg(test)]
-pub mod mock;
+pub mod memory;
+mod merge_repr;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::cir::{
     Cost, Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpression,
@@ -41,27 +41,31 @@ pub enum Status {
     Clean,
 }
 
-/// Information about a merged group, including its ID and expressions
-#[derive(Debug)]
-pub struct MergedGroupInfo {
-    /// ID of the merged group
-    pub group_id: GroupId,
-
-    /// All logical expressions in this group
-    pub expressions: Vec<LogicalExpressionId>,
-}
-
 /// Result of merging two groups.
 #[derive(Debug)]
 pub struct MergeGroupResult {
-    /// Groups that were merged along with their expressions.
-    pub merged_groups: Vec<MergedGroupInfo>,
-
     /// ID of the new representative group id.
     pub new_repr_group_id: GroupId,
-
     /// Union of all expressions in the new group.
     pub all_exprs: Vec<LogicalExpressionId>,
+    /// Groups that were merged along with their expressions.
+    pub merged_groups: HashMap<GroupId, Vec<LogicalExpressionId>>,
+}
+
+impl MergeGroupResult {
+    /// Creates a new MergeGroupResult instance.
+    ///
+    /// # Parameters
+    /// * `merged_groups` - Groups that were merged along with their expressions.
+    /// * `new_repr_group_id` - ID of the new representative group id.
+    /// * `all_exprs` - Union of all expressions in the new group.
+    pub fn new(new_repr_group_id: GroupId) -> Self {
+        Self {
+            new_repr_group_id,
+            all_exprs: Vec::new(),
+            merged_groups: HashMap::new(),
+        }
+    }
 }
 
 /// Information about a merged goal, including its ID and expressions
@@ -88,7 +92,7 @@ pub struct MergeGoalResult {
 }
 
 /// Results of merge operations with newly dirtied expressions.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MergeResult {
     /// Group merge results.
     pub group_merges: Vec<MergeGroupResult>,
@@ -215,7 +219,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         group_id_1: GroupId,
         group_id_2: GroupId,
-    ) -> MemoizeResult<MergeResult>;
+    ) -> MemoizeResult<Option<MergeResult>>;
 
     //
     // Physical expression and goal operations.

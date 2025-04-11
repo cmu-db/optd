@@ -300,17 +300,17 @@ mod tests {
             Child, GoalMemberId, LogicalExpression, Operator, OperatorData, PhysicalExpression,
             PhysicalProperties, PropertiesData,
         },
-        memo::mock::MockMemo,
+        memo::memory::MemoryMemo,
     };
 
     #[tokio::test]
-    async fn test_optimizer_empty_hir() -> Result<(), Error> {
+    async fn test_optimizer_with_empty_hir() -> Result<(), Error> {
         let hir = HIR {
             context: Context::default(),
             annotations: HashMap::new(),
         };
 
-        let mut client = Optimizer::launch(MockMemo::default(), hir);
+        let mut client = Optimizer::launch(MemoryMemo::default(), hir);
 
         let logical_plan = LogicalPlan(Operator::new(
             "Scan".to_string(),
@@ -320,7 +320,7 @@ mod tests {
         let mut query_instance = client.create_query_instance(logical_plan).await?;
 
         // Wait for three secs, should just directly timeout.
-        tokio::time::timeout(Duration::from_secs(3), async {
+        tokio::time::timeout(Duration::from_secs(1), async {
             let _physical_plan = query_instance.recv_best_plan().await.unwrap();
             panic!("Should not receive a plan");
         })
@@ -333,7 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_optimizer_with_empty_hir_memoized() -> Result<(), Error> {
-        let mut memo = MockMemo::default();
+        let mut memo = MemoryMemo::default();
 
         let (no_sort_goal_id, sort_goal_id, scan_group_id) = {
             let scan = LogicalExpression::new(

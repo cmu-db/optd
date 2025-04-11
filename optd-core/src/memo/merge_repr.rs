@@ -11,12 +11,18 @@ pub struct Representative<T> {
     parents: HashMap<T, T>,
 }
 
+impl<T> Default for Representative<T> {
+    fn default() -> Self {
+        Representative {
+            parents: HashMap::new(),
+        }
+    }
+}
+
 impl<T: Eq + Hash + Clone> Representative<T> {
     /// Creates a new empty Representative
     pub(super) fn new() -> Self {
-        Self {
-            parents: HashMap::new(),
-        }
+        Self::default()
     }
 
     /// Finds the representative of the set containing `x`

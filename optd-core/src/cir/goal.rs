@@ -28,17 +28,3 @@ pub struct GoalId(pub i64);
 /// Represents the cost of a goal / optimized expression in the memo.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Cost(pub f64);
-
-/// Compares two optional costed expressions and determines if the first is better than the second.
-/// TODO(yuchen): impl custom `PartialOrd` on NewType(Option<(PhysicalExpressionId, Cost)>) also works.
-/// It could also be a function of the cost model.
-pub fn cost_is_better(
-    first: Option<(PhysicalExpressionId, Cost)>,
-    second: Option<(PhysicalExpressionId, Cost)>,
-) -> bool {
-    match (first, second) {
-        (Some((_, first_cost)), Some((_, second_cost))) => first_cost < second_cost,
-        (Some(_), None) => true,
-        _ => false,
-    }
-}
