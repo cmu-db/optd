@@ -167,7 +167,24 @@ impl TypeRegistry {
     ///
     /// `true` if `child` is a subtype of `parent`, `false` otherwise.
     pub fn is_subtype(&self, child: &Type, parent: &Type) -> bool {
+        self.is_subtype_inner(child, parent, &mut HashSet::new())
+    }
+
+    /// Inner implementation of is_subtype with memoization for cycle detection.
+    /// Cycles can occur in the type hierarchy with recursive ADTs and EqHash
+    /// checks ADTs recursively deep.
+    fn is_subtype_inner(
+        &self,
+        child: &Type,
+        parent: &Type,
+        memo: &mut HashSet<(Type, Type)>,
+    ) -> bool {
         use Type::*;
+
+        // If we've already visited the pair (child, parent), return true to break cycles
+        if !memo.insert((child.clone(), parent.clone())) {
+            return true;
+        }
 
         if child == parent {
             return true;
@@ -184,22 +201,22 @@ impl TypeRegistry {
 
             // Stored and Costed type handling.
             (Stored(child_inner), Stored(parent_inner)) => {
-                self.is_subtype(child_inner, parent_inner)
+                self.is_subtype_inner(child_inner, parent_inner, memo)
             }
             (Costed(child_inner), Costed(parent_inner)) => {
-                self.is_subtype(child_inner, parent_inner)
+                self.is_subtype_inner(child_inner, parent_inner, memo)
             }
             (Costed(child_inner), Stored(parent_inner)) => {
                 // Costed(A) is a subtype of Stored(A).
-                self.is_subtype(child_inner, parent_inner)
+                self.is_subtype_inner(child_inner, parent_inner, memo)
             }
             (Costed(child_inner), parent_inner) => {
                 // Costed(A) is a subtype of A.
-                self.is_subtype(child_inner, parent_inner)
+                self.is_subtype_inner(child_inner, parent_inner, memo)
             }
             (Stored(child_inner), parent_inner) => {
                 // Stored(A) is a subtype of A.
-                self.is_subtype(child_inner, parent_inner)
+                self.is_subtype_inner(child_inner, parent_inner, memo)
             }
 
             // Check transitive inheritance for ADTs.
@@ -210,13 +227,19 @@ impl TypeRegistry {
 
                 self.subtypes.get(parent_name).is_some_and(|children| {
                     children.iter().any(|subtype_child_name| {
-                        self.is_subtype(&Adt(child_name.clone()), &Adt(subtype_child_name.clone()))
+                        self.is_subtype_inner(
+                            &Adt(child_name.clone()),
+                            &Adt(subtype_child_name.clone()),
+                            memo,
+                        )
                     })
                 })
             }
 
             // Array covariance: Array[T] <: Array[U] if T <: U
-            (Array(child_elem), Array(parent_elem)) => self.is_subtype(child_elem, parent_elem),
+            (Array(child_elem), Array(parent_elem)) => {
+                self.is_subtype_inner(child_elem, parent_elem, memo)
+            }
 
             // Tuple covariance: (T1, T2, ...) <: (U1, U2, ...) if T1 <: U1, T2 <: U2, ...
             (Tuple(child_types), Tuple(parent_types)) => {
@@ -226,22 +249,26 @@ impl TypeRegistry {
                 child_types
                     .iter()
                     .zip(parent_types.iter())
-                    .all(|(c, p)| self.is_subtype(c, p))
+                    .all(|(c, p)| self.is_subtype_inner(c, p, memo))
             }
 
             // Map covariance: Map[K1, V1] <: Map[K2, V2] if K1 <: K2 and V1 <: V2
             (Map(child_key, child_val), Map(parent_key, parent_val)) => {
-                self.is_subtype(child_key, parent_key) && self.is_subtype(child_val, parent_val)
+                self.is_subtype_inner(child_key, parent_key, memo)
+                    && self.is_subtype_inner(child_val, parent_val, memo)
             }
 
             // Function contravariance on args, covariance on return type:
             // (T1 -> U1) <: (T2 -> U2) if T2 <: T1 and U1 <: U2
             (Closure(child_param, child_ret), Closure(parent_param, parent_ret)) => {
-                self.is_subtype(parent_param, child_param) && self.is_subtype(child_ret, parent_ret)
+                self.is_subtype_inner(parent_param, child_param, memo)
+                    && self.is_subtype_inner(child_ret, parent_ret, memo)
             }
 
             // Optional type covariance: Optional[T] <: Optional[U] if T <: U
-            (Optional(child_ty), Optional(parent_ty)) => self.is_subtype(child_ty, parent_ty),
+            (Optional(child_ty), Optional(parent_ty)) => {
+                self.is_subtype_inner(child_ty, parent_ty, memo)
+            }
 
             // Native trait subtyping relationships
 
@@ -256,19 +283,22 @@ impl TypeRegistry {
             (Bool, EqHash) => true,
             (Unit, EqHash) => true,
             (None, EqHash) => true,
-            (Tuple(types), EqHash) => types.iter().all(|t| self.is_subtype(t, &EqHash)),
+            (Optional(inner), EqHash) => self.is_subtype_inner(inner, &EqHash, memo),
+            (Tuple(types), EqHash) => types
+                .iter()
+                .all(|t| self.is_subtype_inner(t, &EqHash, memo)),
             (Adt(name), EqHash) => {
                 // Product ADTs with all fields satisfying EqHash also satisfy EqHash.
                 if let Some(fields) = self.product_fields.get(name) {
                     fields.iter().all(|field| {
                         let ty = self.get_product_field_type(name, &field.name);
-                        self.is_subtype(&ty, &EqHash)
+                        self.is_subtype_inner(&ty, &EqHash, memo)
                     })
                 } else if let Some(variants) = self.subtypes.get(name) {
                     // Sum types (enums) satisfy EqHash if all variants satisfy EqHash.
                     variants
                         .iter()
-                        .all(|variant| self.is_subtype(&Adt(variant.clone()), &EqHash))
+                        .all(|variant| self.is_subtype_inner(&Adt(variant.clone()), &EqHash, memo))
                 } else {
                     false
                 }
@@ -328,6 +358,7 @@ impl TypeRegistry {
                 AstType::Map(key, val) => {
                     Map(convert(*key.value).into(), convert(*val.value).into())
                 }
+                AstType::Questioned(inner) => Optional(convert(*inner.value).into()),
                 _ => panic!("Registry has not been properly valided"),
             }
         }
@@ -875,5 +906,237 @@ mod type_registry_tests {
             &Type::Adt("Truck".to_string()),
             &Type::Adt("Cars".to_string())
         ));
+    }
+
+    #[test]
+    fn test_native_trait_concat() {
+        let registry = TypeRegistry::default();
+
+        // Test types that should implement Concat
+        assert!(registry.is_subtype(&Type::String, &Type::Concat));
+        assert!(registry.is_subtype(&Type::Array(Box::new(Type::Int64)), &Type::Concat));
+        assert!(registry.is_subtype(
+            &Type::Map(Box::new(Type::String), Box::new(Type::Int64)),
+            &Type::Concat
+        ));
+
+        // Test nested types that implement Concat
+        assert!(registry.is_subtype(
+            &Type::Array(Box::new(Type::Array(Box::new(Type::Int64)))),
+            &Type::Concat
+        ));
+
+        // Test types that should not implement Concat
+        assert!(!registry.is_subtype(&Type::Int64, &Type::Concat));
+        assert!(!registry.is_subtype(&Type::Bool, &Type::Concat));
+        assert!(!registry.is_subtype(&Type::Float64, &Type::Concat));
+        assert!(!registry.is_subtype(&Type::Unit, &Type::Concat));
+        assert!(!registry.is_subtype(&Type::None, &Type::Concat));
+        assert!(!registry.is_subtype(&Type::Tuple(vec![Type::Int64, Type::String]), &Type::Concat));
+        assert!(!registry.is_subtype(
+            &Type::Closure(Box::new(Type::Int64), Box::new(Type::String)),
+            &Type::Concat
+        ));
+
+        // Special types
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Concat));
+        assert!(!registry.is_subtype(&Type::Concat, &Type::Nothing));
+        assert!(registry.is_subtype(&Type::Concat, &Type::Universe));
+
+        // Stored/Costed with Concat-compatible inner types
+        assert!(registry.is_subtype(&Type::Stored(Box::new(Type::String)), &Type::String));
+        assert!(registry.is_subtype(&Type::Stored(Box::new(Type::String)), &Type::Concat));
+        assert!(registry.is_subtype(&Type::Costed(Box::new(Type::String)), &Type::Concat));
+    }
+
+    #[test]
+    fn test_native_trait_eqhash() {
+        let registry = TypeRegistry::default();
+
+        // Test primitive types that should implement EqHash
+        assert!(registry.is_subtype(&Type::Int64, &Type::EqHash));
+        assert!(registry.is_subtype(&Type::String, &Type::EqHash));
+        assert!(registry.is_subtype(&Type::Bool, &Type::EqHash));
+        assert!(registry.is_subtype(&Type::Unit, &Type::EqHash));
+        assert!(registry.is_subtype(&Type::None, &Type::EqHash));
+
+        // Test tuple types with all EqHash elements
+        assert!(registry.is_subtype(
+            &Type::Tuple(vec![Type::Int64, Type::String, Type::Bool]),
+            &Type::EqHash
+        ));
+
+        // Mixed tuple with a non-EqHash type should not implement EqHash
+        assert!(!registry.is_subtype(
+            &Type::Tuple(vec![
+                Type::Int64,
+                Type::Closure(Box::new(Type::Int64), Box::new(Type::Bool))
+            ]),
+            &Type::EqHash
+        ));
+
+        // Test empty tuple (should implement EqHash)
+        assert!(registry.is_subtype(&Type::Tuple(vec![]), &Type::EqHash));
+
+        // Test types that should not implement EqHash
+        assert!(!registry.is_subtype(&Type::Float64, &Type::EqHash)); // Floating point is not guaranteed equality
+        assert!(!registry.is_subtype(
+            &Type::Closure(Box::new(Type::Int64), Box::new(Type::Bool)),
+            &Type::EqHash
+        ));
+        assert!(!registry.is_subtype(
+            &Type::Map(Box::new(Type::String), Box::new(Type::Int64)),
+            &Type::EqHash
+        ));
+
+        // Special types
+        assert!(registry.is_subtype(&Type::Nothing, &Type::EqHash));
+        assert!(!registry.is_subtype(&Type::EqHash, &Type::Nothing));
+        assert!(registry.is_subtype(&Type::EqHash, &Type::Universe));
+    }
+
+    #[test]
+    fn test_native_trait_arithmetic() {
+        let registry = TypeRegistry::default();
+
+        // Test types that should implement Arithmetic
+        assert!(registry.is_subtype(&Type::Int64, &Type::Arithmetic));
+        assert!(registry.is_subtype(&Type::Float64, &Type::Arithmetic));
+
+        // Test types that should not implement Arithmetic
+        assert!(!registry.is_subtype(&Type::String, &Type::Arithmetic));
+        assert!(!registry.is_subtype(&Type::Bool, &Type::Arithmetic));
+        assert!(!registry.is_subtype(&Type::Unit, &Type::Arithmetic));
+        assert!(!registry.is_subtype(&Type::None, &Type::Arithmetic));
+        assert!(!registry.is_subtype(
+            &Type::Tuple(vec![Type::Int64, Type::Float64]),
+            &Type::Arithmetic
+        ));
+        assert!(!registry.is_subtype(&Type::Array(Box::new(Type::Int64)), &Type::Arithmetic));
+        assert!(!registry.is_subtype(
+            &Type::Map(Box::new(Type::String), Box::new(Type::Int64)),
+            &Type::Arithmetic
+        ));
+
+        // Special types
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Arithmetic));
+        assert!(!registry.is_subtype(&Type::Arithmetic, &Type::Nothing));
+        assert!(registry.is_subtype(&Type::Arithmetic, &Type::Universe));
+
+        // Stored/Costed with Arithmetic-compatible inner types
+        assert!(registry.is_subtype(&Type::Stored(Box::new(Type::Int64)), &Type::Int64));
+        assert!(registry.is_subtype(&Type::Stored(Box::new(Type::Int64)), &Type::Arithmetic));
+        assert!(registry.is_subtype(&Type::Costed(Box::new(Type::Float64)), &Type::Arithmetic));
+    }
+
+    #[test]
+    fn test_adt_eqhash() {
+        // Create a registry with ADTs
+        let mut registry = TypeRegistry::default();
+
+        // Create ADTs with EqHash-compatible fields
+        let point = create_product_adt("Point", vec![("x", AstType::Int64), ("y", AstType::Int64)]);
+
+        // Create ADT with mixed field types (some EqHash, some not)
+        let complex_shape = create_product_adt(
+            "ComplexShape",
+            vec![
+                ("name", AstType::String),
+                (
+                    "transform",
+                    AstType::Closure(spanned(AstType::Int64), spanned(AstType::Int64)),
+                ),
+            ],
+        );
+
+        // Create sum type with all variants satisfying EqHash
+        let shape1 = create_product_adt("Circle", vec![("radius", AstType::Int64)]);
+        let shape2 = create_product_adt(
+            "Rectangle",
+            vec![("width", AstType::Int64), ("height", AstType::Int64)],
+        );
+        let shapes = create_sum_adt("Shape", vec![shape1, shape2]);
+
+        // Register the ADTs
+        registry.register_adt(&point).unwrap();
+        registry.register_adt(&complex_shape).unwrap();
+        registry.register_adt(&shapes).unwrap();
+
+        // Test EqHash relationships
+
+        // Point should satisfy EqHash since all fields (x, y) are Int64 which satisfies EqHash
+        assert!(registry.is_subtype(&Type::Adt("Point".to_string()), &Type::EqHash));
+
+        // ComplexShape should not satisfy EqHash since it has a Closure field which doesn't satisfy EqHash
+        assert!(!registry.is_subtype(&Type::Adt("ComplexShape".to_string()), &Type::EqHash));
+
+        // Circle and Rectangle should satisfy EqHash
+        assert!(registry.is_subtype(&Type::Adt("Circle".to_string()), &Type::EqHash));
+        assert!(registry.is_subtype(&Type::Adt("Rectangle".to_string()), &Type::EqHash));
+
+        // Shape (sum type) should satisfy EqHash since all variants satisfy EqHash
+        assert!(registry.is_subtype(&Type::Adt("Shape".to_string()), &Type::EqHash));
+    }
+
+    #[test]
+    fn test_recursive_adt_with_native_traits() {
+        // Create a registry with a recursive ADT
+        let mut registry = TypeRegistry::default();
+
+        // Create a recursive List type
+        let list_node = create_product_adt(
+            "ListNode",
+            vec![
+                ("value", AstType::Int64),
+                (
+                    "next",
+                    AstType::Questioned(spanned(AstType::Identifier("ListNode".to_string()))),
+                ),
+            ],
+        );
+
+        // Register the ADT
+        registry.register_adt(&list_node).unwrap();
+
+        // Test relationships with native traits
+
+        // ListNode should satisfy EqHash since both Int64 and Optional<ListNode> satisfy EqHash
+        assert!(registry.is_subtype(&Type::Adt("ListNode".to_string()), &Type::EqHash));
+
+        // ListNode should not satisfy Concat or Arithmetic
+        assert!(!registry.is_subtype(&Type::Adt("ListNode".to_string()), &Type::Concat));
+        assert!(!registry.is_subtype(&Type::Adt("ListNode".to_string()), &Type::Arithmetic));
+    }
+
+    #[test]
+    fn test_multiple_native_traits() {
+        let registry = TypeRegistry::default();
+
+        // Test which types satisfy multiple traits
+
+        // Int64 satisfies both EqHash and Arithmetic
+        assert!(registry.is_subtype(&Type::Int64, &Type::EqHash));
+        assert!(registry.is_subtype(&Type::Int64, &Type::Arithmetic));
+        assert!(!registry.is_subtype(&Type::Int64, &Type::Concat));
+
+        // String satisfies both EqHash and Concat
+        assert!(registry.is_subtype(&Type::String, &Type::EqHash));
+        assert!(registry.is_subtype(&Type::String, &Type::Concat));
+        assert!(!registry.is_subtype(&Type::String, &Type::Arithmetic));
+
+        // Float64 only satisfies Arithmetic
+        assert!(registry.is_subtype(&Type::Float64, &Type::Arithmetic));
+        assert!(!registry.is_subtype(&Type::Float64, &Type::EqHash));
+        assert!(!registry.is_subtype(&Type::Float64, &Type::Concat));
+
+        // Bool only satisfies EqHash
+        assert!(registry.is_subtype(&Type::Bool, &Type::EqHash));
+        assert!(!registry.is_subtype(&Type::Bool, &Type::Arithmetic));
+        assert!(!registry.is_subtype(&Type::Bool, &Type::Concat));
+
+        // Array satisfies only Concat
+        assert!(registry.is_subtype(&Type::Array(Box::new(Type::Int64)), &Type::Concat));
+        assert!(!registry.is_subtype(&Type::Array(Box::new(Type::Int64)), &Type::EqHash));
+        assert!(!registry.is_subtype(&Type::Array(Box::new(Type::Int64)), &Type::Arithmetic));
     }
 }
