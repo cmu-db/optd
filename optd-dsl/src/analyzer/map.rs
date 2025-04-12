@@ -83,9 +83,6 @@ pub enum MapKey {
     Logical(Box<LogicalMapKey>),
     Physical(Box<PhysicalMapKey>),
 
-    /// or representation
-    Fail(Box<MapKey>),
-
     /// None value
     None,
 }
@@ -165,10 +162,6 @@ fn value_to_map_key<M: ExprMetadata>(value: &Value<M>) -> MapKey {
                 MapKey::Physical(Box::new(PhysicalMapKey::Materialized(map_op)))
             }
         },
-        CoreData::Fail(inner) => {
-            let inner_key = value_to_map_key(inner);
-            MapKey::Fail(Box::new(inner_key))
-        }
         CoreData::None => MapKey::None,
         _ => panic!("Invalid map key: {:?}", value),
     }
@@ -266,10 +259,6 @@ mod tests {
         Value::new(CoreData::None)
     }
 
-    fn fail_val(inner: Value) -> Value {
-        Value::new(CoreData::Fail(Box::new(inner)))
-    }
-
     #[test]
     fn test_simple_map_operations() {
         let mut map = Map::default();
@@ -350,10 +339,6 @@ mod tests {
         );
         map.inner
             .insert(value_to_map_key(&none_val()), string_val("none"));
-        map.inner.insert(
-            value_to_map_key(&fail_val(string_val("error"))),
-            string_val("fail"),
-        );
 
         // Operator types
         let logical_op = create_logical_operator("filter", vec![int_val(1)], vec![]);
@@ -377,14 +362,10 @@ mod tests {
             &string_val("struct"),
         );
         assert_values_equal(&map.get(&none_val()), &string_val("none"));
-        assert_values_equal(
-            &map.get(&fail_val(string_val("error"))),
-            &string_val("fail"),
-        );
         assert_values_equal(&map.get(&logical_op), &string_val("logical"));
         assert_values_equal(&map.get(&physical_op), &string_val("physical"));
 
-        assert_eq!(map.inner.len(), 10);
+        assert_eq!(map.inner.len(), 9);
     }
 
     #[test]
@@ -425,7 +406,6 @@ mod tests {
             tuple_val(vec![int_val(1), bool_val(false)]),
             struct_val("Test", vec![string_val("field"), int_val(123)]),
             none_val(),
-            fail_val(int_val(404)),
         ];
 
         for value in values {
@@ -457,7 +437,7 @@ mod tests {
                         ],
                     ),
                 ]),
-                fail_val(none_val()),
+                none_val(),
             ],
         );
 

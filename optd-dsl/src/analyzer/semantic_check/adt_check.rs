@@ -178,6 +178,8 @@ fn check_type(
 
         Starred(_) => Err(AnalyzerErrorKind::new_invalid_type(span)),
 
+        Unknown => Err(AnalyzerErrorKind::new_invalid_type(span)),
+
         _ => Ok(()), // Primitive types don't contain logical or physical.
     }
 }

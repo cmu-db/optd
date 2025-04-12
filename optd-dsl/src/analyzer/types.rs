@@ -1,5 +1,5 @@
 use super::{error::AnalyzerErrorKind, hir::Identifier};
-use crate::parser::ast::{Adt, Field};
+use crate::parser::ast::{Adt, Field, Type as AstType};
 use crate::utils::span::Span;
 use Adt::*;
 use std::collections::BTreeMap;
@@ -9,6 +9,8 @@ use std::{
 };
 
 // Core type constants.
+// These are expressed as strings, not a Type enum, because they are
+// regular ADTs in the language.
 pub const LOGICAL_TYPE: &str = "Logical";
 pub const PHYSICAL_TYPE: &str = "Physical";
 pub const LOGICAL_PROPS: &str = "LogicalProperties";
@@ -49,6 +51,11 @@ pub enum Type {
     // For Logical & Physical: memo status.
     Stored(Box<Type>),
     Costed(Box<Type>),
+
+    // Native trait types
+    Concat,     // For types that can be concatenated (String, Array, Map).
+    EqHash,     // For types that support equality and hashing.
+    Arithmetic, // For types that support arithmetic operations.
 }
 
 /// Manages the type hierarchy and subtyping relationships
@@ -84,7 +91,7 @@ impl TypeRegistry {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if registration is successful, or a `AnalyzerErrorKind` if a duplicate name is found    
+    /// `Ok(())` if registration is successful, or a `AnalyzerErrorKind` if a duplicate name is found.
     pub fn register_adt(&mut self, adt: &Adt) -> Result<(), Box<AnalyzerErrorKind>> {
         match adt {
             Product { name, fields } => {
@@ -145,7 +152,7 @@ impl TypeRegistry {
         }
     }
 
-    /// Checks if a type is a subtype of another type
+    /// Checks if a type is a subtype of another type.
     ///
     /// This method determines if `child` is a subtype of `parent` according to
     /// the language's type system rules. It handles primitive types, complex types
@@ -158,7 +165,7 @@ impl TypeRegistry {
     ///
     /// # Returns
     ///
-    /// `true` if `child` is a subtype of `parent`, `false` otherwise
+    /// `true` if `child` is a subtype of `parent`, `false` otherwise.
     pub fn is_subtype(&self, child: &Type, parent: &Type) -> bool {
         use Type::*;
 
@@ -167,15 +174,15 @@ impl TypeRegistry {
         }
 
         match (child, parent) {
-            // Universe is the top type - everything is a subtype of Universe
+            // Universe is the top type - everything is a subtype of Universe.
             (_, Universe) => true,
 
-            // Nothing is the bottom type - it is a subtype of everything
+            // Nothing is the bottom type - it is a subtype of everything.
             (Nothing, _) => true,
 
             (None, Optional(_)) => true,
 
-            // Stored and Costed type handling
+            // Stored and Costed type handling.
             (Stored(child_inner), Stored(parent_inner)) => {
                 self.is_subtype(child_inner, parent_inner)
             }
@@ -195,7 +202,7 @@ impl TypeRegistry {
                 self.is_subtype(child_inner, parent_inner)
             }
 
-            // Check transitive inheritance for ADTs
+            // Check transitive inheritance for ADTs.
             (Adt(child_name), Adt(parent_name)) => {
                 if child_name == parent_name {
                     return true;
@@ -236,11 +243,49 @@ impl TypeRegistry {
             // Optional type covariance: Optional[T] <: Optional[U] if T <: U
             (Optional(child_ty), Optional(parent_ty)) => self.is_subtype(child_ty, parent_ty),
 
+            // Native trait subtyping relationships
+
+            // Concat trait implementations.
+            (String, Concat) => true,
+            (Array(_), Concat) => true,
+            (Map(_, _), Concat) => true,
+
+            // EqHash trait implementations.
+            (Int64, EqHash) => true,
+            (String, EqHash) => true,
+            (Bool, EqHash) => true,
+            (Unit, EqHash) => true,
+            (None, EqHash) => true,
+            (Tuple(types), EqHash) => types.iter().all(|t| self.is_subtype(t, &EqHash)),
+            (Adt(name), EqHash) => {
+                // Product ADTs with all fields satisfying EqHash also satisfy EqHash.
+                if let Some(fields) = self.product_fields.get(name) {
+                    fields.iter().all(|field| {
+                        let ty = self.get_product_field_type(name, &field.name);
+                        self.is_subtype(&ty, &EqHash)
+                    })
+                } else if let Some(variants) = self.subtypes.get(name) {
+                    // Sum types (enums) satisfy EqHash if all variants satisfy EqHash.
+                    variants
+                        .iter()
+                        .all(|variant| self.is_subtype(&Adt(variant.clone()), &EqHash))
+                } else {
+                    false
+                }
+            }
+
+            // Arithmetic trait implementations.
+            (Int64, Arithmetic) => true,
+            (Float64, Arithmetic) => true,
+
             _ => false,
         }
     }
 
-    /// Retrieves a field from a product ADT by name.
+    /// Retrieves the type of a field from a product ADT by name.
+    ///
+    /// This function should only be called once the registry has been validated,
+    /// or it might panic.
     ///
     /// # Arguments
     ///
@@ -249,44 +294,45 @@ impl TypeRegistry {
     ///
     /// # Returns
     ///
-    /// The field with the specified name from the given ADT.
-    ///
-    /// # Panics
-    ///
-    /// This function will panic in two cases:
-    /// 1. If the ADT name doesn't exist in the registry
-    /// 2. If the specified field name doesn't exist in the ADT
-    pub fn get_product_field(&self, adt_name: &Identifier, field_name: &Identifier) -> Field {
+    /// The type of the field.
+    pub fn get_product_field_type(&self, adt_name: &Identifier, field_name: &Identifier) -> Type {
+        use Type::*;
+
         let fields = self
             .product_fields
             .get(adt_name)
             .unwrap_or_else(|| panic!("ADT '{}' not found in type registry", adt_name));
 
-        fields
+        let field = fields
             .iter()
             .find(|field| *field.name.value == *field_name)
             .cloned()
-            .unwrap_or_else(|| panic!("Field '{}' not found in ADT '{}'", field_name, adt_name))
-    }
+            .unwrap_or_else(|| panic!("Field '{}' not found in ADT '{}'", field_name, adt_name));
 
-    /// Returns the number of fields in a product ADT.
-    ///
-    /// # Arguments
-    ///
-    /// * `adt_name` - The identifier of the ADT
-    ///
-    /// # Returns
-    ///
-    /// The number of fields in the specified ADT.
-    ///
-    /// # Panics
-    ///
-    /// This function will panic if the ADT name doesn't exist in the registry.
-    pub fn get_field_count(&self, adt_name: &Identifier) -> usize {
-        self.product_fields
-            .get(adt_name)
-            .unwrap_or_else(|| panic!("ADT '{}' not found in type registry", adt_name))
-            .len()
+        fn convert(ty: AstType) -> Type {
+            match ty {
+                AstType::Identifier(name) => Adt(name),
+                AstType::Int64 => Int64,
+                AstType::String => Type::String,
+                AstType::Bool => Type::Bool,
+                AstType::Unit => Type::Unit,
+                AstType::Float64 => Type::Float64,
+                AstType::Array(inner) => convert(*inner.value),
+                AstType::Closure(params, ret) => {
+                    Closure(convert(*params.value).into(), convert(*ret.value).into())
+                }
+                AstType::Tuple(inner) => {
+                    let inner_types = inner.iter().map(|ty| convert(*ty.value.clone())).collect();
+                    Tuple(inner_types)
+                }
+                AstType::Map(key, val) => {
+                    Map(convert(*key.value).into(), convert(*val.value).into())
+                }
+                _ => panic!("Registry has not been properly valided"),
+            }
+        }
+
+        convert(*field.ty.value)
     }
 }
 
@@ -294,7 +340,7 @@ impl TypeRegistry {
 mod type_registry_tests {
     use super::*;
     use crate::{
-        parser::ast::{self, Field},
+        parser::ast::Field,
         utils::span::{Span, Spanned},
     };
 
@@ -306,7 +352,7 @@ mod type_registry_tests {
         Spanned::new(value, create_test_span())
     }
 
-    fn create_product_adt(name: &str, fields: Vec<(&str, ast::Type)>) -> Adt {
+    fn create_product_adt(name: &str, fields: Vec<(&str, AstType)>) -> Adt {
         let spanned_fields: Vec<Spanned<Field>> = fields
             .into_iter()
             .map(|(field_name, field_type)| {
@@ -598,17 +644,17 @@ mod type_registry_tests {
         let mut registry = TypeRegistry::default();
 
         // Create a simple Shape hierarchy
-        let shape = create_product_adt("Shape", vec![("area", ast::Type::Float64)]);
+        let shape = create_product_adt("Shape", vec![("area", AstType::Float64)]);
         let circle = create_product_adt(
             "Circle",
-            vec![("radius", ast::Type::Float64), ("area", ast::Type::Float64)],
+            vec![("radius", AstType::Float64), ("area", AstType::Float64)],
         );
         let rectangle = create_product_adt(
             "Rectangle",
             vec![
-                ("width", ast::Type::Float64),
-                ("height", ast::Type::Float64),
-                ("area", ast::Type::Float64),
+                ("width", AstType::Float64),
+                ("height", AstType::Float64),
+                ("area", AstType::Float64),
             ],
         );
 
@@ -749,27 +795,27 @@ mod type_registry_tests {
         let mut registry = TypeRegistry::default();
 
         // Create a complex type hierarchy for vehicles
-        let vehicle = create_product_adt("Vehicle", vec![("wheels", ast::Type::Int64)]);
+        let vehicle = create_product_adt("Vehicle", vec![("wheels", AstType::Int64)]);
 
         let car = create_product_adt(
             "Car",
-            vec![("wheels", ast::Type::Int64), ("doors", ast::Type::Int64)],
+            vec![("wheels", AstType::Int64), ("doors", AstType::Int64)],
         );
 
         let sports_car = create_product_adt(
             "SportsCar",
             vec![
-                ("wheels", ast::Type::Int64),
-                ("doors", ast::Type::Int64),
-                ("top_speed", ast::Type::Float64),
+                ("wheels", AstType::Int64),
+                ("doors", AstType::Int64),
+                ("top_speed", AstType::Float64),
             ],
         );
 
         let truck = create_product_adt(
             "Truck",
             vec![
-                ("wheels", ast::Type::Int64),
-                ("load_capacity", ast::Type::Float64),
+                ("wheels", AstType::Int64),
+                ("load_capacity", AstType::Float64),
             ],
         );
 
@@ -829,66 +875,5 @@ mod type_registry_tests {
             &Type::Adt("Truck".to_string()),
             &Type::Adt("Cars".to_string())
         ));
-    }
-
-    #[test]
-    fn test_get_product_field_and_field_count() {
-        let mut registry = TypeRegistry::default();
-
-        // Create an ADT with multiple fields
-        let person = create_product_adt(
-            "Person",
-            vec![
-                ("name", ast::Type::String),
-                ("age", ast::Type::Int64),
-                ("active", ast::Type::Bool),
-            ],
-        );
-
-        // Register the ADT
-        registry.register_adt(&person).unwrap();
-
-        // Test get_field_count
-        assert_eq!(registry.get_field_count(&"Person".to_string()), 3);
-
-        // Test get_product_field
-        let name_field = registry.get_product_field(&"Person".to_string(), &"name".to_string());
-        assert_eq!(*name_field.name.value, "name");
-        match &*name_field.ty.value {
-            ast::Type::String => {} // Expected
-            _ => panic!("Expected String type for name field"),
-        }
-
-        let age_field = registry.get_product_field(&"Person".to_string(), &"age".to_string());
-        assert_eq!(*age_field.name.value, "age");
-        match &*age_field.ty.value {
-            ast::Type::Int64 => {} // Expected
-            _ => panic!("Expected Int64 type for age field"),
-        }
-
-        let active_field = registry.get_product_field(&"Person".to_string(), &"active".to_string());
-        assert_eq!(*active_field.name.value, "active");
-        match &*active_field.ty.value {
-            ast::Type::Bool => {} // Expected
-            _ => panic!("Expected Bool type for active field"),
-        }
-
-        // Test panic behavior with non-existent ADT
-        let result = std::panic::catch_unwind(|| {
-            registry.get_field_count(&"NonExistentADT".to_string());
-        });
-        assert!(
-            result.is_err(),
-            "Expected panic for non-existent ADT in get_field_count"
-        );
-
-        // Test panic behavior with non-existent field
-        let result = std::panic::catch_unwind(|| {
-            registry.get_product_field(&"Person".to_string(), &"nonexistent".to_string());
-        });
-        assert!(
-            result.is_err(),
-            "Expected panic for non-existent field in get_product_field"
-        );
     }
 }
