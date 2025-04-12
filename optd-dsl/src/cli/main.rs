@@ -27,13 +27,11 @@
 //! cargo run -- compile examples/example.opt --print-ast --print-typedspan-hir
 //! ```
 use clap::{Parser, Subcommand};
-use compile::{CompileOptions, adt_check, ast_to_hir, parse, scope_check};
+use optd_dsl::compile::{CompileOptions, adt_check, ast_to_hir, parse, scope_check};
 use optd_dsl::utils::error::{CompileError, Diagnose};
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
-
-mod compile;
 
 #[derive(Parser)]
 #[command(
