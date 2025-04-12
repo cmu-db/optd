@@ -260,7 +260,7 @@ impl TypeRegistry {
         let fields = self
             .product_fields
             .get(adt_name)
-            .expect(&format!("ADT '{}' not found in type registry", adt_name));
+            .unwrap_or_else(|| panic!("ADT '{}' not found in type registry", adt_name));
 
         fields
             .iter()
@@ -285,7 +285,7 @@ impl TypeRegistry {
     pub fn get_field_count(&self, adt_name: &Identifier) -> usize {
         self.product_fields
             .get(adt_name)
-            .expect(&format!("ADT '{}' not found in type registry", adt_name))
+            .unwrap_or_else(|| panic!("ADT '{}' not found in type registry", adt_name))
             .len()
     }
 }
