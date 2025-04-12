@@ -455,7 +455,7 @@ mod adt_validation_tests {
     fn test_optional_recursive_type() {
         // Test a recursive type that uses Optional to break the recursion:
         // type LinkedList(value: Int64, next: LinkedList?)
-        // This should be valid because Optional (?) breaks the recursion
+        // This should be valid because Optional (?) breaks the recursion.
         let (mut subtypes, mut product_fields) = create_core_registry();
 
         subtypes.insert("LinkedList".to_string(), HashSet::new());
@@ -477,7 +477,6 @@ mod adt_validation_tests {
         let registry = setup_test_registry(subtypes, product_fields);
         let result = adt_check(&registry, "test.opt");
 
-        // Should pass because the Optional type breaks the recursion
         assert!(result.is_ok());
     }
 
