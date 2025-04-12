@@ -9,7 +9,9 @@ use crate::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Identifier, Literal, TypedSpan, UnaryOp, Value,
 };
 use crate::analyzer::types::Type;
-use crate::parser::ast::{self, BinOp as AstBinOp, Expr as AstExpr};
+use crate::parser::ast::{
+    self, BinOp as AstBinOp, Expr as AstExpr, Literal as AstLiteral, PostfixOp,
+};
 use crate::utils::span::{Span, Spanned};
 use ExprKind::*;
 use std::collections::HashSet;
@@ -50,7 +52,10 @@ impl ASTConverter {
             AstExpr::Array(elements) => self.convert_array(elements, generics)?,
             AstExpr::Tuple(elements) => self.convert_tuple(elements, generics)?,
             AstExpr::Map(entries) => self.convert_map(entries, generics)?,
-            AstExpr::Constructor(name, args) => self.convert_constructor(name, args, generics)?,
+            AstExpr::Constructor(name, args) => {
+                ty = Type::Adt(*name.value.clone());
+                self.convert_constructor(name, args, &span, generics)?
+            }
             AstExpr::Closure(params, body) => {
                 // We extract the potential type annotations.
                 let params = params
@@ -61,30 +66,42 @@ impl ASTConverter {
                             self.convert_type(&field.ty, generics)?,
                         ))
                     })
-                    .collect::<Result<Vec<_>, Box<AnalyzerErrorKind>>>()?;
+                    .collect::<Result<Vec<_>, Box<_>>>()?;
 
                 ty = Self::create_function_type(&params, &Type::Unknown);
                 self.convert_closure(&params, body, generics)?
             }
             AstExpr::Postfix(expr, op) => self.convert_postfix(expr, op, generics)?,
-            AstExpr::Fail(error_expr) => self.convert_fail(error_expr, generics)?,
-            AstExpr::None => CoreVal(Value::new_unknown(CoreData::None, span.clone())),
+            AstExpr::Fail(error_expr) => {
+                ty = Type::Never;
+                self.convert_fail(error_expr, generics)?
+            }
+            AstExpr::None => {
+                ty = Type::None;
+                CoreVal(Value::new_unknown(CoreData::None, span.clone()))
+            }
             AstExpr::Block(block) => self.convert_block(block, generics)?,
         };
 
         Ok(Expr::new_with(kind, ty, span))
     }
 
-    fn convert_literal(&self, literal: &ast::Literal, span: &Span) -> ExprKind<TypedSpan> {
-        let hir_lit = match literal {
-            ast::Literal::Int64(val) => Literal::Int64(*val),
-            ast::Literal::String(val) => Literal::String(val.clone()),
-            ast::Literal::Bool(val) => Literal::Bool(*val),
-            ast::Literal::Float64(val) => Literal::Float64(val.0),
-            ast::Literal::Unit => Literal::Unit,
+    fn convert_literal(&self, literal: &AstLiteral, span: &Span) -> ExprKind<TypedSpan> {
+        use Literal::*;
+
+        let (hir_lit, hir_ty) = match literal {
+            AstLiteral::Int64(val) => (Int64(*val), Type::Int64),
+            AstLiteral::String(val) => (String(val.clone()), Type::String),
+            AstLiteral::Bool(val) => (Bool(*val), Type::Bool),
+            AstLiteral::Float64(val) => (Float64(val.0), Type::Float64),
+            AstLiteral::Unit => (Unit, Type::Unit),
         };
 
-        CoreVal(Value::new_unknown(CoreData::Literal(hir_lit), span.clone()))
+        CoreVal(Value::new_with(
+            CoreData::Literal(hir_lit),
+            hir_ty,
+            span.clone(),
+        ))
     }
 
     fn convert_ref(&self, ident: &Identifier) -> ExprKind<TypedSpan> {
@@ -286,22 +303,47 @@ impl ASTConverter {
         Ok(Map(hir_entries))
     }
 
+    pub(super) fn validate_constructor(
+        &self,
+        name: &Spanned<Identifier>,
+        span: &Span,
+        actual_size: usize,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
+        // Lookup the product fields and validate they exist.
+        let product_fields = match self.type_registry.product_fields.get(&*name.value) {
+            Some(fields) => fields,
+            None => {
+                return Err(AnalyzerErrorKind::new_unconstructible_type(
+                    &name.value,
+                    &name.span,
+                ));
+            }
+        };
+
+        // Check if the number of arguments matches the expected field count.
+        let expected_size = product_fields.len();
+        if expected_size != actual_size {
+            return Err(AnalyzerErrorKind::new_field_number_mismatch(
+                &name.value,
+                span,
+                expected_size,
+                actual_size,
+            ));
+        }
+
+        Ok(())
+    }
+
     fn convert_constructor(
         &self,
         name: &Spanned<Identifier>,
         args: &[Spanned<AstExpr>],
+        span: &Span,
         generics: &HashSet<Identifier>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
+        self.validate_constructor(name, span, args.len())?;
+
         let hir_args = self.convert_expr_list(args, generics)?;
-
-        // Check if the corresponding type exists.
-        if !self.type_registry.subtypes.contains_key(&*name.value) {
-            return Err(AnalyzerErrorKind::new_undefined_type(
-                &name.value,
-                &name.span,
-            ));
-        }
-
         Ok(CoreExpr(CoreData::Struct(*name.value.clone(), hir_args)))
     }
 
@@ -323,23 +365,23 @@ impl ASTConverter {
     fn convert_postfix(
         &self,
         expr: &Spanned<AstExpr>,
-        op: &ast::PostfixOp,
+        op: &PostfixOp,
         generics: &HashSet<Identifier>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
         let hir_expr = self.convert_expr(expr, generics)?;
 
         match op {
-            ast::PostfixOp::Call(args) => {
+            PostfixOp::Call(args) => {
                 let hir_args = self.convert_expr_list(args, generics)?;
                 Ok(Call(hir_expr.into(), hir_args))
             }
-            ast::PostfixOp::Field(field_name) => {
+            PostfixOp::Field(field_name) => {
                 // Wait until after type inference to transform this
                 // into a `Call` operation.
                 Ok(FieldAccess(hir_expr.into(), (*field_name.value).clone()))
             }
             // Desugar method call (obj.method(args)) into function call (method(obj, args)).
-            ast::PostfixOp::Method(method_name, args) => {
+            PostfixOp::Method(method_name, args) => {
                 let all_args = std::iter::once(hir_expr.into())
                     .chain(self.convert_expr_list(args, generics)?)
                     .collect();
@@ -379,7 +421,7 @@ impl ASTConverter {
 mod expr_tests {
     use super::*;
     use crate::analyzer::hir::{BinOp, ExprKind, Literal, PatternKind, UnaryOp};
-    use crate::parser::ast;
+    use crate::parser::ast::{self, Field};
     use crate::utils::span::{Span, Spanned};
     use std::collections::HashSet;
 
@@ -392,19 +434,12 @@ mod expr_tests {
         Spanned::new(value, create_test_span())
     }
 
-    fn create_test_adt(name: &str) -> ast::Adt {
-        ast::Adt::Product {
-            name: spanned(name.to_string()),
-            fields: vec![],
-        }
-    }
-
     #[test]
     fn test_convert_literal() {
         let converter = ASTConverter::default();
 
         // Test integer literal
-        let int_lit = spanned(AstExpr::Literal(ast::Literal::Int64(42)));
+        let int_lit = spanned(AstExpr::Literal(AstLiteral::Int64(42)));
         let result = converter
             .convert_expr(&int_lit, &HashSet::new())
             .expect("Integer literal conversion should succeed");
@@ -418,7 +453,7 @@ mod expr_tests {
         }
 
         // Test string literal
-        let str_lit = spanned(AstExpr::Literal(ast::Literal::String("hello".to_string())));
+        let str_lit = spanned(AstExpr::Literal(AstLiteral::String("hello".to_string())));
         let result = converter
             .convert_expr(&str_lit, &HashSet::new())
             .expect("String literal conversion should succeed");
@@ -432,7 +467,7 @@ mod expr_tests {
         }
 
         // Test boolean literal
-        let bool_lit = spanned(AstExpr::Literal(ast::Literal::Bool(true)));
+        let bool_lit = spanned(AstExpr::Literal(AstLiteral::Bool(true)));
         let result = converter
             .convert_expr(&bool_lit, &HashSet::new())
             .expect("Boolean literal conversion should succeed");
@@ -447,7 +482,7 @@ mod expr_tests {
 
         // Test float literal
         let float_val = std::f64::consts::PI;
-        let float_lit = spanned(ast::Expr::Literal(ast::Literal::Float64(
+        let float_lit = spanned(ast::Expr::Literal(AstLiteral::Float64(
             ordered_float::OrderedFloat(float_val),
         )));
         let result = converter
@@ -463,7 +498,7 @@ mod expr_tests {
         }
 
         // Test unit literal
-        let unit_lit = spanned(AstExpr::Literal(ast::Literal::Unit));
+        let unit_lit = spanned(AstExpr::Literal(AstLiteral::Unit));
         let result = converter
             .convert_expr(&unit_lit, &HashSet::new())
             .expect("Unit literal conversion should succeed");
@@ -498,8 +533,8 @@ mod expr_tests {
 
         // Helper to create binary operator tests
         let test_binary_op = |op: AstBinOp, expected_op: BinOp| {
-            let left = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
-            let right = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+            let left = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
+            let right = spanned(AstExpr::Literal(AstLiteral::Int64(2)));
             let bin_expr = spanned(AstExpr::Binary(left, op, right));
 
             let result = converter
@@ -530,8 +565,8 @@ mod expr_tests {
         let converter = ASTConverter::default();
 
         // Test != (not equal) desugaring to !(left == right)
-        let left = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
-        let right = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+        let left = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
+        let right = spanned(AstExpr::Literal(AstLiteral::Int64(2)));
         let neq_expr = spanned(AstExpr::Binary(left, AstBinOp::Neq, right));
 
         let result = converter
@@ -544,8 +579,8 @@ mod expr_tests {
         }
 
         // Test > (greater than) desugaring to right < left (swapped operands)
-        let left = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
-        let right = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+        let left = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
+        let right = spanned(AstExpr::Literal(AstLiteral::Int64(2)));
         let gt_expr = spanned(AstExpr::Binary(left, AstBinOp::Gt, right));
 
         let result = converter
@@ -569,8 +604,8 @@ mod expr_tests {
         }
 
         // Test >= (greater than or equal) desugaring to !(left < right)
-        let left = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
-        let right = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+        let left = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
+        let right = spanned(AstExpr::Literal(AstLiteral::Int64(2)));
         let ge_expr = spanned(AstExpr::Binary(left, AstBinOp::Ge, right));
 
         let result = converter
@@ -583,8 +618,8 @@ mod expr_tests {
         }
 
         // Test <= (less than or equal) desugaring to left < right || left == right
-        let left = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
-        let right = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+        let left = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
+        let right = spanned(AstExpr::Literal(AstLiteral::Int64(2)));
         let le_expr = spanned(AstExpr::Binary(left, AstBinOp::Le, right));
 
         let result = converter
@@ -602,7 +637,7 @@ mod expr_tests {
         let converter = ASTConverter::default();
 
         // Test negation
-        let operand = spanned(AstExpr::Literal(ast::Literal::Int64(42)));
+        let operand = spanned(AstExpr::Literal(AstLiteral::Int64(42)));
         let neg_expr = spanned(AstExpr::Unary(ast::UnaryOp::Neg, operand));
 
         let result = converter
@@ -615,7 +650,7 @@ mod expr_tests {
         }
 
         // Test logical not
-        let operand = spanned(AstExpr::Literal(ast::Literal::Bool(true)));
+        let operand = spanned(AstExpr::Literal(AstLiteral::Bool(true)));
         let not_expr = spanned(AstExpr::Unary(ast::UnaryOp::Not, operand));
 
         let result = converter
@@ -638,7 +673,7 @@ mod expr_tests {
             ty: spanned(ast::Type::Int64),
         });
 
-        let init = spanned(AstExpr::Literal(ast::Literal::Int64(42)));
+        let init = spanned(AstExpr::Literal(AstLiteral::Int64(42)));
         let body = spanned(AstExpr::Ref(var_name.clone()));
 
         let let_expr = spanned(AstExpr::Let(field, init, body));
@@ -656,9 +691,9 @@ mod expr_tests {
     fn test_convert_if_then_else() {
         let converter = ASTConverter::default();
 
-        let condition = spanned(AstExpr::Literal(ast::Literal::Bool(true)));
-        let then_branch = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
-        let else_branch = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+        let condition = spanned(AstExpr::Literal(AstLiteral::Bool(true)));
+        let then_branch = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
+        let else_branch = spanned(AstExpr::Literal(AstLiteral::Int64(2)));
 
         let if_expr = spanned(AstExpr::IfThenElse(condition, then_branch, else_branch));
         let result = converter
@@ -675,9 +710,9 @@ mod expr_tests {
     fn test_convert_array() {
         let converter = ASTConverter::default();
 
-        let elem1 = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
-        let elem2 = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
-        let elem3 = spanned(AstExpr::Literal(ast::Literal::Int64(3)));
+        let elem1 = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
+        let elem2 = spanned(AstExpr::Literal(AstLiteral::Int64(2)));
+        let elem3 = spanned(AstExpr::Literal(AstLiteral::Int64(3)));
 
         let array_expr = spanned(AstExpr::Array(vec![elem1, elem2, elem3]));
         let result = converter
@@ -696,9 +731,9 @@ mod expr_tests {
     fn test_convert_tuple() {
         let converter = ASTConverter::default();
 
-        let elem1 = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
-        let elem2 = spanned(AstExpr::Literal(ast::Literal::Bool(true)));
-        let elem3 = spanned(AstExpr::Literal(ast::Literal::String("test".to_string())));
+        let elem1 = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
+        let elem2 = spanned(AstExpr::Literal(AstLiteral::Bool(true)));
+        let elem3 = spanned(AstExpr::Literal(AstLiteral::String("test".to_string())));
 
         let tuple_expr = spanned(AstExpr::Tuple(vec![elem1, elem2, elem3]));
         let result = converter
@@ -717,11 +752,11 @@ mod expr_tests {
     fn test_convert_map() {
         let converter = ASTConverter::default();
 
-        let key1 = spanned(AstExpr::Literal(ast::Literal::String("key1".to_string())));
-        let val1 = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
+        let key1 = spanned(AstExpr::Literal(AstLiteral::String("key1".to_string())));
+        let val1 = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
 
-        let key2 = spanned(AstExpr::Literal(ast::Literal::String("key2".to_string())));
-        let val2 = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+        let key2 = spanned(AstExpr::Literal(AstLiteral::String("key2".to_string())));
+        let val2 = spanned(AstExpr::Literal(AstLiteral::Int64(2)));
 
         let map_expr = spanned(AstExpr::Map(vec![(key1, val1), (key2, val2)]));
         let result = converter
@@ -740,15 +775,28 @@ mod expr_tests {
     fn test_convert_constructor() {
         let mut converter = ASTConverter::default();
 
-        // Register "Point" type in the registry
-        let point_adt = create_test_adt("Point");
+        // Register "Point" type in the registry with 2 fields
+        let point_adt = ast::Adt::Product {
+            name: spanned("Point".to_string()),
+            fields: vec![
+                spanned(Field {
+                    name: spanned("x".to_string()),
+                    ty: spanned(ast::Type::Int64),
+                }),
+                spanned(Field {
+                    name: spanned("y".to_string()),
+                    ty: spanned(ast::Type::String),
+                }),
+            ],
+        };
+
         converter
             .type_registry
             .register_adt(&point_adt)
             .expect("Failed to register Point type");
 
-        let arg1 = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
-        let arg2 = spanned(AstExpr::Literal(ast::Literal::String("test".to_string())));
+        let arg1 = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
+        let arg2 = spanned(AstExpr::Literal(AstLiteral::String("test".to_string())));
 
         let constructor_expr = spanned(AstExpr::Constructor(
             spanned("Point".to_string()),
@@ -784,19 +832,33 @@ mod expr_tests {
         let mut converter = ASTConverter::default();
 
         // Register multiple types for testing nested constructors
-        let types = ["Container", "Item", "Property"];
-        for ty in &types {
-            let adt = create_test_adt(ty);
+        let types = [("Container", 1), ("Item", 1), ("Property", 1)];
+
+        for (name, field_count) in &types {
+            let fields = (0..*field_count)
+                .map(|i| {
+                    spanned(Field {
+                        name: spanned(format!("field{}", i)),
+                        ty: spanned(ast::Type::Int64),
+                    })
+                })
+                .collect();
+
+            let adt = ast::Adt::Product {
+                name: spanned(name.to_string()),
+                fields,
+            };
+
             converter
                 .type_registry
                 .register_adt(&adt)
-                .unwrap_or_else(|_| panic!("Failed to register {} type", ty));
+                .unwrap_or_else(|_| panic!("Failed to register {} type", name));
         }
 
         // Create nested constructor expressions
         let property = spanned(AstExpr::Constructor(
             spanned("Property".to_string()),
-            vec![spanned(AstExpr::Literal(ast::Literal::String(
+            vec![spanned(AstExpr::Literal(AstLiteral::String(
                 "color".to_string(),
             )))],
         ));
@@ -821,7 +883,7 @@ mod expr_tests {
         // Test with one invalid type in the nested structure
         let invalid_property = spanned(AstExpr::Constructor(
             spanned("InvalidType".to_string()),
-            vec![spanned(AstExpr::Literal(ast::Literal::String(
+            vec![spanned(AstExpr::Literal(AstLiteral::String(
                 "color".to_string(),
             )))],
         ));
@@ -848,20 +910,34 @@ mod expr_tests {
     fn test_constructor_in_complex_expressions() {
         let mut converter = ASTConverter::default();
 
-        // Register necessary types
-        let types = ["User", "Address", "Order"];
-        for ty in &types {
-            let adt = create_test_adt(ty);
+        // Register necessary types with appropriate field counts
+        let types = [("User", 1), ("Address", 1), ("Order", 1)];
+
+        for (name, field_count) in &types {
+            let fields = (0..*field_count)
+                .map(|i| {
+                    spanned(Field {
+                        name: spanned(format!("field{}", i)),
+                        ty: spanned(ast::Type::Int64),
+                    })
+                })
+                .collect();
+
+            let adt = ast::Adt::Product {
+                name: spanned(name.to_string()),
+                fields,
+            };
+
             converter
                 .type_registry
                 .register_adt(&adt)
-                .unwrap_or_else(|_| panic!("Failed to register {} type", ty));
+                .unwrap_or_else(|_| panic!("Failed to register {} type", name));
         }
 
         // Create a constructor inside a let expression
         let address_constructor = spanned(AstExpr::Constructor(
             spanned("Address".to_string()),
-            vec![spanned(AstExpr::Literal(ast::Literal::String(
+            vec![spanned(AstExpr::Literal(AstLiteral::String(
                 "123 Main St".to_string(),
             )))],
         ));
@@ -885,7 +961,7 @@ mod expr_tests {
         // Test with invalid type in constructor inside let
         let invalid_constructor = spanned(AstExpr::Constructor(
             spanned("InvalidType".to_string()),
-            vec![spanned(AstExpr::Literal(ast::Literal::String(
+            vec![spanned(AstExpr::Literal(AstLiteral::String(
                 "123 Main St".to_string(),
             )))],
         ));
@@ -902,6 +978,71 @@ mod expr_tests {
         assert!(
             result.is_err(),
             "Let with invalid constructor type should fail"
+        );
+    }
+
+    #[test]
+    fn test_constructor_field_count_validation() {
+        let mut converter = ASTConverter::default();
+
+        // Register a Point type with 2 fields
+        let point_adt = ast::Adt::Product {
+            name: spanned("Point".to_string()),
+            fields: vec![
+                spanned(Field {
+                    name: spanned("x".to_string()),
+                    ty: spanned(ast::Type::Int64),
+                }),
+                spanned(Field {
+                    name: spanned("y".to_string()),
+                    ty: spanned(ast::Type::Int64),
+                }),
+            ],
+        };
+
+        converter
+            .type_registry
+            .register_adt(&point_adt)
+            .expect("Failed to register Point type");
+
+        // Test with correct number of arguments (2)
+        let arg1 = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
+        let arg2 = spanned(AstExpr::Literal(AstLiteral::Int64(2)));
+
+        let correct_constructor = spanned(AstExpr::Constructor(
+            spanned("Point".to_string()),
+            vec![arg1.clone(), arg2.clone()],
+        ));
+
+        let result = converter.convert_expr(&correct_constructor, &HashSet::new());
+        assert!(
+            result.is_ok(),
+            "Constructor with correct field count should succeed"
+        );
+
+        // Test with too few arguments (1 instead of 2)
+        let too_few_args = spanned(AstExpr::Constructor(
+            spanned("Point".to_string()),
+            vec![arg1.clone()],
+        ));
+
+        let result = converter.convert_expr(&too_few_args, &HashSet::new());
+        assert!(
+            result.is_err(),
+            "Constructor with too few arguments should fail"
+        );
+
+        // Test with too many arguments (3 instead of 2)
+        let arg3 = spanned(AstExpr::Literal(AstLiteral::Int64(3)));
+        let too_many_args = spanned(AstExpr::Constructor(
+            spanned("Point".to_string()),
+            vec![arg1, arg2, arg3],
+        ));
+
+        let result = converter.convert_expr(&too_many_args, &HashSet::new());
+        assert!(
+            result.is_err(),
+            "Constructor with too many arguments should fail"
         );
     }
 
@@ -934,8 +1075,8 @@ mod expr_tests {
         let converter = ASTConverter::default();
 
         let func = spanned(AstExpr::Ref("add".to_string()));
-        let arg1 = spanned(AstExpr::Literal(ast::Literal::Int64(1)));
-        let arg2 = spanned(AstExpr::Literal(ast::Literal::Int64(2)));
+        let arg1 = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
+        let arg2 = spanned(AstExpr::Literal(AstLiteral::Int64(2)));
 
         let call_expr = spanned(AstExpr::Postfix(
             func,
@@ -984,7 +1125,7 @@ mod expr_tests {
 
         let obj = spanned(AstExpr::Ref("list".to_string()));
         let method_name = spanned("add".to_string());
-        let arg = spanned(AstExpr::Literal(ast::Literal::Int64(42)));
+        let arg = spanned(AstExpr::Literal(AstLiteral::Int64(42)));
 
         let method_call_expr = spanned(AstExpr::Postfix(
             obj,
@@ -1020,7 +1161,7 @@ mod expr_tests {
     fn test_convert_fail() {
         let converter = ASTConverter::default();
 
-        let error_expr = spanned(AstExpr::Literal(ast::Literal::String("error".to_string())));
+        let error_expr = spanned(AstExpr::Literal(AstLiteral::String("error".to_string())));
         let fail_expr = spanned(AstExpr::Fail(error_expr));
         let result = converter
             .convert_expr(&fail_expr, &HashSet::new())
@@ -1043,7 +1184,19 @@ mod expr_tests {
         let mut converter = ASTConverter::default();
 
         // Register a type for constructor patterns
-        let point_adt = create_test_adt("Point");
+        let point_adt = ast::Adt::Product {
+            name: spanned("Point".to_string()),
+            fields: vec![
+                spanned(Field {
+                    name: spanned("x".to_string()),
+                    ty: spanned(ast::Type::Int64),
+                }),
+                spanned(Field {
+                    name: spanned("y".to_string()),
+                    ty: spanned(ast::Type::Int64),
+                }),
+            ],
+        };
         converter
             .type_registry
             .register_adt(&point_adt)
@@ -1053,8 +1206,8 @@ mod expr_tests {
         let scrutinee = spanned(AstExpr::Ref("value".to_string()));
 
         // Pattern 1: literal pattern
-        let pattern1 = spanned(ast::Pattern::Literal(ast::Literal::Int64(0)));
-        let expr1 = spanned(AstExpr::Literal(ast::Literal::String("zero".to_string())));
+        let pattern1 = spanned(ast::Pattern::Literal(AstLiteral::Int64(0)));
+        let expr1 = spanned(AstExpr::Literal(AstLiteral::String("zero".to_string())));
         let arm1 = spanned(ast::MatchArm {
             pattern: pattern1,
             expr: expr1,
@@ -1102,12 +1255,15 @@ mod expr_tests {
             _ => panic!("Expected PatternMatch expression"),
         }
 
-        // Test pattern match with constructor pattern
+        // Test pattern match with constructor pattern (with correct field count)
         let constructor_pattern = spanned(ast::Pattern::Constructor(
             spanned("Point".to_string()),
-            vec![],
+            vec![
+                spanned(ast::Pattern::Wildcard),
+                spanned(ast::Pattern::Wildcard),
+            ],
         ));
-        let expr3 = spanned(AstExpr::Literal(ast::Literal::String("point".to_string())));
+        let expr3 = spanned(AstExpr::Literal(AstLiteral::String("point".to_string())));
         let arm3 = spanned(ast::MatchArm {
             pattern: constructor_pattern,
             expr: expr3.clone(),
@@ -1123,7 +1279,10 @@ mod expr_tests {
         // Test pattern match with invalid constructor pattern
         let invalid_pattern = spanned(ast::Pattern::Constructor(
             spanned("InvalidType".to_string()),
-            vec![],
+            vec![
+                spanned(ast::Pattern::Wildcard),
+                spanned(ast::Pattern::Wildcard),
+            ],
         ));
         let invalid_arm = spanned(ast::MatchArm {
             pattern: invalid_pattern,
@@ -1143,7 +1302,7 @@ mod expr_tests {
         let converter = ASTConverter::default();
 
         // Create a simple expression inside a block
-        let inner_expr = spanned(AstExpr::Literal(ast::Literal::Int64(42)));
+        let inner_expr = spanned(AstExpr::Literal(AstLiteral::Int64(42)));
         let block_expr = spanned(AstExpr::Block(inner_expr));
 
         let result = converter
@@ -1174,10 +1333,7 @@ mod expr_tests {
         let custom_span = Span::new("test_file.txt".to_string(), 10..20);
 
         // Create a simple expression with that span
-        let expr = Spanned::new(
-            AstExpr::Literal(ast::Literal::Int64(42)),
-            custom_span.clone(),
-        );
+        let expr = Spanned::new(AstExpr::Literal(AstLiteral::Int64(42)), custom_span.clone());
 
         // Convert the expression
         let result = converter

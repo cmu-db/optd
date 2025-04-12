@@ -57,6 +57,11 @@ pub enum AnalyzerErrorKind {
         span: Span,
     },
 
+    UnconstructibleType {
+        name: String,
+        span: Span,
+    },
+
     MissingCoreType {
         name: String,
         src_path: String,
@@ -71,6 +76,13 @@ pub enum AnalyzerErrorKind {
         parent_span: Span,
         child_name: String,
         child_span: Span,
+    },
+
+    FieldNumberMismatch {
+        name: String,
+        span: Span,
+        expected: usize,
+        found: usize,
     },
 }
 
@@ -128,6 +140,14 @@ impl AnalyzerErrorKind {
         .into()
     }
 
+    pub fn new_unconstructible_type(name: &str, span: &Span) -> Box<Self> {
+        Self::UnconstructibleType {
+            name: name.to_string(),
+            span: span.clone(),
+        }
+        .into()
+    }
+
     pub fn new_missing_core_type(name: &str, src_path: &str) -> Box<Self> {
         Self::MissingCoreType {
             name: name.to_string(),
@@ -151,6 +171,21 @@ impl AnalyzerErrorKind {
             parent_span: parent_span.clone(),
             child_name: child_name.to_string(),
             child_span: child_span.clone(),
+        }
+        .into()
+    }
+
+    pub fn new_field_number_mismatch(
+        name: &str,
+        span: &Span,
+        expected: usize,
+        found: usize,
+    ) -> Box<Self> {
+        Self::FieldNumberMismatch {
+            name: name.to_string(),
+            span: span.clone(),
+            expected,
+            found,
         }
         .into()
     }
@@ -208,6 +243,12 @@ impl Diagnose for Box<AnalyzerError> {
                 "Undefined type reference",
                 "Make sure the type is declared before use",
             ),
+            UnconstructibleType { name, span } => self.build_single_span_report(
+                span,
+                &format!("Unconstructible type: '{}'", name),
+                "Type cannot be constructed, or does not exist",
+                "Only defined leaf types can be constructed",
+            ),
             MissingCoreType { name, src_path } => {
                 self.build_missing_core_type_report(name, src_path)
             }
@@ -230,6 +271,17 @@ impl Diagnose for Box<AnalyzerError> {
                 "Parent type defined here",
                 "Check the inheritance hierarchy and ensure that the parent type is valid",
             ),
+            FieldNumberMismatch {
+                name,
+                span,
+                expected,
+                found,
+            } => self.build_single_span_report(
+                span,
+                &format!("Field number mismatch in: '{}'", name),
+                &format!("Expected {} fields, but found {}", expected, found),
+                "Check the number of fields in the type definition",
+            ),
         }
     }
 
@@ -243,9 +295,11 @@ impl Diagnose for Box<AnalyzerError> {
             UndefinedReference { span, .. } => span,
             CyclicType { path } => &path[0].span,
             UndefinedType { span, .. } => span,
+            UnconstructibleType { span, .. } => span,
             MissingCoreType { src_path, .. } => &Span::new(src_path.to_string(), 0..0),
             InvalidType { span, .. } => span,
             InvalidInheritance { child_span, .. } => child_span,
+            FieldNumberMismatch { span, .. } => span,
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))
