@@ -5,8 +5,9 @@
 
 use super::ASTConverter;
 use crate::analyzer::error::AnalyzerErrorKind;
-use crate::analyzer::hir::{Identifier, Literal, MatchArm, Pattern, PatternKind, TypedSpan};
-use crate::parser::ast::{self, Literal as AstLiteral, Pattern as AstPattern};
+use crate::analyzer::hir::{Identifier, MatchArm, Pattern, PatternKind, TypedSpan};
+use crate::analyzer::types::Type;
+use crate::parser::ast::{self, Pattern as AstPattern};
 use crate::utils::span::Spanned;
 use PatternKind::*;
 use std::collections::HashSet;
@@ -43,47 +44,33 @@ impl ASTConverter {
         &self,
         spanned_pattern: &Spanned<AstPattern>,
     ) -> Result<Pattern<TypedSpan>, Box<AnalyzerErrorKind>> {
-        use Literal::*;
-
         let span = spanned_pattern.span.clone();
+        let mut ty = Type::Unknown;
 
         let kind = match &*spanned_pattern.value {
             AstPattern::Error => panic!("AST should no longer contain errors"),
-
             AstPattern::Bind(name, inner_pattern) => {
                 let hir_inner = self.convert_pattern(inner_pattern)?;
                 Bind((*name.value).clone(), hir_inner.into())
             }
-
             AstPattern::Constructor(name, args) => {
                 self.validate_constructor(name, &span, args.len())?;
 
+                ty = Type::Adt(*name.value.clone());
                 let hir_args = args
                     .iter()
                     .map(|arg| self.convert_pattern(arg))
                     .collect::<Result<Vec<_>, _>>()?;
 
-                // Wait until after type inference to transform this into
-                // an operator if needed.
                 Struct((*name.value).clone(), hir_args)
             }
-
             AstPattern::Literal(lit) => {
-                let hir_lit = match lit {
-                    AstLiteral::Int64(val) => Int64(*val),
-                    AstLiteral::String(val) => String(val.clone()),
-                    AstLiteral::Bool(val) => Bool(*val),
-                    AstLiteral::Float64(val) => Float64(val.0),
-                    AstLiteral::Unit => Unit,
-                };
-
+                let (hir_lit, hir_ty) = self.convert_literal(lit);
+                ty = hir_ty;
                 Literal(hir_lit)
             }
-
             AstPattern::Wildcard => Wildcard,
-
             AstPattern::EmptyArray => EmptyArray,
-
             AstPattern::ArrayDecomp(head, tail) => {
                 let hir_head = self.convert_pattern(head)?;
                 let hir_tail = self.convert_pattern(tail)?;
@@ -92,7 +79,7 @@ impl ASTConverter {
             }
         };
 
-        Ok(Pattern::new_unknown(kind, span))
+        Ok(Pattern::new_with(kind, ty, span))
     }
 }
 

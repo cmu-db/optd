@@ -32,7 +32,15 @@ impl ASTConverter {
 
         let kind = match &*spanned_expr.value {
             AstExpr::Error => panic!("AST should no longer contain errors"),
-            AstExpr::Literal(lit) => self.convert_literal(lit, &span),
+            AstExpr::Literal(lit) => {
+                let (hir_lit, hir_ty) = self.convert_literal(lit);
+                ty = hir_ty;
+                CoreVal(Value::new_with(
+                    CoreData::Literal(hir_lit),
+                    ty.clone(),
+                    span.clone(),
+                ))
+            }
             AstExpr::Ref(ident) => self.convert_ref(ident),
             AstExpr::Binary(left, op, right) => {
                 self.convert_binary(left, op, right, &span, generics)?
@@ -60,7 +68,7 @@ impl ASTConverter {
                 // We extract the potential type annotations.
                 let params = params
                     .iter()
-                    .map(|field| -> Result<_, _> {
+                    .map(|field| {
                         Ok((
                             (*field.name).clone(),
                             self.convert_type(&field.ty, generics)?,
@@ -73,7 +81,7 @@ impl ASTConverter {
             }
             AstExpr::Postfix(expr, op) => self.convert_postfix(expr, op, generics)?,
             AstExpr::Fail(error_expr) => {
-                ty = Type::Never;
+                ty = Type::Nothing;
                 self.convert_fail(error_expr, generics)?
             }
             AstExpr::None => {
@@ -86,22 +94,18 @@ impl ASTConverter {
         Ok(Expr::new_with(kind, ty, span))
     }
 
-    fn convert_literal(&self, literal: &AstLiteral, span: &Span) -> ExprKind<TypedSpan> {
+    // Slightly different signature so that we can use it in pattern.rs,
+    // and also get the type at the same time.
+    pub(super) fn convert_literal(&self, literal: &AstLiteral) -> (Literal, Type) {
         use Literal::*;
 
-        let (hir_lit, hir_ty) = match literal {
+        match literal {
             AstLiteral::Int64(val) => (Int64(*val), Type::Int64),
             AstLiteral::String(val) => (String(val.clone()), Type::String),
             AstLiteral::Bool(val) => (Bool(*val), Type::Bool),
             AstLiteral::Float64(val) => (Float64(val.0), Type::Float64),
             AstLiteral::Unit => (Unit, Type::Unit),
-        };
-
-        CoreVal(Value::new_with(
-            CoreData::Literal(hir_lit),
-            hir_ty,
-            span.clone(),
-        ))
+        }
     }
 
     fn convert_ref(&self, ident: &Identifier) -> ExprKind<TypedSpan> {

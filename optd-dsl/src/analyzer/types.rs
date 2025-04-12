@@ -31,7 +31,7 @@ pub enum Type {
     // Special types.
     Unit,
     Universe, // All types are subtypes of Universe.
-    Never,    // Inherits all types.
+    Nothing,  // Inherits all types.
     None,     // Inherits all optionals.
     Unknown,
 
@@ -170,8 +170,8 @@ impl TypeRegistry {
             // Universe is the top type - everything is a subtype of Universe
             (_, Universe) => true,
 
-            // Never is the bottom type - it is a subtype of everything
-            (Never, _) => true,
+            // Nothing is the bottom type - it is a subtype of everything
+            (Nothing, _) => true,
 
             (None, Optional(_)) => true,
 
@@ -689,30 +689,30 @@ mod type_registry_tests {
     }
 
     #[test]
-    fn test_never_as_bottom_type() {
+    fn test_nothing_as_bottom_type() {
         let registry = TypeRegistry::default();
 
-        // Never is a subtype of all primitive types
-        assert!(registry.is_subtype(&Type::Never, &Type::Int64));
-        assert!(registry.is_subtype(&Type::Never, &Type::String));
-        assert!(registry.is_subtype(&Type::Never, &Type::Bool));
-        assert!(registry.is_subtype(&Type::Never, &Type::Float64));
-        assert!(registry.is_subtype(&Type::Never, &Type::Unit));
-        assert!(registry.is_subtype(&Type::Never, &Type::Universe));
+        // Nothing is a subtype of all primitive types
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Int64));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::String));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Bool));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Float64));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Unit));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Universe));
 
-        // Never is a subtype of complex types
-        assert!(registry.is_subtype(&Type::Never, &Type::Array(Box::new(Type::Int64))));
-        assert!(registry.is_subtype(&Type::Never, &Type::Tuple(vec![Type::Int64, Type::Bool])));
+        // Nothing is a subtype of complex types
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Array(Box::new(Type::Int64))));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Tuple(vec![Type::Int64, Type::Bool])));
         assert!(registry.is_subtype(
-            &Type::Never,
+            &Type::Nothing,
             &Type::Closure(Box::new(Type::Int64), Box::new(Type::Bool))
         ));
 
-        // But no type is a subtype of Never (except Never itself)
-        assert!(!registry.is_subtype(&Type::Int64, &Type::Never));
-        assert!(!registry.is_subtype(&Type::Bool, &Type::Never));
-        assert!(!registry.is_subtype(&Type::Universe, &Type::Never));
-        assert!(!registry.is_subtype(&Type::Array(Box::new(Type::Int64)), &Type::Never));
+        // But no type is a subtype of Nothing (except Nothing itself)
+        assert!(!registry.is_subtype(&Type::Int64, &Type::Nothing));
+        assert!(!registry.is_subtype(&Type::Bool, &Type::Nothing));
+        assert!(!registry.is_subtype(&Type::Universe, &Type::Nothing));
+        assert!(!registry.is_subtype(&Type::Array(Box::new(Type::Int64)), &Type::Nothing));
     }
 
     #[test]
@@ -739,9 +739,9 @@ mod type_registry_tests {
         // None is still a subtype of Universe (as all types are)
         assert!(registry.is_subtype(&Type::None, &Type::Universe));
 
-        // None is not equal to Never
-        assert!(!registry.is_subtype(&Type::None, &Type::Never));
-        assert!(registry.is_subtype(&Type::Never, &Type::None));
+        // None is not equal to Nothing
+        assert!(!registry.is_subtype(&Type::None, &Type::Nothing));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::None));
     }
 
     #[test]
