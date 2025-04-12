@@ -175,7 +175,7 @@ impl<'a> CycleDetector<'a> {
                 self.check_field_type_terminates(return_type, product_type)
             }
 
-            Questioned(inner_type) | Starred(inner_type) | Dollared(inner_type) => {
+            Starred(inner_type) | Dollared(inner_type) => {
                 self.check_field_type_terminates(inner_type, product_type)
             }
 
