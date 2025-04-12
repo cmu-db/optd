@@ -23,12 +23,12 @@ impl ASTConverter {
     /// This function is the main dispatcher for expression conversion, routing
     /// the conversion to specialized functions based on the expression kind.
     pub(super) fn convert_expr(
-        &self,
+        &mut self,
         spanned_expr: &Spanned<AstExpr>,
         generics: &HashSet<Identifier>,
     ) -> Result<Expr<TypedSpan>, Box<AnalyzerErrorKind>> {
         let span = spanned_expr.span.clone();
-        let mut ty = Type::Unknown;
+        let mut ty = Type::Unknown(self.next_unknown_id());
 
         let kind = match &*spanned_expr.value {
             AstExpr::Error => panic!("AST should no longer contain errors"),
@@ -76,7 +76,8 @@ impl ASTConverter {
                     })
                     .collect::<Result<Vec<_>, Box<_>>>()?;
 
-                ty = Self::create_function_type(&params, &Type::Unknown);
+                let return_ty = Type::Unknown(self.next_unknown_id());
+                ty = Self::create_function_type(&params, &return_ty);
                 self.convert_closure(&params, body, generics)?
             }
             AstExpr::Postfix(expr, op) => self.convert_postfix(expr, op, generics)?,
@@ -86,7 +87,7 @@ impl ASTConverter {
             }
             AstExpr::None => {
                 ty = Type::None;
-                CoreVal(Value::new_unknown(CoreData::None, span.clone()))
+                CoreVal(Value::new_with(CoreData::None, ty.clone(), span.clone()))
             }
             AstExpr::Block(block) => self.convert_block(block, generics)?,
         };
@@ -113,7 +114,7 @@ impl ASTConverter {
     }
 
     fn convert_binary(
-        &self,
+        &mut self,
         left: &Spanned<AstExpr>,
         op: &AstBinOp,
         right: &Spanned<AstExpr>,
@@ -157,8 +158,11 @@ impl ASTConverter {
                 let hir_left = self.convert_expr(left, generics)?;
                 let hir_right = self.convert_expr(right, generics)?;
 
-                let eq_expr =
-                    Expr::new_unknown(Binary(hir_left.into(), Eq, hir_right.into()), span.clone());
+                let eq_expr = Expr::new_unknown(
+                    Binary(hir_left.into(), Eq, hir_right.into()),
+                    span.clone(),
+                    self.next_unknown_id(),
+                );
 
                 Ok(Unary(UnaryOp::Not, eq_expr.into()))
             }
@@ -176,8 +180,11 @@ impl ASTConverter {
                 let hir_left = self.convert_expr(left, generics)?;
                 let hir_right = self.convert_expr(right, generics)?;
 
-                let lt_expr =
-                    Expr::new_unknown(Binary(hir_left.into(), Lt, hir_right.into()), span.clone());
+                let lt_expr = Expr::new_unknown(
+                    Binary(hir_left.into(), Lt, hir_right.into()),
+                    span.clone(),
+                    self.next_unknown_id(),
+                );
 
                 Ok(Unary(UnaryOp::Not, lt_expr.into()))
             }
@@ -190,8 +197,13 @@ impl ASTConverter {
                 let lt_expr = Expr::new_unknown(
                     Binary(hir_left.clone(), Lt, hir_right.clone()),
                     span.clone(),
+                    self.next_unknown_id(),
                 );
-                let eq_expr = Expr::new_unknown(Binary(hir_left, Eq, hir_right), span.clone());
+                let eq_expr = Expr::new_unknown(
+                    Binary(hir_left, Eq, hir_right),
+                    span.clone(),
+                    self.next_unknown_id(),
+                );
 
                 Ok(Binary(lt_expr.into(), Or, eq_expr.into()))
             }
@@ -199,7 +211,7 @@ impl ASTConverter {
     }
 
     fn convert_unary(
-        &self,
+        &mut self,
         op: &ast::UnaryOp,
         operand: &Spanned<AstExpr>,
         generics: &HashSet<Identifier>,
@@ -215,7 +227,7 @@ impl ASTConverter {
     }
 
     fn convert_let(
-        &self,
+        &mut self,
         field: &Spanned<ast::Field>,
         init: &Spanned<AstExpr>,
         body: &Spanned<AstExpr>,
@@ -229,7 +241,7 @@ impl ASTConverter {
     }
 
     fn convert_pattern_match(
-        &self,
+        &mut self,
         scrutinee: &Spanned<AstExpr>,
         arms: &[Spanned<ast::MatchArm>],
         generics: &HashSet<Identifier>,
@@ -241,7 +253,7 @@ impl ASTConverter {
     }
 
     fn convert_if_then_else(
-        &self,
+        &mut self,
         condition: &Spanned<AstExpr>,
         then_branch: &Spanned<AstExpr>,
         else_branch: &Spanned<AstExpr>,
@@ -259,7 +271,7 @@ impl ASTConverter {
     }
 
     fn convert_expr_list(
-        &self,
+        &mut self,
         elements: &[Spanned<AstExpr>],
         generics: &HashSet<Identifier>,
     ) -> Result<Vec<Arc<Expr<TypedSpan>>>, Box<AnalyzerErrorKind>> {
@@ -274,7 +286,7 @@ impl ASTConverter {
     }
 
     fn convert_array(
-        &self,
+        &mut self,
         elements: &[Spanned<AstExpr>],
         generics: &HashSet<Identifier>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
@@ -283,7 +295,7 @@ impl ASTConverter {
     }
 
     fn convert_tuple(
-        &self,
+        &mut self,
         elements: &[Spanned<AstExpr>],
         generics: &HashSet<Identifier>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
@@ -292,7 +304,7 @@ impl ASTConverter {
     }
 
     fn convert_map(
-        &self,
+        &mut self,
         entries: &[(Spanned<AstExpr>, Spanned<AstExpr>)],
         generics: &HashSet<Identifier>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
@@ -339,7 +351,7 @@ impl ASTConverter {
     }
 
     fn convert_constructor(
-        &self,
+        &mut self,
         name: &Spanned<Identifier>,
         args: &[Spanned<AstExpr>],
         span: &Span,
@@ -352,7 +364,7 @@ impl ASTConverter {
     }
 
     fn convert_closure(
-        &self,
+        &mut self,
         params: &[(Identifier, Type)],
         body: &Spanned<AstExpr>,
         generics: &HashSet<Identifier>,
@@ -367,7 +379,7 @@ impl ASTConverter {
     }
 
     fn convert_postfix(
-        &self,
+        &mut self,
         expr: &Spanned<AstExpr>,
         op: &PostfixOp,
         generics: &HashSet<Identifier>,
@@ -393,6 +405,7 @@ impl ASTConverter {
                 let method_fn = Arc::new(Expr::new_unknown(
                     Ref((*method_name.value).clone()),
                     method_name.span.clone(),
+                    self.next_unknown_id(),
                 ));
 
                 Ok(Call(method_fn, all_args))
@@ -401,7 +414,7 @@ impl ASTConverter {
     }
 
     fn convert_fail(
-        &self,
+        &mut self,
         error_expr: &Spanned<AstExpr>,
         generics: &HashSet<Identifier>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
@@ -411,7 +424,7 @@ impl ASTConverter {
     }
 
     fn convert_block(
-        &self,
+        &mut self,
         block: &Spanned<AstExpr>,
         generics: &HashSet<Identifier>,
     ) -> Result<ExprKind<TypedSpan>, Box<AnalyzerErrorKind>> {
@@ -440,7 +453,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_literal() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         // Test integer literal
         let int_lit = spanned(AstExpr::Literal(AstLiteral::Int64(42)));
@@ -518,7 +531,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_reference() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         let ref_expr = spanned(AstExpr::Ref("variable".to_string()));
         let result = converter
@@ -533,10 +546,10 @@ mod expr_tests {
 
     #[test]
     fn test_convert_binary_operators() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         // Helper to create binary operator tests
-        let test_binary_op = |op: AstBinOp, expected_op: BinOp| {
+        let mut test_binary_op = |op: AstBinOp, expected_op: BinOp| {
             let left = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
             let right = spanned(AstExpr::Literal(AstLiteral::Int64(2)));
             let bin_expr = spanned(AstExpr::Binary(left, op, right));
@@ -566,7 +579,7 @@ mod expr_tests {
 
     #[test]
     fn test_desugared_binary_operators() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         // Test != (not equal) desugaring to !(left == right)
         let left = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
@@ -638,7 +651,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_unary_operators() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         // Test negation
         let operand = spanned(AstExpr::Literal(AstLiteral::Int64(42)));
@@ -669,7 +682,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_let_expression() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         let var_name = "x".to_string();
         let field = spanned(ast::Field {
@@ -693,7 +706,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_if_then_else() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         let condition = spanned(AstExpr::Literal(AstLiteral::Bool(true)));
         let then_branch = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
@@ -712,7 +725,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_array() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         let elem1 = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
         let elem2 = spanned(AstExpr::Literal(AstLiteral::Int64(2)));
@@ -733,7 +746,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_tuple() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         let elem1 = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
         let elem2 = spanned(AstExpr::Literal(AstLiteral::Bool(true)));
@@ -754,7 +767,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_map() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         let key1 = spanned(AstExpr::Literal(AstLiteral::String("key1".to_string())));
         let val1 = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
@@ -1052,7 +1065,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_closure() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         let param = spanned(ast::Field {
             name: spanned("x".to_string()),
@@ -1076,7 +1089,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_function_call() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         let func = spanned(AstExpr::Ref("add".to_string()));
         let arg1 = spanned(AstExpr::Literal(AstLiteral::Int64(1)));
@@ -1100,7 +1113,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_field_access() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         let obj = spanned(AstExpr::Ref("point".to_string()));
         let field_name = spanned("x".to_string());
@@ -1125,7 +1138,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_method_call() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         let obj = spanned(AstExpr::Ref("list".to_string()));
         let method_name = spanned("add".to_string());
@@ -1163,7 +1176,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_fail() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         let error_expr = spanned(AstExpr::Literal(AstLiteral::String("error".to_string())));
         let fail_expr = spanned(AstExpr::Fail(error_expr));
@@ -1303,7 +1316,7 @@ mod expr_tests {
 
     #[test]
     fn test_convert_block() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         // Create a simple expression inside a block
         let inner_expr = spanned(AstExpr::Literal(AstLiteral::Int64(42)));
@@ -1331,7 +1344,7 @@ mod expr_tests {
 
     #[test]
     fn test_expr_conversion_preserves_span() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         // Create a span with specific location
         let custom_span = Span::new("test_file.txt".to_string(), 10..20);

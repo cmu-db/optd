@@ -3,6 +3,7 @@ use crate::{
         context::Context,
         error::AnalyzerErrorKind,
         hir::{CoreData, Expr, ExprKind, FunKind, HIR, Pattern, PatternKind, TypedSpan, Value},
+        types::Type,
     },
     utils::span::Span,
 };
@@ -49,7 +50,7 @@ fn create_function_scope(
     fn_ctx.push_scope();
 
     for param in params {
-        let dummy = Value::new_unknown(CoreData::None, span.clone());
+        let dummy = Value::new_with(CoreData::None, Type::None, span.clone());
         fn_ctx.try_bind(param.clone(), dummy)?;
     }
 
@@ -93,7 +94,7 @@ fn check_expr(
 
             // Bind the name before checking the body
             // This simulates the lexical scoping rules.
-            let dummy = Value::new_unknown(CoreData::None, span.clone());
+            let dummy = Value::new_with(CoreData::None, Type::None, span.clone());
             ctx.try_bind(name.to_string(), dummy)?;
 
             check_expr(body, ctx)?;
@@ -160,7 +161,7 @@ fn check_pattern(
     match &pattern.kind {
         Bind(name, sub_pattern) => {
             // Add the binding to the current scope, checking for duplicates.
-            let dummy = Value::new_unknown(CoreData::None, pattern.metadata.span.clone());
+            let dummy = Value::new_with(CoreData::None, Type::None, pattern.metadata.span.clone());
             ctx.try_bind(name.clone(), dummy)?;
             check_pattern(sub_pattern, ctx)?;
         }
@@ -210,7 +211,7 @@ mod scope_check_tests {
 
     // Create a dummy value for binding
     fn dummy_value(span: Span) -> Value<TypedSpan> {
-        Value::new_unknown(CoreData::None, span)
+        Value::new_with(CoreData::None, Type::None, span)
     }
 
     // Setup a context with a function for testing
@@ -224,7 +225,7 @@ mod scope_check_tests {
         let fun_val = Value {
             data: CoreData::Function(FunKind::Closure(params, Arc::new(body))),
             metadata: TypedSpan {
-                ty: Type::Unknown,
+                ty: Type::Nothing,
                 span: test_span(1, 10),
             },
         };
@@ -245,7 +246,11 @@ mod scope_check_tests {
     #[test]
     fn test_valid_reference() {
         let param_name = "x".to_string();
-        let body = Expr::new_unknown(ExprKind::Ref(param_name.clone()), test_span(5, 6));
+        let body = Expr::new_with(
+            ExprKind::Ref(param_name.clone()),
+            Type::Nothing,
+            test_span(5, 6),
+        );
         let (_, result) = setup_test_context(vec![param_name], body);
         assert!(result.is_ok());
     }
@@ -254,7 +259,11 @@ mod scope_check_tests {
     fn test_undefined_reference() {
         let (_, result) = setup_test_context(
             vec!["x".to_string()],
-            Expr::new_unknown(ExprKind::Ref("undefined".to_string()), test_span(5, 13)),
+            Expr::new_with(
+                ExprKind::Ref("undefined".to_string()),
+                Type::Nothing,
+                test_span(5, 13),
+            ),
         );
         assert!(matches!(
             result,
@@ -265,15 +274,21 @@ mod scope_check_tests {
     #[test]
     fn test_let_binding() {
         let let_var = "y".to_string();
-        let let_expr = Expr::new_unknown(
+        let let_expr = Expr::new_with(
             ExprKind::Let(
                 let_var.clone(),
-                Arc::new(Expr::new_unknown(
+                Arc::new(Expr::new_with(
                     ExprKind::CoreVal(dummy_value(test_span(5, 6))),
+                    Type::Nothing,
                     test_span(5, 6),
                 )),
-                Arc::new(Expr::new_unknown(ExprKind::Ref(let_var), test_span(7, 8))),
+                Arc::new(Expr::new_with(
+                    ExprKind::Ref(let_var),
+                    Type::Nothing,
+                    test_span(7, 8),
+                )),
             ),
+            Type::Nothing,
             test_span(1, 10),
         );
 
@@ -285,7 +300,11 @@ mod scope_check_tests {
     fn test_duplicate_parameters() {
         let (_, result) = setup_test_context(
             vec!["x".to_string(), "x".to_string()],
-            Expr::new_unknown(ExprKind::Ref("x".to_string()), test_span(5, 6)),
+            Expr::new_with(
+                ExprKind::Ref("x".to_string()),
+                Type::Nothing,
+                test_span(5, 6),
+            ),
         );
         assert!(matches!(
             result,
@@ -296,25 +315,33 @@ mod scope_check_tests {
     #[test]
     fn test_duplicate_let() {
         let let_var = "y".to_string();
-        let outer_let = Expr::new_unknown(
+        let outer_let = Expr::new_with(
             ExprKind::Let(
                 let_var.clone(),
-                Arc::new(Expr::new_unknown(
+                Arc::new(Expr::new_with(
                     ExprKind::CoreVal(dummy_value(test_span(5, 6))),
+                    Type::Nothing,
                     test_span(5, 6),
                 )),
-                Arc::new(Expr::new_unknown(
+                Arc::new(Expr::new_with(
                     ExprKind::Let(
                         let_var.clone(),
-                        Arc::new(Expr::new_unknown(
+                        Arc::new(Expr::new_with(
                             ExprKind::CoreVal(dummy_value(test_span(10, 11))),
+                            Type::Nothing,
                             test_span(10, 11),
                         )),
-                        Arc::new(Expr::new_unknown(ExprKind::Ref(let_var), test_span(12, 13))),
+                        Arc::new(Expr::new_with(
+                            ExprKind::Ref(let_var),
+                            Type::Nothing,
+                            test_span(12, 13),
+                        )),
                     ),
+                    Type::Nothing,
                     test_span(8, 14),
                 )),
             ),
+            Type::Nothing,
             test_span(1, 15),
         );
 
@@ -330,14 +357,16 @@ mod scope_check_tests {
         let outer_param = "x".to_string();
         let inner_param = "y".to_string();
 
-        let inner_fn = Expr::new_unknown(
+        let inner_fn = Expr::new_with(
             ExprKind::CoreExpr(CoreData::Function(FunKind::Closure(
                 vec![inner_param],
-                Arc::new(Expr::new_unknown(
+                Arc::new(Expr::new_with(
                     ExprKind::Ref(outer_param.clone()),
+                    Type::Nothing,
                     test_span(10, 11),
                 )),
             ))),
+            Type::Nothing,
             test_span(5, 12),
         );
 
@@ -347,29 +376,34 @@ mod scope_check_tests {
 
     #[test]
     fn test_pattern_match() {
-        let match_expr = Expr::new_unknown(
+        let match_expr = Expr::new_with(
             ExprKind::PatternMatch(
-                Arc::new(Expr::new_unknown(
+                Arc::new(Expr::new_with(
                     ExprKind::Ref("x".to_string()),
+                    Type::Nothing,
                     test_span(5, 6),
                 )),
                 vec![MatchArm {
-                    pattern: Pattern::new_unknown(
+                    pattern: Pattern::new_with(
                         PatternKind::Bind(
                             "matched".to_string(),
-                            Box::new(Pattern::new_unknown(
+                            Box::new(Pattern::new_with(
                                 PatternKind::Wildcard,
+                                Type::Nothing,
                                 test_span(10, 15),
                             )),
                         ),
+                        Type::Nothing,
                         test_span(10, 15),
                     ),
-                    expr: Arc::new(Expr::new_unknown(
+                    expr: Arc::new(Expr::new_with(
                         ExprKind::Ref("matched".to_string()),
+                        Type::Nothing,
                         test_span(20, 27),
                     )),
                 }],
             ),
+            Type::Nothing,
             test_span(1, 30),
         );
 
@@ -379,35 +413,41 @@ mod scope_check_tests {
 
     #[test]
     fn test_duplicate_pattern_bindings() {
-        let match_expr = Expr::new_unknown(
+        let match_expr = Expr::new_with(
             ExprKind::PatternMatch(
-                Arc::new(Expr::new_unknown(
+                Arc::new(Expr::new_with(
                     ExprKind::Ref("x".to_string()),
+                    Type::Nothing,
                     test_span(5, 6),
                 )),
                 vec![MatchArm {
-                    pattern: Pattern::new_unknown(
+                    pattern: Pattern::new_with(
                         PatternKind::Bind(
                             "y".to_string(),
-                            Box::new(Pattern::new_unknown(
+                            Box::new(Pattern::new_with(
                                 PatternKind::Bind(
                                     "y".to_string(),
-                                    Box::new(Pattern::new_unknown(
+                                    Box::new(Pattern::new_with(
                                         PatternKind::Wildcard,
+                                        Type::Nothing,
                                         test_span(10, 15),
                                     )),
                                 ),
+                                Type::Nothing,
                                 test_span(10, 15),
                             )),
                         ),
+                        Type::Nothing,
                         test_span(10, 15),
                     ),
-                    expr: Arc::new(Expr::new_unknown(
+                    expr: Arc::new(Expr::new_with(
                         ExprKind::Ref("y".to_string()),
+                        Type::Nothing,
                         test_span(20, 21),
                     )),
                 }],
             ),
+            Type::Nothing,
             test_span(1, 25),
         );
 
@@ -423,28 +463,37 @@ mod scope_check_tests {
         let x_var = "x".to_string();
 
         // Create a simple let expression with a block that shadows x
-        let test_expr = Expr::new_unknown(
+        let test_expr = Expr::new_with(
             ExprKind::Let(
                 x_var.clone(),
-                Arc::new(Expr::new_unknown(
+                Arc::new(Expr::new_with(
                     ExprKind::CoreVal(dummy_value(test_span(1, 2))),
+                    Type::Nothing,
                     test_span(1, 2),
                 )),
-                Arc::new(Expr::new_unknown(
-                    ExprKind::NewScope(Arc::new(Expr::new_unknown(
+                Arc::new(Expr::new_with(
+                    ExprKind::NewScope(Arc::new(Expr::new_with(
                         ExprKind::Let(
                             x_var.clone(),
-                            Arc::new(Expr::new_unknown(
+                            Arc::new(Expr::new_with(
                                 ExprKind::CoreVal(dummy_value(test_span(3, 4))),
+                                Type::Nothing,
                                 test_span(3, 4),
                             )),
-                            Arc::new(Expr::new_unknown(ExprKind::Ref(x_var), test_span(5, 6))),
+                            Arc::new(Expr::new_with(
+                                ExprKind::Ref(x_var),
+                                Type::Nothing,
+                                test_span(5, 6),
+                            )),
                         ),
+                        Type::Nothing,
                         test_span(2, 7),
                     ))),
+                    Type::Nothing,
                     test_span(1, 8),
                 )),
             ),
+            Type::Nothing,
             test_span(0, 9),
         );
 

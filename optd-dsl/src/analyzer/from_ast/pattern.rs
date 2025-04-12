@@ -19,7 +19,7 @@ impl ASTConverter {
     /// This function is the main entry point for pattern conversion, handling both
     /// the patterns and expressions in match arms.
     pub(super) fn convert_match_arms(
-        &self,
+        &mut self,
         arms: &[Spanned<ast::MatchArm>],
         generics: &HashSet<Identifier>,
     ) -> Result<Vec<MatchArm<TypedSpan>>, Box<AnalyzerErrorKind>> {
@@ -41,11 +41,11 @@ impl ASTConverter {
     /// All patterns are created with Unknown type for now, as type inference
     /// will be handled in a later phase.
     fn convert_pattern(
-        &self,
+        &mut self,
         spanned_pattern: &Spanned<AstPattern>,
     ) -> Result<Pattern<TypedSpan>, Box<AnalyzerErrorKind>> {
         let span = spanned_pattern.span.clone();
-        let mut ty = Type::Unknown;
+        let mut ty = Type::Unknown(self.next_unknown_id());
 
         let kind = match &*spanned_pattern.value {
             AstPattern::Error => panic!("AST should no longer contain errors"),
@@ -288,7 +288,7 @@ mod pattern_tests {
 
     #[test]
     fn test_convert_array_decomp_pattern() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         // Create a head::tail pattern
         let head = spanned(AstPattern::Bind(

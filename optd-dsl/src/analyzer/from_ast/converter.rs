@@ -20,6 +20,8 @@ pub struct ASTConverter {
     pub(super) context: Context<TypedSpan>,
     /// Annotations for HIR expressions.
     pub(super) annotations: HashMap<Identifier, Vec<Annotation>>,
+    /// Unique id counter for Unknown types.
+    unknown_id: usize,
 }
 
 impl ASTConverter {
@@ -66,10 +68,17 @@ impl ASTConverter {
         ))
     }
 
+    /// Gets and increments the next unknown type ID.
+    pub(super) fn next_unknown_id(&mut self) -> usize {
+        let id = self.unknown_id;
+        self.unknown_id += 1;
+        id
+    }
+
     /// Registers a function AST node and adds it to the context.
     ///
     /// Handles function parameters, return type, and body conversion.
-    pub(super) fn register_function(
+    pub fn register_function(
         &mut self,
         spanned_fn: &Spanned<Function>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
@@ -138,7 +147,7 @@ impl ASTConverter {
     /// Collects parameter names and types from both the receiver (if present)
     /// and the parameter list.
     fn get_parameters(
-        &self,
+        &mut self,
         func: &Function,
         generics: &HashSet<Identifier>,
     ) -> Result<Vec<(Identifier, Type)>, Box<AnalyzerErrorKind>> {

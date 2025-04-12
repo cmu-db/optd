@@ -225,12 +225,12 @@ impl Value<TypedSpan> {
     }
 
     /// Creates a new value from core data with unknown type and span metadata
-    pub fn new_unknown(data: CoreData<Value<TypedSpan>, TypedSpan>, span: Span) -> Self {
+    pub fn new_unknown(data: CoreData<Value<TypedSpan>, TypedSpan>, span: Span, id: usize) -> Self {
         Self {
             data,
             metadata: TypedSpan {
                 span,
-                ty: Type::Unknown,
+                ty: Type::Unknown(id),
             },
         }
     }
@@ -293,11 +293,11 @@ impl Expr<TypedSpan> {
     }
 
     /// Creates a new expression with unknown type and span metadata
-    pub fn new_unknown(kind: ExprKind<TypedSpan>, span: Span) -> Self {
+    pub fn new_unknown(kind: ExprKind<TypedSpan>, span: Span, id: usize) -> Self {
         Self {
             kind,
             metadata: TypedSpan {
-                ty: Type::Unknown,
+                ty: Type::Unknown(id),
                 span,
             },
         }
@@ -365,11 +365,11 @@ impl Pattern<TypedSpan> {
     }
 
     /// Creates a new pattern with unknown type and span metadata
-    pub fn new_unknown(kind: PatternKind<TypedSpan>, span: Span) -> Self {
+    pub fn new_unknown(kind: PatternKind<TypedSpan>, span: Span, id: usize) -> Self {
         Self {
             kind,
             metadata: TypedSpan {
-                ty: Type::Unknown,
+                ty: Type::Unknown(id),
                 span,
             },
         }

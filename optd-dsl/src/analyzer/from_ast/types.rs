@@ -30,7 +30,7 @@ impl ASTConverter {
     ///
     /// The equivalent HIR type, or an AnalyzerErrorKind if the conversion fails.
     pub(super) fn convert_type(
-        &self,
+        &mut self,
         ast_type: &Spanned<AstType>,
         generics: &HashSet<Identifier>,
     ) -> Result<Type, Box<AnalyzerErrorKind>> {
@@ -80,7 +80,7 @@ impl ASTConverter {
                 }
             }
             AstType::Error => panic!("AST should no longer contain errors"),
-            AstType::Unknown => Unknown,
+            AstType::Unknown => Unknown(self.next_unknown_id()),
         };
 
         Ok(hir_type)
@@ -135,11 +135,11 @@ mod types_tests {
             (AstType::Bool, Type::Bool),
             (AstType::Float64, Type::Float64),
             (AstType::Unit, Type::Unit),
-            (AstType::Unknown, Type::Unknown),
+            (AstType::Unknown, Type::Unknown(0)),
         ];
 
         let generics = HashSet::new();
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         for (ast_type, expected_type) in test_cases {
             let result = converter

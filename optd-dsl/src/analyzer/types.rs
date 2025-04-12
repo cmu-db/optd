@@ -30,10 +30,10 @@ pub enum Type {
 
     // Special types.
     Unit,
-    Universe, // All types are subtypes of Universe.
-    Nothing,  // Inherits all types.
-    None,     // Inherits all optionals.
-    Unknown,
+    Universe,       // All types are subtypes of Universe.
+    Nothing,        // Inherits all types.
+    None,           // Inherits all optionals.
+    Unknown(usize), // Unique identifier for unknown types.
 
     // User types.
     Adt(Identifier),
