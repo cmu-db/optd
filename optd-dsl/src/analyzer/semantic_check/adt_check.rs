@@ -1,7 +1,7 @@
 use super::cycle_detect::CycleDetector;
 use crate::{
     analyzer::{
-        error::AnalyzerErrorKind,
+        errors::AnalyzerErrorKind,
         hir::Identifier,
         types::{CORE_TYPES, LOGICAL_TYPE, PHYSICAL_TYPE, Type, TypeRegistry},
     },

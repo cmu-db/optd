@@ -1,6 +1,6 @@
 use super::hir::Identifier;
 use crate::utils::{
-    error::Diagnose,
+    errors::Diagnose,
     span::{Span, Spanned},
 };
 use ariadne::{Color, Label, Report, ReportKind, Source};

@@ -1,9 +1,9 @@
 use super::adt::adt_parser;
 use super::ast::{Item, Module};
-use super::error::ParserError;
+use super::errors::ParserError;
 use super::function::function_parser;
 use crate::lexer::tokens::Token;
-use crate::utils::error::CompileError;
+use crate::utils::errors::CompileError;
 use crate::utils::span::Span;
 use chumsky::{Stream, prelude::*};
 

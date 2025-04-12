@@ -1,4 +1,4 @@
-use crate::analyzer::error::AnalyzerErrorKind;
+use crate::analyzer::errors::AnalyzerErrorKind;
 use crate::analyzer::hir::{Annotation, FunKind, Identifier, UdfKind};
 use crate::analyzer::{
     context::Context,

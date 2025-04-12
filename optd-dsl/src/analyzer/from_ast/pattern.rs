@@ -4,7 +4,7 @@
 //! corresponding HIR representations.
 
 use super::ASTConverter;
-use crate::analyzer::error::AnalyzerErrorKind;
+use crate::analyzer::errors::AnalyzerErrorKind;
 use crate::analyzer::hir::{Identifier, MatchArm, Pattern, PatternKind, TypedSpan};
 use crate::analyzer::types::Type;
 use crate::parser::ast::{self, Pattern as AstPattern};

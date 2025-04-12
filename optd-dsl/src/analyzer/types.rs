@@ -1,4 +1,4 @@
-use super::{error::AnalyzerErrorKind, hir::Identifier};
+use super::{errors::AnalyzerErrorKind, hir::Identifier};
 use crate::parser::ast::{Adt, Field, Type as AstType};
 use crate::utils::span::Span;
 use Adt::*;

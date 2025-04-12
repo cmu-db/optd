@@ -1,6 +1,6 @@
 use crate::{
     analyzer::{
-        error::AnalyzerError,
+        errors::AnalyzerError,
         from_ast::ASTConverter,
         hir::{HIR, TypedSpan},
         semantic_check::{
@@ -11,7 +11,7 @@ use crate::{
     },
     lexer::lex::lex,
     parser::{ast::Module, module::parse_module},
-    utils::error::CompileError,
+    utils::errors::CompileError,
 };
 
 /// Compilation options for the DSL

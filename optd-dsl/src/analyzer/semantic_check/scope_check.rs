@@ -1,7 +1,7 @@
 use crate::{
     analyzer::{
         context::Context,
-        error::AnalyzerErrorKind,
+        errors::AnalyzerErrorKind,
         hir::{CoreData, Expr, ExprKind, FunKind, HIR, Pattern, PatternKind, TypedSpan, Value},
         types::Type,
     },
@@ -192,7 +192,7 @@ mod scope_check_tests {
     use crate::{
         analyzer::{
             context::Context,
-            error::AnalyzerErrorKind,
+            errors::AnalyzerErrorKind,
             hir::{
                 CoreData, Expr, ExprKind, FunKind, HIR, MatchArm, Pattern, PatternKind, TypedSpan,
                 Value,

@@ -1,4 +1,4 @@
-use crate::utils::{error::Diagnose, span::Span};
+use crate::utils::{errors::Diagnose, span::Span};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use chumsky::error::{Simple, SimpleReason};
 
