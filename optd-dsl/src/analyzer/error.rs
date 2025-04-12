@@ -413,12 +413,15 @@ impl AnalyzerError {
 
         Report::build(ReportKind::Error, span.clone())
             .with_message(format!("Missing required core type: '{}'", name))
-            .with_label(
-                Label::new(span.clone())
-                    .with_color(Color::Red),
-            )
-            .with_help(format!("Add a definition for the '{}' type in your module", name))
-            .with_note(format!("Core types must be defined for the language to function correctly. '{}' is a fundamental type needed by the compiler.", name))
+            .with_label(Label::new(span.clone()).with_color(Color::Red))
+            .with_help(format!(
+                "Add a definition for the '{}' type in your module",
+                name
+            ))
+            .with_note(format!(
+                "'{}' is a fundamental type needed by the compiler",
+                name
+            ))
             .finish()
     }
 }
