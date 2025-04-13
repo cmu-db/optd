@@ -26,8 +26,9 @@
 //! cargo run -- compile examples/example.opt --verbose
 //! cargo run -- compile examples/example.opt --print-ast --print-typedspan-hir
 //! ```
+
 use clap::{Parser, Subcommand};
-use optd_dsl::compile::{CompileOptions, adt_check, ast_to_hir, parse, scope_check};
+use optd_dsl::compile::{CompileOptions, adt_check, ast_to_hir, parse};
 use optd_dsl::utils::errors::{CompileError, Diagnose};
 use std::error::Error;
 use std::fs;
@@ -123,21 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err(error) => handle_errors(&[error]),
             };
 
-            // Step 3: Perform scope checking
-            if *verbose {
-                println!("Performing scope checking...");
-            }
-
-            match scope_check(&source, &hir) {
-                Ok(_) => {
-                    if *verbose {
-                        println!("✅ Scope checking successful!");
-                    }
-                }
-                Err(error) => handle_errors(&[error]),
-            }
-
-            // Step 4: Perform ADT checking
+            // Step 3: Perform ADT checking
             if *verbose {
                 println!("Performing ADT checking...");
             }

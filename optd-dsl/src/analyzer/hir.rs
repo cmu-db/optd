@@ -59,6 +59,13 @@ pub struct TypedSpan {
 }
 impl ExprMetadata for TypedSpan {}
 
+impl TypedSpan {
+    /// Creates a new TypedSpan with the given type and span.
+    pub fn new(ty: Type, span: Span) -> Self {
+        Self { ty, span }
+    }
+}
+
 /// User-defined function: either linked or unlinked
 #[derive(Debug, Clone)]
 pub enum UdfKind<M: ExprMetadata> {
