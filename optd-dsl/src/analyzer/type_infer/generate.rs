@@ -1,10 +1,11 @@
+use super::solver::Solver;
 use crate::{
     analyzer::{
         context::Context,
         errors::AnalyzerErrorKind,
         hir::{
-            BinOp, CoreData, Expr, ExprKind, FunKind, HIR, Identifier, LetBinding, MatchArm,
-            Pattern, PatternKind, TypedSpan, UnaryOp, Value,
+            BinOp, CoreData, Expr, ExprKind, FunKind, HIR, Identifier, LetBinding, MapEntry,
+            MatchArm, Pattern, PatternKind, TypedSpan, UnaryOp, Value,
         },
         types::{Type, create_function_type},
     },
@@ -12,7 +13,10 @@ use crate::{
 };
 use std::sync::Arc;
 
-impl super::solver::Solver {
+// TODO(alexis) tomorrow:
+// structs, index access returns option, cleanup & audit.
+// solver: SAT...
+impl Solver<'_> {
     /// Generates type constraints from an HIR while verifying scopes.
     ///
     /// This method traverses the HIR and simultaneously:
@@ -72,7 +76,7 @@ impl super::solver::Solver {
         };
 
         // Bind each parameter with its appropriate type.
-        for (name, ty) in params.into_iter().zip(param_types.iter()) {
+        for (name, ty) in params.iter().zip(param_types.iter()) {
             let dummy = Self::dummy_value(ty, &metadata.span);
             fn_ctx.try_bind(name.clone(), dummy)?;
         }
@@ -155,14 +159,13 @@ impl super::solver::Solver {
                 self.generate_pattern(sub_pattern, ctx)?;
             }
             Struct(_, field_patterns) => {
-                // TODO: Here I should check of structs are valid...
+                // TODO: Here I should check of structs are valid... Reuse other function, <:
                 field_patterns
                     .iter()
                     .try_for_each(|field| self.generate_pattern(field, ctx))?;
             }
             Operator(_) => panic!("Operators may not be in the HIR yet"),
             ArrayDecomp(head, tail) => {
-                // TODO: What about the head?
                 self.generate_pattern(head, ctx)?;
                 self.generate_pattern(tail, ctx)?;
             }
@@ -356,7 +359,7 @@ impl super::solver::Solver {
     fn generate_map(
         &mut self,
         expr: &Expr<TypedSpan>,
-        entries: &[(Arc<Expr<TypedSpan>>, Arc<Expr<TypedSpan>>)],
+        entries: &[MapEntry<TypedSpan>],
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
         use Type::*;
@@ -455,7 +458,7 @@ impl super::solver::Solver {
                     .try_for_each(|expr| self.generate_expr(expr, ctx.clone()))?;
             }
             CoreData::Struct(_name, exprs) => {
-                // TODO: Here I should check of structs are valid...
+                // TODO: Here I should check of structs are valid (share same function, use <:, access registry)
                 exprs
                     .iter()
                     .try_for_each(|expr| self.generate_expr(expr, ctx.clone()))?;
@@ -514,7 +517,8 @@ mod scope_check_tests {
                 CoreData, Expr, ExprKind, FunKind, HIR, LetBinding, MatchArm, Pattern, PatternKind,
                 TypedSpan, Value,
             },
-            types::{Type, create_function_type},
+            type_infer::solver::Solver,
+            types::{Type, TypeRegistry, create_function_type},
         },
         utils::span::Span,
     };
@@ -537,7 +541,8 @@ mod scope_check_tests {
         body: Expr<TypedSpan>,
     ) -> (HIR<TypedSpan>, Result<(), Box<AnalyzerErrorKind>>) {
         let mut context = Context::default();
-        let mut solver = super::super::solver::Solver::default();
+        let registry = TypeRegistry::default();
+        let mut solver = Solver::new(&registry);
 
         // Create function value
         let len = params.len();

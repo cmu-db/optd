@@ -76,7 +76,7 @@ impl ASTConverter {
                 (Literal(hir_lit), hir_ty)
             }
 
-            AstPattern::Wildcard => (Wildcard, Nothing),
+            AstPattern::Wildcard => (Wildcard, self.next_unknown()),
 
             AstPattern::EmptyArray => (EmptyArray, Array(Nothing.into())),
 

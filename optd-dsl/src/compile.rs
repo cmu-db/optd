@@ -4,6 +4,7 @@ use crate::{
         from_ast::ASTConverter,
         hir::{HIR, TypedSpan},
         semantic_check::adt_check,
+        type_infer::{self},
         types::TypeRegistry,
     },
     lexer::lex::lex,
@@ -67,6 +68,16 @@ pub fn adt_check(
     registry: &TypeRegistry,
 ) -> Result<(), CompileError> {
     adt_check::adt_check(registry, source_path).map_err(|err_kind| {
+        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
+    })
+}
+
+pub fn infer(
+    source: &str,
+    hir: &HIR<TypedSpan>,
+    registry: &TypeRegistry,
+) -> Result<(), CompileError> {
+    type_infer::infer(hir, registry).map_err(|err_kind| {
         CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })
 }

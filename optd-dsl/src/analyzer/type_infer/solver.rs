@@ -44,17 +44,27 @@ enum Constraint {
 ///
 /// The solver collects constraints during type checking and then resolves them
 /// to determine concrete types for all expressions in the program.
-#[derive(Debug, Default)]
-pub struct Solver {
+#[derive(Debug)]
+pub struct Solver<'a> {
     /// The type registry that holds all known types
-    registry: TypeRegistry,
+    pub(super) registry: &'a TypeRegistry,
     /// The set of collected type constraints to be solved
     constraints: Vec<Constraint>,
     /// Maps unknown type IDs to their resolved concrete types
     resolved_unknown: HashMap<usize, Type>,
 }
 
-impl Solver {
+impl<'a> Solver<'a> {
+    /// Creates a new instance of the constraint solver, initializing it with
+    /// a type registry.
+    pub(super) fn new(registry: &'a TypeRegistry) -> Self {
+        Self {
+            registry,
+            constraints: Vec::new(),
+            resolved_unknown: HashMap::new(),
+        }
+    }
+
     /// Resolves all collected constraints and fills in the concrete types.
     ///
     /// This is the main entry point for constraint solving after all constraints

@@ -28,7 +28,7 @@
 //! ```
 
 use clap::{Parser, Subcommand};
-use optd_dsl::compile::{CompileOptions, adt_check, ast_to_hir, parse};
+use optd_dsl::compile::{CompileOptions, adt_check, ast_to_hir, infer, parse};
 use optd_dsl::utils::errors::{CompileError, Diagnose};
 use std::error::Error;
 use std::fs;
@@ -130,6 +130,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             match adt_check(&source, &source_path, &type_registry) {
+                Ok(_) => {
+                    if *verbose {
+                        println!("✅ ADT checking successful!");
+                    }
+                }
+                Err(error) => handle_errors(&[error]),
+            }
+
+            // Step 4: Perform type inference
+            if *verbose {
+                println!("Performing type inference...");
+            }
+
+            match infer(&source, &hir, &type_registry) {
                 Ok(_) => {
                     if *verbose {
                         println!("✅ ADT checking successful!");

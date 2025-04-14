@@ -290,7 +290,7 @@ impl Expr<TypedSpan> {
 }
 
 /// Type alias for map entries to reduce type complexity
-pub type MapEntries<M> = Vec<(Arc<Expr<M>>, Arc<Expr<M>>)>;
+pub type MapEntry<M> = (Arc<Expr<M>>, Arc<Expr<M>>);
 
 /// Expression node kinds without metadata
 #[derive(Debug, Clone)]
@@ -310,7 +310,7 @@ pub enum ExprKind<M: ExprMetadata> {
     /// Function call
     Call(Arc<Expr<M>>, Vec<Arc<Expr<M>>>),
     /// Map expression
-    Map(MapEntries<M>),
+    Map(Vec<MapEntry<M>>),
     /// Variable reference
     Ref(Identifier),
     /// Field access (becomes a call after analysis)
