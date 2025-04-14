@@ -6,9 +6,10 @@
 use super::ASTConverter;
 use crate::analyzer::errors::AnalyzerErrorKind;
 use crate::analyzer::hir::{
-    BinOp, CoreData, Expr, ExprKind, FunKind, Identifier, Literal, TypedSpan, UnaryOp, Value,
+    BinOp, CoreData, Expr, ExprKind, FunKind, Identifier, LetBinding, Literal, TypedSpan, UnaryOp,
+    Value,
 };
-use crate::analyzer::types::Type;
+use crate::analyzer::types::{Type, create_function_type};
 use crate::parser::ast::{
     self, BinOp as AstBinOp, Expr as AstExpr, Literal as AstLiteral, PostfixOp,
 };
@@ -27,8 +28,10 @@ impl ASTConverter {
         spanned_expr: &Spanned<AstExpr>,
         generics: &HashSet<Identifier>,
     ) -> Result<Expr<TypedSpan>, Box<AnalyzerErrorKind>> {
+        use Type::*;
+
         let span = spanned_expr.span.clone();
-        let mut ty = Type::Unknown(self.next_unknown_id());
+        let mut ty = self.next_unknown();
 
         let kind = match &*spanned_expr.value {
             AstExpr::Error => panic!("AST should no longer contain errors"),
@@ -46,26 +49,38 @@ impl ASTConverter {
                 self.convert_binary(left, op, right, &span, generics)?
             }
             AstExpr::Unary(op, operand) => self.convert_unary(op, operand, generics)?,
-            AstExpr::Let(field, init, body) => {
-                // We extract the potential type annotation.
-                ty = self.convert_type(&field.ty, generics)?;
-                self.convert_let(field, init, body, generics)?
-            }
+            AstExpr::Let(field, init, body) => self.convert_let(field, init, body, generics)?,
             AstExpr::IfThenElse(condition, then_branch, else_branch) => {
                 self.convert_if_then_else(condition, then_branch, else_branch, generics)?
             }
             AstExpr::PatternMatch(scrutinee, arms) => {
                 self.convert_pattern_match(scrutinee, arms, generics)?
             }
-            AstExpr::Array(elements) => self.convert_array(elements, generics)?,
-            AstExpr::Tuple(elements) => self.convert_tuple(elements, generics)?,
-            AstExpr::Map(entries) => self.convert_map(entries, generics)?,
+            AstExpr::Array(elements) => {
+                ty = if elements.is_empty() {
+                    Array(Nothing.into())
+                } else {
+                    Array(self.next_unknown().into())
+                };
+                self.convert_array(elements, generics)?
+            }
+            AstExpr::Tuple(elements) => {
+                ty = Tuple(elements.iter().map(|_| self.next_unknown()).collect());
+                self.convert_tuple(elements, generics)?
+            }
+            AstExpr::Map(entries) => {
+                ty = if entries.is_empty() {
+                    Map(Nothing.into(), Nothing.into())
+                } else {
+                    Map(self.next_unknown().into(), self.next_unknown().into())
+                };
+                self.convert_map(entries, generics)?
+            }
             AstExpr::Constructor(name, args) => {
-                ty = Type::Adt(*name.value.clone());
+                ty = Adt(*name.value.clone());
                 self.convert_constructor(name, args, &span, generics)?
             }
             AstExpr::Closure(params, body) => {
-                // We extract the potential type annotations.
                 let params = params
                     .iter()
                     .map(|field| {
@@ -75,18 +90,18 @@ impl ASTConverter {
                         ))
                     })
                     .collect::<Result<Vec<_>, Box<_>>>()?;
+                let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
 
-                let return_ty = Type::Unknown(self.next_unknown_id());
-                ty = Self::create_function_type(&params, &return_ty);
+                ty = create_function_type(&param_types, &self.next_unknown());
                 self.convert_closure(&params, body, generics)?
             }
             AstExpr::Postfix(expr, op) => self.convert_postfix(expr, op, generics)?,
             AstExpr::Fail(error_expr) => {
-                ty = Type::Nothing;
+                ty = Nothing;
                 self.convert_fail(error_expr, generics)?
             }
             AstExpr::None => {
-                ty = Type::None;
+                ty = None;
                 CoreVal(Value::new_with(CoreData::None, ty.clone(), span.clone()))
             }
             AstExpr::Block(block) => self.convert_block(block, generics)?,
@@ -101,10 +116,10 @@ impl ASTConverter {
         use Literal::*;
 
         match literal {
-            AstLiteral::Int64(val) => (Int64(*val), Type::Int64),
+            AstLiteral::Int64(val) => (Int64(*val), Type::I64),
             AstLiteral::String(val) => (String(val.clone()), Type::String),
             AstLiteral::Bool(val) => (Bool(*val), Type::Bool),
-            AstLiteral::Float64(val) => (Float64(val.0), Type::Float64),
+            AstLiteral::Float64(val) => (Float64(val.0), Type::F64),
             AstLiteral::Unit => (Unit, Type::Unit),
         }
     }
@@ -158,10 +173,10 @@ impl ASTConverter {
                 let hir_left = self.convert_expr(left, generics)?;
                 let hir_right = self.convert_expr(right, generics)?;
 
-                let eq_expr = Expr::new_unknown(
+                let eq_expr = Expr::new_with(
                     Binary(hir_left.into(), Eq, hir_right.into()),
+                    self.next_unknown(),
                     span.clone(),
-                    self.next_unknown_id(),
                 );
 
                 Ok(Unary(UnaryOp::Not, eq_expr.into()))
@@ -180,10 +195,10 @@ impl ASTConverter {
                 let hir_left = self.convert_expr(left, generics)?;
                 let hir_right = self.convert_expr(right, generics)?;
 
-                let lt_expr = Expr::new_unknown(
+                let lt_expr = Expr::new_with(
                     Binary(hir_left.into(), Lt, hir_right.into()),
+                    self.next_unknown(),
                     span.clone(),
-                    self.next_unknown_id(),
                 );
 
                 Ok(Unary(UnaryOp::Not, lt_expr.into()))
@@ -194,15 +209,15 @@ impl ASTConverter {
                 let hir_left = Arc::new(self.convert_expr(left, generics)?);
                 let hir_right = Arc::new(self.convert_expr(right, generics)?);
 
-                let lt_expr = Expr::new_unknown(
+                let lt_expr = Expr::new_with(
                     Binary(hir_left.clone(), Lt, hir_right.clone()),
+                    self.next_unknown(),
                     span.clone(),
-                    self.next_unknown_id(),
                 );
-                let eq_expr = Expr::new_unknown(
+                let eq_expr = Expr::new_with(
                     Binary(hir_left, Eq, hir_right),
+                    self.next_unknown(),
                     span.clone(),
-                    self.next_unknown_id(),
                 );
 
                 Ok(Binary(lt_expr.into(), Or, eq_expr.into()))
@@ -237,7 +252,11 @@ impl ASTConverter {
         let hir_body = self.convert_expr(body, generics)?;
         let var_name = (*field.name).clone();
 
-        Ok(Let(var_name, hir_init.into(), hir_body.into()))
+        let ty = self.convert_type(&field.ty, generics)?;
+        let let_binding =
+            LetBinding::new_with(var_name.clone(), hir_init.into(), ty, field.span.clone());
+
+        Ok(Let(let_binding, hir_body.into()))
     }
 
     fn convert_pattern_match(
@@ -402,10 +421,10 @@ impl ASTConverter {
                     .chain(self.convert_expr_list(args, generics)?)
                     .collect();
 
-                let method_fn = Arc::new(Expr::new_unknown(
+                let method_fn = Arc::new(Expr::new_with(
                     Ref((*method_name.value).clone()),
+                    self.next_unknown(),
                     method_name.span.clone(),
-                    self.next_unknown_id(),
                 ));
 
                 Ok(Call(method_fn, all_args))
@@ -699,7 +718,7 @@ mod expr_tests {
             .expect("Let expression conversion should succeed");
 
         match &result.kind {
-            ExprKind::Let(name, _, _) => assert_eq!(name, &var_name),
+            ExprKind::Let(LetBinding { name, .. }, _) => assert_eq!(name, &var_name),
             _ => panic!("Expected Let expression"),
         }
     }

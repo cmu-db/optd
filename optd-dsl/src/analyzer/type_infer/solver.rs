@@ -1,10 +1,7 @@
-use crate::{
-    analyzer::{
-        errors::AnalyzerErrorKind,
-        hir::{Identifier, TypedSpan},
-        types::Type,
-    },
-    utils::span::Spanned,
+use crate::analyzer::{
+    errors::AnalyzerErrorKind,
+    hir::{Identifier, TypedSpan},
+    types::{Type, TypeRegistry},
 };
 use std::collections::HashMap;
 
@@ -19,12 +16,17 @@ enum Constraint {
     ///
     /// This constraint enforces that `target_type` is a supertype of all `sub_types`,
     /// allowing substitution of more specific types where a more general type is expected.
-    ///
-    /// Additionally, if all sub_types are equal, then target_type will be set to that type.
-    /// This is useful for inference in contexts like common type determination.
     Subtypes {
         target_type: TypedSpan,
         sub_types: Vec<TypedSpan>,
+    },
+
+    /// Equality constraint: `target_type = other_type`
+    ///
+    /// This constraint enforces that `target_type` is equal to `other_type`.
+    Equal {
+        target_type: TypedSpan,
+        other_type: TypedSpan,
     },
 
     /// Field access: `inner.field = outer`
@@ -32,9 +34,9 @@ enum Constraint {
     /// This constraint enforces that the type `inner` has a field named `field`
     /// with a type that matches `outer`. Used for struct field access.
     FieldAccess {
-        inner: Type,
-        field: Spanned<Identifier>,
-        outer: Type,
+        inner: TypedSpan,
+        field: Identifier,
+        outer: TypedSpan,
     },
 }
 
@@ -44,9 +46,10 @@ enum Constraint {
 /// to determine concrete types for all expressions in the program.
 #[derive(Debug, Default)]
 pub struct Solver {
+    /// The type registry that holds all known types
+    registry: TypeRegistry,
     /// The set of collected type constraints to be solved
     constraints: Vec<Constraint>,
-
     /// Maps unknown type IDs to their resolved concrete types
     resolved_unknown: HashMap<usize, Type>,
 }
@@ -69,7 +72,6 @@ impl Solver {
     /// Adds a subtyping constraint set: `target_type >: all sub_types`
     ///
     /// This constraint enforces that the target_type is a supertype of all the sub_types.
-    /// Additionally, if all sub_types are equal, then target_type will be set to that type.
     ///
     /// # Arguments
     ///
@@ -86,25 +88,40 @@ impl Solver {
         });
     }
 
-    /// Adds a field access constraint: `inner.field = outer`
+    /// Adds an equality constraint: `target_type = other_type`
+    ///
+    /// This constraint enforces that the target_type is equal to other_type.
+    ///
+    /// # Arguments
+    ///
+    /// * `target_type` - The type that is expected to be equal to other_type
+    /// * `other_type` - The type that is being compared for equality
+    pub(super) fn add_constraint_equal(&mut self, target_type: &TypedSpan, other_type: &TypedSpan) {
+        self.constraints.push(Constraint::Equal {
+            target_type: target_type.clone(),
+            other_type: other_type.clone(),
+        });
+    }
+
+    /// Adds a field access constraint: `outer >: inner.field`
     ///
     /// This enforces that a type has a field with a particular name and type.
     ///
     /// # Arguments
     ///
-    /// * `inner` - The type containing the field
-    /// * `field` - The name of the field with its source location
     /// * `outer` - The expected type of the field
+    /// * `field` - The name of the field with its source location
+    /// * `inner` - The type containing the field
     pub(super) fn add_constraint_field_access(
         &mut self,
-        inner: Type,
-        field: Spanned<Identifier>,
-        outer: Type,
+        outer: &TypedSpan,
+        field: &str,
+        inner: &TypedSpan,
     ) {
         self.constraints.push(Constraint::FieldAccess {
-            inner,
-            field,
-            outer,
+            inner: inner.clone(),
+            field: field.to_string(),
+            outer: outer.clone(),
         });
     }
 }

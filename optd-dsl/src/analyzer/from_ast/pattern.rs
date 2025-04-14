@@ -9,7 +9,6 @@ use crate::analyzer::hir::{Identifier, MatchArm, Pattern, PatternKind, TypedSpan
 use crate::analyzer::types::Type;
 use crate::parser::ast::{self, Pattern as AstPattern};
 use crate::utils::span::Spanned;
-use PatternKind::*;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -38,44 +37,58 @@ impl ASTConverter {
 
     /// Converts an AST pattern to an HIR pattern.
     ///
-    /// All patterns are created with Unknown type for now, as type inference
-    /// will be handled in a later phase.
+    /// Each pattern kind determines its own specific type, which will be used
+    /// during pattern matching and constraint solving.
     fn convert_pattern(
         &mut self,
         spanned_pattern: &Spanned<AstPattern>,
     ) -> Result<Pattern<TypedSpan>, Box<AnalyzerErrorKind>> {
-        let span = spanned_pattern.span.clone();
-        let mut ty = Type::Unknown(self.next_unknown_id());
+        use PatternKind::*;
+        use Type::*;
 
-        let kind = match &*spanned_pattern.value {
+        let span = spanned_pattern.span.clone();
+
+        let (kind, ty) = match &*spanned_pattern.value {
             AstPattern::Error => panic!("AST should no longer contain errors"),
+
             AstPattern::Bind(name, inner_pattern) => {
                 let hir_inner = self.convert_pattern(inner_pattern)?;
-                Bind((*name.value).clone(), hir_inner.into())
+                (
+                    Bind((*name.value).clone(), hir_inner.clone().into()),
+                    hir_inner.metadata.ty.clone(),
+                )
             }
+
             AstPattern::Constructor(name, args) => {
                 self.validate_constructor(name, &span, args.len())?;
+                let adt_type = Adt(*name.value.clone());
 
-                ty = Type::Adt(*name.value.clone());
                 let hir_args = args
                     .iter()
                     .map(|arg| self.convert_pattern(arg))
                     .collect::<Result<Vec<_>, _>>()?;
 
-                Struct((*name.value).clone(), hir_args)
+                (Struct((*name.value).clone(), hir_args), adt_type)
             }
+
             AstPattern::Literal(lit) => {
                 let (hir_lit, hir_ty) = self.convert_literal(lit);
-                ty = hir_ty;
-                Literal(hir_lit)
+                (Literal(hir_lit), hir_ty)
             }
-            AstPattern::Wildcard => Wildcard,
-            AstPattern::EmptyArray => EmptyArray,
+
+            AstPattern::Wildcard => (Wildcard, Nothing),
+
+            AstPattern::EmptyArray => (EmptyArray, Array(Nothing.into())),
+
             AstPattern::ArrayDecomp(head, tail) => {
                 let hir_head = self.convert_pattern(head)?;
                 let hir_tail = self.convert_pattern(tail)?;
+                let element_type = hir_head.metadata.ty.clone();
 
-                ArrayDecomp(hir_head.into(), hir_tail.into())
+                (
+                    ArrayDecomp(hir_head.into(), hir_tail.into()),
+                    Array(element_type.into()),
+                )
             }
         };
 

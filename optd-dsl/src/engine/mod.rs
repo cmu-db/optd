@@ -89,9 +89,8 @@ impl Engine {
                     .await
                 }
                 NewScope(expr) => evaluate_new_scope(expr.clone(), self, k).await,
-                Let(ident, assignee, after) => {
-                    evaluate_let_binding(ident.clone(), assignee.clone(), after.clone(), self, k)
-                        .await
+                Let(binding, after) => {
+                    evaluate_let_binding(binding.clone(), after.clone(), self, k).await
                 }
                 Binary(left, op, right) => {
                     evaluate_binary_expr(left.clone(), op.clone(), right.clone(), self, k).await

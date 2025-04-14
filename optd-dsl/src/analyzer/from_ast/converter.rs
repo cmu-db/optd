@@ -1,5 +1,6 @@
 use crate::analyzer::errors::AnalyzerErrorKind;
 use crate::analyzer::hir::{Annotation, FunKind, Identifier, UdfKind};
+use crate::analyzer::types::create_function_type;
 use crate::analyzer::{
     context::Context,
     hir::{CoreData, HIR, TypedSpan, Value},
@@ -68,11 +69,11 @@ impl ASTConverter {
         ))
     }
 
-    /// Gets and increments the next unknown type ID.
-    pub(super) fn next_unknown_id(&mut self) -> usize {
+    /// Gets and increments the next unknown type.
+    pub(super) fn next_unknown(&mut self) -> Type {
         let id = self.unknown_id;
         self.unknown_id += 1;
-        id
+        Type::Unknown(id)
     }
 
     /// Registers a function AST node and adds it to the context.
@@ -99,8 +100,10 @@ impl ASTConverter {
             .collect();
 
         let params = self.get_parameters(func, &generics)?;
+        let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
+
         let return_type = self.convert_type(&func.return_type, &generics)?;
-        let fn_type = Self::create_function_type(&params, &return_type);
+        let fn_type = create_function_type(&param_types, &return_type);
 
         match &func.body {
             Some(body_expr) => {

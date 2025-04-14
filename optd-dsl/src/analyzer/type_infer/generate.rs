@@ -1,26 +1,28 @@
-use std::sync::Arc;
-
-use crate::analyzer::{
-    context::Context,
-    errors::AnalyzerErrorKind,
-    hir::{
-        self, BinOp, CoreData, Expr, ExprKind, FunKind, HIR, MatchArm, Pattern, PatternKind,
-        TypedSpan, UnaryOp, Value,
+use crate::{
+    analyzer::{
+        context::Context,
+        errors::AnalyzerErrorKind,
+        hir::{
+            BinOp, CoreData, Expr, ExprKind, FunKind, HIR, Identifier, LetBinding, MatchArm,
+            Pattern, PatternKind, TypedSpan, UnaryOp, Value,
+        },
+        types::{Type, create_function_type},
     },
-    types::Type,
+    utils::span::Span,
 };
+use std::sync::Arc;
 
 impl super::solver::Solver {
     /// Generates type constraints from an HIR while verifying scopes.
     ///
     /// This method traverses the HIR and simultaneously:
-    /// 1. Ensures all variable references have proper bindings in the lexical scope
-    /// 2. Detects duplicate identifiers in the same scope
-    /// 3. Generates type constraints for the solver to later resolve
+    /// 1. Ensures all variable references have proper bindings in the lexical scope.
+    /// 2. Detects duplicate identifiers in the same scope.
+    /// 3. Generates type constraints for the solver to later resolve.
     ///
     /// # Arguments
     ///
-    /// * `hir` - The HIR to analyze and generate constraints from
+    /// * `hir` - The HIR to analyze and generate constraints from.
     ///
     /// # Returns
     ///
@@ -39,7 +41,7 @@ impl super::solver::Solver {
             .try_for_each(|fun| match &fun.data {
                 Function(Closure(args, body)) => {
                     let ctx =
-                        self.create_function_scope(hir.context.clone(), args, &fun.metadata)?;
+                        self.create_function_scope(hir.context.clone(), &args[..], &fun.metadata)?;
                     self.generate_expr(body, ctx)
                 }
                 Function(Udf(_)) => Ok(()), // UDFs have no body to check.
@@ -52,7 +54,7 @@ impl super::solver::Solver {
     fn create_function_scope(
         &mut self,
         base_ctx: Context<TypedSpan>,
-        params: &[String],
+        params: &[Identifier],
         metadata: &TypedSpan,
     ) -> Result<Context<TypedSpan>, Box<AnalyzerErrorKind>> {
         use Type::*;
@@ -71,7 +73,7 @@ impl super::solver::Solver {
 
         // Bind each parameter with its appropriate type.
         for (name, ty) in params.into_iter().zip(param_types.iter()) {
-            let dummy = Value::new_with(CoreData::None, ty.clone(), metadata.span.clone());
+            let dummy = Self::dummy_value(ty, &metadata.span);
             fn_ctx.try_bind(name.clone(), dummy)?;
         }
 
@@ -95,7 +97,7 @@ impl super::solver::Solver {
                 self.generate_if_then_else(expr, cond, then_branch, else_branch, ctx)
             }
             NewScope(inner_expr) => self.generate_new_scope(expr, inner_expr, ctx),
-            Let(name, value, body) => self.generate_let(expr, name, value, body, ctx),
+            Let(binding, body) => self.generate_let(expr, binding, body, ctx),
             Binary(left, op, right) => self.generate_binary(expr, left, op, right, ctx),
             Unary(op, operand) => self.generate_unary(expr, op, operand, ctx),
             Call(func, args) => self.generate_call(expr, func, args, ctx),
@@ -118,8 +120,6 @@ impl super::solver::Solver {
         arms: &[MatchArm<TypedSpan>],
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        self.generate_expr(scrutinee, ctx.clone())?;
-
         let mut pattern_types = Vec::with_capacity(arms.len());
         let mut arm_types = Vec::with_capacity(arms.len());
 
@@ -137,13 +137,45 @@ impl super::solver::Solver {
         self.add_constraint_subtypes(&scrutinee.metadata, &pattern_types);
         self.add_constraint_subtypes(&expr.metadata, &arm_types);
 
+        self.generate_expr(scrutinee, ctx)
+    }
+
+    /// Validates pattern bindings, and adds them to the context.
+    fn generate_pattern(
+        &mut self,
+        pattern: &Pattern<TypedSpan>,
+        ctx: &mut Context<TypedSpan>,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
+        use PatternKind::*;
+
+        match &pattern.kind {
+            Bind(name, sub_pattern) => {
+                let dummy = Self::dummy_value(&pattern.metadata.ty, &pattern.metadata.span);
+                ctx.try_bind(name.clone(), dummy)?;
+                self.generate_pattern(sub_pattern, ctx)?;
+            }
+            Struct(_, field_patterns) => {
+                // TODO: Here I should check of structs are valid...
+                field_patterns
+                    .iter()
+                    .try_for_each(|field| self.generate_pattern(field, ctx))?;
+            }
+            Operator(_) => panic!("Operators may not be in the HIR yet"),
+            ArrayDecomp(head, tail) => {
+                // TODO: What about the head?
+                self.generate_pattern(head, ctx)?;
+                self.generate_pattern(tail, ctx)?;
+            }
+            Wildcard | EmptyArray | Literal(_) => {} // Terminal patterns, no action needed.
+        }
+
         Ok(())
     }
 
     /// Generates constraints for if-then-else expressions while verifying scopes.
     /// Enforces two key type relationships:
-    /// - `bool >: condition` - Ensures condition evaluates to a boolean
-    /// - `expr >: then, else` - Ensures result type is compatible with both branches
+    /// - `bool = cond`
+    /// - `expr >: then, else`
     fn generate_if_then_else(
         &mut self,
         expr: &Expr<TypedSpan>,
@@ -152,27 +184,20 @@ impl super::solver::Solver {
         else_branch: &Expr<TypedSpan>,
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        self.generate_expr(cond, ctx.clone())?;
+        let bool_type = TypedSpan::new(Type::Bool, cond.metadata.span.clone());
+        let branch_types = [then_branch.metadata.clone(), else_branch.metadata.clone()];
 
-        let bool_type = TypedSpan {
-            ty: Type::Bool,
-            span: cond.metadata.span.clone(),
-        };
-
-        let mut branch_types = Vec::with_capacity(2);
-        branch_types.push(then_branch.metadata.clone());
-        branch_types.push(else_branch.metadata.clone());
-
-        self.add_constraint_subtypes(&bool_type, &[cond.metadata.clone()]);
+        self.add_constraint_equal(&bool_type, &cond.metadata);
         self.add_constraint_subtypes(&expr.metadata, &branch_types);
 
+        self.generate_expr(cond, ctx.clone())?;
         self.generate_expr(then_branch, ctx.clone())?;
         self.generate_expr(else_branch, ctx)
     }
 
     /// Generates constraints for new scope expressions while verifying scopes.
     /// Enforces the type relationship:
-    /// - `outer >: inner` - Ensures scope result type is compatible with inner expression
+    /// - `outer >: inner`
     fn generate_new_scope(
         &mut self,
         expr: &Expr<TypedSpan>,
@@ -183,44 +208,39 @@ impl super::solver::Solver {
         new_ctx.push_scope();
 
         self.add_constraint_subtypes(&expr.metadata, &[inner_expr.metadata.clone()]);
-
         self.generate_expr(inner_expr, new_ctx)
     }
 
     /// Generates constraints for let binding expressions while verifying scopes.
     /// Enforces the type relationship:
-    /// - `expr >: val >: body` - Ensures proper type flow through the binding and expression
+    /// - `expr >: body`
+    /// - `binding >: binding.expr`
     fn generate_let(
         &mut self,
         expr: &Expr<TypedSpan>,
-        name: &str,
-        value: &Expr<TypedSpan>,
+        binding: &LetBinding<TypedSpan>,
         body: &Expr<TypedSpan>,
         mut ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        self.generate_expr(value, ctx.clone())?;
+        // Bind the type to the context.
+        let dummy = Self::dummy_value(&binding.metadata.ty, &binding.metadata.span);
+        ctx.try_bind(binding.name.to_string(), dummy)?;
 
-        let dummy = Value::new_with(
-            CoreData::None,
-            value.metadata.ty.clone(),
-            value.metadata.span.clone(),
-        );
-        ctx.try_bind(name.to_string(), dummy)?;
+        self.add_constraint_subtypes(&binding.metadata, &[binding.expr.metadata.clone()]);
+        self.add_constraint_subtypes(&expr.metadata, &[body.metadata.clone()]);
 
-        self.add_constraint_subtypes(&expr.metadata, &[value.metadata.clone()]);
-        self.add_constraint_subtypes(&value.metadata, &[body.metadata.clone()]);
-
+        self.generate_expr(&binding.expr, ctx.clone())?;
         self.generate_expr(body, ctx)
     }
 
     /// Generates constraints for binary operations while verifying scopes.
     /// Enforces type relationships based on operation:
-    /// - Add/Sub/Mul/Div: expr >: left, right and Arithmetic >: left, right
-    /// - Lt: bool >: expr, Arithmetic >: left, right, left >: right, right >: left
-    /// - Eq: bool >: expr, EqHash >: left, right, left >: right, right >: left
-    /// - And/Or: bool >: expr, bool >: left, right
-    /// - Range: Array(Int64) >: expr, Int64 >: left, right
-    /// - Concat: expr >: left, right, Concat >: left, right
+    /// - Add/Sub/Mul/Div: `expr >: left, right` and `Arithmetic >: left, right`
+    /// - Lt: `bool = expr`, `Arithmetic >: left, right`, `left = right`
+    /// - Eq: `bool = expr`, `EqHash >: left, right`, `left = right`
+    /// - And/Or: `bool = expr`, `bool >: left, right`
+    /// - Range: `Array(I64) = expr`, `I64 >: left, right`
+    /// - Concat: `expr >: left, right`, `Concat >: left, right`
     fn generate_binary(
         &mut self,
         expr: &Expr<TypedSpan>,
@@ -231,17 +251,14 @@ impl super::solver::Solver {
     ) -> Result<(), Box<AnalyzerErrorKind>> {
         use BinOp::*;
 
-        self.generate_expr(left, ctx.clone())?;
-        self.generate_expr(right, ctx)?;
-
         let span = &expr.metadata.span;
 
         let bool_type = TypedSpan::new(Type::Bool, span.clone());
         let arithmetic_type = TypedSpan::new(Type::Arithmetic, span.clone());
         let eqhash_type = TypedSpan::new(Type::EqHash, span.clone());
         let concat_type = TypedSpan::new(Type::Concat, span.clone());
-        let int64_type = TypedSpan::new(Type::Int64, span.clone());
-        let array_int64_type = TypedSpan::new(Type::Array(Type::Int64.into()), span.clone());
+        let i64_type = TypedSpan::new(Type::I64, span.clone());
+        let array_i64_type = TypedSpan::new(Type::Array(Type::I64.into()), span.clone());
 
         let op_types = vec![left.metadata.clone(), right.metadata.clone()];
 
@@ -251,24 +268,22 @@ impl super::solver::Solver {
                 self.add_constraint_subtypes(&arithmetic_type, &op_types);
             }
             Lt => {
-                self.add_constraint_subtypes(&bool_type, &[expr.metadata.clone()]);
+                self.add_constraint_equal(&bool_type, &expr.metadata);
                 self.add_constraint_subtypes(&arithmetic_type, &op_types);
-                self.add_constraint_subtypes(&left.metadata, &[right.metadata.clone()]);
-                self.add_constraint_subtypes(&right.metadata, &[left.metadata.clone()]);
+                self.add_constraint_equal(&left.metadata, &right.metadata);
             }
             Eq => {
-                self.add_constraint_subtypes(&bool_type, &[expr.metadata.clone()]);
+                self.add_constraint_equal(&bool_type, &expr.metadata);
                 self.add_constraint_subtypes(&eqhash_type, &op_types);
-                self.add_constraint_subtypes(&left.metadata, &[right.metadata.clone()]);
-                self.add_constraint_subtypes(&right.metadata, &[left.metadata.clone()]);
+                self.add_constraint_equal(&left.metadata, &right.metadata);
             }
             And | Or => {
-                self.add_constraint_subtypes(&bool_type, &[expr.metadata.clone()]);
+                self.add_constraint_equal(&bool_type, &expr.metadata);
                 self.add_constraint_subtypes(&bool_type, &op_types);
             }
             Range => {
-                self.add_constraint_subtypes(&array_int64_type, &[expr.metadata.clone()]);
-                self.add_constraint_subtypes(&int64_type, &op_types);
+                self.add_constraint_equal(&array_i64_type, &expr.metadata);
+                self.add_constraint_subtypes(&i64_type, &op_types);
             }
             Concat => {
                 self.add_constraint_subtypes(&expr.metadata, &op_types);
@@ -276,13 +291,14 @@ impl super::solver::Solver {
             }
         }
 
-        Ok(())
+        self.generate_expr(left, ctx.clone())?;
+        self.generate_expr(right, ctx)
     }
 
     /// Generates constraints for unary operations while verifying scopes.
     /// Enforces type relationships based on operation:
-    /// - Not: bool >: operand, bool >: expr
-    /// - Neg: Arithmetic >: operand, expr >: operand
+    /// - Neg: `expr >: operand`, `Arithmetic >: operand`
+    /// - Not: `expr = bool`, `bool = operand`
     fn generate_unary(
         &mut self,
         expr: &Expr<TypedSpan>,
@@ -290,13 +306,12 @@ impl super::solver::Solver {
         operand: &Expr<TypedSpan>,
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
+        use Type::*;
         use UnaryOp::*;
 
-        self.generate_expr(operand, ctx)?;
-
         let span = &expr.metadata.span;
-        let bool_type = TypedSpan::new(Type::Bool, span.clone());
-        let arithmetic_type = TypedSpan::new(Type::Arithmetic, span.clone());
+        let bool_type = TypedSpan::new(Bool, span.clone());
+        let arithmetic_type = TypedSpan::new(Arithmetic, span.clone());
 
         match op {
             Neg => {
@@ -304,17 +319,17 @@ impl super::solver::Solver {
                 self.add_constraint_subtypes(&expr.metadata, &[operand.metadata.clone()]);
             }
             Not => {
-                self.add_constraint_subtypes(&bool_type, &[operand.metadata.clone()]);
-                self.add_constraint_subtypes(&bool_type, &[expr.metadata.clone()]);
+                self.add_constraint_equal(&bool_type, &operand.metadata);
+                self.add_constraint_equal(&bool_type, &expr.metadata);
             }
         }
 
-        Ok(())
+        self.generate_expr(operand, ctx)
     }
 
     /// Generates constraints for function calls while verifying scopes.
     /// Enforces the type relationship:
-    /// - Closure(args_types, expr.type) >: func - Ensures function type can accept the arguments
+    /// - `func >: Closure(args_types, expr.type)`
     fn generate_call(
         &mut self,
         expr: &Expr<TypedSpan>,
@@ -322,95 +337,46 @@ impl super::solver::Solver {
         args: &[Arc<Expr<TypedSpan>>],
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        // TODO: This is wrong as of now!!
-        // Need to: handle generics (probably <: resciprocally), add id!
-        // Handle arrays, maps, tuples (most likely: inherit from the function)
-        // check args, check return type (easy)
-        // also: need a way to create new unknown!
-        
-        /*self.generate_expr(func, ctx.clone())?;
+        let arg_types: Vec<_> = args.iter().map(|arg| arg.metadata.ty.clone()).collect();
+        let fun_type = TypedSpan::new(
+            create_function_type(&arg_types, &expr.metadata.ty),
+            expr.metadata.span.clone(),
+        );
+        self.add_constraint_subtypes(&fun_type, &[func.metadata.clone()]);
 
-        let arg_metadata: Vec<TypedSpan> = args.iter().map(|arg| arg.metadata.clone()).collect();
-
-        // Create the expected function type
-        let fn_type = if args.len() == 1 {
-            // For single argument functions
-            let fn_type = TypedSpan::new(
-                Type::Closure(
-                    Box::new(args[0].metadata.ty.clone()),
-                    Box::new(expr.metadata.ty.clone()),
-                ),
-                expr.metadata.span.clone(),
-            );
-            self.add_constraint_subtypes(&fn_type, &[func.metadata.clone()]);
-        } else if !args.is_empty() {
-            // For multi-argument functions
-            let param_types: Vec<Type> = args.iter().map(|arg| arg.metadata.ty.clone()).collect();
-
-            let fn_type = TypedSpan::new(
-                Type::Closure(
-                    Box::new(Type::Tuple(param_types)),
-                    Box::new(expr.metadata.ty.clone()),
-                ),
-                expr.metadata.span.clone(),
-            );
-            self.add_constraint_subtypes(&fn_type, &[func.metadata.clone()]);
-        };
-
-        // Process all arguments
+        self.generate_expr(func, ctx.clone())?;
         args.iter()
-            .try_for_each(|arg| self.generate_expr(arg, ctx.clone()))*/
-
-        Ok(())
+            .try_for_each(|arg| self.generate_expr(arg, ctx.clone()))
     }
 
     /// Generates constraints for map expressions while verifying scopes.
-    /// Ensures all keys have the same type and all values have the same type.
+    /// Enforces the type relationship:
+    /// - `Map(EqHash, Universe) >: expr`
+    /// - `expr` >: `all maps`
     fn generate_map(
         &mut self,
         expr: &Expr<TypedSpan>,
         entries: &[(Arc<Expr<TypedSpan>>, Arc<Expr<TypedSpan>>)],
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
+        use Type::*;
+
         let span = &expr.metadata.span;
-        let expr_type = &expr.metadata.ty;
 
-        // If we have entries, determine key and value types
-        if !entries.is_empty() {
-            let first_key_type = &entries[0].0.metadata.ty;
-            let first_value_type = &entries[0].1.metadata.ty;
+        let map_type = TypedSpan::new(Map(EqHash.into(), Universe.into()), span.clone());
+        self.add_constraint_subtypes(&map_type, &[expr.metadata.clone()]);
 
-            // Ensure all keys have the same type
-            for (k, _) in entries.iter() {
-                self.add_constraint_equal(
-                    k.metadata.span.clone(),
-                    k.metadata.ty.clone(),
-                    first_key_type.clone(),
-                );
-            }
+        let entry_maps: Vec<_> = entries
+            .iter()
+            .map(|(k, v)| {
+                TypedSpan::new(
+                    Map(k.metadata.ty.clone().into(), v.metadata.ty.clone().into()),
+                    span.clone(),
+                )
+            })
+            .collect();
 
-            // Ensure all values have the same type
-            for (_, v) in entries.iter() {
-                self.add_constraint_equal(
-                    v.metadata.span.clone(),
-                    v.metadata.ty.clone(),
-                    first_value_type.clone(),
-                );
-            }
-
-            // Map type should be Map(key_type, value_type)
-            self.add_constraint_equal(
-                span.clone(),
-                expr_type.clone(),
-                Type::Map(
-                    Box::new(first_key_type.clone()),
-                    Box::new(first_value_type.clone()),
-                ),
-            );
-
-            // Keys should implement EqHash
-            self.add_constraint_subtype(span.clone(), first_key_type.clone(), Type::EqHash);
-        }
+        self.add_constraint_subtypes(&expr.metadata, &entry_maps);
 
         entries.iter().try_for_each(|(k, v)| {
             self.generate_expr(k, ctx.clone())?;
@@ -419,29 +385,30 @@ impl super::solver::Solver {
     }
 
     /// Generates constraints for variable references while verifying scopes.
-    /// Ensures the referenced variable exists and has the correct type.
+    /// Enforces the type relationship:
+    /// - `expr >: ref_type`
     fn generate_ref(
         &mut self,
         expr: &Expr<TypedSpan>,
         name: &str,
         ctx: &Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        let span = &expr.metadata.span;
-        let expr_type = &expr.metadata.ty;
-
-        // Verify variable references exist.
         if let Some(value) = ctx.lookup(name) {
-            // Add constraint: reference type should match the declared type
-            self.add_constraint_equal(span.clone(), expr_type.clone(), value.metadata.ty.clone());
+            self.add_constraint_subtypes(&expr.metadata, &[value.metadata.clone()]);
         } else {
-            return Err(AnalyzerErrorKind::new_undefined_reference(name, span));
+            return Err(AnalyzerErrorKind::new_undefined_reference(
+                name,
+                &expr.metadata.span,
+            ));
         }
 
         Ok(())
     }
 
     /// Generates constraints for field access expressions while verifying scopes.
-    /// Ensures the object has a field with the specified name.
+    /// Ensures the object of type `obj` has a field with the specified name, and
+    /// Enforces the type relationship:
+    /// - `expr >: obj.field_name`
     fn generate_field_access(
         &mut self,
         expr: &Expr<TypedSpan>,
@@ -449,20 +416,8 @@ impl super::solver::Solver {
         field_name: &str,
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        let span = &expr.metadata.span;
-        let expr_type = &expr.metadata.ty;
-
-        self.generate_expr(obj, ctx)?;
-
-        // Generate field access constraint
-        self.add_constraint_field_access(
-            span.clone(),
-            obj.metadata.ty.clone(),
-            field_name.to_string(),
-            expr_type.clone(),
-        );
-
-        Ok(())
+        self.add_constraint_field_access(&expr.metadata, field_name, &obj.metadata);
+        self.generate_expr(obj, ctx)
     }
 
     /// Generates constraints for core expressions while verifying scopes.
@@ -473,269 +428,82 @@ impl super::solver::Solver {
         core_data: &CoreData<std::sync::Arc<Expr<TypedSpan>>, TypedSpan>,
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        let span = &expr.metadata.span;
-        let expr_type = &expr.metadata.ty;
+        use Type::*;
 
-        use CoreData::*;
-        use FunKind::*;
+        let span = &expr.metadata.span;
 
         match core_data {
-            Array(exprs) => {
-                // If array is not empty, all elements should have the same type
-                if !exprs.is_empty() {
-                    let first_elem_type = &exprs[0].metadata.ty;
+            CoreData::Array(exprs) => {
+                let entries: Vec<_> = exprs
+                    .iter()
+                    .map(|val| TypedSpan::new(Array(val.metadata.ty.clone().into()), span.clone()))
+                    .collect();
 
-                    for expr in exprs.iter().skip(1) {
-                        self.add_constraint_equal(
-                            expr.metadata.span.clone(),
-                            expr.metadata.ty.clone(),
-                            first_elem_type.clone(),
-                        );
-                    }
-
-                    // Array type should be Array(element_type)
-                    self.add_constraint_equal(
-                        span.clone(),
-                        expr_type.clone(),
-                        Type::Array(Box::new(first_elem_type.clone())),
-                    );
-                }
-
+                self.add_constraint_subtypes(&expr.metadata, &entries);
                 exprs
                     .iter()
                     .try_for_each(|expr| self.generate_expr(expr, ctx.clone()))?;
             }
-            Tuple(exprs) => {
-                // Tuple type should be Tuple(element_types)
-                let element_types: Vec<Type> =
+            CoreData::Tuple(exprs) => {
+                let element_types: Vec<_> =
                     exprs.iter().map(|expr| expr.metadata.ty.clone()).collect();
+                let tuple_type = TypedSpan::new(Tuple(element_types.clone()), span.clone());
 
-                self.add_constraint_equal(
-                    span.clone(),
-                    expr_type.clone(),
-                    Type::Tuple(element_types),
-                );
-
+                self.add_constraint_subtypes(&expr.metadata, &[tuple_type.clone()]);
                 exprs
                     .iter()
                     .try_for_each(|expr| self.generate_expr(expr, ctx.clone()))?;
             }
-            Struct(name, exprs) => {
-                // Struct type should be Adt(name)
-                self.add_constraint_equal(span.clone(), expr_type.clone(), Type::Adt(name.clone()));
-
+            CoreData::Struct(_name, exprs) => {
+                // TODO: Here I should check of structs are valid...
                 exprs
                     .iter()
                     .try_for_each(|expr| self.generate_expr(expr, ctx.clone()))?;
             }
-            Function(Closure(params, body)) => {
-                // Function definitions create a new lexical scope.
-                let fn_ctx = self.create_function_scope(ctx, params, &expr.metadata)?;
-
-                // Generate function type constraint
-                self.add_constraint_equal(
-                    span.clone(),
-                    expr_type.clone(),
-                    Type::Closure(
-                        Box::new(Type::Tuple(vec![])),
-                        Box::new(body.metadata.ty.clone()),
-                    ),
-                );
-
+            CoreData::Map(_) | CoreData::Logical(_) | CoreData::Physical(_) => {
+                panic!("Types may not be in the HIR yet")
+            }
+            CoreData::Function(FunKind::Udf(_)) => panic!("UDFs may not appear within functions"),
+            CoreData::Function(FunKind::Closure(params, body)) => {
+                let fn_ctx = self.create_function_scope(ctx, &params[..], &expr.metadata)?;
                 self.generate_expr(body, fn_ctx)?;
             }
-            Fail(expr) => {
+            CoreData::Fail(expr) => {
+                let string_type = TypedSpan::new(Type::String, expr.metadata.span.clone());
+                self.add_constraint_equal(&expr.metadata, &string_type);
                 self.generate_expr(expr, ctx)?;
-
-                // Fail expression has Nothing type (can be used anywhere)
-                self.add_constraint_equal(span.clone(), expr_type.clone(), Type::Nothing);
             }
-            Literal(lit) => {
-                // Add literal type constraint based on the literal type
-                match lit {
-                    hir::Literal::Int64(_) => {
-                        self.add_constraint_equal(span.clone(), expr_type.clone(), Type::Int64);
-                    }
-                    hir::Literal::Float64(_) => {
-                        self.add_constraint_equal(span.clone(), expr_type.clone(), Type::Float64);
-                    }
-                    hir::Literal::String(_) => {
-                        self.add_constraint_equal(span.clone(), expr_type.clone(), Type::String);
-                    }
-                    hir::Literal::Bool(_) => {
-                        self.add_constraint_equal(span.clone(), expr_type.clone(), Type::Bool);
-                    }
-                    hir::Literal::Unit => {
-                        self.add_constraint_equal(span.clone(), expr_type.clone(), Type::Unit);
-                    }
-                }
-            }
-            None => {
-                self.add_constraint_equal(span.clone(), expr_type.clone(), Type::None);
-            }
-            _ => {}
+            CoreData::Literal(_) | CoreData::None => {}
         }
 
         Ok(())
     }
 
     /// Generates constraints for core values while verifying scopes.
-    /// Handles function values.
+    /// Enforces the type relationship:
+    /// - `expr >: value`
     fn generate_core_val(
         &mut self,
         expr: &Expr<TypedSpan>,
         value: &Value<TypedSpan>,
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        let span = &expr.metadata.span;
-        let expr_type = &expr.metadata.ty;
-
-        // Value's type should match expression type
-        self.add_constraint_equal(span.clone(), expr_type.clone(), value.metadata.ty.clone());
+        self.add_constraint_subtypes(&expr.metadata, &[value.metadata.clone()]);
 
         if let CoreData::Function(FunKind::Closure(params, body)) = &value.data {
-            let fn_ctx = self.create_function_scope(ctx, params, &value.metadata)?;
+            let fn_ctx = self.create_function_scope(ctx, &params[..], &value.metadata)?;
             self.generate_expr(body, fn_ctx)?;
         }
 
         Ok(())
     }
 
-    /// Validates pattern bindings, adds them to the context, and generates type constraints.
-    fn generate_pattern(
-        &mut self,
-        pattern: &Pattern<TypedSpan>,
-        ctx: &mut Context<TypedSpan>,
-    ) -> Result<(), Box<AnalyzerErrorKind>> {
-        use PatternKind::*;
-
-        let pattern_type = &pattern.metadata.ty;
-        let span = &pattern.metadata.span;
-
-        match &pattern.kind {
-            Bind(name, sub_pattern) => {
-                // Add the binding to the current scope, checking for duplicates.
-                let dummy = Value::new_with(
-                    CoreData::None,
-                    pattern_type.clone(),
-                    pattern.metadata.span.clone(),
-                );
-                ctx.try_bind(name.clone(), dummy)?;
-
-                // Pattern type should match sub-pattern type
-                self.add_constraint_equal(
-                    span.clone(),
-                    pattern_type.clone(),
-                    sub_pattern.metadata.ty.clone(),
-                );
-
-                self.generate_pattern(sub_pattern, ctx)?;
-            }
-            Literal(lit) => {
-                // Add constraint based on literal type
-                match lit {
-                    hir::Literal::Int64(_) => {
-                        self.add_constraint_equal(span.clone(), pattern_type.clone(), Type::Int64);
-                    }
-                    hir::Literal::Float64(_) => {
-                        self.add_constraint_equal(
-                            span.clone(),
-                            pattern_type.clone(),
-                            Type::Float64,
-                        );
-                    }
-                    hir::Literal::String(_) => {
-                        self.add_constraint_equal(span.clone(), pattern_type.clone(), Type::String);
-                    }
-                    hir::Literal::Bool(_) => {
-                        self.add_constraint_equal(span.clone(), pattern_type.clone(), Type::Bool);
-                    }
-                    hir::Literal::Unit => {
-                        self.add_constraint_equal(span.clone(), pattern_type.clone(), Type::Unit);
-                    }
-                }
-            }
-            Struct(name, field_patterns) => {
-                // Add type constraint for struct pattern
-                self.add_constraint_equal(
-                    span.clone(),
-                    pattern_type.clone(),
-                    Type::Adt(name.clone()),
-                );
-
-                field_patterns
-                    .iter()
-                    .try_for_each(|field| self.generate_pattern(field, ctx))?;
-            }
-            Operator(_) => panic!("Operators may not be in the HIR yet"),
-            ArrayDecomp(head, tail) => {
-                // The pattern type should be Array(element_type)
-                let element_type = head.metadata.ty.clone();
-
-                self.add_constraint_equal(
-                    span.clone(),
-                    pattern_type.clone(),
-                    Type::Array(Box::new(element_type.clone())),
-                );
-
-                // Tail should have type Array(element_type)
-                self.add_constraint_equal(
-                    tail.metadata.span.clone(),
-                    tail.metadata.ty.clone(),
-                    Type::Array(Box::new(element_type)),
-                );
-
-                // Both head and tail can introduce bindings.
-                self.generate_pattern(head, ctx)?;
-                self.generate_pattern(tail, ctx)?;
-            }
-            Wildcard => {
-                // Wildcard can match any type, no constraints to add
-            }
-            EmptyArray => {
-                // EmptyArray pattern has type Array(element_type)
-                // but we don't know the element type
-                // We'll leave it to the other constraints to determine this
-                let element_id = match pattern_type {
-                    Type::Array(elem) => elem,
-                    Type::Unknown(id) => {
-                        // If pattern type is unknown, constrain it to be an array
-                        let unknown_id = *id;
-                        let element_type = Type::Unknown(unknown_id + 1);
-                        self.add_constraint_equal(
-                            span.clone(),
-                            pattern_type.clone(),
-                            Type::Array(Box::new(element_type.clone())),
-                        );
-                        &Box::new(element_type)
-                    }
-                    _ => {
-                        // If pattern type is not an array or unknown,
-                        // constraint it to be an array with unknown element type
-                        let element_type = Type::Unknown(0);
-                        self.add_constraint_equal(
-                            span.clone(),
-                            pattern_type.clone(),
-                            Type::Array(Box::new(element_type.clone())),
-                        );
-                        &Box::new(element_type)
-                    }
-                };
-
-                // EmptyArray should have type Array of some element type
-                self.add_constraint_equal(
-                    span.clone(),
-                    pattern_type.clone(),
-                    Type::Array(element_id.clone()),
-                );
-            }
-        }
-
-        Ok(())
+    /// Creates a dummy value with the specified type and span.
+    fn dummy_value(ty: &Type, span: &Span) -> Value<TypedSpan> {
+        Value::new_with(CoreData::None, ty.clone(), span.clone())
     }
 }
 
-/// Tests for the constraint generation functionality
 #[cfg(test)]
 mod scope_check_tests {
     use crate::{
@@ -743,10 +511,10 @@ mod scope_check_tests {
             context::Context,
             errors::AnalyzerErrorKind,
             hir::{
-                CoreData, Expr, ExprKind, FunKind, HIR, MatchArm, Pattern, PatternKind, TypedSpan,
-                Value,
+                CoreData, Expr, ExprKind, FunKind, HIR, LetBinding, MatchArm, Pattern, PatternKind,
+                TypedSpan, Value,
             },
-            types::Type,
+            types::{Type, create_function_type},
         },
         utils::span::Span,
     };
@@ -772,10 +540,11 @@ mod scope_check_tests {
         let mut solver = super::super::solver::Solver::default();
 
         // Create function value
+        let len = params.len();
         let fun_val = Value {
             data: CoreData::Function(FunKind::Closure(params, Arc::new(body))),
             metadata: TypedSpan {
-                ty: Type::Nothing,
+                ty: create_function_type(&vec![Type::None; len], &Type::None),
                 span: test_span(1, 10),
             },
         };
@@ -826,12 +595,16 @@ mod scope_check_tests {
         let let_var = "y".to_string();
         let let_expr = Expr::new_with(
             ExprKind::Let(
-                let_var.clone(),
-                Arc::new(Expr::new_with(
-                    ExprKind::CoreVal(dummy_value(test_span(5, 6))),
+                LetBinding::new_with(
+                    let_var.clone(),
+                    Arc::new(Expr::new_with(
+                        ExprKind::CoreVal(dummy_value(test_span(5, 6))),
+                        Type::Nothing,
+                        test_span(5, 6),
+                    )),
                     Type::Nothing,
                     test_span(5, 6),
-                )),
+                ),
                 Arc::new(Expr::new_with(
                     ExprKind::Ref(let_var),
                     Type::Nothing,
@@ -867,20 +640,28 @@ mod scope_check_tests {
         let let_var = "y".to_string();
         let outer_let = Expr::new_with(
             ExprKind::Let(
-                let_var.clone(),
-                Arc::new(Expr::new_with(
-                    ExprKind::CoreVal(dummy_value(test_span(5, 6))),
+                LetBinding::new_with(
+                    let_var.clone(),
+                    Arc::new(Expr::new_with(
+                        ExprKind::CoreVal(dummy_value(test_span(5, 6))),
+                        Type::Nothing,
+                        test_span(5, 6),
+                    )),
                     Type::Nothing,
                     test_span(5, 6),
-                )),
+                ),
                 Arc::new(Expr::new_with(
                     ExprKind::Let(
-                        let_var.clone(),
-                        Arc::new(Expr::new_with(
-                            ExprKind::CoreVal(dummy_value(test_span(10, 11))),
+                        LetBinding::new_with(
+                            let_var.clone(),
+                            Arc::new(Expr::new_with(
+                                ExprKind::CoreVal(dummy_value(test_span(10, 11))),
+                                Type::Nothing,
+                                test_span(10, 11),
+                            )),
                             Type::Nothing,
                             test_span(10, 11),
-                        )),
+                        ),
                         Arc::new(Expr::new_with(
                             ExprKind::Ref(let_var),
                             Type::Nothing,
@@ -916,7 +697,7 @@ mod scope_check_tests {
                     test_span(10, 11),
                 )),
             ))),
-            Type::Nothing,
+            Type::Closure(Type::None.into(), Type::None.into()),
             test_span(5, 12),
         );
 
@@ -1015,21 +796,29 @@ mod scope_check_tests {
         // Create a simple let expression with a block that shadows x
         let test_expr = Expr::new_with(
             ExprKind::Let(
-                x_var.clone(),
-                Arc::new(Expr::new_with(
-                    ExprKind::CoreVal(dummy_value(test_span(1, 2))),
+                LetBinding::new_with(
+                    x_var.clone(),
+                    Arc::new(Expr::new_with(
+                        ExprKind::CoreVal(dummy_value(test_span(1, 2))),
+                        Type::Nothing,
+                        test_span(1, 2),
+                    )),
                     Type::Nothing,
                     test_span(1, 2),
-                )),
+                ),
                 Arc::new(Expr::new_with(
                     ExprKind::NewScope(Arc::new(Expr::new_with(
                         ExprKind::Let(
-                            x_var.clone(),
-                            Arc::new(Expr::new_with(
-                                ExprKind::CoreVal(dummy_value(test_span(3, 4))),
+                            LetBinding::new_with(
+                                x_var.clone(),
+                                Arc::new(Expr::new_with(
+                                    ExprKind::CoreVal(dummy_value(test_span(3, 4))),
+                                    Type::Nothing,
+                                    test_span(3, 4),
+                                )),
                                 Type::Nothing,
                                 test_span(3, 4),
-                            )),
+                            ),
                             Arc::new(Expr::new_with(
                                 ExprKind::Ref(x_var),
                                 Type::Nothing,
