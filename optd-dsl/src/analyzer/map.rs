@@ -120,6 +120,26 @@ impl Map {
     }
 }
 
+/// PartialEq implementation for Map
+impl PartialEq for Map {
+    fn eq(&self, other: &Self) -> bool {
+        if self.inner.len() != other.inner.len() {
+            return false;
+        }
+
+        // Check if all key-value pairs match
+        self.inner.iter().all(|(k, v1)| {
+            if let Some(v2) = other.inner.get(k) {
+                return v1 == v2;
+            }
+            false
+        })
+    }
+}
+
+/// Eq implementation for Map
+impl Eq for Map {}
+
 // Key conversion functions
 
 /// Converts a Value to a MapKey, enforcing valid key types
