@@ -46,8 +46,6 @@ pub enum Status {
 pub struct MergeGroupResult {
     /// ID of the new representative group id.
     pub new_repr_group_id: GroupId,
-    /// Union of all expressions in the new group.
-    pub all_exprs: Vec<LogicalExpressionId>,
     /// Groups that were merged along with their expressions.
     pub merged_groups: HashMap<GroupId, Vec<LogicalExpressionId>>,
 }
@@ -58,11 +56,9 @@ impl MergeGroupResult {
     /// # Parameters
     /// * `merged_groups` - Groups that were merged along with their expressions.
     /// * `new_repr_group_id` - ID of the new representative group id.
-    /// * `all_exprs` - Union of all expressions in the new group.
     pub fn new(new_repr_group_id: GroupId) -> Self {
         Self {
             new_repr_group_id,
-            all_exprs: Vec::new(),
             merged_groups: HashMap::new(),
         }
     }

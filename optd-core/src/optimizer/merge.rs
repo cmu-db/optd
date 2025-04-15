@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use super::Optimizer;
 use crate::{
-    cir::{GoalId, GroupId, ImplementationRule, LogicalExpressionId},
+    cir::{GoalId, GroupId, ImplementationRule, LogicalExpressionId, TransformationRule},
     error::Error,
     memo::{Memoize, MergeResult, MergedGoalInfo},
     optimizer::tasks::TaskId,
@@ -21,144 +21,145 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn handle_merge_result(&mut self, result: MergeResult) -> Result<(), Error> {
         // ## Apply group merges:
         for group_merge in result.group_merges {
-            // For each MergedGroupInfo
-            // 1. For each group
-            // - Get all new expressions in that group (see code currently in my branch, just take all, then remove the ones that are in the group).
-            // - Launch new subtasks based on subscription:
-            // (this only happens if there is a task for the group).
-            // -> Implement expression, Explore expression, ForkLogical
-            let repr_group_id = group_merge.new_repr_group_id;
-            // TODO(Sarvesh): should we ensure that the explore group is running?
-            let repr_explore_task_id = self.group_exploration_task_index.get(&repr_group_id);
-            if repr_explore_task_id.is_none() {
-                // TODO(Sarvesh): I believe we should just ignore this merge
-                continue;
-            }
-
-            for (merged_group_id, expressions) in &group_merge.merged_groups {
-                let merged_group_task_id = self.group_exploration_task_index.get(merged_group_id);
-                if merged_group_task_id.is_none() {
-                    // TODO(Sarvesh): we ignore this merged group, as it is not running and hence, has no subscribers
+            let all_exprs_by_group = group_merge.merged_groups;
+            let new_repr_group_id = group_merge.new_repr_group_id;
+            // For each group that has an exploration task, we launch new subtasks based on subscription.
+            // Note: It is fine to have duplication at this stage, we will remove duplicates later.
+            for (group_id, _) in all_exprs_by_group.iter() {
+                //
+                let Some(explore_group_task_id) =
+                    self.group_exploration_task_index.get(group_id).cloned()
+                else {
                     continue;
-                }
-                let merged_group_task_id = merged_group_task_id.unwrap();
-                let merged_group_task = self
-                    .tasks
-                    .get_mut(merged_group_task_id)
-                    .unwrap()
-                    .as_explore_group();
+                };
 
-                let fork_outs = merged_group_task.fork_logical_out.clone();
-                let optimize_goal_outs = merged_group_task.optimize_goal_out.clone();
+                let (optimize_goal_task_ids, fork_logical_task_ids) = {
+                    let explore_group_task = self
+                        .tasks
+                        .get(&explore_group_task_id)
+                        .unwrap()
+                        .as_explore_group();
 
-                let old_exprs = expressions.iter().cloned().collect::<HashSet<_>>();
+                    (
+                        explore_group_task.optimize_goal_out.clone(),
+                        explore_group_task.fork_logical_out.clone(),
+                    )
+                };
 
-                let new_exprs = group_merge
-                    .all_exprs
+                let other_groups_exprs: Vec<_> = all_exprs_by_group
                     .iter()
-                    .filter(|expr| !old_exprs.contains(expr));
+                    .filter(|(id, _)| *id != group_id)
+                    .flat_map(|(_, exprs)| exprs)
+                    .cloned()
+                    .collect();
 
-                for expr in new_exprs {
-                    for fork_out in fork_outs.iter() {
-                        // Create the continuation task
-                        let cont_with_logical_task_id = {
-                            self.create_continue_with_logical_task(*expr, *fork_out)
-                                .await?
-                        };
+                for logical_expr_id in other_groups_exprs {
+                    let transformations = self.rule_book.get_transformations().to_vec();
 
-                        // Get the fork task first
-                        let fork_task = self.tasks.get_mut(fork_out).unwrap().as_fork_logical_mut();
-                        // Update the fork task
-                        fork_task.add_continue_in(cont_with_logical_task_id);
+                    // Create transformations for each logical expression from the other groups
+                    let xform_expr_task_ids = self
+                        .create_transformation_tasks(
+                            logical_expr_id,
+                            explore_group_task_id,
+                            transformations,
+                        )
+                        .await?;
+
+                    let explore_group_task = self
+                        .get_task_mut(explore_group_task_id)
+                        .as_explore_group_mut();
+                    for task_id in xform_expr_task_ids {
+                        explore_group_task.add_transform_expr_in(task_id);
                     }
 
-                    for optimize_goal_out in optimize_goal_outs.iter() {
-                        let implementations = self.rule_book.get_implementations().to_vec();
-                        let optimize_goal_task = self
-                            .tasks
-                            .get_mut(optimize_goal_out)
-                            .unwrap()
-                            .as_optimize_goal_mut();
-                        let goal_id = optimize_goal_task.goal_id;
+                    // Create implementations for each logical expression from the other groups
+                    // for each goal that depends on the group.
+                    for optimize_goal_task_id in optimize_goal_task_ids.iter() {
+                        let goal_id = {
+                            let optimize_goal_task = self
+                                .tasks
+                                .get(optimize_goal_task_id)
+                                .unwrap()
+                                .as_optimize_goal();
+                            optimize_goal_task.goal_id
+                        };
 
-                        let task_ids = self
+                        let implementations = self.rule_book.get_implementations().to_vec();
+
+                        let impl_expr_task_ids = self
                             .create_implementation_tasks(
-                                *expr,
+                                logical_expr_id,
                                 goal_id,
-                                *optimize_goal_out,
-                                &implementations,
+                                *optimize_goal_task_id,
+                                implementations,
                             )
                             .await?;
 
                         let optimize_goal_task = self
                             .tasks
-                            .get_mut(optimize_goal_out)
+                            .get_mut(optimize_goal_task_id)
                             .unwrap()
                             .as_optimize_goal_mut();
-                        for task_id in task_ids {
+
+                        for task_id in impl_expr_task_ids {
                             optimize_goal_task.add_implement_expr_in(task_id);
                         }
                     }
+
+                    // Create continuation for each logical expression from the other groups
+                    // at each fork point that depends on the group.
+                    for fork_logical_task_id in fork_logical_task_ids.iter() {
+                        let cont_with_logical_task_id = self
+                            .create_continue_with_logical_task(
+                                logical_expr_id,
+                                *fork_logical_task_id,
+                            )
+                            .await?;
+                        let fork_logical_task = self
+                            .tasks
+                            .get_mut(fork_logical_task_id)
+                            .unwrap()
+                            .as_fork_logical_mut();
+                        fork_logical_task.add_continue_in(cont_with_logical_task_id);
+                    }
                 }
             }
-            // 2. Merge the entire graph as follows:
-            // - Get all explore group tasks from each merged group from the index
-            // -> If none, do nothing
-            // -> Exactly one task present:
-            // --> Update indexes
-            // -> If more than one:
-            // --> Take one, and merge all hashsets.
-            // --> Update indexes
         }
 
-        // 3. Go to all subscribers and publishers of that consolidated task, and filter
-        // out all the tasks that have the same logical expression id (using the repr).
-        // --> Cancel those tasks (i.e. remove from HashMap) and remove from graph.
-
-        // ## Apply goal merges:
-        // @alexis
-        // 1. For each goal
-        // - Get all new members in that goal (ditto).
-        // - Get optional new best cost from all (also see code currently on my branch!).
-        // - For all subscribers to goal notify the best new cost.
-        // -> Continuations, OptimizePlan [OptimizeGoal is a bit different, as they also
-        // need the new members to do anything].
-        // [Aside] for OptimizeGoal: send the new members and launch tasks accordingly
-        // (i.e. CostExpression, and OptimizeGoal).
-        // 2. Merge the entire graph just like for groups.
-        // -> Except we also need to report the PhysicalExpressionID merged, so that we
-        // can adapt that index correctly too (not required for LogicalExpressionID).
-        // 3. Go to all subscribers of consolidated OptimizeGoal task, and remove the ones 	// appear twice using repr.
-
-        // ## Handle dirty stuff:
-        // 0. Aside: we need a way to know inside what group the dirty transformation/implementation belongs, as we don't have an index for that.
-        // 1. Find the task corresponding to the dirty cost expression / implement expression / transform expression.
-        // 2. Execute:
-        // - If does not exist, do nothing.
-        // - If exists, but has already started (boolean), do nothing.
-        // - If exists, and has not started: schedule the job, and set the flag to true.
-
-        // ## Apply goal merges:
-        // Similar approach...
-        // (@yuchen draft):
-        // 1. For each goal
-        // - Get the (old) best costed expression in that goal
-        // - What to do with goal members?
-        // - Launch new tasks blindly based on subscription:
-        // -> CostExpression, ForkCostedPhysical
-        // 2. Merge the entire graph as follows:
-        // - Get all tasks from each merged goal
-        // If none, do nothing.
-        // Exactly one task present:
-        // --> Update indexes
-        // If more than one:
-        // --> Take one and merge all hashsets.
-        // --> Update indexes
-        // 3. TODO:
-
-        // Handle dirty transformation / implementation / costing.
-
         Ok(())
+    }
+
+    async fn create_implementation_tasks(
+        &mut self,
+        expr: LogicalExpressionId,
+        goal_id: GoalId,
+        optimize_goal_out: TaskId,
+        implementations: Vec<ImplementationRule>,
+    ) -> Result<Vec<TaskId>, Error> {
+        let mut task_ids = Vec::with_capacity(implementations.len());
+        for rule in implementations {
+            let impl_expr_task_id = self
+                .create_implement_expression_task(rule, expr, goal_id, optimize_goal_out)
+                .await?;
+            task_ids.push(impl_expr_task_id);
+        }
+        Ok(task_ids)
+    }
+
+    async fn create_transformation_tasks(
+        &mut self,
+        logical_expr_id: LogicalExpressionId,
+        explore_group_out: TaskId,
+        transformations: Vec<TransformationRule>,
+    ) -> Result<Vec<TaskId>, Error> {
+        let mut task_ids = Vec::with_capacity(transformations.len());
+        for rule in transformations {
+            let impl_expr_task_id = self
+                .create_transform_expression_task(rule, logical_expr_id, explore_group_out)
+                .await?;
+            task_ids.push(impl_expr_task_id);
+        }
+        Ok(task_ids)
     }
 
     /// Helper method to merge exploration tasks for merged groups.
@@ -268,22 +269,5 @@ impl<M: Memoize> Optimizer<M> {
         //             .insert(new_repr_goal_id, *primary_task_id);
         //     }
         // }
-    }
-
-    async fn create_implementation_tasks(
-        &mut self,
-        expr: LogicalExpressionId,
-        goal_id: GoalId,
-        optimize_goal_out: TaskId,
-        implementations: &[ImplementationRule],
-    ) -> Result<Vec<TaskId>, Error> {
-        let mut task_ids = Vec::new();
-        for rule in implementations {
-            let impl_expr_task_id = self
-                .create_implement_expression_task(rule.clone(), expr, goal_id, optimize_goal_out)
-                .await?;
-            task_ids.push(impl_expr_task_id);
-        }
-        Ok(task_ids)
     }
 }

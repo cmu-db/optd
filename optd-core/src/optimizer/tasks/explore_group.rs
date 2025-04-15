@@ -38,7 +38,7 @@ impl ExploreGroupTask {
         }
     }
 
-    fn add_transform_expr_in(&mut self, task_id: TaskId) {
+    pub fn add_transform_expr_in(&mut self, task_id: TaskId) {
         self.transform_expr_in.push(task_id);
     }
 }
