@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use super::Optimizer;
+use super::{Optimizer, tasks::Task};
 use crate::{
     cir::{GoalId, GroupId, ImplementationRule, LogicalExpressionId, TransformationRule},
     error::Error,
@@ -19,13 +19,13 @@ impl<M: Memoize> Optimizer<M> {
     /// # Parameters
     /// * `result` - The merge result to handle.
     pub(super) async fn handle_merge_result(&mut self, result: MergeResult) -> Result<(), Error> {
-        // ## Apply group merges:
+        // <I. Apply group merges>
         for group_merge in result.group_merges {
             // collect all the explore group tasks for merged groups.
             let mut explore_group_tasks = Vec::new();
             let all_exprs_by_group = group_merge.merged_groups;
             let new_repr_group_id = group_merge.new_repr_group_id;
-            // For each group that has an exploration task, we launch new subtasks based on subscription.
+            // Step 1: For each group that has an exploration task, we launch new subtasks based on subscription.
             // Note: It is fine to have duplication at this stage, we will remove duplicates later.
             for (group_id, _) in all_exprs_by_group.iter() {
                 //
@@ -127,10 +127,10 @@ impl<M: Memoize> Optimizer<M> {
                     }
                 }
             }
-
-            // Merge the explore group tasks.
-            match explore_group_tasks.as_slice() {
-                [] => (), // No tasks exist, nothing to do.
+            // END Step 1.
+            // BEGIN Step 2: Merge the explore group tasks.
+            let maybe_primary_task = match explore_group_tasks.as_slice() {
+                [] => None, // No tasks exist, nothing to do.
                 [(task_id, group_id)] => {
                     // Just one task exists - update its index.
                     if *group_id != new_repr_group_id {
@@ -138,37 +138,90 @@ impl<M: Memoize> Optimizer<M> {
                     }
                     self.group_exploration_task_index
                         .insert(new_repr_group_id, *task_id);
+
+                    let mut primary_task = self.tasks.remove(task_id).unwrap().into_explore_group();
+                    primary_task.group_id = new_repr_group_id;
+                    Some(primary_task)
                 }
                 [(primary_task_id, primary_group_id), rest @ ..] => {
                     // Multiple tasks - merge them into the primary task.
-                    let mut optimize_goal_out = Vec::new();
-                    let mut fork_logical_out = Vec::new();
-                    let mut transform_expr_in = Vec::new();
+                    let mut optimize_goal_task_ids = Vec::new();
+                    let mut fork_logical_task_ids = Vec::new();
+                    let mut transform_expr_task_ids = Vec::new();
 
                     for (task_id, group_id) in rest {
                         let task = self.tasks.remove(task_id).unwrap().into_explore_group();
                         self.group_exploration_task_index.remove(group_id);
-                        optimize_goal_out.extend(task.optimize_goal_out);
-                        fork_logical_out.extend(task.fork_logical_out);
-                        transform_expr_in.extend(task.transform_expr_in);
+                        optimize_goal_task_ids.extend(task.optimize_goal_out);
+                        fork_logical_task_ids.extend(task.fork_logical_out);
+                        transform_expr_task_ids.extend(task.transform_expr_in);
                     }
 
-                    let primary_task = self
+                    let mut primary_task = self
                         .tasks
-                        .get_mut(primary_task_id)
+                        .remove(primary_task_id)
                         .unwrap()
-                        .as_explore_group_mut();
-                    primary_task.optimize_goal_out.extend(optimize_goal_out);
-                    primary_task.fork_logical_out.extend(fork_logical_out);
-                    primary_task.transform_expr_in.extend(transform_expr_in);
+                        .into_explore_group();
+
+                    for task_id in optimize_goal_task_ids.iter() {
+                        let optimize_goal_task =
+                            self.tasks.get_mut(task_id).unwrap().as_optimize_goal_mut();
+                        optimize_goal_task.explore_group_in = *primary_task_id;
+                    }
+                    primary_task
+                        .optimize_goal_out
+                        .extend(optimize_goal_task_ids);
+
+                    for task_id in fork_logical_task_ids.iter() {
+                        let fork_logical_task =
+                            self.tasks.get_mut(task_id).unwrap().as_fork_logical_mut();
+                        fork_logical_task.explore_group_in = *primary_task_id;
+                    }
+                    primary_task.fork_logical_out.extend(fork_logical_task_ids);
+
+                    for task_id in transform_expr_task_ids.iter() {
+                        let transform_expr_task = self
+                            .tasks
+                            .get_mut(task_id)
+                            .unwrap()
+                            .as_transform_expression_mut();
+                        transform_expr_task.explore_group_out = *primary_task_id;
+                    }
+                    primary_task
+                        .transform_expr_in
+                        .extend(transform_expr_task_ids);
                     primary_task.group_id = new_repr_group_id;
 
                     // remap the new_repr_group_id to point to the primary task.
                     self.group_exploration_task_index.remove(primary_group_id);
                     self.group_exploration_task_index
                         .insert(new_repr_group_id, *primary_task_id);
+                    Some(primary_task)
+                }
+            };
+            // END Step 2.
+            let Some(mut primary_task) = maybe_primary_task else {
+                continue;
+            };
+            // Step 3: Dedup the subscribers and publishers.
+
+            // Dedup all transform expression.
+            let mut transforms = HashMap::new();
+            for task_id in primary_task.transform_expr_in.iter() {
+                let task = self.tasks.get(task_id).unwrap().as_transform_expression();
+                let repr_expr_id = self
+                    .memo
+                    .find_repr_logical_expr(task.logical_expr_id)
+                    .await?;
+                if let Some(old_task_id) =
+                    transforms.insert((repr_expr_id, task.rule.clone()), *task_id)
+                {
+                    // Remove old task.
+                    // TODO: Unlink subtree, recursively.
+                    self.tasks.remove(&old_task_id);
                 }
             }
+            primary_task.transform_expr_in = transforms.values().cloned().collect();
         }
 
         Ok(())
