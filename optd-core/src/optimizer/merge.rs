@@ -36,7 +36,7 @@ impl<M: Memoize> Optimizer<M> {
             }
 
             for (merged_group_id, expressions) in &group_merge.merged_groups {
-                let merged_group_task_id = self.group_exploration_task_index.get(&merged_group_id);
+                let merged_group_task_id = self.group_exploration_task_index.get(merged_group_id);
                 if merged_group_task_id.is_none() {
                     // TODO(Sarvesh): we ignore this merged group, as it is not running and hence, has no subscribers
                     continue;
