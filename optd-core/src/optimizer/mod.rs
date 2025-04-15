@@ -1,6 +1,6 @@
 use crate::cir::{
-    Cost, Goal, GoalId, GroupId, LogicalPlan, LogicalProperties, PartialLogicalPlan,
-    PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan, RuleBook,
+    Cost, Goal, GoalId, GroupId, LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan,
+    PhysicalExpressionId, RuleBook,
 };
 use crate::error::Error;
 use crate::memo::Memoize;
@@ -8,10 +8,7 @@ use EngineMessageKind::*;
 pub use client::{Client, QueryInstance};
 use client::{ClientMessage, QueryInstanceId};
 use futures::StreamExt;
-use futures::{
-    SinkExt,
-    channel::mpsc::{self, Receiver, Sender},
-};
+use futures::channel::mpsc;
 
 use jobs::{Job, JobId};
 use optd_dsl::analyzer::hir::Value;
@@ -32,22 +29,6 @@ mod tasks;
 /// Default maximum number of concurrent jobs to run in the optimizer.
 const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1000;
 
-/// External client request to optimize a query in the optimizer.
-///
-/// Defines the public API for submitting a query and receiving execution plans.
-#[derive(Debug)]
-pub struct OptimizeRequest {
-    /// The logical plan to optimize.
-    pub plan: LogicalPlan,
-
-    /// Channel for receiving optimized physical plans.
-    ///
-    /// Streams results back as they become available, allowing clients to:
-    /// * Receive progressively better plans during optimization.
-    /// * Terminate early when a "good enough" plan is found.
-    pub response_tx: oneshot::Sender<PhysicalPlan>,
-}
-
 /// Messages passed within the optimization system.
 ///
 /// Each message that includes a JobId represents the result of a completed job,
@@ -66,8 +47,8 @@ impl EngineMessage {
     }
 }
 
-
 /// Messages sent to the optimizer by the DSL engine to change the state of the memo.
+#[derive(Clone)]
 pub enum EngineMessageKind {
     /// New logical plan alternative for a group from applying transformation rules.
     /// Access the parent of related task (ExploreGroup) to get the group id.
@@ -92,10 +73,10 @@ pub enum EngineMessageKind {
     /// Subscribe to costed physical expressions for a goal.
     // TODO(yuchen): either pass in the budget or as part of the continuation.
     SubscribeGoal(Goal, Continuation<Value, EngineResponse<EngineMessageKind>>),
-  
+
     /// Retrieve logical properties for a specific group.
     #[allow(unused)]
-    RetrieveProperties(GroupId, Sender<LogicalProperties>),
+    RetrieveProperties(GroupId, mpsc::Sender<LogicalProperties>),
 
     /// Associate logical properties with a group.
     /// Note: logical property are on-demand computed.
@@ -135,7 +116,7 @@ pub struct Optimizer<M: Memoize> {
     running_jobs: HashMap<JobId, Job>,
 
     /// Maps pending derives to a sinle job id and a list of senders that retrieve logical properties.
-    pending_derives: HashMap<GroupId, (JobId, Vec<oneshot::Sender<LogicalProperties>>)>,
+    pending_derives: HashMap<GroupId, (JobId, Vec<mpsc::Sender<LogicalProperties>>)>,
 
     next_job_id: JobId,
     max_concurrent_jobs: usize,
@@ -300,8 +281,8 @@ mod tests {
     use super::*;
     use crate::{
         cir::{
-            Child, GoalMemberId, LogicalExpression, Operator, OperatorData, PhysicalExpression,
-            PhysicalProperties, PropertiesData,
+            Child, GoalMemberId, LogicalExpression, LogicalPlan, Operator, OperatorData,
+            PhysicalExpression, PhysicalPlan, PhysicalProperties, PropertiesData,
         },
         memo::memory::MemoryMemo,
     };

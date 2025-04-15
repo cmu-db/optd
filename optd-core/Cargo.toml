@@ -10,5 +10,5 @@ optd-dsl = { path = "../optd-dsl" }
 async-recursion = "1.1.1"
 futures = "0.3.31"
 ordered-float = "5.0.0"
-tokio = { version = "1.44.2", features = ["macros", "rt"] }
+tokio = { version = "1.44.2", features = ["macros", "rt", "time"] }
 trait-variant = "0.1.2"

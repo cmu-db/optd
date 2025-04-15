@@ -10,7 +10,7 @@ use crate::error::Error;
 use crate::memo::Memoize;
 use EngineMessageKind::*;
 use futures::SinkExt;
-use futures::channel::{mpsc, oneshot};
+use futures::channel::mpsc;
 use optd_dsl::engine::{Engine, EngineResponse};
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
@@ -70,7 +70,7 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) fn schedule_derive_job(
         &mut self,
         group_id: GroupId,
-        sender: oneshot::Sender<LogicalProperties>,
+        sender: mpsc::Sender<LogicalProperties>,
     ) -> JobId {
         let entry = self.pending_derives.entry(group_id);
         match entry {
