@@ -13,9 +13,6 @@ use crate::{
 };
 use std::sync::Arc;
 
-// TODO(alexis) tomorrow:
-// structs, index access returns option, cleanup & audit.
-// solver: SAT...
 impl Solver<'_> {
     /// Generates type constraints from an HIR while verifying scopes.
     ///
@@ -158,14 +155,28 @@ impl Solver<'_> {
                 ctx.try_bind(name.clone(), dummy)?;
                 self.generate_pattern(sub_pattern, ctx)?;
             }
-            Struct(_, field_patterns) => {
-                // TODO: Here I should check of structs are valid... Reuse other function, <:
+            Struct(name, field_patterns) => {
                 field_patterns
                     .iter()
-                    .try_for_each(|field| self.generate_pattern(field, ctx))?;
+                    .enumerate()
+                    .try_for_each(|(i, field_pat)| {
+                        let field_type = TypedSpan::new(
+                            self.registry.get_product_field_type_by_index(name, i),
+                            field_pat.metadata.span.clone(),
+                        );
+
+                        self.add_constraint_subtypes(&field_type, &[field_pat.metadata.clone()]);
+                        self.generate_pattern(field_pat, ctx)
+                    })?;
             }
             Operator(_) => panic!("Operators may not be in the HIR yet"),
             ArrayDecomp(head, tail) => {
+                let head_ty = TypedSpan::new(
+                    Type::Array(head.metadata.ty.clone().into()),
+                    head.metadata.span.clone(),
+                );
+                self.add_constraint_subtypes(&pattern.metadata, &[head_ty, tail.metadata.clone()]);
+
                 self.generate_pattern(head, ctx)?;
                 self.generate_pattern(tail, ctx)?;
             }
@@ -457,11 +468,16 @@ impl Solver<'_> {
                     .iter()
                     .try_for_each(|expr| self.generate_expr(expr, ctx.clone()))?;
             }
-            CoreData::Struct(_name, exprs) => {
-                // TODO: Here I should check of structs are valid (share same function, use <:, access registry)
-                exprs
-                    .iter()
-                    .try_for_each(|expr| self.generate_expr(expr, ctx.clone()))?;
+            CoreData::Struct(name, exprs) => {
+                exprs.iter().enumerate().try_for_each(|(i, field_expr)| {
+                    let field_type = TypedSpan::new(
+                        self.registry.get_product_field_type_by_index(name, i),
+                        field_expr.metadata.span.clone(),
+                    );
+
+                    self.add_constraint_subtypes(&field_type, &[field_expr.metadata.clone()]);
+                    self.generate_expr(field_expr, ctx.clone())
+                })?;
             }
             CoreData::Map(_) | CoreData::Logical(_) | CoreData::Physical(_) => {
                 panic!("Types may not be in the HIR yet")

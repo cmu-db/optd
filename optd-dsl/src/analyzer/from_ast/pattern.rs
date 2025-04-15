@@ -47,48 +47,44 @@ impl ASTConverter {
         use Type::*;
 
         let span = spanned_pattern.span.clone();
+        let mut ty = self.next_unknown();
 
-        let (kind, ty) = match &*spanned_pattern.value {
+        let kind = match &*spanned_pattern.value {
             AstPattern::Error => panic!("AST should no longer contain errors"),
-
             AstPattern::Bind(name, inner_pattern) => {
                 let hir_inner = self.convert_pattern(inner_pattern)?;
-                (
-                    Bind((*name.value).clone(), hir_inner.clone().into()),
-                    hir_inner.metadata.ty.clone(),
-                )
-            }
+                ty = hir_inner.metadata.ty.clone();
 
+                Bind((*name.value).clone(), hir_inner.into())
+            }
             AstPattern::Constructor(name, args) => {
                 self.validate_constructor(name, &span, args.len())?;
-                let adt_type = Adt(*name.value.clone());
+                ty = Adt(*name.value.clone());
 
                 let hir_args = args
                     .iter()
                     .map(|arg| self.convert_pattern(arg))
                     .collect::<Result<Vec<_>, _>>()?;
 
-                (Struct((*name.value).clone(), hir_args), adt_type)
+                Struct((*name.value).clone(), hir_args)
             }
-
             AstPattern::Literal(lit) => {
                 let (hir_lit, hir_ty) = self.convert_literal(lit);
-                (Literal(hir_lit), hir_ty)
+                ty = hir_ty;
+
+                Literal(hir_lit)
             }
+            AstPattern::Wildcard => Wildcard,
+            AstPattern::EmptyArray => {
+                ty = Array(self.next_unknown().into());
 
-            AstPattern::Wildcard => (Wildcard, self.next_unknown()),
-
-            AstPattern::EmptyArray => (EmptyArray, Array(Nothing.into())),
-
+                EmptyArray
+            }
             AstPattern::ArrayDecomp(head, tail) => {
                 let hir_head = self.convert_pattern(head)?;
                 let hir_tail = self.convert_pattern(tail)?;
-                let element_type = hir_head.metadata.ty.clone();
 
-                (
-                    ArrayDecomp(hir_head.into(), hir_tail.into()),
-                    Array(element_type.into()),
-                )
+                ArrayDecomp(hir_head.into(), hir_tail.into())
             }
         };
 

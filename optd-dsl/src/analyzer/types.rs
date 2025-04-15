@@ -331,18 +331,7 @@ impl TypeRegistry {
     ///
     /// This function should only be called once the registry has been validated,
     /// or it might panic.
-    ///
-    /// # Arguments
-    ///
-    /// * `adt_name` - The identifier of the ADT
-    /// * `field_name` - The identifier of the field to retrieve
-    ///
-    /// # Returns
-    ///
-    /// The type of the field.
     pub fn get_product_field_type(&self, adt_name: &Identifier, field_name: &Identifier) -> Type {
-        use Type::*;
-
         let fields = self
             .product_fields
             .get(adt_name)
@@ -354,31 +343,21 @@ impl TypeRegistry {
             .cloned()
             .unwrap_or_else(|| panic!("Field '{}' not found in ADT '{}'", field_name, adt_name));
 
-        fn convert(ty: AstType) -> Type {
-            match ty {
-                AstType::Identifier(name) => Adt(name),
-                AstType::Int64 => I64,
-                AstType::String => Type::String,
-                AstType::Bool => Type::Bool,
-                AstType::Unit => Type::Unit,
-                AstType::Float64 => Type::F64,
-                AstType::Array(inner) => convert(*inner.value),
-                AstType::Closure(params, ret) => {
-                    Closure(convert(*params.value).into(), convert(*ret.value).into())
-                }
-                AstType::Tuple(inner) => {
-                    let inner_types = inner.iter().map(|ty| convert(*ty.value.clone())).collect();
-                    Tuple(inner_types)
-                }
-                AstType::Map(key, val) => {
-                    Map(convert(*key.value).into(), convert(*val.value).into())
-                }
-                AstType::Questioned(inner) => Optional(convert(*inner.value).into()),
-                _ => panic!("Registry has not been properly valided"),
-            }
-        }
+        convert_ast_type(*field.ty.value)
+    }
 
-        convert(*field.ty.value)
+    /// Retrieves the type of a field from a product ADT by index position.
+    ///
+    /// This function should only be called once the registry has been validated,
+    /// or it might panic.
+    pub fn get_product_field_type_by_index(&self, adt_name: &Identifier, index: usize) -> Type {
+        let fields = self
+            .product_fields
+            .get(adt_name)
+            .unwrap_or_else(|| panic!("ADT '{}' not found in type registry", adt_name));
+
+        let field = &fields[index];
+        convert_ast_type(*field.ty.value.clone())
     }
 }
 
@@ -393,6 +372,38 @@ pub(super) fn create_function_type(param_types: &[Type], return_type: &Type) -> 
     };
 
     Type::Closure(param_type.into(), return_type.clone().into())
+}
+
+/// Converts an AST type to a Type enum.
+fn convert_ast_type(ty: AstType) -> Type {
+    use Type::*;
+
+    match ty {
+        AstType::Identifier(name) => Adt(name),
+        AstType::Int64 => I64,
+        AstType::String => String,
+        AstType::Bool => Bool,
+        AstType::Unit => Unit,
+        AstType::Float64 => F64,
+        AstType::Array(inner) => Array(convert_ast_type(*inner.value).into()),
+        AstType::Closure(params, ret) => Closure(
+            convert_ast_type(*params.value).into(),
+            convert_ast_type(*ret.value).into(),
+        ),
+        AstType::Tuple(inner) => {
+            let inner_types = inner
+                .iter()
+                .map(|ty| convert_ast_type(*ty.value.clone()))
+                .collect();
+            Tuple(inner_types)
+        }
+        AstType::Map(key, val) => Map(
+            convert_ast_type(*key.value).into(),
+            convert_ast_type(*val.value).into(),
+        ),
+        AstType::Questioned(inner) => Optional(convert_ast_type(*inner.value).into()),
+        _ => panic!("Registry has not been properly validated"),
+    }
 }
 
 #[cfg(test)]

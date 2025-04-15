@@ -527,7 +527,7 @@ fn get_indexed_item(items: &[Value], index: usize) -> Value {
     if index < items.len() {
         items[index].clone()
     } else {
-        panic!("index out of bounds: {} >= {}", index, items.len());
+        Value::new(CoreData::None)
     }
 }
 
@@ -1397,9 +1397,8 @@ mod tests {
         ]))));
 
         // Access array[2] which should be 30
-        let index_expr = Arc::new(Expr::new(Call(array_expr, vec![lit_expr(int(2))])));
-
-        let results = evaluate_and_collect(index_expr, engine, harness).await;
+        let index_expr = Arc::new(Expr::new(Call(array_expr.clone(), vec![lit_expr(int(2))])));
+        let results = evaluate_and_collect(index_expr, engine.clone(), harness.clone()).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -1408,6 +1407,19 @@ mod tests {
                 assert_eq!(lit, &Literal::Int64(30));
             }
             _ => panic!("Expected integer literal"),
+        }
+
+        // Test out-of-bounds access: array[10] which should return None
+        let out_of_bounds_expr = Arc::new(Expr::new(Call(array_expr, vec![lit_expr(int(10))])));
+        let out_of_bounds_results = evaluate_and_collect(out_of_bounds_expr, engine, harness).await;
+
+        // Check that out-of-bounds access returns None
+        assert_eq!(out_of_bounds_results.len(), 1);
+        match &out_of_bounds_results[0].data {
+            CoreData::None => {
+                // Expected None value
+            }
+            other => panic!("Expected None, got: {:?}", other),
         }
     }
 
