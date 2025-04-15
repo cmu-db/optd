@@ -23,4 +23,4 @@ futures = "0.3.31"
 ordered-float = "5.0.0"
 
 [dev-dependencies]
-tokio = { version = "1.44.2", features = ["macros"] }
+tokio = { version = "1.44.2", features = ["full"] }
