@@ -43,6 +43,9 @@ impl Solver<'_> {
                 Function(Closure(args, body)) => {
                     let ctx =
                         self.create_function_scope(hir.context.clone(), &args[..], &fun.metadata)?;
+
+                    let ret_type = self.ty_return.as_ref().cloned().unwrap();
+                    self.add_constraint_subtypes(&ret_type, &[body.metadata.clone()]);
                     self.generate_expr(body, ctx)
                 }
                 Function(Udf(_)) => Ok(()), // UDFs have no body to check.
@@ -501,8 +504,11 @@ impl Solver<'_> {
             }
             CoreData::Function(FunKind::Udf(_)) => panic!("UDFs may not appear within functions"),
             CoreData::Function(FunKind::Closure(params, body)) => {
-                // TODO: return (both real and implicit)
                 let fn_ctx = self.create_function_scope(ctx, &params[..], &expr.metadata)?;
+
+                let ret_type = self.ty_return.as_ref().cloned().unwrap();
+                self.add_constraint_subtypes(&ret_type, &[body.metadata.clone()]);
+
                 self.generate_expr(body, fn_ctx)?;
             }
             CoreData::Fail(expr) => {

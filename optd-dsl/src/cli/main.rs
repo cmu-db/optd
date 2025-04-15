@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let ast = match parse(&source, &options) {
                 Ok(ast) => {
-                    log_success("Parse successful");
+                    println!("{}", "Parse successful".green());
                     if *print_ast {
                         println!("\nAST Structure:\n{:#?}", ast);
                     }
@@ -113,7 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let (hir, type_registry) = match ast_to_hir(&source, ast) {
                 Ok((hir, type_registry)) => {
-                    log_success("AST to HIR conversion successful");
+                    println!("{}", "AST to HIR conversion successful".green());
                     if *print_typedspan_hir {
                         println!("\nTyped-Span HIR Structure:\n{:#?}", hir);
                     }
@@ -128,7 +128,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             match registry_check(&source, &source_path, &type_registry) {
-                Ok(_) => log_success("TypeRegistry check successful"),
+                Ok(_) => println!("{}", "TypeRegistry check successful".green()),
                 Err(error) => handle_errors("TypeRegistry check failed", &[error]),
             }
 
@@ -139,11 +139,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             match infer(&source, &hir, &type_registry) {
                 Ok(_) => {
-                    log_success("Type inference successful");
-                    println!(
-                        "\n{}",
-                        "✔ Compilation completed successfully!".green().bold()
-                    );
+                    "Type inference successful".green();
+                    println!("\n{}", "Compilation completed successfully!".green().bold());
                 }
                 Err(error) => handle_errors("Type inference failed", &[error]),
             }
@@ -190,8 +187,4 @@ fn handle_errors(msg: &str, errors: &[CompileError]) -> ! {
             .expect("Failed to print error");
     }
     std::process::exit(1);
-}
-
-fn log_success(msg: &str) {
-    println!("{} {}", "✔".green().bold(), msg.green());
 }
