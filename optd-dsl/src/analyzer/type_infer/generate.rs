@@ -104,6 +104,7 @@ impl Solver<'_> {
             Call(func, args) => self.generate_call(expr, func, args, ctx),
             Map(entries) => self.generate_map(expr, entries, ctx),
             Ref(name) => self.generate_ref(expr, name, &ctx),
+            Return(_) => todo!(), // TODO: Have upper constraint somewhere...
             FieldAccess(obj, field_name) => self.generate_field_access(expr, obj, field_name, ctx),
             CoreExpr(core_data) => self.generate_core_expr(expr, core_data, ctx),
             CoreVal(value) => self.generate_core_val(expr, value, ctx),

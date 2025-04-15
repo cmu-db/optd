@@ -14,68 +14,140 @@ use crate::capture;
 use crate::engine::{Continuation, Engine, EngineResponse};
 use std::sync::Arc;
 
-/// Short-circuit evaluation for logical AND operator.
-///
-/// Evaluates the left operand first. If it's false, immediately returns false without
-/// evaluating the right operand. If the left operand is true, evaluates the right operand
-/// and returns its result.
-///
-/// # Parameters
-///
-/// * `left` - The left operand
-/// * `right` - The right operand
-/// * `engine` - The evaluation engine
-/// * `k` - The continuation to receive evaluation results
-pub(crate) async fn evaluate_and<O>(
-    left: Arc<Expr>,
-    right: Arc<Expr>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    // For AND:
-    // - Short-circuit when left is false (return false)
-    // - Continue when left is true (evaluate right and return its value)
-    evaluate_logical_op(
-        left, right, engine, k, false, // short_circuit_value = false
-        true,  // continue_condition = true
-        "&&",  // op_name
-    )
-    .await
-}
+impl<O: Clone + Send + 'static> Engine<O> {
+    /// Short-circuit evaluation for logical AND operator.
+    ///
+    /// Evaluates the left operand first. If it's false, immediately returns false without
+    /// evaluating the right operand. If the left operand is true, evaluates the right operand
+    /// and returns its result.
+    ///
+    /// # Parameters
+    ///
+    /// * `left` - The left operand
+    /// * `right` - The right operand
+    /// * `k` - The continuation to receive evaluation results
+    pub(crate) async fn evaluate_and(
+        self,
+        left: Arc<Expr>,
+        right: Arc<Expr>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        // For AND:
+        // - Short-circuit when left is false (return false)
+        // - Continue when left is true (evaluate right and return its value)
+        self.evaluate_logical_op(
+            left, right, k, false, // short_circuit_value = false
+            true,  // continue_condition = true
+            "&&",  // op_name
+        )
+        .await
+    }
 
-/// Short-circuit evaluation for logical OR operator.
-///
-/// Evaluates the left operand first. If it's true, immediately returns true without
-/// evaluating the right operand. If the left operand is false, evaluates the right operand
-/// and returns its result.
-///
-/// # Parameters
-///
-/// * `left` - The left operand
-/// * `right` - The right operand
-/// * `engine` - The evaluation engine
-/// * `k` - The continuation to receive evaluation results
-pub(crate) async fn evaluate_or<O>(
-    left: Arc<Expr>,
-    right: Arc<Expr>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    // For OR:
-    // - Short-circuit when left is true (return true)
-    // - Continue when left is false (evaluate right and return its value)
-    evaluate_logical_op(
-        left, right, engine, k, true,  // short_circuit_value = true
-        false, // continue_condition = false
-        "||",  // op_name
-    )
-    .await
+    /// Short-circuit evaluation for logical OR operator.
+    ///
+    /// Evaluates the left operand first. If it's true, immediately returns true without
+    /// evaluating the right operand. If the left operand is false, evaluates the right operand
+    /// and returns its result.
+    ///
+    /// # Parameters
+    ///
+    /// * `left` - The left operand
+    /// * `right` - The right operand
+    /// * `k` - The continuation to receive evaluation results
+    pub(crate) async fn evaluate_or(
+        self,
+        left: Arc<Expr>,
+        right: Arc<Expr>,
+        k: Continuation<Value, EngineResponse<O>>,
+    ) -> EngineResponse<O> {
+        // For OR:
+        // - Short-circuit when left is true (return true)
+        // - Continue when left is false (evaluate right and return its value)
+        self.evaluate_logical_op(
+            left, right, k, true,  // short_circuit_value = true
+            false, // continue_condition = false
+            "||",  // op_name
+        )
+        .await
+    }
+
+    /// Helper function to implement short-circuit evaluation for logical operators.
+    ///
+    /// This generic implementation handles both AND and OR with proper short-circuiting:
+    /// - For AND: if left is false, short-circuit to false.
+    /// - For OR: if left is true, short-circuit to true.
+    async fn evaluate_logical_op(
+        self,
+        left: Arc<Expr>,
+        right: Arc<Expr>,
+        k: Continuation<Value, EngineResponse<O>>,
+        short_circuit_value: bool,
+        continue_condition: bool,
+        op_name: &'static str,
+    ) -> EngineResponse<O> {
+        let engine = self.clone();
+
+        self.evaluate(
+            left,
+            Arc::new(move |left_val| {
+                Box::pin(capture!([right, k, engine], async move {
+                    engine
+                        .handle_logical_op_result(
+                            left_val,
+                            right,
+                            k,
+                            short_circuit_value,
+                            continue_condition,
+                            op_name,
+                        )
+                        .await
+                }))
+            }),
+        )
+        .await
+    }
+
+    /// Handles the result of the left operand evaluation in a logical operation.
+    ///
+    /// Decides whether to short-circuit or evaluate the right operand based on the left operand's value.
+    async fn handle_logical_op_result(
+        self,
+        left_val: Value,
+        right: Arc<Expr>,
+        k: Continuation<Value, EngineResponse<O>>,
+        short_circuit_value: bool,
+        continue_condition: bool,
+        op_name: &'static str,
+    ) -> EngineResponse<O> {
+        use Literal::*;
+
+        match left_val.data {
+            // Check if the left operand triggers short-circuit.
+            CoreData::Literal(Bool(b)) => {
+                if b == continue_condition {
+                    // Continue evaluation with right operand
+                    self.evaluate(
+                        right,
+                        Arc::new(move |right_val| {
+                            Box::pin(capture!([k], async move {
+                                match right_val.data {
+                                    CoreData::Literal(Bool(b)) => {
+                                        k(Value::new(CoreData::Literal(Bool(b)))).await
+                                    }
+                                    _ => panic!("Expected boolean in {} operation", op_name),
+                                }
+                            }))
+                        }),
+                    )
+                    .await
+                } else {
+                    // Short-circuit.
+                    k(Value::new(CoreData::Literal(Bool(short_circuit_value)))).await
+                }
+            }
+            _ => panic!("Expected boolean in {} operation", op_name),
+        }
+    }
 }
 
 /// Evaluates a binary operation between two values.
@@ -155,80 +227,6 @@ pub(crate) fn eval_binary_op(left: Value, op: &BinOp, right: Value) -> Value {
         // Any other combination of value types or operations is not supported.
         expr => panic!("Invalid binary operation: {:?}", expr),
     }
-}
-
-/// Helper function to implement short-circuit evaluation for logical operators.
-///
-/// This generic implementation handles both AND and OR with proper short-circuiting:
-/// - For AND: if left is false, short-circuit to false.
-/// - For OR: if left is true, short-circuit to true.
-async fn evaluate_logical_op<O>(
-    left: Arc<Expr>,
-    right: Arc<Expr>,
-    engine: Engine,
-    k: Continuation<Value, EngineResponse<O>>,
-    short_circuit_value: bool,
-    continue_condition: bool,
-    op_name: &'static str,
-) -> EngineResponse<O>
-where
-    O: Send + 'static,
-{
-    engine
-        .clone()
-        .evaluate(
-            left,
-            Arc::new(move |left_val| {
-                Box::pin(capture!(
-                    [
-                        right,
-                        engine,
-                        k,
-                        short_circuit_value,
-                        continue_condition,
-                        op_name
-                    ],
-                    async move {
-                        match left_val.data {
-                            // Check if the left operand triggers short-circuit.
-                            CoreData::Literal(Literal::Bool(b)) => {
-                                if b == continue_condition {
-                                    engine
-                                        .evaluate(
-                                            right,
-                                            Arc::new(move |right_val| {
-                                                Box::pin(capture!([k, op_name], async move {
-                                                    match right_val.data {
-                                                        CoreData::Literal(Literal::Bool(b)) => {
-                                                            k(Value::new(CoreData::Literal(
-                                                                Literal::Bool(b),
-                                                            )))
-                                                            .await
-                                                        }
-                                                        _ => panic!(
-                                                            "Expected boolean in {} operation",
-                                                            op_name
-                                                        ),
-                                                    }
-                                                }))
-                                            }),
-                                        )
-                                        .await
-                                } else {
-                                    // Short-circuit.
-                                    k(Value::new(CoreData::Literal(Literal::Bool(
-                                        short_circuit_value,
-                                    ))))
-                                    .await
-                                }
-                            }
-                            _ => panic!("Expected boolean in {} operation", op_name),
-                        }
-                    }
-                ))
-            }),
-        )
-        .await
 }
 
 #[cfg(test)]

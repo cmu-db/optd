@@ -1,11 +1,8 @@
-use futures::future::BoxFuture;
-
 use crate::analyzer::hir::{Expr, Value};
 use crate::capture;
-use crate::engine::Engine;
+use crate::engine::{Engine, EngineResponse};
+use futures::future::BoxFuture;
 use std::sync::Arc;
-
-use super::EngineResponse;
 
 /// A type alias for continuations used in the rule engine.
 ///
@@ -13,63 +10,50 @@ use super::EngineResponse;
 /// expand (enumerate) expressions within a group.
 pub type Continuation<I, O> = Arc<dyn Fn(I) -> BoxFuture<'static, O> + Send + Sync>;
 
-/// Evaluates a sequence of expressions and collects their values using continuation passing style.
-///
-/// # Parameters
-/// * `exprs` - The expressions to evaluate
-/// * `engine` - The evaluation engine
-/// * `k` - The continuation to receive all evaluated values
-pub(super) fn evaluate_sequence<O>(
-    exprs: Vec<Arc<Expr>>,
-    engine: Engine,
-    k: Continuation<Vec<Value>, EngineResponse<O>>,
-) -> BoxFuture<'static, EngineResponse<O>>
-where
-    O: Send + 'static,
-{
-    let exprs_len = exprs.len();
-    evaluate_sequence_internal(exprs, 0, Vec::with_capacity(exprs_len), engine, k)
-}
+impl<O: Clone + Send + 'static> Engine<O> {
+    /// Evaluates a sequence of expressions and collects their values using continuation passing style.
+    ///
+    /// # Parameters
+    /// * `exprs` - The expressions to evaluate
+    /// * `k` - The continuation to receive all evaluated values
+    pub(crate) fn evaluate_sequence(
+        self,
+        exprs: Vec<Arc<Expr>>,
+        k: Continuation<Vec<Value>, EngineResponse<O>>,
+    ) -> BoxFuture<'static, EngineResponse<O>> {
+        let exprs_len = exprs.len();
+        self.evaluate_sequence_internal(exprs, 0, Vec::with_capacity(exprs_len), k)
+    }
 
-/// Internal implementation for sequential evaluation.
-///
-/// # Parameters
-/// * `exprs` - The expressions to evaluate
-/// * `index` - The current expression index
-/// * `values` - Accumulated expression values
-/// * `engine` - The evaluation engine
-/// * `k` - The continuation to receive all evaluated values
-fn evaluate_sequence_internal<O>(
-    exprs: Vec<Arc<Expr>>,
-    index: usize,
-    values: Vec<Value>,
-    engine: Engine,
-    k: Continuation<Vec<Value>, EngineResponse<O>>,
-) -> BoxFuture<'static, EngineResponse<O>>
-where
-    O: Send + 'static,
-{
-    Box::pin(async move {
-        if index >= exprs.len() {
-            // All expressions evaluated, call continuation with the vector
-            return k(values).await;
-        }
+    fn evaluate_sequence_internal(
+        self,
+        exprs: Vec<Arc<Expr>>,
+        index: usize,
+        values: Vec<Value>,
+        k: Continuation<Vec<Value>, EngineResponse<O>>,
+    ) -> BoxFuture<'static, EngineResponse<O>> {
+        Box::pin(async move {
+            let engine = self.clone();
 
-        // Evaluate the current expression
-        let expr = exprs[index].clone();
-        engine
-            .clone()
-            .evaluate(
+            if index >= exprs.len() {
+                return k(values).await;
+            }
+
+            let expr = exprs[index].clone();
+            self.evaluate(
                 expr,
                 Arc::new(move |expr_value| {
                     let mut next_values = values.clone();
                     next_values.push(expr_value);
 
-                    Box::pin(capture!([exprs, index, engine, k], async move {
-                        evaluate_sequence_internal(exprs, index + 1, next_values, engine, k).await
+                    Box::pin(capture!([exprs, engine, index, k], async move {
+                        engine
+                            .evaluate_sequence_internal(exprs, index + 1, next_values, k)
+                            .await
                     }))
                 }),
             )
             .await
-    })
+        })
+    }
 }

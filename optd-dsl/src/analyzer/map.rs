@@ -79,7 +79,7 @@ pub enum MapKey {
     Tuple(Vec<MapKey>),
     Struct(String, Vec<MapKey>),
 
-    /// Query structures
+    /// Plan structures
     Logical(Box<LogicalMapKey>),
     Physical(Box<PhysicalMapKey>),
 

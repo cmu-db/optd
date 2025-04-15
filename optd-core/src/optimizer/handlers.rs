@@ -17,10 +17,7 @@ use JobKind::*;
 use LogicalIngest::*;
 use OptimizerMessage::*;
 use TaskKind::*;
-use futures::{
-    SinkExt,
-    channel::{mpsc::Sender, oneshot},
-};
+use futures::{SinkExt, channel::mpsc::Sender};
 use optd_dsl::{
     analyzer::hir::Value,
     engine::{Continuation, EngineResponse},
@@ -353,7 +350,7 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_retrieve_properties(
         &mut self,
         group_id: GroupId,
-        sender: oneshot::Sender<LogicalProperties>,
+        mut sender: Sender<LogicalProperties>,
     ) -> Result<(), Error> {
         let props = self.memo.get_logical_properties(group_id).await?;
 
@@ -363,6 +360,7 @@ impl<M: Memoize> Optimizer<M> {
         tokio::spawn(async move {
             sender
                 .send(props)
+                .await
                 .expect("Failed to send properties - channel closed.");
         });
 
