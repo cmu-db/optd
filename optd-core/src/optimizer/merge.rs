@@ -21,6 +21,8 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn handle_merge_result(&mut self, result: MergeResult) -> Result<(), Error> {
         // ## Apply group merges:
         for group_merge in result.group_merges {
+            // collect all the explore group tasks for merged groups.
+            let mut explore_group_tasks = Vec::new();
             let all_exprs_by_group = group_merge.merged_groups;
             let new_repr_group_id = group_merge.new_repr_group_id;
             // For each group that has an exploration task, we launch new subtasks based on subscription.
@@ -32,6 +34,7 @@ impl<M: Memoize> Optimizer<M> {
                 else {
                     continue;
                 };
+                explore_group_tasks.push((explore_group_task_id, *group_id));
 
                 let (optimize_goal_task_ids, fork_logical_task_ids) = {
                     let explore_group_task = self
@@ -122,6 +125,48 @@ impl<M: Memoize> Optimizer<M> {
                             .as_fork_logical_mut();
                         fork_logical_task.add_continue_in(cont_with_logical_task_id);
                     }
+                }
+            }
+
+            // Merge the explore group tasks.
+            match explore_group_tasks.as_slice() {
+                [] => (), // No tasks exist, nothing to do.
+                [(task_id, group_id)] => {
+                    // Just one task exists - update its index.
+                    if *group_id != new_repr_group_id {
+                        self.group_exploration_task_index.remove(group_id);
+                    }
+                    self.group_exploration_task_index
+                        .insert(new_repr_group_id, *task_id);
+                }
+                [(primary_task_id, primary_group_id), rest @ ..] => {
+                    // Multiple tasks - merge them into the primary task.
+                    let mut optimize_goal_out = Vec::new();
+                    let mut fork_logical_out = Vec::new();
+                    let mut transform_expr_in = Vec::new();
+
+                    for (task_id, group_id) in rest {
+                        let task = self.tasks.remove(task_id).unwrap().into_explore_group();
+                        self.group_exploration_task_index.remove(group_id);
+                        optimize_goal_out.extend(task.optimize_goal_out);
+                        fork_logical_out.extend(task.fork_logical_out);
+                        transform_expr_in.extend(task.transform_expr_in);
+                    }
+
+                    let primary_task = self
+                        .tasks
+                        .get_mut(primary_task_id)
+                        .unwrap()
+                        .as_explore_group_mut();
+                    primary_task.optimize_goal_out.extend(optimize_goal_out);
+                    primary_task.fork_logical_out.extend(fork_logical_out);
+                    primary_task.transform_expr_in.extend(transform_expr_in);
+                    primary_task.group_id = new_repr_group_id;
+
+                    // remap the new_repr_group_id to point to the primary task.
+                    self.group_exploration_task_index.remove(primary_group_id);
+                    self.group_exploration_task_index
+                        .insert(new_repr_group_id, *primary_task_id);
                 }
             }
         }
