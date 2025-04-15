@@ -50,11 +50,11 @@ impl ASTConverter {
         // for invalid type annotations & constructions.
         for item in &module.items {
             if let Item::Function(spanned_fn) = item {
-                self.process_function(spanned_fn)?;
+                self.register_function(spanned_fn)?;
             }
         }
 
-        // Push the context scope of the module, as we have processed all functionss.
+        // Push the context scope of the module, as we have processed all functions.
         self.context.push_scope();
 
         Ok((
@@ -66,10 +66,10 @@ impl ASTConverter {
         ))
     }
 
-    /// Processes a function AST node and adds it to the context.
+    /// Registers a function AST node and adds it to the context.
     ///
     /// Handles function parameters, return type, and body conversion.
-    pub(super) fn process_function(
+    pub(super) fn register_function(
         &mut self,
         spanned_fn: &Spanned<Function>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
@@ -164,7 +164,7 @@ impl ASTConverter {
                             self.convert_type(&field.ty, generics)?,
                         ))
                     })
-                    .collect::<Result<Vec<_>, Box<AnalyzerErrorKind>>>()?,
+                    .collect::<Result<Vec<_>, Box<_>>>()?,
             );
         }
 

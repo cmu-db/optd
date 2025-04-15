@@ -1,6 +1,5 @@
 data LogicalProperties(schema_len: I64)
 
-data PhysicalProperties(schema_len: I64)
 
 data Scalar =
     | ColumnRef(idx: I64)
@@ -124,5 +123,5 @@ fn (expr: Logical*) join_commute: Logical? = match expr
         in
             Project(
                 Join(right, left, Inner, cond.remap(remapping)),
-                right_indices.map(i -> ColumnRef(i))
+                right_indices.map(i -> ColumnRef(i)),
             )

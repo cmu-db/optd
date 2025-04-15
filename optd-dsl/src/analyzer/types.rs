@@ -31,7 +31,8 @@ pub enum Type {
     // Special types.
     Unit,
     Universe, // All types are subtypes of Universe.
-    Never,    // Inherits all types.
+    Nothing,  // Inherits all types.
+    None,     // Inherits all optionals.
     Unknown,
 
     // User types.
@@ -169,8 +170,10 @@ impl TypeRegistry {
             // Universe is the top type - everything is a subtype of Universe
             (_, Universe) => true,
 
-            // Never is the bottom type - it is a subtype of everything
-            (Never, _) => true,
+            // Nothing is the bottom type - it is a subtype of everything
+            (Nothing, _) => true,
+
+            (None, Optional(_)) => true,
 
             // Stored and Costed type handling
             (Stored(child_inner), Stored(parent_inner)) => {
@@ -235,6 +238,55 @@ impl TypeRegistry {
 
             _ => false,
         }
+    }
+
+    /// Retrieves a field from a product ADT by name.
+    ///
+    /// # Arguments
+    ///
+    /// * `adt_name` - The identifier of the ADT
+    /// * `field_name` - The identifier of the field to retrieve
+    ///
+    /// # Returns
+    ///
+    /// The field with the specified name from the given ADT.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic in two cases:
+    /// 1. If the ADT name doesn't exist in the registry
+    /// 2. If the specified field name doesn't exist in the ADT
+    pub fn get_product_field(&self, adt_name: &Identifier, field_name: &Identifier) -> Field {
+        let fields = self
+            .product_fields
+            .get(adt_name)
+            .unwrap_or_else(|| panic!("ADT '{}' not found in type registry", adt_name));
+
+        fields
+            .iter()
+            .find(|field| *field.name.value == *field_name)
+            .cloned()
+            .unwrap_or_else(|| panic!("Field '{}' not found in ADT '{}'", field_name, adt_name))
+    }
+
+    /// Returns the number of fields in a product ADT.
+    ///
+    /// # Arguments
+    ///
+    /// * `adt_name` - The identifier of the ADT
+    ///
+    /// # Returns
+    ///
+    /// The number of fields in the specified ADT.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the ADT name doesn't exist in the registry.
+    pub fn get_field_count(&self, adt_name: &Identifier) -> usize {
+        self.product_fields
+            .get(adt_name)
+            .unwrap_or_else(|| panic!("ADT '{}' not found in type registry", adt_name))
+            .len()
     }
 }
 
@@ -637,30 +689,59 @@ mod type_registry_tests {
     }
 
     #[test]
-    fn test_never_as_bottom_type() {
+    fn test_nothing_as_bottom_type() {
         let registry = TypeRegistry::default();
 
-        // Never is a subtype of all primitive types
-        assert!(registry.is_subtype(&Type::Never, &Type::Int64));
-        assert!(registry.is_subtype(&Type::Never, &Type::String));
-        assert!(registry.is_subtype(&Type::Never, &Type::Bool));
-        assert!(registry.is_subtype(&Type::Never, &Type::Float64));
-        assert!(registry.is_subtype(&Type::Never, &Type::Unit));
-        assert!(registry.is_subtype(&Type::Never, &Type::Universe));
+        // Nothing is a subtype of all primitive types
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Int64));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::String));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Bool));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Float64));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Unit));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Universe));
 
-        // Never is a subtype of complex types
-        assert!(registry.is_subtype(&Type::Never, &Type::Array(Box::new(Type::Int64))));
-        assert!(registry.is_subtype(&Type::Never, &Type::Tuple(vec![Type::Int64, Type::Bool])));
+        // Nothing is a subtype of complex types
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Array(Box::new(Type::Int64))));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Tuple(vec![Type::Int64, Type::Bool])));
         assert!(registry.is_subtype(
-            &Type::Never,
+            &Type::Nothing,
             &Type::Closure(Box::new(Type::Int64), Box::new(Type::Bool))
         ));
 
-        // But no type is a subtype of Never (except Never itself)
-        assert!(!registry.is_subtype(&Type::Int64, &Type::Never));
-        assert!(!registry.is_subtype(&Type::Bool, &Type::Never));
-        assert!(!registry.is_subtype(&Type::Universe, &Type::Never));
-        assert!(!registry.is_subtype(&Type::Array(Box::new(Type::Int64)), &Type::Never));
+        // But no type is a subtype of Nothing (except Nothing itself)
+        assert!(!registry.is_subtype(&Type::Int64, &Type::Nothing));
+        assert!(!registry.is_subtype(&Type::Bool, &Type::Nothing));
+        assert!(!registry.is_subtype(&Type::Universe, &Type::Nothing));
+        assert!(!registry.is_subtype(&Type::Array(Box::new(Type::Int64)), &Type::Nothing));
+    }
+
+    #[test]
+    fn test_none_subtyping() {
+        let registry = TypeRegistry::default();
+
+        // Test None as a subtype of any Optional type
+        assert!(registry.is_subtype(&Type::None, &Type::Optional(Box::new(Type::Int64))));
+        assert!(registry.is_subtype(&Type::None, &Type::Optional(Box::new(Type::String))));
+        assert!(registry.is_subtype(&Type::None, &Type::Optional(Box::new(Type::Bool))));
+        assert!(registry.is_subtype(&Type::None, &Type::Optional(Box::new(Type::Float64))));
+        assert!(registry.is_subtype(&Type::None, &Type::Optional(Box::new(Type::Unit))));
+
+        // Test None with complex Optional types
+        assert!(registry.is_subtype(
+            &Type::None,
+            &Type::Optional(Box::new(Type::Array(Box::new(Type::Int64))))
+        ));
+
+        // Test that None is not a subtype of non-Optional types
+        assert!(!registry.is_subtype(&Type::None, &Type::Int64));
+        assert!(!registry.is_subtype(&Type::None, &Type::String));
+
+        // None is still a subtype of Universe (as all types are)
+        assert!(registry.is_subtype(&Type::None, &Type::Universe));
+
+        // None is not equal to Nothing
+        assert!(!registry.is_subtype(&Type::None, &Type::Nothing));
+        assert!(registry.is_subtype(&Type::Nothing, &Type::None));
     }
 
     #[test]
@@ -748,5 +829,66 @@ mod type_registry_tests {
             &Type::Adt("Truck".to_string()),
             &Type::Adt("Cars".to_string())
         ));
+    }
+
+    #[test]
+    fn test_get_product_field_and_field_count() {
+        let mut registry = TypeRegistry::default();
+
+        // Create an ADT with multiple fields
+        let person = create_product_adt(
+            "Person",
+            vec![
+                ("name", ast::Type::String),
+                ("age", ast::Type::Int64),
+                ("active", ast::Type::Bool),
+            ],
+        );
+
+        // Register the ADT
+        registry.register_adt(&person).unwrap();
+
+        // Test get_field_count
+        assert_eq!(registry.get_field_count(&"Person".to_string()), 3);
+
+        // Test get_product_field
+        let name_field = registry.get_product_field(&"Person".to_string(), &"name".to_string());
+        assert_eq!(*name_field.name.value, "name");
+        match &*name_field.ty.value {
+            ast::Type::String => {} // Expected
+            _ => panic!("Expected String type for name field"),
+        }
+
+        let age_field = registry.get_product_field(&"Person".to_string(), &"age".to_string());
+        assert_eq!(*age_field.name.value, "age");
+        match &*age_field.ty.value {
+            ast::Type::Int64 => {} // Expected
+            _ => panic!("Expected Int64 type for age field"),
+        }
+
+        let active_field = registry.get_product_field(&"Person".to_string(), &"active".to_string());
+        assert_eq!(*active_field.name.value, "active");
+        match &*active_field.ty.value {
+            ast::Type::Bool => {} // Expected
+            _ => panic!("Expected Bool type for active field"),
+        }
+
+        // Test panic behavior with non-existent ADT
+        let result = std::panic::catch_unwind(|| {
+            registry.get_field_count(&"NonExistentADT".to_string());
+        });
+        assert!(
+            result.is_err(),
+            "Expected panic for non-existent ADT in get_field_count"
+        );
+
+        // Test panic behavior with non-existent field
+        let result = std::panic::catch_unwind(|| {
+            registry.get_product_field(&"Person".to_string(), &"nonexistent".to_string());
+        });
+        assert!(
+            result.is_err(),
+            "Expected panic for non-existent field in get_product_field"
+        );
     }
 }
