@@ -29,7 +29,7 @@
 
 use clap::{Parser, Subcommand};
 use colored::*;
-use optd_dsl::compile::{CompileOptions, registry_check, ast_to_hir, infer, parse};
+use optd_dsl::compile::{CompileOptions, ast_to_hir, infer, parse, registry_check};
 use optd_dsl::utils::errors::{CompileError, Diagnose};
 use std::error::Error;
 use std::fs;
@@ -80,11 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             print_typedspan_hir,
         } => {
             if *verbose {
-                println!(
-                    "{} {}",
-                    "⏳".blue(),
-                    format!("Compiling file: {}", input.display())
-                );
+                println!("{} Compiling file: {}", "⏳".blue(), input.display());
             }
 
             let source = read_file(input)?;
@@ -112,10 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Step 2: AST to HIR
             if *verbose {
-                println!(
-                    "{} Converting AST to HIR and TypeRegistry...",
-                    "→".cyan()
-                );
+                println!("{} Converting AST to HIR and TypeRegistry...", "→".cyan());
             }
 
             let (hir, type_registry) = match ast_to_hir(&source, ast) {
