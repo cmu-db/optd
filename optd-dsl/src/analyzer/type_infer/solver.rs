@@ -57,7 +57,7 @@ pub struct Solver<'a> {
 impl<'a> Solver<'a> {
     /// Creates a new instance of the constraint solver, initializing it with
     /// a type registry.
-    pub(super) fn new(registry: &'a TypeRegistry) -> Self {
+    pub fn new(registry: &'a TypeRegistry) -> Self {
         Self {
             registry,
             constraints: Vec::new(),
@@ -74,7 +74,7 @@ impl<'a> Solver<'a> {
     ///
     /// * `Ok(())` if all constraints are successfully resolved
     /// * `Err` containing the first encountered type error
-    pub(super) fn resolve(&mut self) -> Result<(), Box<AnalyzerErrorKind>> {
+    pub fn resolve(&mut self) -> Result<(), Box<AnalyzerErrorKind>> {
         // The actual constraint solving implementation will be added here
         Ok(())
     }

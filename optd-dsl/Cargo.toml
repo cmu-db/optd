@@ -17,6 +17,7 @@ ariadne = "0.5.1"
 async-trait = "0.1.88"
 chumsky = "0.9.3"
 clap = { version = "4.5.35", features = ["derive"] }
+colored = "3.0.0"
 enum_dispatch = "0.3.13"
 futures = "0.3.31"
 ordered-float = "5.0.0"
