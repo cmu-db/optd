@@ -392,7 +392,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Invalid map key: Float64")]
     fn test_float_key_panics() {
-        value_to_map_key(&float_val(f64::consts::PI));
+        value_to_map_key(&float_val(std::f64::consts::PI));
     }
 
     #[test]

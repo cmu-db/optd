@@ -1,12 +1,13 @@
-data LogicalProps(schema_len: I64)
+data LogicalProperties(schema_len: I64)
+
+data PhysicalProperties(schema_len: I64)
 
 data Scalar =
     | ColumnRef(idx: I64)
     | Literal =
         | IntLiteral(value: I64)
         | StringLiteral(value: String)
-        | BoolLiteral(value: Bool)
-        \ NullLiteral
+        \ BoolLiteral(value: Bool)
     | Arithmetic =
         | Mult(left: Scalar, right: Scalar)
         | Add(left: Scalar, right: Scalar)
@@ -84,6 +85,8 @@ data Physical =
           order_by: [(Scalar, SortOrder)]
       )
 
+data SortOrder
+
 data JoinType =
     | Inner
     | Left
@@ -91,15 +94,19 @@ data JoinType =
     | Full
     \ Semi
 
-fn <K, V> map_get(map: {K: V}, key: K): V = None
+data List = 
+    | Cons(l: List)
+    \ Nil
 
-fn rewrite_column_refs(): V
+fn <K, V> map_get(map: {K: V}, key: K): V = none
+
+fn <V> rewrite_column_refs (): V
 
 fn (log: Logical*) schema_len: I64 
 fn <A, B> (a: A) map(lambda: A -> B): B 
 
 [rust]
-fn (expr: Scalar) apply_children(f: Scalar -> Scalar) = None
+fn (expr: Scalar) apply_children(f: Scalar -> Scalar) = none
 
 fn (pred: Predicate) remap(map: {I64 : I64}) =
     match pred

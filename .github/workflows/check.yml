@@ -59,7 +59,9 @@ jobs:
       - name: cargo clippy
         uses: giraffate/clippy-action@v1
         with:
-          reporter: 'github-pr-check'
+          clippy_flags: --all-targets -- Dwarnings
+          reporter: github-pr-check
+          fail_on_error: true
           github_token: ${{ secrets.GITHUB_TOKEN }}
   # # Since this is not a proper library on crates.io we do not need this.
   # semver:
@@ -100,7 +102,7 @@ jobs:
     strategy:
       matrix:
         # Rust 2024 Edition MSRV
-        msrv: ["1.85.0"] 
+        msrv: ["1.85.0"]
     name: ubuntu / ${{ matrix.msrv }}
     steps:
       - uses: actions/checkout@v4

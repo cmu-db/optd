@@ -1,0 +1,12 @@
+[package]
+name = "optd"
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/cmu-db/optd"
+
+[dependencies]
+optd-core = { path = "../optd-core" }
+optd-dsl = { path = "../optd-dsl" }
+
+async-trait = "0.1.88"
+iceberg = { version = "0.4.0", default-features = false }

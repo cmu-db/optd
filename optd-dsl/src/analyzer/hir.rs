@@ -314,6 +314,8 @@ pub enum ExprKind<M: ExprMetadata> {
     PatternMatch(Arc<Expr<M>>, Vec<MatchArm<M>>),
     /// Conditional expression
     IfThenElse(Arc<Expr<M>>, Arc<Expr<M>>, Arc<Expr<M>>),
+    /// Expression block creating a new scope
+    NewScope(Arc<Expr<M>>),
     /// Variable binding
     Let(Identifier, Arc<Expr<M>>, Arc<Expr<M>>),
     /// Binary operation

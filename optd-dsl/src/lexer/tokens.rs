@@ -94,7 +94,7 @@ impl std::fmt::Display for Token {
             Token::Then => write!(f, "then"),
             Token::Else => write!(f, "else"),
             Token::Fail => write!(f, "fail"),
-            Token::None => write!(f, "None"),
+            Token::None => write!(f, "none"),
 
             // Literals
             Token::TermIdent(ident) => write!(f, "{}", ident),

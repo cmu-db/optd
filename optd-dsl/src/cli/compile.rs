@@ -1,8 +1,12 @@
 use optd_dsl::{
     analyzer::{
+        error::AnalyzerError,
         from_ast::ASTConverter,
         hir::{HIR, TypedSpan},
-        semantic_check::{error::SemanticError, scope_check::scope_check},
+        semantic_check::{
+            adt_check,
+            scope_check::{self},
+        },
         types::TypeRegistry,
     },
     lexer::lex::lex,
@@ -20,13 +24,6 @@ pub struct CompileOptions {
 ///
 /// This function performs lexing and parsing stages of compilation,
 /// returning either the parsed AST Module or collected errors.
-///
-/// # Arguments
-/// * `source` - The source code to parse
-/// * `options` - Compilation options including source path
-///
-/// # Returns
-/// * `Result<Module, Vec<CompileError>>` - The parsed AST or errors
 pub fn parse(source: &str, options: &CompileOptions) -> Result<Module, Vec<CompileError>> {
     let mut errors = Vec::new();
     // Step 1: Lexing
@@ -50,13 +47,6 @@ pub fn parse(source: &str, options: &CompileOptions) -> Result<Module, Vec<Compi
 ///
 /// This function performs semantic analysis on the AST and converts it
 /// to a typed High-level Intermediate Representation (HIR).
-///
-/// # Arguments
-/// * `source` - The source code of the module to convert
-/// * `ast` - The AST module to convert
-///
-/// # Returns
-/// * `Result<(HIR<TypedSpan>, TypeRegistry), CompileError>` - The compiled HIR with type registry or error
 pub fn ast_to_hir(
     source: &str,
     ast: Module,
@@ -64,7 +54,7 @@ pub fn ast_to_hir(
     let converter = ASTConverter::default();
 
     converter.convert(&ast).map_err(|err_kind| {
-        CompileError::SemanticError(SemanticError::new(source.to_string(), err_kind))
+        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })
 }
 
@@ -72,15 +62,24 @@ pub fn ast_to_hir(
 ///
 /// This function verifies that all variable references in the HIR are valid
 /// and all bindings follow proper scoping rules.
+pub fn scope_check(source: &str, hir: &HIR<TypedSpan>) -> Result<(), CompileError> {
+    scope_check::scope_check(hir).map_err(|err_kind| {
+        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
+    })
+}
+
+/// Perform ADT checking on type registry
 ///
-/// # Arguments
-/// * `source` - The source code of the module
-/// * `hir` - The HIR to check
-///
-/// # Returns
-/// * `Result<(), CompileError>` - Success or scope error
-pub fn check_scopes(source: &str, hir: &HIR<TypedSpan>) -> Result<(), CompileError> {
-    scope_check(hir).map_err(|err_kind| {
-        CompileError::SemanticError(SemanticError::new(source.to_string(), err_kind))
+/// This function verifies that all ADT definitions are valid:
+/// - Checks for circular ADT definitions that would cause infinite recursion
+/// - Checks for duplicate field names within product types
+/// - Verifies that all referenced types exist in the registry
+pub fn adt_check(
+    source: &str,
+    source_path: &str,
+    registry: &TypeRegistry,
+) -> Result<(), CompileError> {
+    adt_check::adt_check(registry, source_path).map_err(|err_kind| {
+        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })
 }

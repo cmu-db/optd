@@ -27,7 +27,7 @@
 //! cargo run -- compile examples/example.opt --print-ast --print-typedspan-hir
 //! ```
 use clap::{Parser, Subcommand};
-use compile::{CompileOptions, ast_to_hir, check_scopes, parse};
+use compile::{CompileOptions, adt_check, ast_to_hir, parse, scope_check};
 use optd_dsl::utils::error::{CompileError, Diagnose};
 use std::error::Error;
 use std::fs;
@@ -85,9 +85,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Read the source file.
             let source = read_file(input)?;
+            let source_path = input.to_string_lossy().to_string();
 
             let options = CompileOptions {
-                source_path: input.to_string_lossy().to_string(),
+                source_path: source_path.clone(),
             };
 
             // Step 1: Parse the source to AST.
@@ -129,17 +130,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Performing scope checking...");
             }
 
-            match check_scopes(&source, &hir) {
+            match scope_check(&source, &hir) {
                 Ok(_) => {
                     if *verbose {
                         println!("✅ Scope checking successful!");
                     }
+                }
+                Err(error) => handle_errors(&[error]),
+            }
+
+            // Step 4: Perform ADT checking
+            if *verbose {
+                println!("Performing ADT checking...");
+            }
+
+            match adt_check(&source, &source_path, &type_registry) {
+                Ok(_) => {
+                    if *verbose {
+                        println!("✅ ADT checking successful!");
+                    }
+
                     if *print_typedspan_hir {
                         println!("\nTyped-Span HIR Structure:");
                         println!("{:#?}", hir);
                         println!("\nType Registry:");
                         println!("{:#?}", type_registry);
                     }
+
                     if *verbose {
                         println!("\n✅ Compilation completed successfully!");
                     } else {
