@@ -46,11 +46,13 @@ enum Constraint {
 /// to determine concrete types for all expressions in the program.
 #[derive(Debug)]
 pub struct Solver<'a> {
-    /// The type registry that holds all known types
+    /// The type registry that holds all known types.
     pub(super) registry: &'a TypeRegistry,
-    /// The set of collected type constraints to be solved
+    /// The type of the return value of the current function.
+    pub(super) ty_return: Option<TypedSpan>,
+    /// The set of collected type constraints to be solved.
     constraints: Vec<Constraint>,
-    /// Maps unknown type IDs to their resolved concrete types
+    /// Maps unknown type IDs to their resolved concrete types.
     resolved_unknown: HashMap<usize, Type>,
 }
 
@@ -60,6 +62,7 @@ impl<'a> Solver<'a> {
     pub fn new(registry: &'a TypeRegistry) -> Self {
         Self {
             registry,
+            ty_return: None,
             constraints: Vec::new(),
             resolved_unknown: HashMap::new(),
         }

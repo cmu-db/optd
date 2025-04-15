@@ -65,10 +65,13 @@ impl Solver<'_> {
 
         // Extract the parameter types from the function type.
         let param_types = match &metadata.ty {
-            Closure(param_type, _) => match param_type.as_ref() {
-                Tuple(types) => types.clone(),
-                _ => vec![param_type.as_ref().clone()],
-            },
+            Closure(param_type, ret_type) => {
+                self.ty_return = Some(TypedSpan::new(*ret_type.clone(), metadata.span.clone()));
+                match param_type.as_ref() {
+                    Tuple(types) => types.clone(),
+                    _ => vec![param_type.as_ref().clone()],
+                }
+            }
             _ => panic!("Expected a closure type for function parameters"),
         };
 
@@ -104,7 +107,7 @@ impl Solver<'_> {
             Call(func, args) => self.generate_call(expr, func, args, ctx),
             Map(entries) => self.generate_map(expr, entries, ctx),
             Ref(name) => self.generate_ref(expr, name, &ctx),
-            Return(_) => todo!(), // TODO: Have upper constraint somewhere...
+            Return(inner_expr) => self.generate_return(inner_expr, ctx),
             FieldAccess(obj, field_name) => self.generate_field_access(expr, obj, field_name, ctx),
             CoreExpr(core_data) => self.generate_core_expr(expr, core_data, ctx),
             CoreVal(value) => self.generate_core_val(expr, value, ctx),
@@ -420,6 +423,19 @@ impl Solver<'_> {
         Ok(())
     }
 
+    /// Generates constraints for return expressions while verifying scopes.
+    /// Enforces the type relationship:
+    /// - `ty_return >: inner_expr`
+    fn generate_return(
+        &mut self,
+        inner_expr: &Expr<TypedSpan>,
+        ctx: Context<TypedSpan>,
+    ) -> Result<(), Box<AnalyzerErrorKind>> {
+        let ty_return = self.ty_return.as_ref().cloned().unwrap();
+        self.add_constraint_subtypes(&ty_return, &[inner_expr.metadata.clone()]);
+        self.generate_expr(inner_expr, ctx)
+    }
+
     /// Generates constraints for field access expressions while verifying scopes.
     /// Ensures the object of type `obj` has a field with the specified name, and
     /// Enforces the type relationship:
@@ -485,6 +501,7 @@ impl Solver<'_> {
             }
             CoreData::Function(FunKind::Udf(_)) => panic!("UDFs may not appear within functions"),
             CoreData::Function(FunKind::Closure(params, body)) => {
+                // TODO: return (both real and implicit)
                 let fn_ctx = self.create_function_scope(ctx, &params[..], &expr.metadata)?;
                 self.generate_expr(body, fn_ctx)?;
             }
@@ -501,14 +518,14 @@ impl Solver<'_> {
 
     /// Generates constraints for core values while verifying scopes.
     /// Enforces the type relationship:
-    /// - `expr >: value`
+    /// - `expr = value`
     fn generate_core_val(
         &mut self,
         expr: &Expr<TypedSpan>,
         value: &Value<TypedSpan>,
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        self.add_constraint_subtypes(&expr.metadata, &[value.metadata.clone()]);
+        self.add_constraint_equal(&expr.metadata, &value.metadata);
 
         if let CoreData::Function(FunKind::Closure(params, body)) = &value.data {
             let fn_ctx = self.create_function_scope(ctx, &params[..], &value.metadata)?;
