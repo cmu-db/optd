@@ -10,7 +10,11 @@ use crate::{
     memo::Memoize,
 };
 
-use futures::channel::oneshot;
+use JobKind::*;
+use LogicalIngest::*;
+use OptimizerMessage::*;
+use TaskKind::*;
+use futures::{SinkExt, channel::mpsc::Sender};
 use optd_dsl::{
     analyzer::hir::Value,
     engine::{Continuation, EngineResponse},
@@ -288,11 +292,48 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn process_retrieve_properties(
         &mut self,
         group_id: GroupId,
-        sender: oneshot::Sender<LogicalProperties>,
+        mut sender: Sender<LogicalProperties>,
     ) -> Result<(), Error> {
-        if let Some(props) = self.memo.get_logical_properties(group_id).await? {
-            // We don't want to make a job out of this, as it is merely a way to unblock
-            // an existing pending job. We send it to the channel without blocking the
+        let props = self.memo.get_logical_properties(group_id).await?;
+
+        // We don't want to make a job out of this, as it is merely a way to unblock
+        // an existing pending job. We send it to the channel without blocking the
+        // main co-routine.
+        tokio::spawn(async move {
+            sender
+                .send(props)
+                .await
+                .expect("Failed to send properties - channel closed.");
+        });
+
+        Ok(())
+    }
+
+    /// Helper method to resolve dependencies after a group creation job completes.
+    ///
+    /// This method is called when a group creation job completes. It updates all
+    /// pending messages that were waiting for this job and processes any that
+    /// are now ready (have no more pending dependencies).
+    ///
+    /// # Parameters
+    /// * `completed_job_id` - ID of the completed job.
+    async fn resolve_dependencies(&mut self, completed_job_id: JobId) {
+        // Update dependencies and collect ready messages.
+        let ready_indices: Vec<_> = self
+            .pending_messages
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, pending)| {
+                pending.pending_dependencies.remove(&completed_job_id);
+                pending.pending_dependencies.is_empty().then_some(i)
+            })
+            .collect();
+
+        // Process all ready messages (in reverse order to avoid index issues when removing).
+        for i in ready_indices.iter().rev() {
+            let pending = self.pending_messages.swap_remove(*i);
+
+            // Re-send the message to be processed in a new co-routine to not block the
             // main co-routine.
             tokio::spawn(async move {
                 sender

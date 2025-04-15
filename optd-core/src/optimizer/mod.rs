@@ -8,8 +8,11 @@ use EngineMessageKind::*;
 pub use client::{Client, QueryInstance};
 use client::{ClientMessage, QueryInstanceId};
 use futures::StreamExt;
-use futures::channel::mpsc;
-use futures::channel::oneshot;
+use futures::{
+    SinkExt,
+    channel::mpsc::{self, Receiver, Sender},
+};
+
 use jobs::{Job, JobId};
 use optd_dsl::analyzer::hir::Value;
 use optd_dsl::analyzer::{context::Context, hir::HIR};
@@ -63,6 +66,7 @@ impl EngineMessage {
     }
 }
 
+
 /// Messages sent to the optimizer by the DSL engine to change the state of the memo.
 pub enum EngineMessageKind {
     /// New logical plan alternative for a group from applying transformation rules.
@@ -88,11 +92,10 @@ pub enum EngineMessageKind {
     /// Subscribe to costed physical expressions for a goal.
     // TODO(yuchen): either pass in the budget or as part of the continuation.
     SubscribeGoal(Goal, Continuation<Value, EngineResponse<EngineMessageKind>>),
-
-    /// Retrieve logical properties for a specific partial logical plan.
-    // TODO(yuchen): This should be partial logical plan.
-    #[allow(dead_code)]
-    RetrieveProperties(GroupId, oneshot::Sender<LogicalProperties>),
+  
+    /// Retrieve logical properties for a specific group.
+    #[allow(unused)]
+    RetrieveProperties(GroupId, Sender<LogicalProperties>),
 
     /// Associate logical properties with a group.
     /// Note: logical property are on-demand computed.
