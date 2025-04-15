@@ -96,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Step 1: Parse
             if *verbose {
-                println!("{} {}", "→".cyan(), "Parsing source code...");
+                println!("{} Parsing source code...", "→".cyan());
             }
 
             let ast = match parse(&source, &options) {
@@ -113,9 +113,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Step 2: AST to HIR
             if *verbose {
                 println!(
-                    "{} {}",
-                    "→".cyan(),
-                    "Converting AST to HIR and TypeRegistry..."
+                    "{} Converting AST to HIR and TypeRegistry...",
+                    "→".cyan()
                 );
             }
 
@@ -132,7 +131,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Step 3: TypeRegistry Check
             if *verbose {
-                println!("{} {}", "→".cyan(), "Checking TypeRegistry...");
+                println!("{} Checking TypeRegistry...", "→".cyan());
             }
 
             match registry_check(&source, &source_path, &type_registry) {
@@ -142,7 +141,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Step 4: Type Inference
             if *verbose {
-                println!("{} {}", "→".cyan(), "Performing type inference...");
+                println!("{} Performing type inference...", "→".cyan());
             }
 
             match infer(&source, &hir, &type_registry) {
