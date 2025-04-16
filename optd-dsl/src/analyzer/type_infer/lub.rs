@@ -9,21 +9,22 @@ impl TypeRegistry {
     /// The least upper bound is the most specific type that is a supertype of both input types.
     ///
     /// The LUB follows these principles:
-    /// 1. For container types (Array, Tuple, etc.), it applies covariance rules.
-    /// 2. For function (and Map) types, it uses contravariance for parameters and covariance for return types.
-    /// 3. For native trait types (Concat, EqHash, Arithmetic), the result is the trait only if both types
+    /// 1. Primitive types check for equality.
+    /// 2. For container types (Array, Tuple, etc.), it applies covariance rules.
+    /// 3. For function (and Map) types, it uses contravariance for parameters and covariance for return types.
+    /// 4. For native trait types (Concat, EqHash, Arithmetic), the result is the trait only if both types
     ///    implement it, and at least one of the types is the trait itself.
-    /// 4. For ADT types, it finds the closest common supertype in the type hierarchy.
-    /// 5. For wrapper types:
+    /// 5. For ADT types, it finds the closest common supertype in the type hierarchy.
+    /// 6. For wrapper types:
     ///    - Optional preserves the wrapper and computes LUB of inner types
     ///    - None and Optional(T) yields Optional(T)
     ///    - None and non-Optional T yields Optional(T)
     ///    - For Stored/Costed: Costed is considered more specific than Stored, and
     ///      either wrapper can be removed when comparing with non-wrapped types
-    /// 6. Map types can be viewed as functions from keys to optional values, and
+    /// 7. Map types can be viewed as functions from keys to optional values, and
     ///    Arrays as functions from indices to values, with appropriate type conversions.
-    /// 7. The ultimate fallback is Type::Universe, the top type of the hierarchy.
-    /// 8. Nothing is the bottom type; LUB(Nothing, T) = T.
+    /// 8. The ultimate fallback is Type::Universe, the top type of the hierarchy.
+    /// 9. Nothing is the bottom type; LUB(Nothing, T) = T.
     ///
     /// # Arguments
     ///
@@ -37,9 +38,17 @@ impl TypeRegistry {
     pub(super) fn least_upper_bound(&self, type1: &Type, type2: &Type) -> Type {
         use Type::*;
 
-        match (type1, type2) {
+        let lub = match (type1, type2) {
             // Nothing is the bottom type - LUB(Nothing, T) = T.
             (Nothing, other) | (other, Nothing) => other.clone(),
+
+            // Primitive types - check for equality.
+            (I64, I64)
+            | (String, String)
+            | (F64, F64)
+            | (Bool, Bool)
+            | (Unit, Unit)
+            | (None, None) => type1.clone(),
 
             // Array covariance: LUB(Array<T1>, Array<T2>) = Array<LUB(T1, T2)>.
             (Array(elem1), Array(elem2)) => {
@@ -152,7 +161,13 @@ impl TypeRegistry {
 
             // Default case - universe is the ultimate fallback.
             _ => Universe,
-        }
+        };
+
+        // Verify post-condition.
+        debug_assert!(self.is_subtype(type1, &lub));
+        debug_assert!(self.is_subtype(type2, &lub));
+
+        lub
     }
 
     /// Finds a common supertype of two ADT identifiers in the type hierarchy.
@@ -220,5 +235,771 @@ impl TypeRegistry {
 
         collect_supertypes(self, name, &mut result);
         result
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::analyzer::types::type_registry_tests::{create_product_adt, create_sum_adt};
+    use crate::parser::ast::Type as AstType;
+
+    /// Helper function to set up a comprehensive type hierarchy for testing
+    pub fn setup_type_hierarchy() -> TypeRegistry {
+        let mut registry = TypeRegistry::default();
+
+        // Animal hierarchy
+        let animal = create_product_adt("Animal", vec![("name", AstType::String)]);
+
+        let mammal = create_product_adt(
+            "Mammal",
+            vec![("name", AstType::String), ("warm_blooded", AstType::Bool)],
+        );
+
+        let bird = create_product_adt(
+            "Bird",
+            vec![("name", AstType::String), ("can_fly", AstType::Bool)],
+        );
+
+        let dog = create_product_adt(
+            "Dog",
+            vec![
+                ("name", AstType::String),
+                ("warm_blooded", AstType::Bool),
+                ("breed", AstType::String),
+            ],
+        );
+
+        let cat = create_product_adt(
+            "Cat",
+            vec![
+                ("name", AstType::String),
+                ("warm_blooded", AstType::Bool),
+                ("lives", AstType::Int64),
+            ],
+        );
+
+        let eagle = create_product_adt(
+            "Eagle",
+            vec![
+                ("name", AstType::String),
+                ("can_fly", AstType::Bool),
+                ("wingspan", AstType::Float64),
+            ],
+        );
+
+        let penguin = create_product_adt(
+            "Penguin",
+            vec![
+                ("name", AstType::String),
+                ("can_fly", AstType::Bool),
+                ("swims", AstType::Bool),
+            ],
+        );
+
+        // Vehicle hierarchy
+        let vehicle = create_product_adt(
+            "Vehicle",
+            vec![("id", AstType::String), ("wheels", AstType::Int64)],
+        );
+
+        let land_vehicle = create_product_adt(
+            "LandVehicle",
+            vec![
+                ("id", AstType::String),
+                ("wheels", AstType::Int64),
+                ("terrain", AstType::String),
+            ],
+        );
+
+        let water_vehicle = create_product_adt(
+            "WaterVehicle",
+            vec![
+                ("id", AstType::String),
+                ("wheels", AstType::Int64),
+                ("displacement", AstType::Float64),
+            ],
+        );
+
+        let car = create_product_adt(
+            "Car",
+            vec![
+                ("id", AstType::String),
+                ("wheels", AstType::Int64),
+                ("terrain", AstType::String),
+                ("doors", AstType::Int64),
+            ],
+        );
+
+        let bicycle = create_product_adt(
+            "Bicycle",
+            vec![
+                ("id", AstType::String),
+                ("wheels", AstType::Int64),
+                ("terrain", AstType::String),
+                ("pedals", AstType::Bool),
+            ],
+        );
+
+        let boat = create_product_adt(
+            "Boat",
+            vec![
+                ("id", AstType::String),
+                ("wheels", AstType::Int64),
+                ("displacement", AstType::Float64),
+                ("sails", AstType::Bool),
+            ],
+        );
+
+        // Register hierarchies
+        let mammals_enum = create_sum_adt("Mammals", vec![mammal.clone(), dog, cat]);
+        let birds_enum = create_sum_adt("Birds", vec![bird.clone(), eagle, penguin]);
+        let animals_enum = create_sum_adt("Animals", vec![animal, mammals_enum, birds_enum]);
+
+        let land_vehicles_enum = create_sum_adt("LandVehicles", vec![land_vehicle, car, bicycle]);
+        let water_vehicles_enum = create_sum_adt("WaterVehicles", vec![water_vehicle, boat]);
+        let vehicles_enum = create_sum_adt(
+            "Vehicles",
+            vec![vehicle, land_vehicles_enum, water_vehicles_enum],
+        );
+
+        registry.register_adt(&animals_enum).unwrap();
+        registry.register_adt(&vehicles_enum).unwrap();
+
+        registry
+    }
+
+    #[test]
+    fn test_simple_lub() {
+        let registry = setup_type_hierarchy();
+
+        // Identical primitive types
+        assert_eq!(
+            registry.least_upper_bound(&Type::I64, &Type::I64),
+            Type::I64
+        );
+        assert_eq!(
+            registry.least_upper_bound(&Type::Bool, &Type::Bool),
+            Type::Bool
+        );
+        assert_eq!(
+            registry.least_upper_bound(&Type::String, &Type::String),
+            Type::String
+        );
+
+        // Different primitive types
+        assert_eq!(
+            registry.least_upper_bound(&Type::I64, &Type::Bool),
+            Type::Universe
+        );
+        assert_eq!(
+            registry.least_upper_bound(&Type::String, &Type::F64),
+            Type::Universe
+        );
+        assert_eq!(
+            registry.least_upper_bound(&Type::I64, &Type::F64),
+            Type::Universe
+        );
+
+        // ADTs
+        assert_eq!(
+            registry
+                .least_upper_bound(&Type::Adt("Dog".to_string()), &Type::Adt("Dog".to_string())),
+            Type::Adt("Dog".to_string())
+        );
+
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Adt("Dog".to_string()),
+                &Type::Adt("Mammal".to_string())
+            ),
+            Type::Adt("Mammals".to_string())
+        );
+
+        assert_eq!(
+            registry
+                .least_upper_bound(&Type::Adt("Dog".to_string()), &Type::Adt("Cat".to_string())),
+            Type::Adt("Mammals".to_string())
+        );
+
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Adt("Dog".to_string()),
+                &Type::Adt("Eagle".to_string())
+            ),
+            Type::Adt("Animals".to_string())
+        );
+
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Adt("Mammals".to_string()),
+                &Type::Adt("Birds".to_string())
+            ),
+            Type::Adt("Animals".to_string())
+        );
+
+        // ADT and unrelated type
+        assert_eq!(
+            registry
+                .least_upper_bound(&Type::Adt("Dog".to_string()), &Type::Adt("Car".to_string())),
+            Type::Universe
+        );
+
+        // Nothing with other types
+        assert_eq!(
+            registry.least_upper_bound(&Type::Nothing, &Type::Adt("Dog".to_string())),
+            Type::Adt("Dog".to_string())
+        );
+
+        assert_eq!(
+            registry.least_upper_bound(&Type::Adt("Car".to_string()), &Type::Nothing),
+            Type::Adt("Car".to_string())
+        );
+    }
+
+    #[test]
+    fn test_array_lub() {
+        let registry = setup_type_hierarchy();
+
+        // Array of same ADT type
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Array(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Array(Box::new(Type::Adt("Dog".to_string())))
+            ),
+            Type::Array(Box::new(Type::Adt("Dog".to_string())))
+        );
+
+        // Array of related ADT types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Array(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Array(Box::new(Type::Adt("Cat".to_string())))
+            ),
+            Type::Array(Box::new(Type::Adt("Mammals".to_string())))
+        );
+
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Array(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Array(Box::new(Type::Adt("Eagle".to_string())))
+            ),
+            Type::Array(Box::new(Type::Adt("Animals".to_string())))
+        );
+
+        // Array of unrelated ADT types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Array(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Array(Box::new(Type::Adt("Car".to_string())))
+            ),
+            Type::Array(Box::new(Type::Universe))
+        );
+
+        // Nested arrays with ADTs
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Array(Box::new(Type::Array(Box::new(Type::Adt(
+                    "Dog".to_string()
+                ))))),
+                &Type::Array(Box::new(Type::Array(Box::new(Type::Adt(
+                    "Cat".to_string()
+                )))))
+            ),
+            Type::Array(Box::new(Type::Array(Box::new(Type::Adt(
+                "Mammals".to_string()
+            )))))
+        );
+    }
+
+    #[test]
+    fn test_tuple_lub() {
+        let registry = setup_type_hierarchy();
+
+        // Tuples with same ADT types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Tuple(vec![
+                    Type::Adt("Dog".to_string()),
+                    Type::Adt("Car".to_string())
+                ]),
+                &Type::Tuple(vec![
+                    Type::Adt("Dog".to_string()),
+                    Type::Adt("Car".to_string())
+                ])
+            ),
+            Type::Tuple(vec![
+                Type::Adt("Dog".to_string()),
+                Type::Adt("Car".to_string())
+            ])
+        );
+
+        // Tuples with related ADT types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Tuple(vec![
+                    Type::Adt("Dog".to_string()),
+                    Type::Adt("Car".to_string())
+                ]),
+                &Type::Tuple(vec![
+                    Type::Adt("Cat".to_string()),
+                    Type::Adt("Bicycle".to_string())
+                ])
+            ),
+            Type::Tuple(vec![
+                Type::Adt("Mammals".to_string()),
+                Type::Adt("LandVehicles".to_string())
+            ])
+        );
+
+        // Tuples with mixed related/unrelated types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Tuple(vec![
+                    Type::Adt("Dog".to_string()),
+                    Type::Adt("Car".to_string())
+                ]),
+                &Type::Tuple(vec![
+                    Type::Adt("Eagle".to_string()),
+                    Type::Adt("Boat".to_string())
+                ])
+            ),
+            Type::Tuple(vec![
+                Type::Adt("Animals".to_string()),
+                Type::Adt("Vehicles".to_string())
+            ])
+        );
+
+        // Different length tuples should result in Universe
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Tuple(vec![Type::Adt("Dog".to_string())]),
+                &Type::Tuple(vec![
+                    Type::Adt("Dog".to_string()),
+                    Type::Adt("Car".to_string())
+                ])
+            ),
+            Type::Universe
+        );
+    }
+
+    #[test]
+    fn test_map_lub() {
+        let registry = setup_type_hierarchy();
+
+        // Maps with identical ADT key and value types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Map(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                ),
+                &Type::Map(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                )
+            ),
+            Type::Map(
+                Box::new(Type::Adt("Dog".to_string())),
+                Box::new(Type::Adt("Car".to_string()))
+            )
+        );
+
+        // Maps with related ADT value types (covariant)
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Map(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                ),
+                &Type::Map(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Bicycle".to_string()))
+                )
+            ),
+            Type::Map(
+                Box::new(Type::Adt("Dog".to_string())),
+                Box::new(Type::Adt("LandVehicles".to_string()))
+            )
+        );
+
+        // Maps with related ADT key types (contravariant)
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Map(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                ),
+                &Type::Map(
+                    Box::new(Type::Adt("Mammals".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                )
+            ),
+            Type::Map(
+                Box::new(Type::Adt("Dog".to_string())),
+                Box::new(Type::Adt("Car".to_string()))
+            )
+        );
+
+        // Maps with both key and value types related
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Map(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                ),
+                &Type::Map(
+                    Box::new(Type::Adt("Mammals".to_string())),
+                    Box::new(Type::Adt("Bicycle".to_string()))
+                )
+            ),
+            Type::Map(
+                Box::new(Type::Adt("Dog".to_string())),
+                Box::new(Type::Adt("LandVehicles".to_string()))
+            )
+        );
+
+        // Maps with unrelated value types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Map(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                ),
+                &Type::Map(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Boat".to_string()))
+                )
+            ),
+            Type::Map(
+                Box::new(Type::Adt("Dog".to_string())),
+                Box::new(Type::Adt("Vehicles".to_string()))
+            )
+        );
+    }
+
+    #[test]
+    fn test_function_lub() {
+        let registry = setup_type_hierarchy();
+
+        // Functions with identical ADT parameter and return types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Closure(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                ),
+                &Type::Closure(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                )
+            ),
+            Type::Closure(
+                Box::new(Type::Adt("Dog".to_string())),
+                Box::new(Type::Adt("Car".to_string()))
+            )
+        );
+
+        // Functions with related ADT parameter types (contravariance)
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Closure(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                ),
+                &Type::Closure(
+                    Box::new(Type::Adt("Cat".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                )
+            ),
+            Type::Closure(
+                Box::new(Type::Nothing),
+                Box::new(Type::Adt("Car".to_string()))
+            )
+        );
+
+        // Functions with related ADT return types (covariance)
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Closure(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                ),
+                &Type::Closure(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Bicycle".to_string()))
+                )
+            ),
+            Type::Closure(
+                Box::new(Type::Adt("Dog".to_string())),
+                Box::new(Type::Adt("LandVehicles".to_string()))
+            )
+        );
+
+        // Functions with both parameter and return types related
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Closure(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                ),
+                &Type::Closure(
+                    Box::new(Type::Adt("Mammals".to_string())),
+                    Box::new(Type::Adt("Bicycle".to_string()))
+                )
+            ),
+            Type::Closure(
+                Box::new(Type::Adt("Dog".to_string())),
+                Box::new(Type::Adt("LandVehicles".to_string()))
+            )
+        );
+    }
+
+    #[test]
+    fn test_optional_lub() {
+        let registry = setup_type_hierarchy();
+
+        // Optional of same ADT types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Optional(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Optional(Box::new(Type::Adt("Dog".to_string())))
+            ),
+            Type::Optional(Box::new(Type::Adt("Dog".to_string())))
+        );
+
+        // Optional of related ADT types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Optional(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Optional(Box::new(Type::Adt("Cat".to_string())))
+            ),
+            Type::Optional(Box::new(Type::Adt("Mammals".to_string())))
+        );
+
+        // Optional of distantly related ADT types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Optional(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Optional(Box::new(Type::Adt("Eagle".to_string())))
+            ),
+            Type::Optional(Box::new(Type::Adt("Animals".to_string())))
+        );
+
+        // None and Optional ADT
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::None,
+                &Type::Optional(Box::new(Type::Adt("Dog".to_string())))
+            ),
+            Type::Optional(Box::new(Type::Adt("Dog".to_string())))
+        );
+
+        // None and ADT type
+        assert_eq!(
+            registry.least_upper_bound(&Type::None, &Type::Adt("Dog".to_string())),
+            Type::Optional(Box::new(Type::Adt("Dog".to_string())))
+        );
+
+        // ADT and Optional related ADT
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Adt("Dog".to_string()),
+                &Type::Optional(Box::new(Type::Adt("Cat".to_string())))
+            ),
+            Type::Optional(Box::new(Type::Adt("Mammals".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_stored_costed_lub() {
+        let registry = setup_type_hierarchy();
+
+        // Stored of same ADT types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Stored(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Stored(Box::new(Type::Adt("Dog".to_string())))
+            ),
+            Type::Stored(Box::new(Type::Adt("Dog".to_string())))
+        );
+
+        // Stored of related ADT types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Stored(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Stored(Box::new(Type::Adt("Cat".to_string())))
+            ),
+            Type::Stored(Box::new(Type::Adt("Mammals".to_string())))
+        );
+
+        // Costed of same ADT types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Costed(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Costed(Box::new(Type::Adt("Dog".to_string())))
+            ),
+            Type::Costed(Box::new(Type::Adt("Dog".to_string())))
+        );
+
+        // Mixed Stored and Costed with same ADT type
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Stored(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Costed(Box::new(Type::Adt("Dog".to_string())))
+            ),
+            Type::Stored(Box::new(Type::Adt("Dog".to_string())))
+        );
+
+        // Mixed Stored and Costed with related ADT types
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Stored(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Costed(Box::new(Type::Adt("Cat".to_string())))
+            ),
+            Type::Stored(Box::new(Type::Adt("Mammals".to_string())))
+        );
+
+        // Stored/Costed with regular ADT type
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Stored(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Adt("Cat".to_string())
+            ),
+            Type::Adt("Mammals".to_string())
+        );
+    }
+
+    #[test]
+    fn test_native_traits_with_adts() {
+        let registry = setup_type_hierarchy();
+
+        // EqHash with ADT types
+        assert_eq!(
+            registry.least_upper_bound(&Type::EqHash, &Type::Adt("Dog".to_string())),
+            Type::EqHash
+        );
+
+        // Concat with Array of ADTs
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Concat,
+                &Type::Array(Box::new(Type::Adt("Dog".to_string())))
+            ),
+            Type::Concat
+        );
+
+        // Arithmetic with numeric type
+        assert_eq!(
+            registry.least_upper_bound(&Type::Arithmetic, &Type::I64),
+            Type::Arithmetic
+        );
+    }
+
+    #[test]
+    fn test_complex_nested_types_lub() {
+        let registry = setup_type_hierarchy();
+
+        // Array of Optional ADTs
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Array(Box::new(Type::Optional(Box::new(Type::Adt(
+                    "Dog".to_string()
+                ))))),
+                &Type::Array(Box::new(Type::Optional(Box::new(Type::Adt(
+                    "Cat".to_string()
+                )))))
+            ),
+            Type::Array(Box::new(Type::Optional(Box::new(Type::Adt(
+                "Mammals".to_string()
+            )))))
+        );
+
+        // Map with ADT keys and function values
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Map(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Closure(
+                        Box::new(Type::Adt("Car".to_string())),
+                        Box::new(Type::Adt("Boat".to_string()))
+                    ))
+                ),
+                &Type::Map(
+                    Box::new(Type::Adt("Animals".to_string())),
+                    Box::new(Type::Closure(
+                        Box::new(Type::Adt("Bicycle".to_string())),
+                        Box::new(Type::Adt("Boat".to_string()))
+                    ))
+                )
+            ),
+            Type::Map(
+                Box::new(Type::Adt("Dog".to_string())), // contravariance on key type
+                Box::new(Type::Closure(
+                    Box::new(Type::Nothing), // contravariance on function parameter
+                    Box::new(Type::Adt("Boat".to_string()))  // covariance on function return
+                ))
+            )
+        );
+
+        // Optional Stored Tuple of ADTs
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Optional(Box::new(Type::Stored(Box::new(Type::Tuple(vec![
+                    Type::Adt("Dog".to_string()),
+                    Type::Adt("Car".to_string())
+                ]))))),
+                &Type::Optional(Box::new(Type::Stored(Box::new(Type::Tuple(vec![
+                    Type::Adt("Cat".to_string()),
+                    Type::Adt("Bicycle".to_string())
+                ])))))
+            ),
+            Type::Optional(Box::new(Type::Stored(Box::new(Type::Tuple(vec![
+                Type::Adt("Mammals".to_string()),
+                Type::Adt("LandVehicles".to_string())
+            ])))))
+        );
+    }
+
+    #[test]
+    fn test_map_function_compatibility_lub() {
+        let registry = setup_type_hierarchy();
+
+        // Map and Function compatibility
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Map(
+                    Box::new(Type::Adt("Dog".to_string())),
+                    Box::new(Type::Adt("Car".to_string()))
+                ),
+                &Type::Closure(
+                    Box::new(Type::Adt("Mammals".to_string())),
+                    Box::new(Type::Optional(Box::new(Type::Adt(
+                        "LandVehicles".to_string()
+                    ))))
+                )
+            ),
+            Type::Closure(
+                Box::new(Type::Adt("Dog".to_string())), // GLB of Dog and Mammals is Dog (contravariance)
+                Box::new(Type::Optional(Box::new(Type::Adt(
+                    "LandVehicles".to_string()
+                ))))  // LUB of Car? and LandVehicles?
+            )
+        );
+
+        // Array and Function compatibility
+        assert_eq!(
+            registry.least_upper_bound(
+                &Type::Array(Box::new(Type::Adt("Dog".to_string()))),
+                &Type::Closure(
+                    Box::new(Type::I64),
+                    Box::new(Type::Optional(Box::new(Type::Adt("Mammals".to_string()))))
+                )
+            ),
+            Type::Closure(
+                Box::new(Type::I64),
+                Box::new(Type::Optional(Box::new(Type::Adt("Mammals".to_string()))))
+            )
+        );
     }
 }

@@ -413,22 +413,22 @@ fn convert_ast_type(ty: AstType) -> Type {
 }
 
 #[cfg(test)]
-mod type_registry_tests {
+pub mod type_registry_tests {
     use super::*;
     use crate::{
         parser::ast::Field,
         utils::span::{Span, Spanned},
     };
 
-    fn create_test_span() -> Span {
+    pub fn create_test_span() -> Span {
         Span::new("test".to_string(), 0..1)
     }
 
-    fn spanned<T>(value: T) -> Spanned<T> {
+    pub fn spanned<T>(value: T) -> Spanned<T> {
         Spanned::new(value, create_test_span())
     }
 
-    fn create_product_adt(name: &str, fields: Vec<(&str, AstType)>) -> Adt {
+    pub fn create_product_adt(name: &str, fields: Vec<(&str, AstType)>) -> Adt {
         let spanned_fields: Vec<Spanned<Field>> = fields
             .into_iter()
             .map(|(field_name, field_type)| {
@@ -445,7 +445,7 @@ mod type_registry_tests {
         }
     }
 
-    fn create_sum_adt(name: &str, variants: Vec<Adt>) -> Adt {
+    pub fn create_sum_adt(name: &str, variants: Vec<Adt>) -> Adt {
         Sum {
             name: spanned(name.to_string()),
             variants: variants.into_iter().map(spanned).collect(),
