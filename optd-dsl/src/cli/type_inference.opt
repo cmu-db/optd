@@ -1,0 +1,11 @@
+data Logical =
+    | Add(left: Logical, right: Logical)
+    \ Const(val: I64)
+
+data Physical
+data LogicalProperties
+data PhysicalProperties
+
+fn (log: Logical) fold = match log
+    | Add(left, right) -> fold(left) + fold(right)
+    \ Const(val) -> val
