@@ -11,18 +11,21 @@ impl TypeRegistry {
     /// This operation is also known as the "join" in type theory.
     ///
     /// The LUB follows these principles:
-    /// 1. For container types (Array, Tuple, Map, etc.), it applies covariance rules.
-    /// 2. For function types, it uses contravariance for parameters and covariance for return types.
-    /// 3. For native trait types (Concat, EqHash, Arithmetic), the result is the trait if both types implement it.
-    /// 4. For class/ADT types, it finds the closest common ancestor in the type hierarchy.
-    /// 5. For special wrapper types (Optional, Stored, Costed), it preserves the wrapper and computes LUB of inner types.
-    /// 6. The ultimate fallback is Type::Universe, the top type of the hierarchy.
-    ///
-    /// Note on trait types: The type system has three special trait types (Concat, EqHash, Arithmetic)
-    /// that represent capabilities rather than data structures. There isn't a strict hierarchy among
-    /// these traits, and a type can implement multiple traits (so there might be confusion).
-    /// LUB will return a trait type only if one of the types is the trait.
-    /// This trick works well enough for our type inference.
+    /// 1. For container types (Array, Tuple, etc.), it applies covariance rules.
+    /// 2. For function (and Map) types, it uses contravariance for parameters and covariance for return types.
+    /// 3. For native trait types (Concat, EqHash, Arithmetic), the result is the trait only if both types
+    ///    implement it, and at least one of the types is the trait itself.
+    /// 4. For class/ADT types, it finds the closest common supertype in the type hierarchy.
+    /// 5. For wrapper types:
+    ///    - Optional preserves the wrapper and computes LUB of inner types
+    ///    - None and Optional(T) yields Optional(T)
+    ///    - None and non-Optional T yields Optional(T)
+    ///    - For Stored/Costed: Costed is considered more specific than Stored, and
+    ///      either wrapper can be removed when comparing with non-wrapped types
+    /// 6. Map types can be viewed as functions from keys to optional values, and
+    ///    Arrays as functions from indices to values, with appropriate type conversions.
+    /// 7. The ultimate fallback is Type::Universe, the top type of the hierarchy.
+    /// 8. Nothing is the bottom type; LUB(Nothing, T) = T.
     ///
     /// # Arguments
     ///
@@ -71,6 +74,9 @@ impl TypeRegistry {
             (None, Optional(inner)) | (Optional(inner), None) => Optional(inner.clone()),
             (Optional(inner), other) | (other, Optional(inner)) => {
                 Optional(self.least_upper_bound(inner, other).into())
+            }
+            (None, other) | (other, None) if !matches!(other, Optional(_)) => {
+                Optional(other.clone().into())
             }
 
             // Stored type handling.
