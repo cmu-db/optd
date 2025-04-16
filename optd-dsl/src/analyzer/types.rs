@@ -656,26 +656,38 @@ mod type_registry_tests {
             &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
             &Type::Universe
         ));
-        
+
         // Create a registry with ADTs to test variance
         let mut adts_registry = TypeRegistry::default();
         let animal = create_product_adt("Animal", vec![]);
         let dog = create_product_adt("Dog", vec![]);
         let animals_enum = create_sum_adt("Animals", vec![animal, dog]);
         adts_registry.register_adt(&animals_enum).unwrap();
-        
+
         // Test contravariance of map keys:
         // Map(Animals, String) <: Map(Dog, String) because Dog <: Animals
         assert!(adts_registry.is_subtype(
-            &Type::Map(Box::new(Type::Adt("Animals".to_string())), Box::new(Type::String)),
-            &Type::Map(Box::new(Type::Adt("Dog".to_string())), Box::new(Type::String))
+            &Type::Map(
+                Box::new(Type::Adt("Animals".to_string())),
+                Box::new(Type::String)
+            ),
+            &Type::Map(
+                Box::new(Type::Adt("Dog".to_string())),
+                Box::new(Type::String)
+            )
         ));
-        
+
         // Test covariance of map values:
         // Map(String, Dog) <: Map(String, Animals) because Dog <: Animals
         assert!(adts_registry.is_subtype(
-            &Type::Map(Box::new(Type::String), Box::new(Type::Adt("Dog".to_string()))),
-            &Type::Map(Box::new(Type::String), Box::new(Type::Adt("Animals".to_string())))
+            &Type::Map(
+                Box::new(Type::String),
+                Box::new(Type::Adt("Dog".to_string()))
+            ),
+            &Type::Map(
+                Box::new(Type::String),
+                Box::new(Type::Adt("Animals".to_string()))
+            )
         ));
     }
 
