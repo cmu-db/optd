@@ -6,16 +6,14 @@ use std::collections::HashSet;
 
 impl TypeRegistry {
     /// Finds the least upper bound (LUB) of two types.
-    ///
     /// The least upper bound is the most specific type that is a supertype of both input types.
-    /// This operation is also known as the "join" in type theory.
     ///
     /// The LUB follows these principles:
     /// 1. For container types (Array, Tuple, etc.), it applies covariance rules.
     /// 2. For function (and Map) types, it uses contravariance for parameters and covariance for return types.
     /// 3. For native trait types (Concat, EqHash, Arithmetic), the result is the trait only if both types
     ///    implement it, and at least one of the types is the trait itself.
-    /// 4. For class/ADT types, it finds the closest common supertype in the type hierarchy.
+    /// 4. For ADT types, it finds the closest common supertype in the type hierarchy.
     /// 5. For wrapper types:
     ///    - Optional preserves the wrapper and computes LUB of inner types
     ///    - None and Optional(T) yields Optional(T)
@@ -140,23 +138,16 @@ impl TypeRegistry {
                 }
             }
 
-            // Native trait types trick, check function documentation for more details.
-            (_, Concat) | (Concat, _)
-                if self.is_subtype(type1, &Concat) && self.is_subtype(type2, &Concat) =>
+            // Native trait handling.
+            (trait_type @ (Concat | EqHash | Arithmetic), other)
+                if self.is_subtype(other, trait_type) =>
             {
-                Concat
+                trait_type.clone()
             }
-
-            (_, EqHash) | (EqHash, _)
-                if self.is_subtype(type1, &EqHash) && self.is_subtype(type2, &EqHash) =>
+            (other, trait_type @ (Concat | EqHash | Arithmetic))
+                if self.is_subtype(other, trait_type) =>
             {
-                EqHash
-            }
-
-            (_, Arithmetic) | (Arithmetic, _)
-                if self.is_subtype(type1, &Arithmetic) && self.is_subtype(type2, &Arithmetic) =>
-            {
-                Arithmetic
+                trait_type.clone()
             }
 
             // Default case - universe is the ultimate fallback.

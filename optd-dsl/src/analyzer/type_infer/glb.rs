@@ -1,14 +1,24 @@
-use crate::analyzer::{
-    hir::Identifier,
-    types::{Type, TypeRegistry},
-};
-use std::collections::HashSet;
+use crate::analyzer::types::{Type, TypeRegistry};
 
 impl TypeRegistry {
     /// Finds the greatest lower bound (GLB) of two types.
-    ///
     /// The greatest lower bound is the most general type that is a subtype of both input types.
-    /// This operation is also known as the "meet" in type theory.
+    ///
+    /// The GLB follows these principles:
+    /// 1. For container types (Array, Tuple), it applies covariance rules in reverse.
+    /// 2. For function (and Map) types, it uses contravariance in reverse: covariance for parameters,
+    ///    contravariance for return types.
+    /// 3. For ADTs, it finds the more specific of the two types if one is a subtype of the other, given
+    ///    the absence of multiple inheritance within ADTs.
+    /// 4. For wrapper types:
+    ///    - Optional preserves the wrapper for all GLB operations, computing GLB of inner type where applicable.
+    ///    - None is the GLB of None and any Optional type.
+    ///    - For Stored/Costed: Costed is more specific than Stored, so mixed operations yield Costed.
+    /// 5. For compatibility between collections and functions:
+    ///    - Map and Function: GLB results in a Function with appropriate parameter and return types.
+    ///    - Array and Function: GLB results in a Function if the parameter type is I64.
+    /// 6. Nothing is the bottom type, Universe is the top type, so GLB(Universe, T) = T and GLB(Nothing, T) = Nothing.
+    /// 7. If no common subtype exists, Nothing is returned as the fallback.
     ///
     /// # Arguments
     ///
@@ -18,273 +28,121 @@ impl TypeRegistry {
     /// # Returns
     ///
     /// The greatest lower bound of the two types. Returns `Type::Nothing` if no common
-    /// subtype exists, as Nothing is the bottom type in the type system.
-    pub fn greatest_lower_bound(&self, type1: &Type, type2: &Type) -> Type {
+    /// subtype exists.
+    pub(super) fn greatest_lower_bound(&self, type1: &Type, type2: &Type) -> Type {
         use Type::*;
 
-        // If one type is a subtype of the other, the subtype is the GLB
-        if self.is_subtype(type1, type2) {
-            return type1.clone();
-        }
-        if self.is_subtype(type2, type1) {
-            return type2.clone();
-        }
-
-        // Handle identical types
-        if type1 == type2 {
-            return type1.clone();
-        }
-
-        // Special case for Nothing (bottom type)
-        if matches!(type1, Nothing) || matches!(type2, Nothing) {
-            return Nothing;
-        }
-
-        // Special case for None and Optional types
-        if matches!(type1, None) && matches!(type2, Optional(_)) {
-            return None;
-        }
-        if matches!(type2, None) && matches!(type1, Optional(_)) {
-            return None;
-        }
-
-        // Handle composite types with the same structure
         match (type1, type2) {
-            // Arrays: find the GLB of element types
+            // Universe is the top type - GLB(Universe, T) = T.
+            (Universe, other) | (other, Universe) => other.clone(),
+
+            // Array covariance: GLB(Array<T1>, Array<T2>) = Array<GLB(T1, T2)>.
             (Array(elem1), Array(elem2)) => {
                 let glb_elem = self.greatest_lower_bound(elem1, elem2);
-                if matches!(glb_elem, Nothing) {
-                    return Nothing;
-                }
-                return Array(Box::new(glb_elem));
+                Array(glb_elem.into())
             }
 
-            // Tuples: find GLB for each pair of elements (if same length)
+            // Tuple covariance: GLB((T1,T2,...), (U1,U2,...)) = (GLB(T1,U1), GLB(T2,U2), ...).
             (Tuple(elems1), Tuple(elems2)) if elems1.len() == elems2.len() => {
-                let mut glb_elems = Vec::with_capacity(elems1.len());
+                let glb_elems: Vec<_> = elems1
+                    .iter()
+                    .zip(elems2.iter())
+                    .map(|(e1, e2)| self.greatest_lower_bound(e1, e2))
+                    .collect();
 
-                for (e1, e2) in elems1.iter().zip(elems2.iter()) {
-                    let elem_glb = self.greatest_lower_bound(e1, e2);
-                    if matches!(elem_glb, Nothing) {
-                        return Nothing; // If any element pair has no GLB, the tuples have no GLB
-                    }
-                    glb_elems.push(elem_glb);
-                }
-
-                return Tuple(glb_elems);
+                Tuple(glb_elems)
             }
 
-            // Maps: find GLB for keys and values
+            // Map with contravariant keys and covariant values.
             (Map(key1, val1), Map(key2, val2)) => {
-                let glb_key = self.greatest_lower_bound(key1, key2);
+                let lub_key = self.least_upper_bound(key1, key2);
                 let glb_val = self.greatest_lower_bound(val1, val2);
 
-                if matches!(glb_key, Nothing) || matches!(glb_val, Nothing) {
-                    return Nothing;
-                }
-
-                return Map(Box::new(glb_key), Box::new(glb_val));
+                Map(lub_key.into(), glb_val.into())
             }
 
-            // Optional types: find GLB of inner types
+            // Optional type handling.
             (Optional(inner1), Optional(inner2)) => {
                 let glb_inner = self.greatest_lower_bound(inner1, inner2);
-                if matches!(glb_inner, Nothing) {
-                    return Nothing;
-                }
-                return Optional(Box::new(glb_inner));
+                Optional(glb_inner.into())
+            }
+            (None, Optional(_)) | (Optional(_), None) => None,
+            (None, None) => None,
+            (Optional(inner), other) | (other, Optional(inner)) => {
+                let glb = self.greatest_lower_bound(inner, other);
+                Optional(glb.into())
             }
 
-            // Stored types: find GLB of inner types
+            // Stored type handling.
             (Stored(inner1), Stored(inner2)) => {
                 let glb_inner = self.greatest_lower_bound(inner1, inner2);
-                if matches!(glb_inner, Nothing) {
-                    return Nothing;
-                }
-                return Stored(Box::new(glb_inner));
+                Stored(glb_inner.into())
             }
 
-            // Costed types: find GLB of inner types
+            // Costed type handling.
             (Costed(inner1), Costed(inner2)) => {
                 let glb_inner = self.greatest_lower_bound(inner1, inner2);
-                if matches!(glb_inner, Nothing) {
-                    return Nothing;
-                }
-                return Costed(Box::new(glb_inner));
+                Costed(glb_inner.into())
             }
 
-            // For mixed Costed and Stored types
-            (Costed(inner1), Stored(inner2)) | (Stored(inner1), Costed(inner2)) => {
-                let glb_inner = self.greatest_lower_bound(inner1, inner2);
-                if matches!(glb_inner, Nothing) {
-                    return Nothing;
-                }
-                return Costed(Box::new(glb_inner));
+            // Mixed Stored and Costed - result is Costed (more specific).
+            (Costed(costed), Stored(stored)) | (Stored(stored), Costed(costed)) => {
+                let glb_inner = self.greatest_lower_bound(costed, stored);
+                Costed(glb_inner.into())
             }
 
-            // For function types, use covariance for parameters and contravariance for return types
+            // Function type handling - covariant parameters, contravariant return types (reversed from LUB).
             (Closure(param1, ret1), Closure(param2, ret2)) => {
-                // For covariant parameter types, we need the LUB
-                let param_lub = self.least_upper_bound(param1, param2);
+                let param_type = self.least_upper_bound(param1, param2);
+                let ret_type = self.greatest_lower_bound(ret1, ret2);
 
-                // For contravariant return types, we need the GLB
-                let ret_glb = self.greatest_lower_bound(ret1, ret2);
-                if matches!(ret_glb, Nothing) {
-                    return Nothing;
-                }
-
-                return Closure(Box::new(param_lub), Box::new(ret_glb));
+                Closure(param_type.into(), ret_type.into())
             }
 
-            // For ADTs, we need to find the most general common subtype
-            (Adt(name1), Adt(name2)) => {
-                // Try to find a common subtype in the type hierarchy
-                if let Some(common_subtype) = self.find_common_subtype(name1, name2) {
-                    return Adt(common_subtype);
+            // Map/Function compatibility - a Map can be seen as a function from keys to optional values.
+            (Map(key_type, val_type), Closure(param_type, ret_type))
+            | (Closure(param_type, ret_type), Map(key_type, val_type)) => {
+                let param_glb = self.least_upper_bound(param_type, key_type);
+                let ret_lub = self.greatest_lower_bound(ret_type, &Optional(val_type.clone()));
+                Closure(param_glb.into(), ret_lub.into())
+            }
+
+            // Array/Function compatibility - an Array can be seen as a function from indices to values.
+            (Array(elem_type), Closure(param_type, ret_type))
+            | (Closure(param_type, ret_type), Array(elem_type)) => {
+                if matches!(&**param_type, I64) {
+                    let ret_lub = self.greatest_lower_bound(ret_type, &Optional(elem_type.clone()));
+                    Closure(I64.into(), ret_lub.into())
+                } else {
+                    Nothing
                 }
             }
 
-            // Handle Optional and its inner type
-            (Optional(inner), other) | (other, Optional(inner))
-                if self.is_subtype(other, inner) =>
+            // ADT types - find subtype relationship if it exists.
+            (adt1 @ Adt(_), adt2 @ Adt(_)) => {
+                if self.is_subtype(adt1, adt2) {
+                    adt1.clone()
+                } else if self.is_subtype(adt2, adt1) {
+                    adt2.clone()
+                } else {
+                    Nothing
+                }
+            }
+
+            // Native trait handling.
+            (trait_type @ (Concat | EqHash | Arithmetic), other)
+                if self.is_subtype(other, trait_type) =>
             {
-                // If other is a subtype of the inner type, other is the GLB
-                return other.clone();
+                other.clone()
+            }
+            (other, trait_type @ (Concat | EqHash | Arithmetic))
+                if self.is_subtype(other, trait_type) =>
+            {
+                other.clone()
             }
 
-            // Handle Stored and its inner type
-            (Stored(inner), other) | (other, Stored(inner)) if self.is_subtype(other, inner) => {
-                // If other is a subtype of the inner type, Costed(other) is the GLB
-                return Costed(Box::new(other.clone()));
-            }
-
-            // Handle Costed and its inner type
-            (Costed(inner), other) | (other, Costed(inner)) if self.is_subtype(other, inner) => {
-                // If other is a subtype of the inner type, Costed(other) is the GLB
-                return Costed(Box::new(other.clone()));
-            }
-
-            // Native traits: check if there's a common implementation
-            (_, Concat) | (Concat, _) => {
-                // Find a common type that implements Concat, if any
-                for common_type in [
-                    String,
-                    Array(Box::new(Universe)),
-                    Map(Box::new(Universe), Box::new(Universe)),
-                ] {
-                    if self.is_subtype(type1, &common_type) && self.is_subtype(type2, &common_type)
-                    {
-                        return common_type;
-                    }
-                }
-            }
-
-            (_, EqHash) | (EqHash, _) => {
-                // Find a common type that implements EqHash, if any
-                for common_type in [I64, String, Bool, Unit, None] {
-                    if self.is_subtype(type1, &common_type) && self.is_subtype(type2, &common_type)
-                    {
-                        return common_type;
-                    }
-                }
-            }
-
-            (_, Arithmetic) | (Arithmetic, _) => {
-                // Find a common type that implements Arithmetic, if any
-                for common_type in [I64, F64] {
-                    if self.is_subtype(type1, &common_type) && self.is_subtype(type2, &common_type)
-                    {
-                        return common_type;
-                    }
-                }
-            }
-
-            _ => {}
+            // Default case - return Nothing if no common subtype exists.
+            _ => Nothing,
         }
-
-        // If no common subtype found, return Nothing (bottom type)
-        Nothing
-    }
-
-    /// Finds a common subtype of two ADT identifiers in the type hierarchy.
-    ///
-    /// # Arguments
-    ///
-    /// * `name1` - The first ADT identifier
-    /// * `name2` - The second ADT identifier
-    ///
-    /// # Returns
-    ///
-    /// Some(identifier) if a common subtype is found, None otherwise.
-    fn find_common_subtype(&self, name1: &Identifier, name2: &Identifier) -> Option<Identifier> {
-        // Get all subtypes of name1
-        let subtypes1 = self.get_all_subtypes(name1);
-
-        // Get all subtypes of name2
-        let subtypes2 = self.get_all_subtypes(name2);
-
-        // Find the most general common subtype
-        // First collect the common subtypes
-        let common_subtypes: Vec<&Identifier> = subtypes1
-            .iter()
-            .filter(|&st| subtypes2.contains(st))
-            .collect();
-
-        // If no common subtypes, return None
-        if common_subtypes.is_empty() {
-            return None;
-        }
-
-        // Find the most general one (the one that is a supertype of all others)
-        let mut most_general = common_subtypes[0];
-
-        for &subtype in &common_subtypes[1..] {
-            if self.is_subtype(
-                &Type::Adt(most_general.clone()),
-                &Type::Adt(subtype.clone()),
-            ) {
-                most_general = subtype;
-            }
-        }
-
-        Some(most_general.clone())
-    }
-
-    /// Gets all subtypes of an ADT identifier in the type hierarchy.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The ADT identifier
-    ///
-    /// # Returns
-    ///
-    /// A HashSet containing all subtypes of the given ADT, including itself.
-    fn get_all_subtypes(&self, name: &Identifier) -> HashSet<Identifier> {
-        let mut result = HashSet::new();
-        result.insert(name.clone());
-
-        // Inner recursive function to collect subtypes
-        fn collect_subtypes(
-            registry: &TypeRegistry,
-            name: &Identifier,
-            result: &mut HashSet<Identifier>,
-        ) {
-            // Look through all parent-children relationships
-            for (parent, children) in &registry.subtypes {
-                // If this name is a parent
-                if parent == name {
-                    // Add all its children to the result
-                    for child in children {
-                        if result.insert(child.clone()) {
-                            // Recursively collect subtypes of each child
-                            collect_subtypes(registry, child, result);
-                        }
-                    }
-                }
-            }
-        }
-
-        collect_subtypes(self, name, &mut result);
-        result
     }
 }
