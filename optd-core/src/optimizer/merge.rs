@@ -2,9 +2,15 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{Optimizer, tasks::Task};
+use super::{
+    Optimizer,
+    tasks::{SourceTaskId, Task},
+};
 use crate::{
-    cir::{GoalId, GroupId, ImplementationRule, LogicalExpressionId, TransformationRule},
+    cir::{
+        Cost, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpressionId,
+        TransformationRule,
+    },
     error::Error,
     memo::{Memoize, MergeResult, MergedGoalInfo},
     optimizer::tasks::TaskId,
@@ -27,7 +33,7 @@ impl<M: Memoize> Optimizer<M> {
             let new_repr_group_id = group_merge.new_repr_group_id;
             // Step 1: For each group that has an exploration task, we launch new subtasks based on subscription.
             // Note: It is fine to have duplication at this stage, we will remove duplicates later.
-            for (group_id, _) in all_exprs_by_group.iter() {
+            for group_id in all_exprs_by_group.keys() {
                 //
                 let Some(explore_group_task_id) =
                     self.group_exploration_task_index.get(group_id).cloned()
@@ -222,6 +228,114 @@ impl<M: Memoize> Optimizer<M> {
                 }
             }
             primary_task.transform_expr_in = transforms.values().cloned().collect();
+        }
+
+        // <II. Apply goal merges>
+        for goal_merge in result.goal_merges {
+            let mut optimize_goal_tasks = Vec::new();
+            let all_exprs_by_goal = &goal_merge.merged_goals;
+            let new_repr_goal_id = goal_merge.new_repr_goal_id;
+
+            for (goal_id, current_goal_info) in all_exprs_by_goal.iter() {
+                let Some(optimize_goal_task_id) =
+                    self.goal_optimization_task_index.get(goal_id).cloned()
+                else {
+                    continue;
+                };
+                optimize_goal_tasks.push((optimize_goal_task_id, *goal_id));
+
+                let (optimize_plan_task_ids, fork_costed_task_ids) = {
+                    let optimize_goal_task = self
+                        .tasks
+                        .get_mut(&optimize_goal_task_id)
+                        .unwrap()
+                        .as_optimize_goal();
+                    (
+                        optimize_goal_task.optimize_plan_out.clone(),
+                        optimize_goal_task.fork_costed_out.clone(),
+                    )
+                };
+                let current_cost = current_goal_info.best_expr.as_ref().map(|(_, cost)| *cost);
+
+                // TODO: could we reuse `handle_forward_result` logic?
+                let members_from_others = all_exprs_by_goal
+                    .iter()
+                    .filter(|(id, _)| *id != goal_id)
+                    .flat_map(|(_, goal_info)| goal_info.members.iter())
+                    .cloned()
+                    .collect::<HashSet<_>>();
+
+                // Ensure there is a subtask for all the goal members from other goals.
+                for member in members_from_others {
+                    match member {
+                        GoalMemberId::PhysicalExpressionId(physical_expr_id) => {
+                            let task_id = self
+                                .ensure_cost_expression_task(
+                                    physical_expr_id,
+                                    Cost(f64::MAX),
+                                    optimize_goal_task_id,
+                                )
+                                .await?;
+                            let optimize_goal_task = self
+                                .tasks
+                                .get_mut(&optimize_goal_task_id)
+                                .unwrap()
+                                .as_optimize_goal_mut();
+                            optimize_goal_task.add_cost_expr_in(task_id);
+                        }
+                        GoalMemberId::GoalId(goal_id) => {
+                            let (task_id, _) = self
+                                .ensure_optimize_goal_task(
+                                    goal_id,
+                                    SourceTaskId::OptimizeGoal(optimize_goal_task_id),
+                                )
+                                .await?;
+                            let optimize_goal_task = self
+                                .tasks
+                                .get_mut(&optimize_goal_task_id)
+                                .unwrap()
+                                .as_optimize_goal_mut();
+                            optimize_goal_task.add_optimize_goal_in(task_id);
+                        }
+                    }
+                }
+
+                let best_from_others = all_exprs_by_goal
+                    .iter()
+                    .filter(|(id, _)| *id != goal_id)
+                    .filter_map(|(_, goal_info)| goal_info.best_expr)
+                    .filter(|(_, cost)| current_cost.is_none_or(|current| *cost < current))
+                    .fold(None, |acc, (expr_id, cost)| match acc {
+                        None => Some((expr_id, cost)),
+                        Some((_, acc_cost)) if cost < acc_cost => Some((expr_id, cost)),
+                        Some(_) => acc,
+                    });
+
+                if let Some((best_expr_id, best_cost)) = best_from_others {
+                    // Send to client of optimize plan.
+                    for task_id in optimize_plan_task_ids.iter() {
+                        let optimize_plan_task =
+                            self.tasks.get(task_id).unwrap().as_optimize_plan();
+                        self.emit_best_physical_plan(
+                            optimize_plan_task.physical_plan_tx.clone(),
+                            best_expr_id,
+                        )
+                        .await?;
+                    }
+                    // Lanuch continuations.
+                    for task_id in fork_costed_task_ids.iter() {
+                        let continue_with_costed_task_id = self
+                            .create_continue_with_costed_task(best_expr_id, best_cost, *task_id)
+                            .await?;
+                        let fork_costed_task =
+                            self.tasks.get_mut(task_id).unwrap().as_fork_costed_mut();
+                        fork_costed_task.budget = best_cost;
+                        fork_costed_task.add_continue_in(continue_with_costed_task_id);
+                    }
+                }
+            }
+
+            // TODO(yuchen): we should also dedup the implement expressions here, besides other stuff.
         }
 
         Ok(())

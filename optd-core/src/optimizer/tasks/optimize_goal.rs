@@ -53,12 +53,12 @@ impl OptimizeGoalTask {
     }
 
     /// Adds a `CostExpression` task as a dependency.
-    fn add_cost_expr_in(&mut self, task_id: TaskId) {
+    pub fn add_cost_expr_in(&mut self, task_id: TaskId) {
         self.cost_expression_in.push(task_id);
     }
 
     /// Adds an `OptimizeGoal` task as a dependency.
-    fn add_optimize_goal_in(&mut self, task_id: TaskId) {
+    pub fn add_optimize_goal_in(&mut self, task_id: TaskId) {
         self.optimize_goal_in.push(task_id);
     }
 }
