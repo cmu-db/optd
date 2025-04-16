@@ -202,6 +202,8 @@ impl TypeRegistry {
 
             (None, Optional(_)) => true,
 
+            // TODO; Wrong about option,,,,
+
             // Stored and Costed type handling.
             (Stored(child_inner), Stored(parent_inner)) => {
                 self.is_subtype_inner(child_inner, parent_inner, memo)
@@ -257,10 +259,9 @@ impl TypeRegistry {
             }
 
             // Tuple covariance: (T1, T2, ...) <: (U1, U2, ...) if T1 <: U1, T2 <: U2, ...
-            (Tuple(child_types), Tuple(parent_types)) => {
-                if child_types.len() != parent_types.len() {
-                    return false;
-                }
+            (Tuple(child_types), Tuple(parent_types))
+                if child_types.len() == parent_types.len() =>
+            {
                 child_types
                     .iter()
                     .zip(parent_types.iter())
