@@ -363,15 +363,17 @@ impl TypeRegistry {
 
 /// Creates a function type from parameter types and return type.
 pub(super) fn create_function_type(param_types: &[Type], return_type: &Type) -> Type {
+    use Type::*;
+
     let param_type = if param_types.is_empty() {
-        Type::Unit
+        Unit
     } else if param_types.len() == 1 {
         param_types[0].clone()
     } else {
-        Type::Tuple(param_types.to_vec())
+        Tuple(param_types.to_vec())
     };
 
-    Type::Closure(param_type.into(), return_type.clone().into())
+    Closure(param_type.into(), return_type.clone().into())
 }
 
 /// Converts an AST type to a Type enum.
