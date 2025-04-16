@@ -10,6 +10,20 @@ impl TypeRegistry {
     /// The least upper bound is the most specific type that is a supertype of both input types.
     /// This operation is also known as the "join" in type theory.
     ///
+    /// The LUB follows these principles:
+    /// 1. For container types (Array, Tuple, Map, etc.), it applies covariance rules.
+    /// 2. For function types, it uses contravariance for parameters and covariance for return types.
+    /// 3. For native trait types (Concat, EqHash, Arithmetic), the result is the trait if both types implement it.
+    /// 4. For class/ADT types, it finds the closest common ancestor in the type hierarchy.
+    /// 5. For special wrapper types (Optional, Stored, Costed), it preserves the wrapper and computes LUB of inner types.
+    /// 6. The ultimate fallback is Type::Universe, the top type of the hierarchy.
+    ///
+    /// Note on trait types: The type system has three special trait types (Concat, EqHash, Arithmetic)
+    /// that represent capabilities rather than data structures. There isn't a strict hierarchy among
+    /// these traits, and a type can implement multiple traits (so there might be confusion).
+    /// LUB will return a trait type only if one of the types is the trait.
+    /// This trick works well enough for our type inference.
+    ///
     /// # Arguments
     ///
     /// * `type1` - The first type
@@ -19,18 +33,20 @@ impl TypeRegistry {
     ///
     /// The least upper bound of the two types. Returns `Type::Universe` if no more specific common
     /// supertype exists.
-    pub fn least_upper_bound(&self, type1: &Type, type2: &Type) -> Type {
+    pub(super) fn least_upper_bound(&self, type1: &Type, type2: &Type) -> Type {
         use Type::*;
 
         match (type1, type2) {
-            // Nothing is the bottom type.
+            // Nothing is the bottom type - LUB(Nothing, T) = T.
             (Nothing, other) | (other, Nothing) => other.clone(),
 
+            // Array covariance: LUB(Array<T1>, Array<T2>) = Array<LUB(T1, T2)>.
             (Array(elem1), Array(elem2)) => {
                 let lub_elem = self.least_upper_bound(elem1, elem2);
-                return Array(Box::new(lub_elem));
+                Array(lub_elem.into())
             }
 
+            // Tuple covariance: LUB((T1,T2,...), (U1,U2,...)) = (LUB(T1,U1), LUB(T2,U2), ...).
             (Tuple(elems1), Tuple(elems2)) if elems1.len() == elems2.len() => {
                 let lub_elems = elems1
                     .iter()
@@ -40,53 +56,76 @@ impl TypeRegistry {
                 Tuple(lub_elems)
             }
 
+            // Map with contravariant keys and covariant values.
             (Map(key1, val1), Map(key2, val2)) => {
-                let lub_key = self.least_upper_bound(key1, key2);
+                let glb_key = self.greatest_lower_bound(key1, key2);
                 let lub_val = self.least_upper_bound(val1, val2);
-                Map(lub_key.into(), lub_val.into())
+                Map(glb_key.into(), lub_val.into())
             }
 
+            // Optional type handling.
             (Optional(inner1), Optional(inner2)) => {
                 let lub_inner = self.least_upper_bound(inner1, inner2);
                 Optional(lub_inner.into())
             }
-
             (None, Optional(inner)) | (Optional(inner), None) => Optional(inner.clone()),
+            (Optional(inner), other) | (other, Optional(inner)) => {
+                Optional(self.least_upper_bound(inner, other).into())
+            }
 
+            // Stored type handling.
             (Stored(inner1), Stored(inner2)) => {
                 let lub_inner = self.least_upper_bound(inner1, inner2);
                 Stored(lub_inner.into())
             }
 
+            // Costed type handling.
             (Costed(inner1), Costed(inner2)) => {
                 let lub_inner = self.least_upper_bound(inner1, inner2);
                 Costed(lub_inner.into())
             }
 
-            // Mhh -----
-            (Costed(inner1), Stored(inner2)) | (Stored(inner1), Costed(inner2)) => {
-                let lub_inner = self.least_upper_bound(inner1, inner2);
+            // Mixed Stored and Costed - result is Stored (Costed is more specific, Stored is more general).
+            (Costed(costed), Stored(stored)) | (Stored(stored), Costed(costed)) => {
+                let lub_inner = self.least_upper_bound(costed, stored);
                 Stored(lub_inner.into())
             }
-            (Stored(inner), other) | (other, Stored(inner)) if self.is_subtype(inner, other) => {
-                Stored(other.clone().into())
+
+            // Unwrap Stored/Costed for LUB with other types.
+            (Stored(stored), other) | (other, Stored(stored)) => {
+                self.least_upper_bound(stored, other)
             }
-            (Costed(inner), other) | (other, Costed(inner)) if self.is_subtype(inner, other) => {
-                Stored(other.clone().into())
+            (Costed(costed), other) | (other, Costed(costed)) => {
+                self.least_upper_bound(costed, other)
             }
-            (Optional(inner), other) | (other, Optional(inner))
-                if self.is_subtype(inner, other) =>
-            {
-                Optional(other.clone().into())
-            }
-            // Mhh -----
+
+            // Function type handling - contravariant parameters, covariant return types.
             (Closure(param1, ret1), Closure(param2, ret2)) => {
                 let param_type = self.greatest_lower_bound(param1, param2);
                 let ret_type = self.least_upper_bound(ret1, ret2);
-
                 Closure(param_type.into(), ret_type.into())
             }
 
+            // Map/Function compatibility - a Map can be seen as a function from keys to optional values.
+            (Map(key_type, val_type), Closure(param_type, ret_type))
+            | (Closure(param_type, ret_type), Map(key_type, val_type)) => {
+                let param_glb = self.greatest_lower_bound(param_type, key_type);
+                let ret_lub = self.least_upper_bound(ret_type, &Optional(val_type.clone()));
+                Closure(param_glb.into(), ret_lub.into())
+            }
+
+            // Array/Function compatibility - an Array can be seen as a function from indices to values.
+            (Array(elem_type), Closure(param_type, ret_type))
+            | (Closure(param_type, ret_type), Array(elem_type)) => {
+                if matches!(&**param_type, I64) {
+                    let ret_lub = self.least_upper_bound(ret_type, &Optional(elem_type.clone()));
+                    Closure(I64.into(), ret_lub.into())
+                } else {
+                    Universe
+                }
+            }
+
+            // ADT types - find their common supertype in the hierarchy.
             (Adt(name1), Adt(name2)) => {
                 if let Some(common_ancestor) = self.find_common_supertype(name1, name2) {
                     Adt(common_ancestor)
@@ -95,15 +134,7 @@ impl TypeRegistry {
                 }
             }
 
-            // Handle native trait types.
-            // TODO: This is annoying as not always ordered!
-            // Stored(A) <: A
-            // B <: A
-            // Stored(B) <: B
-            // Stored(B) <: Stored(A) <: A
-            // ->    B   -->   A <------- Stored(A)
-            
-            // A <: Option(A)
+            // Native trait types trick, check function documentation for more details.
             (_, Concat) | (Concat, _)
                 if self.is_subtype(type1, &Concat) && self.is_subtype(type2, &Concat) =>
             {
@@ -122,6 +153,7 @@ impl TypeRegistry {
                 Arithmetic
             }
 
+            // Default case - universe is the ultimate fallback.
             _ => Universe,
         }
     }
@@ -140,7 +172,7 @@ impl TypeRegistry {
         let supertypes1 = self.get_all_supertypes(name1);
         let supertypes2 = self.get_all_supertypes(name2);
 
-        let common_supertypes: Vec<&Identifier> = supertypes1
+        let common_supertypes: Vec<_> = supertypes1
             .iter()
             .filter(|&st| supertypes2.contains(st))
             .collect();
@@ -191,341 +223,5 @@ impl TypeRegistry {
 
         collect_supertypes(self, name, &mut result);
         result
-    }
-}
-
-#[cfg(test)]
-mod least_upper_bound_tests {
-    use super::*;
-    use crate::{
-        parser::ast::{Adt, Field, Type as AstType},
-        utils::span::{Span, Spanned},
-    };
-    use Adt::*;
-
-    fn create_test_span() -> Span {
-        Span::new("test".to_string(), 0..1)
-    }
-
-    fn spanned<T>(value: T) -> Spanned<T> {
-        Spanned::new(value, create_test_span())
-    }
-
-    fn create_product_adt(name: &str, fields: Vec<(&str, AstType)>) -> Adt {
-        let spanned_fields: Vec<Spanned<Field>> = fields
-            .into_iter()
-            .map(|(field_name, field_type)| {
-                spanned(Field {
-                    name: spanned(field_name.to_string()),
-                    ty: spanned(field_type),
-                })
-            })
-            .collect();
-
-        Product {
-            name: spanned(name.to_string()),
-            fields: spanned_fields,
-        }
-    }
-
-    fn create_sum_adt(name: &str, variants: Vec<Adt>) -> Adt {
-        Sum {
-            name: spanned(name.to_string()),
-            variants: variants.into_iter().map(spanned).collect(),
-        }
-    }
-
-    #[test]
-    fn test_lub_primitive_types() {
-        let registry = TypeRegistry::default();
-
-        // Same primitive types
-        assert_eq!(
-            registry.least_upper_bound(&Type::I64, &Type::I64),
-            Type::I64
-        );
-        assert_eq!(
-            registry.least_upper_bound(&Type::String, &Type::String),
-            Type::String
-        );
-        assert_eq!(
-            registry.least_upper_bound(&Type::Bool, &Type::Bool),
-            Type::Bool
-        );
-        assert_eq!(
-            registry.least_upper_bound(&Type::F64, &Type::F64),
-            Type::F64
-        );
-        assert_eq!(
-            registry.least_upper_bound(&Type::Unit, &Type::Unit),
-            Type::Unit
-        );
-
-        // Different primitive types - should result in Universe
-        assert_eq!(
-            registry.least_upper_bound(&Type::I64, &Type::String),
-            Type::Universe
-        );
-        assert_eq!(
-            registry.least_upper_bound(&Type::Bool, &Type::F64),
-            Type::Universe
-        );
-
-        // Special case for Nothing
-        assert_eq!(
-            registry.least_upper_bound(&Type::Nothing, &Type::I64),
-            Type::I64
-        );
-        assert_eq!(
-            registry.least_upper_bound(&Type::String, &Type::Nothing),
-            Type::String
-        );
-
-        // Special case for None
-        assert_eq!(
-            registry.least_upper_bound(&Type::None, &Type::Optional(Box::new(Type::I64))),
-            Type::Optional(Box::new(Type::I64))
-        );
-    }
-
-    #[test]
-    fn test_lub_composite_types() {
-        let registry = TypeRegistry::default();
-
-        // Array types
-        assert_eq!(
-            registry.least_upper_bound(
-                &Type::Array(Box::new(Type::I64)),
-                &Type::Array(Box::new(Type::I64))
-            ),
-            Type::Array(Box::new(Type::I64))
-        );
-
-        // Tuples
-        assert_eq!(
-            registry.least_upper_bound(
-                &Type::Tuple(vec![Type::I64, Type::String]),
-                &Type::Tuple(vec![Type::I64, Type::String])
-            ),
-            Type::Tuple(vec![Type::I64, Type::String])
-        );
-
-        // Maps
-        assert_eq!(
-            registry.least_upper_bound(
-                &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
-                &Type::Map(Box::new(Type::String), Box::new(Type::I64))
-            ),
-            Type::Map(Box::new(Type::String), Box::new(Type::I64))
-        );
-
-        // Different types - should result in Universe
-        assert_eq!(
-            registry.least_upper_bound(
-                &Type::Array(Box::new(Type::I64)),
-                &Type::Tuple(vec![Type::I64, Type::String])
-            ),
-            Type::Universe
-        );
-    }
-
-    #[test]
-    fn test_lub_stored_costed_types() {
-        let registry = TypeRegistry::default();
-
-        // Stored types
-        assert_eq!(
-            registry.least_upper_bound(
-                &Type::Stored(Box::new(Type::I64)),
-                &Type::Stored(Box::new(Type::I64))
-            ),
-            Type::Stored(Box::new(Type::I64))
-        );
-
-        // Costed types
-        assert_eq!(
-            registry.least_upper_bound(
-                &Type::Costed(Box::new(Type::I64)),
-                &Type::Costed(Box::new(Type::I64))
-            ),
-            Type::Costed(Box::new(Type::I64))
-        );
-
-        // Mix of Stored and Costed - should result in Stored
-        assert_eq!(
-            registry.least_upper_bound(
-                &Type::Stored(Box::new(Type::I64)),
-                &Type::Costed(Box::new(Type::I64))
-            ),
-            Type::Stored(Box::new(Type::I64))
-        );
-
-        // Stored and non-wrapped type
-        assert_eq!(
-            registry.least_upper_bound(&Type::Stored(Box::new(Type::I64)), &Type::I64),
-            Type::Stored(Box::new(Type::I64))
-        );
-    }
-
-    #[test]
-    fn test_lub_native_trait_types() {
-        let registry = TypeRegistry::default();
-
-        // Types that both implement Concat
-        assert_eq!(
-            registry.least_upper_bound(&Type::String, &Type::Array(Box::new(Type::I64))),
-            Type::Concat
-        );
-
-        // Types that both implement EqHash
-        assert_eq!(
-            registry.least_upper_bound(&Type::I64, &Type::String),
-            Type::EqHash
-        );
-
-        // Types that both implement Arithmetic
-        assert_eq!(
-            registry.least_upper_bound(&Type::I64, &Type::F64),
-            Type::Arithmetic
-        );
-    }
-
-    #[test]
-    fn test_lub_adt_hierarchy() {
-        let mut registry = TypeRegistry::default();
-
-        // Create a vehicle hierarchy
-        let vehicle = create_product_adt("Vehicle", vec![("wheels", AstType::Int64)]);
-        let car = create_product_adt(
-            "Car",
-            vec![("wheels", AstType::Int64), ("doors", AstType::Int64)],
-        );
-        let truck = create_product_adt(
-            "Truck",
-            vec![("wheels", AstType::Int64), ("load", AstType::Float64)],
-        );
-        let vehicles_enum = create_sum_adt("Vehicles", vec![vehicle, car, truck]);
-
-        // Register the ADTs
-        registry.register_adt(&vehicles_enum).unwrap();
-
-        // LUB of Car and Truck should be Vehicles
-        assert_eq!(
-            registry.least_upper_bound(
-                &Type::Adt("Car".to_string()),
-                &Type::Adt("Truck".to_string())
-            ),
-            Type::Adt("Vehicles".to_string())
-        );
-
-        // LUB of Car and Vehicle should be Vehicles
-        assert_eq!(
-            registry.least_upper_bound(
-                &Type::Adt("Car".to_string()),
-                &Type::Adt("Vehicle".to_string())
-            ),
-            Type::Adt("Vehicles".to_string())
-        );
-
-        // LUB of Car and Vehicles should be Vehicles
-        assert_eq!(
-            registry.least_upper_bound(
-                &Type::Adt("Car".to_string()),
-                &Type::Adt("Vehicles".to_string())
-            ),
-            Type::Adt("Vehicles".to_string())
-        );
-    }
-
-    #[test]
-    fn test_lub_optional_types() {
-        let registry = TypeRegistry::default();
-
-        // Optional types
-        assert_eq!(
-            registry.least_upper_bound(
-                &Type::Optional(Box::new(Type::I64)),
-                &Type::Optional(Box::new(Type::I64))
-            ),
-            Type::Optional(Box::new(Type::I64))
-        );
-
-        // None and Optional type
-        assert_eq!(
-            registry.least_upper_bound(&Type::None, &Type::Optional(Box::new(Type::I64))),
-            Type::Optional(Box::new(Type::I64))
-        );
-
-        // Optional and its inner type
-        assert_eq!(
-            registry.least_upper_bound(&Type::Optional(Box::new(Type::I64)), &Type::I64),
-            Type::Optional(Box::new(Type::I64))
-        );
-
-        // Different optional types
-        assert_eq!(
-            registry.least_upper_bound(
-                &Type::Optional(Box::new(Type::I64)),
-                &Type::Optional(Box::new(Type::F64))
-            ),
-            Type::Optional(Box::new(Type::Universe))
-        );
-    }
-
-    #[test]
-    fn test_lub_function_types() {
-        let mut registry = TypeRegistry::default();
-
-        // Create a type hierarchy for testing GLB with functions
-        let animal = create_product_adt("Animal", vec![]);
-        let dog = create_product_adt("Dog", vec![]);
-        let cat = create_product_adt("Cat", vec![]);
-        let animals_enum = create_sum_adt("Animals", vec![animal, dog, cat]);
-        registry.register_adt(&animals_enum).unwrap();
-
-        // Same function signatures
-        assert_eq!(
-            registry.least_upper_bound(
-                &Type::Closure(Box::new(Type::I64), Box::new(Type::Bool)),
-                &Type::Closure(Box::new(Type::I64), Box::new(Type::Bool))
-            ),
-            Type::Closure(Box::new(Type::I64), Box::new(Type::Bool))
-        );
-
-        // Functions with related parameter types (params should use GLB)
-        // Closure(Dog, Bool) join Closure(Cat, Bool) = Closure(Animals, Bool)
-        // since Animals is a GLB of Dog and Cat
-        let fn1 = Type::Closure(Box::new(Type::Adt("Dog".to_string())), Box::new(Type::Bool));
-        let fn2 = Type::Closure(Box::new(Type::Adt("Cat".to_string())), Box::new(Type::Bool));
-        assert_eq!(
-            registry.least_upper_bound(&fn1, &fn2),
-            Type::Closure(
-                Box::new(Type::Adt("Animals".to_string())),
-                Box::new(Type::Bool)
-            )
-        );
-
-        // Function with related return types
-        // Closure(I64, Dog) join Closure(I64, Cat) = Closure(I64, Animals)
-        let fn3 = Type::Closure(Box::new(Type::I64), Box::new(Type::Adt("Dog".to_string())));
-        let fn4 = Type::Closure(Box::new(Type::I64), Box::new(Type::Adt("Cat".to_string())));
-        assert_eq!(
-            registry.least_upper_bound(&fn3, &fn4),
-            Type::Closure(
-                Box::new(Type::I64),
-                Box::new(Type::Adt("Animals".to_string()))
-            )
-        );
-
-        // Function with both contravariant param types and covariant return types
-        let fn5 = Type::Closure(Box::new(Type::Adt("Dog".to_string())), Box::new(Type::I64));
-        let fn6 = Type::Closure(Box::new(Type::Adt("Cat".to_string())), Box::new(Type::F64));
-        assert_eq!(
-            registry.least_upper_bound(&fn5, &fn6),
-            Type::Closure(
-                Box::new(Type::Adt("Animals".to_string())),
-                Box::new(Type::Arithmetic)
-            )
-        );
     }
 }

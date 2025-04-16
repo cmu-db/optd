@@ -202,8 +202,6 @@ impl TypeRegistry {
 
             (None, Optional(_)) => true,
 
-            // TODO; Wrong about option,,,,
-
             // Stored and Costed type handling.
             (Stored(child_inner), Stored(parent_inner)) => {
                 self.is_subtype_inner(child_inner, parent_inner, memo)
@@ -268,9 +266,10 @@ impl TypeRegistry {
                     .all(|(c, p)| self.is_subtype_inner(c, p, memo))
             }
 
-            // Map covariance: Map[K1, V1] <: Map[K2, V2] if K1 <: K2 and V1 <: V2
+            // Map covariance on values, contravariance on keys:
+            // Map[K1, V1] <: Map[K2, V2] if K2 <: K1 and V1 <: V2
             (Map(child_key, child_val), Map(parent_key, parent_val)) => {
-                self.is_subtype_inner(child_key, parent_key, memo)
+                self.is_subtype_inner(parent_key, child_key, memo)
                     && self.is_subtype_inner(child_val, parent_val, memo)
             }
 
@@ -284,6 +283,10 @@ impl TypeRegistry {
             // Optional type covariance: Optional[T] <: Optional[U] if T <: U
             (Optional(child_ty), Optional(parent_ty)) => {
                 self.is_subtype_inner(child_ty, parent_ty, memo)
+            }
+            // Likewise, T <: Optional[T]
+            (child_type, Optional(parent_inner)) => {
+                self.is_subtype_inner(child_type, parent_inner, memo)
             }
 
             // Native trait subtyping relationships
@@ -627,6 +630,7 @@ mod type_registry_tests {
 
     #[test]
     fn test_map_subtyping() {
+        // Setup basic registry
         let registry = TypeRegistry::default();
 
         // Same type maps
@@ -651,6 +655,27 @@ mod type_registry_tests {
         assert!(registry.is_subtype(
             &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
             &Type::Universe
+        ));
+        
+        // Create a registry with ADTs to test variance
+        let mut adts_registry = TypeRegistry::default();
+        let animal = create_product_adt("Animal", vec![]);
+        let dog = create_product_adt("Dog", vec![]);
+        let animals_enum = create_sum_adt("Animals", vec![animal, dog]);
+        adts_registry.register_adt(&animals_enum).unwrap();
+        
+        // Test contravariance of map keys:
+        // Map(Animals, String) <: Map(Dog, String) because Dog <: Animals
+        assert!(adts_registry.is_subtype(
+            &Type::Map(Box::new(Type::Adt("Animals".to_string())), Box::new(Type::String)),
+            &Type::Map(Box::new(Type::Adt("Dog".to_string())), Box::new(Type::String))
+        ));
+        
+        // Test covariance of map values:
+        // Map(String, Dog) <: Map(String, Animals) because Dog <: Animals
+        assert!(adts_registry.is_subtype(
+            &Type::Map(Box::new(Type::String), Box::new(Type::Adt("Dog".to_string()))),
+            &Type::Map(Box::new(Type::String), Box::new(Type::Adt("Animals".to_string())))
         ));
     }
 
@@ -852,6 +877,47 @@ mod type_registry_tests {
         // None is not equal to Nothing
         assert!(!registry.is_subtype(&Type::None, &Type::Nothing));
         assert!(registry.is_subtype(&Type::Nothing, &Type::None));
+    }
+
+    #[test]
+    fn test_type_optional_subtyping() {
+        let registry = TypeRegistry::default();
+
+        // Test that a type is a subtype of its corresponding optional type
+        assert!(registry.is_subtype(&Type::I64, &Type::Optional(Box::new(Type::I64))));
+        assert!(registry.is_subtype(&Type::String, &Type::Optional(Box::new(Type::String))));
+        assert!(registry.is_subtype(&Type::Bool, &Type::Optional(Box::new(Type::Bool))));
+
+        // Test with nested types
+        assert!(registry.is_subtype(
+            &Type::Array(Box::new(Type::I64)),
+            &Type::Optional(Box::new(Type::Array(Box::new(Type::I64))))
+        ));
+
+        // Test with inheritance
+        let mut adts_registry = TypeRegistry::default();
+        let animal = create_product_adt("Animal", vec![]);
+        let dog = create_product_adt("Dog", vec![]);
+        let animals_enum = create_sum_adt("Animals", vec![animal, dog]);
+        adts_registry.register_adt(&animals_enum).unwrap();
+
+        // Dog <: Optional<Dog>
+        assert!(adts_registry.is_subtype(
+            &Type::Adt("Dog".to_string()),
+            &Type::Optional(Box::new(Type::Adt("Dog".to_string())))
+        ));
+
+        // Dog <: Optional<Animals> (transitivity)
+        assert!(adts_registry.is_subtype(
+            &Type::Adt("Dog".to_string()),
+            &Type::Optional(Box::new(Type::Adt("Animals".to_string())))
+        ));
+
+        // Test that non-subtypes remain non-subtypes when wrapped in Optional
+        assert!(!adts_registry.is_subtype(
+            &Type::Adt("Animals".to_string()),
+            &Type::Optional(Box::new(Type::Adt("Dog".to_string())))
+        ));
     }
 
     #[test]
