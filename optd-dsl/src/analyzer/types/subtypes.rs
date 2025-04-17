@@ -47,7 +47,9 @@ impl TypeRegistry {
             // Nothing is the bottom type - it is a subtype of everything.
             (Nothing, _) => true,
 
-            (None, Optional(_)) => true,
+            // Generics only match if they have strictly the same name.
+            // Bounded generics are not yet supported.
+            (Generic(gen1), Generic(gen2)) if gen1 == gen2 => true,
 
             // Stored and Costed type handling.
             (Stored(child_inner), Stored(parent_inner)) => {
@@ -86,18 +88,18 @@ impl TypeRegistry {
                 })
             }
 
-            // Array covariance: Array[T] <: Array[U] if T <: U
+            // Array covariance: Array[T] <: Array[U] if T <: U.
             (Array(child_elem), Array(parent_elem)) => {
                 self.is_subtype_inner(child_elem, parent_elem, memo)
             }
 
-            // Map as a subtype of Function: Map(A, B) <: Closure(A, B?)
+            // Map as a subtype of Function: Map(A, B) <: Closure(A, B?).
             (Map(key_type, val_type), Closure(param_type, ret_type)) => {
                 self.is_subtype_inner(param_type, key_type, memo)
                     && self.is_subtype_inner(&Optional(val_type.clone()), ret_type, memo)
             }
 
-            // Array as a subtype of Function: Array(B) <: Closure(I64, B?)
+            // Array as a subtype of Function: Array(B) <: Closure(I64, B?).
             (Array(elem_type), Closure(param_type, ret_type)) => {
                 matches!(&**param_type, I64)
                     && self.is_subtype_inner(&Optional(elem_type.clone()), ret_type, memo)
@@ -114,24 +116,26 @@ impl TypeRegistry {
             }
 
             // Map covariance on values, contravariance on keys:
-            // Map[K1, V1] <: Map[K2, V2] if K2 <: K1 and V1 <: V2
+            // Map[K1, V1] <: Map[K2, V2] if K2 <: K1 and V1 <: V2.
             (Map(child_key, child_val), Map(parent_key, parent_val)) => {
                 self.is_subtype_inner(parent_key, child_key, memo)
                     && self.is_subtype_inner(child_val, parent_val, memo)
             }
 
             // Function contravariance on args, covariance on return type:
-            // (T1 -> U1) <: (T2 -> U2) if T2 <: T1 and U1 <: U2
+            // (T1 -> U1) <: (T2 -> U2) if T2 <: T1 and U1 <: U2.
             (Closure(child_param, child_ret), Closure(parent_param, parent_ret)) => {
                 self.is_subtype_inner(parent_param, child_param, memo)
                     && self.is_subtype_inner(child_ret, parent_ret, memo)
             }
 
-            // Optional type covariance: Optional[T] <: Optional[U] if T <: U
+            // Optional type covariance: Optional[T] <: Optional[U] if T <: U.
             (Optional(child_ty), Optional(parent_ty)) => {
                 self.is_subtype_inner(child_ty, parent_ty, memo)
             }
-            // Likewise, T <: Optional[T]
+            // None <: Optional[Universe].
+            (None, Optional(_)) => true,
+            // Likewise, T <: Optional[T].
             (child_type, Optional(parent_inner)) => {
                 self.is_subtype_inner(child_type, parent_inner, memo)
             }
@@ -579,6 +583,59 @@ pub mod tests {
         assert!(!registry.is_subtype(&Type::Bool, &Type::Nothing));
         assert!(!registry.is_subtype(&Type::Universe, &Type::Nothing));
         assert!(!registry.is_subtype(&Type::Array(Box::new(Type::I64)), &Type::Nothing));
+    }
+
+    #[test]
+    fn test_generic_subtyping() {
+        let registry = TypeRegistry::default();
+        
+        // Generics are only subtypes of themselves (same name)
+        assert!(registry.is_subtype(
+            &Type::Generic("T".to_string()),
+            &Type::Generic("T".to_string())
+        ));
+        
+        // Different named generics are not subtypes
+        assert!(!registry.is_subtype(
+            &Type::Generic("T".to_string()),
+            &Type::Generic("U".to_string())
+        ));
+        
+        // All generics are subtypes of Universe
+        assert!(registry.is_subtype(
+            &Type::Generic("T".to_string()),
+            &Type::Universe
+        ));
+        
+        // Nothing is a subtype of any generic
+        assert!(registry.is_subtype(
+            &Type::Nothing,
+            &Type::Generic("T".to_string())
+        ));
+        
+        // Generic is not a subtype of concrete types
+        assert!(!registry.is_subtype(
+            &Type::Generic("T".to_string()),
+            &Type::I64
+        ));
+        
+        // Concrete types are not subtypes of generics
+        assert!(!registry.is_subtype(
+            &Type::I64,
+            &Type::Generic("T".to_string())
+        ));
+        
+        // Test with generic in container types
+        assert!(registry.is_subtype(
+            &Type::Array(Box::new(Type::Generic("T".to_string()))),
+            &Type::Array(Box::new(Type::Generic("T".to_string())))
+        ));
+        
+        // Different generics in container types
+        assert!(!registry.is_subtype(
+            &Type::Array(Box::new(Type::Generic("T".to_string()))),
+            &Type::Array(Box::new(Type::Generic("U".to_string())))
+        ));
     }
 
     #[test]
