@@ -251,20 +251,6 @@ impl TypeRegistry {
         Type::Unknown(id)
     }
 
-    /// Resolves all collected constraints and fills in the concrete types.
-    ///
-    /// This is the main entry point for constraint solving after all constraints
-    /// have been gathered during the type checking phase.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` if all constraints are successfully resolved
-    /// * `Err` containing the first encountered type error
-    pub fn resolve(&mut self) -> Result<(), Box<AnalyzerErrorKind>> {
-        // The actual constraint solving implementation will be added here
-        Ok(())
-    }
-
     /// Adds a subtyping constraint set: `target_type >: all sub_types`
     ///
     /// This constraint enforces that the target_type is a supertype of all the sub_types.
