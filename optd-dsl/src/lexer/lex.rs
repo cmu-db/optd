@@ -1,5 +1,5 @@
-use super::{error::LexerError, tokens::Token};
-use crate::utils::{error::CompileError, span::Span};
+use super::{errors::LexerError, tokens::Token};
+use crate::utils::{errors::CompileError, span::Span};
 use chumsky::{
     Parser, Stream,
     error::Simple,

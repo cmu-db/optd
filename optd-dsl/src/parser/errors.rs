@@ -1,6 +1,6 @@
 use crate::{
     lexer::tokens::Token,
-    utils::{error::Diagnose, span::Span},
+    utils::{errors::Diagnose, span::Span},
 };
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use chumsky::error::{Simple, SimpleReason};

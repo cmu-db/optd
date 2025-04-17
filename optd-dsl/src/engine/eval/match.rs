@@ -531,7 +531,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::analyzer::hir::UdfKind;
+    use crate::analyzer::hir::{LetBinding, UdfKind};
     use crate::engine::Engine;
     use crate::utils::tests::{
         array_decomp_pattern, array_val, bind_pattern, create_logical_operator,
@@ -552,7 +552,6 @@ mod tests {
     use Materializable::*;
     use std::sync::Arc;
 
-    /// Test simple pattern matching with literals
     #[tokio::test]
     async fn test_simple_literal_patterns() {
         let harness = TestHarness::new();
@@ -581,7 +580,6 @@ mod tests {
         }
     }
 
-    /// Test binding patterns with nested patterns
     #[tokio::test]
     async fn test_bind_pattern_with_nesting() {
         let harness = TestHarness::new();
@@ -599,12 +597,14 @@ mod tests {
                 match_arm(
                     bind_pattern("x", literal_pattern(int(42))),
                     Arc::new(Expr::new(Let(
-                        "y".to_string(),
-                        Arc::new(Expr::new(Binary(
-                            ref_expr("x"),
-                            BinOp::Add,
-                            lit_expr(int(10)),
-                        ))),
+                        LetBinding::new(
+                            "y".to_string(),
+                            Arc::new(Expr::new(Binary(
+                                ref_expr("x"),
+                                BinOp::Add,
+                                lit_expr(int(10)),
+                            ))),
+                        ),
                         ref_expr("y"),
                     ))),
                 ),
@@ -625,7 +625,6 @@ mod tests {
         }
     }
 
-    /// Test array decomposition patterns
     #[tokio::test]
     async fn test_array_decomposition() {
         let harness = TestHarness::new();
@@ -694,7 +693,6 @@ mod tests {
         }
     }
 
-    /// Test struct patterns
     #[tokio::test]
     async fn test_struct_patterns() {
         let harness = TestHarness::new();
@@ -742,7 +740,6 @@ mod tests {
         }
     }
 
-    /// Test complex operator pattern matching
     #[tokio::test]
     async fn test_complex_operator_patterns() {
         let harness = TestHarness::new();
@@ -841,7 +838,6 @@ mod tests {
         }
     }
 
-    /// Test pattern matching with unmaterialized operators (requires group resolution)
     #[tokio::test]
     async fn test_unmaterialized_logical_operator_patterns() {
         let harness = TestHarness::new();
@@ -947,7 +943,6 @@ mod tests {
         }
     }
 
-    /// Test pattern matching with unmaterialized physical operators (requires goal resolution)
     #[tokio::test]
     async fn test_unmaterialized_physical_operator_patterns() {
         let harness = TestHarness::new();
@@ -977,6 +972,16 @@ mod tests {
 
         let unmaterialized_expr = Arc::new(Expr::new(CoreVal(unmaterialized_physical_op)));
 
+        // Create a to_string function
+        let to_string_fn = Arc::new(Expr::new(CoreVal(Value::new(CoreData::Function(
+            FunKind::Udf(UdfKind::Linked(|args| match &args[0].data {
+                CoreData::Literal(lit) => {
+                    Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
+                }
+                _ => Value::new(CoreData::Literal(string("<non-literal>"))),
+            })),
+        )))));
+
         // Create a match expression to match against the expanded physical operator
         let match_expr = pattern_match_expr(
             unmaterialized_expr,
@@ -1003,15 +1008,7 @@ mod tests {
                     ),
                     // Create formatted result string with binding values
                     Arc::new(Expr::new(Let(
-                        "to_string".to_string(),
-                        Arc::new(Expr::new(CoreVal(Value::new(CoreData::Function(
-                            FunKind::Udf(UdfKind::Linked(|args| match &args[0].data {
-                                CoreData::Literal(lit) => {
-                                    Value::new(CoreData::Literal(string(&format!("{:?}", lit))))
-                                }
-                                _ => Value::new(CoreData::Literal(string("<non-literal>"))),
-                            })),
-                        ))))),
+                        LetBinding::new("to_string".to_string(), to_string_fn),
                         Arc::new(Expr::new(Binary(
                             lit_expr(string("Physical plan: ")),
                             BinOp::Concat,
@@ -1078,7 +1075,6 @@ mod tests {
         }
     }
 
-    /// Test multiple pattern matching arms with fallthrough
     #[tokio::test]
     async fn test_multiple_match_arms_with_fallthrough() {
         let harness = TestHarness::new();
@@ -1211,7 +1207,6 @@ mod tests {
         }
     }
 
-    /// Test pattern matching with deeply nested bind patterns
     #[tokio::test]
     async fn test_deeply_nested_bind_patterns() {
         let harness = TestHarness::new();
@@ -1383,7 +1378,6 @@ mod tests {
         }
     }
 
-    /// Test combinatorial explosion with multiple expansion paths
     #[tokio::test]
     async fn test_combinatorial_explosion() {
         let harness = TestHarness::new();
@@ -1436,6 +1430,16 @@ mod tests {
 
         // Create a pattern match that will match any join with a table scan as first child
         // and extract information from it
+        let concat_expr = Arc::new(Expr::new(Binary(
+            ref_expr("table_name"),
+            BinOp::Concat,
+            Arc::new(Expr::new(Binary(
+                lit_expr(string(" filtered by ")),
+                BinOp::Concat,
+                ref_expr("filter_condition"),
+            ))),
+        )));
+
         let match_expr = pattern_match_expr(
             join_expr,
             vec![
@@ -1460,16 +1464,7 @@ mod tests {
                         ],
                     ),
                     Arc::new(Expr::new(Let(
-                        "result".to_string(),
-                        Arc::new(Expr::new(Binary(
-                            ref_expr("table_name"),
-                            BinOp::Concat,
-                            Arc::new(Expr::new(Binary(
-                                lit_expr(string(" filtered by ")),
-                                BinOp::Concat,
-                                ref_expr("filter_condition"),
-                            ))),
-                        ))),
+                        LetBinding::new("result".to_string(), concat_expr),
                         ref_expr("result"),
                     ))),
                 ),

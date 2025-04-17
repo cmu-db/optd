@@ -59,6 +59,13 @@ pub struct TypedSpan {
 }
 impl ExprMetadata for TypedSpan {}
 
+impl TypedSpan {
+    /// Creates a new TypedSpan with the given type and span.
+    pub fn new(ty: Type, span: Span) -> Self {
+        Self { ty, span }
+    }
+}
+
 /// User-defined function: either linked or unlinked
 #[derive(Debug, Clone)]
 pub enum UdfKind<M: ExprMetadata> {
@@ -223,17 +230,6 @@ impl Value<TypedSpan> {
             metadata: TypedSpan { span, ty },
         }
     }
-
-    /// Creates a new value from core data with unknown type and span metadata
-    pub fn new_unknown(data: CoreData<Value<TypedSpan>, TypedSpan>, span: Span) -> Self {
-        Self {
-            data,
-            metadata: TypedSpan {
-                span,
-                ty: Type::Unknown,
-            },
-        }
-    }
 }
 
 /// Core data structures shared across the system
@@ -291,21 +287,10 @@ impl Expr<TypedSpan> {
             metadata: TypedSpan { ty, span },
         }
     }
-
-    /// Creates a new expression with unknown type and span metadata
-    pub fn new_unknown(kind: ExprKind<TypedSpan>, span: Span) -> Self {
-        Self {
-            kind,
-            metadata: TypedSpan {
-                ty: Type::Unknown,
-                span,
-            },
-        }
-    }
 }
 
 /// Type alias for map entries to reduce type complexity
-pub type MapEntries<M> = Vec<(Arc<Expr<M>>, Arc<Expr<M>>)>;
+pub type MapEntry<M> = (Arc<Expr<M>>, Arc<Expr<M>>);
 
 /// Expression node kinds without metadata
 #[derive(Debug, Clone)]
@@ -317,7 +302,7 @@ pub enum ExprKind<M: ExprMetadata> {
     /// Expression block creating a new scope
     NewScope(Arc<Expr<M>>),
     /// Variable binding
-    Let(Identifier, Arc<Expr<M>>, Arc<Expr<M>>),
+    Let(LetBinding<M>, Arc<Expr<M>>),
     /// Binary operation
     Binary(Arc<Expr<M>>, BinOp, Arc<Expr<M>>),
     /// Unary operation
@@ -325,7 +310,7 @@ pub enum ExprKind<M: ExprMetadata> {
     /// Function call
     Call(Arc<Expr<M>>, Vec<Arc<Expr<M>>>),
     /// Map expression
-    Map(MapEntries<M>),
+    Map(Vec<MapEntry<M>>),
     /// Variable reference
     Ref(Identifier),
     /// Return from a function
@@ -336,6 +321,39 @@ pub enum ExprKind<M: ExprMetadata> {
     CoreExpr(CoreData<Arc<Expr<M>>, M>),
     /// Core value
     CoreVal(Value<M>),
+}
+
+/// Variable binding in a let expression
+#[derive(Debug, Clone)]
+pub struct LetBinding<M: ExprMetadata = NoMetadata> {
+    /// Name of the variable
+    pub name: Identifier,
+    /// Expression to bind to the variable
+    pub expr: Arc<Expr<M>>,
+    /// Optional metadata for the binding
+    pub metadata: M,
+}
+
+impl LetBinding<NoMetadata> {
+    /// Creates a new let binding without metadata
+    pub fn new(name: Identifier, expr: Arc<Expr<NoMetadata>>) -> Self {
+        Self {
+            name,
+            expr,
+            metadata: NoMetadata,
+        }
+    }
+}
+
+impl LetBinding<TypedSpan> {
+    /// Creates a new let binding with type and span metadata
+    pub fn new_with(name: Identifier, expr: Arc<Expr<TypedSpan>>, ty: Type, span: Span) -> Self {
+        Self {
+            name,
+            expr,
+            metadata: TypedSpan { ty, span },
+        }
+    }
 }
 
 /// Pattern for matching with optional metadata
@@ -363,17 +381,6 @@ impl Pattern<TypedSpan> {
         Self {
             kind,
             metadata: TypedSpan { ty, span },
-        }
-    }
-
-    /// Creates a new pattern with unknown type and span metadata
-    pub fn new_unknown(kind: PatternKind<TypedSpan>, span: Span) -> Self {
-        Self {
-            kind,
-            metadata: TypedSpan {
-                ty: Type::Unknown,
-                span,
-            },
         }
     }
 }

@@ -94,7 +94,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
 
 #[cfg(test)]
 mod tests {
-    use crate::analyzer::hir::BinOp;
+    use crate::analyzer::hir::{BinOp, LetBinding};
     use crate::utils::tests::{TestHarness, evaluate_and_collect, int, lit_expr, ref_expr, string};
     use crate::{
         analyzer::{
@@ -303,14 +303,15 @@ mod tests {
         let main_fn = Value::new(CoreData::Function(FunKind::Closure(
             vec![],
             Arc::new(Expr::new(Let(
-                "a".to_string(),
-                lit_expr(int(10)),
+                LetBinding::new("a".to_string(), lit_expr(int(10))),
                 Arc::new(Expr::new(Let(
-                    "b".to_string(),
-                    Arc::new(Expr::new(Call(
-                        ref_expr("fail_fn"),
-                        vec![lit_expr(int(42))],
-                    ))),
+                    LetBinding::new(
+                        "b".to_string(),
+                        Arc::new(Expr::new(Call(
+                            ref_expr("fail_fn"),
+                            vec![lit_expr(int(42))],
+                        ))),
+                    ),
                     Arc::new(Expr::new(Binary(ref_expr("a"), BinOp::Add, ref_expr("b")))),
                 ))),
             ))),

@@ -4,12 +4,11 @@
 //! corresponding HIR representations.
 
 use super::ASTConverter;
-use crate::analyzer::error::AnalyzerErrorKind;
+use crate::analyzer::errors::AnalyzerErrorKind;
 use crate::analyzer::hir::{Identifier, MatchArm, Pattern, PatternKind, TypedSpan};
 use crate::analyzer::types::Type;
 use crate::parser::ast::{self, Pattern as AstPattern};
 use crate::utils::span::Spanned;
-use PatternKind::*;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -19,7 +18,7 @@ impl ASTConverter {
     /// This function is the main entry point for pattern conversion, handling both
     /// the patterns and expressions in match arms.
     pub(super) fn convert_match_arms(
-        &self,
+        &mut self,
         arms: &[Spanned<ast::MatchArm>],
         generics: &HashSet<Identifier>,
     ) -> Result<Vec<MatchArm<TypedSpan>>, Box<AnalyzerErrorKind>> {
@@ -38,25 +37,30 @@ impl ASTConverter {
 
     /// Converts an AST pattern to an HIR pattern.
     ///
-    /// All patterns are created with Unknown type for now, as type inference
-    /// will be handled in a later phase.
+    /// Each pattern kind determines its own specific type, which will be used
+    /// during pattern matching and constraint solving.
     fn convert_pattern(
-        &self,
+        &mut self,
         spanned_pattern: &Spanned<AstPattern>,
     ) -> Result<Pattern<TypedSpan>, Box<AnalyzerErrorKind>> {
+        use PatternKind::*;
+        use Type::*;
+
         let span = spanned_pattern.span.clone();
-        let mut ty = Type::Unknown;
+        let mut ty = self.next_unknown();
 
         let kind = match &*spanned_pattern.value {
             AstPattern::Error => panic!("AST should no longer contain errors"),
             AstPattern::Bind(name, inner_pattern) => {
                 let hir_inner = self.convert_pattern(inner_pattern)?;
+                ty = hir_inner.metadata.ty.clone();
+
                 Bind((*name.value).clone(), hir_inner.into())
             }
             AstPattern::Constructor(name, args) => {
                 self.validate_constructor(name, &span, args.len())?;
+                ty = Adt(*name.value.clone());
 
-                ty = Type::Adt(*name.value.clone());
                 let hir_args = args
                     .iter()
                     .map(|arg| self.convert_pattern(arg))
@@ -67,10 +71,15 @@ impl ASTConverter {
             AstPattern::Literal(lit) => {
                 let (hir_lit, hir_ty) = self.convert_literal(lit);
                 ty = hir_ty;
+
                 Literal(hir_lit)
             }
             AstPattern::Wildcard => Wildcard,
-            AstPattern::EmptyArray => EmptyArray,
+            AstPattern::EmptyArray => {
+                ty = Array(self.next_unknown().into());
+
+                EmptyArray
+            }
             AstPattern::ArrayDecomp(head, tail) => {
                 let hir_head = self.convert_pattern(head)?;
                 let hir_tail = self.convert_pattern(tail)?;
@@ -288,7 +297,7 @@ mod pattern_tests {
 
     #[test]
     fn test_convert_array_decomp_pattern() {
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         // Create a head::tail pattern
         let head = spanned(AstPattern::Bind(

@@ -10,7 +10,7 @@ use crate::{
     utils::span::{Span, Spanned},
 };
 
-use super::{ast::Field, r#type::type_parser};
+use super::{ast::Field, types::type_parser};
 
 fn field_parser() -> impl Parser<Token, Spanned<Field>, Error = Simple<Token, Span>> + Clone {
     select! { Token::TermIdent(name) => name }

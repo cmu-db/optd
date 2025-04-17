@@ -1,7 +1,7 @@
 use super::{
     ast::{Field, PostfixOp, Type},
     pattern::pattern_parser,
-    r#type::type_parser,
+    types::type_parser,
     utils::delimited_parser,
 };
 use crate::{

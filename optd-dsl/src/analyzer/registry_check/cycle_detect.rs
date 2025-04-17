@@ -1,5 +1,5 @@
 use crate::{
-    analyzer::{error::AnalyzerErrorKind, hir::Identifier, types::TypeRegistry},
+    analyzer::{errors::AnalyzerErrorKind, hir::Identifier, types::TypeRegistry},
     parser::ast::Type as AstType,
     utils::span::Spanned,
 };
@@ -175,7 +175,7 @@ impl<'a> CycleDetector<'a> {
                 self.check_field_type_terminates(return_type, product_type)
             }
 
-            Questioned(inner_type) | Starred(inner_type) | Dollared(inner_type) => {
+            Starred(inner_type) | Dollared(inner_type) => {
                 self.check_field_type_terminates(inner_type, product_type)
             }
 

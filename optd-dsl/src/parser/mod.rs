@@ -1,9 +1,9 @@
 mod adt;
 pub mod ast;
-pub mod error;
+pub mod errors;
 mod expr;
 mod function;
 pub mod module;
 mod pattern;
-mod r#type;
+mod types;
 mod utils;

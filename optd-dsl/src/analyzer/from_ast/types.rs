@@ -4,7 +4,7 @@
 //! corresponding HIR type representations.
 
 use super::ASTConverter;
-use crate::analyzer::error::AnalyzerErrorKind;
+use crate::analyzer::errors::AnalyzerErrorKind;
 use crate::analyzer::hir::Identifier;
 use crate::analyzer::types::Type;
 use crate::parser::ast::Type as AstType;
@@ -30,17 +30,17 @@ impl ASTConverter {
     ///
     /// The equivalent HIR type, or an AnalyzerErrorKind if the conversion fails.
     pub(super) fn convert_type(
-        &self,
+        &mut self,
         ast_type: &Spanned<AstType>,
         generics: &HashSet<Identifier>,
     ) -> Result<Type, Box<AnalyzerErrorKind>> {
         use Type::*;
 
         let hir_type = match &*ast_type.value {
-            AstType::Int64 => Int64,
+            AstType::Int64 => I64,
             AstType::String => String,
             AstType::Bool => Bool,
-            AstType::Float64 => Float64,
+            AstType::Float64 => F64,
             AstType::Unit => Unit,
             AstType::Array(elem_type) => Array(self.convert_type(elem_type, generics)?.into()),
             AstType::Closure(param_type, return_type) => Closure(
@@ -80,25 +80,10 @@ impl ASTConverter {
                 }
             }
             AstType::Error => panic!("AST should no longer contain errors"),
-            AstType::Unknown => Unknown,
+            AstType::Unknown => self.next_unknown(),
         };
 
         Ok(hir_type)
-    }
-
-    /// Creates a function type from parameter types and return type.
-    pub(super) fn create_function_type(params: &[(Identifier, Type)], return_type: &Type) -> Type {
-        let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
-
-        let param_type = if params.is_empty() {
-            Type::Unit
-        } else if param_types.len() == 1 {
-            param_types[0].clone()
-        } else {
-            Type::Tuple(param_types)
-        };
-
-        Type::Closure(param_type.into(), return_type.clone().into())
     }
 }
 
@@ -130,16 +115,16 @@ mod types_tests {
     fn test_convert_primitive_types() {
         // Test each primitive type
         let test_cases = vec![
-            (AstType::Int64, Type::Int64),
+            (AstType::Int64, Type::I64),
             (AstType::String, Type::String),
             (AstType::Bool, Type::Bool),
-            (AstType::Float64, Type::Float64),
+            (AstType::Float64, Type::F64),
             (AstType::Unit, Type::Unit),
-            (AstType::Unknown, Type::Unknown),
+            (AstType::Unknown, Type::Unknown(0)),
         ];
 
         let generics = HashSet::new();
-        let converter = ASTConverter::default();
+        let mut converter = ASTConverter::default();
 
         for (ast_type, expected_type) in test_cases {
             let result = converter
@@ -164,7 +149,7 @@ mod types_tests {
             .convert_type(&spanned(array_type), &generics)
             .expect("Array type conversion should succeed");
         match result {
-            Type::Array(elem_type) => assert_eq!(*elem_type, Type::Int64),
+            Type::Array(elem_type) => assert_eq!(*elem_type, Type::I64),
             _ => panic!("Expected Array type"),
         }
 
@@ -177,7 +162,7 @@ mod types_tests {
             .expect("Closure type conversion should succeed");
         match result {
             Type::Closure(param, ret) => {
-                assert_eq!(*param, Type::Int64);
+                assert_eq!(*param, Type::I64);
                 assert_eq!(*ret, Type::Bool);
             }
             _ => panic!("Expected Closure type"),
@@ -215,7 +200,7 @@ mod types_tests {
             .convert_type(&spanned(questioned_type), &generics)
             .expect("Optional type conversion should succeed");
         match result {
-            Type::Optional(inner) => assert_eq!(*inner, Type::Int64),
+            Type::Optional(inner) => assert_eq!(*inner, Type::I64),
             _ => panic!("Expected Optional type"),
         }
 
@@ -226,7 +211,7 @@ mod types_tests {
             .convert_type(&spanned(starred_type), &generics)
             .expect("Stored type conversion should succeed");
         match result {
-            Type::Stored(inner) => assert_eq!(*inner, Type::Int64),
+            Type::Stored(inner) => assert_eq!(*inner, Type::I64),
             _ => panic!("Expected Stored type"),
         }
 
@@ -237,7 +222,7 @@ mod types_tests {
             .convert_type(&spanned(dollared_type), &generics)
             .expect("Costed type conversion should succeed");
         match result {
-            Type::Costed(inner) => assert_eq!(*inner, Type::Int64),
+            Type::Costed(inner) => assert_eq!(*inner, Type::I64),
             _ => panic!("Expected Costed type"),
         }
 
@@ -569,52 +554,5 @@ mod types_tests {
                 .convert_type(&spanned(invalid_costed), &generics)
                 .is_err()
         );
-    }
-
-    #[test]
-    fn test_create_function_type() {
-        // Test with no parameters
-        let params: Vec<(Identifier, Type)> = vec![];
-        let return_type = Type::Int64;
-        let result = ASTConverter::create_function_type(&params, &return_type);
-        match result {
-            Type::Closure(param, ret) => {
-                assert_eq!(*param, Type::Unit);
-                assert_eq!(*ret, Type::Int64);
-            }
-            _ => panic!("Expected Closure type"),
-        }
-
-        // Test with one parameter
-        let params = vec![("x".to_string(), Type::Int64)];
-        let result = ASTConverter::create_function_type(&params, &return_type);
-        match result {
-            Type::Closure(param, ret) => {
-                assert_eq!(*param, Type::Int64);
-                assert_eq!(*ret, Type::Int64);
-            }
-            _ => panic!("Expected Closure type"),
-        }
-
-        // Test with multiple parameters
-        let params = vec![
-            ("x".to_string(), Type::Int64),
-            ("y".to_string(), Type::Bool),
-        ];
-        let result = ASTConverter::create_function_type(&params, &return_type);
-        match result {
-            Type::Closure(param, ret) => {
-                match &*param {
-                    Type::Tuple(types) => {
-                        assert_eq!(types.len(), 2);
-                        assert_eq!(types[0], Type::Int64);
-                        assert_eq!(types[1], Type::Bool);
-                    }
-                    _ => panic!("Expected Tuple type for parameters"),
-                }
-                assert_eq!(*ret, Type::Int64);
-            }
-            _ => panic!("Expected Closure type"),
-        }
     }
 }

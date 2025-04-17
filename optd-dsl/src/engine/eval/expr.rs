@@ -1,7 +1,7 @@
 use super::{binary::eval_binary_op, unary::eval_unary_op};
 use crate::analyzer::hir::{
-    BinOp, CoreData, Expr, ExprKind, FunKind, Goal, GroupId, Identifier, Literal, LogicalOp,
-    Materializable, PhysicalOp, UdfKind, UnaryOp, Value,
+    BinOp, CoreData, Expr, ExprKind, FunKind, Goal, GroupId, Identifier, LetBinding, Literal,
+    LogicalOp, Materializable, PhysicalOp, UdfKind, UnaryOp, Value,
 };
 use crate::analyzer::map::Map;
 use crate::engine::{Continuation, EngineResponse};
@@ -57,26 +57,25 @@ impl<O: Clone + Send + 'static> Engine<O> {
     ///
     /// # Parameters
     ///
-    /// * `ident` - The identifier to bind the value to.
-    /// * `assignee` - The expression to evaluate and bind.
+    /// * `binding` - The binding to evaluate and bind to the context.
     /// * `after` - The expression to evaluate in the updated context.
     /// * `k` - The continuation to receive evaluation results.
     pub(crate) async fn evaluate_let_binding(
         self,
-        ident: String,
-        assignee: Arc<Expr>,
+        binding: LetBinding,
         after: Arc<Expr>,
         k: Continuation<Value, EngineResponse<O>>,
     ) -> EngineResponse<O> {
         let engine = self.clone();
+        let LetBinding { name, expr, .. } = binding;
 
         self.evaluate(
-            assignee,
+            expr,
             Arc::new(move |value| {
-                Box::pin(capture!([ident, engine, after, k], async move {
+                Box::pin(capture!([name, engine, after, k], async move {
                     // Create updated context with the new binding.
                     let mut new_ctx = engine.context.clone();
-                    new_ctx.bind(ident, value);
+                    new_ctx.bind(name, value);
 
                     // Evaluate the after expression in the updated context.
                     engine.with_new_context(new_ctx).evaluate(after, k).await
@@ -480,7 +479,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
         if index < items.len() {
             items[index].clone()
         } else {
-            panic!("index out of bounds: {} >= {}", index, items.len());
+            Value::new(CoreData::None)
         }
     }
 
@@ -672,7 +671,7 @@ impl<O: Clone + Send + 'static> Engine<O> {
 
 #[cfg(test)]
 mod tests {
-    use crate::analyzer::hir::{Goal, GroupId, Materializable, UdfKind};
+    use crate::analyzer::hir::{Goal, GroupId, LetBinding, Materializable, UdfKind};
     use crate::engine::Engine;
     use crate::utils::tests::{
         array_val, assert_values_equal, create_logical_operator, create_physical_operator,
@@ -690,7 +689,6 @@ mod tests {
     use ExprKind::*;
     use std::sync::Arc;
 
-    /// Test if-then-else expressions with true and false conditions
     #[tokio::test]
     async fn test_if_then_else() {
         let harness = TestHarness::new();
@@ -763,7 +761,6 @@ mod tests {
         }
     }
 
-    /// Test let bindings and variable references
     #[tokio::test]
     async fn test_let_binding() {
         let harness = TestHarness::new();
@@ -772,8 +769,7 @@ mod tests {
 
         // let x = 10 in x + 5
         let let_expr = Arc::new(Expr::new(Let(
-            "x".to_string(),
-            lit_expr(int(10)),
+            LetBinding::new("x".to_string(), lit_expr(int(10))),
             Arc::new(Expr::new(Binary(
                 ref_expr("x"),
                 BinOp::Add,
@@ -796,22 +792,22 @@ mod tests {
     async fn test_new_scope_and_shadowing() {
         let harness = TestHarness::new();
         let mut ctx = Context::default();
-
         // Bind a variable in the outer scope
         ctx.bind("x".to_string(), lit_val(int(10)));
         let engine = Engine::new(ctx);
 
-        // Create a test expression that:
-        // 1. Uses NewScope to create a nested scope
-        // 2. Inside the scope, shadows x with a new value
-        // 3. After leaving the scope, uses x which should have its original value
+        // Create an inner let binding to shadow x
+        let inner_let = Arc::new(Expr::new(Let(
+            LetBinding::new("x".to_string(), lit_expr(int(20))), // Shadow x in new scope
+            ref_expr("x"),                                       // Return the shadowed value
+        )));
+
+        // Create a new scope with the inner let
+        let new_scope = Arc::new(Expr::new(NewScope(inner_let)));
+
+        // Create the outer let binding for inner_value
         let test_expr = Arc::new(Expr::new(Let(
-            "inner_value".to_string(),
-            Arc::new(Expr::new(NewScope(Arc::new(Expr::new(Let(
-                "x".to_string(), // Shadow x in new scope
-                lit_expr(int(20)),
-                ref_expr("x"), // Return the shadowed value
-            )))))),
+            LetBinding::new("inner_value".to_string(), new_scope),
             // Create a tuple with both the inner value and the outer value of x
             Arc::new(Expr::new(CoreExpr(CoreData::Tuple(vec![
                 ref_expr("inner_value"), // Value from inner scope
@@ -826,7 +822,6 @@ mod tests {
         match &results[0].data {
             CoreData::Tuple(elements) => {
                 assert_eq!(elements.len(), 2);
-
                 // First element should be from shadowed variable in inner scope
                 match &elements[0].data {
                     CoreData::Literal(Literal::Int64(value)) => {
@@ -834,7 +829,6 @@ mod tests {
                     }
                     _ => panic!("Expected integer value"),
                 }
-
                 // Second element should be from outer scope after leaving inner scope
                 match &elements[1].data {
                     CoreData::Literal(Literal::Int64(value)) => {
@@ -1002,16 +996,18 @@ mod tests {
         let test_return_function = Value::new(CoreData::Function(FunKind::Closure(
             vec!["x".to_string()],
             Arc::new(Expr::new(Let(
-                "result".to_string(),
-                Arc::new(Expr::new(IfThenElse(
-                    Arc::new(Expr::new(Binary(
-                        ref_expr("x"),
-                        BinOp::Lt,
-                        lit_expr(int(10)),
+                LetBinding::new(
+                    "result".to_string(),
+                    Arc::new(Expr::new(IfThenElse(
+                        Arc::new(Expr::new(Binary(
+                            ref_expr("x"),
+                            BinOp::Lt,
+                            lit_expr(int(10)),
+                        ))),
+                        Arc::new(Expr::new(Return(lit_expr(string("too small"))))),
+                        lit_expr(string("big enough")),
                     ))),
-                    Arc::new(Expr::new(Return(lit_expr(string("too small"))))),
-                    lit_expr(string("big enough")),
-                ))),
+                ),
                 // This part should never execute when x < 10
                 Arc::new(Expr::new(Binary(
                     lit_expr(string("result is: ")),
@@ -1064,18 +1060,19 @@ mod tests {
         let engine = Engine::new(ctx);
 
         // let x = 10 in
-        //   let y = x * 2 in
-        //     x + y
+        // let y = x * 2 in
+        // x + y
         let nested_let_expr = Arc::new(Expr::new(Let(
-            "x".to_string(),
-            lit_expr(int(10)),
+            LetBinding::new("x".to_string(), lit_expr(int(10))),
             Arc::new(Expr::new(Let(
-                "y".to_string(),
-                Arc::new(Expr::new(Binary(
-                    ref_expr("x"),
-                    BinOp::Mul,
-                    lit_expr(int(2)),
-                ))),
+                LetBinding::new(
+                    "y".to_string(),
+                    Arc::new(Expr::new(Binary(
+                        ref_expr("x"),
+                        BinOp::Mul,
+                        lit_expr(int(2)),
+                    ))),
+                ),
                 Arc::new(Expr::new(Binary(ref_expr("x"), BinOp::Add, ref_expr("y")))),
             ))),
         )));
@@ -1091,7 +1088,6 @@ mod tests {
         }
     }
 
-    /// Test function calls with user-defined functions (closures)
     #[tokio::test]
     async fn test_function_call_closure() {
         let harness = TestHarness::new();
@@ -1123,7 +1119,6 @@ mod tests {
         }
     }
 
-    /// Test function calls with built-in functions (Rust UDFs)
     #[tokio::test]
     async fn test_function_call_rust_udf() {
         let harness = TestHarness::new();
@@ -1172,7 +1167,6 @@ mod tests {
         }
     }
 
-    /// Test to verify the Map implementation works correctly.
     #[tokio::test]
     async fn test_map_creation() {
         let harness = TestHarness::new();
@@ -1248,7 +1242,6 @@ mod tests {
         }
     }
 
-    /// Test map operations with nested maps and lookup
     #[tokio::test]
     async fn test_map_nested_and_lookup() {
         let harness = TestHarness::new();
@@ -1312,27 +1305,27 @@ mod tests {
             (lit_expr(string("settings")), settings_map),
         ])));
 
+        // Create the nested data lookup expressions step by step
+        let get_user = Arc::new(Expr::new(Call(
+            ref_expr("get"),
+            vec![ref_expr("data"), lit_expr(string("user"))],
+        )));
+
+        let get_address = Arc::new(Expr::new(Call(
+            ref_expr("get"),
+            vec![get_user, lit_expr(string("address"))],
+        )));
+
+        let get_city = Arc::new(Expr::new(Call(
+            ref_expr("get"),
+            vec![get_address, lit_expr(string("city"))],
+        )));
+
         // First, evaluate the nested map to bind it to a variable
         let program = Arc::new(Expr::new(Let(
-            "data".to_string(),
-            nested_map_expr,
+            LetBinding::new("data".to_string(), nested_map_expr),
             // Extract user.address.city using get function
-            Arc::new(Expr::new(Call(
-                ref_expr("get"),
-                vec![
-                    Arc::new(Expr::new(Call(
-                        ref_expr("get"),
-                        vec![
-                            Arc::new(Expr::new(Call(
-                                ref_expr("get"),
-                                vec![ref_expr("data"), lit_expr(string("user"))],
-                            ))),
-                            lit_expr(string("address")),
-                        ],
-                    ))),
-                    lit_expr(string("city")),
-                ],
-            ))),
+            get_city,
         )));
 
         // Evaluate the program
@@ -1348,7 +1341,6 @@ mod tests {
         }
     }
 
-    /// Test complex program with multiple expression types
     #[tokio::test]
     async fn test_complex_program() {
         let harness = TestHarness::new();
@@ -1387,14 +1379,14 @@ mod tests {
         // 2. Calls factorial on one of them
         // 3. Performs some arithmetic on the result
         let program = Arc::new(Expr::new(Let(
-            "a".to_string(),
-            lit_expr(int(5)), // a = 5
+            LetBinding::new("a".to_string(), lit_expr(int(5))), // a = 5
             Arc::new(Expr::new(Let(
-                "b".to_string(),
-                lit_expr(int(3)), // b = 3
+                LetBinding::new("b".to_string(), lit_expr(int(3))), // b = 3
                 Arc::new(Expr::new(Let(
-                    "fact_a".to_string(),
-                    Arc::new(Expr::new(Call(ref_expr("factorial"), vec![ref_expr("a")]))), // fact_a = factorial(a)
+                    LetBinding::new(
+                        "fact_a".to_string(),
+                        Arc::new(Expr::new(Call(ref_expr("factorial"), vec![ref_expr("a")]))), // fact_a = factorial(a)
+                    ),
                     Arc::new(Expr::new(Binary(
                         ref_expr("fact_a"),
                         BinOp::Div,
@@ -1415,7 +1407,6 @@ mod tests {
         }
     }
 
-    /// Test array indexing with call syntax
     #[tokio::test]
     async fn test_array_indexing() {
         let harness = TestHarness::new();
@@ -1432,9 +1423,8 @@ mod tests {
         ]))));
 
         // Access array[2] which should be 30
-        let index_expr = Arc::new(Expr::new(Call(array_expr, vec![lit_expr(int(2))])));
-
-        let results = evaluate_and_collect(index_expr, engine, harness).await;
+        let index_expr = Arc::new(Expr::new(Call(array_expr.clone(), vec![lit_expr(int(2))])));
+        let results = evaluate_and_collect(index_expr, engine.clone(), harness.clone()).await;
 
         // Check result
         assert_eq!(results.len(), 1);
@@ -1443,6 +1433,19 @@ mod tests {
                 assert_eq!(lit, &Literal::Int64(30));
             }
             _ => panic!("Expected integer literal"),
+        }
+
+        // Test out-of-bounds access: array[10] which should return None
+        let out_of_bounds_expr = Arc::new(Expr::new(Call(array_expr, vec![lit_expr(int(10))])));
+        let out_of_bounds_results = evaluate_and_collect(out_of_bounds_expr, engine, harness).await;
+
+        // Check that out-of-bounds access returns None
+        assert_eq!(out_of_bounds_results.len(), 1);
+        match &out_of_bounds_results[0].data {
+            CoreData::None => {
+                // Expected None value
+            }
+            other => panic!("Expected None, got: {:?}", other),
         }
     }
 
@@ -1503,7 +1506,6 @@ mod tests {
         }
     }
 
-    /// Test map lookup with call syntax
     #[tokio::test]
     async fn test_map_lookup() {
         let harness = TestHarness::new();
@@ -1513,12 +1515,14 @@ mod tests {
         // Create a map with key-value pairs: { "a": 1, "b": 2, "c": 3 }
         // Use a let expression to bind the map and do lookups directly
         let test_expr = Arc::new(Expr::new(Let(
-            "map".to_string(),
-            Arc::new(Expr::new(Map(vec![
-                (lit_expr(string("a")), lit_expr(int(1))),
-                (lit_expr(string("b")), lit_expr(int(2))),
-                (lit_expr(string("c")), lit_expr(int(3))),
-            ]))),
+            LetBinding::new(
+                "map".to_string(),
+                Arc::new(Expr::new(Map(vec![
+                    (lit_expr(string("a")), lit_expr(int(1))),
+                    (lit_expr(string("b")), lit_expr(int(2))),
+                    (lit_expr(string("c")), lit_expr(int(3))),
+                ]))),
+            ),
             // Create a tuple of map["b"] and map["d"] to test both existing and missing keys
             Arc::new(Expr::new(CoreExpr(CoreData::Tuple(vec![
                 // map["b"] - should be 2
@@ -1541,7 +1545,6 @@ mod tests {
         match &results[0].data {
             CoreData::Tuple(elements) => {
                 assert_eq!(elements.len(), 2);
-
                 // Check first element: map["b"] should be 2
                 match &elements[0].data {
                     CoreData::Literal(lit) => {
@@ -1549,7 +1552,6 @@ mod tests {
                     }
                     _ => panic!("Expected integer literal for existing key lookup"),
                 }
-
                 // Check second element: map["d"] should be None
                 match &elements[1].data {
                     CoreData::None => {}
@@ -1560,7 +1562,6 @@ mod tests {
         }
     }
 
-    /// Test complex expressions for both collection and index
     #[tokio::test]
     async fn test_complex_collection_and_index() {
         let harness = TestHarness::new();
@@ -1570,23 +1571,27 @@ mod tests {
         // Create a let expression that binds an array and then accesses it
         // let arr = [10, 20, 30, 40, 50] in
         // let idx = 2 + 1 in
-        //   arr[idx]  // should be 40
+        // arr[idx] // should be 40
         let complex_expr = Arc::new(Expr::new(Let(
-            "arr".to_string(),
-            Arc::new(Expr::new(CoreExpr(CoreData::Array(vec![
-                lit_expr(int(10)),
-                lit_expr(int(20)),
-                lit_expr(int(30)),
-                lit_expr(int(40)),
-                lit_expr(int(50)),
-            ])))),
+            LetBinding::new(
+                "arr".to_string(),
+                Arc::new(Expr::new(CoreExpr(CoreData::Array(vec![
+                    lit_expr(int(10)),
+                    lit_expr(int(20)),
+                    lit_expr(int(30)),
+                    lit_expr(int(40)),
+                    lit_expr(int(50)),
+                ])))),
+            ),
             Arc::new(Expr::new(Let(
-                "idx".to_string(),
-                Arc::new(Expr::new(Binary(
-                    lit_expr(int(2)),
-                    BinOp::Add,
-                    lit_expr(int(1)),
-                ))),
+                LetBinding::new(
+                    "idx".to_string(),
+                    Arc::new(Expr::new(Binary(
+                        lit_expr(int(2)),
+                        BinOp::Add,
+                        lit_expr(int(1)),
+                    ))),
+                ),
                 Arc::new(Expr::new(Call(ref_expr("arr"), vec![ref_expr("idx")]))),
             ))),
         )));
@@ -1603,7 +1608,6 @@ mod tests {
         }
     }
 
-    /// Test indexing into a logical operator
     #[tokio::test]
     async fn test_logical_operator_indexing() {
         let harness = TestHarness::new();
@@ -1701,7 +1705,6 @@ mod tests {
         }
     }
 
-    /// Test indexing into a physical operator
     #[tokio::test]
     async fn test_physical_operator_indexing() {
         let harness = TestHarness::new();
@@ -1799,7 +1802,6 @@ mod tests {
         }
     }
 
-    /// Test indexing into an unmaterialized logical operator
     #[tokio::test]
     async fn test_unmaterialized_logical_operator_indexing() {
         let harness = TestHarness::new();
@@ -1888,7 +1890,6 @@ mod tests {
         }
     }
 
-    /// Test indexing into an unmaterialized physical operator
     #[tokio::test]
     async fn test_unmaterialized_physical_operator_indexing() {
         let harness = TestHarness::new();
@@ -1984,7 +1985,6 @@ mod tests {
         }
     }
 
-    /// Test accessing multiple levels of nested operators through indexing
     #[tokio::test]
     async fn test_nested_operator_indexing() {
         let harness = TestHarness::new();
@@ -2068,7 +2068,6 @@ mod tests {
         }
     }
 
-    /// Test variable reference in various contexts
     #[tokio::test]
     async fn test_variable_references() {
         let harness = TestHarness::new();

@@ -1,7 +1,7 @@
 use super::cycle_detect::CycleDetector;
 use crate::{
     analyzer::{
-        error::AnalyzerErrorKind,
+        errors::AnalyzerErrorKind,
         hir::Identifier,
         types::{CORE_TYPES, LOGICAL_TYPE, PHYSICAL_TYPE, Type, TypeRegistry},
     },
@@ -178,6 +178,8 @@ fn check_type(
 
         Starred(_) => Err(AnalyzerErrorKind::new_invalid_type(span)),
 
+        Unknown => Err(AnalyzerErrorKind::new_invalid_type(span)),
+
         _ => Ok(()), // Primitive types don't contain logical or physical.
     }
 }
@@ -185,7 +187,7 @@ fn check_type(
 #[cfg(test)]
 mod adt_validation_tests {
     use crate::analyzer::hir::Identifier;
-    use crate::analyzer::semantic_check::adt_check::adt_check;
+    use crate::analyzer::registry_check::adt_check::adt_check;
     use crate::analyzer::types::{
         LOGICAL_PROPS, LOGICAL_TYPE, PHYSICAL_PROPS, PHYSICAL_TYPE, TypeRegistry,
     };
@@ -447,6 +449,35 @@ mod adt_validation_tests {
         let result = adt_check(&registry, "test.opt");
 
         assert!(result.is_err()); // Should detect the cycle
+    }
+
+    #[test]
+    fn test_optional_recursive_type() {
+        // Test a recursive type that uses Optional to break the recursion:
+        // type LinkedList(value: Int64, next: LinkedList?)
+        // This should be valid because Optional (?) breaks the recursion.
+        let (mut subtypes, mut product_fields) = create_core_registry();
+
+        subtypes.insert("LinkedList".to_string(), HashSet::new());
+
+        product_fields.insert(
+            "LinkedList".to_string(),
+            vec![
+                create_field("value", AstType::Int64),
+                create_field(
+                    "next",
+                    AstType::Questioned(Spanned::new(
+                        AstType::Identifier("LinkedList".to_string()),
+                        create_test_span(),
+                    )),
+                ),
+            ],
+        );
+
+        let registry = setup_test_registry(subtypes, product_fields);
+        let result = adt_check(&registry, "test.opt");
+
+        assert!(result.is_ok());
     }
 
     #[test]

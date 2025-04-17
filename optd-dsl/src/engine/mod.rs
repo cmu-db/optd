@@ -87,8 +87,8 @@ impl<O: Clone + Send + 'static> Engine<O> {
                     .await
                 }
                 NewScope(expr) => self.evaluate_new_scope(expr.clone(), k).await,
-                Let(ident, assignee, after) => {
-                    self.evaluate_let_binding(ident.clone(), assignee.clone(), after.clone(), k)
+                Let(binding, after) => {
+                    self.evaluate_let_binding(binding.clone(), after.clone(), k)
                         .await
                 }
                 Binary(left, op, right) => {

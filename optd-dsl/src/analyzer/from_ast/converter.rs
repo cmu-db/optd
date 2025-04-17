@@ -1,5 +1,6 @@
-use crate::analyzer::error::AnalyzerErrorKind;
+use crate::analyzer::errors::AnalyzerErrorKind;
 use crate::analyzer::hir::{Annotation, FunKind, Identifier, UdfKind};
+use crate::analyzer::types::create_function_type;
 use crate::analyzer::{
     context::Context,
     hir::{CoreData, HIR, TypedSpan, Value},
@@ -20,6 +21,8 @@ pub struct ASTConverter {
     pub(super) context: Context<TypedSpan>,
     /// Annotations for HIR expressions.
     pub(super) annotations: HashMap<Identifier, Vec<Annotation>>,
+    /// Unique id counter for Unknown types.
+    unknown_id: usize,
 }
 
 impl ASTConverter {
@@ -66,10 +69,17 @@ impl ASTConverter {
         ))
     }
 
+    /// Gets and increments the next unknown type.
+    pub(super) fn next_unknown(&mut self) -> Type {
+        let id = self.unknown_id;
+        self.unknown_id += 1;
+        Type::Unknown(id)
+    }
+
     /// Registers a function AST node and adds it to the context.
     ///
     /// Handles function parameters, return type, and body conversion.
-    pub(super) fn register_function(
+    pub fn register_function(
         &mut self,
         spanned_fn: &Spanned<Function>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
@@ -90,8 +100,10 @@ impl ASTConverter {
             .collect();
 
         let params = self.get_parameters(func, &generics)?;
+        let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
+
         let return_type = self.convert_type(&func.return_type, &generics)?;
-        let fn_type = Self::create_function_type(&params, &return_type);
+        let fn_type = create_function_type(&param_types, &return_type);
 
         match &func.body {
             Some(body_expr) => {
@@ -138,7 +150,7 @@ impl ASTConverter {
     /// Collects parameter names and types from both the receiver (if present)
     /// and the parameter list.
     fn get_parameters(
-        &self,
+        &mut self,
         func: &Function,
         generics: &HashSet<Identifier>,
     ) -> Result<Vec<(Identifier, Type)>, Box<AnalyzerErrorKind>> {

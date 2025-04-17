@@ -1,5 +1,7 @@
 use super::span::Span;
-use crate::{analyzer::error::AnalyzerError, lexer::error::LexerError, parser::error::ParserError};
+use crate::{
+    analyzer::errors::AnalyzerError, lexer::errors::LexerError, parser::errors::ParserError,
+};
 use ariadne::{Report, Source};
 use enum_dispatch::enum_dispatch;
 use std::io::Write;

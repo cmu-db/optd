@@ -1,5 +1,5 @@
 use super::{
-    error::AnalyzerErrorKind,
+    errors::AnalyzerErrorKind,
     hir::{ExprMetadata, Identifier, NoMetadata, TypedSpan},
 };
 use crate::analyzer::hir::Value;
