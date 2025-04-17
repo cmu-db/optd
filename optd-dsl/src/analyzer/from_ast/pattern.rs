@@ -6,7 +6,7 @@
 use super::ASTConverter;
 use crate::analyzer::errors::AnalyzerErrorKind;
 use crate::analyzer::hir::{Identifier, MatchArm, Pattern, PatternKind, TypedSpan};
-use crate::analyzer::types::Type;
+use crate::analyzer::types::registry::Type;
 use crate::parser::ast::{self, Pattern as AstPattern};
 use crate::utils::span::Spanned;
 use std::collections::HashSet;
@@ -47,7 +47,7 @@ impl ASTConverter {
         use Type::*;
 
         let span = spanned_pattern.span.clone();
-        let mut ty = self.next_unknown();
+        let mut ty = self.registry.new_unknown();
 
         let kind = match &*spanned_pattern.value {
             AstPattern::Error => panic!("AST should no longer contain errors"),
@@ -76,7 +76,7 @@ impl ASTConverter {
             }
             AstPattern::Wildcard => Wildcard,
             AstPattern::EmptyArray => {
-                ty = Array(self.next_unknown().into());
+                ty = Array(self.registry.new_unknown().into());
 
                 EmptyArray
             }
@@ -140,7 +140,7 @@ mod pattern_tests {
         // with 2 fields
         let point_adt = create_product_adt("Point", 2);
         converter
-            .type_registry
+            .registry
             .register_adt(&point_adt)
             .expect("Failed to register Point type");
 
@@ -215,7 +215,7 @@ mod pattern_tests {
         // Register "Point" type for constructor pattern test with 2 fields
         let point_adt = create_product_adt("Point", 2);
         converter
-            .type_registry
+            .registry
             .register_adt(&point_adt)
             .expect("Failed to register Point type");
 
@@ -343,7 +343,7 @@ mod pattern_tests {
         for (name, field_count) in &types {
             let adt = create_product_adt(name, *field_count);
             converter
-                .type_registry
+                .registry
                 .register_adt(&adt)
                 .unwrap_or_else(|_| panic!("Failed to register {} type", name));
         }
@@ -397,7 +397,7 @@ mod pattern_tests {
         // Register a Point type with 2 fields
         let point_adt = create_product_adt("Point", 2);
         converter
-            .type_registry
+            .registry
             .register_adt(&point_adt)
             .expect("Failed to register Point type");
 

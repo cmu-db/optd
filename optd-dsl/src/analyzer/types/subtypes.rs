@@ -1,157 +1,7 @@
-use super::{errors::AnalyzerErrorKind, hir::Identifier};
-use crate::parser::ast::{Adt, Field, Type as AstType};
-use crate::utils::span::Span;
-use Adt::*;
-use std::collections::BTreeMap;
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-};
-
-// Core type constants.
-// These are expressed as strings, not a Type enum, because they are
-// regular ADTs in the language.
-pub const LOGICAL_TYPE: &str = "Logical";
-pub const PHYSICAL_TYPE: &str = "Physical";
-pub const LOGICAL_PROPS: &str = "LogicalProperties";
-pub const PHYSICAL_PROPS: &str = "PhysicalProperties";
-
-pub const CORE_TYPES: [&str; 4] = [LOGICAL_TYPE, PHYSICAL_TYPE, LOGICAL_PROPS, PHYSICAL_PROPS];
-
-/// Represents types in the language.
-///
-/// This enum contains both primitive types (like Int64, String) and complex types
-/// (like Array, Tuple, Closure) as well as user-defined types through ADTs.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Type {
-    // Primitive types.
-    I64,
-    String,
-    Bool,
-    F64,
-
-    // Special types.
-    Unit,
-    Universe,       // All types are subtypes of Universe.
-    Nothing,        // Inherits all types.
-    None,           // Inherits all optionals.
-    Unknown(usize), // Unique identifier for unknown types.
-
-    // User types.
-    Adt(Identifier),
-    Generic(Identifier),
-
-    // Composite types.
-    Array(Box<Type>),
-    Closure(Box<Type>, Box<Type>),
-    Tuple(Vec<Type>),
-    Map(Box<Type>, Box<Type>),
-    Optional(Box<Type>),
-
-    // For Logical & Physical: memo status.
-    Stored(Box<Type>),
-    Costed(Box<Type>),
-
-    // Native trait types
-    Concat,     // For types that can be concatenated (String, Array, Map).
-    EqHash,     // For types that support equality and hashing.
-    Arithmetic, // For types that support arithmetic operations.
-}
-
-/// Manages the type hierarchy and subtyping relationships
-///
-/// The TypeRegistry keeps track of the inheritance relationships between
-/// types, particularly for user-defined ADTs. It provides methods to register
-/// types and check subtyping relationships.
-#[derive(Debug, Clone, Default)]
-pub struct TypeRegistry {
-    /// Maps ADT identifiers to their subtype identifiers.
-    /// We use a BTreeMap to ensure determinstic execution.
-    pub subtypes: BTreeMap<Identifier, HashSet<Identifier>>,
-    /// Maps ADT identifiers to their source spans.
-    pub spans: HashMap<Identifier, Span>,
-    /// Maps terminal / product ADT identifiers to their AST fields.
-    ///
-    /// Note: We store the original AST Field elements rather than converting them
-    /// to a more processed form to preserve their source span information. This allows
-    /// for better error reporting during type checking and semantic analysis.
-    pub product_fields: HashMap<Identifier, Vec<Field>>,
-}
+use super::registry::{Type, TypeRegistry};
+use std::collections::HashSet;
 
 impl TypeRegistry {
-    /// Registers an ADT in the type registry
-    ///
-    /// This method updates the type hierarchy by adding the ADT and all its
-    /// potential subtypes to the registry. For enums, each variant is registered
-    /// as a subtype of the enum.
-    ///
-    /// # Arguments
-    ///
-    /// * `adt` - The ADT to register
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` if registration is successful, or a `AnalyzerErrorKind` if a duplicate name is found.
-    pub fn register_adt(&mut self, adt: &Adt) -> Result<(), Box<AnalyzerErrorKind>> {
-        match adt {
-            Product { name, fields } => {
-                let type_name = name.value.as_ref().clone();
-
-                // Check for duplicate ADT names.
-                if let Some(existing_span) = self.spans.get(&type_name) {
-                    return Err(AnalyzerErrorKind::new_duplicate_adt(
-                        &type_name,
-                        existing_span,
-                        &name.span,
-                    ));
-                }
-
-                // Register the ADT fields.
-                self.product_fields.insert(
-                    type_name.clone(),
-                    fields.iter().map(|field| *field.value.clone()).collect(),
-                );
-
-                self.spans.insert(type_name.clone(), name.span.clone());
-                self.subtypes.entry(type_name).or_default();
-
-                Ok(())
-            }
-            Sum { name, variants } => {
-                let enum_name = name.value.as_ref().clone();
-
-                // Check for duplicate ADT names.
-                if let Some(existing_span) = self.spans.get(&enum_name) {
-                    return Err(AnalyzerErrorKind::new_duplicate_adt(
-                        &enum_name,
-                        existing_span,
-                        &name.span,
-                    ));
-                }
-
-                self.spans.insert(enum_name.clone(), name.clone().span);
-                self.subtypes.entry(enum_name.clone()).or_default();
-
-                for variant in variants {
-                    let variant_adt = variant.value.as_ref();
-                    // Register each variant.
-                    self.register_adt(variant_adt)?;
-
-                    let variant_name = match variant_adt {
-                        Product { name, .. } => name.value.as_ref(),
-                        Sum { name, .. } => name.value.as_ref(),
-                    };
-
-                    // Add variant as a subtype of the enum.
-                    if let Some(children) = self.subtypes.get_mut(&enum_name) {
-                        children.insert(variant_name.clone());
-                    }
-                }
-                Ok(())
-            }
-        }
-    }
-
     /// Checks if a type is a subtype of another type.
     ///
     /// This method determines if `child` is a subtype of `parent` according to
@@ -170,9 +20,6 @@ impl TypeRegistry {
         self.is_subtype_inner(child, parent, &mut HashSet::new())
     }
 
-    /// Inner implementation of is_subtype with memoization for cycle detection.
-    /// Cycles can occur in the type hierarchy with recursive ADTs and EqHash
-    /// checks ADTs recursively deep.
     /// Inner implementation of is_subtype with memoization for cycle detection.
     /// Cycles can occur in the type hierarchy with recursive ADTs and EqHash
     /// checks ADTs recursively deep.
@@ -330,127 +177,17 @@ impl TypeRegistry {
             _ => false,
         }
     }
-
-    /// Retrieves the type of a field from a product ADT by name.
-    ///
-    /// This function should only be called once the registry has been validated,
-    /// or it might panic.
-    pub fn get_product_field_type(&self, adt_name: &Identifier, field_name: &Identifier) -> Type {
-        let fields = self
-            .product_fields
-            .get(adt_name)
-            .unwrap_or_else(|| panic!("ADT '{}' not found in type registry", adt_name));
-
-        let field = fields
-            .iter()
-            .find(|field| *field.name.value == *field_name)
-            .cloned()
-            .unwrap_or_else(|| panic!("Field '{}' not found in ADT '{}'", field_name, adt_name));
-
-        convert_ast_type(*field.ty.value)
-    }
-
-    /// Retrieves the type of a field from a product ADT by index position.
-    ///
-    /// This function should only be called once the registry has been validated,
-    /// or it might panic.
-    pub fn get_product_field_type_by_index(&self, adt_name: &Identifier, index: usize) -> Type {
-        let fields = self
-            .product_fields
-            .get(adt_name)
-            .unwrap_or_else(|| panic!("ADT '{}' not found in type registry", adt_name));
-
-        let field = &fields[index];
-        convert_ast_type(*field.ty.value.clone())
-    }
-}
-
-/// Creates a function type from parameter types and return type.
-pub(super) fn create_function_type(param_types: &[Type], return_type: &Type) -> Type {
-    use Type::*;
-
-    let param_type = if param_types.is_empty() {
-        Unit
-    } else if param_types.len() == 1 {
-        param_types[0].clone()
-    } else {
-        Tuple(param_types.to_vec())
-    };
-
-    Closure(param_type.into(), return_type.clone().into())
-}
-
-/// Converts an AST type to a Type enum.
-fn convert_ast_type(ty: AstType) -> Type {
-    use Type::*;
-
-    match ty {
-        AstType::Identifier(name) => Adt(name),
-        AstType::Int64 => I64,
-        AstType::String => String,
-        AstType::Bool => Bool,
-        AstType::Unit => Unit,
-        AstType::Float64 => F64,
-        AstType::Array(inner) => Array(convert_ast_type(*inner.value).into()),
-        AstType::Closure(params, ret) => Closure(
-            convert_ast_type(*params.value).into(),
-            convert_ast_type(*ret.value).into(),
-        ),
-        AstType::Tuple(inner) => {
-            let inner_types = inner
-                .iter()
-                .map(|ty| convert_ast_type(*ty.value.clone()))
-                .collect();
-            Tuple(inner_types)
-        }
-        AstType::Map(key, val) => Map(
-            convert_ast_type(*key.value).into(),
-            convert_ast_type(*val.value).into(),
-        ),
-        AstType::Questioned(inner) => Optional(convert_ast_type(*inner.value).into()),
-        _ => panic!("Registry has not been properly validated"),
-    }
 }
 
 #[cfg(test)]
-pub mod type_registry_tests {
+pub mod tests {
     use super::*;
     use crate::{
-        parser::ast::Field,
-        utils::span::{Span, Spanned},
+        analyzer::types::registry::type_registry_tests::{
+            create_product_adt, create_sum_adt, spanned,
+        },
+        parser::ast::Type as AstType,
     };
-
-    pub fn create_test_span() -> Span {
-        Span::new("test".to_string(), 0..1)
-    }
-
-    pub fn spanned<T>(value: T) -> Spanned<T> {
-        Spanned::new(value, create_test_span())
-    }
-
-    pub fn create_product_adt(name: &str, fields: Vec<(&str, AstType)>) -> Adt {
-        let spanned_fields: Vec<Spanned<Field>> = fields
-            .into_iter()
-            .map(|(field_name, field_type)| {
-                spanned(Field {
-                    name: spanned(field_name.to_string()),
-                    ty: spanned(field_type),
-                })
-            })
-            .collect();
-
-        Product {
-            name: spanned(name.to_string()),
-            fields: spanned_fields,
-        }
-    }
-
-    pub fn create_sum_adt(name: &str, variants: Vec<Adt>) -> Adt {
-        Sum {
-            name: spanned(name.to_string()),
-            variants: variants.into_iter().map(spanned).collect(),
-        }
-    }
 
     #[test]
     fn test_stored_and_costed_types() {
@@ -509,24 +246,6 @@ pub mod type_registry_tests {
                 "Animals".to_string()
             )))))
         ));
-    }
-
-    #[test]
-    fn test_duplicate_adt_detection() {
-        let mut registry = TypeRegistry::default();
-
-        // First registration should succeed
-        let car1 = create_product_adt("Car", vec![]);
-        assert!(registry.register_adt(&car1).is_ok());
-
-        // Second registration with the same name should fail
-        let car2 = Product {
-            name: spanned("Car".to_string()),
-            fields: vec![],
-        };
-
-        let result = registry.register_adt(&car2);
-        assert!(result.is_err());
     }
 
     #[test]
@@ -1337,49 +1056,5 @@ pub mod type_registry_tests {
                 Box::new(Type::Optional(Box::new(Type::String)))
             )
         ));
-    }
-
-    #[test]
-    fn test_create_function_type() {
-        // Test with no parameters
-        let params: Vec<Type> = vec![];
-        let return_type = Type::I64;
-        let result = create_function_type(&params, &return_type);
-        match result {
-            Type::Closure(param, ret) => {
-                assert_eq!(*param, Type::Unit);
-                assert_eq!(*ret, Type::I64);
-            }
-            _ => panic!("Expected Closure type"),
-        }
-
-        // Test with one parameter
-        let params = vec![Type::I64];
-        let result = create_function_type(&params, &return_type);
-        match result {
-            Type::Closure(param, ret) => {
-                assert_eq!(*param, Type::I64);
-                assert_eq!(*ret, Type::I64);
-            }
-            _ => panic!("Expected Closure type"),
-        }
-
-        // Test with multiple parameters
-        let params = vec![Type::I64, Type::Bool];
-        let result = create_function_type(&params, &return_type);
-        match result {
-            Type::Closure(param, ret) => {
-                match &*param {
-                    Type::Tuple(types) => {
-                        assert_eq!(types.len(), 2);
-                        assert_eq!(types[0], Type::I64);
-                        assert_eq!(types[1], Type::Bool);
-                    }
-                    _ => panic!("Expected Tuple type for parameters"),
-                }
-                assert_eq!(*ret, Type::I64);
-            }
-            _ => panic!("Expected Closure type"),
-        }
     }
 }

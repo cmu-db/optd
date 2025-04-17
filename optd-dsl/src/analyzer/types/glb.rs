@@ -1,4 +1,5 @@
-use crate::analyzer::types::{Type, TypeRegistry};
+use super::registry::TypeRegistry;
+use crate::analyzer::types::registry::Type;
 
 impl TypeRegistry {
     /// Finds the greatest lower bound (GLB) of two types.
@@ -175,9 +176,9 @@ impl TypeRegistry {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use super::*;
-    use crate::analyzer::type_infer::lub::tests::setup_type_hierarchy;
+    use crate::analyzer::types::lub::tests::setup_type_hierarchy;
 
     #[test]
     fn test_greatest_lower_bound_simple() {

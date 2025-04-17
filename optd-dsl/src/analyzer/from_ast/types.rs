@@ -6,7 +6,7 @@
 use super::ASTConverter;
 use crate::analyzer::errors::AnalyzerErrorKind;
 use crate::analyzer::hir::Identifier;
-use crate::analyzer::types::Type;
+use crate::analyzer::types::registry::Type;
 use crate::parser::ast::Type as AstType;
 use crate::utils::span::Spanned;
 use std::collections::HashSet;
@@ -72,7 +72,7 @@ impl ASTConverter {
                     Generic(name.clone())
                 } else {
                     // Check if the type exists in the registry.
-                    if !self.type_registry.subtypes.contains_key(name) {
+                    if !self.registry.subtypes.contains_key(name) {
                         return Err(AnalyzerErrorKind::new_undefined_type(name, &ast_type.span));
                     }
 
@@ -80,7 +80,7 @@ impl ASTConverter {
                 }
             }
             AstType::Error => panic!("AST should no longer contain errors"),
-            AstType::Unknown => self.next_unknown(),
+            AstType::Unknown => self.registry.new_unknown(),
         };
 
         Ok(hir_type)
@@ -90,7 +90,6 @@ impl ASTConverter {
 #[cfg(test)]
 mod types_tests {
     use super::*;
-    use crate::analyzer::types::Type;
     use crate::parser::ast;
     use crate::utils::span::{Span, Spanned};
     use std::collections::HashSet;
@@ -141,7 +140,7 @@ mod types_tests {
 
         // Register "TestType" for testing complex types
         let test_adt = create_test_adt("TestType");
-        converter.type_registry.register_adt(&test_adt).unwrap();
+        converter.registry.register_adt(&test_adt).unwrap();
 
         // Test array type
         let array_type = AstType::Array(spanned(AstType::Int64));
@@ -191,7 +190,7 @@ mod types_tests {
 
         // Register "TestType" for complex types
         let test_adt = create_test_adt("TestType");
-        converter.type_registry.register_adt(&test_adt).unwrap();
+        converter.registry.register_adt(&test_adt).unwrap();
 
         // Test questioned type (Optional)
         let inner_type = spanned(AstType::Int64);
@@ -245,7 +244,7 @@ mod types_tests {
 
         // Register "MyType" in the type registry
         let product_adt = create_test_adt("MyType");
-        converter.type_registry.register_adt(&product_adt).unwrap();
+        converter.registry.register_adt(&product_adt).unwrap();
 
         // Test regular ADT identifier with registered type
         let adt_type = AstType::Identifier("MyType".to_string());
@@ -285,7 +284,7 @@ mod types_tests {
         let types = ["TypeA", "TypeB", "Container"];
         for ty in &types {
             converter
-                .type_registry
+                .registry
                 .register_adt(&create_test_adt(ty))
                 .unwrap();
         }
@@ -347,11 +346,8 @@ mod types_tests {
         let data_type_adt = create_test_adt("DataType");
         let key_type_adt = create_test_adt("KeyType");
 
-        converter
-            .type_registry
-            .register_adt(&data_type_adt)
-            .unwrap();
-        converter.type_registry.register_adt(&key_type_adt).unwrap();
+        converter.registry.register_adt(&data_type_adt).unwrap();
+        converter.registry.register_adt(&key_type_adt).unwrap();
 
         let generics = HashSet::new();
 
@@ -433,10 +429,7 @@ mod types_tests {
 
         // Register type
         let data_type_adt = create_test_adt("DataType");
-        converter
-            .type_registry
-            .register_adt(&data_type_adt)
-            .unwrap();
+        converter.registry.register_adt(&data_type_adt).unwrap();
 
         // Setup generics
         let mut generics = HashSet::new();
@@ -496,10 +489,7 @@ mod types_tests {
 
         // Register type
         let data_type_adt = create_test_adt("DataType");
-        converter
-            .type_registry
-            .register_adt(&data_type_adt)
-            .unwrap();
+        converter.registry.register_adt(&data_type_adt).unwrap();
 
         let generics = HashSet::new();
 

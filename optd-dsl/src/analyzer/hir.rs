@@ -17,7 +17,7 @@
 
 use super::context::Context;
 use super::map::Map;
-use super::types::Type;
+use super::types::registry::Type;
 use crate::utils::span::Span;
 use std::fmt::Debug;
 use std::{collections::HashMap, sync::Arc};

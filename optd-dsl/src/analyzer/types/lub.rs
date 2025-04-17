@@ -1,7 +1,5 @@
-use crate::analyzer::{
-    hir::Identifier,
-    types::{Type, TypeRegistry},
-};
+use super::registry::TypeRegistry;
+use crate::analyzer::{hir::Identifier, types::registry::Type};
 use std::collections::HashSet;
 
 impl TypeRegistry {
@@ -241,8 +239,10 @@ impl TypeRegistry {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::analyzer::types::type_registry_tests::{create_product_adt, create_sum_adt};
-    use crate::parser::ast::Type as AstType;
+    use crate::{
+        analyzer::types::registry::type_registry_tests::{create_product_adt, create_sum_adt},
+        parser::ast::Type as AstType,
+    };
 
     /// Helper function to set up a comprehensive type hierarchy for testing
     pub fn setup_type_hierarchy() -> TypeRegistry {

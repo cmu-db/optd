@@ -111,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{} Converting AST to HIR and TypeRegistry...", "→".cyan());
             }
 
-            let (hir, type_registry) = match ast_to_hir(&source, ast) {
+            let (hir, mut type_registry) = match ast_to_hir(&source, ast) {
                 Ok((hir, type_registry)) => {
                     println!("{}", "AST to HIR conversion successful".green());
                     if *print_typedspan_hir {
@@ -137,7 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{} Performing type inference...", "→".cyan());
             }
 
-            match infer(&source, &hir, &type_registry) {
+            match infer(&source, &hir, &mut type_registry) {
                 Ok(_) => {
                     "Type inference successful".green();
                     println!("\n{}", "Compilation completed successfully!".green().bold());

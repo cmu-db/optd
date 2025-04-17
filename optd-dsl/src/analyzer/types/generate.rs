@@ -1,4 +1,4 @@
-use super::solver::Solver;
+use super::registry::{TypeRegistry, create_function_type};
 use crate::{
     analyzer::{
         context::Context,
@@ -7,13 +7,13 @@ use crate::{
             BinOp, CoreData, Expr, ExprKind, FunKind, HIR, Identifier, LetBinding, MapEntry,
             MatchArm, Pattern, PatternKind, TypedSpan, UnaryOp, Value,
         },
-        types::{Type, create_function_type},
+        types::registry::Type,
     },
     utils::span::Span,
 };
 use std::sync::Arc;
 
-impl Solver<'_> {
+impl TypeRegistry {
     /// Generates type constraints from an HIR while verifying scopes.
     ///
     /// This method traverses the HIR and simultaneously:
@@ -168,7 +168,7 @@ impl Solver<'_> {
                     .enumerate()
                     .try_for_each(|(i, field_pat)| {
                         let field_type = TypedSpan::new(
-                            self.registry.get_product_field_type_by_index(name, i),
+                            self.get_product_field_type_by_index(name, i),
                             field_pat.metadata.span.clone(),
                         );
 
@@ -491,7 +491,7 @@ impl Solver<'_> {
             CoreData::Struct(name, exprs) => {
                 exprs.iter().enumerate().try_for_each(|(i, field_expr)| {
                     let field_type = TypedSpan::new(
-                        self.registry.get_product_field_type_by_index(name, i),
+                        self.get_product_field_type_by_index(name, i),
                         field_expr.metadata.span.clone(),
                     );
 
@@ -549,6 +549,7 @@ impl Solver<'_> {
 
 #[cfg(test)]
 mod scope_check_tests {
+    use super::*;
     use crate::{
         analyzer::{
             context::Context,
@@ -557,18 +558,12 @@ mod scope_check_tests {
                 CoreData, Expr, ExprKind, FunKind, HIR, LetBinding, MatchArm, Pattern, PatternKind,
                 TypedSpan, Value,
             },
-            type_infer::solver::Solver,
-            types::{Type, TypeRegistry, create_function_type},
+            types::registry::type_registry_tests::create_test_span,
         },
         utils::span::Span,
     };
     use std::collections::HashMap;
     use std::sync::Arc;
-
-    // Create a test span
-    fn test_span(start: usize, end: usize) -> Span {
-        Span::new("test".to_string(), start..end)
-    }
 
     // Create a dummy value for binding
     fn dummy_value(span: Span) -> Value<TypedSpan> {
@@ -581,8 +576,7 @@ mod scope_check_tests {
         body: Expr<TypedSpan>,
     ) -> (HIR<TypedSpan>, Result<(), Box<AnalyzerErrorKind>>) {
         let mut context = Context::default();
-        let registry = TypeRegistry::default();
-        let mut solver = Solver::new(&registry);
+        let mut registry = TypeRegistry::default();
 
         // Create function value
         let len = params.len();
@@ -590,7 +584,7 @@ mod scope_check_tests {
             data: CoreData::Function(FunKind::Closure(params, Arc::new(body))),
             metadata: TypedSpan {
                 ty: create_function_type(&vec![Type::None; len], &Type::None),
-                span: test_span(1, 10),
+                span: create_test_span(),
             },
         };
 
@@ -602,7 +596,7 @@ mod scope_check_tests {
             annotations: HashMap::new(),
         };
 
-        let result = solver.generate_constraints(&hir);
+        let result = registry.generate_constraints(&hir);
 
         (hir, result)
     }
@@ -613,7 +607,7 @@ mod scope_check_tests {
         let body = Expr::new_with(
             ExprKind::Ref(param_name.clone()),
             Type::Nothing,
-            test_span(5, 6),
+            create_test_span(),
         );
         let (_, result) = setup_test_context(vec![param_name], body);
         assert!(result.is_ok());
@@ -626,7 +620,7 @@ mod scope_check_tests {
             Expr::new_with(
                 ExprKind::Ref("undefined".to_string()),
                 Type::Nothing,
-                test_span(5, 13),
+                create_test_span(),
             ),
         );
         assert!(matches!(
@@ -643,21 +637,21 @@ mod scope_check_tests {
                 LetBinding::new_with(
                     let_var.clone(),
                     Arc::new(Expr::new_with(
-                        ExprKind::CoreVal(dummy_value(test_span(5, 6))),
+                        ExprKind::CoreVal(dummy_value(create_test_span())),
                         Type::Nothing,
-                        test_span(5, 6),
+                        create_test_span(),
                     )),
                     Type::Nothing,
-                    test_span(5, 6),
+                    create_test_span(),
                 ),
                 Arc::new(Expr::new_with(
                     ExprKind::Ref(let_var),
                     Type::Nothing,
-                    test_span(7, 8),
+                    create_test_span(),
                 )),
             ),
             Type::Nothing,
-            test_span(1, 10),
+            create_test_span(),
         );
 
         let (_, result) = setup_test_context(vec!["x".to_string()], let_expr);
@@ -671,7 +665,7 @@ mod scope_check_tests {
             Expr::new_with(
                 ExprKind::Ref("x".to_string()),
                 Type::Nothing,
-                test_span(5, 6),
+                create_test_span(),
             ),
         );
         assert!(matches!(
@@ -688,37 +682,37 @@ mod scope_check_tests {
                 LetBinding::new_with(
                     let_var.clone(),
                     Arc::new(Expr::new_with(
-                        ExprKind::CoreVal(dummy_value(test_span(5, 6))),
+                        ExprKind::CoreVal(dummy_value(create_test_span())),
                         Type::Nothing,
-                        test_span(5, 6),
+                        create_test_span(),
                     )),
                     Type::Nothing,
-                    test_span(5, 6),
+                    create_test_span(),
                 ),
                 Arc::new(Expr::new_with(
                     ExprKind::Let(
                         LetBinding::new_with(
                             let_var.clone(),
                             Arc::new(Expr::new_with(
-                                ExprKind::CoreVal(dummy_value(test_span(10, 11))),
+                                ExprKind::CoreVal(dummy_value(create_test_span())),
                                 Type::Nothing,
-                                test_span(10, 11),
+                                create_test_span(),
                             )),
                             Type::Nothing,
-                            test_span(10, 11),
+                            create_test_span(),
                         ),
                         Arc::new(Expr::new_with(
                             ExprKind::Ref(let_var),
                             Type::Nothing,
-                            test_span(12, 13),
+                            create_test_span(),
                         )),
                     ),
                     Type::Nothing,
-                    test_span(8, 14),
+                    create_test_span(),
                 )),
             ),
             Type::Nothing,
-            test_span(1, 15),
+            create_test_span(),
         );
 
         let (_, result) = setup_test_context(vec!["x".to_string()], outer_let);
@@ -739,11 +733,11 @@ mod scope_check_tests {
                 Arc::new(Expr::new_with(
                     ExprKind::Ref(outer_param.clone()),
                     Type::Nothing,
-                    test_span(10, 11),
+                    create_test_span(),
                 )),
             ))),
             Type::Closure(Type::None.into(), Type::None.into()),
-            test_span(5, 12),
+            create_test_span(),
         );
 
         let (_, result) = setup_test_context(vec![outer_param], inner_fn);
@@ -757,7 +751,7 @@ mod scope_check_tests {
                 Arc::new(Expr::new_with(
                     ExprKind::Ref("x".to_string()),
                     Type::Nothing,
-                    test_span(5, 6),
+                    create_test_span(),
                 )),
                 vec![MatchArm {
                     pattern: Pattern::new_with(
@@ -766,21 +760,21 @@ mod scope_check_tests {
                             Box::new(Pattern::new_with(
                                 PatternKind::Wildcard,
                                 Type::Nothing,
-                                test_span(10, 15),
+                                create_test_span(),
                             )),
                         ),
                         Type::Nothing,
-                        test_span(10, 15),
+                        create_test_span(),
                     ),
                     expr: Arc::new(Expr::new_with(
                         ExprKind::Ref("matched".to_string()),
                         Type::Nothing,
-                        test_span(20, 27),
+                        create_test_span(),
                     )),
                 }],
             ),
             Type::Nothing,
-            test_span(1, 30),
+            create_test_span(),
         );
 
         let (_, result) = setup_test_context(vec!["x".to_string()], match_expr);
@@ -794,7 +788,7 @@ mod scope_check_tests {
                 Arc::new(Expr::new_with(
                     ExprKind::Ref("x".to_string()),
                     Type::Nothing,
-                    test_span(5, 6),
+                    create_test_span(),
                 )),
                 vec![MatchArm {
                     pattern: Pattern::new_with(
@@ -806,25 +800,25 @@ mod scope_check_tests {
                                     Box::new(Pattern::new_with(
                                         PatternKind::Wildcard,
                                         Type::Nothing,
-                                        test_span(10, 15),
+                                        create_test_span(),
                                     )),
                                 ),
                                 Type::Nothing,
-                                test_span(10, 15),
+                                create_test_span(),
                             )),
                         ),
                         Type::Nothing,
-                        test_span(10, 15),
+                        create_test_span(),
                     ),
                     expr: Arc::new(Expr::new_with(
                         ExprKind::Ref("y".to_string()),
                         Type::Nothing,
-                        test_span(20, 21),
+                        create_test_span(),
                     )),
                 }],
             ),
             Type::Nothing,
-            test_span(1, 25),
+            create_test_span(),
         );
 
         let (_, result) = setup_test_context(vec!["x".to_string()], match_expr);
@@ -844,12 +838,12 @@ mod scope_check_tests {
                 LetBinding::new_with(
                     x_var.clone(),
                     Arc::new(Expr::new_with(
-                        ExprKind::CoreVal(dummy_value(test_span(1, 2))),
+                        ExprKind::CoreVal(dummy_value(create_test_span())),
                         Type::Nothing,
-                        test_span(1, 2),
+                        create_test_span(),
                     )),
                     Type::Nothing,
-                    test_span(1, 2),
+                    create_test_span(),
                 ),
                 Arc::new(Expr::new_with(
                     ExprKind::NewScope(Arc::new(Expr::new_with(
@@ -857,28 +851,28 @@ mod scope_check_tests {
                             LetBinding::new_with(
                                 x_var.clone(),
                                 Arc::new(Expr::new_with(
-                                    ExprKind::CoreVal(dummy_value(test_span(3, 4))),
+                                    ExprKind::CoreVal(dummy_value(create_test_span())),
                                     Type::Nothing,
-                                    test_span(3, 4),
+                                    create_test_span(),
                                 )),
                                 Type::Nothing,
-                                test_span(3, 4),
+                                create_test_span(),
                             ),
                             Arc::new(Expr::new_with(
                                 ExprKind::Ref(x_var),
                                 Type::Nothing,
-                                test_span(5, 6),
+                                create_test_span(),
                             )),
                         ),
                         Type::Nothing,
-                        test_span(2, 7),
+                        create_test_span(),
                     ))),
                     Type::Nothing,
-                    test_span(1, 8),
+                    create_test_span(),
                 )),
             ),
             Type::Nothing,
-            test_span(0, 9),
+            create_test_span(),
         );
 
         let (_, result) = setup_test_context(vec![], test_expr);

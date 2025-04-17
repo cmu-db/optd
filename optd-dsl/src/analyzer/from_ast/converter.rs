@@ -1,10 +1,9 @@
 use crate::analyzer::errors::AnalyzerErrorKind;
 use crate::analyzer::hir::{Annotation, FunKind, Identifier, UdfKind};
-use crate::analyzer::types::create_function_type;
+use crate::analyzer::types::registry::{Type, TypeRegistry, create_function_type};
 use crate::analyzer::{
     context::Context,
     hir::{CoreData, HIR, TypedSpan, Value},
-    types::{Type, TypeRegistry},
 };
 use crate::parser::ast::{Function, Item, Module};
 use crate::utils::span::Spanned;
@@ -15,14 +14,12 @@ use std::collections::{HashMap, HashSet};
 /// Converts an AST to a High-level Intermediate Representation (HIR).
 #[derive(Debug, Clone, Default)]
 pub struct ASTConverter {
-    /// Registry of types for type checking and subtyping.
-    pub(super) type_registry: TypeRegistry,
     /// Context for variable bindings.
     pub(super) context: Context<TypedSpan>,
+    /// Registry of types for type checking and subtyping.
+    pub(super) registry: TypeRegistry,
     /// Annotations for HIR expressions.
     pub(super) annotations: HashMap<Identifier, Vec<Annotation>>,
-    /// Unique id counter for Unknown types.
-    unknown_id: usize,
 }
 
 impl ASTConverter {
@@ -45,7 +42,7 @@ impl ASTConverter {
         // First pass: Process all ADTs to register types.
         for item in &module.items {
             if let Item::Adt(spanned_adt) = item {
-                self.type_registry.register_adt(&spanned_adt.value)?;
+                self.registry.register_adt(&spanned_adt.value)?;
             }
         }
 
@@ -65,21 +62,14 @@ impl ASTConverter {
                 context: self.context,
                 annotations: self.annotations,
             },
-            self.type_registry,
+            self.registry,
         ))
-    }
-
-    /// Gets and increments the next unknown type.
-    pub(super) fn next_unknown(&mut self) -> Type {
-        let id = self.unknown_id;
-        self.unknown_id += 1;
-        Type::Unknown(id)
     }
 
     /// Registers a function AST node and adds it to the context.
     ///
     /// Handles function parameters, return type, and body conversion.
-    pub fn register_function(
+    fn register_function(
         &mut self,
         spanned_fn: &Spanned<Function>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
@@ -188,7 +178,6 @@ impl ASTConverter {
 mod converter_tests {
     use super::*;
     use crate::analyzer::hir::{CoreData, FunKind};
-    use crate::analyzer::types::Type;
     use crate::parser::ast::{self, Adt, Function, Item, Module, Type as AstType};
     use crate::utils::span::{Span, Spanned};
 
