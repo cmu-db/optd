@@ -15,36 +15,27 @@ impl TypeRegistry {
     /// * `Err` containing the first encountered type error
     pub fn resolve(&mut self) -> Result<(), Box<AnalyzerErrorKind>> {
         loop {
-            let mut any_bumped = false;
-            let mut first_error = None;
-
-            // Temporarily take ownership of constraints to avoid borrow checker issues.
             let constraints = mem::take(&mut self.constraints);
 
-            for constraint in &constraints {
-                match self.check_constraint(constraint) {
+            let (any_bumped, first_error) = constraints
+                .iter()
+                .map(|constraint| self.check_constraint(constraint))
+                .fold((false, None), |(mut acc_bumped, acc_err), res| match res {
                     Ok(bumped) => {
-                        any_bumped |= bumped;
+                        acc_bumped |= bumped;
+                        (acc_bumped, acc_err)
                     }
-                    Err((error, bumped)) => {
-                        any_bumped |= bumped;
-                        if first_error.is_none() {
-                            first_error = Some(error);
-                        }
+                    Err((err, bumped)) => {
+                        acc_bumped |= bumped;
+                        let acc_err = acc_err.or(Some(err));
+                        (acc_bumped, acc_err)
                     }
-                }
-            }
+                });
 
-            // Put constraints back.
             self.constraints = constraints;
 
-            // If no types were bumped, we've reached a fixed point.
             if !any_bumped {
-                if let Some(error) = first_error {
-                    return Err(error);
-                } else {
-                    return Ok(());
-                }
+                return first_error.map_or(Ok(()), Err);
             }
         }
     }
@@ -71,10 +62,12 @@ impl TypeRegistry {
                 let is_subtype = self.is_subtype_infer(&sub_type.ty, &target_type.ty, &mut bumped);
 
                 if !is_subtype && !bumped {
-                    let sub_type = &self.materialize_unknown(sub_type);
-                    let target_type = &self.materialize_unknown(target_type);
-                    let error = AnalyzerErrorKind::new_invalid_subtype(sub_type, target_type);
-                    Err((error, bumped))
+                    let sub = self.materialize_unknown(sub_type);
+                    let target = self.materialize_unknown(target_type);
+                    Err((
+                        AnalyzerErrorKind::new_invalid_subtype(&sub, &target),
+                        bumped,
+                    ))
                 } else {
                     Ok(bumped)
                 }
@@ -85,7 +78,8 @@ impl TypeRegistry {
                 field,
                 outer,
             } => {
-                let inner = &self.materialize_unknown(inner);
+                let inner = self.materialize_unknown(inner);
+
                 match &inner.ty {
                     Type::Adt(name) => match self.get_product_field_type(name, field) {
                         Some(field_ty) => {
@@ -94,28 +88,33 @@ impl TypeRegistry {
                                 self.is_subtype_infer(&field_ty, &outer.ty, &mut bumped);
 
                             if !is_subtype && !bumped {
-                                let outer = &self.materialize_unknown(outer);
-                                let error = AnalyzerErrorKind::new_invalid_subtype(inner, outer);
-                                Err((error, bumped))
+                                let outer = self.materialize_unknown(outer);
+                                Err((
+                                    AnalyzerErrorKind::new_invalid_subtype(&inner, &outer),
+                                    bumped,
+                                ))
                             } else {
                                 Ok(bumped)
                             }
                         }
                         None => {
-                            let outer = &self.materialize_unknown(outer);
-                            let error = AnalyzerErrorKind::new_invalid_field_access(
-                                inner,
-                                field,
-                                &outer.span,
-                            );
-                            Err((error, false))
+                            let outer = self.materialize_unknown(outer);
+                            Err((
+                                AnalyzerErrorKind::new_invalid_field_access(
+                                    &inner,
+                                    field,
+                                    &outer.span,
+                                ),
+                                false,
+                            ))
                         }
                     },
                     _ => {
-                        let outer = &self.materialize_unknown(outer);
-                        let error =
-                            AnalyzerErrorKind::new_invalid_field_access(inner, field, &outer.span);
-                        Err((error, false))
+                        let outer = self.materialize_unknown(outer);
+                        Err((
+                            AnalyzerErrorKind::new_invalid_field_access(&inner, field, &outer.span),
+                            false,
+                        ))
                     }
                 }
             }
