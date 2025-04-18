@@ -80,7 +80,7 @@ impl ASTConverter {
                 if let Some((name, idx)) = parent_adt {
                     ty = self
                         .registry
-                        .get_product_field_type_by_index(&name, *idx)
+                        .get_product_field_type_by_index(name, *idx)
                         .unwrap();
                 }
 

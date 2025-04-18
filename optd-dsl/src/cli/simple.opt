@@ -6,6 +6,6 @@ data Physical
 data LogicalProperties
 data PhysicalProperties
 
-fn (log: Logical) fold = match log
+fn (log: Logical) fold: I64 = match log
     | Add(left, right) -> fold(left) + fold(right)
     \ Const(val) -> val

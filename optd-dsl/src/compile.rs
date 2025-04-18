@@ -90,7 +90,9 @@ pub fn infer(
     })?;
 
     // Step 3: Resolve constraints.
-    let _ = registry.resolve();
+    registry.resolve().map_err(|err_kind| {
+        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
+    })?;
 
     // TODO(alexis): Step 4: Transform HIR
     // After type inference, transform the HIR into its final form with complete type information.
