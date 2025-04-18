@@ -40,9 +40,9 @@ impl TypeRegistry {
 
         let glb = match (type1, type2) {
             // Substitute Unknown types with their current inferred type.
-            (Unknown(id), _) | (_, Unknown(id)) => {
-                let type1 = self.resolved_unknown.get(id).cloned().unwrap();
-                self.least_upper_bound(&type1, type2)
+            (Unknown(id), other) | (other, Unknown(id)) => {
+                let bound_unknown = self.resolved_unknown.get(id).cloned().unwrap();
+                self.least_upper_bound(&bound_unknown, other)
             }
 
             // Universe is the top type - GLB(Universe, T) = T.

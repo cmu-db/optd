@@ -27,8 +27,8 @@ impl TypeRegistry {
     ///
     /// During type inference, this method can also refine unknown types to satisfy
     /// subtyping constraints. When an unknown type is encountered:
-    /// - As a parent: It is simply substituted and checked against the child type.
-    /// - As a child: It's updated to the least upper bound of itself and the parent type.
+    /// - As a parent: It is updated to the least upper bound of itself and the child type.
+    /// - As a child: It is simply substituted and checked against the parent type.
     ///
     /// The `bumped` parameter tracks whether any unknown types were modified
     /// during subtyping checks, which is used by the constraint solver to determine
@@ -96,23 +96,23 @@ impl TypeRegistry {
             // Nothing is the bottom type - it is a subtype of everything.
             (Nothing, _) => true,
 
-            // If parent is unknown, check if its resolved type is a supertype of child.
+            // If parent is unknown, bump up to LUB of child.
             (_, Unknown(id)) => {
                 let parent = self.resolved_unknown.get(id).cloned().unwrap();
-                self.is_subtype_infer_inner(child, &parent, bumped, memo)
-            }
+                let lub = self.least_upper_bound(child, &parent);
 
-            // If child is unknown, bump up to LUB with parent.
-            (Unknown(id), _) => {
-                let child = self.resolved_unknown.get(id).cloned().unwrap();
-                let lub = self.least_upper_bound(&child, parent);
-
-                if lub != child {
+                if lub != parent {
                     self.resolved_unknown.insert(*id, lub);
                     *bumped = true;
                 }
 
                 true
+            }
+
+            // If child is unknown, check if its resolved type is a subtype of parent.
+            (Unknown(id), _) => {
+                let child = self.resolved_unknown.get(id).cloned().unwrap();
+                self.is_subtype_infer_inner(&child, parent, bumped, memo)
             }
 
             // Generics only match if they have strictly the same name.

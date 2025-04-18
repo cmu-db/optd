@@ -66,11 +66,20 @@ impl TypeRegistry {
                 field,
                 outer,
             } => {
-                if let Type::Adt(name) = &inner.ty {
-                    let valid = self
-                        .get_product_field_type(&name, field)
-                        .is_some_and(|ty| ty == outer.ty);
-                    (valid, false)
+                let inner_ty = if let Type::Unknown(id) = &inner.ty {
+                    self.resolved_unknown.get(id).unwrap()
+                } else {
+                    &inner.ty
+                };
+
+                if let Type::Adt(name) = inner_ty {
+                    self.get_product_field_type(name, field)
+                        .map(|ty| {
+                            let mut bumped = false;
+                            let is_subtype = self.is_subtype_infer(&ty, &outer.ty, &mut bumped);
+                            (is_subtype, bumped)
+                        })
+                        .unwrap_or((false, false))
                 } else {
                     (false, false)
                 }

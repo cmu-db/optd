@@ -407,7 +407,7 @@ impl TypeRegistry {
 
     /// Generates constraints for variable references while verifying scopes.
     /// Enforces the type relationship:
-    /// - `expr >: ref_type`
+    /// - `expr = ref_type`
     fn generate_ref(
         &mut self,
         expr: &Expr<TypedSpan>,
@@ -415,7 +415,7 @@ impl TypeRegistry {
         ctx: &Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
         if let Some(value) = ctx.lookup(name) {
-            self.add_constraint_subtypes(&expr.metadata, &[value.metadata.clone()]);
+            self.add_constraint_equal(&expr.metadata, &value.metadata);
         } else {
             return Err(AnalyzerErrorKind::new_undefined_reference(
                 name,
