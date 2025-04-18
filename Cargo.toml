@@ -1,5 +1,5 @@
 [workspace]
-members = ["optd", "optd-test"]
+members = ["optd"]
 resolver = "2"
 
 [workspace.package]
