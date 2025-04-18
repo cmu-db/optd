@@ -12,30 +12,36 @@ impl TypeRegistry {
     /// # Returns
     ///
     /// * `Ok(())` if all constraints are successfully resolved
-    /// * `Err` containing the first encountered type error
-    pub fn resolve(&mut self) -> Result<(), Box<AnalyzerErrorKind>> {
+    /// * `Vec<Err>` containing all the encountered type errors
+    pub fn resolve(&mut self) -> Result<(), Vec<Box<AnalyzerErrorKind>>> {
         loop {
+            let mut any_bumped = false;
+            let mut errors = Vec::new();
+
+            // Temporarily take ownership of constraints to avoid borrow checker issues.
             let constraints = mem::take(&mut self.constraints);
 
-            let (any_bumped, first_error) = constraints
-                .iter()
-                .map(|constraint| self.check_constraint(constraint))
-                .fold((false, None), |(mut acc_bumped, acc_err), res| match res {
+            for constraint in &constraints {
+                match self.check_constraint(constraint) {
                     Ok(bumped) => {
-                        acc_bumped |= bumped;
-                        (acc_bumped, acc_err)
+                        any_bumped |= bumped;
                     }
                     Err((err, bumped)) => {
-                        acc_bumped |= bumped;
-                        let acc_err = acc_err.or(Some(err));
-                        (acc_bumped, acc_err)
+                        any_bumped |= bumped;
+                        errors.push(err);
                     }
-                });
+                }
+            }
 
+            // Put constraints back.
             self.constraints = constraints;
 
             if !any_bumped {
-                return first_error.map_or(Ok(()), Err);
+                return if errors.is_empty() {
+                    Ok(())
+                } else {
+                    Err(errors)
+                };
             }
         }
     }

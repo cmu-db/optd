@@ -82,16 +82,24 @@ pub fn infer(
     source: &str,
     hir: &HIR<TypedSpan>,
     registry: &mut TypeRegistry,
-) -> Result<HIR, CompileError> {
+) -> Result<HIR, Vec<CompileError>> {
     // Step 1 & 2: Perform scope checking and generate type constraints
     // This traverses the HIR, verifies scopes, and creates constraints for all expressions
     registry.generate_constraints(hir).map_err(|err_kind| {
-        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
+        vec![CompileError::AnalyzerError(AnalyzerError::new(
+            source.to_string(),
+            *err_kind,
+        ))]
     })?;
 
     // Step 3: Resolve constraints.
-    registry.resolve().map_err(|err_kind| {
-        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
+    registry.resolve().map_err(|err_kinds| {
+        err_kinds
+            .into_iter()
+            .map(|err_kind| {
+                CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
+            })
+            .collect::<Vec<_>>()
     })?;
 
     // TODO(alexis): Step 4: Transform HIR
