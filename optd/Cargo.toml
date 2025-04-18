@@ -4,9 +4,27 @@ version = "0.1.0"
 edition = "2024"
 repository = "https://github.com/cmu-db/optd"
 
-[dependencies]
-optd-core = { path = "../optd-core" }
-optd-dsl = { path = "../optd-dsl" }
+[[bin]]
+name = "optd-cli"
+path = "src/dsl/cli/main.rs"
 
+[dependencies]
+ariadne = "0.5.1"
+async-recursion = "1.1.1"
 async-trait = "0.1.88"
+chumsky = "0.9.3"
+clap = { version = "4.5.37", features = ["derive"] }
+colored = "3.0.0"
+enum_dispatch = "0.3.13"
+futures = "0.3.31"
 iceberg = { version = "0.4.0", default-features = false }
+ordered-float = "5.0.0"
+tokio = { version = "1.44.2", features = ["macros", "rt"] }
+trait-variant = "0.1.2"
+
+[dev-dependencies]
+tokio = { version = "1.44.2", features = [
+    "macros",
+    "rt-multi-thread",
+    "test-util"
+] }
