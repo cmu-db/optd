@@ -317,7 +317,7 @@ pub fn expr_parser() -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, 
             .then(expr.clone())
             .map(|(bindings, body)| {
                 bindings.into_iter().rev().fold(body, |acc_body, binding| {
-                    let span = binding.span.clone();
+                    let span = acc_body.span.clone();
                     let (field, value) = *binding.value.clone();
                     Spanned::new(Expr::Let(field, value, acc_body), span)
                 })

@@ -121,13 +121,48 @@ impl TypeRegistry {
         }
     }
 
-    fn materialize_unknown(&self, typed_span: &TypedSpan) -> TypedSpan {
-        match &typed_span.ty {
-            Type::Unknown(id) => {
-                let resolved_type = self.resolved_unknown.get(id).unwrap().clone();
-                TypedSpan::new(resolved_type, typed_span.span.clone())
+    /// Recursively resolves all Unknown types within a type structure.
+    ///
+    /// This method walks through composite types (arrays, tuples, etc.)
+    /// and replaces any Unknown types with their concrete inferred types
+    /// from the registry.
+    ///
+    /// # Arguments
+    ///
+    /// * `ty` - The type to resolve
+    ///
+    /// # Returns
+    ///
+    /// A new Type with all Unknown types replaced by their concrete types
+    pub(super) fn resolve_type(&self, ty: &Type) -> Type {
+        use Type::*;
+
+        match ty {
+            Unknown(id) => {
+                if let Some(resolved) = self.resolved_unknown.get(id) {
+                    self.resolve_type(resolved)
+                } else {
+                    ty.clone()
+                }
             }
-            _ => typed_span.clone(),
+            Array(elem) => Array(self.resolve_type(elem).into()),
+            Closure(param, ret) => Closure(
+                self.resolve_type(param).into(),
+                self.resolve_type(ret).into(),
+            ),
+            Tuple(elems) => Tuple(elems.iter().map(|e| self.resolve_type(e)).collect()),
+            Map(key, val) => Map(self.resolve_type(key).into(), self.resolve_type(val).into()),
+            Optional(inner) => Optional(self.resolve_type(inner).into()),
+            Stored(inner) => Stored(self.resolve_type(inner).into()),
+            Costed(inner) => Costed(self.resolve_type(inner).into()),
+
+            // For all other types that don't contain nested types, just clone.
+            _ => ty.clone(),
         }
+    }
+
+    fn materialize_unknown(&self, typed_span: &TypedSpan) -> TypedSpan {
+        let resolved_ty = self.resolve_type(&typed_span.ty);
+        TypedSpan::new(resolved_ty, typed_span.span.clone())
     }
 }

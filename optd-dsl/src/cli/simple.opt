@@ -9,3 +9,10 @@ data PhysicalProperties
 fn (log: Logical) fold: I64 = match log
     | Add(left, right) -> fold(left) + fold(right)
     \ Const(val) -> val
+
+fn (log: Logical) test =
+    let 
+        x = 5 + 5.5,
+        y = [5455] ++ ["String"] 
+    in
+        [x]

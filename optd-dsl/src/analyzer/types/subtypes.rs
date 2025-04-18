@@ -98,7 +98,7 @@ impl TypeRegistry {
 
             // If parent is unknown, bump up to LUB of child.
             (_, Unknown(id)) => {
-                let parent = self.resolved_unknown.get(id).cloned().unwrap();
+                let parent = self.resolve_type(&parent);
                 let lub = self.least_upper_bound(child, &parent);
 
                 if lub != parent {
@@ -110,8 +110,8 @@ impl TypeRegistry {
             }
 
             // If child is unknown, check if its resolved type is a subtype of parent.
-            (Unknown(id), _) => {
-                let child = self.resolved_unknown.get(id).cloned().unwrap();
+            (Unknown(_), _) => {
+                let child = self.resolve_type(&child);
                 self.is_subtype_infer_inner(&child, parent, bumped, memo)
             }
 

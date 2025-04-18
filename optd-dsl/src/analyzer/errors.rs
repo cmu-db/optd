@@ -320,9 +320,9 @@ impl Diagnose for Box<AnalyzerError> {
             } => self.build_duplicate_report(
                 &child.span,
                 &parent.span,
-                &format!("Type error: '{:?}' is not a subtype of '{:?}'", child.ty, parent.ty),
-                &format!("Found type '{:?}' here", child.ty),
-                &format!("Expected type '{:?}' here", parent.ty),
+                &format!("Type error: '{}' is not a subtype of '{}'", child.ty, parent.ty),
+                &format!("Found type '{}' here", child.ty),
+                &format!("Expected type '{}' here", parent.ty),
                 "The types are incompatible - consider adding an explicit annotation or using a compatible type",
             ),
             InvalidFieldAccess {
@@ -332,9 +332,9 @@ impl Diagnose for Box<AnalyzerError> {
             } => self.build_duplicate_report(
                 field_span,
                 &object.span,
-                &format!("Invalid field access: type '{:?}' has no field '{}'", object.ty, field_name),
+                &format!("Invalid field access: type '{}' has no field '{}'", object.ty, field_name),
                 &format!("Field '{}' accessed here", field_name),
-                &format!("Object of type '{:?}' defined here", object.ty),
+                &format!("Object of type '{}' defined here", object.ty),
                 "Check for typos in the field name or ensure you're accessing the right type of object",
             ),
         }

@@ -3,6 +3,7 @@ use crate::analyzer::hir::{Identifier, TypedSpan};
 use crate::parser::ast::{Adt, Field, Type as AstType};
 use crate::utils::span::Span;
 use Adt::*;
+use core::fmt;
 use std::collections::BTreeMap;
 use std::{
     collections::{HashMap, HashSet},
@@ -346,6 +347,59 @@ fn convert_ast_type(ty: AstType) -> Type {
         _ => panic!("Registry has not been properly validated"),
     }
 }
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // Primitive types
+            Type::I64 => write!(f, "I64"),
+            Type::String => write!(f, "String"),
+            Type::Bool => write!(f, "Bool"),
+            Type::F64 => write!(f, "F64"),
+
+            // Special types
+            Type::Unit => write!(f, "()"),
+            Type::Universe => write!(f, "Universe"),
+            Type::Nothing => write!(f, "Nothing"),
+            Type::None => write!(f, "None"),
+            Type::Unknown(id) => write!(f, "Unknown({})", id),
+
+            // User types
+            Type::Adt(name) => write!(f, "{}", name),
+            Type::Generic(name) => write!(f, "{}", name),
+
+            // Composite types
+            Type::Array(elem) => write!(f, "[{}]", elem),
+            Type::Closure(param, ret) => write!(f, "{} -> {}", param, ret),
+            Type::Tuple(elems) => {
+                if elems.is_empty() {
+                    write!(f, "()")
+                } else {
+                    write!(f, "(")?;
+                    for (i, elem) in elems.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", elem)?;
+                    }
+                    write!(f, ")")
+                }
+            }
+            Type::Map(key, val) => write!(f, "{{{} -> {}}}", key, val),
+            Type::Optional(inner) => write!(f, "{}?", inner),
+
+            // Memo status types
+            Type::Stored(inner) => write!(f, "{}*", inner),
+            Type::Costed(inner) => write!(f, "{}$", inner),
+
+            // Native trait types
+            Type::Concat => write!(f, "Concat"),
+            Type::EqHash => write!(f, "EqHash"),
+            Type::Arithmetic => write!(f, "Arithmetic"),
+        }
+    }
+}
+
 #[cfg(test)]
 pub mod type_registry_tests {
     use super::*;

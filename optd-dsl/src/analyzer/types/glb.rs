@@ -40,8 +40,8 @@ impl TypeRegistry {
 
         let glb = match (type1, type2) {
             // Substitute Unknown types with their current inferred type.
-            (Unknown(id), other) | (other, Unknown(id)) => {
-                let bound_unknown = self.resolved_unknown.get(id).cloned().unwrap();
+            (unknown @ Unknown(_), other) | (other, unknown @ Unknown(_)) => {
+                let bound_unknown = self.resolve_type(unknown);
                 self.least_upper_bound(&bound_unknown, other)
             }
 
