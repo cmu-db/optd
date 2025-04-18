@@ -108,7 +108,7 @@ fn <A, B> (a: A) map(lambda: A -> B): B
 [rust]
 fn (expr: Scalar) apply_children(f: Scalar -> Scalar) = none
 
-fn (pred: Predicate) remap(map: {I64 : I64}) =
+fn (pred: Scalar) remap(map: {I64 : I64}) =
     match pred
         | ColumnRef(idx) -> ColumnRef(map(idx))
         \ _ -> pred.apply_children(child -> rewrite_column_refs(child, map))
