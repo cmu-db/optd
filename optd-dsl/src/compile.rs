@@ -89,9 +89,8 @@ pub fn infer(
         CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })?;
 
-    // TODO(alexis): Step 3: Resolve constraints.
-    // This step should use unification or other techniques to solve the constraint system
-    // and determine concrete types for all expressions.
+    // Step 3: Resolve constraints.
+    let _ = registry.resolve();
 
     // TODO(alexis): Step 4: Transform HIR
     // After type inference, transform the HIR into its final form with complete type information.
