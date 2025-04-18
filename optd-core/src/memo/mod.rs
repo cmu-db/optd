@@ -1,14 +1,35 @@
-use crate::{
-    cir::{
-        Cost, Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpression,
-        LogicalExpressionId, LogicalProperties, PhysicalExpression, PhysicalExpressionId,
-        TransformationRule,
-    },
-    error::Error,
+#[cfg(test)]
+pub mod memory;
+mod merge_repr;
+
+use std::collections::{HashMap, HashSet};
+
+use crate::cir::{
+    Cost, Goal, GoalId, GoalMemberId, GroupId, ImplementationRule, LogicalExpression,
+    LogicalExpressionId, LogicalProperties, PhysicalExpression, PhysicalExpressionId,
+    TransformationRule,
 };
 
 /// Type alias for results returned by Memoize trait methods
-pub type MemoizeResult<T> = Result<T, Error>;
+pub type MemoizeResult<T> = Result<T, MemoizeError>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoizeError {
+    /// Error indicating that a group ID was not found in the memo.
+    GroupNotFound(GroupId),
+
+    /// Error indicating that a goal ID was not found in the memo.
+    GoalNotFound(GoalId),
+
+    /// Error indicating that a logical expression ID was not found in the memo.
+    LogicalExprNotFound(LogicalExpressionId),
+
+    /// Error indicating that a physical expression ID was not found in the memo.
+    PhysicalExprNotFound(PhysicalExpressionId),
+
+    /// Error indicating that there is no logical expression in the group.
+    NoLogicalExprInGroup(GroupId),
+}
 
 /// Status of a rule application or costing operation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,32 +41,32 @@ pub enum Status {
     Clean,
 }
 
-/// Information about a merged group, including its ID and expressions
-#[derive(Debug)]
-pub struct MergedGroupInfo {
-    /// ID of the merged group
-    pub group_id: GroupId,
-
-    /// All logical expressions in this group
-    pub expressions: Vec<LogicalExpressionId>,
-}
-
 /// Result of merging two groups.
 #[derive(Debug)]
 pub struct MergeGroupResult {
-    /// Groups that were merged along with their expressions.
-    pub merged_groups: Vec<MergedGroupInfo>,
-
     /// ID of the new representative group id.
     pub new_repr_group_id: GroupId,
+    /// Groups that were merged along with their expressions.
+    pub merged_groups: HashMap<GroupId, Vec<LogicalExpressionId>>,
+}
+
+impl MergeGroupResult {
+    /// Creates a new MergeGroupResult instance.
+    ///
+    /// # Parameters
+    /// * `merged_groups` - Groups that were merged along with their expressions.
+    /// * `new_repr_group_id` - ID of the new representative group id.
+    pub fn new(new_repr_group_id: GroupId) -> Self {
+        Self {
+            new_repr_group_id,
+            merged_groups: HashMap::new(),
+        }
+    }
 }
 
 /// Information about a merged goal, including its ID and expressions
 #[derive(Debug)]
 pub struct MergedGoalInfo {
-    /// ID of the merged goal
-    pub goal_id: GoalId,
-
     /// The best costed expression for this goal, if any
     pub best_expr: Option<(PhysicalExpressionId, Cost)>,
 
@@ -57,14 +78,14 @@ pub struct MergedGoalInfo {
 #[derive(Debug)]
 pub struct MergeGoalResult {
     /// Goals that were merged along with their potential best costed expression.
-    pub merged_goals: Vec<MergedGoalInfo>,
+    pub merged_goals: HashMap<GoalId, MergedGoalInfo>,
 
     /// ID of the new representative goal id.
     pub new_repr_goal_id: GoalId,
 }
 
 /// Results of merge operations with newly dirtied expressions.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MergeResult {
     /// Group merge results.
     pub group_merges: Vec<MergeGroupResult>,
@@ -80,6 +101,22 @@ pub struct MergeResult {
 
     /// Costings that were marked as dirty and need recomputation.
     pub dirty_costings: Vec<PhysicalExpressionId>,
+}
+
+pub struct ForwardResult {
+    pub physical_expr_id: PhysicalExpressionId,
+    pub best_cost: Cost,
+    pub goals_forwarded: HashSet<GoalId>,
+}
+
+impl ForwardResult {
+    pub fn new(physical_expr_id: PhysicalExpressionId, best_cost: Cost) -> Self {
+        Self {
+            physical_expr_id,
+            best_cost,
+            goals_forwarded: HashSet::new(),
+        }
+    }
 }
 
 /// Core interface for memo-based query optimization.
@@ -101,7 +138,24 @@ pub trait Memoize: Send + Sync + 'static {
     ///
     /// # Returns
     /// The properties associated with the group or an error if not found.
-    async fn get_logical_properties(&self, group_id: GroupId) -> MemoizeResult<LogicalProperties>;
+    async fn get_logical_properties(
+        &self,
+        group_id: GroupId,
+    ) -> MemoizeResult<Option<LogicalProperties>>;
+
+    /// Sets logical properties for a group ID.
+    ///
+    /// # Parameters
+    /// * `group_id` - ID of the group to set properties for.
+    /// * `props` - The logical properties to associate with the group.
+    ///
+    /// # Returns
+    /// A result indicating success or failure of the operation.
+    async fn set_logical_properties(
+        &mut self,
+        group_id: GroupId,
+        props: LogicalProperties,
+    ) -> MemoizeResult<()>;
 
     /// Gets all logical expression IDs in a group (only representative IDs).
     ///
@@ -114,6 +168,9 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         group_id: GroupId,
     ) -> MemoizeResult<Vec<LogicalExpressionId>>;
+
+    /// Gets any logical expression ID in a group.
+    async fn get_any_logical_expr(&self, group_id: GroupId) -> MemoizeResult<LogicalExpressionId>;
 
     /// Finds group containing a logical expression ID, if it exists.
     ///
@@ -138,7 +195,6 @@ pub trait Memoize: Send + Sync + 'static {
     async fn create_group(
         &mut self,
         logical_expr_id: LogicalExpressionId,
-        props: &LogicalProperties,
     ) -> MemoizeResult<GroupId>;
 
     /// Merges groups 1 and 2, unifying them under a common representative.
@@ -156,7 +212,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         group_id_1: GroupId,
         group_id_2: GroupId,
-    ) -> MemoizeResult<MergeResult>;
+    ) -> MemoizeResult<Option<MergeResult>>;
 
     //
     // Physical expression and goal operations.
@@ -174,18 +230,6 @@ pub trait Memoize: Send + Sync + 'static {
         &self,
         goal_id: GoalId,
     ) -> MemoizeResult<Option<(PhysicalExpressionId, Cost)>>;
-
-    /// Gets all physical expression IDs in a goal (only representative IDs).
-    ///
-    /// # Parameters
-    /// * `goal_id` - ID of the goal to retrieve expressions from.
-    ///
-    /// # Returns
-    /// A vector of physical expression IDs in the specified goal.
-    async fn get_all_physical_exprs(
-        &self,
-        goal_id: GoalId,
-    ) -> MemoizeResult<Vec<PhysicalExpressionId>>;
 
     /// Gets all members of a goal, which can be physical expressions or other goals.
     ///
@@ -208,7 +252,7 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         goal_id: GoalId,
         member: GoalMemberId,
-    ) -> MemoizeResult<bool>;
+    ) -> MemoizeResult<Option<ForwardResult>>;
 
     /// Updates the cost of a physical expression ID.
     ///
@@ -222,7 +266,12 @@ pub trait Memoize: Send + Sync + 'static {
         &mut self,
         physical_expr_id: PhysicalExpressionId,
         new_cost: Cost,
-    ) -> MemoizeResult<bool>;
+    ) -> MemoizeResult<Option<ForwardResult>>;
+
+    async fn get_physical_expr_cost(
+        &self,
+        physical_expr_id: PhysicalExpressionId,
+    ) -> MemoizeResult<Option<Cost>>;
 
     //
     // Rule and costing status operations.

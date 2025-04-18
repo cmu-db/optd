@@ -1,98 +1,86 @@
 use crate::cir::{
-    Cost, Goal, GoalId, GroupId, LogicalExpressionId, LogicalPlan, LogicalProperties,
-    PartialLogicalPlan, PartialPhysicalPlan, PhysicalExpressionId, PhysicalPlan, RuleBook,
+    Cost, Goal, GoalId, GroupId, LogicalProperties, PartialLogicalPlan, PartialPhysicalPlan,
+    PhysicalExpressionId, RuleBook,
 };
 use crate::error::Error;
 use crate::memo::Memoize;
-use OptimizerMessage::*;
+use EngineMessageKind::*;
+pub use client::{Client, QueryInstance};
+use client::{ClientMessage, QueryInstanceId};
 use futures::StreamExt;
-use futures::{
-    SinkExt,
-    channel::mpsc::{self, Receiver, Sender},
-};
+use futures::channel::mpsc;
+
 use jobs::{Job, JobId};
 use optd_dsl::analyzer::hir::Value;
 use optd_dsl::analyzer::{context::Context, hir::HIR};
 use optd_dsl::engine::{Continuation, EngineResponse};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use tasks::{Task, TaskId};
 
+mod client;
 mod egest;
+mod forward;
 mod handlers;
 mod ingest;
 mod jobs;
 mod merge;
-mod subscriptions;
 mod tasks;
 
 /// Default maximum number of concurrent jobs to run in the optimizer.
 const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1000;
 
-/// External client request to optimize a query in the optimizer.
-///
-/// Defines the public API for submitting a query and receiving execution plans.
-#[derive(Clone, Debug)]
-pub struct OptimizeRequest {
-    /// The logical plan to optimize.
-    pub plan: LogicalPlan,
-
-    /// Channel for receiving optimized physical plans.
-    ///
-    /// Streams results back as they become available, allowing clients to:
-    /// * Receive progressively better plans during optimization.
-    /// * Terminate early when a "good enough" plan is found.
-    pub response_tx: Sender<PhysicalPlan>,
-}
-
 /// Messages passed within the optimization system.
 ///
 /// Each message that includes a JobId represents the result of a completed job,
 /// allowing the optimizer to track which tasks are progressing.
-#[derive(Clone)]
-enum OptimizerMessage {
-    /// Process an optimization request.
-    OptimizeRequestWrapper(OptimizeRequest, TaskId),
+struct EngineMessage {
+    /// The job ID of the sender.
+    pub job_id: JobId,
+    /// The kind of message being sent to the optimizer engine.
+    pub kind: EngineMessageKind,
+}
 
+impl EngineMessage {
+    /// Create a new engine message with the specified job ID and kind.
+    pub fn new(job_id: JobId, kind: EngineMessageKind) -> Self {
+        Self { job_id, kind }
+    }
+}
+
+/// Messages sent to the optimizer by the DSL engine to change the state of the memo.
+#[derive(Clone)]
+pub enum EngineMessageKind {
     /// New logical plan alternative for a group from applying transformation rules.
-    NewLogicalPartial(PartialLogicalPlan, GroupId, JobId),
+    /// Access the parent of related task (ExploreGroup) to get the group id.
+    /// Possible sources: StartTransformRule | ContinueWithLogical
+    NewLogicalPartial(PartialLogicalPlan, GroupId),
 
     /// New physical implementation for a goal, awaiting recursive optimization.
-    NewPhysicalPartial(PartialPhysicalPlan, GoalId, JobId),
+    /// Access the parent of related task (OptimizeGoal) to get the goal id.
+    /// Possible sources: StartImplementRuleJob | ContinueWithLogical
+    NewPhysicalPartial(PartialPhysicalPlan, GoalId),
 
     /// Fully optimized physical expression with complete costing.
-    NewCostedPhysical(PhysicalExpressionId, Cost, JobId),
-
-    /// Create a new group with the provided logical properties.
-    CreateGroup(LogicalExpressionId, LogicalProperties, JobId),
+    /// Possible sources: CostExpression  | ContinueWithCostedPhysical
+    NewCostedPhysical(PhysicalExpressionId, Cost),
 
     /// Subscribe to logical expressions in a specific group.
     SubscribeGroup(
         GroupId,
-        Continuation<Value, EngineResponse<OptimizerMessage>>,
-        JobId,
+        Continuation<Value, EngineResponse<EngineMessageKind>>,
     ),
 
     /// Subscribe to costed physical expressions for a goal.
-    SubscribeGoal(
-        Goal,
-        Continuation<Value, EngineResponse<OptimizerMessage>>,
-        JobId,
-    ),
+    // TODO(yuchen): either pass in the budget or as part of the continuation.
+    SubscribeGoal(Goal, Continuation<Value, EngineResponse<EngineMessageKind>>),
 
     /// Retrieve logical properties for a specific group.
     #[allow(unused)]
-    RetrieveProperties(GroupId, Sender<LogicalProperties>),
-}
+    RetrieveProperties(GroupId, mpsc::Sender<LogicalProperties>),
 
-/// A message that is waiting for dependencies before it can be processed.
-///
-/// Tracks the set of job IDs that must exist before the message can be handled.
-struct PendingMessage {
-    /// The message stashed for later processing.
-    message: OptimizerMessage,
-
-    /// Set of job IDs whose groups must be created before this message can be processed.
-    pending_dependencies: HashSet<JobId>,
+    /// Associate logical properties with a group.
+    /// Note: logical property are on-demand computed.
+    NewProperties(GroupId, LogicalProperties),
 }
 
 /// The central access point to the optimizer.
@@ -106,164 +94,432 @@ pub struct Optimizer<M: Memoize> {
     hir_context: Context,
 
     // Message handling.
-    pending_messages: Vec<PendingMessage>,
-    message_tx: Sender<OptimizerMessage>,
-    message_rx: Receiver<OptimizerMessage>,
-    optimize_rx: Receiver<OptimizeRequest>,
+    /// Sender for sending messages from the engine.
+    engine_tx: mpsc::Sender<EngineMessage>,
+    /// Receiver for receiving messages from the engine.
+    engine_rx: mpsc::Receiver<EngineMessage>,
+    /// Receiver for client messages.
+    client_rx: mpsc::Receiver<ClientMessage>,
+
+    // Query instance management.
+    /// The next query instance id to be assigned.
+    next_query_instance_id: QueryInstanceId,
+    /// Query instance id to the `OptimizePlan` task id.
+    query_instances: HashMap<QueryInstanceId, TaskId>,
+
+    // Job management.
+    /// Queue of jobs that are ready to be run.
+    runnable_jobs: HashMap<JobId, Job>,
+    /// Queue of job ids that are runnable.
+    runnable_queue: VecDeque<JobId>,
+    /// Map of currently running jobs. Some job is associated with a task, some are not.
+    running_jobs: HashMap<JobId, Job>,
+
+    /// Maps pending derives to a sinle job id and a list of senders that retrieve logical properties.
+    pending_derives: HashMap<GroupId, (JobId, Vec<mpsc::Sender<LogicalProperties>>)>,
+
+    next_job_id: JobId,
+    max_concurrent_jobs: usize,
 
     // Task management.
     tasks: HashMap<TaskId, Task>,
     next_task_id: TaskId,
 
-    // Job management.
-    pending_jobs: HashMap<JobId, Job>,
-    job_schedule_queue: VecDeque<JobId>,
-    running_jobs: HashMap<JobId, Job>,
-    next_job_id: JobId,
-    max_concurrent_jobs: usize,
-
     // Task indexing.
     group_exploration_task_index: HashMap<GroupId, TaskId>,
     goal_optimization_task_index: HashMap<GoalId, TaskId>,
     cost_expression_task_index: HashMap<PhysicalExpressionId, TaskId>,
-
-    // Subscriptions.
-    group_subscribers: HashMap<GroupId, Vec<TaskId>>,
-    goal_subscribers: HashMap<GoalId, Vec<TaskId>>,
 }
 
 impl<M: Memoize> Optimizer<M> {
     /// Create a new optimizer instance with the given memo and HIR context.
     ///
     /// Use `launch` to create and start the optimizer.
-    fn new(
-        memo: M,
-        hir: HIR,
-        message_tx: Sender<OptimizerMessage>,
-        message_rx: Receiver<OptimizerMessage>,
-        optimize_rx: Receiver<OptimizeRequest>,
-    ) -> Self {
-        Self {
+    fn new(memo: M, hir: HIR, client_rx: mpsc::Receiver<ClientMessage>) -> Self {
+        let (engine_tx, engine_rx) = mpsc::channel(0);
+
+        Optimizer {
             // Core components.
             memo,
             rule_book: RuleBook::default(),
             hir_context: hir.context,
 
             // Message handling.
-            pending_messages: Vec::new(),
-            message_tx,
-            message_rx,
-            optimize_rx,
+            engine_tx,
+            engine_rx,
+            client_rx,
+
+            query_instances: HashMap::new(),
+            next_query_instance_id: QueryInstanceId(0),
+
+            // Job management.
+            runnable_jobs: HashMap::new(),
+            runnable_queue: VecDeque::new(),
+            running_jobs: HashMap::new(),
+            pending_derives: HashMap::new(),
+            next_job_id: JobId(0),
+            max_concurrent_jobs: DEFAULT_MAX_CONCURRENT_JOBS,
 
             // Task management.
             tasks: HashMap::new(),
             next_task_id: TaskId(0),
 
-            // Job management.
-            pending_jobs: HashMap::new(),
-            job_schedule_queue: VecDeque::new(),
-            running_jobs: HashMap::new(),
-            next_job_id: JobId(0),
-            max_concurrent_jobs: DEFAULT_MAX_CONCURRENT_JOBS,
-
             // Task indexing.
             group_exploration_task_index: HashMap::new(),
             goal_optimization_task_index: HashMap::new(),
             cost_expression_task_index: HashMap::new(),
-
-            // Subscriptions.
-            group_subscribers: HashMap::new(),
-            goal_subscribers: HashMap::new(),
         }
     }
 
     /// Launch a new optimizer and return a sender for client communication.
-    pub fn launch(memo: M, hir: HIR) -> Sender<OptimizeRequest> {
-        let (message_tx, message_rx) = mpsc::channel(0);
-        let (optimize_tx, optimize_rx) = mpsc::channel(0);
+    pub fn launch(memo: M, hir: HIR) -> Client<M> {
+        let (client_tx, client_rx) = mpsc::channel(0);
 
-        // Start the background processing loop.
-        let optimizer = Self::new(memo, hir, message_tx.clone(), message_rx, optimize_rx);
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
+            // Start the background processing loop.
+            let optimizer = Self::new(memo, hir, client_rx);
             // TODO(Alexis): If an error occurs we could restart or reboot the memo.
             // Rather than failing (e.g. memo could be distributed).
-            optimizer.run().await.expect("Optimizer failure");
+            optimizer.run().await.expect("Optimizer failure")
         });
 
-        optimize_tx
+        Client::new(client_tx, handle)
     }
 
     /// Run the optimizer's main processing loop.
-    async fn run(mut self) -> Result<(), Error> {
+    async fn run(mut self) -> Result<M, Error> {
         loop {
             tokio::select! {
-                Some(request) = self.optimize_rx.next() => {
-                    let OptimizeRequest { plan, response_tx } = request.clone();
-                    let task_id = self.launch_optimize_plan_task(plan, response_tx).await;
-                    let mut message_tx = self.message_tx.clone();
-
-                    // Forward the optimization request to the message processing loop
-                    // in a new coroutine to avoid a deadlock.
-                    tokio::spawn(
-                        async move {
-                            message_tx.send(OptimizeRequestWrapper(request, task_id))
-                                .await
-                                .expect("Failed to forward optimize request");
-                        }
-                    );
+                Some(request) = self.client_rx.next() => {
+                    let is_shutdown = self.process_client_request(request).await?;
+                    if is_shutdown {
+                        break Ok(self.memo);
+                    }
                 },
-                Some(message) = self.message_rx.next() => {
+                Some(message) = self.engine_rx.next() => {
+                    let EngineMessage {
+                        job_id,
+                        kind,
+                    } = message;
+                    let _job = self.running_jobs.remove(&job_id).unwrap();
                     // Process the next message in the channel.
-                    match message {
-                        OptimizeRequestWrapper(request, task_id_opt) => {
-                            self.process_optimize_request(request.plan, request.response_tx, task_id_opt).await?;
-                        }
-                        NewLogicalPartial(plan, group_id, job_id) => {
-                            if self.get_related_task(job_id).is_some() {
-                                self.process_new_logical_partial(plan, group_id, job_id).await?;
+                    match kind {
+                        NewLogicalPartial(plan, group_id) => {
+                            if self.get_related_task(message.job_id).is_some() {
+                                self.process_new_logical_partial(plan, group_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
-                        NewPhysicalPartial(plan, goal_id, job_id) => {
-                            if self.get_related_task(job_id).is_some() {
-                                self.process_new_physical_partial(plan, goal_id, job_id).await?;
+                        NewPhysicalPartial(plan, goal_id) => {
+                            if let Some(task_id) = self.get_related_task(job_id) {
+                                self.process_new_physical_partial(plan, goal_id, task_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
-                        NewCostedPhysical(expression_id, cost, job_id) => {
+                        NewCostedPhysical(expression_id, cost) => {
                             if self.get_related_task(job_id).is_some() {
                                 self.process_new_costed_physical(expression_id, cost).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
-                        CreateGroup( expression_id, properties, job_id) => {
-                            if self.get_related_task(job_id).is_some() {
-                                self.process_create_group(expression_id, &properties, job_id).await?;
+                        SubscribeGroup(group_id, continuation) => {
+                            if let Some(task_id) = self.get_related_task(job_id) {
+                                self.process_group_subscription(group_id, continuation, task_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
-                        SubscribeGroup(group_id, continuation, job_id) => {
-                            if self.get_related_task(job_id).is_some() {
-                                self.process_group_subscription(group_id, continuation, job_id).await?;
-                                self.complete_job(job_id).await?;
-                            }
-                        }
-                        SubscribeGoal(goal, continuation, job_id) => {
-                            if self.get_related_task(job_id).is_some() {
-                                self.process_goal_subscription(&goal, continuation, job_id).await?;
+                        SubscribeGoal(goal, continuation) => {
+                            if let Some(task_id) = self.get_related_task(job_id) {
+                                self.process_goal_subscription(&goal, continuation, task_id).await?;
                                 self.complete_job(job_id).await?;
                             }
                         }
                         RetrieveProperties(group_id, sender) => {
                             self.process_retrieve_properties(group_id, sender).await?;
                         }
+                        NewProperties(group_id, properties) => {
+                            self.process_new_properties(group_id, properties).await?;
+                            self.complete_job(job_id).await?;
+                        }
                     };
 
                     // Launch pending jobs according to a policy (currently FIFO).
-                    self.launch_pending_jobs().await?;
+                    self.launch_runnable_jobs().await?;
                 },
-                else => break Ok(()),
+                else => break Ok(self.memo),
             }
         }
+    }
+
+    fn next_task_id(&mut self) -> TaskId {
+        let task_id = self.next_task_id;
+        self.next_task_id.0 += 1;
+        task_id
+    }
+
+    fn next_query_instance_id(&mut self) -> QueryInstanceId {
+        let query_instance_id = self.next_query_instance_id;
+        self.next_query_instance_id.0 += 1;
+        query_instance_id
+    }
+
+    fn get_related_task(&self, job_id: JobId) -> Option<TaskId> {
+        self.running_jobs.get(&job_id).and_then(|job| match job {
+            Job::Task(task_id) => Some(*task_id),
+            Job::Derive(_) => None,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use std::{sync::Arc, time::Duration};
+
+    use tokio::task::JoinSet;
+
+    use super::*;
+    use crate::{
+        cir::{
+            Child, GoalMemberId, LogicalExpression, LogicalPlan, Operator, OperatorData,
+            PhysicalExpression, PhysicalPlan, PhysicalProperties, PropertiesData,
+        },
+        memo::memory::MemoryMemo,
+    };
+
+    #[tokio::test]
+    async fn test_optimizer_with_empty_hir() -> Result<(), Error> {
+        let hir = HIR {
+            context: Context::default(),
+            annotations: HashMap::new(),
+        };
+
+        let mut client = Optimizer::launch(MemoryMemo::default(), hir);
+
+        let logical_plan = LogicalPlan(Operator::new(
+            "Scan".to_string(),
+            vec![OperatorData::String("t1".into())],
+            vec![],
+        ));
+        let mut query_instance = client.create_query_instance(logical_plan).await?;
+
+        // Wait for three secs, should just directly timeout.
+        tokio::time::timeout(Duration::from_secs(1), async {
+            let _physical_plan = query_instance.recv_best_plan().await.unwrap();
+            panic!("Should not receive a plan");
+        })
+        .await
+        .unwrap_err();
+
+        client.shutdown().await.unwrap();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_optimizer_with_empty_hir_memoized() -> Result<(), Error> {
+        let mut memo = MemoryMemo::default();
+
+        let (no_sort_goal_id, sort_goal_id, scan_group_id) = {
+            let scan = LogicalExpression::new(
+                "Scan".to_string(),
+                vec![OperatorData::String("t1".into())],
+                vec![],
+            );
+
+            let logical_expr_id = memo.get_logical_expr_id(&scan).await?;
+            let scan_group_id = memo.create_group(logical_expr_id).await?;
+
+            let no_sort_goal_id = memo
+                .get_goal_id(&Goal(scan_group_id, PhysicalProperties(None)))
+                .await?;
+            let properties =
+                PhysicalProperties(Some(PropertiesData::String("order by t1.v1".into())));
+            let sort_goal_id = memo.get_goal_id(&Goal(scan_group_id, properties)).await?;
+            (no_sort_goal_id, sort_goal_id, scan_group_id)
+        };
+
+        let goal_id = {
+            let sort = LogicalExpression::new(
+                "Sort".to_string(),
+                vec![OperatorData::String("t1".into())],
+                vec![Child::Singleton(scan_group_id)],
+            );
+            let logical_expr_id = memo.get_logical_expr_id(&sort).await?;
+            let sort_group_id = memo.create_group(logical_expr_id).await?;
+            let goal_id = memo
+                .get_goal_id(&Goal(sort_group_id, PhysicalProperties(None)))
+                .await?;
+
+            // manually connect the goal to sort_goal_id.
+            let result = memo
+                .add_goal_member(goal_id, GoalMemberId::GoalId(sort_goal_id))
+                .await?;
+            assert!(result.is_none());
+            goal_id
+        };
+
+        {
+            let table_scan = PhysicalExpression::new(
+                "TableScan".to_string(),
+                vec![OperatorData::String("t1".into())],
+                vec![],
+            );
+            let physical_expr_id = memo.get_physical_expr_id(&table_scan).await?;
+            let forward_result = memo
+                .add_goal_member(
+                    no_sort_goal_id,
+                    GoalMemberId::PhysicalExpressionId(physical_expr_id),
+                )
+                .await?;
+
+            assert!(forward_result.is_none());
+
+            let result = memo
+                .update_physical_expr_cost(physical_expr_id, Cost(40.0))
+                .await?
+                .unwrap();
+
+            assert_eq!(result.best_cost, Cost(40.0));
+            assert_eq!(result.physical_expr_id, physical_expr_id);
+            assert_eq!(result.goals_forwarded.len(), 1);
+            assert!(result.goals_forwarded.contains(&no_sort_goal_id));
+        }
+
+        let index_scan_expr_id = {
+            let index_scan = PhysicalExpression::new(
+                "IndexScan".to_string(),
+                vec![
+                    OperatorData::String("t1".into()),
+                    OperatorData::String("t1v1".into()),
+                ],
+                vec![],
+            );
+
+            let physical_expr_id = memo.get_physical_expr_id(&index_scan).await?;
+            memo.add_goal_member(
+                no_sort_goal_id,
+                GoalMemberId::PhysicalExpressionId(physical_expr_id),
+            )
+            .await?;
+
+            memo.update_physical_expr_cost(physical_expr_id, Cost(50.0))
+                .await?;
+            physical_expr_id
+        };
+
+        {
+            let physical_sort = PhysicalExpression::new(
+                "EnforceSort".to_string(),
+                vec![OperatorData::String("order_by t1.v1".into())],
+                vec![Child::Singleton(GoalMemberId::GoalId(no_sort_goal_id))],
+            );
+
+            let physical_expr_id = memo.get_physical_expr_id(&physical_sort).await?;
+            memo.add_goal_member(
+                goal_id,
+                GoalMemberId::PhysicalExpressionId(physical_expr_id),
+            )
+            .await?;
+
+            memo.update_physical_expr_cost(physical_expr_id, Cost(60.0))
+                .await?;
+        }
+
+        let hir = HIR {
+            context: Context::default(),
+            annotations: HashMap::new(),
+        };
+        let mut client = Optimizer::launch(memo, hir);
+
+        let logical_scan_plan = LogicalPlan(Operator::new(
+            "Scan".to_string(),
+            vec![OperatorData::String("t1".into())],
+            vec![],
+        ));
+
+        let physical_scan = Arc::new(PhysicalPlan(Operator::new(
+            "TableScan".to_string(),
+            vec![OperatorData::String("t1".into())],
+            vec![],
+        )));
+
+        let mut join_set = JoinSet::new();
+
+        {
+            let logical_plan = logical_scan_plan.clone();
+            let mut query_instance = client.create_query_instance(logical_plan).await.unwrap();
+            let expected = physical_scan.clone();
+            join_set.spawn(async move {
+                let physical_plan = query_instance.recv_best_plan().await.unwrap();
+                println!("Best plan: {:?}", physical_plan);
+
+                assert_eq!(&physical_plan, expected.as_ref());
+            })
+        };
+
+        let enforce_sort = Arc::new(PhysicalPlan(Operator::new(
+            "EnforceSort".to_string(),
+            vec![OperatorData::String("order_by t1.v1".into())],
+            vec![Child::Singleton(physical_scan)],
+        )));
+
+        let logical_sort_plan = LogicalPlan(Operator::new(
+            "Sort".to_string(),
+            vec![OperatorData::String("t1".into())],
+            vec![Child::Singleton(Arc::new(logical_scan_plan))],
+        ));
+
+        {
+            let logical_plan = logical_sort_plan.clone();
+            let mut query_instance = client.create_query_instance(logical_plan).await.unwrap();
+            let expected = enforce_sort.clone();
+            join_set.spawn(async move {
+                let physical_plan = query_instance.recv_best_plan().await.unwrap();
+
+                assert_eq!(&physical_plan, expected.as_ref());
+            })
+        };
+
+        let _ = join_set.join_all().await;
+
+        let mut memo = client.shutdown().await.unwrap();
+
+        // Add index scan to the memo. We expect the index scan to be the best plan for the logical_sort query.
+        {
+            memo.add_goal_member(
+                sort_goal_id,
+                GoalMemberId::PhysicalExpressionId(index_scan_expr_id),
+            )
+            .await?;
+        }
+
+        let index_scan = Arc::new(PhysicalPlan(Operator::new(
+            "IndexScan".to_string(),
+            vec![
+                OperatorData::String("t1".into()),
+                OperatorData::String("t1v1".into()),
+            ],
+            vec![],
+        )));
+
+        let hir = HIR {
+            context: Context::default(),
+            annotations: HashMap::new(),
+        };
+        let mut client = Optimizer::launch(memo, hir);
+
+        {
+            let logical_plan = logical_sort_plan.clone();
+            let mut query_instance = client.create_query_instance(logical_plan).await.unwrap();
+            let expected = index_scan;
+            tokio::spawn(async move {
+                let physical_plan = query_instance.recv_best_plan().await.unwrap();
+
+                assert_eq!(&physical_plan, expected.as_ref());
+            })
+        };
+
+        client.shutdown().await.unwrap();
+        Ok(())
     }
 }
