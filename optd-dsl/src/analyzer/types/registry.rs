@@ -116,7 +116,8 @@ pub struct TypeRegistry {
     pub ty_return: Option<TypedSpan>,
     /// The set of collected type constraints to be solved.
     pub constraints: Vec<Constraint>,
-    /// Maps unknown type IDs to their resolved concrete types.
+    /// Maps unknown type IDs to their current inferred concrete types.
+    /// Types start at `Nothing`, and get bumped up when needed by the constraint.
     pub resolved_unknown: HashMap<usize, Type>,
     /// Current ID to use for new Unknown types
     pub next_unknown_id: usize,
@@ -248,6 +249,7 @@ impl TypeRegistry {
     pub fn new_unknown(&mut self) -> Type {
         let id = self.next_unknown_id;
         self.next_unknown_id += 1;
+        self.resolved_unknown.insert(id, Type::Nothing);
         Type::Unknown(id)
     }
 

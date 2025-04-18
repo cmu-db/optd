@@ -3,7 +3,7 @@ use crate::{
     analyzer::{
         errors::AnalyzerErrorKind,
         hir::Identifier,
-        types::registry::{CORE_TYPES, LOGICAL_TYPE, PHYSICAL_TYPE, Type, TypeRegistry},
+        types::registry::{CORE_TYPES, LOGICAL_TYPE, PHYSICAL_TYPE, TypeRegistry},
     },
     parser::ast::Type as AstType,
     utils::span::Span,
@@ -108,14 +108,11 @@ fn check_product_fields(registry: &TypeRegistry) -> Result<(), Box<AnalyzerError
 }
 
 fn is_logical(ty: &Identifier, registry: &TypeRegistry) -> bool {
-    registry.is_subtype(&Type::Adt(ty.clone()), &Type::Adt(LOGICAL_TYPE.to_string()))
+    registry.is_adt_child(ty, &LOGICAL_TYPE.to_string())
 }
 
 fn is_physical(ty: &Identifier, registry: &TypeRegistry) -> bool {
-    registry.is_subtype(
-        &Type::Adt(ty.clone()),
-        &Type::Adt(PHYSICAL_TYPE.to_string()),
-    )
+    registry.is_adt_child(ty, &PHYSICAL_TYPE.to_string())
 }
 
 fn valid_core_type(

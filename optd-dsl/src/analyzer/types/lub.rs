@@ -33,10 +33,16 @@ impl TypeRegistry {
     ///
     /// The least upper bound of the two types. Returns `Type::Universe` if no more specific common
     /// supertype exists.
-    pub(super) fn least_upper_bound(&self, type1: &Type, type2: &Type) -> Type {
+    pub(super) fn least_upper_bound(&mut self, type1: &Type, type2: &Type) -> Type {
         use Type::*;
 
         let lub = match (type1, type2) {
+            // Substitute Unknown types with their current inferred type.
+            (Unknown(id), _) | (_, Unknown(id)) => {
+                let type1 = self.resolved_unknown.get(id).cloned().unwrap();
+                self.least_upper_bound(&type1, type2)
+            }
+
             // Nothing is the bottom type - LUB(Nothing, T) = T.
             (Nothing, other) | (other, Nothing) => other.clone(),
 
@@ -147,11 +153,7 @@ impl TypeRegistry {
 
             // Native trait handling.
             (trait_type @ (Concat | EqHash | Arithmetic), other)
-                if self.is_subtype(other, trait_type) =>
-            {
-                trait_type.clone()
-            }
-            (other, trait_type @ (Concat | EqHash | Arithmetic))
+            | (other, trait_type @ (Concat | EqHash | Arithmetic))
                 if self.is_subtype(other, trait_type) =>
             {
                 trait_type.clone()
@@ -178,7 +180,11 @@ impl TypeRegistry {
     /// # Returns
     ///
     /// Some(identifier) if a common supertype is found, None otherwise.
-    fn find_common_supertype(&self, name1: &Identifier, name2: &Identifier) -> Option<Identifier> {
+    fn find_common_supertype(
+        &mut self,
+        name1: &Identifier,
+        name2: &Identifier,
+    ) -> Option<Identifier> {
         let supertypes1 = self.get_all_supertypes(name1);
         let supertypes2 = self.get_all_supertypes(name2);
 
@@ -371,7 +377,7 @@ pub mod tests {
 
     #[test]
     fn test_simple_lub() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Identical primitive types
         assert_eq!(
@@ -459,7 +465,7 @@ pub mod tests {
 
     #[test]
     fn test_array_lub() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Array of same ADT type
         assert_eq!(
@@ -514,7 +520,7 @@ pub mod tests {
 
     #[test]
     fn test_tuple_lub() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Tuples with same ADT types
         assert_eq!(
@@ -585,7 +591,7 @@ pub mod tests {
 
     #[test]
     fn test_map_lub() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Maps with identical ADT key and value types
         assert_eq!(
@@ -680,7 +686,7 @@ pub mod tests {
 
     #[test]
     fn test_function_lub() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Functions with identical ADT parameter and return types
         assert_eq!(
@@ -757,7 +763,7 @@ pub mod tests {
 
     #[test]
     fn test_optional_lub() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Optional of same ADT types
         assert_eq!(
@@ -813,7 +819,7 @@ pub mod tests {
 
     #[test]
     fn test_stored_costed_lub() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Stored of same ADT types
         assert_eq!(
@@ -872,7 +878,7 @@ pub mod tests {
 
     #[test]
     fn test_native_traits_with_adts() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // EqHash with ADT types
         assert_eq!(
@@ -898,7 +904,7 @@ pub mod tests {
 
     #[test]
     fn test_complex_nested_types_lub() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Array of Optional ADTs
         assert_eq!(
@@ -963,7 +969,7 @@ pub mod tests {
 
     #[test]
     fn test_map_function_compatibility_lub() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Map and Function compatibility
         assert_eq!(
