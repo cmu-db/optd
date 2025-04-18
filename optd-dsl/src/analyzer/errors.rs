@@ -1,4 +1,4 @@
-use super::hir::Identifier;
+use super::hir::{Identifier, TypedSpan};
 use crate::utils::{
     errors::Diagnose,
     span::{Span, Spanned},
@@ -83,6 +83,17 @@ pub enum AnalyzerErrorKind {
         span: Span,
         expected: usize,
         found: usize,
+    },
+
+    InvalidSubtype {
+        child: TypedSpan,
+        parent: TypedSpan,
+    },
+
+    InvalidFieldAccess {
+        object: TypedSpan,
+        field_name: String,
+        field_span: Span,
     },
 }
 
@@ -189,6 +200,27 @@ impl AnalyzerErrorKind {
         }
         .into()
     }
+
+    pub fn new_invalid_subtype(child: &TypedSpan, parent: &TypedSpan) -> Box<Self> {
+        Self::InvalidSubtype {
+            child: child.clone(),
+            parent: parent.clone(),
+        }
+        .into()
+    }
+
+    pub fn new_invalid_field_access(
+        object: &TypedSpan,
+        field_name: &str,
+        field_span: &Span,
+    ) -> Box<Self> {
+        Self::InvalidFieldAccess {
+            object: object.clone(),
+            field_name: field_name.to_string(),
+            field_span: field_span.clone(),
+        }
+        .into()
+    }
 }
 
 impl Diagnose for Box<AnalyzerError> {
@@ -282,6 +314,29 @@ impl Diagnose for Box<AnalyzerError> {
                 &format!("Expected {} fields, but found {}", expected, found),
                 "Check the number of fields in the type definition",
             ),
+            InvalidSubtype {
+                child,
+                parent,
+            } => self.build_duplicate_report(
+                &child.span,
+                &parent.span,
+                &format!("Type error: '{}' is not a subtype of '{}'", child.ty, parent.ty),
+                &format!("Found type '{}' here", child.ty),
+                &format!("Expected type '{}' here", parent.ty),
+                "The types are incompatible - consider adding an explicit annotation or using a compatible type",
+            ),
+            InvalidFieldAccess {
+                object,
+                field_name,
+                field_span,
+            } => self.build_duplicate_report(
+                field_span,
+                &object.span,
+                &format!("Invalid field access: type '{}' has no field '{}'", object.ty, field_name),
+                &format!("Field '{}' accessed here", field_name),
+                &format!("Object of type '{}' defined here", object.ty),
+                "Check for typos in the field name or ensure you're accessing the right type of object",
+            ),
         }
     }
 
@@ -300,6 +355,8 @@ impl Diagnose for Box<AnalyzerError> {
             InvalidType { span, .. } => span,
             InvalidInheritance { child_span, .. } => child_span,
             FieldNumberMismatch { span, .. } => span,
+            InvalidSubtype { child, .. } => &child.span,
+            InvalidFieldAccess { field_span, .. } => field_span,
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))

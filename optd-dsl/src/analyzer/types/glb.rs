@@ -1,4 +1,5 @@
-use crate::analyzer::types::{Type, TypeRegistry};
+use super::registry::TypeRegistry;
+use crate::analyzer::types::registry::Type;
 
 impl TypeRegistry {
     /// Finds the greatest lower bound (GLB) of two types.
@@ -34,10 +35,16 @@ impl TypeRegistry {
     ///
     /// The greatest lower bound of the two types. Returns `Type::Nothing` if no common
     /// subtype exists.
-    pub(super) fn greatest_lower_bound(&self, type1: &Type, type2: &Type) -> Type {
+    pub(super) fn greatest_lower_bound(&mut self, type1: &Type, type2: &Type) -> Type {
         use Type::*;
 
         let glb = match (type1, type2) {
+            // Substitute Unknown types with their current inferred type.
+            (unknown @ Unknown(_), other) | (other, unknown @ Unknown(_)) => {
+                let bound_unknown = self.resolve_type(unknown);
+                self.least_upper_bound(&bound_unknown, other)
+            }
+
             // Universe is the top type - GLB(Universe, T) = T.
             (Universe, other) | (other, Universe) => other.clone(),
 
@@ -152,11 +159,7 @@ impl TypeRegistry {
 
             // Native trait handling.
             (trait_type @ (Concat | EqHash | Arithmetic), other)
-                if self.is_subtype(other, trait_type) =>
-            {
-                other.clone()
-            }
-            (other, trait_type @ (Concat | EqHash | Arithmetic))
+            | (other, trait_type @ (Concat | EqHash | Arithmetic))
                 if self.is_subtype(other, trait_type) =>
             {
                 other.clone()
@@ -175,13 +178,13 @@ impl TypeRegistry {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use super::*;
-    use crate::analyzer::type_infer::lub::tests::setup_type_hierarchy;
+    use crate::analyzer::types::lub::tests::setup_type_hierarchy;
 
     #[test]
     fn test_greatest_lower_bound_simple() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Identical ADT types
         assert_eq!(
@@ -228,7 +231,7 @@ pub mod tests {
 
     #[test]
     fn test_greatest_lower_bound_array() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Arrays of same ADT types
         assert_eq!(
@@ -260,7 +263,7 @@ pub mod tests {
 
     #[test]
     fn test_greatest_lower_bound_tuple() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Tuples of same ADT types
         assert_eq!(
@@ -328,7 +331,7 @@ pub mod tests {
 
     #[test]
     fn test_greatest_lower_bound_map() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Maps with same key and value types
         assert_eq!(
@@ -405,7 +408,7 @@ pub mod tests {
 
     #[test]
     fn test_greatest_lower_bound_function() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Functions with same parameter and return types
         assert_eq!(
@@ -482,7 +485,7 @@ pub mod tests {
 
     #[test]
     fn test_greatest_lower_bound_optional() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Optional of same types
         assert_eq!(
@@ -538,7 +541,7 @@ pub mod tests {
 
     #[test]
     fn test_greatest_lower_bound_stored_costed() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Stored of same types
         assert_eq!(
@@ -588,7 +591,7 @@ pub mod tests {
 
     #[test]
     fn test_greatest_lower_bound_collection_function() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Map and Function compatibility
         assert_eq!(
@@ -625,7 +628,7 @@ pub mod tests {
 
     #[test]
     fn test_greatest_lower_bound_complex_nested_types() {
-        let registry = setup_type_hierarchy();
+        let mut registry = setup_type_hierarchy();
 
         // Array of Optional ADTs
         assert_eq!(

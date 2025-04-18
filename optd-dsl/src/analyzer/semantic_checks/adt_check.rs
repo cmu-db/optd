@@ -3,7 +3,7 @@ use crate::{
     analyzer::{
         errors::AnalyzerErrorKind,
         hir::Identifier,
-        types::{CORE_TYPES, LOGICAL_TYPE, PHYSICAL_TYPE, Type, TypeRegistry},
+        types::registry::{CORE_TYPES, LOGICAL_TYPE, PHYSICAL_TYPE, TypeRegistry},
     },
     parser::ast::Type as AstType,
     utils::span::Span,
@@ -108,14 +108,11 @@ fn check_product_fields(registry: &TypeRegistry) -> Result<(), Box<AnalyzerError
 }
 
 fn is_logical(ty: &Identifier, registry: &TypeRegistry) -> bool {
-    registry.is_subtype(&Type::Adt(ty.clone()), &Type::Adt(LOGICAL_TYPE.to_string()))
+    registry.is_adt_child(ty, &LOGICAL_TYPE.to_string())
 }
 
 fn is_physical(ty: &Identifier, registry: &TypeRegistry) -> bool {
-    registry.is_subtype(
-        &Type::Adt(ty.clone()),
-        &Type::Adt(PHYSICAL_TYPE.to_string()),
-    )
+    registry.is_adt_child(ty, &PHYSICAL_TYPE.to_string())
 }
 
 fn valid_core_type(
@@ -187,8 +184,8 @@ fn check_type(
 #[cfg(test)]
 mod adt_validation_tests {
     use crate::analyzer::hir::Identifier;
-    use crate::analyzer::registry_check::adt_check::adt_check;
-    use crate::analyzer::types::{
+    use crate::analyzer::semantic_checks::adt_check::adt_check;
+    use crate::analyzer::types::registry::{
         LOGICAL_PROPS, LOGICAL_TYPE, PHYSICAL_PROPS, PHYSICAL_TYPE, TypeRegistry,
     };
     use crate::parser::ast::{Field, Type as AstType};
@@ -217,6 +214,10 @@ mod adt_validation_tests {
             spans,
             subtypes,
             product_fields,
+            ty_return: None,
+            constraints: vec![],
+            resolved_unknown: HashMap::new(),
+            next_unknown_id: 0,
         }
     }
 

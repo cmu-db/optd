@@ -9,7 +9,7 @@ use crate::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Identifier, LetBinding, Literal, TypedSpan, UnaryOp,
     Value,
 };
-use crate::analyzer::types::{Type, create_function_type};
+use crate::analyzer::types::registry::{Type, create_function_type};
 use crate::parser::ast::{
     self, BinOp as AstBinOp, Expr as AstExpr, Literal as AstLiteral, PostfixOp,
 };
@@ -31,7 +31,7 @@ impl ASTConverter {
         use Type::*;
 
         let span = spanned_expr.span.clone();
-        let mut ty = self.next_unknown();
+        let mut ty = self.registry.new_unknown();
 
         let kind = match &*spanned_expr.value {
             AstExpr::Error => panic!("AST should no longer contain errors"),
@@ -60,19 +60,27 @@ impl ASTConverter {
                 ty = if elements.is_empty() {
                     Array(Nothing.into())
                 } else {
-                    Array(self.next_unknown().into())
+                    Array(self.registry.new_unknown().into())
                 };
                 self.convert_array(elements, generics)?
             }
             AstExpr::Tuple(elements) => {
-                ty = Tuple(elements.iter().map(|_| self.next_unknown()).collect());
+                ty = Tuple(
+                    elements
+                        .iter()
+                        .map(|_| self.registry.new_unknown())
+                        .collect(),
+                );
                 self.convert_tuple(elements, generics)?
             }
             AstExpr::Map(entries) => {
                 ty = if entries.is_empty() {
                     Map(Nothing.into(), Nothing.into())
                 } else {
-                    Map(self.next_unknown().into(), self.next_unknown().into())
+                    Map(
+                        self.registry.new_unknown().into(),
+                        self.registry.new_unknown().into(),
+                    )
                 };
                 self.convert_map(entries, generics)?
             }
@@ -92,7 +100,7 @@ impl ASTConverter {
                     .collect::<Result<Vec<_>, Box<_>>>()?;
                 let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
 
-                ty = create_function_type(&param_types, &self.next_unknown());
+                ty = create_function_type(&param_types, &self.registry.new_unknown());
                 self.convert_closure(&params, body, generics)?
             }
             AstExpr::Postfix(expr, op) => self.convert_postfix(expr, op, generics)?,
@@ -175,7 +183,7 @@ impl ASTConverter {
 
                 let eq_expr = Expr::new_with(
                     Binary(hir_left.into(), Eq, hir_right.into()),
-                    self.next_unknown(),
+                    self.registry.new_unknown(),
                     span.clone(),
                 );
 
@@ -197,7 +205,7 @@ impl ASTConverter {
 
                 let lt_expr = Expr::new_with(
                     Binary(hir_left.into(), Lt, hir_right.into()),
-                    self.next_unknown(),
+                    self.registry.new_unknown(),
                     span.clone(),
                 );
 
@@ -211,12 +219,12 @@ impl ASTConverter {
 
                 let lt_expr = Expr::new_with(
                     Binary(hir_left.clone(), Lt, hir_right.clone()),
-                    self.next_unknown(),
+                    self.registry.new_unknown(),
                     span.clone(),
                 );
                 let eq_expr = Expr::new_with(
                     Binary(hir_left, Eq, hir_right),
-                    self.next_unknown(),
+                    self.registry.new_unknown(),
                     span.clone(),
                 );
 
@@ -345,7 +353,7 @@ impl ASTConverter {
         actual_size: usize,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
         // Lookup the product fields and validate they exist.
-        let product_fields = match self.type_registry.product_fields.get(&*name.value) {
+        let product_fields = match self.registry.product_fields.get(&*name.value) {
             Some(fields) => fields,
             None => {
                 return Err(AnalyzerErrorKind::new_unconstructible_type(
@@ -423,7 +431,7 @@ impl ASTConverter {
 
                 let method_fn = Arc::new(Expr::new_with(
                     Ref((*method_name.value).clone()),
-                    self.next_unknown(),
+                    self.registry.new_unknown(),
                     method_name.span.clone(),
                 ));
 
@@ -827,7 +835,7 @@ mod expr_tests {
         };
 
         converter
-            .type_registry
+            .registry
             .register_adt(&point_adt)
             .expect("Failed to register Point type");
 
@@ -886,7 +894,7 @@ mod expr_tests {
             };
 
             converter
-                .type_registry
+                .registry
                 .register_adt(&adt)
                 .unwrap_or_else(|_| panic!("Failed to register {} type", name));
         }
@@ -965,7 +973,7 @@ mod expr_tests {
             };
 
             converter
-                .type_registry
+                .registry
                 .register_adt(&adt)
                 .unwrap_or_else(|_| panic!("Failed to register {} type", name));
         }
@@ -1037,7 +1045,7 @@ mod expr_tests {
         };
 
         converter
-            .type_registry
+            .registry
             .register_adt(&point_adt)
             .expect("Failed to register Point type");
 
@@ -1234,7 +1242,7 @@ mod expr_tests {
             ],
         };
         converter
-            .type_registry
+            .registry
             .register_adt(&point_adt)
             .expect("Failed to register Point type");
 

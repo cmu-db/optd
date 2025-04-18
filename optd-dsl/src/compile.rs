@@ -4,9 +4,8 @@ use crate::{
         errors::AnalyzerError,
         from_ast::ASTConverter,
         hir::{HIR, TypedSpan},
-        registry_check::{self},
-        type_infer::Solver,
-        types::TypeRegistry,
+        semantic_checks::adt_check,
+        types::registry::TypeRegistry,
     },
     lexer::lex::lex,
     parser::{ast::Module, module::parse_module},
@@ -51,7 +50,6 @@ pub fn ast_to_hir(
     ast: Module,
 ) -> Result<(HIR<TypedSpan>, TypeRegistry), CompileError> {
     let converter = ASTConverter::default();
-
     converter.convert(&ast).map_err(|err_kind| {
         CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })
@@ -68,7 +66,7 @@ pub fn registry_check(
     source_path: &str,
     registry: &TypeRegistry,
 ) -> Result<(), CompileError> {
-    registry_check::adt_check(registry, source_path).map_err(|err_kind| {
+    adt_check(registry, source_path).map_err(|err_kind| {
         CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
     })
 }
@@ -83,20 +81,26 @@ pub fn registry_check(
 pub fn infer(
     source: &str,
     hir: &HIR<TypedSpan>,
-    registry: &TypeRegistry,
-) -> Result<HIR, CompileError> {
-    // Create a new constraint solver initialized with the type registry
-    let mut solver = Solver::new(registry);
-
+    registry: &mut TypeRegistry,
+) -> Result<HIR, Vec<CompileError>> {
     // Step 1 & 2: Perform scope checking and generate type constraints
     // This traverses the HIR, verifies scopes, and creates constraints for all expressions
-    solver.generate_constraints(hir).map_err(|err_kind| {
-        CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
+    registry.generate_constraints(hir).map_err(|err_kind| {
+        vec![CompileError::AnalyzerError(AnalyzerError::new(
+            source.to_string(),
+            *err_kind,
+        ))]
     })?;
 
-    // TODO(alexis): Step 3: Resolve constraints.
-    // This step should use unification or other techniques to solve the constraint system
-    // and determine concrete types for all expressions.
+    // Step 3: Resolve constraints.
+    registry.resolve().map_err(|err_kinds| {
+        err_kinds
+            .into_iter()
+            .map(|err_kind| {
+                CompileError::AnalyzerError(AnalyzerError::new(source.to_string(), *err_kind))
+            })
+            .collect::<Vec<_>>()
+    })?;
 
     // TODO(alexis): Step 4: Transform HIR
     // After type inference, transform the HIR into its final form with complete type information.

@@ -6,7 +6,7 @@
 use super::ASTConverter;
 use crate::analyzer::errors::AnalyzerErrorKind;
 use crate::analyzer::hir::{Identifier, MatchArm, Pattern, PatternKind, TypedSpan};
-use crate::analyzer::types::Type;
+use crate::analyzer::types::registry::Type;
 use crate::parser::ast::{self, Pattern as AstPattern};
 use crate::utils::span::Spanned;
 use std::collections::HashSet;
@@ -24,7 +24,7 @@ impl ASTConverter {
     ) -> Result<Vec<MatchArm<TypedSpan>>, Box<AnalyzerErrorKind>> {
         arms.iter()
             .map(|arm| {
-                let pattern = self.convert_pattern(&arm.pattern)?;
+                let pattern = self.convert_pattern(&arm.pattern, &None)?;
                 let expr = self.convert_expr(&arm.expr, generics)?;
 
                 Ok(MatchArm {
@@ -42,28 +42,29 @@ impl ASTConverter {
     fn convert_pattern(
         &mut self,
         spanned_pattern: &Spanned<AstPattern>,
+        parent_adt: &Option<(Identifier, usize)>,
     ) -> Result<Pattern<TypedSpan>, Box<AnalyzerErrorKind>> {
         use PatternKind::*;
-        use Type::*;
 
         let span = spanned_pattern.span.clone();
-        let mut ty = self.next_unknown();
+        let mut ty = self.registry.new_unknown();
 
         let kind = match &*spanned_pattern.value {
             AstPattern::Error => panic!("AST should no longer contain errors"),
             AstPattern::Bind(name, inner_pattern) => {
-                let hir_inner = self.convert_pattern(inner_pattern)?;
+                let hir_inner = self.convert_pattern(inner_pattern, parent_adt)?;
                 ty = hir_inner.metadata.ty.clone();
 
                 Bind((*name.value).clone(), hir_inner.into())
             }
             AstPattern::Constructor(name, args) => {
                 self.validate_constructor(name, &span, args.len())?;
-                ty = Adt(*name.value.clone());
+                ty = Type::Adt(*name.value.clone());
 
                 let hir_args = args
                     .iter()
-                    .map(|arg| self.convert_pattern(arg))
+                    .enumerate()
+                    .map(|(idx, arg)| self.convert_pattern(arg, &Some((*name.value.clone(), idx))))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 Struct((*name.value).clone(), hir_args)
@@ -74,15 +75,25 @@ impl ASTConverter {
 
                 Literal(hir_lit)
             }
-            AstPattern::Wildcard => Wildcard,
+            AstPattern::Wildcard => {
+                // Add implicit type annotation when in field of struct.
+                if let Some((name, idx)) = parent_adt {
+                    ty = self
+                        .registry
+                        .get_product_field_type_by_index(name, *idx)
+                        .unwrap();
+                }
+
+                Wildcard
+            }
             AstPattern::EmptyArray => {
-                ty = Array(self.next_unknown().into());
+                ty = Type::Array(self.registry.new_unknown().into());
 
                 EmptyArray
             }
             AstPattern::ArrayDecomp(head, tail) => {
-                let hir_head = self.convert_pattern(head)?;
-                let hir_tail = self.convert_pattern(tail)?;
+                let hir_head = self.convert_pattern(head, &None)?;
+                let hir_tail = self.convert_pattern(tail, &None)?;
 
                 ArrayDecomp(hir_head.into(), hir_tail.into())
             }
@@ -140,7 +151,7 @@ mod pattern_tests {
         // with 2 fields
         let point_adt = create_product_adt("Point", 2);
         converter
-            .type_registry
+            .registry
             .register_adt(&point_adt)
             .expect("Failed to register Point type");
 
@@ -215,14 +226,14 @@ mod pattern_tests {
         // Register "Point" type for constructor pattern test with 2 fields
         let point_adt = create_product_adt("Point", 2);
         converter
-            .type_registry
+            .registry
             .register_adt(&point_adt)
             .expect("Failed to register Point type");
 
         // Test literal pattern
         let int_pattern = spanned(AstPattern::Literal(AstLiteral::Int64(42)));
         let result = converter
-            .convert_pattern(&int_pattern)
+            .convert_pattern(&int_pattern, &None)
             .expect("Literal pattern conversion should succeed");
 
         match &result.kind {
@@ -233,7 +244,7 @@ mod pattern_tests {
         // Test wildcard pattern
         let wildcard_pattern = spanned(AstPattern::Wildcard);
         let result = converter
-            .convert_pattern(&wildcard_pattern)
+            .convert_pattern(&wildcard_pattern, &None)
             .expect("Wildcard pattern conversion should succeed");
 
         match &result.kind {
@@ -246,7 +257,7 @@ mod pattern_tests {
         let bind_pattern = spanned(AstPattern::Bind(spanned("x".to_string()), inner));
 
         let result = converter
-            .convert_pattern(&bind_pattern)
+            .convert_pattern(&bind_pattern, &None)
             .expect("Binding pattern conversion should succeed");
 
         match &result.kind {
@@ -261,7 +272,7 @@ mod pattern_tests {
         ));
 
         let result = converter
-            .convert_pattern(&constructor_pattern)
+            .convert_pattern(&constructor_pattern, &None)
             .expect("Constructor pattern conversion should succeed");
 
         match &result.kind {
@@ -275,7 +286,7 @@ mod pattern_tests {
         // Test array patterns
         let empty_array_pattern = spanned(AstPattern::EmptyArray);
         let result = converter
-            .convert_pattern(&empty_array_pattern)
+            .convert_pattern(&empty_array_pattern, &None)
             .expect("Empty array pattern conversion should succeed");
 
         match &result.kind {
@@ -288,7 +299,7 @@ mod pattern_tests {
             spanned("UnknownType".to_string()),
             vec![spanned(AstPattern::Wildcard), spanned(AstPattern::Wildcard)],
         ));
-        let result = converter.convert_pattern(&unknown_constructor);
+        let result = converter.convert_pattern(&unknown_constructor, &None);
         assert!(
             result.is_err(),
             "Expected error for unknown type in constructor pattern"
@@ -312,7 +323,7 @@ mod pattern_tests {
         let array_decomp = spanned(AstPattern::ArrayDecomp(head, tail));
 
         let result = converter
-            .convert_pattern(&array_decomp)
+            .convert_pattern(&array_decomp, &None)
             .expect("Array decomposition pattern conversion should succeed");
 
         match &result.kind {
@@ -343,7 +354,7 @@ mod pattern_tests {
         for (name, field_count) in &types {
             let adt = create_product_adt(name, *field_count);
             converter
-                .type_registry
+                .registry
                 .register_adt(&adt)
                 .unwrap_or_else(|_| panic!("Failed to register {} type", name));
         }
@@ -353,7 +364,7 @@ mod pattern_tests {
             spanned("Shape".to_string()),
             vec![spanned(AstPattern::Wildcard)],
         ));
-        assert!(converter.convert_pattern(&shape_pattern).is_ok());
+        assert!(converter.convert_pattern(&shape_pattern, &None).is_ok());
 
         // Test nested constructor patterns (all valid)
         let circle_inner = spanned(AstPattern::Constructor(
@@ -366,7 +377,7 @@ mod pattern_tests {
             vec![circle_inner],
         ));
 
-        let result = converter.convert_pattern(&nested_pattern);
+        let result = converter.convert_pattern(&nested_pattern, &None);
         assert!(
             result.is_ok(),
             "Valid nested constructor pattern should succeed"
@@ -383,7 +394,7 @@ mod pattern_tests {
             vec![invalid_inner],
         ));
 
-        let result = converter.convert_pattern(&invalid_nested);
+        let result = converter.convert_pattern(&invalid_nested, &None);
         assert!(
             result.is_err(),
             "Nested pattern with invalid constructor should fail"
@@ -397,7 +408,7 @@ mod pattern_tests {
         // Register a Point type with 2 fields
         let point_adt = create_product_adt("Point", 2);
         converter
-            .type_registry
+            .registry
             .register_adt(&point_adt)
             .expect("Failed to register Point type");
 
@@ -407,7 +418,7 @@ mod pattern_tests {
             vec![spanned(AstPattern::Wildcard), spanned(AstPattern::Wildcard)],
         ));
 
-        let result = converter.convert_pattern(&correct_pattern);
+        let result = converter.convert_pattern(&correct_pattern, &None);
         assert!(
             result.is_ok(),
             "Constructor pattern with correct field count should succeed"
@@ -419,7 +430,7 @@ mod pattern_tests {
             vec![spanned(AstPattern::Wildcard)],
         ));
 
-        let result = converter.convert_pattern(&too_few_args);
+        let result = converter.convert_pattern(&too_few_args, &None);
         assert!(
             result.is_err(),
             "Constructor pattern with too few arguments should fail"
@@ -435,7 +446,7 @@ mod pattern_tests {
             ],
         ));
 
-        let result = converter.convert_pattern(&too_many_args);
+        let result = converter.convert_pattern(&too_many_args, &None);
         assert!(
             result.is_err(),
             "Constructor pattern with too many arguments should fail"

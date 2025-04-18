@@ -1,155 +1,22 @@
-use super::{errors::AnalyzerErrorKind, hir::Identifier};
-use crate::parser::ast::{Adt, Field, Type as AstType};
-use crate::utils::span::Span;
-use Adt::*;
-use std::collections::BTreeMap;
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-};
+use crate::analyzer::hir::Identifier;
 
-// Core type constants.
-// These are expressed as strings, not a Type enum, because they are
-// regular ADTs in the language.
-pub const LOGICAL_TYPE: &str = "Logical";
-pub const PHYSICAL_TYPE: &str = "Physical";
-pub const LOGICAL_PROPS: &str = "LogicalProperties";
-pub const PHYSICAL_PROPS: &str = "PhysicalProperties";
-
-pub const CORE_TYPES: [&str; 4] = [LOGICAL_TYPE, PHYSICAL_TYPE, LOGICAL_PROPS, PHYSICAL_PROPS];
-
-/// Represents types in the language.
-///
-/// This enum contains both primitive types (like Int64, String) and complex types
-/// (like Array, Tuple, Closure) as well as user-defined types through ADTs.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Type {
-    // Primitive types.
-    I64,
-    String,
-    Bool,
-    F64,
-
-    // Special types.
-    Unit,
-    Universe,       // All types are subtypes of Universe.
-    Nothing,        // Inherits all types.
-    None,           // Inherits all optionals.
-    Unknown(usize), // Unique identifier for unknown types.
-
-    // User types.
-    Adt(Identifier),
-    Generic(Identifier),
-
-    // Composite types.
-    Array(Box<Type>),
-    Closure(Box<Type>, Box<Type>),
-    Tuple(Vec<Type>),
-    Map(Box<Type>, Box<Type>),
-    Optional(Box<Type>),
-
-    // For Logical & Physical: memo status.
-    Stored(Box<Type>),
-    Costed(Box<Type>),
-
-    // Native trait types
-    Concat,     // For types that can be concatenated (String, Array, Map).
-    EqHash,     // For types that support equality and hashing.
-    Arithmetic, // For types that support arithmetic operations.
-}
-
-/// Manages the type hierarchy and subtyping relationships
-///
-/// The TypeRegistry keeps track of the inheritance relationships between
-/// types, particularly for user-defined ADTs. It provides methods to register
-/// types and check subtyping relationships.
-#[derive(Debug, Clone, Default)]
-pub struct TypeRegistry {
-    /// Maps ADT identifiers to their subtype identifiers.
-    /// We use a BTreeMap to ensure determinstic execution.
-    pub subtypes: BTreeMap<Identifier, HashSet<Identifier>>,
-    /// Maps ADT identifiers to their source spans.
-    pub spans: HashMap<Identifier, Span>,
-    /// Maps terminal / product ADT identifiers to their AST fields.
-    ///
-    /// Note: We store the original AST Field elements rather than converting them
-    /// to a more processed form to preserve their source span information. This allows
-    /// for better error reporting during type checking and semantic analysis.
-    pub product_fields: HashMap<Identifier, Vec<Field>>,
-}
+use super::registry::{Type, TypeRegistry};
+use std::collections::HashSet;
 
 impl TypeRegistry {
-    /// Registers an ADT in the type registry
-    ///
-    /// This method updates the type hierarchy by adding the ADT and all its
-    /// potential subtypes to the registry. For enums, each variant is registered
-    /// as a subtype of the enum.
+    /// This is a convenience wrapper around `is_subtype_infer` that doesn't require
+    /// tracking changes to unknown types.
     ///
     /// # Arguments
     ///
-    /// * `adt` - The ADT to register
+    /// * `child` - The potential subtype.
+    /// * `parent` - The potential supertype.
     ///
     /// # Returns
     ///
-    /// `Ok(())` if registration is successful, or a `AnalyzerErrorKind` if a duplicate name is found.
-    pub fn register_adt(&mut self, adt: &Adt) -> Result<(), Box<AnalyzerErrorKind>> {
-        match adt {
-            Product { name, fields } => {
-                let type_name = name.value.as_ref().clone();
-
-                // Check for duplicate ADT names.
-                if let Some(existing_span) = self.spans.get(&type_name) {
-                    return Err(AnalyzerErrorKind::new_duplicate_adt(
-                        &type_name,
-                        existing_span,
-                        &name.span,
-                    ));
-                }
-
-                // Register the ADT fields.
-                self.product_fields.insert(
-                    type_name.clone(),
-                    fields.iter().map(|field| *field.value.clone()).collect(),
-                );
-
-                self.spans.insert(type_name.clone(), name.span.clone());
-                self.subtypes.entry(type_name).or_default();
-
-                Ok(())
-            }
-            Sum { name, variants } => {
-                let enum_name = name.value.as_ref().clone();
-
-                // Check for duplicate ADT names.
-                if let Some(existing_span) = self.spans.get(&enum_name) {
-                    return Err(AnalyzerErrorKind::new_duplicate_adt(
-                        &enum_name,
-                        existing_span,
-                        &name.span,
-                    ));
-                }
-
-                self.spans.insert(enum_name.clone(), name.clone().span);
-                self.subtypes.entry(enum_name.clone()).or_default();
-
-                for variant in variants {
-                    let variant_adt = variant.value.as_ref();
-                    // Register each variant.
-                    self.register_adt(variant_adt)?;
-
-                    let variant_name = match variant_adt {
-                        Product { name, .. } => name.value.as_ref(),
-                        Sum { name, .. } => name.value.as_ref(),
-                    };
-
-                    // Add variant as a subtype of the enum.
-                    if let Some(children) = self.subtypes.get_mut(&enum_name) {
-                        children.insert(variant_name.clone());
-                    }
-                }
-                Ok(())
-            }
-        }
+    /// `true` if `child` is a subtype of `parent`, `false` otherwise.
+    pub fn is_subtype(&mut self, child: &Type, parent: &Type) -> bool {
+        self.is_subtype_infer(child, parent, &mut false)
     }
 
     /// Checks if a type is a subtype of another type.
@@ -158,28 +25,57 @@ impl TypeRegistry {
     /// the language's type system rules. It handles primitive types, complex types
     /// with covariant and contravariant relationships, and user-defined ADTs.
     ///
+    /// During type inference, this method can also refine unknown types to satisfy
+    /// subtyping constraints. When an unknown type is encountered:
+    /// - As a parent: It is updated to the least upper bound of itself and the child type.
+    /// - As a child: It is simply substituted and checked against the parent type.
+    ///
+    /// The `bumped` parameter tracks whether any unknown types were modified
+    /// during subtyping checks, which is used by the constraint solver to determine
+    /// when to stop iterating.
+    ///
     /// # Arguments
     ///
-    /// * `child` - The potential subtype
-    /// * `parent` - The potential supertype
+    /// * `child` - The potential subtype.
+    /// * `parent` - The potential supertype.
+    /// * `bumped` - Mutable flag to track if any unknown types were updated.
     ///
     /// # Returns
     ///
-    /// `true` if `child` is a subtype of `parent`, `false` otherwise.
-    pub fn is_subtype(&self, child: &Type, parent: &Type) -> bool {
-        self.is_subtype_inner(child, parent, &mut HashSet::new())
+    /// `true` if `child` is a subtype of `parent` (or can be made a subtype by
+    /// updating unknown types), `false` otherwise.
+    ///
+    /// # Note
+    ///
+    /// If no unknown types are involved, this behaves as a standard subtype check.
+    pub fn is_subtype_infer(&mut self, child: &Type, parent: &Type, bumped: &mut bool) -> bool {
+        let mut result;
+        let mut local_bumped;
+
+        // Continue checking until we reach stability (no more type updates).
+        // Stop if we've reached a stable state (no more updates) or got a negative result.
+        loop {
+            local_bumped = false;
+            result =
+                self.is_subtype_infer_inner(child, parent, &mut local_bumped, &mut HashSet::new());
+            *bumped |= local_bumped;
+
+            if !local_bumped || !result {
+                break;
+            }
+        }
+
+        result
     }
 
-    /// Inner implementation of is_subtype with memoization for cycle detection.
+    /// Inner implementation of is_subtype_infer with memoization for cycle detection.
     /// Cycles can occur in the type hierarchy with recursive ADTs and EqHash
     /// checks ADTs recursively deep.
-    /// Inner implementation of is_subtype with memoization for cycle detection.
-    /// Cycles can occur in the type hierarchy with recursive ADTs and EqHash
-    /// checks ADTs recursively deep.
-    fn is_subtype_inner(
-        &self,
+    fn is_subtype_infer_inner(
+        &mut self,
         child: &Type,
         parent: &Type,
+        bumped: &mut bool,
         memo: &mut HashSet<(Type, Type)>,
     ) -> bool {
         use Type::*;
@@ -200,60 +96,77 @@ impl TypeRegistry {
             // Nothing is the bottom type - it is a subtype of everything.
             (Nothing, _) => true,
 
-            (None, Optional(_)) => true,
+            // If parent is unknown, bump up to LUB of child.
+            (_, Unknown(id)) => {
+                let parent = self.resolve_type(&parent);
+                let lub = self.least_upper_bound(child, &parent);
+
+                if lub != parent {
+                    self.resolved_unknown.insert(*id, lub);
+                    *bumped = true;
+                }
+
+                true
+            }
+
+            // If child is unknown, check if its resolved type is a subtype of parent.
+            (Unknown(_), _) => {
+                let child = self.resolve_type(&child);
+                self.is_subtype_infer_inner(&child, parent, bumped, memo)
+            }
+
+            // Generics only match if they have strictly the same name.
+            // Bounded generics are not yet supported.
+            (Generic(gen1), Generic(gen2)) if gen1 == gen2 => true,
 
             // Stored and Costed type handling.
             (Stored(child_inner), Stored(parent_inner)) => {
-                self.is_subtype_inner(child_inner, parent_inner, memo)
+                self.is_subtype_infer_inner(child_inner, parent_inner, bumped, memo)
             }
             (Costed(child_inner), Costed(parent_inner)) => {
-                self.is_subtype_inner(child_inner, parent_inner, memo)
+                self.is_subtype_infer_inner(child_inner, parent_inner, bumped, memo)
             }
             (Costed(child_inner), Stored(parent_inner)) => {
                 // Costed(A) is a subtype of Stored(A).
-                self.is_subtype_inner(child_inner, parent_inner, memo)
+                self.is_subtype_infer_inner(child_inner, parent_inner, bumped, memo)
             }
             (Costed(child_inner), parent_inner) => {
                 // Costed(A) is a subtype of A.
-                self.is_subtype_inner(child_inner, parent_inner, memo)
+                self.is_subtype_infer_inner(child_inner, parent_inner, bumped, memo)
             }
             (Stored(child_inner), parent_inner) => {
                 // Stored(A) is a subtype of A.
-                self.is_subtype_inner(child_inner, parent_inner, memo)
+                self.is_subtype_infer_inner(child_inner, parent_inner, bumped, memo)
             }
 
             // Check transitive inheritance for ADTs.
-            (Adt(child_name), Adt(parent_name)) => {
-                if child_name == parent_name {
-                    return true;
-                }
+            (Adt(child_name), Adt(parent_name)) => self.is_adt_child(child_name, parent_name),
 
-                self.subtypes.get(parent_name).is_some_and(|children| {
-                    children.iter().any(|subtype_child_name| {
-                        self.is_subtype_inner(
-                            &Adt(child_name.clone()),
-                            &Adt(subtype_child_name.clone()),
-                            memo,
-                        )
-                    })
-                })
-            }
-
-            // Array covariance: Array[T] <: Array[U] if T <: U
+            // Array covariance: Array[T] <: Array[U] if T <: U.
             (Array(child_elem), Array(parent_elem)) => {
-                self.is_subtype_inner(child_elem, parent_elem, memo)
+                self.is_subtype_infer_inner(child_elem, parent_elem, bumped, memo)
             }
 
-            // Map as a subtype of Function: Map(A, B) <: Closure(A, B?)
+            // Map as a subtype of Function: Map(A, B) <: Closure(A, B?).
             (Map(key_type, val_type), Closure(param_type, ret_type)) => {
-                self.is_subtype_inner(param_type, key_type, memo)
-                    && self.is_subtype_inner(&Optional(val_type.clone()), ret_type, memo)
+                self.is_subtype_infer_inner(param_type, key_type, bumped, memo)
+                    && self.is_subtype_infer_inner(
+                        &Optional(val_type.clone()),
+                        ret_type,
+                        bumped,
+                        memo,
+                    )
             }
 
-            // Array as a subtype of Function: Array(B) <: Closure(I64, B?)
+            // Array as a subtype of Function: Array(B) <: Closure(I64, B?).
             (Array(elem_type), Closure(param_type, ret_type)) => {
                 matches!(&**param_type, I64)
-                    && self.is_subtype_inner(&Optional(elem_type.clone()), ret_type, memo)
+                    && self.is_subtype_infer_inner(
+                        &Optional(elem_type.clone()),
+                        ret_type,
+                        bumped,
+                        memo,
+                    )
             }
 
             // Tuple covariance: (T1, T2, ...) <: (U1, U2, ...) if T1 <: U1, T2 <: U2, ...
@@ -263,30 +176,32 @@ impl TypeRegistry {
                 child_types
                     .iter()
                     .zip(parent_types.iter())
-                    .all(|(c, p)| self.is_subtype_inner(c, p, memo))
+                    .all(|(c, p)| self.is_subtype_infer_inner(c, p, bumped, memo))
             }
 
             // Map covariance on values, contravariance on keys:
-            // Map[K1, V1] <: Map[K2, V2] if K2 <: K1 and V1 <: V2
+            // Map[K1, V1] <: Map[K2, V2] if K2 <: K1 and V1 <: V2.
             (Map(child_key, child_val), Map(parent_key, parent_val)) => {
-                self.is_subtype_inner(parent_key, child_key, memo)
-                    && self.is_subtype_inner(child_val, parent_val, memo)
+                self.is_subtype_infer_inner(parent_key, child_key, bumped, memo)
+                    && self.is_subtype_infer_inner(child_val, parent_val, bumped, memo)
             }
 
             // Function contravariance on args, covariance on return type:
-            // (T1 -> U1) <: (T2 -> U2) if T2 <: T1 and U1 <: U2
+            // (T1 -> U1) <: (T2 -> U2) if T2 <: T1 and U1 <: U2.
             (Closure(child_param, child_ret), Closure(parent_param, parent_ret)) => {
-                self.is_subtype_inner(parent_param, child_param, memo)
-                    && self.is_subtype_inner(child_ret, parent_ret, memo)
+                self.is_subtype_infer_inner(parent_param, child_param, bumped, memo)
+                    && self.is_subtype_infer_inner(child_ret, parent_ret, bumped, memo)
             }
 
-            // Optional type covariance: Optional[T] <: Optional[U] if T <: U
+            // Optional type covariance: Optional[T] <: Optional[U] if T <: U.
             (Optional(child_ty), Optional(parent_ty)) => {
-                self.is_subtype_inner(child_ty, parent_ty, memo)
+                self.is_subtype_infer_inner(child_ty, parent_ty, bumped, memo)
             }
-            // Likewise, T <: Optional[T]
-            (child_type, Optional(parent_inner)) => {
-                self.is_subtype_inner(child_type, parent_inner, memo)
+            // None <: Optional[Universe].
+            (None, Optional(_)) => true,
+            // Likewise, T <: Optional[T].
+            (_, Optional(parent_inner)) => {
+                self.is_subtype_infer_inner(child, parent_inner, bumped, memo)
             }
 
             // Native trait subtyping relationships
@@ -302,22 +217,22 @@ impl TypeRegistry {
             (Bool, EqHash) => true,
             (Unit, EqHash) => true,
             (None, EqHash) => true,
-            (Optional(inner), EqHash) => self.is_subtype_inner(inner, &EqHash, memo),
+            (Optional(inner), EqHash) => self.is_subtype_infer_inner(inner, &EqHash, bumped, memo),
             (Tuple(types), EqHash) => types
                 .iter()
-                .all(|t| self.is_subtype_inner(t, &EqHash, memo)),
+                .all(|t| self.is_subtype_infer_inner(t, &EqHash, bumped, memo)),
             (Adt(name), EqHash) => {
                 // Product ADTs with all fields satisfying EqHash also satisfy EqHash.
-                if let Some(fields) = self.product_fields.get(name) {
+                if let Some(fields) = self.product_fields.get(name).cloned() {
                     fields.iter().all(|field| {
-                        let ty = self.get_product_field_type(name, &field.name);
-                        self.is_subtype_inner(&ty, &EqHash, memo)
+                        let ty = self.get_product_field_type(name, &field.name).unwrap();
+                        self.is_subtype_infer_inner(&ty, &EqHash, bumped, memo)
                     })
-                } else if let Some(variants) = self.subtypes.get(name) {
+                } else if let Some(variants) = self.subtypes.get(name).cloned() {
                     // Sum types (enums) satisfy EqHash if all variants satisfy EqHash.
-                    variants
-                        .iter()
-                        .all(|variant| self.is_subtype_inner(&Adt(variant.clone()), &EqHash, memo))
+                    variants.iter().all(|variant| {
+                        self.is_subtype_infer_inner(&Adt(variant.clone()), &EqHash, bumped, memo)
+                    })
                 } else {
                     false
                 }
@@ -331,130 +246,33 @@ impl TypeRegistry {
         }
     }
 
-    /// Retrieves the type of a field from a product ADT by name.
-    ///
-    /// This function should only be called once the registry has been validated,
-    /// or it might panic.
-    pub fn get_product_field_type(&self, adt_name: &Identifier, field_name: &Identifier) -> Type {
-        let fields = self
-            .product_fields
-            .get(adt_name)
-            .unwrap_or_else(|| panic!("ADT '{}' not found in type registry", adt_name));
-
-        let field = fields
-            .iter()
-            .find(|field| *field.name.value == *field_name)
-            .cloned()
-            .unwrap_or_else(|| panic!("Field '{}' not found in ADT '{}'", field_name, adt_name));
-
-        convert_ast_type(*field.ty.value)
-    }
-
-    /// Retrieves the type of a field from a product ADT by index position.
-    ///
-    /// This function should only be called once the registry has been validated,
-    /// or it might panic.
-    pub fn get_product_field_type_by_index(&self, adt_name: &Identifier, index: usize) -> Type {
-        let fields = self
-            .product_fields
-            .get(adt_name)
-            .unwrap_or_else(|| panic!("ADT '{}' not found in type registry", adt_name));
-
-        let field = &fields[index];
-        convert_ast_type(*field.ty.value.clone())
-    }
-}
-
-/// Creates a function type from parameter types and return type.
-pub(super) fn create_function_type(param_types: &[Type], return_type: &Type) -> Type {
-    use Type::*;
-
-    let param_type = if param_types.is_empty() {
-        Unit
-    } else if param_types.len() == 1 {
-        param_types[0].clone()
-    } else {
-        Tuple(param_types.to_vec())
-    };
-
-    Closure(param_type.into(), return_type.clone().into())
-}
-
-/// Converts an AST type to a Type enum.
-fn convert_ast_type(ty: AstType) -> Type {
-    use Type::*;
-
-    match ty {
-        AstType::Identifier(name) => Adt(name),
-        AstType::Int64 => I64,
-        AstType::String => String,
-        AstType::Bool => Bool,
-        AstType::Unit => Unit,
-        AstType::Float64 => F64,
-        AstType::Array(inner) => Array(convert_ast_type(*inner.value).into()),
-        AstType::Closure(params, ret) => Closure(
-            convert_ast_type(*params.value).into(),
-            convert_ast_type(*ret.value).into(),
-        ),
-        AstType::Tuple(inner) => {
-            let inner_types = inner
-                .iter()
-                .map(|ty| convert_ast_type(*ty.value.clone()))
-                .collect();
-            Tuple(inner_types)
+    pub fn is_adt_child(&self, child_name: &Identifier, parent_name: &Identifier) -> bool {
+        if child_name == parent_name {
+            return true;
         }
-        AstType::Map(key, val) => Map(
-            convert_ast_type(*key.value).into(),
-            convert_ast_type(*val.value).into(),
-        ),
-        AstType::Questioned(inner) => Optional(convert_ast_type(*inner.value).into()),
-        _ => panic!("Registry has not been properly validated"),
+
+        self.subtypes
+            .get(parent_name)
+            .cloned()
+            .unwrap()
+            .iter()
+            .any(|subtype_child_name| self.is_adt_child(child_name, subtype_child_name))
     }
 }
 
 #[cfg(test)]
-pub mod type_registry_tests {
+pub mod tests {
     use super::*;
     use crate::{
-        parser::ast::Field,
-        utils::span::{Span, Spanned},
+        analyzer::types::registry::type_registry_tests::{
+            create_product_adt, create_sum_adt, spanned,
+        },
+        parser::ast::Type as AstType,
     };
-
-    pub fn create_test_span() -> Span {
-        Span::new("test".to_string(), 0..1)
-    }
-
-    pub fn spanned<T>(value: T) -> Spanned<T> {
-        Spanned::new(value, create_test_span())
-    }
-
-    pub fn create_product_adt(name: &str, fields: Vec<(&str, AstType)>) -> Adt {
-        let spanned_fields: Vec<Spanned<Field>> = fields
-            .into_iter()
-            .map(|(field_name, field_type)| {
-                spanned(Field {
-                    name: spanned(field_name.to_string()),
-                    ty: spanned(field_type),
-                })
-            })
-            .collect();
-
-        Product {
-            name: spanned(name.to_string()),
-            fields: spanned_fields,
-        }
-    }
-
-    pub fn create_sum_adt(name: &str, variants: Vec<Adt>) -> Adt {
-        Sum {
-            name: spanned(name.to_string()),
-            variants: variants.into_iter().map(spanned).collect(),
-        }
-    }
 
     #[test]
     fn test_stored_and_costed_types() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Test Stored type as a subtype of the inner type
         assert!(registry.is_subtype(&Type::Stored(Box::new(Type::I64)), &Type::I64));
@@ -512,26 +330,8 @@ pub mod type_registry_tests {
     }
 
     #[test]
-    fn test_duplicate_adt_detection() {
-        let mut registry = TypeRegistry::default();
-
-        // First registration should succeed
-        let car1 = create_product_adt("Car", vec![]);
-        assert!(registry.register_adt(&car1).is_ok());
-
-        // Second registration with the same name should fail
-        let car2 = Product {
-            name: spanned("Car".to_string()),
-            fields: vec![],
-        };
-
-        let result = registry.register_adt(&car2);
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_primitive_type_equality() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Same primitive types should be subtypes of each other
         assert!(registry.is_subtype(&Type::I64, &Type::I64));
@@ -557,7 +357,7 @@ pub mod type_registry_tests {
 
     #[test]
     fn test_array_subtyping() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Same type arrays
         assert!(registry.is_subtype(
@@ -595,7 +395,7 @@ pub mod type_registry_tests {
 
     #[test]
     fn test_tuple_subtyping() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Same type tuples
         assert!(registry.is_subtype(
@@ -631,7 +431,7 @@ pub mod type_registry_tests {
     #[test]
     fn test_map_subtyping() {
         // Setup basic registry
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Same type maps
         assert!(registry.is_subtype(
@@ -693,7 +493,7 @@ pub mod type_registry_tests {
 
     #[test]
     fn test_closure_subtyping() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Same function signatures
         assert!(registry.is_subtype(
@@ -804,7 +604,7 @@ pub mod type_registry_tests {
 
     #[test]
     fn test_universe_as_top_type() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Check that Universe is a supertype of all primitive types
         assert!(registry.is_subtype(&Type::I64, &Type::Universe));
@@ -837,7 +637,7 @@ pub mod type_registry_tests {
 
     #[test]
     fn test_nothing_as_bottom_type() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Nothing is a subtype of all primitive types
         assert!(registry.is_subtype(&Type::Nothing, &Type::I64));
@@ -863,8 +663,49 @@ pub mod type_registry_tests {
     }
 
     #[test]
+    fn test_generic_subtyping() {
+        let mut registry = TypeRegistry::default();
+
+        // Generics are only subtypes of themselves (same name)
+        assert!(registry.is_subtype(
+            &Type::Generic("T".to_string()),
+            &Type::Generic("T".to_string())
+        ));
+
+        // Different named generics are not subtypes
+        assert!(!registry.is_subtype(
+            &Type::Generic("T".to_string()),
+            &Type::Generic("U".to_string())
+        ));
+
+        // All generics are subtypes of Universe
+        assert!(registry.is_subtype(&Type::Generic("T".to_string()), &Type::Universe));
+
+        // Nothing is a subtype of any generic
+        assert!(registry.is_subtype(&Type::Nothing, &Type::Generic("T".to_string())));
+
+        // Generic is not a subtype of concrete types
+        assert!(!registry.is_subtype(&Type::Generic("T".to_string()), &Type::I64));
+
+        // Concrete types are not subtypes of generics
+        assert!(!registry.is_subtype(&Type::I64, &Type::Generic("T".to_string())));
+
+        // Test with generic in container types
+        assert!(registry.is_subtype(
+            &Type::Array(Box::new(Type::Generic("T".to_string()))),
+            &Type::Array(Box::new(Type::Generic("T".to_string())))
+        ));
+
+        // Different generics in container types
+        assert!(!registry.is_subtype(
+            &Type::Array(Box::new(Type::Generic("T".to_string()))),
+            &Type::Array(Box::new(Type::Generic("U".to_string())))
+        ));
+    }
+
+    #[test]
     fn test_none_subtyping() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Test None as a subtype of any Optional type
         assert!(registry.is_subtype(&Type::None, &Type::Optional(Box::new(Type::I64))));
@@ -893,7 +734,7 @@ pub mod type_registry_tests {
 
     #[test]
     fn test_type_optional_subtyping() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Test that a type is a subtype of its corresponding optional type
         assert!(registry.is_subtype(&Type::I64, &Type::Optional(Box::new(Type::I64))));
@@ -1021,7 +862,7 @@ pub mod type_registry_tests {
 
     #[test]
     fn test_native_trait_concat() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Test types that should implement Concat
         assert!(registry.is_subtype(&Type::String, &Type::Concat));
@@ -1062,7 +903,7 @@ pub mod type_registry_tests {
 
     #[test]
     fn test_native_trait_eqhash() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Test primitive types that should implement EqHash
         assert!(registry.is_subtype(&Type::I64, &Type::EqHash));
@@ -1108,7 +949,7 @@ pub mod type_registry_tests {
 
     #[test]
     fn test_native_trait_arithmetic() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Test types that should implement Arithmetic
         assert!(registry.is_subtype(&Type::I64, &Type::Arithmetic));
@@ -1218,7 +1059,7 @@ pub mod type_registry_tests {
 
     #[test]
     fn test_multiple_native_traits() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Test which types satisfy multiple traits
 
@@ -1250,7 +1091,7 @@ pub mod type_registry_tests {
 
     #[test]
     fn test_collection_function_subtyping() {
-        let registry = TypeRegistry::default();
+        let mut registry = TypeRegistry::default();
 
         // Test Map as a subtype of Function
         // Map(String, I64) <: Closure(String, Optional<I64>)
@@ -1337,49 +1178,5 @@ pub mod type_registry_tests {
                 Box::new(Type::Optional(Box::new(Type::String)))
             )
         ));
-    }
-
-    #[test]
-    fn test_create_function_type() {
-        // Test with no parameters
-        let params: Vec<Type> = vec![];
-        let return_type = Type::I64;
-        let result = create_function_type(&params, &return_type);
-        match result {
-            Type::Closure(param, ret) => {
-                assert_eq!(*param, Type::Unit);
-                assert_eq!(*ret, Type::I64);
-            }
-            _ => panic!("Expected Closure type"),
-        }
-
-        // Test with one parameter
-        let params = vec![Type::I64];
-        let result = create_function_type(&params, &return_type);
-        match result {
-            Type::Closure(param, ret) => {
-                assert_eq!(*param, Type::I64);
-                assert_eq!(*ret, Type::I64);
-            }
-            _ => panic!("Expected Closure type"),
-        }
-
-        // Test with multiple parameters
-        let params = vec![Type::I64, Type::Bool];
-        let result = create_function_type(&params, &return_type);
-        match result {
-            Type::Closure(param, ret) => {
-                match &*param {
-                    Type::Tuple(types) => {
-                        assert_eq!(types.len(), 2);
-                        assert_eq!(types[0], Type::I64);
-                        assert_eq!(types[1], Type::Bool);
-                    }
-                    _ => panic!("Expected Tuple type for parameters"),
-                }
-                assert_eq!(*ret, Type::I64);
-            }
-            _ => panic!("Expected Closure type"),
-        }
     }
 }
