@@ -168,7 +168,7 @@ impl TypeRegistry {
                     .enumerate()
                     .try_for_each(|(i, field_pat)| {
                         let field_type = TypedSpan::new(
-                            self.get_product_field_type_by_index(name, i),
+                            self.get_product_field_type_by_index(name, i).unwrap(),
                             field_pat.metadata.span.clone(),
                         );
 
@@ -491,7 +491,7 @@ impl TypeRegistry {
             CoreData::Struct(name, exprs) => {
                 exprs.iter().enumerate().try_for_each(|(i, field_expr)| {
                     let field_type = TypedSpan::new(
-                        self.get_product_field_type_by_index(name, i),
+                        self.get_product_field_type_by_index(name, i).unwrap(),
                         field_expr.metadata.span.clone(),
                     );
 

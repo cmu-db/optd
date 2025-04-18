@@ -66,21 +66,13 @@ pub enum Type {
 /// source code location where it was generated to provide useful error messages.
 #[derive(Debug, Clone)]
 pub enum Constraint {
-    /// Subtyping relationship: `target_type >: sub_types`
+    /// Subtyping relationship: `target_type >: sub_type`
     ///
-    /// This constraint enforces that `target_type` is a supertype of all `sub_types`,
-    /// allowing substitution of more specific types where a more general type is expected.
-    Subtypes {
+    /// This constraint enforces that `target_type` is a supertype of `sub_type`,
+    /// allowing substitution of a more specific type where a more general type is expected.
+    Subtype {
         target_type: TypedSpan,
-        sub_types: Vec<TypedSpan>,
-    },
-
-    /// Equality constraint: `target_type = other_type`
-    ///
-    /// This constraint enforces that `target_type` is equal to `other_type`.
-    Equal {
-        target_type: TypedSpan,
-        other_type: TypedSpan,
+        sub_type: TypedSpan,
     },
 
     /// Field access: `inner.field = outer`
@@ -210,39 +202,34 @@ impl TypeRegistry {
         }
     }
 
-    // The is_subtype method is now provided in the subtypes.rs file
-
     /// Retrieves the type of a field from a product ADT by name.
     ///
     /// This function should only be called once the registry has been validated,
     /// or it might panic.
-    pub fn get_product_field_type(&self, adt_name: &Identifier, field_name: &Identifier) -> Type {
-        let fields = self
-            .product_fields
-            .get(adt_name)
-            .unwrap_or_else(|| panic!("ADT '{}' not found in type registry", adt_name));
-
+    pub fn get_product_field_type(
+        &self,
+        adt_name: &Identifier,
+        field_name: &Identifier,
+    ) -> Option<Type> {
+        let fields = self.product_fields.get(adt_name)?;
         let field = fields
             .iter()
             .find(|field| *field.name.value == *field_name)
-            .cloned()
-            .unwrap_or_else(|| panic!("Field '{}' not found in ADT '{}'", field_name, adt_name));
+            .cloned()?;
 
-        convert_ast_type(*field.ty.value)
+        Some(convert_ast_type(*field.ty.value))
     }
 
     /// Retrieves the type of a field from a product ADT by index position.
-    ///
-    /// This function should only be called once the registry has been validated,
-    /// or it might panic.
-    pub fn get_product_field_type_by_index(&self, adt_name: &Identifier, index: usize) -> Type {
-        let fields = self
-            .product_fields
-            .get(adt_name)
-            .unwrap_or_else(|| panic!("ADT '{}' not found in type registry", adt_name));
+    pub fn get_product_field_type_by_index(
+        &self,
+        adt_name: &Identifier,
+        index: usize,
+    ) -> Option<Type> {
+        let fields = self.product_fields.get(adt_name)?;
+        let field = fields.get(index)?;
 
-        let field = &fields[index];
-        convert_ast_type(*field.ty.value.clone())
+        Some(convert_ast_type(*field.ty.value.clone()))
     }
 
     /// Creates a new unknown type
@@ -262,10 +249,12 @@ impl TypeRegistry {
     /// * `target_type` - The type that must be a supertype of all sub_types
     /// * `sub_types` - The types that must be subtypes of target_type
     pub fn add_constraint_subtypes(&mut self, target_type: &TypedSpan, sub_types: &[TypedSpan]) {
-        self.constraints.push(Constraint::Subtypes {
-            target_type: target_type.clone(),
-            sub_types: sub_types.to_vec(),
-        });
+        for sub_type in sub_types {
+            self.constraints.push(Constraint::Subtype {
+                target_type: target_type.clone(),
+                sub_type: sub_type.clone(),
+            });
+        }
     }
 
     /// Adds an equality constraint: `target_type = other_type`
@@ -277,9 +266,14 @@ impl TypeRegistry {
     /// * `target_type` - The type that is expected to be equal to other_type
     /// * `other_type` - The type that is being compared for equality
     pub fn add_constraint_equal(&mut self, target_type: &TypedSpan, other_type: &TypedSpan) {
-        self.constraints.push(Constraint::Equal {
+        self.constraints.push(Constraint::Subtype {
             target_type: target_type.clone(),
-            other_type: other_type.clone(),
+            sub_type: other_type.clone(),
+        });
+
+        self.constraints.push(Constraint::Subtype {
+            target_type: other_type.clone(),
+            sub_type: target_type.clone(),
         });
     }
 

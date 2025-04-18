@@ -225,7 +225,7 @@ impl TypeRegistry {
                 // Product ADTs with all fields satisfying EqHash also satisfy EqHash.
                 if let Some(fields) = self.product_fields.get(name).cloned() {
                     fields.iter().all(|field| {
-                        let ty = self.get_product_field_type(name, &field.name);
+                        let ty = self.get_product_field_type(name, &field.name).unwrap();
                         self.is_subtype_infer_inner(&ty, &EqHash, bumped, memo)
                     })
                 } else if let Some(variants) = self.subtypes.get(name).cloned() {
