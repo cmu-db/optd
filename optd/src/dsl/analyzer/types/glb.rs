@@ -1,5 +1,5 @@
 use super::registry::TypeRegistry;
-use crate::dsl::analyzer::types::registry::{ TypeKind};
+use crate::dsl::analyzer::types::registry::TypeKind;
 
 impl TypeRegistry {
     /// Finds the greatest lower bound (GLB) of two types.

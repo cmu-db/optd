@@ -43,10 +43,10 @@ impl ASTConverter {
             AstType::Bool => Bool,
             AstType::Float64 => F64,
             AstType::Unit => Unit,
-            AstType::Array(elem_type) => Array(self.convert_type(elem_type, generics)?.into()),
+            AstType::Array(elem_type) => Array(self.convert_type(elem_type, generics)?),
             AstType::Closure(param_type, return_type) => Closure(
-                self.convert_type(param_type, generics)?.into(),
-                self.convert_type(return_type, generics)?.into(),
+                self.convert_type(param_type, generics)?,
+                self.convert_type(return_type, generics)?,
             ),
             AstType::Tuple(types) => {
                 let mut hir_types = Vec::new();
@@ -58,16 +58,12 @@ impl ASTConverter {
                 Tuple(hir_types)
             }
             AstType::Map(key_type, value_type) => Map(
-                self.convert_type(key_type, generics)?.into(),
-                self.convert_type(value_type, generics)?.into(),
+                self.convert_type(key_type, generics)?,
+                self.convert_type(value_type, generics)?,
             ),
-            AstType::Questioned(inner_type) => {
-                Optional(self.convert_type(inner_type, generics)?.into())
-            }
-            AstType::Starred(inner_type) => Stored(self.convert_type(inner_type, generics)?.into()),
-            AstType::Dollared(inner_type) => {
-                Costed(self.convert_type(inner_type, generics)?.into())
-            }
+            AstType::Questioned(inner_type) => Optional(self.convert_type(inner_type, generics)?),
+            AstType::Starred(inner_type) => Stored(self.convert_type(inner_type, generics)?),
+            AstType::Dollared(inner_type) => Costed(self.convert_type(inner_type, generics)?),
             AstType::Identifier(name) => {
                 if generics.contains(name) {
                     Generic(name.clone())

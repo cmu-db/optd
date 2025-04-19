@@ -386,85 +386,55 @@ pub mod tests {
         let mut registry = setup_type_hierarchy();
 
         // Identical primitive types
-        assert_eq!(registry.least_upper_bound(&I64.into(), &I64.into()), I64);
-        assert_eq!(registry.least_upper_bound(&Bool.into(), &Bool.into()), Bool);
-        assert_eq!(
-            registry.least_upper_bound(&String.into(), &String.into()),
-            String
-        );
+        assert_eq!(registry.least_upper_bound(&I64, &I64), I64);
+        assert_eq!(registry.least_upper_bound(&Bool, &Bool), Bool);
+        assert_eq!(registry.least_upper_bound(&String, &String), String);
 
         // Different primitive types
-        assert_eq!(
-            registry.least_upper_bound(&I64.into(), &Bool.into()),
-            Universe
-        );
-        assert_eq!(
-            registry.least_upper_bound(&String.into(), &F64.into()),
-            Universe
-        );
-        assert_eq!(
-            registry.least_upper_bound(&I64.into(), &F64.into()),
-            Universe
-        );
+        assert_eq!(registry.least_upper_bound(&I64, &Bool), Universe);
+        assert_eq!(registry.least_upper_bound(&String, &F64), Universe);
+        assert_eq!(registry.least_upper_bound(&I64, &F64), Universe);
 
         // ADTs
         assert_eq!(
-            registry.least_upper_bound(
-                &Adt("Dog".to_string()).into(),
-                &Adt("Dog".to_string()).into()
-            ),
+            registry.least_upper_bound(&Adt("Dog".to_string()), &Adt("Dog".to_string())),
             Adt("Dog".to_string())
         );
 
         assert_eq!(
-            registry.least_upper_bound(
-                &Adt("Dog".to_string()).into(),
-                &Adt("Mammal".to_string()).into()
-            ),
+            registry.least_upper_bound(&Adt("Dog".to_string()), &Adt("Mammal".to_string())),
             Adt("Mammals".to_string())
         );
 
         assert_eq!(
-            registry.least_upper_bound(
-                &Adt("Dog".to_string()).into(),
-                &Adt("Cat".to_string()).into()
-            ),
+            registry.least_upper_bound(&Adt("Dog".to_string()), &Adt("Cat".to_string())),
             Adt("Mammals".to_string())
         );
 
         assert_eq!(
-            registry.least_upper_bound(
-                &Adt("Dog".to_string()).into(),
-                &Adt("Eagle".to_string()).into()
-            ),
+            registry.least_upper_bound(&Adt("Dog".to_string()), &Adt("Eagle".to_string())),
             Adt("Animals".to_string())
         );
 
         assert_eq!(
-            registry.least_upper_bound(
-                &Adt("Mammals".to_string()).into(),
-                &Adt("Birds".to_string()).into()
-            ),
+            registry.least_upper_bound(&Adt("Mammals".to_string()), &Adt("Birds".to_string())),
             Adt("Animals".to_string())
         );
 
         // ADT and unrelated type
         assert_eq!(
-            registry.least_upper_bound(
-                &Adt("Dog".to_string()).into(),
-                &Adt("Car".to_string()).into()
-            ),
+            registry.least_upper_bound(&Adt("Dog".to_string()), &Adt("Car".to_string())),
             Universe
         );
 
         // Nothing with other types
         assert_eq!(
-            registry.least_upper_bound(&Nothing.into(), &Adt("Dog".to_string()).into()),
+            registry.least_upper_bound(&Nothing, &Adt("Dog".to_string())),
             Adt("Dog".to_string())
         );
 
         assert_eq!(
-            registry.least_upper_bound(&Adt("Car".to_string()).into(), &Nothing.into()),
+            registry.least_upper_bound(&Adt("Car".to_string()), &Nothing),
             Adt("Car".to_string())
         );
     }
@@ -476,8 +446,8 @@ pub mod tests {
         // Array of same ADT type
         assert_eq!(
             registry.least_upper_bound(
-                &Array(Adt("Dog".to_string()).into()).into(),
-                &Array(Adt("Dog".to_string()).into()).into()
+                &Array(Adt("Dog".to_string()).into()),
+                &Array(Adt("Dog".to_string()).into())
             ),
             Array(Adt("Dog".to_string()).into())
         );
@@ -485,16 +455,16 @@ pub mod tests {
         // Array of related ADT types
         assert_eq!(
             registry.least_upper_bound(
-                &Array(Adt("Dog".to_string()).into()).into(),
-                &Array(Adt("Cat".to_string()).into()).into()
+                &Array(Adt("Dog".to_string()).into()),
+                &Array(Adt("Cat".to_string()).into())
             ),
             Array(Adt("Mammals".to_string()).into())
         );
 
         assert_eq!(
             registry.least_upper_bound(
-                &Array(Adt("Dog".to_string()).into()).into(),
-                &Array(Adt("Eagle".to_string()).into()).into()
+                &Array(Adt("Dog".to_string()).into()),
+                &Array(Adt("Eagle".to_string()).into())
             ),
             Array(Adt("Animals".to_string()).into())
         );
@@ -502,8 +472,8 @@ pub mod tests {
         // Array of unrelated ADT types
         assert_eq!(
             registry.least_upper_bound(
-                &Array(Adt("Dog".to_string()).into()).into(),
-                &Array(Adt("Car".to_string()).into()).into()
+                &Array(Adt("Dog".to_string()).into()),
+                &Array(Adt("Car".to_string()).into())
             ),
             Array(Universe.into())
         );
@@ -511,8 +481,8 @@ pub mod tests {
         // Nested arrays with ADTs
         assert_eq!(
             registry.least_upper_bound(
-                &Array(Array(Adt("Dog".to_string()).into()).into()).into(),
-                &Array(Array(Adt("Cat".to_string()).into()).into()).into()
+                &Array(Array(Adt("Dog".to_string()).into()).into()),
+                &Array(Array(Adt("Cat".to_string()).into()).into())
             ),
             Array(Array(Adt("Mammals".to_string()).into()).into())
         );
@@ -528,13 +498,11 @@ pub mod tests {
                 &Tuple(vec![
                     Adt("Dog".to_string()).into(),
                     Adt("Car".to_string()).into()
-                ])
-                .into(),
+                ]),
                 &Tuple(vec![
                     Adt("Dog".to_string()).into(),
                     Adt("Car".to_string()).into()
                 ])
-                .into()
             ),
             Tuple(vec![
                 Adt("Dog".to_string()).into(),
@@ -548,13 +516,11 @@ pub mod tests {
                 &Tuple(vec![
                     Adt("Dog".to_string()).into(),
                     Adt("Car".to_string()).into()
-                ])
-                .into(),
+                ]),
                 &Tuple(vec![
                     Adt("Cat".to_string()).into(),
                     Adt("Bicycle".to_string()).into()
                 ])
-                .into()
             ),
             Tuple(vec![
                 Adt("Mammals".to_string()).into(),
@@ -568,13 +534,11 @@ pub mod tests {
                 &Tuple(vec![
                     Adt("Dog".to_string()).into(),
                     Adt("Car".to_string()).into()
-                ])
-                .into(),
+                ]),
                 &Tuple(vec![
                     Adt("Eagle".to_string()).into(),
                     Adt("Boat".to_string()).into()
                 ])
-                .into()
             ),
             Tuple(vec![
                 Adt("Animals".to_string()).into(),
@@ -585,12 +549,11 @@ pub mod tests {
         // Different length tuples should result in Universe
         assert_eq!(
             registry.least_upper_bound(
-                &Tuple(vec![Adt("Dog".to_string()).into()]).into(),
+                &Tuple(vec![Adt("Dog".to_string()).into()]),
                 &Tuple(vec![
                     Adt("Dog".to_string()).into(),
                     Adt("Car".to_string()).into()
                 ])
-                .into()
             ),
             Universe
         );
@@ -603,8 +566,8 @@ pub mod tests {
         // Maps with identical ADT key and value types
         assert_eq!(
             registry.least_upper_bound(
-                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()).into(),
-                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()).into()
+                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
+                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into())
             ),
             Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into())
         );
@@ -612,12 +575,11 @@ pub mod tests {
         // Maps with related ADT value types (covariant)
         assert_eq!(
             registry.least_upper_bound(
-                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()).into(),
+                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
                 &Map(
                     Adt("Dog".to_string()).into(),
                     Adt("Bicycle".to_string()).into()
                 )
-                .into()
             ),
             Map(
                 Adt("Dog".to_string()).into(),
@@ -628,12 +590,11 @@ pub mod tests {
         // Maps with related ADT key types (contravariant)
         assert_eq!(
             registry.least_upper_bound(
-                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()).into(),
+                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
                 &Map(
                     Adt("Mammals".to_string()).into(),
                     Adt("Car".to_string()).into()
                 )
-                .into()
             ),
             Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into())
         );
@@ -641,12 +602,11 @@ pub mod tests {
         // Maps with both key and value types related
         assert_eq!(
             registry.least_upper_bound(
-                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()).into(),
+                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
                 &Map(
                     Adt("Mammals".to_string()).into(),
                     Adt("Bicycle".to_string()).into()
                 )
-                .into()
             ),
             Map(
                 Adt("Dog".to_string()).into(),
@@ -657,12 +617,11 @@ pub mod tests {
         // Maps with unrelated value types
         assert_eq!(
             registry.least_upper_bound(
-                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()).into(),
+                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
                 &Map(
                     Adt("Dog".to_string()).into(),
                     Adt("Boat".to_string()).into()
                 )
-                .into()
             ),
             Map(
                 Adt("Dog".to_string()).into(),
@@ -678,8 +637,8 @@ pub mod tests {
         // Functions with identical ADT parameter and return types
         assert_eq!(
             registry.least_upper_bound(
-                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()).into(),
-                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()).into()
+                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
+                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into())
             ),
             Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into())
         );
@@ -687,8 +646,8 @@ pub mod tests {
         // Functions with related ADT parameter types (contravariance)
         assert_eq!(
             registry.least_upper_bound(
-                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()).into(),
-                &Closure(Adt("Cat".to_string()).into(), Adt("Car".to_string()).into()).into()
+                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
+                &Closure(Adt("Cat".to_string()).into(), Adt("Car".to_string()).into())
             ),
             Closure(Nothing.into(), Adt("Car".to_string()).into())
         );
@@ -696,12 +655,11 @@ pub mod tests {
         // Functions with related ADT return types (covariance)
         assert_eq!(
             registry.least_upper_bound(
-                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()).into(),
+                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
                 &Closure(
                     Adt("Dog".to_string()).into(),
                     Adt("Bicycle".to_string()).into()
                 )
-                .into()
             ),
             Closure(
                 Adt("Dog".to_string()).into(),
@@ -712,12 +670,11 @@ pub mod tests {
         // Functions with both parameter and return types related
         assert_eq!(
             registry.least_upper_bound(
-                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()).into(),
+                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
                 &Closure(
                     Adt("Mammals".to_string()).into(),
                     Adt("Bicycle".to_string()).into()
                 )
-                .into()
             ),
             Closure(
                 Adt("Dog".to_string()).into(),
@@ -733,8 +690,8 @@ pub mod tests {
         // Optional of same ADT types
         assert_eq!(
             registry.least_upper_bound(
-                &Optional(Adt("Dog".to_string()).into()).into(),
-                &Optional(Adt("Dog".to_string()).into()).into()
+                &Optional(Adt("Dog".to_string()).into()),
+                &Optional(Adt("Dog".to_string()).into())
             ),
             Optional(Adt("Dog".to_string()).into())
         );
@@ -742,8 +699,8 @@ pub mod tests {
         // Optional of related ADT types
         assert_eq!(
             registry.least_upper_bound(
-                &Optional(Adt("Dog".to_string()).into()).into(),
-                &Optional(Adt("Cat".to_string()).into()).into()
+                &Optional(Adt("Dog".to_string()).into()),
+                &Optional(Adt("Cat".to_string()).into())
             ),
             Optional(Adt("Mammals".to_string()).into())
         );
@@ -751,32 +708,29 @@ pub mod tests {
         // Optional of distantly related ADT types
         assert_eq!(
             registry.least_upper_bound(
-                &Optional(Adt("Dog".to_string()).into()).into(),
-                &Optional(Adt("Eagle".to_string()).into()).into()
+                &Optional(Adt("Dog".to_string()).into()),
+                &Optional(Adt("Eagle".to_string()).into())
             ),
             Optional(Adt("Animals".to_string()).into())
         );
 
         // None and Optional ADT
         assert_eq!(
-            registry.least_upper_bound(
-                &None.into(),
-                &Optional(Adt("Dog".to_string()).into()).into()
-            ),
+            registry.least_upper_bound(&None, &Optional(Adt("Dog".to_string()).into())),
             Optional(Adt("Dog".to_string()).into())
         );
 
         // None and ADT type
         assert_eq!(
-            registry.least_upper_bound(&None.into(), &Adt("Dog".to_string()).into()),
+            registry.least_upper_bound(&None, &Adt("Dog".to_string())),
             Optional(Adt("Dog".to_string()).into())
         );
 
         // ADT and Optional related ADT
         assert_eq!(
             registry.least_upper_bound(
-                &Adt("Dog".to_string()).into(),
-                &Optional(Adt("Cat".to_string()).into()).into()
+                &Adt("Dog".to_string()),
+                &Optional(Adt("Cat".to_string()).into())
             ),
             Optional(Adt("Mammals".to_string()).into())
         );
@@ -789,8 +743,8 @@ pub mod tests {
         // Stored of same ADT types
         assert_eq!(
             registry.least_upper_bound(
-                &Stored(Adt("Dog".to_string()).into()).into(),
-                &Stored(Adt("Dog".to_string()).into()).into()
+                &Stored(Adt("Dog".to_string()).into()),
+                &Stored(Adt("Dog".to_string()).into())
             ),
             Stored(Adt("Dog".to_string()).into())
         );
@@ -798,8 +752,8 @@ pub mod tests {
         // Stored of related ADT types
         assert_eq!(
             registry.least_upper_bound(
-                &Stored(Adt("Dog".to_string()).into()).into(),
-                &Stored(Adt("Cat".to_string()).into()).into()
+                &Stored(Adt("Dog".to_string()).into()),
+                &Stored(Adt("Cat".to_string()).into())
             ),
             Stored(Adt("Mammals".to_string()).into())
         );
@@ -807,8 +761,8 @@ pub mod tests {
         // Costed of same ADT types
         assert_eq!(
             registry.least_upper_bound(
-                &Costed(Adt("Dog".to_string()).into()).into(),
-                &Costed(Adt("Dog".to_string()).into()).into()
+                &Costed(Adt("Dog".to_string()).into()),
+                &Costed(Adt("Dog".to_string()).into())
             ),
             Costed(Adt("Dog".to_string()).into())
         );
@@ -816,8 +770,8 @@ pub mod tests {
         // Mixed Stored and Costed with same ADT type
         assert_eq!(
             registry.least_upper_bound(
-                &Stored(Adt("Dog".to_string()).into()).into(),
-                &Costed(Adt("Dog".to_string()).into()).into()
+                &Stored(Adt("Dog".to_string()).into()),
+                &Costed(Adt("Dog".to_string()).into())
             ),
             Stored(Adt("Dog".to_string()).into())
         );
@@ -825,8 +779,8 @@ pub mod tests {
         // Mixed Stored and Costed with related ADT types
         assert_eq!(
             registry.least_upper_bound(
-                &Stored(Adt("Dog".to_string()).into()).into(),
-                &Costed(Adt("Cat".to_string()).into()).into()
+                &Stored(Adt("Dog".to_string()).into()),
+                &Costed(Adt("Cat".to_string()).into())
             ),
             Stored(Adt("Mammals".to_string()).into())
         );
@@ -834,8 +788,8 @@ pub mod tests {
         // Stored/Costed with regular ADT type
         assert_eq!(
             registry.least_upper_bound(
-                &Stored(Adt("Dog".to_string()).into()).into(),
-                &Adt("Cat".to_string()).into()
+                &Stored(Adt("Dog".to_string()).into()),
+                &Adt("Cat".to_string())
             ),
             Adt("Mammals".to_string())
         );
@@ -847,22 +801,18 @@ pub mod tests {
 
         // EqHash with ADT types
         assert_eq!(
-            registry.least_upper_bound(&EqHash.into(), &Adt("Dog".to_string()).into()),
+            registry.least_upper_bound(&EqHash, &Adt("Dog".to_string())),
             EqHash
         );
 
         // Concat with Array of ADTs
         assert_eq!(
-            registry
-                .least_upper_bound(&Concat.into(), &Array(Adt("Dog".to_string()).into()).into()),
+            registry.least_upper_bound(&Concat, &Array(Adt("Dog".to_string()).into())),
             Concat
         );
 
         // Arithmetic with numeric type
-        assert_eq!(
-            registry.least_upper_bound(&Arithmetic.into(), &I64.into()),
-            Arithmetic
-        );
+        assert_eq!(registry.least_upper_bound(&Arithmetic, &I64), Arithmetic);
     }
 
     #[test]
@@ -872,8 +822,8 @@ pub mod tests {
         // Array of Optional ADTs
         assert_eq!(
             registry.least_upper_bound(
-                &Array(Optional(Adt("Dog".to_string()).into()).into()).into(),
-                &Array(Optional(Adt("Cat".to_string()).into()).into()).into()
+                &Array(Optional(Adt("Dog".to_string()).into()).into()),
+                &Array(Optional(Adt("Cat".to_string()).into()).into())
             ),
             Array(Optional(Adt("Mammals".to_string()).into()).into())
         );
@@ -888,8 +838,7 @@ pub mod tests {
                         Adt("Boat".to_string()).into()
                     )
                     .into()
-                )
-                .into(),
+                ),
                 &Map(
                     Adt("Animals".to_string()).into(),
                     Closure(
@@ -898,7 +847,6 @@ pub mod tests {
                     )
                     .into()
                 )
-                .into()
             ),
             Map(
                 Adt("Dog".to_string()).into(), // contravariance on key type
@@ -922,8 +870,7 @@ pub mod tests {
                         .into()
                     )
                     .into()
-                )
-                .into(),
+                ),
                 &Optional(
                     Stored(
                         Tuple(vec![
@@ -934,7 +881,6 @@ pub mod tests {
                     )
                     .into()
                 )
-                .into()
             ),
             Optional(
                 Stored(
@@ -956,12 +902,11 @@ pub mod tests {
         // Map and Function compatibility
         assert_eq!(
             registry.least_upper_bound(
-                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()).into(),
+                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
                 &Closure(
                     Adt("Mammals".to_string()).into(),
                     Optional(Adt("LandVehicles".to_string()).into()).into()
                 )
-                .into()
             ),
             Closure(
                 Adt("Dog".to_string()).into(), // GLB of Dog and Mammals is Dog (contravariance)
@@ -972,12 +917,11 @@ pub mod tests {
         // Array and Function compatibility
         assert_eq!(
             registry.least_upper_bound(
-                &Array(Adt("Dog".to_string()).into()).into(),
+                &Array(Adt("Dog".to_string()).into()),
                 &Closure(
                     I64.into(),
                     Optional(Adt("Mammals".to_string()).into()).into()
                 )
-                .into()
             ),
             Closure(
                 I64.into(),

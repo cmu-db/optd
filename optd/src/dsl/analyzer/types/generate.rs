@@ -179,7 +179,7 @@ impl TypeRegistry {
             Operator(_) => panic!("Operators may not be in the HIR yet"),
             ArrayDecomp(head, tail) => {
                 let head_ty = TypedSpan::new(
-                    TypeKind::Array(head.metadata.ty.clone().into()).into(),
+                    TypeKind::Array(head.metadata.ty.clone()).into(),
                     head.metadata.span.clone(),
                 );
                 self.add_constraint_subtypes(&pattern.metadata, &[head_ty, tail.metadata.clone()]);
@@ -392,7 +392,7 @@ impl TypeRegistry {
             .iter()
             .map(|(k, v)| {
                 TypedSpan::new(
-                    Map(k.metadata.ty.clone().into(), v.metadata.ty.clone().into()).into(),
+                    Map(k.metadata.ty.clone(), v.metadata.ty.clone()).into(),
                     span.clone(),
                 )
             })
@@ -471,9 +471,7 @@ impl TypeRegistry {
             CoreData::Array(exprs) => {
                 let entries: Vec<_> = exprs
                     .iter()
-                    .map(|val| {
-                        TypedSpan::new(Array(val.metadata.ty.clone().into()).into(), span.clone())
-                    })
+                    .map(|val| TypedSpan::new(Array(val.metadata.ty.clone()).into(), span.clone()))
                     .collect();
 
                 self.add_constraint_subtypes(&expr.metadata, &entries);
