@@ -1,5 +1,12 @@
 use super::registry::{Constraint, Type, TypeRegistry};
-use crate::dsl::analyzer::{errors::AnalyzerErrorKind, hir::TypedSpan};
+use crate::dsl::{
+    analyzer::{
+        errors::AnalyzerErrorKind,
+        hir::{Identifier, TypedSpan},
+        types::{registry::TypeKind, subtypes::EnforceError},
+    },
+    utils::span::OptionalSpanned,
+};
 use std::mem;
 
 impl TypeRegistry {
@@ -12,11 +19,11 @@ impl TypeRegistry {
     /// # Returns
     ///
     /// * `Ok(())` if all constraints are successfully resolved
-    /// * `Vec<Err>` containing all the encountered type errors
-    pub fn resolve(&mut self) -> Result<(), Vec<Box<AnalyzerErrorKind>>> {
+    /// * `Err(error)` containing the first encountered type error
+    pub fn resolve(&mut self) -> Result<(), Box<AnalyzerErrorKind>> {
         loop {
             let mut any_bumped = false;
-            let mut errors = Vec::new();
+            let mut field_access_error = None;
 
             // Temporarily take ownership of constraints to avoid borrow checker issues.
             let constraints = mem::take(&mut self.constraints);
@@ -26,9 +33,18 @@ impl TypeRegistry {
                     Ok(bumped) => {
                         any_bumped |= bumped;
                     }
-                    Err((err, bumped)) => {
-                        any_bumped |= bumped;
-                        errors.push(err);
+                    Err(err) => {
+                        // Check if this is a field access error.
+                        // Store field access error but continue (it might be resolved later).
+                        // Return all other errors immediately.
+                        if let AnalyzerErrorKind::InvalidFieldAccess { .. } = *err {
+                            if field_access_error.is_none() {
+                                field_access_error = Some(err);
+                            }
+                        } else {
+                            self.constraints = constraints;
+                            return Err(err);
+                        }
                     }
                 }
             }
@@ -36,12 +52,13 @@ impl TypeRegistry {
             // Put constraints back.
             self.constraints = constraints;
 
+            // If no bumps occurred and we have a field access error, return it as it will
+            // never get resolved.
             if !any_bumped {
-                return if errors.is_empty() {
-                    Ok(())
-                } else {
-                    Err(errors)
-                };
+                if let Some(err) = field_access_error {
+                    return Err(err);
+                }
+                return Ok(());
             }
         }
     }
@@ -51,84 +68,74 @@ impl TypeRegistry {
     /// # Returns
     ///
     /// * `Ok(bool)` - The constraint is satisfied, with a boolean indicating if any types were bumped.
-    /// * `Err((Box<AnalyzerErrorKind>, bool))` - The constraint failed, with the error and a boolean
-    ///   indicating if any types were bumped.
+    /// * `Err(Box<AnalyzerErrorKind>)` - The constraint failed, with the error.
     fn check_constraint(
         &mut self,
         constraint: &Constraint,
-    ) -> Result<bool, (Box<AnalyzerErrorKind>, bool)> {
+    ) -> Result<bool, Box<AnalyzerErrorKind>> {
         use Constraint::*;
-
         match constraint {
-            Subtype {
-                target_type,
-                sub_type,
-            } => {
-                let mut bumped = false;
-                let is_subtype = self.is_subtype_infer(&sub_type.ty, &target_type.ty, &mut bumped);
-
-                if !is_subtype && !bumped {
-                    let sub = self.materialize_unknown(sub_type);
-                    let target = self.materialize_unknown(target_type);
-                    Err((
-                        AnalyzerErrorKind::new_invalid_subtype(&sub, &target),
-                        bumped,
-                    ))
-                } else {
-                    Ok(bumped)
-                }
-            }
-
+            Subtype { child, parent } => self.check_subtype_constraint(child, parent),
             FieldAccess {
                 inner,
                 field,
                 outer,
-            } => {
-                let inner = self.materialize_unknown(inner);
+            } => self.check_field_access_constraint(inner, field, outer),
+        }
+    }
 
-                match &inner.ty {
-                    Type::Adt(name) => match self.get_product_field_type(name, field) {
-                        Some(field_ty) => {
-                            let mut bumped = false;
-                            let is_subtype =
-                                self.is_subtype_infer(&field_ty, &outer.ty, &mut bumped);
+    /// Checks if a subtype constraint is satisfied.
+    fn check_subtype_constraint(
+        &mut self,
+        child: &TypedSpan,
+        parent: &TypedSpan,
+    ) -> Result<bool, Box<AnalyzerErrorKind>> {
+        use EnforceError::*;
 
-                            if !is_subtype && !bumped {
-                                let outer = self.materialize_unknown(outer);
-                                Err((
-                                    AnalyzerErrorKind::new_invalid_subtype(&inner, &outer),
-                                    bumped,
-                                ))
-                            } else {
-                                Ok(bumped)
-                            }
-                        }
-                        None => {
-                            let outer = self.materialize_unknown(outer);
-                            Err((
-                                AnalyzerErrorKind::new_invalid_field_access(
-                                    &inner,
-                                    field,
-                                    &outer.span,
-                                ),
-                                false,
-                            ))
-                        }
-                    },
-                    _ => {
-                        let outer = self.materialize_unknown(outer);
-                        Err((
-                            AnalyzerErrorKind::new_invalid_field_access(&inner, field, &outer.span),
-                            false,
-                        ))
-                    }
+        let child_span = child.span.clone();
+        let parent_span = parent.span.clone();
+
+        self.enforce_subtype(&child.ty, &parent.ty)
+            .map_err(|err| match err {
+                InvalidMerge(type1, type2) => {
+                    let type1 = TypedSpan::new(type1, child_span);
+                    let type2 = TypedSpan::new(type2, parent_span);
+                    AnalyzerErrorKind::new_type_merge_fail(&type1, &type2)
                 }
-            }
+
+                InvalidSubtype(child, parent) => {
+                    let child = TypedSpan::new(child, child_span);
+                    let parent = TypedSpan::new(parent, parent_span);
+                    AnalyzerErrorKind::new_invalid_subtype(&child, &parent)
+                }
+            })
+    }
+
+    /// Checks if a field access constraint is satisfied.
+    fn check_field_access_constraint(
+        &mut self,
+        inner: &TypedSpan,
+        field: &Identifier,
+        outer: &TypedSpan,
+    ) -> Result<bool, Box<AnalyzerErrorKind>> {
+        let inner_resolved = self.resolve_type(&inner.ty);
+
+        match &*inner_resolved.value {
+            TypeKind::Adt(name) => self
+                .get_product_field_type(name, field)
+                .ok_or_else(|| AnalyzerErrorKind::new_invalid_field_access(inner, field))
+                .and_then(|field_ty| {
+                    self.check_subtype_constraint(
+                        &TypedSpan::new(field_ty, inner.span.clone()),
+                        outer,
+                    )
+                }),
+            _ => Err(AnalyzerErrorKind::new_invalid_field_access(inner, field)),
         }
     }
 
     /// Recursively resolves all Unknown types within a type structure.
-    ///
+    ///self.
     /// This method walks through composite types (arrays, tuples, etc.)
     /// and replaces any Unknown types with their concrete inferred types
     /// from the registry.
@@ -141,34 +148,30 @@ impl TypeRegistry {
     ///
     /// A new Type with all Unknown types replaced by their concrete types
     pub(super) fn resolve_type(&self, ty: &Type) -> Type {
-        use Type::*;
+        use TypeKind::*;
 
-        match ty {
+        let resolved_kind = match &*ty.value {
             Unknown(id) => {
                 if let Some(resolved) = self.resolved_unknown.get(id) {
-                    self.resolve_type(resolved)
+                    return self.resolve_type(&resolved.clone().into());
                 } else {
-                    ty.clone()
+                    return ty.clone();
                 }
             }
-            Array(elem) => Array(self.resolve_type(elem).into()),
-            Closure(param, ret) => Closure(
-                self.resolve_type(param).into(),
-                self.resolve_type(ret).into(),
-            ),
+            Array(elem) => Array(self.resolve_type(elem)),
+            Closure(param, ret) => Closure(self.resolve_type(param), self.resolve_type(ret)),
             Tuple(elems) => Tuple(elems.iter().map(|e| self.resolve_type(e)).collect()),
-            Map(key, val) => Map(self.resolve_type(key).into(), self.resolve_type(val).into()),
-            Optional(inner) => Optional(self.resolve_type(inner).into()),
-            Stored(inner) => Stored(self.resolve_type(inner).into()),
-            Costed(inner) => Costed(self.resolve_type(inner).into()),
-
+            Map(key, val) => Map(self.resolve_type(key), self.resolve_type(val)),
+            Optional(inner) => Optional(self.resolve_type(inner)),
+            Stored(inner) => Stored(self.resolve_type(inner)),
+            Costed(inner) => Costed(self.resolve_type(inner)),
             // For all other types that don't contain nested types, just clone.
-            _ => ty.clone(),
-        }
-    }
+            _ => return ty.clone(),
+        };
 
-    fn materialize_unknown(&self, typed_span: &TypedSpan) -> TypedSpan {
-        let resolved_ty = self.resolve_type(&typed_span.ty);
-        TypedSpan::new(resolved_ty, typed_span.span.clone())
+        OptionalSpanned {
+            value: resolved_kind.into(),
+            span: ty.span.clone(),
+        }
     }
 }

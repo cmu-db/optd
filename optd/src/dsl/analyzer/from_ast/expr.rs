@@ -9,7 +9,7 @@ use crate::dsl::analyzer::hir::{
     BinOp, CoreData, Expr, ExprKind, FunKind, Identifier, LetBinding, Literal, TypedSpan, UnaryOp,
     Value,
 };
-use crate::dsl::analyzer::types::registry::{Type, create_function_type};
+use crate::dsl::analyzer::types::registry::{Type, TypeKind, create_function_type};
 use crate::dsl::parser::ast::{
     self, BinOp as AstBinOp, Expr as AstExpr, Literal as AstLiteral, PostfixOp,
 };
@@ -28,15 +28,15 @@ impl ASTConverter {
         spanned_expr: &Spanned<AstExpr>,
         generics: &HashSet<Identifier>,
     ) -> Result<Expr<TypedSpan>, Box<AnalyzerErrorKind>> {
-        use Type::*;
+        use TypeKind::*;
 
         let span = spanned_expr.span.clone();
-        let mut ty = self.registry.new_unknown();
+        let mut ty = self.registry.new_unknown().into();
 
         let kind = match &*spanned_expr.value {
             AstExpr::Error => panic!("AST should no longer contain errors"),
             AstExpr::Literal(lit) => {
-                let (hir_lit, hir_ty) = self.convert_literal(lit);
+                let (hir_lit, hir_ty) = self.convert_literal(lit, &span);
                 ty = hir_ty;
                 CoreVal(Value::new_with(
                     CoreData::Literal(hir_lit),
@@ -58,9 +58,9 @@ impl ASTConverter {
             }
             AstExpr::Array(elements) => {
                 ty = if elements.is_empty() {
-                    Array(Nothing.into())
+                    Array(Nothing.into()).into()
                 } else {
-                    Array(self.registry.new_unknown().into())
+                    Array(self.registry.new_unknown().into()).into()
                 };
                 self.convert_array(elements, generics)?
             }
@@ -68,24 +68,26 @@ impl ASTConverter {
                 ty = Tuple(
                     elements
                         .iter()
-                        .map(|_| self.registry.new_unknown())
+                        .map(|_| self.registry.new_unknown().into())
                         .collect(),
-                );
+                )
+                .into();
                 self.convert_tuple(elements, generics)?
             }
             AstExpr::Map(entries) => {
                 ty = if entries.is_empty() {
-                    Map(Nothing.into(), Nothing.into())
+                    Map(Nothing.into(), Nothing.into()).into()
                 } else {
                     Map(
                         self.registry.new_unknown().into(),
                         self.registry.new_unknown().into(),
                     )
+                    .into()
                 };
                 self.convert_map(entries, generics)?
             }
             AstExpr::Constructor(name, args) => {
-                ty = Adt(*name.value.clone());
+                ty = Type::spanned(Adt(*name.value.clone()), name.span.clone());
                 self.convert_constructor(name, args, &span, generics)?
             }
             AstExpr::Closure(params, body) => {
@@ -100,16 +102,16 @@ impl ASTConverter {
                     .collect::<Result<Vec<_>, Box<_>>>()?;
                 let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
 
-                ty = create_function_type(&param_types, &self.registry.new_unknown());
+                ty = create_function_type(&param_types, &self.registry.new_unknown().into());
                 self.convert_closure(&params, body, generics)?
             }
             AstExpr::Postfix(expr, op) => self.convert_postfix(expr, op, generics)?,
             AstExpr::Fail(error_expr) => {
-                ty = Nothing;
+                ty = Type::spanned(Nothing, span.clone());
                 self.convert_fail(error_expr, generics)?
             }
             AstExpr::None => {
-                ty = None;
+                ty = Type::spanned(None, span.clone());
                 CoreVal(Value::new_with(CoreData::None, ty.clone(), span.clone()))
             }
             AstExpr::Block(block) => self.convert_block(block, generics)?,
@@ -120,16 +122,18 @@ impl ASTConverter {
 
     // Slightly different signature so that we can use it in pattern.rs,
     // and also get the type at the same time.
-    pub(super) fn convert_literal(&self, literal: &AstLiteral) -> (Literal, Type) {
-        use Literal::*;
+    pub(super) fn convert_literal(&self, literal: &AstLiteral, span: &Span) -> (Literal, Type) {
+        use TypeKind::*;
 
-        match literal {
-            AstLiteral::Int64(val) => (Int64(*val), Type::I64),
-            AstLiteral::String(val) => (String(val.clone()), Type::String),
-            AstLiteral::Bool(val) => (Bool(*val), Type::Bool),
-            AstLiteral::Float64(val) => (Float64(val.0), Type::F64),
-            AstLiteral::Unit => (Unit, Type::Unit),
-        }
+        let (lit, kind) = match literal {
+            AstLiteral::Int64(val) => (Literal::Int64(*val), I64),
+            AstLiteral::String(val) => (Literal::String(val.clone()), String),
+            AstLiteral::Bool(val) => (Literal::Bool(*val), Bool),
+            AstLiteral::Float64(val) => (Literal::Float64(val.0), F64),
+            AstLiteral::Unit => (Literal::Unit, Unit),
+        };
+
+        (lit, Type::spanned(kind, span.clone()))
     }
 
     fn convert_ref(&self, ident: &Identifier) -> ExprKind<TypedSpan> {
@@ -183,7 +187,7 @@ impl ASTConverter {
 
                 let eq_expr = Expr::new_with(
                     Binary(hir_left.into(), Eq, hir_right.into()),
-                    self.registry.new_unknown(),
+                    self.registry.new_unknown().into(),
                     span.clone(),
                 );
 
@@ -205,7 +209,7 @@ impl ASTConverter {
 
                 let lt_expr = Expr::new_with(
                     Binary(hir_left.into(), Lt, hir_right.into()),
-                    self.registry.new_unknown(),
+                    self.registry.new_unknown().into(),
                     span.clone(),
                 );
 
@@ -219,12 +223,12 @@ impl ASTConverter {
 
                 let lt_expr = Expr::new_with(
                     Binary(hir_left.clone(), Lt, hir_right.clone()),
-                    self.registry.new_unknown(),
+                    self.registry.new_unknown().into(),
                     span.clone(),
                 );
                 let eq_expr = Expr::new_with(
                     Binary(hir_left, Eq, hir_right),
-                    self.registry.new_unknown(),
+                    self.registry.new_unknown().into(),
                     span.clone(),
                 );
 
@@ -431,7 +435,7 @@ impl ASTConverter {
 
                 let method_fn = Arc::new(Expr::new_with(
                     Ref((*method_name.value).clone()),
-                    self.registry.new_unknown(),
+                    self.registry.new_unknown().into(),
                     method_name.span.clone(),
                 ));
 

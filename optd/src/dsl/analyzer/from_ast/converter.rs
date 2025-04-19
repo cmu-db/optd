@@ -178,6 +178,7 @@ impl ASTConverter {
 mod converter_tests {
     use super::*;
     use crate::dsl::analyzer::hir::{CoreData, FunKind};
+    use crate::dsl::analyzer::types::registry::TypeKind;
     use crate::dsl::parser::ast::{self, Adt, Function, Item, Module, Type as AstType};
     use crate::dsl::utils::span::{Span, Spanned};
 
@@ -445,9 +446,9 @@ mod converter_tests {
         assert!(func_val.is_some());
 
         // Verify the return type is a generic
-        match &func_val.unwrap().metadata.ty {
-            Type::Closure(_, ret_type) => {
-                assert_eq!(**ret_type, Type::Generic(String::from("T")));
+        match &*func_val.unwrap().metadata.ty.value {
+            TypeKind::Closure(_, ret_type) => {
+                assert_eq!(**ret_type, TypeKind::Generic(String::from("T")));
             }
             _ => panic!("Expected closure type"),
         }

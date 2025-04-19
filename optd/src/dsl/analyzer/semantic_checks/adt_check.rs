@@ -108,11 +108,11 @@ fn check_product_fields(registry: &TypeRegistry) -> Result<(), Box<AnalyzerError
 }
 
 fn is_logical(ty: &Identifier, registry: &TypeRegistry) -> bool {
-    registry.is_adt_child(ty, &LOGICAL_TYPE.to_string())
+    registry.inherits_adt(ty, &LOGICAL_TYPE.to_string())
 }
 
 fn is_physical(ty: &Identifier, registry: &TypeRegistry) -> bool {
-    registry.is_adt_child(ty, &PHYSICAL_TYPE.to_string())
+    registry.inherits_adt(ty, &PHYSICAL_TYPE.to_string())
 }
 
 fn valid_core_type(

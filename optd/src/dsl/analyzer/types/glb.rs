@@ -1,5 +1,5 @@
 use super::registry::TypeRegistry;
-use crate::dsl::analyzer::types::registry::Type;
+use crate::dsl::analyzer::types::registry::{ TypeKind};
 
 impl TypeRegistry {
     /// Finds the greatest lower bound (GLB) of two types.
@@ -35,13 +35,13 @@ impl TypeRegistry {
     ///
     /// The greatest lower bound of the two types. Returns `Type::Nothing` if no common
     /// subtype exists.
-    pub(super) fn greatest_lower_bound(&mut self, type1: &Type, type2: &Type) -> Type {
-        use Type::*;
+    pub(super) fn greatest_lower_bound(&mut self, type1: &TypeKind, type2: &TypeKind) -> TypeKind {
+        use TypeKind::*;
 
         let glb = match (type1, type2) {
             // Substitute Unknown types with their current inferred type.
             (unknown @ Unknown(_), other) | (other, unknown @ Unknown(_)) => {
-                let bound_unknown = self.resolve_type(unknown);
+                let bound_unknown = self.resolve_type(&unknown.clone().into());
                 self.least_upper_bound(&bound_unknown, other)
             }
 
@@ -67,7 +67,7 @@ impl TypeRegistry {
                 let glb_elems: Vec<_> = elems1
                     .iter()
                     .zip(elems2.iter())
-                    .map(|(e1, e2)| self.greatest_lower_bound(e1, e2))
+                    .map(|(e1, e2)| self.greatest_lower_bound(e1, e2).into())
                     .collect();
 
                 Tuple(glb_elems)
@@ -147,20 +147,22 @@ impl TypeRegistry {
             }
 
             // ADT types - find subtype relationship if it exists.
-            (adt1 @ Adt(_), adt2 @ Adt(_)) => {
-                if self.is_subtype(adt1, adt2) {
-                    adt1.clone()
-                } else if self.is_subtype(adt2, adt1) {
-                    adt2.clone()
+            (Adt(adt1), Adt(adt2)) => {
+                if self.inherits_adt(adt1, adt2) {
+                    type1.clone()
+                } else if self.inherits_adt(adt2, adt1) {
+                    type2.clone()
                 } else {
                     Nothing
                 }
             }
 
-            // Native trait handling.
+            // Native trait handling: re-use enforce subtype for convenience.
             (trait_type @ (Concat | EqHash | Arithmetic), other)
             | (other, trait_type @ (Concat | EqHash | Arithmetic))
-                if self.is_subtype(other, trait_type) =>
+                if self
+                    .enforce_subtype(&other.clone().into(), &trait_type.clone().into())
+                    .is_ok() =>
             {
                 other.clone()
             }
@@ -170,8 +172,14 @@ impl TypeRegistry {
         };
 
         // Verify post-condition.
-        assert!(self.is_subtype(&glb, type1));
-        assert!(self.is_subtype(&glb, type2));
+        assert!(
+            self.enforce_subtype(&glb.clone().into(), &type1.clone().into())
+                .is_ok()
+        );
+        assert!(
+            self.enforce_subtype(&glb.clone().into(), &type2.clone().into())
+                .is_ok()
+        );
 
         glb
     }
@@ -181,513 +189,470 @@ impl TypeRegistry {
 mod tests {
     use super::*;
     use crate::dsl::analyzer::types::lub::tests::setup_type_hierarchy;
+    use TypeKind::*;
 
     #[test]
     fn test_greatest_lower_bound_simple() {
-        let mut registry = setup_type_hierarchy();
+        let mut reg = setup_type_hierarchy();
 
         // Identical ADT types
         assert_eq!(
-            registry
-                .greatest_lower_bound(&Type::Adt("Dog".to_string()), &Type::Adt("Dog".to_string())),
-            Type::Adt("Dog".to_string())
+            reg.greatest_lower_bound(&Adt("Dog".to_string()), &Adt("Dog".to_string())),
+            Adt("Dog".to_string())
         );
 
         // Subtype/supertype relationship
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Adt("Dog".to_string()),
-                &Type::Adt("Mammals".to_string())
-            ),
-            Type::Adt("Dog".to_string())
+            reg.greatest_lower_bound(&Adt("Dog".to_string()), &Adt("Mammals".to_string())),
+            Adt("Dog".to_string())
         );
 
         // Related types (siblings)
         assert_eq!(
-            registry
-                .greatest_lower_bound(&Type::Adt("Dog".to_string()), &Type::Adt("Cat".to_string())),
-            Type::Nothing
+            reg.greatest_lower_bound(&Adt("Dog".to_string()), &Adt("Cat".to_string())),
+            Nothing
         );
 
         // Unrelated types
         assert_eq!(
-            registry
-                .greatest_lower_bound(&Type::Adt("Dog".to_string()), &Type::Adt("Car".to_string())),
-            Type::Nothing
+            reg.greatest_lower_bound(&Adt("Dog".to_string()), &Adt("Car".to_string())),
+            Nothing
         );
 
         // Universe with ADT type
         assert_eq!(
-            registry.greatest_lower_bound(&Type::Universe, &Type::Adt("Dog".to_string())),
-            Type::Adt("Dog".to_string())
+            reg.greatest_lower_bound(&Universe, &Adt("Dog".to_string())),
+            Adt("Dog".to_string())
         );
 
         // Nothing with ADT type
         assert_eq!(
-            registry.greatest_lower_bound(&Type::Nothing, &Type::Adt("Dog".to_string())),
-            Type::Nothing
+            reg.greatest_lower_bound(&Nothing, &Adt("Dog".to_string())),
+            Nothing
         );
     }
 
     #[test]
     fn test_greatest_lower_bound_array() {
-        let mut registry = setup_type_hierarchy();
+        let mut reg = setup_type_hierarchy();
 
         // Arrays of same ADT types
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Array(Box::new(Type::Adt("Dog".to_string()))),
-                &Type::Array(Box::new(Type::Adt("Dog".to_string())))
+            reg.greatest_lower_bound(
+                &Array(Adt("Dog".to_string()).into()),
+                &Array(Adt("Dog".to_string()).into())
             ),
-            Type::Array(Box::new(Type::Adt("Dog".to_string())))
+            Array(Adt("Dog".to_string()).into())
         );
 
         // Arrays of subtype/supertype relationship
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Array(Box::new(Type::Adt("Dog".to_string()))),
-                &Type::Array(Box::new(Type::Adt("Mammals".to_string())))
+            reg.greatest_lower_bound(
+                &Array(Adt("Dog".to_string()).into()),
+                &Array(Adt("Mammals".to_string()).into())
             ),
-            Type::Array(Box::new(Type::Adt("Dog".to_string())))
+            Array(Adt("Dog".to_string()).into())
         );
 
         // Arrays of related types (siblings)
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Array(Box::new(Type::Adt("Dog".to_string()))),
-                &Type::Array(Box::new(Type::Adt("Cat".to_string())))
+            reg.greatest_lower_bound(
+                &Array(Adt("Dog".to_string()).into()),
+                &Array(Adt("Cat".to_string()).into())
             ),
-            Type::Array(Box::new(Type::Nothing))
+            Array(Nothing.into())
         );
     }
 
     #[test]
     fn test_greatest_lower_bound_tuple() {
-        let mut registry = setup_type_hierarchy();
+        let mut reg = setup_type_hierarchy();
 
         // Tuples of same ADT types
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Tuple(vec![
-                    Type::Adt("Dog".to_string()),
-                    Type::Adt("Car".to_string())
+            reg.greatest_lower_bound(
+                &Tuple(vec![
+                    Adt("Dog".to_string()).into(),
+                    Adt("Car".to_string()).into()
                 ]),
-                &Type::Tuple(vec![
-                    Type::Adt("Dog".to_string()),
-                    Type::Adt("Car".to_string())
+                &Tuple(vec![
+                    Adt("Dog".to_string()).into(),
+                    Adt("Car".to_string()).into()
                 ])
             ),
-            Type::Tuple(vec![
-                Type::Adt("Dog".to_string()),
-                Type::Adt("Car".to_string())
+            Tuple(vec![
+                Adt("Dog".to_string()).into(),
+                Adt("Car".to_string()).into()
             ])
         );
 
         // Tuples with subtype/supertype relationship
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Tuple(vec![
-                    Type::Adt("Dog".to_string()),
-                    Type::Adt("Car".to_string())
+            reg.greatest_lower_bound(
+                &Tuple(vec![
+                    Adt("Dog".to_string()).into(),
+                    Adt("Car".to_string()).into()
                 ]),
-                &Type::Tuple(vec![
-                    Type::Adt("Mammals".to_string()),
-                    Type::Adt("LandVehicles".to_string())
+                &Tuple(vec![
+                    Adt("Mammals".to_string()).into(),
+                    Adt("LandVehicles".to_string()).into()
                 ])
             ),
-            Type::Tuple(vec![
-                Type::Adt("Dog".to_string()),
-                Type::Adt("Car".to_string())
+            Tuple(vec![
+                Adt("Dog".to_string()).into(),
+                Adt("Car".to_string()).into()
             ])
         );
 
         // Tuples with mixed compatibility
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Tuple(vec![
-                    Type::Adt("Dog".to_string()),
-                    Type::Adt("Car".to_string())
+            reg.greatest_lower_bound(
+                &Tuple(vec![
+                    Adt("Dog".to_string()).into(),
+                    Adt("Car".to_string()).into()
                 ]),
-                &Type::Tuple(vec![
-                    Type::Adt("Cat".to_string()),
-                    Type::Adt("LandVehicles".to_string())
+                &Tuple(vec![
+                    Adt("Cat".to_string()).into(),
+                    Adt("LandVehicles".to_string()).into()
                 ])
             ),
-            Type::Tuple(vec![Type::Nothing, Type::Adt("Car".to_string())])
+            Tuple(vec![Nothing.into(), Adt("Car".to_string()).into()])
         );
 
         // Different length tuples
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Tuple(vec![Type::Adt("Dog".to_string())]),
-                &Type::Tuple(vec![
-                    Type::Adt("Dog".to_string()),
-                    Type::Adt("Car".to_string())
+            reg.greatest_lower_bound(
+                &Tuple(vec![Adt("Dog".to_string()).into()]),
+                &Tuple(vec![
+                    Adt("Dog".to_string()).into(),
+                    Adt("Car".to_string()).into()
                 ])
             ),
-            Type::Nothing
+            Nothing
         );
     }
 
     #[test]
     fn test_greatest_lower_bound_map() {
-        let mut registry = setup_type_hierarchy();
+        let mut reg = setup_type_hierarchy();
 
         // Maps with same key and value types
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Map(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Adt("Car".to_string()))
-                ),
-                &Type::Map(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Adt("Car".to_string()))
-                )
+            reg.greatest_lower_bound(
+                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
+                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into())
             ),
-            Type::Map(
-                Box::new(Type::Adt("Dog".to_string())),
-                Box::new(Type::Adt("Car".to_string()))
-            )
+            Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into())
         );
 
         // Maps with covariant keys (opposite of LUB due to contravariance)
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Map(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Adt("Car".to_string()))
-                ),
-                &Type::Map(
-                    Box::new(Type::Adt("Mammals".to_string())),
-                    Box::new(Type::Adt("Car".to_string()))
+            reg.greatest_lower_bound(
+                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
+                &Map(
+                    Adt("Mammals".to_string()).into(),
+                    Adt("Car".to_string()).into()
                 )
             ),
-            Type::Map(
-                Box::new(Type::Adt("Mammals".to_string())),
-                Box::new(Type::Adt("Car".to_string()))
+            Map(
+                Adt("Mammals".to_string()).into(),
+                Adt("Car".to_string()).into()
             )
         );
 
         // Maps with contravariant values (opposite of LUB due to covariance)
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Map(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Adt("Car".to_string()))
-                ),
-                &Type::Map(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Adt("LandVehicles".to_string()))
+            reg.greatest_lower_bound(
+                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
+                &Map(
+                    Adt("Dog".to_string()).into(),
+                    Adt("LandVehicles".to_string()).into()
                 )
             ),
-            Type::Map(
-                Box::new(Type::Adt("Dog".to_string())),
-                Box::new(Type::Adt("Car".to_string()))
-            )
+            Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into())
         );
 
         // Maps with mixed key and value type relationships
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Map(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Adt("Car".to_string()))
-                ),
-                &Type::Map(
-                    Box::new(Type::Adt("Mammals".to_string())),
-                    Box::new(Type::Adt("LandVehicles".to_string()))
+            reg.greatest_lower_bound(
+                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
+                &Map(
+                    Adt("Mammals".to_string()).into(),
+                    Adt("LandVehicles".to_string()).into()
                 )
             ),
-            Type::Map(
-                Box::new(Type::Adt("Mammals".to_string())),
-                Box::new(Type::Adt("Car".to_string()))
+            Map(
+                Adt("Mammals".to_string()).into(),
+                Adt("Car".to_string()).into()
             )
         );
     }
 
     #[test]
     fn test_greatest_lower_bound_function() {
-        let mut registry = setup_type_hierarchy();
+        let mut reg = setup_type_hierarchy();
 
         // Functions with same parameter and return types
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Closure(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Adt("Car".to_string()))
-                ),
-                &Type::Closure(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Adt("Car".to_string()))
-                )
+            reg.greatest_lower_bound(
+                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
+                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into())
             ),
-            Type::Closure(
-                Box::new(Type::Adt("Dog".to_string())),
-                Box::new(Type::Adt("Car".to_string()))
-            )
+            Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into())
         );
 
         // Functions with covariant parameters (opposite of LUB due to contravariance)
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Closure(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Adt("Car".to_string()))
-                ),
-                &Type::Closure(
-                    Box::new(Type::Adt("Mammals".to_string())),
-                    Box::new(Type::Adt("Car".to_string()))
+            reg.greatest_lower_bound(
+                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
+                &Closure(
+                    Adt("Mammals".to_string()).into(),
+                    Adt("Car".to_string()).into()
                 )
             ),
-            Type::Closure(
-                Box::new(Type::Adt("Mammals".to_string())),
-                Box::new(Type::Adt("Car".to_string()))
+            Closure(
+                Adt("Mammals".to_string()).into(),
+                Adt("Car".to_string()).into()
             )
         );
 
         // Functions with contravariant return types (opposite of LUB due to covariance)
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Closure(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Adt("Car".to_string()))
-                ),
-                &Type::Closure(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Adt("LandVehicles".to_string()))
+            reg.greatest_lower_bound(
+                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
+                &Closure(
+                    Adt("Dog".to_string()).into(),
+                    Adt("LandVehicles".to_string()).into()
                 )
             ),
-            Type::Closure(
-                Box::new(Type::Adt("Dog".to_string())),
-                Box::new(Type::Adt("Car".to_string()))
-            )
+            Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into())
         );
 
         // Functions with mixed parameter and return type relationships
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Closure(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Adt("Car".to_string()))
-                ),
-                &Type::Closure(
-                    Box::new(Type::Adt("Mammals".to_string())),
-                    Box::new(Type::Adt("LandVehicles".to_string()))
+            reg.greatest_lower_bound(
+                &Closure(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
+                &Closure(
+                    Adt("Mammals".to_string()).into(),
+                    Adt("LandVehicles".to_string()).into()
                 )
             ),
-            Type::Closure(
-                Box::new(Type::Adt("Mammals".to_string())),
-                Box::new(Type::Adt("Car".to_string()))
+            Closure(
+                Adt("Mammals".to_string()).into(),
+                Adt("Car".to_string()).into()
             )
         );
     }
 
     #[test]
     fn test_greatest_lower_bound_optional() {
-        let mut registry = setup_type_hierarchy();
+        let mut reg = setup_type_hierarchy();
 
         // Optional of same types
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Optional(Box::new(Type::Adt("Dog".to_string()))),
-                &Type::Optional(Box::new(Type::Adt("Dog".to_string())))
+            reg.greatest_lower_bound(
+                &Optional(Adt("Dog".to_string()).into()),
+                &Optional(Adt("Dog".to_string()).into())
             ),
-            Type::Optional(Box::new(Type::Adt("Dog".to_string())))
+            Optional(Adt("Dog".to_string()).into())
         );
 
         // Optional of subtype/supertype
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Optional(Box::new(Type::Adt("Dog".to_string()))),
-                &Type::Optional(Box::new(Type::Adt("Mammals".to_string())))
+            reg.greatest_lower_bound(
+                &Optional(Adt("Dog".to_string()).into()),
+                &Optional(Adt("Mammals".to_string()).into())
             ),
-            Type::Optional(Box::new(Type::Adt("Dog".to_string())))
+            Optional(Adt("Dog".to_string()).into())
         );
 
         // Optional of unrelated types
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Optional(Box::new(Type::Adt("Dog".to_string()))),
-                &Type::Optional(Box::new(Type::Adt("Car".to_string())))
+            reg.greatest_lower_bound(
+                &Optional(Adt("Dog".to_string()).into()),
+                &Optional(Adt("Car".to_string()).into())
             ),
-            Type::Optional(Box::new(Type::Nothing))
+            Optional(Nothing.into())
         );
 
         // None and Optional
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::None,
-                &Type::Optional(Box::new(Type::Adt("Dog".to_string())))
-            ),
-            Type::None
+            reg.greatest_lower_bound(&None, &Optional(Adt("Dog".to_string()).into())),
+            None
         );
 
         // None and None
-        assert_eq!(
-            registry.greatest_lower_bound(&Type::None, &Type::None),
-            Type::None
-        );
+        assert_eq!(reg.greatest_lower_bound(&None, &None), None);
 
         // Optional and base type
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Optional(Box::new(Type::Adt("Mammals".to_string()))),
-                &Type::Adt("Dog".to_string())
+            reg.greatest_lower_bound(
+                &Optional(Adt("Mammals".to_string()).into()),
+                &Adt("Dog".to_string())
             ),
-            Type::Adt("Dog".to_string())
+            Adt("Dog".to_string())
         );
     }
 
     #[test]
     fn test_greatest_lower_bound_stored_costed() {
-        let mut registry = setup_type_hierarchy();
+        let mut reg = setup_type_hierarchy();
 
         // Stored of same types
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Stored(Box::new(Type::Adt("Dog".to_string()))),
-                &Type::Stored(Box::new(Type::Adt("Dog".to_string())))
+            reg.greatest_lower_bound(
+                &Stored(Adt("Dog".to_string()).into()),
+                &Stored(Adt("Dog".to_string()).into())
             ),
-            Type::Stored(Box::new(Type::Adt("Dog".to_string())))
+            Stored(Adt("Dog".to_string()).into())
         );
 
         // Stored of subtype/supertype
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Stored(Box::new(Type::Adt("Dog".to_string()))),
-                &Type::Stored(Box::new(Type::Adt("Mammals".to_string())))
+            reg.greatest_lower_bound(
+                &Stored(Adt("Dog".to_string()).into()),
+                &Stored(Adt("Mammals".to_string()).into())
             ),
-            Type::Stored(Box::new(Type::Adt("Dog".to_string())))
+            Stored(Adt("Dog".to_string()).into())
         );
 
         // Costed of same types
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Costed(Box::new(Type::Adt("Dog".to_string()))),
-                &Type::Costed(Box::new(Type::Adt("Dog".to_string())))
+            reg.greatest_lower_bound(
+                &Costed(Adt("Dog".to_string()).into()),
+                &Costed(Adt("Dog".to_string()).into())
             ),
-            Type::Costed(Box::new(Type::Adt("Dog".to_string())))
+            Costed(Adt("Dog".to_string()).into())
         );
 
         // Mixed Stored and Costed (Costed is more specific than Stored)
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Stored(Box::new(Type::Adt("Dog".to_string()))),
-                &Type::Costed(Box::new(Type::Adt("Dog".to_string())))
+            reg.greatest_lower_bound(
+                &Stored(Adt("Dog".to_string()).into()),
+                &Costed(Adt("Dog".to_string()).into())
             ),
-            Type::Costed(Box::new(Type::Adt("Dog".to_string())))
+            Costed(Adt("Dog".to_string()).into())
         );
 
         // Mixed with subtype/supertype relationship
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Stored(Box::new(Type::Adt("Mammals".to_string()))),
-                &Type::Costed(Box::new(Type::Adt("Dog".to_string())))
+            reg.greatest_lower_bound(
+                &Stored(Adt("Mammals".to_string()).into()),
+                &Costed(Adt("Dog".to_string()).into())
             ),
-            Type::Costed(Box::new(Type::Adt("Dog".to_string())))
+            Costed(Adt("Dog".to_string()).into())
         );
     }
 
     #[test]
     fn test_greatest_lower_bound_collection_function() {
-        let mut registry = setup_type_hierarchy();
+        let mut reg = setup_type_hierarchy();
 
         // Map and Function compatibility
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Map(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Adt("Car".to_string()))
-                ),
-                &Type::Closure(
-                    Box::new(Type::Adt("Mammals".to_string())),
-                    Box::new(Type::Optional(Box::new(Type::Adt(
-                        "LandVehicles".to_string()
-                    ))))
+            reg.greatest_lower_bound(
+                &Map(Adt("Dog".to_string()).into(), Adt("Car".to_string()).into()),
+                &Closure(
+                    Adt("Mammals".to_string()).into(),
+                    Optional(Adt("LandVehicles".to_string()).into()).into()
                 )
             ),
-            Type::Map(
-                Box::new(Type::Adt("Mammals".to_string())),
-                Box::new(Type::Adt("Car".to_string()))
+            Map(
+                Adt("Mammals".to_string()).into(),
+                Adt("Car".to_string()).into()
             )
         );
 
         // Array and Function compatibility
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Array(Box::new(Type::Adt("Dog".to_string()))),
-                &Type::Closure(
-                    Box::new(Type::I64),
-                    Box::new(Type::Optional(Box::new(Type::Adt("Mammals".to_string()))))
+            reg.greatest_lower_bound(
+                &Array(Adt("Dog".to_string()).into()),
+                &Closure(
+                    I64.into(),
+                    Optional(Adt("Mammals".to_string()).into()).into()
                 )
             ),
-            Type::Array(Box::new(Type::Adt("Dog".to_string())))
+            Array(Adt("Dog".to_string()).into())
         );
     }
 
     #[test]
     fn test_greatest_lower_bound_complex_nested_types() {
-        let mut registry = setup_type_hierarchy();
+        let mut reg = setup_type_hierarchy();
 
         // Array of Optional ADTs
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Array(Box::new(Type::Optional(Box::new(Type::Adt(
-                    "Mammals".to_string()
-                ))))),
-                &Type::Array(Box::new(Type::Optional(Box::new(Type::Adt(
-                    "Dog".to_string()
-                )))))
+            reg.greatest_lower_bound(
+                &Array(Optional(Adt("Mammals".to_string()).into()).into()),
+                &Array(Optional(Adt("Dog".to_string()).into()).into())
             ),
-            Type::Array(Box::new(Type::Optional(Box::new(Type::Adt(
-                "Dog".to_string()
-            )))))
+            Array(Optional(Adt("Dog".to_string()).into()).into())
         );
 
         // Map with ADT keys and function values
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Map(
-                    Box::new(Type::Adt("Dog".to_string())),
-                    Box::new(Type::Closure(
-                        Box::new(Type::Adt("Car".to_string())),
-                        Box::new(Type::Adt("Boat".to_string()))
-                    ))
+            reg.greatest_lower_bound(
+                &Map(
+                    Adt("Dog".to_string()).into(),
+                    Closure(
+                        Adt("Car".to_string()).into(),
+                        Adt("Boat".to_string()).into()
+                    )
+                    .into()
                 ),
-                &Type::Map(
-                    Box::new(Type::Adt("Animals".to_string())),
-                    Box::new(Type::Closure(
-                        Box::new(Type::Adt("LandVehicles".to_string())),
-                        Box::new(Type::Adt("WaterVehicles".to_string()))
-                    ))
+                &Map(
+                    Adt("Animals".to_string()).into(),
+                    Closure(
+                        Adt("LandVehicles".to_string()).into(),
+                        Adt("WaterVehicles".to_string()).into()
+                    )
+                    .into()
                 )
             ),
-            Type::Map(
-                Box::new(Type::Adt("Animals".to_string())), // LUB of keys
-                Box::new(Type::Closure(
-                    Box::new(Type::Adt("LandVehicles".to_string())), // LUB of function parameters
-                    Box::new(Type::Adt("Boat".to_string()))          // GLB of function returns
-                ))
+            Map(
+                Adt("Animals".to_string()).into(), // LUB of keys
+                Closure(
+                    Adt("LandVehicles".to_string()).into(), // LUB of function parameters
+                    Adt("Boat".to_string()).into()          // GLB of function returns
+                )
+                .into()
             )
         );
 
         // Optional Stored Tuple of ADTs
         assert_eq!(
-            registry.greatest_lower_bound(
-                &Type::Optional(Box::new(Type::Stored(Box::new(Type::Tuple(vec![
-                    Type::Adt("Mammals".to_string()),
-                    Type::Adt("LandVehicles".to_string())
-                ]))))),
-                &Type::Optional(Box::new(Type::Stored(Box::new(Type::Tuple(vec![
-                    Type::Adt("Dog".to_string()),
-                    Type::Adt("Car".to_string())
-                ])))))
+            reg.greatest_lower_bound(
+                &Optional(
+                    Stored(
+                        Tuple(vec![
+                            Adt("Mammals".to_string()).into(),
+                            Adt("LandVehicles".to_string()).into()
+                        ])
+                        .into()
+                    )
+                    .into()
+                ),
+                &Optional(
+                    Stored(
+                        Tuple(vec![
+                            Adt("Dog".to_string()).into(),
+                            Adt("Car".to_string()).into()
+                        ])
+                        .into()
+                    )
+                    .into()
+                )
             ),
-            Type::Optional(Box::new(Type::Stored(Box::new(Type::Tuple(vec![
-                Type::Adt("Dog".to_string()),
-                Type::Adt("Car".to_string())
-            ])))))
+            Optional(
+                Stored(
+                    Tuple(vec![
+                        Adt("Dog".to_string()).into(),
+                        Adt("Car".to_string()).into()
+                    ])
+                    .into()
+                )
+                .into()
+            )
         );
     }
 }

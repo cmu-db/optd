@@ -14,11 +14,10 @@ use std::ops::{Deref, Range};
 ///
 /// Used to connect AST nodes with their original location in the source code,
 /// enabling accurate error reporting.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Span {
     /// The source file path or identifier
     pub src_file: String,
-
     /// The range of character positions (start, end) in the source file
     pub range: (usize, usize),
 }
@@ -37,12 +36,11 @@ impl Span {
 ///
 /// This type enriches AST nodes with location information, which is essential
 /// for providing meaningful error messages during compilation.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Spanned<T> {
-    /// The wrapped value
+    /// The wrapped value.
     pub value: Box<T>,
-
-    /// The source location of the value
+    /// The source location of the value.
     pub span: Span,
 }
 
@@ -56,10 +54,50 @@ impl<T> Spanned<T> {
     }
 }
 
+/// A value that may or may not have span information associated with it.
+///
+/// OptionalSpanned allows for attaching source location information to values
+/// when available, while still allowing values to exist without spans when
+/// they're not needed or not available.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct OptionalSpanned<T> {
+    /// The wrapped value.
+    pub value: Box<T>,
+    /// Optional source location of the value.
+    pub span: Option<Span>,
+}
+
+impl<T> OptionalSpanned<T> {
+    /// Creates a new optionally spanned value with span information.
+    pub fn spanned(value: T, span: Span) -> Self {
+        Self {
+            value: Box::new(value),
+            span: Some(span),
+        }
+    }
+
+    /// Creates a new optionally spanned value without span information.
+    pub fn unspanned(value: T) -> Self {
+        Self {
+            value: Box::new(value),
+            span: None,
+        }
+    }
+}
+
 impl<T> Deref for Spanned<T> {
     type Target = T;
 
     /// Dereferences the spanned value to access the underlying value.
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl<T> Deref for OptionalSpanned<T> {
+    type Target = T;
+
+    /// Dereferences the optionally spanned value to access the underlying value.
     fn deref(&self) -> &Self::Target {
         &self.value
     }
@@ -74,18 +112,22 @@ impl fmt::Debug for Span {
 impl chumsky::Span for Span {
     type Context = String;
     type Offset = usize;
+
     fn new(src_file: String, range: Range<usize>) -> Self {
         Self {
             src_file,
             range: (range.start, range.end),
         }
     }
+
     fn context(&self) -> String {
         self.src_file.clone()
     }
+
     fn start(&self) -> Self::Offset {
         self.range.0
     }
+
     fn end(&self) -> Self::Offset {
         self.range.1
     }
@@ -93,12 +135,15 @@ impl chumsky::Span for Span {
 
 impl ariadne::Span for Span {
     type SourceId = String;
+
     fn source(&self) -> &String {
         &self.src_file
     }
+
     fn start(&self) -> usize {
         self.range.0
     }
+
     fn end(&self) -> usize {
         self.range.1
     }

@@ -6,7 +6,7 @@
 use super::ASTConverter;
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::Identifier;
-use crate::dsl::analyzer::types::registry::Type;
+use crate::dsl::analyzer::types::registry::{Type, TypeKind};
 use crate::dsl::parser::ast::Type as AstType;
 use crate::dsl::utils::span::Spanned;
 use std::collections::HashSet;
@@ -34,9 +34,10 @@ impl ASTConverter {
         ast_type: &Spanned<AstType>,
         generics: &HashSet<Identifier>,
     ) -> Result<Type, Box<AnalyzerErrorKind>> {
-        use Type::*;
+        use TypeKind::*;
 
-        let hir_type = match &*ast_type.value {
+        let span = ast_type.span.clone();
+        let kind = match &*ast_type.value {
             AstType::Int64 => I64,
             AstType::String => String,
             AstType::Bool => Bool,
@@ -83,7 +84,7 @@ impl ASTConverter {
             AstType::Unknown => self.registry.new_unknown(),
         };
 
-        Ok(hir_type)
+        Ok(Type::spanned(kind, span))
     }
 }
 
@@ -114,12 +115,12 @@ mod types_tests {
     fn test_convert_primitive_types() {
         // Test each primitive type
         let test_cases = vec![
-            (AstType::Int64, Type::I64),
-            (AstType::String, Type::String),
-            (AstType::Bool, Type::Bool),
-            (AstType::Float64, Type::F64),
-            (AstType::Unit, Type::Unit),
-            (AstType::Unknown, Type::Unknown(0)),
+            (AstType::Int64, TypeKind::I64),
+            (AstType::String, TypeKind::String),
+            (AstType::Bool, TypeKind::Bool),
+            (AstType::Float64, TypeKind::F64),
+            (AstType::Unit, TypeKind::Unit),
+            (AstType::Unknown, TypeKind::Unknown(0)),
         ];
 
         let generics = HashSet::new();
@@ -129,7 +130,7 @@ mod types_tests {
             let result = converter
                 .convert_type(&spanned(ast_type), &generics)
                 .expect("Primitive type conversion should succeed");
-            assert_eq!(result, expected_type);
+            assert_eq!(*result.value, expected_type);
         }
     }
 
@@ -147,8 +148,8 @@ mod types_tests {
         let result = converter
             .convert_type(&spanned(array_type), &generics)
             .expect("Array type conversion should succeed");
-        match result {
-            Type::Array(elem_type) => assert_eq!(*elem_type, Type::I64),
+        match &*result.value {
+            TypeKind::Array(elem_type) => assert_eq!(*elem_type.value, TypeKind::I64),
             _ => panic!("Expected Array type"),
         }
 
@@ -159,10 +160,10 @@ mod types_tests {
         let result = converter
             .convert_type(&spanned(closure_type), &generics)
             .expect("Closure type conversion should succeed");
-        match result {
-            Type::Closure(param, ret) => {
-                assert_eq!(*param, Type::I64);
-                assert_eq!(*ret, Type::Bool);
+        match &*result.value {
+            TypeKind::Closure(param, ret) => {
+                assert_eq!(*param.value, TypeKind::I64);
+                assert_eq!(*ret.value, TypeKind::Bool);
             }
             _ => panic!("Expected Closure type"),
         }
@@ -174,10 +175,10 @@ mod types_tests {
         let result = converter
             .convert_type(&spanned(map_type), &generics)
             .expect("Map type conversion should succeed");
-        match result {
-            Type::Map(key, value) => {
-                assert_eq!(*key, Type::String);
-                assert_eq!(*value, Type::Adt("TestType".to_string()));
+        match &*result.value {
+            TypeKind::Map(key, val) => {
+                assert_eq!(*key.value, TypeKind::String);
+                assert_eq!(*val.value, TypeKind::Adt("TestType".to_string()));
             }
             _ => panic!("Expected Map type"),
         }
@@ -198,8 +199,8 @@ mod types_tests {
         let result = converter
             .convert_type(&spanned(questioned_type), &generics)
             .expect("Optional type conversion should succeed");
-        match result {
-            Type::Optional(inner) => assert_eq!(*inner, Type::I64),
+        match &*result.value {
+            TypeKind::Optional(inner) => assert_eq!(*inner.value, TypeKind::I64),
             _ => panic!("Expected Optional type"),
         }
 
@@ -209,8 +210,8 @@ mod types_tests {
         let result = converter
             .convert_type(&spanned(starred_type), &generics)
             .expect("Stored type conversion should succeed");
-        match result {
-            Type::Stored(inner) => assert_eq!(*inner, Type::I64),
+        match &*result.value {
+            TypeKind::Stored(inner) => assert_eq!(*inner.value, TypeKind::I64),
             _ => panic!("Expected Stored type"),
         }
 
@@ -220,8 +221,8 @@ mod types_tests {
         let result = converter
             .convert_type(&spanned(dollared_type), &generics)
             .expect("Costed type conversion should succeed");
-        match result {
-            Type::Costed(inner) => assert_eq!(*inner, Type::I64),
+        match &*result.value {
+            TypeKind::Costed(inner) => assert_eq!(*inner.value, TypeKind::I64),
             _ => panic!("Expected Costed type"),
         }
 
@@ -231,8 +232,10 @@ mod types_tests {
         let result = converter
             .convert_type(&spanned(starred_type), &generics)
             .expect("Stored type with identifier should succeed");
-        match result {
-            Type::Stored(inner) => assert_eq!(*inner, Type::Adt("TestType".to_string())),
+        match &*result.value {
+            TypeKind::Stored(inner) => {
+                assert_eq!(*inner.value, TypeKind::Adt("TestType".to_string()))
+            }
             _ => panic!("Expected Stored type"),
         }
     }
@@ -252,8 +255,8 @@ mod types_tests {
         let result = converter
             .convert_type(&spanned(adt_type), &generics)
             .expect("Registered ADT type conversion should succeed");
-        match result {
-            Type::Adt(name) => assert_eq!(name, "MyType"),
+        match &*result.value {
+            TypeKind::Adt(name) => assert_eq!(name, "MyType"),
             _ => panic!("Expected Adt type"),
         }
 
@@ -269,8 +272,8 @@ mod types_tests {
         let result = converter
             .convert_type(&spanned(generic_type), &generics)
             .expect("Generic type conversion should succeed");
-        match result {
-            Type::Generic(name) => assert_eq!(name, "T"),
+        match &*result.value {
+            TypeKind::Generic(name) => assert_eq!(name, "T"),
             _ => panic!("Expected Generic type"),
         }
     }

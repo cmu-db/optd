@@ -1,24 +1,16 @@
-use crate::dsl::analyzer::hir::Identifier;
-
 use super::registry::{Type, TypeRegistry};
+use crate::dsl::analyzer::{hir::Identifier, types::registry::TypeKind};
 use std::collections::HashSet;
 
-impl TypeRegistry {
-    /// This is a convenience wrapper around `is_subtype_infer` that doesn't require
-    /// tracking changes to unknown types.
-    ///
-    /// # Arguments
-    ///
-    /// * `child` - The potential subtype.
-    /// * `parent` - The potential supertype.
-    ///
-    /// # Returns
-    ///
-    /// `true` if `child` is a subtype of `parent`, `false` otherwise.
-    pub fn is_subtype(&mut self, child: &Type, parent: &Type) -> bool {
-        self.is_subtype_infer(child, parent, &mut false)
-    }
+/// Errors when enforcing subtyping constraints.
+pub(super) enum EnforceError {
+    /// Cannot bump LUB `Unknown` RHS to left LHS.
+    InvalidMerge(Type, Type),
+    /// Left is not a subtype of right.
+    InvalidSubtype(Type, Type),
+}
 
+impl TypeRegistry {
     /// Checks if a type is a subtype of another type.
     ///
     /// This method determines if `child` is a subtype of `parent` according to
@@ -48,125 +40,124 @@ impl TypeRegistry {
     /// # Note
     ///
     /// If no unknown types are involved, this behaves as a standard subtype check.
-    pub fn is_subtype_infer(&mut self, child: &Type, parent: &Type, bumped: &mut bool) -> bool {
-        let mut result;
-        let mut local_bumped;
+    pub(super) fn enforce_subtype(
+        &mut self,
+        child: &Type,
+        parent: &Type,
+    ) -> Result<bool, EnforceError> {
+        let mut bumped = false;
 
         // Continue checking until we reach stability (no more type updates).
         // Stop if we've reached a stable state (no more updates) or got a negative result.
         loop {
-            local_bumped = false;
-            result =
-                self.is_subtype_infer_inner(child, parent, &mut local_bumped, &mut HashSet::new());
-            *bumped |= local_bumped;
+            let local_bumped = self.enforce_subtype_inner(child, parent, &mut HashSet::new())?;
+            bumped |= local_bumped;
 
-            if !local_bumped || !result {
+            if !local_bumped {
                 break;
             }
         }
 
-        result
+        Ok(bumped)
     }
 
     /// Inner implementation of is_subtype_infer with memoization for cycle detection.
     /// Cycles can occur in the type hierarchy with recursive ADTs and EqHash
     /// checks ADTs recursively deep.
-    fn is_subtype_infer_inner(
+    fn enforce_subtype_inner(
         &mut self,
         child: &Type,
         parent: &Type,
-        bumped: &mut bool,
         memo: &mut HashSet<(Type, Type)>,
-    ) -> bool {
-        use Type::*;
+    ) -> Result<bool, EnforceError> {
+        use EnforceError::*;
+        use TypeKind::*;
 
-        // If we've already visited the pair (child, parent), return true to break cycles
+        // If we've already visited the pair (child, parent).
         if !memo.insert((child.clone(), parent.clone())) {
-            return true;
+            return Ok(false);
         }
 
-        if child == parent {
-            return true;
+        if child.value == parent.value {
+            return Ok(false);
         }
 
-        match (child, parent) {
+        match (&*child.value, &*parent.value) {
             // Universe is the top type - everything is a subtype of Universe.
-            (_, Universe) => true,
+            (_, Universe) => Ok(false),
 
             // Nothing is the bottom type - it is a subtype of everything.
-            (Nothing, _) => true,
+            (Nothing, _) => Ok(false),
 
             // If parent is unknown, bump up to LUB of child.
             (_, Unknown(id)) => {
                 let parent = self.resolve_type(parent);
                 let lub = self.least_upper_bound(child, &parent);
 
-                if lub != parent {
+                if matches!(lub, Universe) {
+                    Err(InvalidMerge(child.clone(), parent))
+                } else if lub != *parent {
                     self.resolved_unknown.insert(*id, lub);
-                    *bumped = true;
+                    Ok(true)
+                } else {
+                    Ok(false)
                 }
-
-                true
             }
 
             // If child is unknown, check if its resolved type is a subtype of parent.
             (Unknown(_), _) => {
                 let child = self.resolve_type(child);
-                self.is_subtype_infer_inner(&child, parent, bumped, memo)
+                self.enforce_subtype_inner(&child, parent, memo)
             }
 
             // Generics only match if they have strictly the same name.
             // Bounded generics are not yet supported.
-            (Generic(gen1), Generic(gen2)) if gen1 == gen2 => true,
+            (Generic(gen1), Generic(gen2)) if gen1 == gen2 => Ok(false),
 
             // Stored and Costed type handling.
             (Stored(child_inner), Stored(parent_inner)) => {
-                self.is_subtype_infer_inner(child_inner, parent_inner, bumped, memo)
+                self.enforce_subtype_inner(child_inner, parent_inner, memo)
             }
             (Costed(child_inner), Costed(parent_inner)) => {
-                self.is_subtype_infer_inner(child_inner, parent_inner, bumped, memo)
+                self.enforce_subtype_inner(child_inner, parent_inner, memo)
             }
             (Costed(child_inner), Stored(parent_inner)) => {
                 // Costed(A) is a subtype of Stored(A).
-                self.is_subtype_infer_inner(child_inner, parent_inner, bumped, memo)
+                self.enforce_subtype_inner(child_inner, parent_inner, memo)
             }
-            (Costed(child_inner), parent_inner) => {
+            (Costed(child_inner), _) => {
                 // Costed(A) is a subtype of A.
-                self.is_subtype_infer_inner(child_inner, parent_inner, bumped, memo)
+                self.enforce_subtype_inner(child_inner, parent, memo)
             }
-            (Stored(child_inner), parent_inner) => {
+            (Stored(child_inner), _) => {
                 // Stored(A) is a subtype of A.
-                self.is_subtype_infer_inner(child_inner, parent_inner, bumped, memo)
+                self.enforce_subtype_inner(child_inner, parent, memo)
             }
 
             // Check transitive inheritance for ADTs.
-            (Adt(child_name), Adt(parent_name)) => self.is_adt_child(child_name, parent_name),
+            (Adt(child_name), Adt(parent_name)) => {
+                if self.inherits_adt(child_name, parent_name) {
+                    Ok(false)
+                } else {
+                    Err(InvalidSubtype(child.clone(), parent.clone()))
+                }
+            }
 
             // Array covariance: Array[T] <: Array[U] if T <: U.
             (Array(child_elem), Array(parent_elem)) => {
-                self.is_subtype_infer_inner(child_elem, parent_elem, bumped, memo)
+                self.enforce_subtype_inner(child_elem, parent_elem, memo)
             }
 
             // Map as a subtype of Function: Map(A, B) <: Closure(A, B?).
             (Map(key_type, val_type), Closure(param_type, ret_type)) => {
-                self.is_subtype_infer_inner(param_type, key_type, bumped, memo)
-                    && self.is_subtype_infer_inner(
-                        &Optional(val_type.clone()),
-                        ret_type,
-                        bumped,
-                        memo,
-                    )
+                let optional_val = Optional(val_type.clone()).into();
+                Ok(self.enforce_subtype_inner(param_type, key_type, memo)?
+                    || self.enforce_subtype_inner(&optional_val, ret_type, memo)?)
             }
 
             // Array as a subtype of Function: Array(B) <: Closure(I64, B?).
-            (Array(elem_type), Closure(param_type, ret_type)) => {
-                matches!(&**param_type, I64)
-                    && self.is_subtype_infer_inner(
-                        &Optional(elem_type.clone()),
-                        ret_type,
-                        bumped,
-                        memo,
-                    )
+            (Array(elem_type), Closure(param_type, ret_type)) if matches!(&**param_type, I64) => {
+                self.enforce_subtype_inner(&Optional(elem_type.clone()).into(), ret_type, memo)
             }
 
             // Tuple covariance: (T1, T2, ...) <: (U1, U2, ...) if T1 <: U1, T2 <: U2, ...
@@ -176,77 +167,80 @@ impl TypeRegistry {
                 child_types
                     .iter()
                     .zip(parent_types.iter())
-                    .all(|(c, p)| self.is_subtype_infer_inner(c, p, bumped, memo))
+                    .try_fold(false, |acc, (c, p)| {
+                        Ok(acc || self.enforce_subtype_inner(c, p, memo)?)
+                    })
             }
 
             // Map covariance on values, contravariance on keys:
             // Map[K1, V1] <: Map[K2, V2] if K2 <: K1 and V1 <: V2.
-            (Map(child_key, child_val), Map(parent_key, parent_val)) => {
-                self.is_subtype_infer_inner(parent_key, child_key, bumped, memo)
-                    && self.is_subtype_infer_inner(child_val, parent_val, bumped, memo)
-            }
+            (Map(child_key, child_val), Map(parent_key, parent_val)) => Ok(self
+                .enforce_subtype_inner(parent_key, child_key, memo)?
+                || self.enforce_subtype_inner(child_val, parent_val, memo)?),
 
             // Function contravariance on args, covariance on return type:
             // (T1 -> U1) <: (T2 -> U2) if T2 <: T1 and U1 <: U2.
-            (Closure(child_param, child_ret), Closure(parent_param, parent_ret)) => {
-                self.is_subtype_infer_inner(parent_param, child_param, bumped, memo)
-                    && self.is_subtype_infer_inner(child_ret, parent_ret, bumped, memo)
-            }
+            (Closure(child_param, child_ret), Closure(parent_param, parent_ret)) => Ok(self
+                .enforce_subtype_inner(parent_param, child_param, memo)?
+                || self.enforce_subtype_inner(child_ret, parent_ret, memo)?),
 
             // Optional type covariance: Optional[T] <: Optional[U] if T <: U.
             (Optional(child_ty), Optional(parent_ty)) => {
-                self.is_subtype_infer_inner(child_ty, parent_ty, bumped, memo)
+                self.enforce_subtype_inner(child_ty, parent_ty, memo)
             }
-            // None <: Optional[Universe].
-            (None, Optional(_)) => true,
+            // None <: Optional[Nothing].
+            (None, Optional(_)) => Ok(false),
             // Likewise, T <: Optional[T].
-            (_, Optional(parent_inner)) => {
-                self.is_subtype_infer_inner(child, parent_inner, bumped, memo)
-            }
+            (_, Optional(parent_inner)) => self.enforce_subtype_inner(child, parent_inner, memo),
 
             // Native trait subtyping relationships
 
             // Concat trait implementations.
-            (String, Concat) => true,
-            (Array(_), Concat) => true,
-            (Map(_, _), Concat) => true,
+            (String, Concat) => Ok(false),
+            (Array(_), Concat) => Ok(false),
+            (Map(_, _), Concat) => Ok(false),
 
             // EqHash trait implementations.
-            (I64, EqHash) => true,
-            (String, EqHash) => true,
-            (Bool, EqHash) => true,
-            (Unit, EqHash) => true,
-            (None, EqHash) => true,
-            (Optional(inner), EqHash) => self.is_subtype_infer_inner(inner, &EqHash, bumped, memo),
-            (Tuple(types), EqHash) => types
-                .iter()
-                .all(|t| self.is_subtype_infer_inner(t, &EqHash, bumped, memo)),
+            (I64, EqHash) => Ok(false),
+            (String, EqHash) => Ok(false),
+            (Bool, EqHash) => Ok(false),
+            (Unit, EqHash) => Ok(false),
+            (None, EqHash) => Ok(false),
+            (Optional(inner), EqHash) => self.enforce_subtype_inner(inner, &EqHash.into(), memo),
+            (Tuple(types), EqHash) => types.iter().try_fold(false, |acc, t| {
+                Ok(acc || self.enforce_subtype_inner(t, &EqHash.into(), memo)?)
+            }),
             (Adt(name), EqHash) => {
-                // Product ADTs with all fields satisfying EqHash also satisfy EqHash.
                 if let Some(fields) = self.product_fields.get(name).cloned() {
-                    fields.iter().all(|field| {
+                    // Product ADTs with all fields satisfying EqHash also satisfy EqHash.
+                    fields.iter().try_fold(false, |acc, field| {
                         let ty = self.get_product_field_type(name, &field.name).unwrap();
-                        self.is_subtype_infer_inner(&ty, &EqHash, bumped, memo)
+                        Ok(acc || self.enforce_subtype_inner(&ty, &EqHash.into(), memo)?)
                     })
                 } else if let Some(variants) = self.subtypes.get(name).cloned() {
                     // Sum types (enums) satisfy EqHash if all variants satisfy EqHash.
-                    variants.iter().all(|variant| {
-                        self.is_subtype_infer_inner(&Adt(variant.clone()), &EqHash, bumped, memo)
+                    variants.iter().try_fold(false, |acc, variant| {
+                        Ok(acc
+                            || self.enforce_subtype_inner(
+                                &Adt(variant.clone()).into(),
+                                &EqHash.into(),
+                                memo,
+                            )?)
                     })
                 } else {
-                    false
+                    Err(InvalidSubtype(child.clone(), parent.clone()))
                 }
             }
 
             // Arithmetic trait implementations.
-            (I64, Arithmetic) => true,
-            (F64, Arithmetic) => true,
+            (I64, Arithmetic) => Ok(false),
+            (F64, Arithmetic) => Ok(false),
 
-            _ => false,
+            _ => Err(InvalidSubtype(child.clone(), parent.clone())),
         }
     }
 
-    pub fn is_adt_child(&self, child_name: &Identifier, parent_name: &Identifier) -> bool {
+    pub(crate) fn inherits_adt(&self, child_name: &Identifier, parent_name: &Identifier) -> bool {
         if child_name == parent_name {
             return true;
         }
@@ -256,12 +250,12 @@ impl TypeRegistry {
             .cloned()
             .unwrap()
             .iter()
-            .any(|subtype_child_name| self.is_adt_child(child_name, subtype_child_name))
+            .any(|subtype_child_name| self.inherits_adt(child_name, subtype_child_name))
     }
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use super::*;
     use crate::dsl::{
         analyzer::types::registry::type_registry_tests::{
@@ -269,22 +263,29 @@ pub mod tests {
         },
         parser::ast::Type as AstType,
     };
+    use TypeKind::*;
 
     #[test]
     fn test_stored_and_costed_types() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Test Stored type as a subtype of the inner type
-        assert!(registry.is_subtype(&Type::Stored(Box::new(Type::I64)), &Type::I64));
+        assert!(
+            reg.enforce_subtype(&Stored(I64.into()).into(), &I64.into())
+                .is_ok()
+        );
 
         // Test Costed type as a subtype of Stored type
-        assert!(registry.is_subtype(
-            &Type::Costed(Box::new(Type::I64)),
-            &Type::Stored(Box::new(Type::I64))
-        ));
+        assert!(
+            reg.enforce_subtype(&Costed(I64.into()).into(), &Stored(I64.into()).into())
+                .is_ok()
+        );
 
         // Test Costed type as a subtype of the inner type (transitivity)
-        assert!(registry.is_subtype(&Type::Costed(Box::new(Type::I64)), &Type::I64));
+        assert!(
+            reg.enforce_subtype(&Costed(I64.into()).into(), &I64.into())
+                .is_ok()
+        );
 
         // Test Stored type covariance
         let mut adts_registry = TypeRegistry::default();
@@ -293,92 +294,118 @@ pub mod tests {
         let animals_enum = create_sum_adt("Animals", vec![animal, dog]);
         adts_registry.register_adt(&animals_enum).unwrap();
 
-        assert!(adts_registry.is_subtype(
-            &Type::Stored(Box::new(Type::Adt("Dog".to_string()))),
-            &Type::Stored(Box::new(Type::Adt("Animals".to_string())))
-        ));
+        assert!(
+            adts_registry
+                .enforce_subtype(
+                    &Stored(Adt("Dog".to_string()).into()).into(),
+                    &Stored(Adt("Animals".to_string()).into()).into()
+                )
+                .is_ok()
+        );
 
         // Test Costed type covariance
-        assert!(adts_registry.is_subtype(
-            &Type::Costed(Box::new(Type::Adt("Dog".to_string()))),
-            &Type::Costed(Box::new(Type::Adt("Animals".to_string())))
-        ));
+        assert!(
+            adts_registry
+                .enforce_subtype(
+                    &Costed(Adt("Dog".to_string()).into()).into(),
+                    &Costed(Adt("Animals".to_string()).into()).into()
+                )
+                .is_ok()
+        );
 
         // Test the inheritance relationship: Costed(Dog) <: Stored(Animals)
-        assert!(adts_registry.is_subtype(
-            &Type::Costed(Box::new(Type::Adt("Dog".to_string()))),
-            &Type::Stored(Box::new(Type::Adt("Animals".to_string())))
-        ));
+        assert!(
+            adts_registry
+                .enforce_subtype(
+                    &Costed(Adt("Dog".to_string()).into()).into(),
+                    &Stored(Adt("Animals".to_string()).into()).into()
+                )
+                .is_ok()
+        );
 
         // Test nested Stored/Costed types
-        assert!(adts_registry.is_subtype(
-            &Type::Stored(Box::new(Type::Costed(Box::new(Type::Adt(
-                "Dog".to_string()
-            ))))),
-            &Type::Stored(Box::new(Type::Adt("Animals".to_string())))
-        ));
+        assert!(
+            adts_registry
+                .enforce_subtype(
+                    &Stored(Costed(Adt("Dog".to_string()).into()).into()).into(),
+                    &Stored(Adt("Animals".to_string()).into()).into()
+                )
+                .is_ok()
+        );
 
         // Test with Array of Stored/Costed types
-        assert!(adts_registry.is_subtype(
-            &Type::Array(Box::new(Type::Costed(Box::new(Type::Adt(
-                "Dog".to_string()
-            ))))),
-            &Type::Array(Box::new(Type::Stored(Box::new(Type::Adt(
-                "Animals".to_string()
-            )))))
-        ));
+        assert!(
+            adts_registry
+                .enforce_subtype(
+                    &Array(Costed(Adt("Dog".to_string()).into()).into()).into(),
+                    &Array(Stored(Adt("Animals".to_string()).into()).into()).into()
+                )
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_primitive_type_equality() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Same primitive types should be subtypes of each other
-        assert!(registry.is_subtype(&Type::I64, &Type::I64));
-        assert!(registry.is_subtype(&Type::Bool, &Type::Bool));
-        assert!(registry.is_subtype(&Type::String, &Type::String));
-        assert!(registry.is_subtype(&Type::F64, &Type::F64));
-        assert!(registry.is_subtype(&Type::Unit, &Type::Unit));
-        assert!(registry.is_subtype(&Type::Universe, &Type::Universe));
+        assert!(reg.enforce_subtype(&I64.into(), &I64.into()).is_ok());
+        assert!(reg.enforce_subtype(&Bool.into(), &Bool.into()).is_ok());
+        assert!(reg.enforce_subtype(&String.into(), &String.into()).is_ok());
+        assert!(reg.enforce_subtype(&F64.into(), &F64.into()).is_ok());
+        assert!(reg.enforce_subtype(&Unit.into(), &Unit.into()).is_ok());
+        assert!(
+            reg.enforce_subtype(&Universe.into(), &Universe.into())
+                .is_ok()
+        );
 
         // Different primitive types should not be subtypes
-        assert!(!registry.is_subtype(&Type::I64, &Type::Bool));
-        assert!(!registry.is_subtype(&Type::String, &Type::I64));
-        assert!(!registry.is_subtype(&Type::F64, &Type::I64));
-        assert!(!registry.is_subtype(&Type::Unit, &Type::Bool));
+        assert!(reg.enforce_subtype(&I64.into(), &Bool.into()).is_err());
+        assert!(reg.enforce_subtype(&String.into(), &I64.into()).is_err());
+        assert!(reg.enforce_subtype(&F64.into(), &I64.into()).is_err());
+        assert!(reg.enforce_subtype(&Unit.into(), &Bool.into()).is_err());
 
         // All types should be subtypes of Universe
-        assert!(registry.is_subtype(&Type::I64, &Type::Universe));
-        assert!(registry.is_subtype(&Type::Bool, &Type::Universe));
-        assert!(registry.is_subtype(&Type::String, &Type::Universe));
-        assert!(registry.is_subtype(&Type::F64, &Type::Universe));
-        assert!(registry.is_subtype(&Type::Unit, &Type::Universe));
+        assert!(reg.enforce_subtype(&I64.into(), &Universe.into()).is_ok());
+        assert!(reg.enforce_subtype(&Bool.into(), &Universe.into()).is_ok());
+        assert!(
+            reg.enforce_subtype(&String.into(), &Universe.into())
+                .is_ok()
+        );
+        assert!(reg.enforce_subtype(&F64.into(), &Universe.into()).is_ok());
+        assert!(reg.enforce_subtype(&Unit.into(), &Universe.into()).is_ok());
     }
 
     #[test]
     fn test_array_subtyping() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Same type arrays
-        assert!(registry.is_subtype(
-            &Type::Array(Box::new(Type::I64)),
-            &Type::Array(Box::new(Type::I64))
-        ));
+        assert!(
+            reg.enforce_subtype(&Array(I64.into()).into(), &Array(I64.into()).into())
+                .is_ok()
+        );
 
         // Different type arrays
-        assert!(!registry.is_subtype(
-            &Type::Array(Box::new(Type::I64)),
-            &Type::Array(Box::new(Type::Bool))
-        ));
+        assert!(
+            reg.enforce_subtype(&Array(I64.into()).into(), &Array(Bool.into()).into())
+                .is_err()
+        );
 
         // Test nested arrays
-        assert!(registry.is_subtype(
-            &Type::Array(Box::new(Type::Array(Box::new(Type::I64)))),
-            &Type::Array(Box::new(Type::Array(Box::new(Type::I64))))
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Array(Array(I64.into()).into()).into(),
+                &Array(Array(I64.into()).into()).into()
+            )
+            .is_ok()
+        );
 
         // Array of any type is subtype of Universe
-        assert!(registry.is_subtype(&Type::Array(Box::new(Type::I64)), &Type::Universe));
+        assert!(
+            reg.enforce_subtype(&Array(I64.into()).into(), &Universe.into())
+                .is_ok()
+        );
 
         // Array with inheritance (will be tested more with ADTs)
         let mut adts_registry = TypeRegistry::default();
@@ -387,75 +414,117 @@ pub mod tests {
         let vehicles_enum = create_sum_adt("Vehicles", vec![vehicle, car]);
         adts_registry.register_adt(&vehicles_enum).unwrap();
 
-        assert!(adts_registry.is_subtype(
-            &Type::Array(Box::new(Type::Adt("Car".to_string()))),
-            &Type::Array(Box::new(Type::Adt("Vehicles".to_string())))
-        ));
+        assert!(
+            adts_registry
+                .enforce_subtype(
+                    &Array(Adt("Car".to_string()).into()).into(),
+                    &Array(Adt("Vehicles".to_string()).into()).into()
+                )
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_tuple_subtyping() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Same type tuples
-        assert!(registry.is_subtype(
-            &Type::Tuple(vec![Type::I64, Type::Bool]),
-            &Type::Tuple(vec![Type::I64, Type::Bool])
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Tuple(vec![I64.into(), Bool.into()]).into(),
+                &Tuple(vec![I64.into(), Bool.into()]).into()
+            )
+            .is_ok()
+        );
 
         // Different type tuples
-        assert!(!registry.is_subtype(
-            &Type::Tuple(vec![Type::I64, Type::Bool]),
-            &Type::Tuple(vec![Type::Bool, Type::I64])
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Tuple(vec![I64.into(), Bool.into()]).into(),
+                &Tuple(vec![Bool.into(), I64.into()]).into()
+            )
+            .is_err()
+        );
 
         // Different length tuples
-        assert!(!registry.is_subtype(
-            &Type::Tuple(vec![Type::I64, Type::Bool]),
-            &Type::Tuple(vec![Type::I64, Type::Bool, Type::String])
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Tuple(vec![I64.into(), Bool.into()]).into(),
+                &Tuple(vec![I64.into(), Bool.into(), String.into()]).into()
+            )
+            .is_err()
+        );
 
         // Empty tuples
-        assert!(registry.is_subtype(&Type::Tuple(vec![]), &Type::Tuple(vec![])));
+        assert!(
+            reg.enforce_subtype(&Tuple(vec![]).into(), &Tuple(vec![]).into())
+                .is_ok()
+        );
 
         // All tuples are subtypes of Universe
-        assert!(registry.is_subtype(&Type::Tuple(vec![Type::I64, Type::Bool]), &Type::Universe));
+        assert!(
+            reg.enforce_subtype(
+                &Tuple(vec![I64.into(), Bool.into()]).into(),
+                &Universe.into()
+            )
+            .is_ok()
+        );
 
         // Nested tuples
-        assert!(registry.is_subtype(
-            &Type::Tuple(vec![Type::I64, Type::Tuple(vec![Type::Bool, Type::String])]),
-            &Type::Tuple(vec![Type::I64, Type::Tuple(vec![Type::Bool, Type::String])])
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Tuple(vec![
+                    I64.into(),
+                    Tuple(vec![Bool.into(), String.into()]).into()
+                ])
+                .into(),
+                &Tuple(vec![
+                    I64.into(),
+                    Tuple(vec![Bool.into(), String.into()]).into()
+                ])
+                .into()
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_map_subtyping() {
         // Setup basic registry
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Same type maps
-        assert!(registry.is_subtype(
-            &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
-            &Type::Map(Box::new(Type::String), Box::new(Type::I64))
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Map(String.into(), I64.into()).into(),
+                &Map(String.into(), I64.into()).into()
+            )
+            .is_ok()
+        );
 
         // Different key types
-        assert!(!registry.is_subtype(
-            &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
-            &Type::Map(Box::new(Type::I64), Box::new(Type::I64))
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Map(String.into(), I64.into()).into(),
+                &Map(I64.into(), I64.into()).into()
+            )
+            .is_err()
+        );
 
         // Different value types
-        assert!(!registry.is_subtype(
-            &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
-            &Type::Map(Box::new(Type::String), Box::new(Type::Bool))
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Map(String.into(), I64.into()).into(),
+                &Map(String.into(), Bool.into()).into()
+            )
+            .is_err()
+        );
 
         // All maps are subtypes of Universe
-        assert!(registry.is_subtype(
-            &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
-            &Type::Universe
-        ));
+        assert!(
+            reg.enforce_subtype(&Map(String.into(), I64.into()).into(), &Universe.into())
+                .is_ok()
+        );
 
         // Create a registry with ADTs to test variance
         let mut adts_registry = TypeRegistry::default();
@@ -466,52 +535,54 @@ pub mod tests {
 
         // Test contravariance of map keys:
         // Map(Animals, String) <: Map(Dog, String) because Dog <: Animals
-        assert!(adts_registry.is_subtype(
-            &Type::Map(
-                Box::new(Type::Adt("Animals".to_string())),
-                Box::new(Type::String)
-            ),
-            &Type::Map(
-                Box::new(Type::Adt("Dog".to_string())),
-                Box::new(Type::String)
-            )
-        ));
+        assert!(
+            adts_registry
+                .enforce_subtype(
+                    &Map(Adt("Animals".to_string()).into(), String.into()).into(),
+                    &Map(Adt("Dog".to_string()).into(), String.into()).into()
+                )
+                .is_ok()
+        );
 
         // Test covariance of map values:
         // Map(String, Dog) <: Map(String, Animals) because Dog <: Animals
-        assert!(adts_registry.is_subtype(
-            &Type::Map(
-                Box::new(Type::String),
-                Box::new(Type::Adt("Dog".to_string()))
-            ),
-            &Type::Map(
-                Box::new(Type::String),
-                Box::new(Type::Adt("Animals".to_string()))
-            )
-        ));
+        assert!(
+            adts_registry
+                .enforce_subtype(
+                    &Map(String.into(), Adt("Dog".to_string()).into()).into(),
+                    &Map(String.into(), Adt("Animals".to_string()).into()).into()
+                )
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_closure_subtyping() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Same function signatures
-        assert!(registry.is_subtype(
-            &Type::Closure(Box::new(Type::I64), Box::new(Type::Bool)),
-            &Type::Closure(Box::new(Type::I64), Box::new(Type::Bool))
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Closure(I64.into(), Bool.into()).into(),
+                &Closure(I64.into(), Bool.into()).into()
+            )
+            .is_ok()
+        );
 
         // Contravariant parameter types - narrower param type is not a subtype
-        assert!(!registry.is_subtype(
-            &Type::Closure(Box::new(Type::I64), Box::new(Type::Bool)),
-            &Type::Closure(Box::new(Type::F64), Box::new(Type::Bool))
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Closure(I64.into(), Bool.into()).into(),
+                &Closure(F64.into(), Bool.into()).into()
+            )
+            .is_err()
+        );
 
         // All closures are subtypes of Universe
-        assert!(registry.is_subtype(
-            &Type::Closure(Box::new(Type::I64), Box::new(Type::Bool)),
-            &Type::Universe
-        ));
+        assert!(
+            reg.enforce_subtype(&Closure(I64.into(), Bool.into()).into(), &Universe.into())
+                .is_ok()
+        );
 
         // Contravariant parameter types - broader param type is a subtype
         let mut adts_registry = TypeRegistry::default();
@@ -521,28 +592,30 @@ pub mod tests {
         adts_registry.register_adt(&animals_enum).unwrap();
 
         // (Animals -> Bool) <: (Dog -> Bool) because Dog <: Animals (contravariance)
-        assert!(adts_registry.is_subtype(
-            &Type::Closure(
-                Box::new(Type::Adt("Animals".to_string())),
-                Box::new(Type::Bool)
-            ),
-            &Type::Closure(Box::new(Type::Adt("Dog".to_string())), Box::new(Type::Bool))
-        ));
+        assert!(
+            adts_registry
+                .enforce_subtype(
+                    &Closure(Adt("Animals".to_string()).into(), Bool.into()).into(),
+                    &Closure(Adt("Dog".to_string()).into(), Bool.into()).into()
+                )
+                .is_ok()
+        );
 
         // Covariant return types
         // (Int64 -> Dog) <: (Int64 -> Animals) because Dog <: Animals
-        assert!(adts_registry.is_subtype(
-            &Type::Closure(Box::new(Type::I64), Box::new(Type::Adt("Dog".to_string()))),
-            &Type::Closure(
-                Box::new(Type::I64),
-                Box::new(Type::Adt("Animals".to_string()))
-            )
-        ));
+        assert!(
+            adts_registry
+                .enforce_subtype(
+                    &Closure(I64.into(), Adt("Dog".to_string()).into()).into(),
+                    &Closure(I64.into(), Adt("Animals".to_string()).into()).into()
+                )
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_adt_registration_and_subtyping() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Create a simple Shape hierarchy
         let shape = create_product_adt("Shape", vec![("area", AstType::Float64)]);
@@ -563,219 +636,345 @@ pub mod tests {
         let shapes_enum = create_sum_adt("Shapes", vec![shape, circle, rectangle]);
 
         // Register the ADT
-        registry.register_adt(&shapes_enum).unwrap();
+        reg.register_adt(&shapes_enum).unwrap();
 
         // Test subtypes relationship
-        assert!(registry.is_subtype(
-            &Type::Adt("Circle".to_string()),
-            &Type::Adt("Shapes".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Adt("Circle".to_string()).into(),
+                &Adt("Shapes".to_string()).into()
+            )
+            .is_ok()
+        );
 
-        assert!(registry.is_subtype(
-            &Type::Adt("Rectangle".to_string()),
-            &Type::Adt("Shapes".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Adt("Rectangle".to_string()).into(),
+                &Adt("Shapes".to_string()).into()
+            )
+            .is_ok()
+        );
 
-        assert!(registry.is_subtype(
-            &Type::Adt("Shape".to_string()),
-            &Type::Adt("Shapes".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Adt("Shape".to_string()).into(),
+                &Adt("Shapes".to_string()).into()
+            )
+            .is_ok()
+        );
 
         // Same type should be a subtype of itself
-        assert!(registry.is_subtype(
-            &Type::Adt("Shapes".to_string()),
-            &Type::Adt("Shapes".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Adt("Shapes".to_string()).into(),
+                &Adt("Shapes".to_string()).into()
+            )
+            .is_ok()
+        );
 
         // All ADTs are subtypes of Universe
-        assert!(registry.is_subtype(&Type::Adt("Shapes".to_string()), &Type::Universe));
+        assert!(
+            reg.enforce_subtype(&Adt("Shapes".to_string()).into(), &Universe.into())
+                .is_ok()
+        );
 
-        // Non-subtypes should return false
-        assert!(!registry.is_subtype(
-            &Type::Adt("Shapes".to_string()),
-            &Type::Adt("Circle".to_string())
-        ));
+        // Non-subtypes should return error
+        assert!(
+            reg.enforce_subtype(
+                &Adt("Shapes".to_string()).into(),
+                &Adt("Circle".to_string()).into()
+            )
+            .is_err()
+        );
 
-        assert!(!registry.is_subtype(
-            &Type::Adt("Circle".to_string()),
-            &Type::Adt("Rectangle".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Adt("Circle".to_string()).into(),
+                &Adt("Rectangle".to_string()).into()
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn test_universe_as_top_type() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Check that Universe is a supertype of all primitive types
-        assert!(registry.is_subtype(&Type::I64, &Type::Universe));
-        assert!(registry.is_subtype(&Type::String, &Type::Universe));
-        assert!(registry.is_subtype(&Type::Bool, &Type::Universe));
-        assert!(registry.is_subtype(&Type::F64, &Type::Universe));
-        assert!(registry.is_subtype(&Type::Unit, &Type::Universe));
+        assert!(reg.enforce_subtype(&I64.into(), &Universe.into()).is_ok());
+        assert!(
+            reg.enforce_subtype(&String.into(), &Universe.into())
+                .is_ok()
+        );
+        assert!(reg.enforce_subtype(&Bool.into(), &Universe.into()).is_ok());
+        assert!(reg.enforce_subtype(&F64.into(), &Universe.into()).is_ok());
+        assert!(reg.enforce_subtype(&Unit.into(), &Universe.into()).is_ok());
 
         // Check that Universe is a supertype of all complex types
-        assert!(registry.is_subtype(&Type::Array(Box::new(Type::I64)), &Type::Universe));
-        assert!(registry.is_subtype(&Type::Tuple(vec![Type::I64, Type::Bool]), &Type::Universe));
-        assert!(registry.is_subtype(
-            &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
-            &Type::Universe
-        ));
-        assert!(registry.is_subtype(
-            &Type::Closure(Box::new(Type::I64), Box::new(Type::Bool)),
-            &Type::Universe
-        ));
+        assert!(
+            reg.enforce_subtype(&Array(I64.into()).into(), &Universe.into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(
+                &Tuple(vec![I64.into(), Bool.into()]).into(),
+                &Universe.into()
+            )
+            .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Map(String.into(), I64.into()).into(), &Universe.into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Closure(I64.into(), Bool.into()).into(), &Universe.into())
+                .is_ok()
+        );
 
         // Check that Universe is a supertype of Stored and Costed types
-        assert!(registry.is_subtype(&Type::Stored(Box::new(Type::I64)), &Type::Universe));
-        assert!(registry.is_subtype(&Type::Costed(Box::new(Type::I64)), &Type::Universe));
+        assert!(
+            reg.enforce_subtype(&Stored(I64.into()).into(), &Universe.into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Costed(I64.into()).into(), &Universe.into())
+                .is_ok()
+        );
 
         // But Universe is not a subtype of any other type
-        assert!(!registry.is_subtype(&Type::Universe, &Type::I64));
-        assert!(!registry.is_subtype(&Type::Universe, &Type::String));
-        assert!(!registry.is_subtype(&Type::Universe, &Type::Array(Box::new(Type::I64))));
+        assert!(reg.enforce_subtype(&Universe.into(), &I64.into()).is_err());
+        assert!(
+            reg.enforce_subtype(&Universe.into(), &String.into())
+                .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&Universe.into(), &Array(I64.into()).into())
+                .is_err()
+        );
     }
 
     #[test]
     fn test_nothing_as_bottom_type() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Nothing is a subtype of all primitive types
-        assert!(registry.is_subtype(&Type::Nothing, &Type::I64));
-        assert!(registry.is_subtype(&Type::Nothing, &Type::String));
-        assert!(registry.is_subtype(&Type::Nothing, &Type::Bool));
-        assert!(registry.is_subtype(&Type::Nothing, &Type::F64));
-        assert!(registry.is_subtype(&Type::Nothing, &Type::Unit));
-        assert!(registry.is_subtype(&Type::Nothing, &Type::Universe));
+        assert!(reg.enforce_subtype(&Nothing.into(), &I64.into()).is_ok());
+        assert!(reg.enforce_subtype(&Nothing.into(), &String.into()).is_ok());
+        assert!(reg.enforce_subtype(&Nothing.into(), &Bool.into()).is_ok());
+        assert!(reg.enforce_subtype(&Nothing.into(), &F64.into()).is_ok());
+        assert!(reg.enforce_subtype(&Nothing.into(), &Unit.into()).is_ok());
+        assert!(
+            reg.enforce_subtype(&Nothing.into(), &Universe.into())
+                .is_ok()
+        );
 
         // Nothing is a subtype of complex types
-        assert!(registry.is_subtype(&Type::Nothing, &Type::Array(Box::new(Type::I64))));
-        assert!(registry.is_subtype(&Type::Nothing, &Type::Tuple(vec![Type::I64, Type::Bool])));
-        assert!(registry.is_subtype(
-            &Type::Nothing,
-            &Type::Closure(Box::new(Type::I64), Box::new(Type::Bool))
-        ));
+        assert!(
+            reg.enforce_subtype(&Nothing.into(), &Array(I64.into()).into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(
+                &Nothing.into(),
+                &Tuple(vec![I64.into(), Bool.into()]).into()
+            )
+            .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Nothing.into(), &Closure(I64.into(), Bool.into()).into())
+                .is_ok()
+        );
 
         // But no type is a subtype of Nothing (except Nothing itself)
-        assert!(!registry.is_subtype(&Type::I64, &Type::Nothing));
-        assert!(!registry.is_subtype(&Type::Bool, &Type::Nothing));
-        assert!(!registry.is_subtype(&Type::Universe, &Type::Nothing));
-        assert!(!registry.is_subtype(&Type::Array(Box::new(Type::I64)), &Type::Nothing));
+        assert!(reg.enforce_subtype(&I64.into(), &Nothing.into()).is_err());
+        assert!(reg.enforce_subtype(&Bool.into(), &Nothing.into()).is_err());
+        assert!(
+            reg.enforce_subtype(&Universe.into(), &Nothing.into())
+                .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&Array(I64.into()).into(), &Nothing.into())
+                .is_err()
+        );
     }
 
     #[test]
     fn test_generic_subtyping() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Generics are only subtypes of themselves (same name)
-        assert!(registry.is_subtype(
-            &Type::Generic("T".to_string()),
-            &Type::Generic("T".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Generic("T".to_string()).into(),
+                &Generic("T".to_string()).into()
+            )
+            .is_ok()
+        );
 
         // Different named generics are not subtypes
-        assert!(!registry.is_subtype(
-            &Type::Generic("T".to_string()),
-            &Type::Generic("U".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Generic("T".to_string()).into(),
+                &Generic("U".to_string()).into()
+            )
+            .is_err()
+        );
 
         // All generics are subtypes of Universe
-        assert!(registry.is_subtype(&Type::Generic("T".to_string()), &Type::Universe));
+        assert!(
+            reg.enforce_subtype(&Generic("T".to_string()).into(), &Universe.into())
+                .is_ok()
+        );
 
         // Nothing is a subtype of any generic
-        assert!(registry.is_subtype(&Type::Nothing, &Type::Generic("T".to_string())));
+        assert!(
+            reg.enforce_subtype(&Nothing.into(), &Generic("T".to_string()).into())
+                .is_ok()
+        );
 
         // Generic is not a subtype of concrete types
-        assert!(!registry.is_subtype(&Type::Generic("T".to_string()), &Type::I64));
+        assert!(
+            reg.enforce_subtype(&Generic("T".to_string()).into(), &I64.into())
+                .is_err()
+        );
 
         // Concrete types are not subtypes of generics
-        assert!(!registry.is_subtype(&Type::I64, &Type::Generic("T".to_string())));
+        assert!(
+            reg.enforce_subtype(&I64.into(), &Generic("T".to_string()).into())
+                .is_err()
+        );
 
         // Test with generic in container types
-        assert!(registry.is_subtype(
-            &Type::Array(Box::new(Type::Generic("T".to_string()))),
-            &Type::Array(Box::new(Type::Generic("T".to_string())))
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Array(Generic("T".to_string()).into()).into(),
+                &Array(Generic("T".to_string()).into()).into()
+            )
+            .is_ok()
+        );
 
         // Different generics in container types
-        assert!(!registry.is_subtype(
-            &Type::Array(Box::new(Type::Generic("T".to_string()))),
-            &Type::Array(Box::new(Type::Generic("U".to_string())))
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Array(Generic("T".to_string()).into()).into(),
+                &Array(Generic("U".to_string()).into()).into()
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn test_none_subtyping() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Test None as a subtype of any Optional type
-        assert!(registry.is_subtype(&Type::None, &Type::Optional(Box::new(Type::I64))));
-        assert!(registry.is_subtype(&Type::None, &Type::Optional(Box::new(Type::String))));
-        assert!(registry.is_subtype(&Type::None, &Type::Optional(Box::new(Type::Bool))));
-        assert!(registry.is_subtype(&Type::None, &Type::Optional(Box::new(Type::F64))));
-        assert!(registry.is_subtype(&Type::None, &Type::Optional(Box::new(Type::Unit))));
+        assert!(
+            reg.enforce_subtype(&None.into(), &Optional(I64.into()).into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&None.into(), &Optional(String.into()).into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&None.into(), &Optional(Bool.into()).into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&None.into(), &Optional(F64.into()).into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&None.into(), &Optional(Unit.into()).into())
+                .is_ok()
+        );
 
         // Test None with complex Optional types
-        assert!(registry.is_subtype(
-            &Type::None,
-            &Type::Optional(Box::new(Type::Array(Box::new(Type::I64))))
-        ));
+        assert!(
+            reg.enforce_subtype(&None.into(), &Optional(Array(I64.into()).into()).into())
+                .is_ok()
+        );
 
         // Test that None is not a subtype of non-Optional types
-        assert!(!registry.is_subtype(&Type::None, &Type::I64));
-        assert!(!registry.is_subtype(&Type::None, &Type::String));
+        assert!(reg.enforce_subtype(&None.into(), &I64.into()).is_err());
+        assert!(reg.enforce_subtype(&None.into(), &String.into()).is_err());
 
         // None is still a subtype of Universe (as all types are)
-        assert!(registry.is_subtype(&Type::None, &Type::Universe));
+        assert!(reg.enforce_subtype(&None.into(), &Universe.into()).is_ok());
 
         // None is not equal to Nothing
-        assert!(!registry.is_subtype(&Type::None, &Type::Nothing));
-        assert!(registry.is_subtype(&Type::Nothing, &Type::None));
+        assert!(reg.enforce_subtype(&None.into(), &Nothing.into()).is_err());
+        assert!(reg.enforce_subtype(&Nothing.into(), &None.into()).is_ok());
     }
 
     #[test]
     fn test_type_optional_subtyping() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Test that a type is a subtype of its corresponding optional type
-        assert!(registry.is_subtype(&Type::I64, &Type::Optional(Box::new(Type::I64))));
-        assert!(registry.is_subtype(&Type::String, &Type::Optional(Box::new(Type::String))));
-        assert!(registry.is_subtype(&Type::Bool, &Type::Optional(Box::new(Type::Bool))));
+        assert!(
+            reg.enforce_subtype(&I64.into(), &Optional(I64.into()).into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&String.into(), &Optional(String.into()).into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Bool.into(), &Optional(Bool.into()).into())
+                .is_ok()
+        );
 
         // Test with nested types
-        assert!(registry.is_subtype(
-            &Type::Array(Box::new(Type::I64)),
-            &Type::Optional(Box::new(Type::Array(Box::new(Type::I64))))
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Array(I64.into()).into(),
+                &Optional(Array(I64.into()).into()).into()
+            )
+            .is_ok()
+        );
 
         // Test with inheritance
-        let mut adts_registry = TypeRegistry::default();
+        let mut adts_reg = TypeRegistry::default();
         let animal = create_product_adt("Animal", vec![]);
         let dog = create_product_adt("Dog", vec![]);
         let animals_enum = create_sum_adt("Animals", vec![animal, dog]);
-        adts_registry.register_adt(&animals_enum).unwrap();
+        adts_reg.register_adt(&animals_enum).unwrap();
 
         // Dog <: Optional<Dog>
-        assert!(adts_registry.is_subtype(
-            &Type::Adt("Dog".to_string()),
-            &Type::Optional(Box::new(Type::Adt("Dog".to_string())))
-        ));
+        assert!(
+            adts_reg
+                .enforce_subtype(
+                    &Adt("Dog".to_string()).into(),
+                    &Optional(Adt("Dog".to_string()).into()).into()
+                )
+                .is_ok()
+        );
 
         // Dog <: Optional<Animals> (transitivity)
-        assert!(adts_registry.is_subtype(
-            &Type::Adt("Dog".to_string()),
-            &Type::Optional(Box::new(Type::Adt("Animals".to_string())))
-        ));
+        assert!(
+            adts_reg
+                .enforce_subtype(
+                    &Adt("Dog".to_string()).into(),
+                    &Optional(Adt("Animals".to_string()).into()).into()
+                )
+                .is_ok()
+        );
 
         // Test that non-subtypes remain non-subtypes when wrapped in Optional
-        assert!(!adts_registry.is_subtype(
-            &Type::Adt("Animals".to_string()),
-            &Type::Optional(Box::new(Type::Adt("Dog".to_string())))
-        ));
+        assert!(
+            adts_reg
+                .enforce_subtype(
+                    &Adt("Animals".to_string()).into(),
+                    &Optional(Adt("Dog".to_string()).into()).into()
+                )
+                .is_err()
+        );
     }
 
     #[test]
     fn test_complex_nested_type_hierarchy() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Create a complex type hierarchy for vehicles
         let vehicle = create_product_adt("Vehicle", vec![("wheels", AstType::Int64)]);
@@ -809,179 +1008,287 @@ pub mod tests {
         let vehicles_enum = create_sum_adt("Vehicles", vec![vehicle, cars_enum, truck]);
 
         // Register the ADT
-        registry.register_adt(&vehicles_enum).unwrap();
+        reg.register_adt(&vehicles_enum).unwrap();
 
         // Test direct subtyping relationships
-        assert!(registry.is_subtype(
-            &Type::Adt("Car".to_string()),
-            &Type::Adt("Cars".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Adt("Car".to_string()).into(),
+                &Adt("Cars".to_string()).into()
+            )
+            .is_ok()
+        );
 
-        assert!(registry.is_subtype(
-            &Type::Adt("SportsCar".to_string()),
-            &Type::Adt("Cars".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Adt("SportsCar".to_string()).into(),
+                &Adt("Cars".to_string()).into()
+            )
+            .is_ok()
+        );
 
-        assert!(registry.is_subtype(
-            &Type::Adt("Cars".to_string()),
-            &Type::Adt("Vehicles".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Adt("Cars".to_string()).into(),
+                &Adt("Vehicles".to_string()).into()
+            )
+            .is_ok()
+        );
 
-        assert!(registry.is_subtype(
-            &Type::Adt("Truck".to_string()),
-            &Type::Adt("Vehicles".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Adt("Truck".to_string()).into(),
+                &Adt("Vehicles".to_string()).into()
+            )
+            .is_ok()
+        );
 
         // Test transitive subtyping
-        assert!(registry.is_subtype(
-            &Type::Adt("SportsCar".to_string()),
-            &Type::Adt("Vehicles".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Adt("SportsCar".to_string()).into(),
+                &Adt("Vehicles".to_string()).into()
+            )
+            .is_ok()
+        );
 
         // All vehicle types are subtypes of Universe
-        assert!(registry.is_subtype(&Type::Adt("Vehicles".to_string()), &Type::Universe));
-        assert!(registry.is_subtype(&Type::Adt("Cars".to_string()), &Type::Universe));
-        assert!(registry.is_subtype(&Type::Adt("SportsCar".to_string()), &Type::Universe));
+        assert!(
+            reg.enforce_subtype(&Adt("Vehicles".to_string()).into(), &Universe.into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Adt("Cars".to_string()).into(), &Universe.into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Adt("SportsCar".to_string()).into(), &Universe.into())
+                .is_ok()
+        );
 
         // Test negative cases
-        assert!(!registry.is_subtype(
-            &Type::Adt("Vehicles".to_string()),
-            &Type::Adt("Cars".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Adt("Vehicles".to_string()).into(),
+                &Adt("Cars".to_string()).into()
+            )
+            .is_err()
+        );
 
-        assert!(!registry.is_subtype(
-            &Type::Adt("Cars".to_string()),
-            &Type::Adt("SportsCar".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Adt("Cars".to_string()).into(),
+                &Adt("SportsCar".to_string()).into()
+            )
+            .is_err()
+        );
 
-        assert!(!registry.is_subtype(
-            &Type::Adt("Truck".to_string()),
-            &Type::Adt("Cars".to_string())
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Adt("Truck".to_string()).into(),
+                &Adt("Cars".to_string()).into()
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn test_native_trait_concat() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Test types that should implement Concat
-        assert!(registry.is_subtype(&Type::String, &Type::Concat));
-        assert!(registry.is_subtype(&Type::Array(Box::new(Type::I64)), &Type::Concat));
-        assert!(registry.is_subtype(
-            &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
-            &Type::Concat
-        ));
+        assert!(reg.enforce_subtype(&String.into(), &Concat.into()).is_ok());
+        assert!(
+            reg.enforce_subtype(&Array(I64.into()).into(), &Concat.into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Map(String.into(), I64.into()).into(), &Concat.into())
+                .is_ok()
+        );
 
         // Test nested types that implement Concat
-        assert!(registry.is_subtype(
-            &Type::Array(Box::new(Type::Array(Box::new(Type::I64)))),
-            &Type::Concat
-        ));
+        assert!(
+            reg.enforce_subtype(&Array(Array(I64.into()).into()).into(), &Concat.into())
+                .is_ok()
+        );
 
         // Test types that should not implement Concat
-        assert!(!registry.is_subtype(&Type::I64, &Type::Concat));
-        assert!(!registry.is_subtype(&Type::Bool, &Type::Concat));
-        assert!(!registry.is_subtype(&Type::F64, &Type::Concat));
-        assert!(!registry.is_subtype(&Type::Unit, &Type::Concat));
-        assert!(!registry.is_subtype(&Type::None, &Type::Concat));
-        assert!(!registry.is_subtype(&Type::Tuple(vec![Type::I64, Type::String]), &Type::Concat));
-        assert!(!registry.is_subtype(
-            &Type::Closure(Box::new(Type::I64), Box::new(Type::String)),
-            &Type::Concat
-        ));
+        assert!(reg.enforce_subtype(&I64.into(), &Concat.into()).is_err());
+        assert!(reg.enforce_subtype(&Bool.into(), &Concat.into()).is_err());
+        assert!(reg.enforce_subtype(&F64.into(), &Concat.into()).is_err());
+        assert!(reg.enforce_subtype(&Unit.into(), &Concat.into()).is_err());
+        assert!(reg.enforce_subtype(&None.into(), &Concat.into()).is_err());
+        assert!(
+            reg.enforce_subtype(
+                &Tuple(vec![I64.into(), String.into()]).into(),
+                &Concat.into()
+            )
+            .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&Closure(I64.into(), String.into()).into(), &Concat.into())
+                .is_err()
+        );
 
         // Special types
-        assert!(registry.is_subtype(&Type::Nothing, &Type::Concat));
-        assert!(!registry.is_subtype(&Type::Concat, &Type::Nothing));
-        assert!(registry.is_subtype(&Type::Concat, &Type::Universe));
+        assert!(reg.enforce_subtype(&Nothing.into(), &Concat.into()).is_ok());
+        assert!(
+            reg.enforce_subtype(&Concat.into(), &Nothing.into())
+                .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&Concat.into(), &Universe.into())
+                .is_ok()
+        );
 
         // Stored/Costed with Concat-compatible inner types
-        assert!(registry.is_subtype(&Type::Stored(Box::new(Type::String)), &Type::String));
-        assert!(registry.is_subtype(&Type::Stored(Box::new(Type::String)), &Type::Concat));
-        assert!(registry.is_subtype(&Type::Costed(Box::new(Type::String)), &Type::Concat));
+        assert!(
+            reg.enforce_subtype(&Stored(String.into()).into(), &String.into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Stored(String.into()).into(), &Concat.into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Costed(String.into()).into(), &Concat.into())
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_native_trait_eqhash() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Test primitive types that should implement EqHash
-        assert!(registry.is_subtype(&Type::I64, &Type::EqHash));
-        assert!(registry.is_subtype(&Type::String, &Type::EqHash));
-        assert!(registry.is_subtype(&Type::Bool, &Type::EqHash));
-        assert!(registry.is_subtype(&Type::Unit, &Type::EqHash));
-        assert!(registry.is_subtype(&Type::None, &Type::EqHash));
+        assert!(reg.enforce_subtype(&I64.into(), &EqHash.into()).is_ok());
+        assert!(reg.enforce_subtype(&String.into(), &EqHash.into()).is_ok());
+        assert!(reg.enforce_subtype(&Bool.into(), &EqHash.into()).is_ok());
+        assert!(reg.enforce_subtype(&Unit.into(), &EqHash.into()).is_ok());
+        assert!(reg.enforce_subtype(&None.into(), &EqHash.into()).is_ok());
 
         // Test tuple types with all EqHash elements
-        assert!(registry.is_subtype(
-            &Type::Tuple(vec![Type::I64, Type::String, Type::Bool]),
-            &Type::EqHash
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Tuple(vec![I64.into(), String.into(), Bool.into()]).into(),
+                &EqHash.into()
+            )
+            .is_ok()
+        );
 
         // Mixed tuple with a non-EqHash type should not implement EqHash
-        assert!(!registry.is_subtype(
-            &Type::Tuple(vec![
-                Type::I64,
-                Type::Closure(Box::new(Type::I64), Box::new(Type::Bool))
-            ]),
-            &Type::EqHash
-        ));
+        assert!(
+            reg.enforce_subtype(
+                &Tuple(vec![I64.into(), Closure(I64.into(), Bool.into()).into()]).into(),
+                &EqHash.into()
+            )
+            .is_err()
+        );
 
         // Test empty tuple (should implement EqHash)
-        assert!(registry.is_subtype(&Type::Tuple(vec![]), &Type::EqHash));
+        assert!(
+            reg.enforce_subtype(&Tuple(vec![]).into(), &EqHash.into())
+                .is_ok()
+        );
 
         // Test types that should not implement EqHash
-        assert!(!registry.is_subtype(&Type::F64, &Type::EqHash)); // Floating point is not guaranteed equality
-        assert!(!registry.is_subtype(
-            &Type::Closure(Box::new(Type::I64), Box::new(Type::Bool)),
-            &Type::EqHash
-        ));
-        assert!(!registry.is_subtype(
-            &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
-            &Type::EqHash
-        ));
+        assert!(reg.enforce_subtype(&F64.into(), &EqHash.into()).is_err()); // Floating point is not guaranteed equality
+        assert!(
+            reg.enforce_subtype(&Closure(I64.into(), Bool.into()).into(), &EqHash.into())
+                .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&Map(String.into(), I64.into()).into(), &EqHash.into())
+                .is_err()
+        );
 
         // Special types
-        assert!(registry.is_subtype(&Type::Nothing, &Type::EqHash));
-        assert!(!registry.is_subtype(&Type::EqHash, &Type::Nothing));
-        assert!(registry.is_subtype(&Type::EqHash, &Type::Universe));
+        assert!(reg.enforce_subtype(&Nothing.into(), &EqHash.into()).is_ok());
+        assert!(
+            reg.enforce_subtype(&EqHash.into(), &Nothing.into())
+                .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&EqHash.into(), &Universe.into())
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_native_trait_arithmetic() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Test types that should implement Arithmetic
-        assert!(registry.is_subtype(&Type::I64, &Type::Arithmetic));
-        assert!(registry.is_subtype(&Type::F64, &Type::Arithmetic));
+        assert!(reg.enforce_subtype(&I64.into(), &Arithmetic.into()).is_ok());
+        assert!(reg.enforce_subtype(&F64.into(), &Arithmetic.into()).is_ok());
 
         // Test types that should not implement Arithmetic
-        assert!(!registry.is_subtype(&Type::String, &Type::Arithmetic));
-        assert!(!registry.is_subtype(&Type::Bool, &Type::Arithmetic));
-        assert!(!registry.is_subtype(&Type::Unit, &Type::Arithmetic));
-        assert!(!registry.is_subtype(&Type::None, &Type::Arithmetic));
-        assert!(!registry.is_subtype(&Type::Tuple(vec![Type::I64, Type::F64]), &Type::Arithmetic));
-        assert!(!registry.is_subtype(&Type::Array(Box::new(Type::I64)), &Type::Arithmetic));
-        assert!(!registry.is_subtype(
-            &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
-            &Type::Arithmetic
-        ));
+        assert!(
+            reg.enforce_subtype(&String.into(), &Arithmetic.into())
+                .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&Bool.into(), &Arithmetic.into())
+                .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&Unit.into(), &Arithmetic.into())
+                .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&None.into(), &Arithmetic.into())
+                .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(
+                &Tuple(vec![I64.into(), F64.into()]).into(),
+                &Arithmetic.into()
+            )
+            .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&Array(I64.into()).into(), &Arithmetic.into())
+                .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&Map(String.into(), I64.into()).into(), &Arithmetic.into())
+                .is_err()
+        );
 
         // Special types
-        assert!(registry.is_subtype(&Type::Nothing, &Type::Arithmetic));
-        assert!(!registry.is_subtype(&Type::Arithmetic, &Type::Nothing));
-        assert!(registry.is_subtype(&Type::Arithmetic, &Type::Universe));
+        assert!(
+            reg.enforce_subtype(&Nothing.into(), &Arithmetic.into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Arithmetic.into(), &Nothing.into())
+                .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&Arithmetic.into(), &Universe.into())
+                .is_ok()
+        );
 
         // Stored/Costed with Arithmetic-compatible inner types
-        assert!(registry.is_subtype(&Type::Stored(Box::new(Type::I64)), &Type::I64));
-        assert!(registry.is_subtype(&Type::Stored(Box::new(Type::I64)), &Type::Arithmetic));
-        assert!(registry.is_subtype(&Type::Costed(Box::new(Type::F64)), &Type::Arithmetic));
+        assert!(
+            reg.enforce_subtype(&Stored(I64.into()).into(), &I64.into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Stored(I64.into()).into(), &Arithmetic.into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Costed(F64.into()).into(), &Arithmetic.into())
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_adt_eqhash() {
         // Create a registry with ADTs
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Create ADTs with EqHash-compatible fields
         let point = create_product_adt("Point", vec![("x", AstType::Int64), ("y", AstType::Int64)]);
@@ -1007,30 +1314,45 @@ pub mod tests {
         let shapes = create_sum_adt("Shape", vec![shape1, shape2]);
 
         // Register the ADTs
-        registry.register_adt(&point).unwrap();
-        registry.register_adt(&complex_shape).unwrap();
-        registry.register_adt(&shapes).unwrap();
+        reg.register_adt(&point).unwrap();
+        reg.register_adt(&complex_shape).unwrap();
+        reg.register_adt(&shapes).unwrap();
 
         // Test EqHash relationships
 
         // Point should satisfy EqHash since all fields (x, y) are Int64 which satisfies EqHash
-        assert!(registry.is_subtype(&Type::Adt("Point".to_string()), &Type::EqHash));
+        assert!(
+            reg.enforce_subtype(&Adt("Point".to_string()).into(), &EqHash.into())
+                .is_ok()
+        );
 
         // ComplexShape should not satisfy EqHash since it has a Closure field which doesn't satisfy EqHash
-        assert!(!registry.is_subtype(&Type::Adt("ComplexShape".to_string()), &Type::EqHash));
+        assert!(
+            reg.enforce_subtype(&Adt("ComplexShape".to_string()).into(), &EqHash.into())
+                .is_err()
+        );
 
         // Circle and Rectangle should satisfy EqHash
-        assert!(registry.is_subtype(&Type::Adt("Circle".to_string()), &Type::EqHash));
-        assert!(registry.is_subtype(&Type::Adt("Rectangle".to_string()), &Type::EqHash));
+        assert!(
+            reg.enforce_subtype(&Adt("Circle".to_string()).into(), &EqHash.into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Adt("Rectangle".to_string()).into(), &EqHash.into())
+                .is_ok()
+        );
 
         // Shape (sum type) should satisfy EqHash since all variants satisfy EqHash
-        assert!(registry.is_subtype(&Type::Adt("Shape".to_string()), &Type::EqHash));
+        assert!(
+            reg.enforce_subtype(&Adt("Shape".to_string()).into(), &EqHash.into())
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_recursive_adt_with_native_traits() {
         // Create a registry with a recursive ADT
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Create a recursive List type
         let list_node = create_product_adt(
@@ -1045,138 +1367,182 @@ pub mod tests {
         );
 
         // Register the ADT
-        registry.register_adt(&list_node).unwrap();
+        reg.register_adt(&list_node).unwrap();
 
         // Test relationships with native traits
 
         // ListNode should satisfy EqHash since both Int64 and Optional<ListNode> satisfy EqHash
-        assert!(registry.is_subtype(&Type::Adt("ListNode".to_string()), &Type::EqHash));
+        assert!(
+            reg.enforce_subtype(&Adt("ListNode".to_string()).into(), &EqHash.into())
+                .is_ok()
+        );
 
         // ListNode should not satisfy Concat or Arithmetic
-        assert!(!registry.is_subtype(&Type::Adt("ListNode".to_string()), &Type::Concat));
-        assert!(!registry.is_subtype(&Type::Adt("ListNode".to_string()), &Type::Arithmetic));
+        assert!(
+            reg.enforce_subtype(&Adt("ListNode".to_string()).into(), &Concat.into())
+                .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&Adt("ListNode".to_string()).into(), &Arithmetic.into())
+                .is_err()
+        );
     }
 
     #[test]
     fn test_multiple_native_traits() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Test which types satisfy multiple traits
 
         // Int64 satisfies both EqHash and Arithmetic
-        assert!(registry.is_subtype(&Type::I64, &Type::EqHash));
-        assert!(registry.is_subtype(&Type::I64, &Type::Arithmetic));
-        assert!(!registry.is_subtype(&Type::I64, &Type::Concat));
+        assert!(reg.enforce_subtype(&I64.into(), &EqHash.into()).is_ok());
+        assert!(reg.enforce_subtype(&I64.into(), &Arithmetic.into()).is_ok());
+        assert!(reg.enforce_subtype(&I64.into(), &Concat.into()).is_err());
 
         // String satisfies both EqHash and Concat
-        assert!(registry.is_subtype(&Type::String, &Type::EqHash));
-        assert!(registry.is_subtype(&Type::String, &Type::Concat));
-        assert!(!registry.is_subtype(&Type::String, &Type::Arithmetic));
+        assert!(reg.enforce_subtype(&String.into(), &EqHash.into()).is_ok());
+        assert!(reg.enforce_subtype(&String.into(), &Concat.into()).is_ok());
+        assert!(
+            reg.enforce_subtype(&String.into(), &Arithmetic.into())
+                .is_err()
+        );
 
         // Float64 only satisfies Arithmetic
-        assert!(registry.is_subtype(&Type::F64, &Type::Arithmetic));
-        assert!(!registry.is_subtype(&Type::F64, &Type::EqHash));
-        assert!(!registry.is_subtype(&Type::F64, &Type::Concat));
+        assert!(reg.enforce_subtype(&F64.into(), &Arithmetic.into()).is_ok());
+        assert!(reg.enforce_subtype(&F64.into(), &EqHash.into()).is_err());
+        assert!(reg.enforce_subtype(&F64.into(), &Concat.into()).is_err());
 
         // Bool only satisfies EqHash
-        assert!(registry.is_subtype(&Type::Bool, &Type::EqHash));
-        assert!(!registry.is_subtype(&Type::Bool, &Type::Arithmetic));
-        assert!(!registry.is_subtype(&Type::Bool, &Type::Concat));
+        assert!(reg.enforce_subtype(&Bool.into(), &EqHash.into()).is_ok());
+        assert!(
+            reg.enforce_subtype(&Bool.into(), &Arithmetic.into())
+                .is_err()
+        );
+        assert!(reg.enforce_subtype(&Bool.into(), &Concat.into()).is_err());
 
         // Array satisfies only Concat
-        assert!(registry.is_subtype(&Type::Array(Box::new(Type::I64)), &Type::Concat));
-        assert!(!registry.is_subtype(&Type::Array(Box::new(Type::I64)), &Type::EqHash));
-        assert!(!registry.is_subtype(&Type::Array(Box::new(Type::I64)), &Type::Arithmetic));
+        assert!(
+            reg.enforce_subtype(&Array(I64.into()).into(), &Concat.into())
+                .is_ok()
+        );
+        assert!(
+            reg.enforce_subtype(&Array(I64.into()).into(), &EqHash.into())
+                .is_err()
+        );
+        assert!(
+            reg.enforce_subtype(&Array(I64.into()).into(), &Arithmetic.into())
+                .is_err()
+        );
     }
 
     #[test]
     fn test_collection_function_subtyping() {
-        let mut registry = TypeRegistry::default();
+        let mut reg = TypeRegistry::default();
 
         // Test Map as a subtype of Function
         // Map(String, I64) <: Closure(String, Optional<I64>)
-        assert!(registry.is_subtype(
-            &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
-            &Type::Closure(
-                Box::new(Type::String),
-                Box::new(Type::Optional(Box::new(Type::I64)))
+        assert!(
+            reg.enforce_subtype(
+                &Map(String.into(), I64.into()).into(),
+                &Closure(String.into(), Optional(I64.into()).into()).into()
             )
-        ));
+            .is_ok()
+        );
 
         // Function contravariance on parameters
         // Map(EqHash, I64) <: Closure(String, Optional<I64>)
-        assert!(registry.is_subtype(
-            &Type::Map(Box::new(Type::EqHash), Box::new(Type::I64)),
-            &Type::Closure(
-                Box::new(Type::String),
-                Box::new(Type::Optional(Box::new(Type::I64)))
+        assert!(
+            reg.enforce_subtype(
+                &Map(EqHash.into(), I64.into()).into(),
+                &Closure(String.into(), Optional(I64.into()).into()).into()
             )
-        ));
+            .is_ok()
+        );
 
         // Function covariance on return type
         // Map(String, I64) <: Closure(String, Optional<Universe>)
-        assert!(registry.is_subtype(
-            &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
-            &Type::Closure(
-                Box::new(Type::String),
-                Box::new(Type::Optional(Box::new(Type::Universe))) // Supertype of I64 (covariance)
+        assert!(
+            reg.enforce_subtype(
+                &Map(String.into(), I64.into()).into(),
+                &Closure(
+                    String.into(),
+                    Optional(Universe.into()).into() // Supertype of I64 (covariance)
+                )
+                .into()
             )
-        ));
+            .is_ok()
+        );
 
         // Negative test - parameter type doesn't match
-        assert!(!registry.is_subtype(
-            &Type::Map(Box::new(Type::String), Box::new(Type::I64)),
-            &Type::Closure(
-                Box::new(Type::I64), // String is not a subtype of I64
-                Box::new(Type::Optional(Box::new(Type::I64)))
+        assert!(
+            reg.enforce_subtype(
+                &Map(String.into(), I64.into()).into(),
+                &Closure(
+                    I64.into(), // String is not a subtype of I64
+                    Optional(I64.into()).into()
+                )
+                .into()
             )
-        ));
+            .is_err()
+        );
 
         // Test Array as a subtype of Function
         // Array(String) <: Closure(I64, Optional<String>)
-        assert!(registry.is_subtype(
-            &Type::Array(Box::new(Type::String)),
-            &Type::Closure(
-                Box::new(Type::I64),
-                Box::new(Type::Optional(Box::new(Type::String)))
+        assert!(
+            reg.enforce_subtype(
+                &Array(String.into()).into(),
+                &Closure(I64.into(), Optional(String.into()).into()).into()
             )
-        ));
+            .is_ok()
+        );
 
         // Function covariance on return type
         // Array(String) <: Closure(I64, Optional<Universe>)
-        assert!(registry.is_subtype(
-            &Type::Array(Box::new(Type::String)),
-            &Type::Closure(
-                Box::new(Type::I64),
-                Box::new(Type::Optional(Box::new(Type::Universe))) // Supertype of String (covariance)
+        assert!(
+            reg.enforce_subtype(
+                &Array(String.into()).into(),
+                &Closure(
+                    I64.into(),
+                    Optional(Universe.into()).into() // Supertype of String (covariance)
+                )
+                .into()
             )
-        ));
+            .is_ok()
+        );
 
         // Negative test - parameter type must be I64
-        assert!(!registry.is_subtype(
-            &Type::Array(Box::new(Type::String)),
-            &Type::Closure(
-                Box::new(Type::String), // Must be I64
-                Box::new(Type::Optional(Box::new(Type::String)))
+        assert!(
+            reg.enforce_subtype(
+                &Array(String.into()).into(),
+                &Closure(
+                    String.into(), // Must be I64
+                    Optional(String.into()).into()
+                )
+                .into()
             )
-        ));
+            .is_err()
+        );
 
         // Negative test - non-optional return type not compatible
-        assert!(!registry.is_subtype(
-            &Type::Array(Box::new(Type::String)),
-            &Type::Closure(
-                Box::new(Type::I64),
-                Box::new(Type::String) // Not Optional<String>
+        assert!(
+            reg.enforce_subtype(
+                &Array(String.into()).into(),
+                &Closure(
+                    I64.into(),
+                    String.into() // Not Optional<String>
+                )
+                .into()
             )
-        ));
+            .is_err()
+        );
 
         // Tuples are not subtypes of functions
-        assert!(!registry.is_subtype(
-            &Type::Tuple(vec![Type::String, Type::String]),
-            &Type::Closure(
-                Box::new(Type::I64),
-                Box::new(Type::Optional(Box::new(Type::String)))
+        assert!(
+            reg.enforce_subtype(
+                &Tuple(vec![String.into(), String.into()]).into(),
+                &Closure(I64.into(), Optional(String.into()).into()).into()
             )
-        ));
+            .is_err()
+        );
     }
 }

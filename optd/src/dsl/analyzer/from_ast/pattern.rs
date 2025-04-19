@@ -6,7 +6,7 @@
 use super::ASTConverter;
 use crate::dsl::analyzer::errors::AnalyzerErrorKind;
 use crate::dsl::analyzer::hir::{Identifier, MatchArm, Pattern, PatternKind, TypedSpan};
-use crate::dsl::analyzer::types::registry::Type;
+use crate::dsl::analyzer::types::registry::{Type, TypeKind};
 use crate::dsl::parser::ast::{self, Pattern as AstPattern};
 use crate::dsl::utils::span::Spanned;
 use std::collections::HashSet;
@@ -47,7 +47,7 @@ impl ASTConverter {
         use PatternKind::*;
 
         let span = spanned_pattern.span.clone();
-        let mut ty = self.registry.new_unknown();
+        let mut ty = self.registry.new_unknown().into();
 
         let kind = match &*spanned_pattern.value {
             AstPattern::Error => panic!("AST should no longer contain errors"),
@@ -59,7 +59,7 @@ impl ASTConverter {
             }
             AstPattern::Constructor(name, args) => {
                 self.validate_constructor(name, &span, args.len())?;
-                ty = Type::Adt(*name.value.clone());
+                ty = Type::spanned(TypeKind::Adt(*name.value.clone()), span.clone());
 
                 let hir_args = args
                     .iter()
@@ -70,7 +70,7 @@ impl ASTConverter {
                 Struct((*name.value).clone(), hir_args)
             }
             AstPattern::Literal(lit) => {
-                let (hir_lit, hir_ty) = self.convert_literal(lit);
+                let (hir_lit, hir_ty) = self.convert_literal(lit, &span);
                 ty = hir_ty;
 
                 Literal(hir_lit)
@@ -87,7 +87,10 @@ impl ASTConverter {
                 Wildcard
             }
             AstPattern::EmptyArray => {
-                ty = Type::Array(self.registry.new_unknown().into());
+                ty = Type::spanned(
+                    TypeKind::Array(self.registry.new_unknown().into()),
+                    span.clone(),
+                );
 
                 EmptyArray
             }

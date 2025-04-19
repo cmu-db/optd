@@ -142,7 +142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "Type inference successful".green();
                     println!("\n{}", "Compilation completed successfully!".green().bold());
                 }
-                Err(errors) => handle_errors("Type inference failed", &errors),
+                Err(error) => handle_errors("Type inference failed", &[error]),
             }
         }
     }

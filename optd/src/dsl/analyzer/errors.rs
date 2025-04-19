@@ -92,8 +92,12 @@ pub enum AnalyzerErrorKind {
 
     InvalidFieldAccess {
         object: TypedSpan,
-        field_name: String,
-        field_span: Span,
+        field: String,
+    },
+
+    TypeMergeFail {
+        type1: TypedSpan,
+        type2: TypedSpan,
     },
 }
 
@@ -209,15 +213,18 @@ impl AnalyzerErrorKind {
         .into()
     }
 
-    pub fn new_invalid_field_access(
-        object: &TypedSpan,
-        field_name: &str,
-        field_span: &Span,
-    ) -> Box<Self> {
+    pub fn new_invalid_field_access(object: &TypedSpan, field: &Identifier) -> Box<Self> {
         Self::InvalidFieldAccess {
             object: object.clone(),
-            field_name: field_name.to_string(),
-            field_span: field_span.clone(),
+            field: field.clone(),
+        }
+        .into()
+    }
+
+    pub fn new_type_merge_fail(type1: &TypedSpan, type2: &TypedSpan) -> Box<Self> {
+        Self::TypeMergeFail {
+            type1: type1.clone(),
+            type2: type2.clone(),
         }
         .into()
     }
@@ -252,16 +259,12 @@ impl Diagnose for Box<AnalyzerError> {
                 "First declared here",
                 "Identifiers must be unique within the same scope",
             ),
-            IncompleteFunction { name, span } => Report::build(ReportKind::Error, span.clone())
-                .with_message(format!("Incomplete function definition: '{}'", name))
-                .with_label(
-                    Label::new(span.clone())
-                        .with_message("Function must have at least one parameter")
-                        .with_color(Color::Magenta),
-                )
-                .with_help("Add at least one parameter or a receiver to this function")
-                .with_note("Functions without parameters are not supported in this language")
-                .finish(),
+            IncompleteFunction { name, span } => self.build_single_span_report(
+                span,
+                &format!("Incomplete function definition: '{}'", name),
+                "Function must have at least one parameter",
+                "Add at least one parameter or a receiver to this function",
+            ),
             UndefinedReference { name, span } => self.build_single_span_report(
                 span,
                 &format!("Undefined reference to: '{}'", name),
@@ -281,9 +284,7 @@ impl Diagnose for Box<AnalyzerError> {
                 "Type cannot be constructed, or does not exist",
                 "Only defined leaf types can be constructed",
             ),
-            MissingCoreType { name, src_path } => {
-                self.build_missing_core_type_report(name, src_path)
-            }
+            MissingCoreType { name, src_path } => self.build_missing_core_type_report(name, src_path),
             InvalidType { span } => self.build_single_span_report(
                 span,
                 "Invalid type usage",
@@ -314,29 +315,9 @@ impl Diagnose for Box<AnalyzerError> {
                 &format!("Expected {} fields, but found {}", expected, found),
                 "Check the number of fields in the type definition",
             ),
-            InvalidSubtype {
-                child,
-                parent,
-            } => self.build_duplicate_report(
-                &child.span,
-                &parent.span,
-                &format!("Type error: '{}' is not a subtype of '{}'", child.ty, parent.ty),
-                &format!("Found type '{}' here", child.ty),
-                &format!("Expected type '{}' here", parent.ty),
-                "The types are incompatible - consider adding an explicit annotation or using a compatible type",
-            ),
-            InvalidFieldAccess {
-                object,
-                field_name,
-                field_span,
-            } => self.build_duplicate_report(
-                field_span,
-                &object.span,
-                &format!("Invalid field access: type '{}' has no field '{}'", object.ty, field_name),
-                &format!("Field '{}' accessed here", field_name),
-                &format!("Object of type '{}' defined here", object.ty),
-                "Check for typos in the field name or ensure you're accessing the right type of object",
-            ),
+            InvalidSubtype { child, parent } => self.build_type_mismatch_report(child, parent),
+            InvalidFieldAccess { object, field } => self.build_invalid_field_access_report(object, field),
+            TypeMergeFail { type1, type2 } => self.build_type_merge_fail_report(type1, type2),
         }
     }
 
@@ -356,7 +337,8 @@ impl Diagnose for Box<AnalyzerError> {
             InvalidInheritance { child_span, .. } => child_span,
             FieldNumberMismatch { span, .. } => span,
             InvalidSubtype { child, .. } => &child.span,
-            InvalidFieldAccess { field_span, .. } => field_span,
+            InvalidFieldAccess { object, .. } => &object.span,
+            TypeMergeFail { type1, .. } => &type1.span,
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))
@@ -406,6 +388,126 @@ impl AnalyzerError {
                     .with_color(Color::Blue),
             )
             .with_help(help)
+            .finish()
+    }
+
+    /// Helper method to build a report for type mismatch errors
+    fn build_type_mismatch_report(&self, child: &TypedSpan, parent: &TypedSpan) -> Report<Span> {
+        let mut report =
+            Report::build(ReportKind::Error, child.span.clone()).with_message(format!(
+                "Type error: '{}' is not a subtype of '{}'",
+                child.ty, parent.ty
+            ));
+
+        report = report.with_label(
+            Label::new(child.span.clone())
+                .with_message(format!(
+                    "Expected type '{}' but found '{}'",
+                    parent.ty, child.ty
+                ))
+                .with_color(Color::Red),
+        );
+
+        if let Some(child_type_span) = child.ty.span.as_ref() {
+            report = report.with_label(
+                Label::new(child_type_span.clone())
+                    .with_message(format!(
+                        "Actual type '{}' defined or annotated here",
+                        child.ty
+                    ))
+                    .with_color(Color::Blue),
+            );
+        }
+
+        if let Some(parent_type_span) = parent.ty.span.as_ref() {
+            report = report.with_label(
+                Label::new(parent_type_span.clone())
+                    .with_message(format!(
+                        "Expected type '{}' defined or annotated here",
+                        parent.ty
+                    ))
+                    .with_color(Color::Yellow),
+            );
+        }
+
+        report
+            .with_help("The types are incompatible - consider adding an explicit type conversion or using a compatible type")
+            .finish()
+    }
+
+    /// Helper method to build a report for invalid field access errors
+    fn build_invalid_field_access_report(
+        &self,
+        object: &TypedSpan,
+        field: &String,
+    ) -> Report<Span> {
+        let mut report =
+            Report::build(ReportKind::Error, object.span.clone()).with_message(format!(
+                "Invalid field access: type '{}' has no field '{}'",
+                object.ty, *field
+            ));
+
+        report = report.with_label(
+            Label::new(object.span.clone())
+                .with_message(format!("Expression of type '{}'", object.ty))
+                .with_color(Color::Blue),
+        );
+
+        if let Some(obj_type_span) = object.ty.span.as_ref() {
+            report = report.with_label(
+                Label::new(obj_type_span.clone())
+                    .with_message("Type defined or annotated here")
+                    .with_color(Color::Yellow),
+            );
+        }
+
+        report
+            .with_help("Check for typos in the field name or ensure you're accessing the right type of object")
+            .finish()
+    }
+
+    /// Helper method to build a report for type merge failure errors
+    fn build_type_merge_fail_report(&self, type1: &TypedSpan, type2: &TypedSpan) -> Report<Span> {
+        let mut report =
+            Report::build(ReportKind::Error, type1.span.clone()).with_message(format!(
+                "Cannot merge incompatible types: '{}' and '{}'",
+                type1.ty, type2.ty
+            ));
+
+        // Label for the first expression
+        report = report.with_label(
+            Label::new(type1.span.clone())
+                .with_message(format!("Type '{}' from here", type1.ty))
+                .with_color(Color::Red),
+        );
+
+        // Label for the second expression
+        report = report.with_label(
+            Label::new(type2.span.clone())
+                .with_message(format!("Not compatible with type '{}' from here", type2.ty))
+                .with_color(Color::Blue),
+        );
+
+        // If the types have span information (e.g., from annotations), show them
+        if let Some(span1) = type1.ty.span.as_ref() {
+            report = report.with_label(
+                Label::new(span1.clone())
+                    .with_message(format!("Type '{}' defined here", type1.ty))
+                    .with_color(Color::Yellow),
+            );
+        }
+
+        if let Some(span2) = type2.ty.span.as_ref() {
+            report = report.with_label(
+                Label::new(span2.clone())
+                    .with_message(format!("Type '{}' defined here", type2.ty))
+                    .with_color(Color::Magenta),
+            );
+        }
+
+        report
+            .with_help("These types are incompatible. Consider using explicit type conversions or ensuring consistent types.")
+            .with_note("Type merging occurs during type inference when the compiler tries to determine the common type between expressions.")
             .finish()
     }
 
@@ -463,9 +565,9 @@ impl AnalyzerError {
             .finish()
     }
 
-    /// Helper method to build a more informative report for missing core types
+    /// Helper method to build a report for missing core types.
     fn build_missing_core_type_report(&self, name: &str, src_path: &str) -> Report<Span> {
-        // Create a span at the beginning of the file
+        // Create a span at the beginning of the file.
         let span = Span::new(src_path.to_string(), 0..0);
 
         Report::build(ReportKind::Error, span.clone())

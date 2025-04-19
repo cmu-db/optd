@@ -7,7 +7,7 @@ use crate::dsl::{
             BinOp, CoreData, Expr, ExprKind, FunKind, HIR, Identifier, LetBinding, MapEntry,
             MatchArm, Pattern, PatternKind, TypedSpan, UnaryOp, Value,
         },
-        types::registry::Type,
+        types::registry::{Type, TypeKind},
     },
     utils::span::Span,
 };
@@ -61,18 +61,18 @@ impl TypeRegistry {
         params: &[Identifier],
         metadata: &TypedSpan,
     ) -> Result<Context<TypedSpan>, Box<AnalyzerErrorKind>> {
-        use Type::*;
+        use TypeKind::*;
 
         let mut fn_ctx = base_ctx;
         fn_ctx.push_scope();
 
         // Extract the parameter types from the function type.
-        let param_types = match &metadata.ty {
+        let param_types = match &*metadata.ty {
             Closure(param_type, ret_type) => {
-                self.ty_return = Some(TypedSpan::new(*ret_type.clone(), metadata.span.clone()));
-                match param_type.as_ref() {
+                self.ty_return = Some(TypedSpan::new(ret_type.clone(), metadata.span.clone()));
+                match &*param_type.value {
                     Tuple(types) => types.clone(),
-                    _ => vec![param_type.as_ref().clone()],
+                    _ => vec![param_type.clone()],
                 }
             }
             _ => panic!("Expected a closure type for function parameters"),
@@ -179,7 +179,7 @@ impl TypeRegistry {
             Operator(_) => panic!("Operators may not be in the HIR yet"),
             ArrayDecomp(head, tail) => {
                 let head_ty = TypedSpan::new(
-                    Type::Array(head.metadata.ty.clone().into()),
+                    TypeKind::Array(head.metadata.ty.clone().into()).into(),
                     head.metadata.span.clone(),
                 );
                 self.add_constraint_subtypes(&pattern.metadata, &[head_ty, tail.metadata.clone()]);
@@ -205,7 +205,7 @@ impl TypeRegistry {
         else_branch: &Expr<TypedSpan>,
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        let bool_type = TypedSpan::new(Type::Bool, cond.metadata.span.clone());
+        let bool_type = TypedSpan::new(TypeKind::Bool.into(), cond.metadata.span.clone());
         let branch_types = [then_branch.metadata.clone(), else_branch.metadata.clone()];
 
         self.add_constraint_equal(&bool_type, &cond.metadata);
@@ -274,12 +274,13 @@ impl TypeRegistry {
 
         let span = &expr.metadata.span;
 
-        let bool_type = TypedSpan::new(Type::Bool, span.clone());
-        let arithmetic_type = TypedSpan::new(Type::Arithmetic, span.clone());
-        let eqhash_type = TypedSpan::new(Type::EqHash, span.clone());
-        let concat_type = TypedSpan::new(Type::Concat, span.clone());
-        let i64_type = TypedSpan::new(Type::I64, span.clone());
-        let array_i64_type = TypedSpan::new(Type::Array(Type::I64.into()), span.clone());
+        let bool_type = TypedSpan::new(TypeKind::Bool.into(), span.clone());
+        let arithmetic_type = TypedSpan::new(TypeKind::Arithmetic.into(), span.clone());
+        let eqhash_type = TypedSpan::new(TypeKind::EqHash.into(), span.clone());
+        let concat_type = TypedSpan::new(TypeKind::Concat.into(), span.clone());
+        let i64_type = TypedSpan::new(TypeKind::I64.into(), span.clone());
+        let array_i64_type =
+            TypedSpan::new(TypeKind::Array(TypeKind::I64.into()).into(), span.clone());
 
         let op_types = vec![left.metadata.clone(), right.metadata.clone()];
 
@@ -327,12 +328,12 @@ impl TypeRegistry {
         operand: &Expr<TypedSpan>,
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        use Type::*;
+        use TypeKind::*;
         use UnaryOp::*;
 
         let span = &expr.metadata.span;
-        let bool_type = TypedSpan::new(Bool, span.clone());
-        let arithmetic_type = TypedSpan::new(Arithmetic, span.clone());
+        let bool_type = TypedSpan::new(Bool.into(), span.clone());
+        let arithmetic_type = TypedSpan::new(Arithmetic.into(), span.clone());
 
         match op {
             Neg => {
@@ -380,18 +381,18 @@ impl TypeRegistry {
         entries: &[MapEntry<TypedSpan>],
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        use Type::*;
+        use TypeKind::*;
 
         let span = &expr.metadata.span;
 
-        let map_type = TypedSpan::new(Map(EqHash.into(), Universe.into()), span.clone());
+        let map_type = TypedSpan::new(Map(EqHash.into(), Universe.into()).into(), span.clone());
         self.add_constraint_subtypes(&map_type, &[expr.metadata.clone()]);
 
         let entry_maps: Vec<_> = entries
             .iter()
             .map(|(k, v)| {
                 TypedSpan::new(
-                    Map(k.metadata.ty.clone().into(), v.metadata.ty.clone().into()),
+                    Map(k.metadata.ty.clone().into(), v.metadata.ty.clone().into()).into(),
                     span.clone(),
                 )
             })
@@ -450,7 +451,7 @@ impl TypeRegistry {
         field_name: &str,
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        self.add_constraint_field_access(&expr.metadata, field_name, &obj.metadata);
+        self.add_constraint_field_access(&expr.metadata, &field_name.to_string(), &obj.metadata);
         self.generate_expr(obj, ctx)
     }
 
@@ -462,7 +463,7 @@ impl TypeRegistry {
         core_data: &CoreData<std::sync::Arc<Expr<TypedSpan>>, TypedSpan>,
         ctx: Context<TypedSpan>,
     ) -> Result<(), Box<AnalyzerErrorKind>> {
-        use Type::*;
+        use TypeKind::*;
 
         let span = &expr.metadata.span;
 
@@ -470,7 +471,9 @@ impl TypeRegistry {
             CoreData::Array(exprs) => {
                 let entries: Vec<_> = exprs
                     .iter()
-                    .map(|val| TypedSpan::new(Array(val.metadata.ty.clone().into()), span.clone()))
+                    .map(|val| {
+                        TypedSpan::new(Array(val.metadata.ty.clone().into()).into(), span.clone())
+                    })
                     .collect();
 
                 self.add_constraint_subtypes(&expr.metadata, &entries);
@@ -481,7 +484,7 @@ impl TypeRegistry {
             CoreData::Tuple(exprs) => {
                 let element_types: Vec<_> =
                     exprs.iter().map(|expr| expr.metadata.ty.clone()).collect();
-                let tuple_type = TypedSpan::new(Tuple(element_types.clone()), span.clone());
+                let tuple_type = TypedSpan::new(Tuple(element_types.clone()).into(), span.clone());
 
                 self.add_constraint_subtypes(&expr.metadata, &[tuple_type.clone()]);
                 exprs
@@ -512,7 +515,8 @@ impl TypeRegistry {
                 self.generate_expr(body, fn_ctx)?;
             }
             CoreData::Fail(expr) => {
-                let string_type = TypedSpan::new(Type::String, expr.metadata.span.clone());
+                let string_type =
+                    TypedSpan::new(TypeKind::String.into(), expr.metadata.span.clone());
                 self.add_constraint_equal(&expr.metadata, &string_type);
                 self.generate_expr(expr, ctx)?;
             }
@@ -567,7 +571,7 @@ mod scope_check_tests {
 
     // Create a dummy value for binding
     fn dummy_value(span: Span) -> Value<TypedSpan> {
-        Value::new_with(CoreData::None, Type::None, span)
+        Value::new_with(CoreData::None, TypeKind::None.into(), span)
     }
 
     // Setup a context with a function for testing
@@ -583,7 +587,7 @@ mod scope_check_tests {
         let fun_val = Value {
             data: CoreData::Function(FunKind::Closure(params, Arc::new(body))),
             metadata: TypedSpan {
-                ty: create_function_type(&vec![Type::None; len], &Type::None),
+                ty: create_function_type(&vec![TypeKind::None.into(); len], &TypeKind::None.into()),
                 span: create_test_span(),
             },
         };
@@ -606,7 +610,7 @@ mod scope_check_tests {
         let param_name = "x".to_string();
         let body = Expr::new_with(
             ExprKind::Ref(param_name.clone()),
-            Type::Nothing,
+            TypeKind::Nothing.into(),
             create_test_span(),
         );
         let (_, result) = setup_test_context(vec![param_name], body);
@@ -619,7 +623,7 @@ mod scope_check_tests {
             vec!["x".to_string()],
             Expr::new_with(
                 ExprKind::Ref("undefined".to_string()),
-                Type::Nothing,
+                TypeKind::Nothing.into(),
                 create_test_span(),
             ),
         );
@@ -638,19 +642,19 @@ mod scope_check_tests {
                     let_var.clone(),
                     Arc::new(Expr::new_with(
                         ExprKind::CoreVal(dummy_value(create_test_span())),
-                        Type::Nothing,
+                        TypeKind::Nothing.into(),
                         create_test_span(),
                     )),
-                    Type::Nothing,
+                    TypeKind::Nothing.into(),
                     create_test_span(),
                 ),
                 Arc::new(Expr::new_with(
                     ExprKind::Ref(let_var),
-                    Type::Nothing,
+                    TypeKind::Nothing.into(),
                     create_test_span(),
                 )),
             ),
-            Type::Nothing,
+            TypeKind::Nothing.into(),
             create_test_span(),
         );
 
@@ -664,7 +668,7 @@ mod scope_check_tests {
             vec!["x".to_string(), "x".to_string()],
             Expr::new_with(
                 ExprKind::Ref("x".to_string()),
-                Type::Nothing,
+                TypeKind::Nothing.into(),
                 create_test_span(),
             ),
         );
@@ -683,10 +687,10 @@ mod scope_check_tests {
                     let_var.clone(),
                     Arc::new(Expr::new_with(
                         ExprKind::CoreVal(dummy_value(create_test_span())),
-                        Type::Nothing,
+                        TypeKind::Nothing.into(),
                         create_test_span(),
                     )),
-                    Type::Nothing,
+                    TypeKind::Nothing.into(),
                     create_test_span(),
                 ),
                 Arc::new(Expr::new_with(
@@ -695,23 +699,23 @@ mod scope_check_tests {
                             let_var.clone(),
                             Arc::new(Expr::new_with(
                                 ExprKind::CoreVal(dummy_value(create_test_span())),
-                                Type::Nothing,
+                                TypeKind::Nothing.into(),
                                 create_test_span(),
                             )),
-                            Type::Nothing,
+                            TypeKind::Nothing.into(),
                             create_test_span(),
                         ),
                         Arc::new(Expr::new_with(
                             ExprKind::Ref(let_var),
-                            Type::Nothing,
+                            TypeKind::Nothing.into(),
                             create_test_span(),
                         )),
                     ),
-                    Type::Nothing,
+                    TypeKind::Nothing.into(),
                     create_test_span(),
                 )),
             ),
-            Type::Nothing,
+            TypeKind::Nothing.into(),
             create_test_span(),
         );
 
@@ -732,11 +736,11 @@ mod scope_check_tests {
                 vec![inner_param],
                 Arc::new(Expr::new_with(
                     ExprKind::Ref(outer_param.clone()),
-                    Type::Nothing,
+                    TypeKind::Nothing.into(),
                     create_test_span(),
                 )),
             ))),
-            Type::Closure(Type::None.into(), Type::None.into()),
+            TypeKind::Closure(TypeKind::None.into(), TypeKind::None.into()).into(),
             create_test_span(),
         );
 
@@ -750,7 +754,7 @@ mod scope_check_tests {
             ExprKind::PatternMatch(
                 Arc::new(Expr::new_with(
                     ExprKind::Ref("x".to_string()),
-                    Type::Nothing,
+                    TypeKind::Nothing.into(),
                     create_test_span(),
                 )),
                 vec![MatchArm {
@@ -759,21 +763,21 @@ mod scope_check_tests {
                             "matched".to_string(),
                             Box::new(Pattern::new_with(
                                 PatternKind::Wildcard,
-                                Type::Nothing,
+                                TypeKind::Nothing.into(),
                                 create_test_span(),
                             )),
                         ),
-                        Type::Nothing,
+                        TypeKind::Nothing.into(),
                         create_test_span(),
                     ),
                     expr: Arc::new(Expr::new_with(
                         ExprKind::Ref("matched".to_string()),
-                        Type::Nothing,
+                        TypeKind::Nothing.into(),
                         create_test_span(),
                     )),
                 }],
             ),
-            Type::Nothing,
+            TypeKind::Nothing.into(),
             create_test_span(),
         );
 
@@ -787,7 +791,7 @@ mod scope_check_tests {
             ExprKind::PatternMatch(
                 Arc::new(Expr::new_with(
                     ExprKind::Ref("x".to_string()),
-                    Type::Nothing,
+                    TypeKind::Nothing.into(),
                     create_test_span(),
                 )),
                 vec![MatchArm {
@@ -799,25 +803,25 @@ mod scope_check_tests {
                                     "y".to_string(),
                                     Box::new(Pattern::new_with(
                                         PatternKind::Wildcard,
-                                        Type::Nothing,
+                                        TypeKind::Nothing.into(),
                                         create_test_span(),
                                     )),
                                 ),
-                                Type::Nothing,
+                                TypeKind::Nothing.into(),
                                 create_test_span(),
                             )),
                         ),
-                        Type::Nothing,
+                        TypeKind::Nothing.into(),
                         create_test_span(),
                     ),
                     expr: Arc::new(Expr::new_with(
                         ExprKind::Ref("y".to_string()),
-                        Type::Nothing,
+                        TypeKind::Nothing.into(),
                         create_test_span(),
                     )),
                 }],
             ),
-            Type::Nothing,
+            TypeKind::Nothing.into(),
             create_test_span(),
         );
 
@@ -839,10 +843,10 @@ mod scope_check_tests {
                     x_var.clone(),
                     Arc::new(Expr::new_with(
                         ExprKind::CoreVal(dummy_value(create_test_span())),
-                        Type::Nothing,
+                        TypeKind::Nothing.into(),
                         create_test_span(),
                     )),
-                    Type::Nothing,
+                    TypeKind::Nothing.into(),
                     create_test_span(),
                 ),
                 Arc::new(Expr::new_with(
@@ -852,26 +856,26 @@ mod scope_check_tests {
                                 x_var.clone(),
                                 Arc::new(Expr::new_with(
                                     ExprKind::CoreVal(dummy_value(create_test_span())),
-                                    Type::Nothing,
+                                    TypeKind::Nothing.into(),
                                     create_test_span(),
                                 )),
-                                Type::Nothing,
+                                TypeKind::Nothing.into(),
                                 create_test_span(),
                             ),
                             Arc::new(Expr::new_with(
                                 ExprKind::Ref(x_var),
-                                Type::Nothing,
+                                TypeKind::Nothing.into(),
                                 create_test_span(),
                             )),
                         ),
-                        Type::Nothing,
+                        TypeKind::Nothing.into(),
                         create_test_span(),
                     ))),
-                    Type::Nothing,
+                    TypeKind::Nothing.into(),
                     create_test_span(),
                 )),
             ),
-            Type::Nothing,
+            TypeKind::Nothing.into(),
             create_test_span(),
         );
 
