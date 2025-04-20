@@ -251,6 +251,12 @@ impl<M: Memoize> Optimizer<M> {
         }
     }
 
+    // fn next_task_id(task_id: &mut TaskId) -> TaskId {
+    //     let ret = *task_id;
+    //     task_id.0 += 1;
+    //     ret
+    // }
+
     fn next_task_id(&mut self) -> TaskId {
         let task_id = self.next_task_id;
         self.next_task_id.0 += 1;

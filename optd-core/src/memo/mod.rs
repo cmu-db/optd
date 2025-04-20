@@ -69,6 +69,11 @@ impl MergeGroupResult {
 pub struct MergedGoalInfo {
     /// The best costed expression for this goal, if any
     pub best_expr: Option<(PhysicalExpressionId, Cost)>,
+    /// ID of the merged goal
+    pub goal_id: GoalId,
+
+    /// Whether this goal contained the best costed expression before merging.
+    pub seen_best_expr_before_merge: bool,
 
     /// All members in this goal, which can be physical expressions or references to other goals
     pub members: Vec<GoalMemberId>,
@@ -79,6 +84,9 @@ pub struct MergedGoalInfo {
 pub struct MergeGoalResult {
     /// Goals that were merged along with their potential best costed expression.
     pub merged_goals: HashMap<GoalId, MergedGoalInfo>,
+
+    /// The best costed expression for all merged goals combined.
+    pub best_expr: Option<(PhysicalExpressionId, Cost)>,
 
     /// ID of the new representative goal id.
     pub new_repr_goal_id: GoalId,

@@ -19,14 +19,16 @@ pub struct ExploreGroupTask {
 
 impl ExploreGroupTask {
     /// Creates a new `ExploreGroupTask`.
-    pub fn new(group_id: GroupId, out_task: SourceTaskId) -> Self {
+    pub fn new(group_id: GroupId, out_task: Option<SourceTaskId>) -> Self {
         let mut task = Self {
             group_id,
             optimize_goal_out: Vec::new(),
             fork_logical_out: Vec::new(),
             transform_expr_in: Vec::new(),
         };
-        task.add_subscriber(out_task);
+        if let Some(out_task) = out_task {
+            task.add_subscriber(out_task);
+        }
         task
     }
 
@@ -58,7 +60,7 @@ impl<M: Memoize> Optimizer<M> {
             let logical_expr_ids = self.memo.get_all_logical_exprs(group_id).await?;
             Ok((*task_id, logical_expr_ids))
         } else {
-            self.create_explore_group_task(group_id, out).await
+            self.create_explore_group_task(group_id, Some(out)).await
         }
     }
 
@@ -66,14 +68,16 @@ impl<M: Memoize> Optimizer<M> {
     pub async fn create_explore_group_task(
         &mut self,
         group_id: GroupId,
-        out: SourceTaskId,
+        out: Option<SourceTaskId>,
     ) -> Result<(TaskId, Vec<LogicalExpressionId>), Error> {
         let task_id = self.next_task_id();
         let mut task = ExploreGroupTask::new(group_id, out);
 
         // Create a transformation task for all expression-rule combinations.
-        let transformations = self.rule_book.get_transformations().to_vec();
-        let logical_expr_ids = self.memo.get_all_logical_exprs(group_id).await?;
+        let rule_book = &self.rule_book;
+        let memo = &self.memo;
+        let transformations = rule_book.get_transformations().to_vec();
+        let logical_expr_ids = memo.get_all_logical_exprs(group_id).await?;
 
         for logical_expr_id in logical_expr_ids.iter() {
             for rule in &transformations {
@@ -84,8 +88,10 @@ impl<M: Memoize> Optimizer<M> {
             }
         }
         // Register the task and add it to the group_exploration index.
-        self.tasks.insert(task_id, Task::ExploreGroup(task));
-        self.group_exploration_task_index.insert(group_id, task_id);
+        let tasks = &mut self.tasks;
+        let group_exploration_task_index = &mut self.group_exploration_task_index;
+        tasks.insert(task_id, Task::ExploreGroup(task));
+        group_exploration_task_index.insert(group_id, task_id);
         Ok((task_id, logical_expr_ids))
     }
 }

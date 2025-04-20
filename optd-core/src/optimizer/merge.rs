@@ -27,17 +27,20 @@ impl<M: Memoize> Optimizer<M> {
     pub(super) async fn handle_merge_result(&mut self, result: MergeResult) -> Result<(), Error> {
         // <I. Apply group merges>
         for group_merge in result.group_merges {
-            // collect all the explore group tasks for merged groups.
-            let mut explore_group_tasks = Vec::new();
-            let all_exprs_by_group = group_merge.merged_groups;
-            let new_repr_group_id = group_merge.new_repr_group_id;
-            // Step 1: For each group that has an exploration task, we launch new subtasks based on subscription.
-            // Note: It is fine to have duplication at this stage, we will remove duplicates later.
-            for group_id in all_exprs_by_group.keys() {
-                //
-                let Some(explore_group_task_id) =
-                    self.group_exploration_task_index.get(group_id).cloned()
-                else {
+            // For each MergedGroupInfo
+            // 1. For each group
+            // - Get all new expressions in that group (see code currently in my branch, just take all, then remove the ones that are in the group).
+            // - Launch new subtasks based on subscription:
+            // (this only happens if there is a task for the group).
+            // -> Implement expression, Explore expression, ForkLogical
+            let repr_group_id = group_merge.new_repr_group_id;
+            // TODO(Sarvesh): should we ensure that the explore group is running?
+
+            for group_info in &group_merge.merged_groups {
+                let merged_group_id = group_info.group_id;
+                let merged_group_task_id = self.group_exploration_task_index.get(&merged_group_id);
+                if merged_group_task_id.is_none() {
+                    // TODO(Sarvesh): we ignore this merged group, as it is not running and hence, has no subscribers
                     continue;
                 };
                 explore_group_tasks.push((explore_group_task_id, *group_id));
@@ -60,7 +63,7 @@ impl<M: Memoize> Optimizer<M> {
                     .filter(|(id, _)| *id != group_id)
                     .flat_map(|(_, exprs)| exprs)
                     .cloned()
-                    .collect();
+                    .collect::<HashSet<LogicalExpressionId>>();
 
                 for logical_expr_id in other_groups_exprs {
                     let transformations = self.rule_book.get_transformations().to_vec();
@@ -133,129 +136,184 @@ impl<M: Memoize> Optimizer<M> {
                     }
                 }
             }
-            // END Step 1.
-            // BEGIN Step 2: Merge the explore group tasks.
-            let maybe_primary_task = match explore_group_tasks.as_slice() {
-                [] => None, // No tasks exist, nothing to do.
-                [(task_id, group_id)] => {
-                    // Just one task exists - update its index.
-                    if *group_id != new_repr_group_id {
-                        self.group_exploration_task_index.remove(group_id);
-                    }
-                    self.group_exploration_task_index
-                        .insert(new_repr_group_id, *task_id);
+            // 2. Merge the entire graph as follows:
+            // - Get all explore group tasks from each merged group from the index
+            // -> If none, do nothing
+            // -> Exactly one task present:
+            // --> Update indexes
+            // -> If more than one:
+            // --> Take one, and merge all hashsets.
+            // --> Update indexes
 
-                    let mut primary_task = self.tasks.remove(task_id).unwrap().into_explore_group();
-                    primary_task.group_id = new_repr_group_id;
-                    Some(primary_task)
+            let mut merged_optimize_goal_outs = HashSet::new();
+            let mut merged_fork_logical_outs = HashSet::new();
+            let mut merged_transform_expr_ins = HashSet::new();
+
+            for group_info in &group_merge.merged_groups {
+                let group_id = group_info.group_id;
+                let task_id = self.group_exploration_task_index.get(&group_id);
+                if task_id.is_none() {
+                    continue;
                 }
-                [(primary_task_id, primary_group_id), rest @ ..] => {
-                    // Multiple tasks - merge them into the primary task.
-                    let mut optimize_goal_task_ids = Vec::new();
-                    let mut fork_logical_task_ids = Vec::new();
-                    let mut transform_expr_task_ids = Vec::new();
+                let task_id = task_id.unwrap();
+                let task = self.tasks.get_mut(task_id).unwrap().as_explore_group_mut();
+                merged_optimize_goal_outs.extend(task.optimize_goal_out.clone());
+                merged_fork_logical_outs.extend(task.fork_logical_out.clone());
+                merged_transform_expr_ins.extend(task.transform_expr_in.clone());
 
-                    for (task_id, group_id) in rest {
-                        let task = self.tasks.remove(task_id).unwrap().into_explore_group();
-                        self.group_exploration_task_index.remove(group_id);
-                        optimize_goal_task_ids.extend(task.optimize_goal_out);
-                        fork_logical_task_ids.extend(task.fork_logical_out);
-                        transform_expr_task_ids.extend(task.transform_expr_in);
-                    }
-
-                    let mut primary_task = self
-                        .tasks
-                        .remove(primary_task_id)
-                        .unwrap()
-                        .into_explore_group();
-
-                    for task_id in optimize_goal_task_ids.iter() {
-                        let optimize_goal_task =
-                            self.tasks.get_mut(task_id).unwrap().as_optimize_goal_mut();
-                        optimize_goal_task.explore_group_in = *primary_task_id;
-                    }
-                    primary_task
-                        .optimize_goal_out
-                        .extend(optimize_goal_task_ids);
-
-                    for task_id in fork_logical_task_ids.iter() {
-                        let fork_logical_task =
-                            self.tasks.get_mut(task_id).unwrap().as_fork_logical_mut();
-                        fork_logical_task.explore_group_in = *primary_task_id;
-                    }
-                    primary_task.fork_logical_out.extend(fork_logical_task_ids);
-
-                    for task_id in transform_expr_task_ids.iter() {
-                        let transform_expr_task = self
-                            .tasks
-                            .get_mut(task_id)
-                            .unwrap()
-                            .as_transform_expression_mut();
-                        transform_expr_task.explore_group_out = *primary_task_id;
-                    }
-                    primary_task
-                        .transform_expr_in
-                        .extend(transform_expr_task_ids);
-                    primary_task.group_id = new_repr_group_id;
-
-                    // remap the new_repr_group_id to point to the primary task.
-                    self.group_exploration_task_index.remove(primary_group_id);
-                    self.group_exploration_task_index
-                        .insert(new_repr_group_id, *primary_task_id);
-                    Some(primary_task)
+                if group_id == repr_group_id {
+                    continue;
                 }
-            };
-            // END Step 2.
-            let Some(mut primary_task) = maybe_primary_task else {
+
+                self.tasks.remove(task_id);
+                self.group_exploration_task_index.remove(&group_id);
+
+                // TODO(Sarvesh): update all the ins and outs of the task
+            }
+
+            if merged_fork_logical_outs.is_empty() && merged_optimize_goal_outs.is_empty() {
+                // There are no tasks that need this merged explore group to exist, so we can just remove it.
+                // This case is only possible if a cascading merge has merged two groups that have no tasks that need their outputs.
                 continue;
-            };
-            // Step 3: Dedup the subscribers and publishers.
+            }
 
-            // Dedup all transform expression.
-            let mut transforms = HashMap::new();
-            for task_id in primary_task.transform_expr_in.iter() {
-                let task = self.tasks.get(task_id).unwrap().as_transform_expression();
-                let repr_expr_id = self
-                    .memo
-                    .find_repr_logical_expr(task.logical_expr_id)
-                    .await?;
-                if let Some(old_task_id) =
-                    transforms.insert((repr_expr_id, task.rule.clone()), *task_id)
+            let repr_explore_task_id = self.group_exploration_task_index.get(&repr_group_id);
+            let repr_explore_task_id = if let Some(repr_explore_task_id) = repr_explore_task_id {
+                repr_explore_task_id
+            } else {
+                &self.create_explore_group_task(repr_group_id, None).await?.0
+            };
+
+            // remove duplicate transform expr tasks
+            let mut publishers_to_remove = HashSet::new();
+            for expr in merged_transform_expr_ins.iter() {
+                let task = self.tasks.get(expr).unwrap();
+                let transform_expr_task = task.as_transform_expression();
+                let repr_logical_expr_id = transform_expr_task.logical_expr_id;
+                if !group_merge
+                    .all_exprs
+                    .contains(&transform_expr_task.logical_expr_id)
                 {
-                    // Remove old task.
-                    // TODO: Unlink subtree, recursively.
-                    self.tasks.remove(&old_task_id);
+                    publishers_to_remove.insert(*expr);
                 }
             }
-            primary_task.transform_expr_in = transforms.values().cloned().collect();
+
+            for expr in publishers_to_remove {
+                // TODO(Sarvesh): can we simply remove the task or do we need to ensure that it's children are also removed?
+                // No, we cannot just do this. We must delete literrally all the tasks that publish to it and also delete the subtree.
+                self.tasks.remove(&expr);
+                merged_transform_expr_ins.remove(&expr);
+            }
+
+            let repr_explore_task = self
+                .tasks
+                .get_mut(repr_explore_task_id)
+                .unwrap()
+                .as_explore_group_mut();
+
+            // we then update all the metadata of the explore group task
+            repr_explore_task
+                .optimize_goal_out
+                .extend(merged_optimize_goal_outs);
+            repr_explore_task
+                .fork_logical_out
+                .extend(merged_fork_logical_outs);
+            repr_explore_task
+                .transform_expr_in
+                .extend(merged_transform_expr_ins);
+
+            // 3. Go to all subscribers of that consolidated task, and filter
+            // out all the tasks that have the same logical expression id (using the repr).
+            // --> Cancel those tasks (i.e. remove from HashMap) and remove from graph.
+            // TODO(Sarvesh): implement this: there can be multiple fork outs that 
+
+
+
         }
 
-        // <II. Apply goal merges>
+        // ## Apply goal merges:
+        // @alexis
+        // 1. For each goal
+        // - Get all new members in that goal (ditto).
+        // - Get optional new best cost from all (also see code currently on my branch!).
+        // - For all subscribers to goal notify the best new cost.
+        // -> Continuations, OptimizePlan [OptimizeGoal is a bit different, as they also
+        // need the new members to do anything].
+        // [Aside] for OptimizeGoal: send the new members and launch tasks accordingly
+        // (i.e. CostExpression, and OptimizeGoal).
+
         for goal_merge in result.goal_merges {
-            let mut optimize_goal_tasks = Vec::new();
-            let all_exprs_by_goal = &goal_merge.merged_goals;
-            let new_repr_goal_id = goal_merge.new_repr_goal_id;
+            // 1. For each goal, schedule the best expression from all OTHER goals only if it is
+            // better than the current best expression for the goal.
+            if let Some(best_expr) = goal_merge.best_expr {
+                for (i, current_goal_info) in goal_merge.merged_goals.iter().enumerate() {
+                    if current_goal_info.seen_best_expr_before_merge {
+                        continue;
+                    }
 
-            for (goal_id, current_goal_info) in all_exprs_by_goal.iter() {
-                let Some(optimize_goal_task_id) =
-                    self.goal_optimization_task_index.get(goal_id).cloned()
-                else {
+                    // Schedule the best expression
+                    let merge_goal_task = {
+                        let merged_goal_task_id = self
+                            .goal_optimization_task_index
+                            .get(&current_goal_info.goal_id);
+                        if merged_goal_task_id.is_none() {
+                            continue;
+                        } else {
+                            let merged_goal_task_id = merged_goal_task_id.unwrap();
+                            self.tasks
+                                .get_mut(merged_goal_task_id)
+                                .unwrap()
+                                .as_optimize_goal_mut()
+                        }
+                    };
+
+                    let optimize_plan_outs = merge_goal_task.optimize_plan_out.clone();
+                    let fork_costed_outs = merge_goal_task.fork_costed_out.clone();
+
+                    // Schedule out tasks
+                    for task_id in optimize_plan_outs.iter() {
+                        let task = self.tasks.get(task_id).unwrap().as_optimize_plan();
+                        self.emit_best_physical_plan(task.physical_plan_tx.clone(), best_expr.0)
+                            .await?;
+                    }
+
+                    // For each dependent `ForkCosted` task, create a new `ContinueWithCosted` tasks for
+                    // the new best costed physical expression.
+
+                    for task_id in fork_costed_outs.iter() {
+                        let continue_with_costed_task_id = self
+                            .create_continue_with_costed_task(best_expr.0, best_expr.1, *task_id)
+                            .await?;
+                        let fork_costed_task =
+                            self.tasks.get_mut(&task_id).unwrap().as_fork_costed_mut();
+                        fork_costed_task.budget = best_expr.1;
+                        fork_costed_task.add_continue_in(continue_with_costed_task_id);
+                    }
+                }
+            }
+
+            for goal_info in &goal_merge.merged_goals {
+                let goal_id = goal_info.goal_id;
+                let task_id = self.goal_optimization_task_index.get(&goal_id);
+                if task_id.is_none() {
                     continue;
-                };
-                optimize_goal_tasks.push((optimize_goal_task_id, *goal_id));
+                }
+            }
+        }
 
-                let (optimize_plan_task_ids, fork_costed_task_ids) = {
-                    let optimize_goal_task = self
-                        .tasks
-                        .get_mut(&optimize_goal_task_id)
-                        .unwrap()
-                        .as_optimize_goal();
-                    (
-                        optimize_goal_task.optimize_plan_out.clone(),
-                        optimize_goal_task.fork_costed_out.clone(),
-                    )
-                };
-                let current_cost = current_goal_info.best_expr.as_ref().map(|(_, cost)| *cost);
+        // 2. Merge the entire graph just like for groups.
+        // -> Except we also need to report the PhysicalExpressionID merged, so that we
+        // can adapt that index correctly too (not required for LogicalExpressionID).
+        // 3. Go to all subscribers of consolidated OptimizeGoal task, and remove the ones 	// appear twice using repr.
+
+        // ## Handle dirty stuff:
+        // Note(Sarvesh): we need this because the fork tasks may not exist
+        // 0. Aside: we need a way to know inside what group the dirty transformation/implementation belongs, as we don't have an index for that.
+        // 1. Find the task corresponding to the dirty cost expression / implement expression / transform expression.
+        // 2. Execute:
+        // - If does not exist, do nothing.
+        // - If exists, but has already started (boolean), do nothing.
+        // - If exists, and has not started: schedule the job, and set the flag to true.
 
                 // TODO: could we reuse `handle_forward_result` logic?
                 let members_from_others = all_exprs_by_goal
@@ -334,12 +392,8 @@ impl<M: Memoize> Optimizer<M> {
                     }
                 }
             }
-
-            // TODO(yuchen): we should also dedup the implement expressions here, besides other stuff.
         }
 
-        Ok(())
-    }
 
     async fn create_implementation_tasks(
         &mut self,
