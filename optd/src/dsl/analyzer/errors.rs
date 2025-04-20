@@ -393,13 +393,11 @@ impl AnalyzerError {
                 .with_color(Color::Red),
         );
 
+        // If there is an annotation, can improve error reporting.
         if let Some(parent_type_span) = parent.span.as_ref() {
             report = report.with_label(
                 Label::new(parent_type_span.clone())
-                    .with_message(format!(
-                        "Expected type '{}' defined or annotated here",
-                        parent
-                    ))
+                    .with_message(format!("Expected type '{}' annotated here", parent))
                     .with_color(Color::Yellow),
             );
         }

@@ -22,12 +22,18 @@ fn binary_op(
 ) -> impl Parser<Token, Spanned<Expr>, Error = Simple<Token, Span>> + Clone {
     term.clone()
         .then(op.then(term.clone()).repeated())
-        .map_with_span(|(left, rights), span| {
-            let mut result = left;
-            for (bin_op, right) in rights {
-                result = Spanned::new(Expr::Binary(result, bin_op, right), span.clone());
-            }
-            result
+        .map(|(left, rights)| {
+            rights
+                .into_iter()
+                .fold(left.clone(), |acc, (bin_op, right)| {
+                    let left_span = left.span.clone();
+                    let right_span = right.span.clone();
+                    let new_span = Span::new(
+                        left_span.src_file.clone(),
+                        left_span.range.0..right_span.range.1,
+                    );
+                    Spanned::new(Expr::Binary(acc, bin_op, right), new_span)
+                })
         })
 }
 
