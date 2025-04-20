@@ -100,50 +100,31 @@ impl TypeRegistry {
             // Nothing is the bottom type - it is a subtype of everything.
             (Nothing, _) => Ok(false),
 
-            // Bidirectional inference case: descending child vs ascending parent.
-            // Prioritize GLB for the descending type as it maintains more specific types.
             // Fall back to LUB for the ascending type if GLB fails.
             (UnknownDesc(id_desc), UnknownAsc(id_asc)) => {
                 let child = self.resolve_type(child);
                 let parent = self.resolve_type(parent);
 
                 self.greatest_lower_bound(&child, &parent)
-                    .map(|glb| {
-                        self.resolved_unknown.insert(*id_desc, glb);
-                        true
-                    })
+                    .map(|glb| self.update_unknown_if_changed(id_desc, &child, glb))
                     .or_else(|_| {
-                        self.least_upper_bound(&child, &parent).map(|lub| {
-                            self.resolved_unknown.insert(*id_asc, lub);
-                            true
-                        })
+                        self.least_upper_bound(&child, &parent)
+                            .map(|lub| self.update_unknown_if_changed(id_asc, &parent, lub))
                     })
             }
 
             // Update an unknown ascending parent by computing LUB with child.
             (_, UnknownAsc(id)) => {
                 let parent = self.resolve_type(parent);
-                self.least_upper_bound(child, &parent).map(|lub| {
-                    if lub != parent {
-                        self.resolved_unknown.insert(*id, lub);
-                        true
-                    } else {
-                        false
-                    }
-                })
+                self.least_upper_bound(child, &parent)
+                    .map(|lub| self.update_unknown_if_changed(id, &parent, lub))
             }
 
             // Update an unknown descending child by computing GLB with parent.
             (UnknownDesc(id), _) => {
                 let child = self.resolve_type(child);
-                self.greatest_lower_bound(&child, parent).map(|glb| {
-                    if glb != child {
-                        self.resolved_unknown.insert(*id, glb);
-                        true
-                    } else {
-                        false
-                    }
-                })
+                self.greatest_lower_bound(&child, parent)
+                    .map(|glb| self.update_unknown_if_changed(id, &child, glb))
             }
 
             // Resolve unknown ascending child and recurse.
@@ -285,6 +266,15 @@ impl TypeRegistry {
             (F64, Arithmetic) => Ok(false),
 
             _ => Err(Subtype),
+        }
+    }
+
+    fn update_unknown_if_changed(&mut self, id: &usize, old_type: &Type, new_type: Type) -> bool {
+        if &new_type != old_type {
+            self.resolved_unknown.insert(*id, new_type);
+            true
+        } else {
+            false
         }
     }
 
