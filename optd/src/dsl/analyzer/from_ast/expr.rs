@@ -36,7 +36,7 @@ impl ASTConverter {
         let kind = match &*spanned_expr.value {
             AstExpr::Error => panic!("AST should no longer contain errors"),
             AstExpr::Literal(lit) => {
-                let (hir_lit, hir_ty) = self.convert_literal(lit, &span);
+                let (hir_lit, hir_ty) = self.convert_literal(lit);
                 ty = hir_ty;
                 CoreVal(Value::new_with(
                     CoreData::Literal(hir_lit),
@@ -87,7 +87,7 @@ impl ASTConverter {
                 self.convert_map(entries, generics)?
             }
             AstExpr::Constructor(name, args) => {
-                ty = Type::spanned(Adt(*name.value.clone()), name.span.clone());
+                ty = Adt(*name.value.clone()).into();
                 self.convert_constructor(name, args, &span, generics)?
             }
             AstExpr::Closure(params, body) => {
@@ -107,11 +107,11 @@ impl ASTConverter {
             }
             AstExpr::Postfix(expr, op) => self.convert_postfix(expr, op, generics)?,
             AstExpr::Fail(error_expr) => {
-                ty = Type::spanned(Nothing, span.clone());
+                ty = Nothing.into();
                 self.convert_fail(error_expr, generics)?
             }
             AstExpr::None => {
-                ty = Type::spanned(None, span.clone());
+                ty = None.into();
                 CoreVal(Value::new_with(CoreData::None, ty.clone(), span.clone()))
             }
             AstExpr::Block(block) => self.convert_block(block, generics)?,
@@ -122,7 +122,7 @@ impl ASTConverter {
 
     // Slightly different signature so that we can use it in pattern.rs,
     // and also get the type at the same time.
-    pub(super) fn convert_literal(&self, literal: &AstLiteral, span: &Span) -> (Literal, Type) {
+    pub(super) fn convert_literal(&self, literal: &AstLiteral) -> (Literal, Type) {
         use TypeKind::*;
 
         let (lit, kind) = match literal {
@@ -133,7 +133,7 @@ impl ASTConverter {
             AstLiteral::Unit => (Literal::Unit, Unit),
         };
 
-        (lit, Type::spanned(kind, span.clone()))
+        (lit, kind.into())
     }
 
     fn convert_ref(&self, ident: &Identifier) -> ExprKind<TypedSpan> {

@@ -8,11 +8,9 @@ data PhysicalProperties
 
 fn (log: Logical) fold: I64 = match log
     | Add(left, right) -> fold(left) + fold(right)
-    | Add(_, right) -> right
+    | _ -> if 5 > 3 then Add(Const(5), Const(5)) else Const(5)
+    | _ -> {
+        let v: Logical = Const(v) in
+        v 
+    }
     \ Const(val) -> val
-
-fn (log: Logical) test =
-    let 
-        x = [5455] ++ ["String"] 
-    in
-        [x]

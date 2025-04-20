@@ -120,7 +120,7 @@ pub struct TypeRegistry {
     pub constraints: Vec<Constraint>,
     /// Maps unknown type IDs to their current inferred concrete types.
     /// Types start at `Nothing`, and get bumped up when needed by the constraint.
-    pub resolved_unknown: HashMap<usize, TypeKind>,
+    pub resolved_unknown: HashMap<usize, Type>,
     /// Current ID to use for new Unknown types.
     pub next_unknown_id: usize,
 }
@@ -244,10 +244,12 @@ impl TypeRegistry {
 
     /// Creates a new unknown type.
     pub fn new_unknown(&mut self) -> TypeKind {
+        use TypeKind::*;
+
         let id = self.next_unknown_id;
         self.next_unknown_id += 1;
-        self.resolved_unknown.insert(id, TypeKind::Nothing);
-        TypeKind::Unknown(id)
+        self.resolved_unknown.insert(id, Nothing.into());
+        Unknown(id)
     }
 
     /// Adds a subtyping constraint set: `parent >: all children`
@@ -282,8 +284,8 @@ impl TypeRegistry {
         });
 
         self.constraints.push(Constraint::Subtype {
-            parent: other_type.clone(),
-            child: target_type.clone(),
+            child: other_type.clone(),
+            parent: target_type.clone(),
         });
     }
 

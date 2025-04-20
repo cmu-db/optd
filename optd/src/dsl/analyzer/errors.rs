@@ -1,4 +1,4 @@
-use super::hir::{Identifier, TypedSpan};
+use super::{hir::Identifier, types::registry::Type};
 use crate::dsl::utils::{
     errors::Diagnose,
     span::{Span, Spanned},
@@ -86,18 +86,15 @@ pub enum AnalyzerErrorKind {
     },
 
     InvalidSubtype {
-        child: TypedSpan,
-        parent: TypedSpan,
+        child: Type,
+        parent: Type,
+        span: Span,
     },
 
     InvalidFieldAccess {
-        object: TypedSpan,
+        object: Type,
+        span: Span,
         field: String,
-    },
-
-    TypeMergeFail {
-        type1: TypedSpan,
-        type2: TypedSpan,
     },
 }
 
@@ -205,26 +202,20 @@ impl AnalyzerErrorKind {
         .into()
     }
 
-    pub fn new_invalid_subtype(child: &TypedSpan, parent: &TypedSpan) -> Box<Self> {
+    pub fn new_invalid_subtype(child: &Type, parent: &Type, span: &Span) -> Box<Self> {
         Self::InvalidSubtype {
             child: child.clone(),
             parent: parent.clone(),
+            span: span.clone(),
         }
         .into()
     }
 
-    pub fn new_invalid_field_access(object: &TypedSpan, field: &Identifier) -> Box<Self> {
+    pub fn new_invalid_field_access(object: &Type, span: &Span, field: &Identifier) -> Box<Self> {
         Self::InvalidFieldAccess {
             object: object.clone(),
+            span: span.clone(),
             field: field.clone(),
-        }
-        .into()
-    }
-
-    pub fn new_type_merge_fail(type1: &TypedSpan, type2: &TypedSpan) -> Box<Self> {
-        Self::TypeMergeFail {
-            type1: type1.clone(),
-            type2: type2.clone(),
         }
         .into()
     }
@@ -315,9 +306,8 @@ impl Diagnose for Box<AnalyzerError> {
                 &format!("Expected {} fields, but found {}", expected, found),
                 "Check the number of fields in the type definition",
             ),
-            InvalidSubtype { child, parent } => self.build_type_mismatch_report(child, parent),
-            InvalidFieldAccess { object, field } => self.build_invalid_field_access_report(object, field),
-            TypeMergeFail { type1, type2 } => self.build_type_merge_fail_report(type1, type2),
+            InvalidSubtype { child, parent, span } => self.build_type_mismatch_report(child, parent, span),
+            InvalidFieldAccess { object, span, field } => self.build_invalid_field_access_report(object, span, field),
         }
     }
 
@@ -336,9 +326,8 @@ impl Diagnose for Box<AnalyzerError> {
             InvalidType { span, .. } => span,
             InvalidInheritance { child_span, .. } => child_span,
             FieldNumberMismatch { span, .. } => span,
-            InvalidSubtype { child, .. } => &child.span,
-            InvalidFieldAccess { object, .. } => &object.span,
-            TypeMergeFail { type1, .. } => &type1.span,
+            InvalidSubtype { span, .. } => span,
+            InvalidFieldAccess { span, .. } => span,
         };
 
         (span.src_file.clone(), Source::from(self.src_code.clone()))
@@ -392,39 +381,24 @@ impl AnalyzerError {
     }
 
     /// Helper method to build a report for type mismatch errors
-    fn build_type_mismatch_report(&self, child: &TypedSpan, parent: &TypedSpan) -> Report<Span> {
-        let mut report =
-            Report::build(ReportKind::Error, child.span.clone()).with_message(format!(
-                "Type error: '{}' is not a subtype of '{}'",
-                child.ty, parent.ty
-            ));
+    fn build_type_mismatch_report(&self, child: &Type, parent: &Type, span: &Span) -> Report<Span> {
+        let mut report = Report::build(ReportKind::Error, span.clone()).with_message(format!(
+            "Type error: '{}' is not a subtype of '{}'",
+            child, parent
+        ));
 
         report = report.with_label(
-            Label::new(child.span.clone())
-                .with_message(format!(
-                    "Expected type '{}' but found '{}'",
-                    parent.ty, child.ty
-                ))
+            Label::new(span.clone())
+                .with_message(format!("Expected type '{}' but found '{}'", parent, child))
                 .with_color(Color::Red),
         );
 
-        if let Some(child_type_span) = child.ty.span.as_ref() {
-            report = report.with_label(
-                Label::new(child_type_span.clone())
-                    .with_message(format!(
-                        "Actual type '{}' defined or annotated here",
-                        child.ty
-                    ))
-                    .with_color(Color::Blue),
-            );
-        }
-
-        if let Some(parent_type_span) = parent.ty.span.as_ref() {
+        if let Some(parent_type_span) = parent.span.as_ref() {
             report = report.with_label(
                 Label::new(parent_type_span.clone())
                     .with_message(format!(
                         "Expected type '{}' defined or annotated here",
-                        parent.ty
+                        parent
                     ))
                     .with_color(Color::Yellow),
             );
@@ -438,76 +412,23 @@ impl AnalyzerError {
     /// Helper method to build a report for invalid field access errors
     fn build_invalid_field_access_report(
         &self,
-        object: &TypedSpan,
+        object: &Type,
+        span: &Span,
         field: &String,
     ) -> Report<Span> {
-        let mut report =
-            Report::build(ReportKind::Error, object.span.clone()).with_message(format!(
-                "Invalid field access: type '{}' has no field '{}'",
-                object.ty, *field
-            ));
+        let mut report = Report::build(ReportKind::Error, span.clone()).with_message(format!(
+            "Invalid field access: type '{}' has no field '{}'",
+            object, *field
+        ));
 
         report = report.with_label(
-            Label::new(object.span.clone())
-                .with_message(format!("Expression of type '{}'", object.ty))
+            Label::new(span.clone())
+                .with_message(format!("Expression of type '{}'", object))
                 .with_color(Color::Blue),
         );
-
-        if let Some(obj_type_span) = object.ty.span.as_ref() {
-            report = report.with_label(
-                Label::new(obj_type_span.clone())
-                    .with_message("Type defined or annotated here")
-                    .with_color(Color::Yellow),
-            );
-        }
 
         report
             .with_help("Check for typos in the field name or ensure you're accessing the right type of object")
-            .finish()
-    }
-
-    /// Helper method to build a report for type merge failure errors
-    fn build_type_merge_fail_report(&self, type1: &TypedSpan, type2: &TypedSpan) -> Report<Span> {
-        let mut report =
-            Report::build(ReportKind::Error, type1.span.clone()).with_message(format!(
-                "Cannot merge incompatible types: '{}' and '{}'",
-                type1.ty, type2.ty
-            ));
-
-        // Label for the first expression
-        report = report.with_label(
-            Label::new(type1.span.clone())
-                .with_message(format!("Type '{}' from here", type1.ty))
-                .with_color(Color::Red),
-        );
-
-        // Label for the second expression
-        report = report.with_label(
-            Label::new(type2.span.clone())
-                .with_message(format!("Not compatible with type '{}' from here", type2.ty))
-                .with_color(Color::Blue),
-        );
-
-        // If the types have span information (e.g., from annotations), show them
-        if let Some(span1) = type1.ty.span.as_ref() {
-            report = report.with_label(
-                Label::new(span1.clone())
-                    .with_message(format!("Type '{}' defined here", type1.ty))
-                    .with_color(Color::Yellow),
-            );
-        }
-
-        if let Some(span2) = type2.ty.span.as_ref() {
-            report = report.with_label(
-                Label::new(span2.clone())
-                    .with_message(format!("Type '{}' defined here", type2.ty))
-                    .with_color(Color::Magenta),
-            );
-        }
-
-        report
-            .with_help("These types are incompatible. Consider using explicit type conversions or ensuring consistent types.")
-            .with_note("Type merging occurs during type inference when the compiler tries to determine the common type between expressions.")
             .finish()
     }
 

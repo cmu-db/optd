@@ -3,11 +3,12 @@ use crate::dsl::analyzer::{hir::Identifier, types::registry::TypeKind};
 use std::collections::HashSet;
 
 /// Errors when enforcing subtyping constraints.
+#[derive(Debug, Clone)]
 pub(super) enum EnforceError {
-    /// Cannot bump LUB `Unknown` RHS to left LHS.
-    InvalidMerge(Type, Type),
-    /// Left is not a subtype of right.
-    InvalidSubtype(Type, Type),
+    /// Cannot merge (LUB) two types.
+    Merge,
+    /// Child is not subtype of parent.
+    Subtype,
 }
 
 impl TypeRegistry {
@@ -92,11 +93,9 @@ impl TypeRegistry {
             // If parent is unknown, bump up to LUB of child.
             (_, Unknown(id)) => {
                 let parent = self.resolve_type(parent);
-                let lub = self.least_upper_bound(child, &parent);
+                let lub = self.least_upper_bound(child, &parent)?;
 
-                if matches!(lub, Universe) {
-                    Err(InvalidMerge(child.clone(), parent))
-                } else if lub != *parent {
+                if lub != parent {
                     self.resolved_unknown.insert(*id, lub);
                     Ok(true)
                 } else {
@@ -139,7 +138,7 @@ impl TypeRegistry {
                 if self.inherits_adt(child_name, parent_name) {
                     Ok(false)
                 } else {
-                    Err(InvalidSubtype(child.clone(), parent.clone()))
+                    Err(Subtype)
                 }
             }
 
@@ -228,7 +227,7 @@ impl TypeRegistry {
                             )?)
                     })
                 } else {
-                    Err(InvalidSubtype(child.clone(), parent.clone()))
+                    Err(Subtype)
                 }
             }
 
@@ -236,7 +235,7 @@ impl TypeRegistry {
             (I64, Arithmetic) => Ok(false),
             (F64, Arithmetic) => Ok(false),
 
-            _ => Err(InvalidSubtype(child.clone(), parent.clone())),
+            _ => Err(Subtype),
         }
     }
 

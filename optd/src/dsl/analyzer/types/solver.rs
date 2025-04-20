@@ -92,23 +92,18 @@ impl TypeRegistry {
     ) -> Result<bool, Box<AnalyzerErrorKind>> {
         use EnforceError::*;
 
-        let child_span = child.span.clone();
-        let parent_span = parent.span.clone();
-
-        self.enforce_subtype(&child.ty, &parent.ty)
-            .map_err(|err| match err {
-                InvalidMerge(type1, type2) => {
-                    let type1 = TypedSpan::new(type1, child_span);
-                    let type2 = TypedSpan::new(type2, parent_span);
-                    AnalyzerErrorKind::new_type_merge_fail(&type1, &type2)
-                }
-
-                InvalidSubtype(child, parent) => {
-                    let child = TypedSpan::new(child, child_span);
-                    let parent = TypedSpan::new(parent, parent_span);
-                    AnalyzerErrorKind::new_invalid_subtype(&child, &parent)
-                }
-            })
+        self.enforce_subtype(&child.ty, &parent.ty).map_err(|err| {
+            match err {
+                // For now, no need to distinguish between both errors.
+                // However, in the future we might want to do something fancier here to
+                // improve error reporting.
+                Merge | Subtype => AnalyzerErrorKind::new_invalid_subtype(
+                    &self.resolve_type(&child.ty),
+                    &self.resolve_type(&parent.ty),
+                    &child.span,
+                ),
+            }
+        })
     }
 
     /// Checks if a field access constraint is satisfied.
@@ -123,14 +118,20 @@ impl TypeRegistry {
         match &*inner_resolved.value {
             TypeKind::Adt(name) => self
                 .get_product_field_type(name, field)
-                .ok_or_else(|| AnalyzerErrorKind::new_invalid_field_access(inner, field))
+                .ok_or_else(|| {
+                    AnalyzerErrorKind::new_invalid_field_access(&inner_resolved, &inner.span, field)
+                })
                 .and_then(|field_ty| {
                     self.check_subtype_constraint(
                         &TypedSpan::new(field_ty, inner.span.clone()),
                         outer,
                     )
                 }),
-            _ => Err(AnalyzerErrorKind::new_invalid_field_access(inner, field)),
+            _ => Err(AnalyzerErrorKind::new_invalid_field_access(
+                &inner_resolved,
+                &inner.span,
+                field,
+            )),
         }
     }
 
@@ -153,7 +154,7 @@ impl TypeRegistry {
         let resolved_kind = match &*ty.value {
             Unknown(id) => {
                 if let Some(resolved) = self.resolved_unknown.get(id) {
-                    return self.resolve_type(&resolved.clone().into());
+                    return self.resolve_type(resolved);
                 } else {
                     return ty.clone();
                 }

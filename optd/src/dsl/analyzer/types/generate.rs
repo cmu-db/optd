@@ -245,12 +245,12 @@ impl TypeRegistry {
     ) -> Result<(), Box<AnalyzerErrorKind>> {
         // Bind the type to the context.
         let dummy = Self::dummy_value(&binding.metadata.ty, &binding.metadata.span);
-        ctx.try_bind(binding.name.to_string(), dummy)?;
 
         self.add_constraint_subtypes(&binding.metadata, &[binding.expr.metadata.clone()]);
         self.add_constraint_subtypes(&expr.metadata, &[body.metadata.clone()]);
 
         self.generate_expr(&binding.expr, ctx.clone())?;
+        ctx.try_bind(binding.name.to_string(), dummy)?;
         self.generate_expr(body, ctx)
     }
 
@@ -658,6 +658,57 @@ mod scope_check_tests {
 
         let (_, result) = setup_test_context(vec!["x".to_string()], let_expr);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_self_reference_in_let_binding() {
+        let var_name = "v".to_string();
+
+        // Create a let expression where the variable references itself in its own initializer
+        // let v = v + v in v
+        let let_expr = Expr::new_with(
+            ExprKind::Let(
+                LetBinding::new_with(
+                    var_name.clone(),
+                    Arc::new(Expr::new_with(
+                        ExprKind::Binary(
+                            Arc::new(Expr::new_with(
+                                ExprKind::Ref(var_name.clone()),
+                                TypeKind::Nothing.into(),
+                                create_test_span(),
+                            )),
+                            BinOp::Add,
+                            Arc::new(Expr::new_with(
+                                ExprKind::Ref(var_name.clone()),
+                                TypeKind::Nothing.into(),
+                                create_test_span(),
+                            )),
+                        ),
+                        TypeKind::Nothing.into(),
+                        create_test_span(),
+                    )),
+                    TypeKind::Nothing.into(),
+                    create_test_span(),
+                ),
+                Arc::new(Expr::new_with(
+                    ExprKind::Ref(var_name),
+                    TypeKind::Nothing.into(),
+                    create_test_span(),
+                )),
+            ),
+            TypeKind::Nothing.into(),
+            create_test_span(),
+        );
+
+        let (_, result) = setup_test_context(vec![], let_expr);
+
+        assert!(
+            matches!(
+                result,
+                Err(err) if matches!(*err, AnalyzerErrorKind::UndefinedReference { ref name, .. } if name == "v")
+            ),
+            "Let expression with self-reference should be rejected with UndefinedReference error"
+        );
     }
 
     #[test]
