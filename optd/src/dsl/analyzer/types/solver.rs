@@ -22,7 +22,7 @@ impl TypeRegistry {
     /// * `Err(error)` containing the first encountered type error
     pub fn resolve(&mut self) -> Result<(), Box<AnalyzerErrorKind>> {
         loop {
-            let mut any_bumped = false;
+            let mut any_changed = false;
             let mut field_access_error = None;
 
             // Temporarily take ownership of constraints to avoid borrow checker issues.
@@ -30,8 +30,8 @@ impl TypeRegistry {
 
             for constraint in &constraints {
                 match self.check_constraint(constraint) {
-                    Ok(bumped) => {
-                        any_bumped |= bumped;
+                    Ok(changed) => {
+                        any_changed |= changed;
                     }
                     Err(err) => {
                         // Check if this is a field access error.
@@ -54,7 +54,7 @@ impl TypeRegistry {
 
             // If no bumps occurred and we have a field access error, return it as it will
             // never get resolved.
-            if !any_bumped {
+            if !any_changed {
                 if let Some(err) = field_access_error {
                     return Err(err);
                 }
@@ -67,7 +67,7 @@ impl TypeRegistry {
     ///
     /// # Returns
     ///
-    /// * `Ok(bool)` - The constraint is satisfied, with a boolean indicating if any types were bumped.
+    /// * `Ok(bool)` - The constraint is satisfied, with a boolean indicating if any types were changed.
     /// * `Err(Box<AnalyzerErrorKind>)` - The constraint failed, with the error.
     fn check_constraint(
         &mut self,
@@ -97,7 +97,7 @@ impl TypeRegistry {
                 // For now, no need to distinguish between both errors.
                 // However, in the future we might want to do something fancier here to
                 // improve error reporting.
-                Merge | Subtype => AnalyzerErrorKind::new_invalid_subtype(
+                Merge | Meet | Subtype => AnalyzerErrorKind::new_invalid_subtype(
                     &self.resolve_type(&child.ty),
                     &self.resolve_type(&parent.ty),
                     &child.span,
@@ -152,7 +152,7 @@ impl TypeRegistry {
         use TypeKind::*;
 
         let resolved_kind = match &*ty.value {
-            Unknown(id) => {
+            UnknownAsc(id) | UnknownDesc(id) => {
                 if let Some(resolved) = self.resolved_unknown.get(id) {
                     return self.resolve_type(resolved);
                 } else {

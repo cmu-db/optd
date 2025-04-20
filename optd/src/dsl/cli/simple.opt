@@ -6,4 +6,11 @@ data Physical
 data LogicalProperties
 data PhysicalProperties
 
-fn (log: Logical) fold: F64 = 5 + 5 + 2.5
+fn (log: Logical) fold = x -> x
+
+fn main(log: Logical): Logical? = match log 
+    | Add(left, right) -> left
+    \ _ -> fail("brru")
+
+fn map() = {"a" : 5, "b" : 4}
+

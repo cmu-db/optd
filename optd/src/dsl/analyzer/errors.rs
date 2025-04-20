@@ -397,7 +397,7 @@ impl AnalyzerError {
         if let Some(parent_type_span) = parent.span.as_ref() {
             report = report.with_label(
                 Label::new(parent_type_span.clone())
-                    .with_message(format!("Expected type '{}' annotated here", parent))
+                    .with_message("Expected type annotated here")
                     .with_color(Color::Yellow),
             );
         }

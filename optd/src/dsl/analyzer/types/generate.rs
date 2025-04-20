@@ -373,8 +373,8 @@ impl TypeRegistry {
 
     /// Generates constraints for map expressions while verifying scopes.
     /// Enforces the type relationship:
-    /// - `Map(EqHash, Universe) >: expr`
-    /// - `expr` >: `all maps`
+    /// - `EqHash >: all keys`
+    /// - `expr >: all maps`
     fn generate_map(
         &mut self,
         expr: &Expr<TypedSpan>,
@@ -385,9 +385,12 @@ impl TypeRegistry {
 
         let span = &expr.metadata.span;
 
-        let map_type = TypedSpan::new(Map(EqHash.into(), Universe.into()).into(), span.clone());
-        self.add_constraint_subtypes(&map_type, &[expr.metadata.clone()]);
+        let eqhash_type = TypedSpan::new(EqHash.into(), span.clone());
+        entries
+            .iter()
+            .for_each(|(k, _)| self.add_constraint_subtypes(&eqhash_type, &[k.metadata.clone()]));
 
+        // TODO: This is WRONG!!!
         let entry_maps: Vec<_> = entries
             .iter()
             .map(|(k, v)| {

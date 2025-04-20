@@ -35,11 +35,11 @@ impl TypeRegistry {
 
         let glb_kind = match (&*type1.value, &*type2.value) {
             // Substitute Unknown types with their current inferred type.
-            (Unknown(_), _) => {
+            (UnknownAsc(_) | UnknownDesc(_), _) => {
                 let bound_unknown = self.resolve_type(type1);
                 return self.greatest_lower_bound(&bound_unknown, type2);
             }
-            (_, Unknown(_)) => {
+            (_, UnknownAsc(_) | UnknownDesc(_)) => {
                 let bound_unknown = self.resolve_type(type2);
                 return self.greatest_lower_bound(type1, &bound_unknown);
             }
@@ -143,7 +143,7 @@ impl TypeRegistry {
                 if let Optional(inner) = &*ret_glb.value {
                     Map(param_lub, inner.clone())
                 } else {
-                    return Err(Merge);
+                    return Err(Meet);
                 }
             }
 
@@ -158,7 +158,7 @@ impl TypeRegistry {
                 if let Optional(inner) = &*ret_glb.value {
                     Array(inner.clone())
                 } else {
-                    return Err(Merge);
+                    return Err(Meet);
                 }
             }
 
@@ -169,7 +169,7 @@ impl TypeRegistry {
                 } else if self.inherits_adt(adt2, adt1) {
                     *type2.value.clone()
                 } else {
-                    return Err(Merge);
+                    return Err(Meet);
                 }
             }
 
@@ -182,7 +182,7 @@ impl TypeRegistry {
             }
 
             // Default case - incompatible types
-            _ => return Err(Merge),
+            _ => return Err(Meet),
         };
 
         let result = glb_kind.into();

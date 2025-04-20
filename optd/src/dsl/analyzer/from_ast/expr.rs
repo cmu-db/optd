@@ -31,7 +31,7 @@ impl ASTConverter {
         use TypeKind::*;
 
         let span = spanned_expr.span.clone();
-        let mut ty = self.registry.new_unknown().into();
+        let mut ty = self.registry.new_unknown_asc().into();
 
         let kind = match &*spanned_expr.value {
             AstExpr::Error => panic!("AST should no longer contain errors"),
@@ -60,7 +60,7 @@ impl ASTConverter {
                 ty = if elements.is_empty() {
                     Array(Nothing.into()).into()
                 } else {
-                    Array(self.registry.new_unknown().into()).into()
+                    Array(self.registry.new_unknown_asc().into()).into()
                 };
                 self.convert_array(elements, generics)?
             }
@@ -68,7 +68,7 @@ impl ASTConverter {
                 ty = Tuple(
                     elements
                         .iter()
-                        .map(|_| self.registry.new_unknown().into())
+                        .map(|_| self.registry.new_unknown_asc().into())
                         .collect(),
                 )
                 .into();
@@ -76,11 +76,11 @@ impl ASTConverter {
             }
             AstExpr::Map(entries) => {
                 ty = if entries.is_empty() {
-                    Map(Nothing.into(), Nothing.into()).into()
+                    Map(Universe.into(), Nothing.into()).into()
                 } else {
                     Map(
-                        self.registry.new_unknown().into(),
-                        self.registry.new_unknown().into(),
+                        self.registry.new_unknown_desc().into(),
+                        self.registry.new_unknown_asc().into(),
                     )
                     .into()
                 };
@@ -96,13 +96,13 @@ impl ASTConverter {
                     .map(|field| {
                         Ok((
                             (*field.name).clone(),
-                            self.convert_type(&field.ty, generics)?,
+                            self.convert_type(&field.ty, false, generics)?,
                         ))
                     })
                     .collect::<Result<Vec<_>, Box<_>>>()?;
                 let param_types = params.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
 
-                ty = create_function_type(&param_types, &self.registry.new_unknown().into());
+                ty = create_function_type(&param_types, &self.registry.new_unknown_asc().into());
                 self.convert_closure(&params, body, generics)?
             }
             AstExpr::Postfix(expr, op) => self.convert_postfix(expr, op, generics)?,
@@ -187,7 +187,7 @@ impl ASTConverter {
 
                 let eq_expr = Expr::new_with(
                     Binary(hir_left.into(), Eq, hir_right.into()),
-                    self.registry.new_unknown().into(),
+                    self.registry.new_unknown_asc().into(),
                     span.clone(),
                 );
 
@@ -209,7 +209,7 @@ impl ASTConverter {
 
                 let lt_expr = Expr::new_with(
                     Binary(hir_left.into(), Lt, hir_right.into()),
-                    self.registry.new_unknown().into(),
+                    self.registry.new_unknown_asc().into(),
                     span.clone(),
                 );
 
@@ -223,12 +223,12 @@ impl ASTConverter {
 
                 let lt_expr = Expr::new_with(
                     Binary(hir_left.clone(), Lt, hir_right.clone()),
-                    self.registry.new_unknown().into(),
+                    self.registry.new_unknown_asc().into(),
                     span.clone(),
                 );
                 let eq_expr = Expr::new_with(
                     Binary(hir_left, Eq, hir_right),
-                    self.registry.new_unknown().into(),
+                    self.registry.new_unknown_asc().into(),
                     span.clone(),
                 );
 
@@ -264,7 +264,7 @@ impl ASTConverter {
         let hir_body = self.convert_expr(body, generics)?;
         let var_name = (*field.name).clone();
 
-        let ty = self.convert_type(&field.ty, generics)?;
+        let ty = self.convert_type(&field.ty, true, generics)?;
         let let_binding =
             LetBinding::new_with(var_name.clone(), hir_init.into(), ty, field.span.clone());
 
@@ -435,7 +435,7 @@ impl ASTConverter {
 
                 let method_fn = Arc::new(Expr::new_with(
                     Ref((*method_name.value).clone()),
-                    self.registry.new_unknown().into(),
+                    self.registry.new_unknown_asc().into(),
                     method_name.span.clone(),
                 ));
 
