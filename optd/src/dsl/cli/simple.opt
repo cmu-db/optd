@@ -7,10 +7,10 @@ data LogicalProperties
 data PhysicalProperties
 
 fn (log: Logical) fold: I64 = match log
-    | Add(left, right) -> fold(left) + fold(right)
-    | _ -> if 5 > 3 then Add(Const(5), Const(5)) else Const(5)
+    | Add(left, right) -> fold(left)() + fold(right)
+    | _ -> if 5 > 3 then 5 else 0
     | _ -> {
-        let v: Logical = Const(v) in
-        v 
+        let v: Logical = Const(5) in
+        v
     }
     \ Const(val) -> val
