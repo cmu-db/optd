@@ -127,6 +127,14 @@ impl GoalState {
 }
 
 impl Memoize for MemoryMemo {
+    async fn merge_groups(
+        &mut self,
+        group_id_1: GroupId,
+        group_id_2: GroupId,
+    ) -> MemoizeResult<Option<MergeResult>> {
+        self.merge_groups_helper(group_id_1, group_id_2).await
+    }
+
     async fn get_logical_properties(
         &self,
         group_id: GroupId,
@@ -203,117 +211,6 @@ impl Memoize for MemoryMemo {
             .insert(logical_expr_id, group_id);
 
         Ok(group_id)
-    }
-
-    async fn merge_groups(
-        &mut self,
-        group_id_1: GroupId,
-        group_id_2: GroupId,
-    ) -> MemoizeResult<Option<MergeResult>> {
-        // our strategy is to always merge group 2 into group 1.
-        let group_id_1 = self.find_repr_group(group_id_1).await?;
-        let group_id_2 = self.find_repr_group(group_id_2).await?;
-
-        if group_id_1 == group_id_2 {
-            return Ok(None);
-        }
-        let mut result = MergeResult::default();
-
-        let group_2_state = self.groups.remove(&group_id_2).unwrap();
-        let group_2_exprs = group_2_state.logical_exprs.iter().cloned().collect();
-
-        let group1_state = self.groups.get_mut(&group_id_1).unwrap();
-        let group1_exprs = group1_state.logical_exprs.iter().cloned().collect();
-
-        for logical_expr_id in group_2_state.logical_exprs {
-            // Update the logical expression to point to the new group id.
-            let old_group_id = self
-                .logical_expr_group_index
-                .insert(logical_expr_id, group_id_1);
-            assert!(old_group_id.is_some());
-            group1_state.logical_exprs.insert(logical_expr_id);
-        }
-        let mut merge_group_result = MergeGroupResult::new(group_id_1);
-        merge_group_result
-            .merged_groups
-            .insert(group_id_1, group1_exprs);
-        merge_group_result
-            .merged_groups
-            .insert(group_id_2, group_2_exprs);
-
-        self.repr_group.merge(&group_id_2, &group_id_1);
-
-        result.group_merges.push(merge_group_result);
-
-        // So now, we have to find out all the goals that belong to both groups but contain the same properties.
-
-        let group_1_goals = group1_state.goals.iter().cloned().collect::<HashSet<_>>();
-        let group_2_goals = group_2_state.goals.iter().cloned().collect::<HashSet<_>>();
-
-        for goal_id1 in group_1_goals.iter() {
-            for goal_id2 in group_2_goals.iter() {
-                let goal_1 = self.goals.get(&goal_id1).unwrap();
-                let goal_2 = self.goals.get(&goal_id2).unwrap();
-                let goal_1_props = &goal_1.goal.1;
-                let goal_2_props = &goal_2.goal.1;
-                if goal_1_props == goal_2_props {
-                    let (merged_goal_result, merge_physical_expr_results) = self
-                        .merge_goals_helper(goal_id1.clone(), goal_id2.clone())
-                        .await?;
-                    result.goal_merges.push(merged_goal_result);
-                    result.physical_expr_merges.extend(merge_physical_expr_results);
-                }
-            }
-        }
-
-        // Let's check for cascading merges now.
-        let logical_expr_with_group_2_as_child = self
-            .group_dependent_logical_exprs
-            .get(&group_id_2)
-            .unwrap()
-            .clone();
-
-        for logical_expr_id in logical_expr_with_group_2_as_child.iter() {
-            let logical_expr = self.logical_exprs.get(logical_expr_id).unwrap();
-            let repr_logical_expr = self.create_repr_logical_expr(logical_expr.clone()).await?;
-            let repr_logical_expr_id = self.get_logical_expr_id(&repr_logical_expr).await?;
-            // merge the logical exprs
-            self.repr_logical_expr
-                .merge(&logical_expr_id, &repr_logical_expr_id);
-
-            let parent_group_id = self.logical_expr_group_index.get(logical_expr_id).unwrap();
-            let parent_group_state = self.groups.get_mut(parent_group_id).unwrap();
-            // We remove the stale logical expr from the parent group.
-            parent_group_state.logical_exprs.remove(logical_expr_id);
-
-            // is the repr logical expr already part of a group?
-            if let Some(repr_parent_group_id) =
-                self.logical_expr_group_index.get(&repr_logical_expr_id)
-            {
-                // the repr logical expr is part of a group, so
-                let parent_group_id = self.logical_expr_group_index.get(logical_expr_id).unwrap();
-                if repr_parent_group_id != parent_group_id {
-                    // we have another merge to do
-                    // TODO(Sarvesh): do a cascading merge between repr_parent_group_id and parent_group_id
-                    // let merge_result = self
-                    //     .merge_groups(repr_parent_group_id, parent_group_id)
-                    //     .await?;
-                    // result.group_merges.push(merge_result);
-                    // TODO(Sarvesh): merge the cascading merge result with the current result.
-                }
-            } else {
-                // the repr logical expr is not part of a group, so we add it to the parent group.
-                // We add the new repr logical expr to the parent group.
-                parent_group_state
-                    .logical_exprs
-                    .insert(repr_logical_expr_id);
-                // we update the index
-                self.logical_expr_group_index
-                    .insert(repr_logical_expr_id, parent_group_id.clone());
-            }
-        }
-
-        Ok(Some(result))
     }
 
     async fn get_best_optimized_physical_expr(
@@ -877,6 +774,8 @@ impl MemoryMemo {
         Ok(repr_physical_expr)
     }
 
+    /// Recursively merges physical expressions.
+    #[async_recursion]
     async fn merge_physical_exprs(
         &mut self,
         physical_expr_id: PhysicalExpressionId,
@@ -908,8 +807,10 @@ impl MemoryMemo {
                 dependent_physical_exprs.iter().cloned().collect::<Vec<_>>();
             for dependent_physical_expr_id in dependent_physical_exprs {
                 // TODO(Sarvesh): handle async recursion
-                // let merge_physical_expr_result = self.merge_physical_exprs(dependent_physical_expr_id.clone()).await?;
-                // results.extend(merge_physical_expr_result);
+                let merge_physical_expr_result = self
+                    .merge_physical_exprs(dependent_physical_expr_id.clone())
+                    .await?;
+                results.extend(merge_physical_expr_result);
             }
         }
 
@@ -1015,6 +916,126 @@ impl MemoryMemo {
         }
 
         Ok((merged_goal_result, results))
+    }
+
+    #[async_recursion]
+    async fn merge_groups_helper(
+        &mut self,
+        group_id_1: GroupId,
+        group_id_2: GroupId,
+    ) -> MemoizeResult<Option<MergeResult>> {
+        // our strategy is to always merge group 2 into group 1.
+        let group_id_1 = self.find_repr_group(group_id_1).await?;
+        let group_id_2 = self.find_repr_group(group_id_2).await?;
+
+        if group_id_1 == group_id_2 {
+            return Ok(None);
+        }
+        let mut result = MergeResult::default();
+
+        let group_2_state = self.groups.remove(&group_id_2).unwrap();
+        let group_2_exprs = group_2_state.logical_exprs.iter().cloned().collect();
+
+        let group1_state = self.groups.get_mut(&group_id_1).unwrap();
+        let group1_exprs = group1_state.logical_exprs.iter().cloned().collect();
+
+        for logical_expr_id in group_2_state.logical_exprs {
+            // Update the logical expression to point to the new group id.
+            let old_group_id = self
+                .logical_expr_group_index
+                .insert(logical_expr_id, group_id_1);
+            assert!(old_group_id.is_some());
+            group1_state.logical_exprs.insert(logical_expr_id);
+        }
+        let mut merge_group_result = MergeGroupResult::new(group_id_1);
+        merge_group_result
+            .merged_groups
+            .insert(group_id_1, group1_exprs);
+        merge_group_result
+            .merged_groups
+            .insert(group_id_2, group_2_exprs);
+
+        self.repr_group.merge(&group_id_2, &group_id_1);
+
+        result.group_merges.push(merge_group_result);
+
+        // So now, we have to find out all the goals that belong to both groups but contain the same properties.
+
+        let group_1_goals = group1_state.goals.iter().cloned().collect::<HashSet<_>>();
+        let group_2_goals = group_2_state.goals.iter().cloned().collect::<HashSet<_>>();
+
+        for goal_id1 in group_1_goals.iter() {
+            for goal_id2 in group_2_goals.iter() {
+                let goal_1 = self.goals.get(&goal_id1).unwrap();
+                let goal_2 = self.goals.get(&goal_id2).unwrap();
+                let goal_1_props = &goal_1.goal.1;
+                let goal_2_props = &goal_2.goal.1;
+                if goal_1_props == goal_2_props {
+                    let (merged_goal_result, merge_physical_expr_results) = self
+                        .merge_goals_helper(goal_id1.clone(), goal_id2.clone())
+                        .await?;
+                    result.goal_merges.push(merged_goal_result);
+                    result
+                        .physical_expr_merges
+                        .extend(merge_physical_expr_results);
+                }
+            }
+        }
+
+        // Let's check for cascading merges now.
+        let logical_expr_with_group_2_as_child = self
+            .group_dependent_logical_exprs
+            .get(&group_id_2)
+            .unwrap()
+            .clone();
+
+        for logical_expr_id in logical_expr_with_group_2_as_child.iter() {
+            let logical_expr = self.logical_exprs.get(logical_expr_id).unwrap();
+            let repr_logical_expr = self.create_repr_logical_expr(logical_expr.clone()).await?;
+            let repr_logical_expr_id = self.get_logical_expr_id(&repr_logical_expr).await?;
+            // merge the logical exprs
+            self.repr_logical_expr
+                .merge(&logical_expr_id, &repr_logical_expr_id);
+
+            let parent_group_id = self.logical_expr_group_index.get(logical_expr_id).unwrap();
+            let parent_group_state = self.groups.get_mut(parent_group_id).unwrap();
+            // We remove the stale logical expr from the parent group.
+            parent_group_state.logical_exprs.remove(logical_expr_id);
+
+            // is the repr logical expr already part of a group?
+            if let Some(repr_parent_group_id) =
+                self.logical_expr_group_index.get(&repr_logical_expr_id)
+            {
+                // the repr logical expr is part of a group, so
+                let parent_group_id = self.logical_expr_group_index.get(logical_expr_id).unwrap();
+                if repr_parent_group_id != parent_group_id {
+                    // we have another merge to do
+                    // do a cascading merge between repr_parent_group_id and parent_group_id
+                    let merge_result = self
+                        .merge_groups_helper(repr_parent_group_id.clone(), parent_group_id.clone())
+                        .await?;
+                    // merge the cascading merge result with the current result.
+                    if let Some(merge_result) = merge_result {
+                        result.group_merges.extend(merge_result.group_merges);
+                        result
+                            .physical_expr_merges
+                            .extend(merge_result.physical_expr_merges);
+                        result.goal_merges.extend(merge_result.goal_merges);
+                    }
+                }
+            } else {
+                // the repr logical expr is not part of a group, so we add it to the parent group.
+                // We add the new repr logical expr to the parent group.
+                parent_group_state
+                    .logical_exprs
+                    .insert(repr_logical_expr_id);
+                // we update the index
+                self.logical_expr_group_index
+                    .insert(repr_logical_expr_id, parent_group_id.clone());
+            }
+        }
+
+        Ok(Some(result))
     }
 
     /// Generates a new group id.
